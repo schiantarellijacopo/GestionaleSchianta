@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
@@ -67,7 +67,8 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.length})</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
-                    <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Allegati</TabsTrigger>
+                    <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
+                    <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Altri allegati</TabsTrigger>
                     <TabsTrigger value="pensione" data-testid="tab-pensione"><Calculator size={13} className="mr-1" />Pensione INPS</TabsTrigger>
                 </TabsList>
 
@@ -78,6 +79,7 @@ export default function AnagraficaDetail() {
                 <TabsContent value="polizze"><PolizzeTab polizze={polizze} /></TabsContent>
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                <TabsContent value="documenti"><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
             </Tabs>
@@ -208,6 +210,27 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
                 <div><Label>Cellulare</Label><Input value={f.cellulare || ""} onChange={(e) => set("cellulare", e.target.value)} /></div>
                 <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value)} /></div>
+                <div>
+                    <Label>Preferenza pagamento</Label>
+                    <Select value={f.preferenza_pagamento || "__none__"} onValueChange={(v) => set("preferenza_pagamento", v === "__none__" ? null : v)}>
+                        <SelectTrigger data-testid="anag-pref-pag"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__none__">— nessuna preferenza —</SelectItem>
+                            <SelectItem value="contanti">Contanti</SelectItem>
+                            <SelectItem value="bonifico">Bonifico</SelectItem>
+                            <SelectItem value="assegno">Assegno</SelectItem>
+                            <SelectItem value="pos">POS / Carta</SelectItem>
+                            <SelectItem value="rid">RID</SelectItem>
+                            <SelectItem value="altro">Altro</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    {f.ultimo_mezzo_pagamento && (
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Ultimo utilizzato: <strong>{f.ultimo_mezzo_pagamento}</strong>
+                            {f.ultimo_mezzo_pagamento_data && ` il ${f.ultimo_mezzo_pagamento_data}`}
+                        </div>
+                    )}
+                </div>
                 <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value)} /></div>
                 <div><Label>Comune</Label><Input value={f.comune || ""} onChange={(e) => set("comune", e.target.value)} /></div>
                 <div><Label>Provincia</Label><Input maxLength={2} value={f.provincia || ""} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
@@ -565,10 +588,13 @@ function PensioneTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [preview, setPreview] = useState(null);
     const [risultati, setRisultati] = useState(null);
     const [params, setParams] = useState({ percentuale_invalidita: 75 });
+    const [uploading, setUploading] = useState(false);
+    const fileRef = useRef(null);
 
-    useEffect(() => {
+    const loadPreview = () => {
         api.get(`/anagrafiche/${anagrafica_id}/calcolo-pensione/preview`).then((r) => setPreview(r.data));
-    }, [anagrafica_id]);
+    };
+    useEffect(loadPreview, [anagrafica_id]);
 
     const calcola = async () => {
         try {
@@ -576,6 +602,23 @@ function PensioneTab({ anagrafica_id, ana, canEdit, onReload }) {
             setRisultati(res.data);
             toast.success("Calcolo completato");
         } catch (e) { toast.error("Errore: " + e.message); }
+    };
+
+    const uploadEstratto = async (file) => {
+        if (!file) return;
+        setUploading(true);
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const r = await api.post(`/anagrafiche/${anagrafica_id}/calcolo-pensione/auto-da-estratto`, fd,
+                { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 });
+            const p = r.data.parsed;
+            toast.success(`Estratto importato: ${p.settimane_contributive} settimane, ${p.anni_stimati} anni`);
+            loadPreview();
+            onReload?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setUploading(false); }
     };
 
     if (!preview) return <Loading />;
@@ -586,6 +629,32 @@ function PensioneTab({ anagrafica_id, ana, canEdit, onReload }) {
                 <h3 className="font-medium mb-4 flex items-center gap-2">
                     <Calculator size={18} className="text-sky-700" /> Parametri (precompilati dall&apos;anagrafica)
                 </h3>
+
+                {/* Toolbar caricamento estratto contributivo */}
+                {canEdit && (
+                    <div className="bg-sky-50 border border-sky-200 rounded-md p-3 mb-4 flex items-center justify-between gap-3 flex-wrap">
+                        <div className="text-xs text-sky-900 flex-1">
+                            <strong>Auto-popola</strong> caricando il PDF dell&apos;estratto contributivo INPS:
+                            settimane, anni, retribuzione media e dati anagrafici verranno estratti automaticamente.
+                        </div>
+                        <input
+                            ref={fileRef}
+                            type="file"
+                            accept=".pdf"
+                            className="hidden"
+                            onChange={(e) => uploadEstratto(e.target.files?.[0])}
+                            data-testid="ec-upload-input"
+                        />
+                        <Button
+                            type="button" variant="outline" size="sm"
+                            onClick={() => fileRef.current?.click()}
+                            disabled={uploading}
+                            data-testid="ec-upload-button"
+                        >
+                            <Upload size={13} className="mr-1" /> {uploading ? "Caricamento..." : "Carica estratto INPS"}
+                        </Button>
+                    </div>
+                )}
 
                 {preview.warnings?.filter(Boolean).length > 0 && (
                     <div className="mb-4 space-y-1">
@@ -666,6 +735,128 @@ function Field({ label, value, hint }) {
             <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-0.5">{label}</div>
             <div className="text-sm text-slate-900 font-medium num">{value || "—"}</div>
             {hint && <div className="text-[10px] text-slate-500 mt-0.5">{hint}</div>}
+        </div>
+    );
+}
+
+
+// ============== DOCUMENTI ANAGRAFICA (CI, patente, passaporto, CF, privacy) ==============
+const DOC_TIPI_ANAG = [
+    { key: "carta_identita", label: "Carta d'identità", icon: "🪪" },
+    { key: "patente", label: "Patente di guida", icon: "🚗" },
+    { key: "passaporto", label: "Passaporto", icon: "📘" },
+    { key: "codice_fiscale_doc", label: "Tessera codice fiscale", icon: "🧾" },
+    { key: "tessera_sanitaria", label: "Tessera sanitaria", icon: "❤️" },
+    { key: "visura_camerale", label: "Visura camerale", icon: "🏢" },
+    { key: "privacy_firmata", label: "Privacy firmata", icon: "✍️" },
+];
+
+function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
+    const [docs, setDocs] = useState(ana?.documenti || {});
+    const [busyTipo, setBusyTipo] = useState(null);
+
+    const upload = async (tipo, file, scadenza) => {
+        if (!file) return;
+        setBusyTipo(tipo);
+        const fd = new FormData();
+        fd.append("file", file);
+        if (scadenza) fd.append("scadenza", scadenza);
+        try {
+            const r = await api.post(`/anagrafiche/${anagrafica_id}/documenti/${tipo}`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            setDocs((p) => ({ ...p, [tipo]: r.data[tipo] }));
+            toast.success("Documento caricato");
+            onReload?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setBusyTipo(null); }
+    };
+
+    const elimina = async (tipo) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/anagrafiche/${anagrafica_id}/documenti/${tipo}`);
+            setDocs((p) => { const c = { ...p }; delete c[tipo]; return c; });
+            toast.success("Eliminato");
+            onReload?.();
+        } catch (e) { toast.error("Errore"); }
+    };
+
+    const scaricaPrivacy = () => {
+        const url = `${process.env.REACT_APP_BACKEND_URL || ""}/api/anagrafiche/${anagrafica_id}/privacy/genera-pdf`;
+        window.open(url, "_blank");
+    };
+
+    return (
+        <div className="space-y-4 mt-4" data-testid="documenti-tab">
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center justify-between flex-wrap gap-3">
+                <div className="text-xs text-sky-900">
+                    <strong>Documenti del cliente</strong>: CI, patente, passaporto, codice fiscale, privacy firmata.
+                    Tutti i file sono protetti (solo staff può vederli).
+                </div>
+                <Button size="sm" variant="outline" onClick={scaricaPrivacy} data-testid="genera-privacy-btn">
+                    📄 Genera PDF privacy
+                </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {DOC_TIPI_ANAG.map((dt) => {
+                    const doc = docs?.[dt.key];
+                    return (
+                        <Card key={dt.key} className="p-3 border-slate-200">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="font-medium text-sm flex items-center gap-2">
+                                    <span className="text-lg">{dt.icon}</span> {dt.label}
+                                </div>
+                                {doc && <span className="badge badge-success text-[10px]">caricato</span>}
+                            </div>
+                            {doc ? (
+                                <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
+                                    <div>
+                                        📎 <a href={doc.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{doc.nome_file}</a>
+                                    </div>
+                                    <div className="text-slate-500">
+                                        {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}
+                                        {doc.scadenza && <span className="ml-2 text-amber-700">scad. {doc.scadenza}</span>}
+                                    </div>
+                                    {canEdit && (
+                                        <div className="flex gap-2 mt-2">
+                                            <label className="cursor-pointer text-[11px] px-2 py-1 bg-sky-700 text-white rounded hover:bg-sky-800" data-testid={`doc-replace-${dt.key}`}>
+                                                Sostituisci
+                                                <input type="file" className="hidden" accept=".pdf,image/*"
+                                                       onChange={(e) => upload(dt.key, e.target.files?.[0])} />
+                                            </label>
+                                            <button onClick={() => elimina(dt.key)} className="text-[11px] text-red-600 hover:underline" data-testid={`doc-delete-${dt.key}`}>
+                                                Elimina
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : canEdit ? (
+                                <label className="cursor-pointer block border border-dashed border-slate-300 rounded-md p-3 text-center bg-slate-50 hover:bg-sky-50 hover:border-sky-300 transition" data-testid={`doc-upload-${dt.key}`}>
+                                    <Upload size={14} className="mx-auto text-slate-400" />
+                                    <div className="text-[11px] text-slate-500 mt-1">
+                                        {busyTipo === dt.key ? "Caricamento..." : "Click per caricare (PDF/JPG/PNG)"}
+                                    </div>
+                                    <input type="file" className="hidden" accept=".pdf,image/*"
+                                           onChange={(e) => upload(dt.key, e.target.files?.[0])} />
+                                </label>
+                            ) : (
+                                <div className="text-xs text-slate-400 italic py-3 text-center">Nessun documento</div>
+                            )}
+                        </Card>
+                    );
+                })}
+            </div>
+
+            {ana?.firma_cliente_url && (
+                <Card className="p-3 border-emerald-200 bg-emerald-50">
+                    <div className="font-medium text-sm flex items-center gap-2 mb-2">
+                        ✍️ Firma digitale del cliente
+                    </div>
+                    <img src={ana.firma_cliente_url} alt="firma" className="bg-white rounded-md border max-h-24" />
+                </Card>
+            )}
         </div>
     );
 }

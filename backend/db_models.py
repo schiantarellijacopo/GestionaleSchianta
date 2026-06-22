@@ -140,6 +140,18 @@ class Anagrafica(BaseDoc):
     data_consenso_privacy: Optional[str] = None
     consenso_commerciale: bool = False
     consenso_profilazione: bool = False
+    # documenti allegati alla scheda cliente (URL storage)
+    documenti: dict = Field(default_factory=dict)
+    # struttura: {"carta_identita": {"url":..., "nome_file":..., "data_caricamento":..., "scadenza":...}, ...}
+    # tipi supportati: carta_identita, patente, passaporto, codice_fiscale, privacy_firmata,
+    #                  tessera_sanitaria, visura_camerale, estratto_contributivo, altro
+    firma_cliente_url: Optional[str] = None   # firma digitale tracciata su canvas
+    privacy_firmata_url: Optional[str] = None # PDF privacy firmato
+    privacy_firmata_il: Optional[str] = None
+    # preferenza pagamento del cliente (default per nuovi titoli)
+    preferenza_pagamento: Optional[Literal["contanti", "bonifico", "assegno", "pos", "rid", "altro"]] = None
+    ultimo_mezzo_pagamento: Optional[str] = None
+    ultimo_mezzo_pagamento_data: Optional[str] = None
     # tag automatici/manuali per segmentazione e newsletter
     tags: List[str] = Field(default_factory=list)
     # collegamenti esterni dall'import
@@ -570,3 +582,46 @@ class EventoCalendario(BaseDoc):
     google_event_id: Optional[str] = None
     outlook_event_id: Optional[str] = None
     stato: Literal["confermato", "tentativo", "annullato"] = "confermato"
+
+
+# =============== PIPELINE CUSTOM (Kanban configurabili) ===============
+class PipelineColonna(BaseModel):
+    key: str                    # slug univoco nella pipeline (es. 'lead', 'trattativa')
+    label: str                  # nome visualizzato
+    colore: Optional[str] = None  # hex es. '#0EA5E9'
+    ordine: int = 0
+    descrizione: Optional[str] = None
+
+
+class PipelineCustom(BaseDoc):
+    """Pipeline configurabile dall'utente: marketing, onboarding, lead, ecc."""
+    nome: str
+    descrizione: Optional[str] = None
+    tipo: Literal["marketing", "vendita", "onboarding", "supporto", "generico"] = "generico"
+    icona: Optional[str] = None        # nome icona lucide (es. 'Megaphone')
+    colore: Optional[str] = None       # hex del badge pipeline
+    colonne: List[PipelineColonna] = Field(default_factory=list)
+    operatore_id: Optional[str] = None  # proprietario / visibilità
+    attiva: bool = True
+
+
+class PipelineCard(BaseDoc):
+    """Card all'interno di una PipelineCustom."""
+    pipeline_id: str
+    colonna_key: str
+    titolo: str
+    descrizione: Optional[str] = None
+    valore_stimato: float = 0.0       # es. budget o premio atteso
+    scadenza: Optional[str] = None
+    # collegamenti opzionali a entità esistenti
+    anagrafica_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+    sinistro_id: Optional[str] = None
+    # assegnazione
+    operatore_id: Optional[str] = None
+    # ordinamento all'interno della colonna
+    ordine: int = 0
+    # tag e priorità
+    tags: List[str] = Field(default_factory=list)
+    priorita: Literal["bassa", "media", "alta"] = "media"
+    archiviata: bool = False

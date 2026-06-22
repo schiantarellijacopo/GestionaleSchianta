@@ -147,39 +147,118 @@ def calcola_pensione(
 
 
 def parse_estratto_conto_inps(testo: str) -> dict:
-    """Parser semplice per estratti contributivi INPS in testo libero.
+    """Parser estratti contributivi INPS in testo libero.
 
-    Cerca pattern come "Settimane: 1234" o "Retribuzione: 25000".
-    Restituisce {settimane_contributive, retribuzione_media_annua, anni}.
+    Estrae: cognome/nome, codice fiscale, data nascita, comune nascita, provincia nascita,
+    settimane contributive totali, data inizio contribuzione, retribuzione media, anni stimati,
+    indirizzo residenza.
     """
     import re
-    settimane = 0
-    retribuzione = 0.0
-    anni = 0
 
-    # Cerca "Settimane:" o "Settimane utili" o "Totale settimane"
-    m = re.search(r"(?:totale\s+)?settimane[^\d]*(\d{2,5})", testo, re.IGNORECASE)
-    if m:
-        settimane = int(m.group(1))
+    result: dict = {
+        "settimane_contributive": 0,
+        "giorni_contributivi": 0,
+        "retribuzione_media_annua": 0.0,
+        "anni_stimati": 0,
+        "righe_contributive": 0,
+    }
 
-    # Retribuzione media annua / imponibile
-    m = re.search(r"(?:retribuzione|imponibile)[^\d]*([\d.,]{3,})", testo, re.IGNORECASE)
+    # === Header anagrafico ===
+    # "Estratto Conto Previdenziale COGNOME NOME"
+    m = re.search(r"Estratto\s+Conto\s+Previdenziale\s+([A-ZÀ-Ÿ' ]+?)(?:\n|\s+nato)", testo)
     if m:
-        val = m.group(1).replace(".", "").replace(",", ".")
+        full = m.group(1).strip()
+        parts = full.split()
+        if len(parts) >= 2:
+            result["cognome"] = parts[0]
+            result["nome"] = " ".join(parts[1:]).strip()
+        else:
+            result["cognome"] = full
+
+    # Codice fiscale (16 caratteri pattern italiano)
+    m = re.search(r"\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b", testo)
+    if m:
+        result["codice_fiscale"] = m.group(1)
+
+    # "nato a CITTÀ (PROV)"
+    m = re.search(r"nato\s+a\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)", testo, re.IGNORECASE)
+    if m:
+        result["comune_nascita"] = m.group(1).strip().title()
+        result["provincia_nascita"] = m.group(2)
+
+    # "il 30/11/1983"
+    m = re.search(r"\bil\s+(\d{2}/\d{2}/\d{4})\b", testo)
+    if m:
+        gg, mm, aa = m.group(1).split("/")
+        result["data_nascita"] = f"{aa}-{mm}-{gg}"
+
+    # Sesso dal CF (settima posizione)
+    if result.get("codice_fiscale"):
         try:
-            retribuzione = float(val)
-        except ValueError:
+            mese_cf = result["codice_fiscale"][9:11]
+            result["sesso"] = "F" if int(mese_cf) > 31 else "M"
+        except Exception:
             pass
 
-    # Anni
-    m = re.search(r"anni\s+(?:contributivi|di\s+contribuzione)[^\d]*(\d{1,2})", testo, re.IGNORECASE)
+    # "residente in INDIRIZZO" su due righe (indirizzo \n CAP comune)
+    m = re.search(r"residente\s+in\s+(.+?)\n\s*(\d{5})\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)",
+                  testo, re.IGNORECASE)
     if m:
-        anni = int(m.group(1))
-        if not settimane:
-            settimane = anni * 52
+        result["indirizzo"] = m.group(1).strip()
+        result["cap"] = m.group(2)
+        result["comune"] = m.group(3).strip().title()
+        result["provincia"] = m.group(4)
 
-    return {
-        "settimane_contributive": settimane,
-        "retribuzione_media_annua": retribuzione,
-        "anni_stimati": anni or (settimane // 52 if settimane else 0),
-    }
+    # === Periodi contributivi ===
+    # Pattern righe: "01/01/2000 31/12/2000 ... sett. 52 ..." oppure "giorni 22"
+    settimane_tot = 0
+    giorni_tot = 0
+    retribuzioni = []
+    primo_inizio = None
+
+    # cattura ogni riga "DD/MM/YYYY DD/MM/YYYY ... (sett.|giorni) N val ..."
+    riga_re = re.compile(
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+.+?(sett\.|giorni)\s+(\d+)\s+([\d,.]+)\s+([\d.,]+)",
+    )
+    for m in riga_re.finditer(testo):
+        dal, _al, unita, qty, _utili, retrib = m.groups()
+        try:
+            n = int(qty)
+            if unita == "sett.":
+                settimane_tot += n
+            else:
+                giorni_tot += n
+            r = float(retrib.replace(".", "").replace(",", "."))
+            if r > 0:
+                retribuzioni.append(r)
+            # data inizio = data più vecchia
+            gg, mm, aa = dal.split("/")
+            iso = f"{aa}-{mm}-{gg}"
+            if primo_inizio is None or iso < primo_inizio:
+                primo_inizio = iso
+            result["righe_contributive"] += 1
+        except Exception:
+            continue
+
+    # somma anche giorni → settimane (7gg ≈ 1 sett)
+    settimane_da_giorni = giorni_tot // 7
+    settimane_tot += settimane_da_giorni
+
+    result["settimane_contributive"] = settimane_tot
+    result["giorni_contributivi"] = giorni_tot
+    result["anni_stimati"] = settimane_tot // 52 if settimane_tot else 0
+    if retribuzioni:
+        result["retribuzione_media_annua"] = round(sum(retribuzioni) / len(retribuzioni), 2)
+    if primo_inizio:
+        result["data_inizio_contribuzione"] = primo_inizio
+
+    return result
+
+
+def parse_estratto_contributivo(pdf_bytes: bytes) -> dict:
+    """Estrae testo da PDF dell'estratto contributivo INPS e ritorna i dati strutturati."""
+    import pdfplumber
+    from io import BytesIO
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    return parse_estratto_conto_inps(text)

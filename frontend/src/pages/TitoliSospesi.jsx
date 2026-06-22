@@ -178,13 +178,24 @@ function KpiCard({ icon, label, value, bg }) {
 
 function DialogIncasso({ titolo, conti, onClose }) {
     const oggi = new Date().toISOString().slice(0, 10);
+    const [pref, setPref] = useState(null);
+    useEffect(() => {
+        if (titolo.contraente_id) {
+            api.get(`/anagrafiche/${titolo.contraente_id}`).then((r) => setPref(r.data));
+        }
+    }, [titolo.contraente_id]);
+    const defaultMezzo = pref?.preferenza_pagamento || pref?.ultimo_mezzo_pagamento || "contanti";
     const [f, setF] = useState({
         data_incasso: oggi,
-        mezzo_pagamento: "contanti",
+        mezzo_pagamento: defaultMezzo,
         conto_cassa_id: conti[0]?.id || "",
         importo_pagato: titolo.importo_lordo,
         motivo_sconto: "",
     });
+    useEffect(() => {
+        if (pref) setF((p) => ({ ...p, mezzo_pagamento: defaultMezzo }));
+    // eslint-disable-next-line
+    }, [pref]);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const sconto = Math.max(0, (titolo.importo_lordo || 0) - (parseFloat(f.importo_pagato) || 0));
 
@@ -215,6 +226,13 @@ function DialogIncasso({ titolo, conti, onClose }) {
                     <div><strong>Polizza:</strong> {titolo.numero_polizza} ({titolo.ramo})</div>
                     <div><strong>Importo da incassare:</strong> <span className="num font-bold">{fmtEur(titolo.importo_lordo)}</span></div>
                     <div><strong>Anticipato dall&apos;agenzia il:</strong> {fmtDate(titolo.data_copertura)} ({titolo.giorni_anticipo} gg fa)</div>
+                    {pref?.preferenza_pagamento && (
+                        <div className="mt-1 text-emerald-700">
+                            ★ <strong>Preferenza cliente:</strong> {pref.preferenza_pagamento}
+                            {pref.ultimo_mezzo_pagamento && pref.ultimo_mezzo_pagamento !== pref.preferenza_pagamento &&
+                                ` (ultimo usato: ${pref.ultimo_mezzo_pagamento})`}
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-3 py-2">

@@ -12,7 +12,7 @@ import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -28,6 +28,7 @@ from db_models import (
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
     AziendaConfig, SchemaProvvigionale, EventoCalendario,
+    PipelineCustom, PipelineColonna, PipelineCard,
     _now_iso, _uid,
 )
 import ania_importer
@@ -862,6 +863,204 @@ async def remove_relazione(aid: str, target_id: str, user=Depends(require_user("
 
 
 # ============================================================
+# DOCUMENTI ANAGRAFICA + FIRMA DIGITALE
+# ============================================================
+ANAGRAFICA_DOC_TIPI = {
+    "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
+    "tessera_sanitaria", "visura_camerale", "estratto_contributivo",
+    "privacy_firmata", "altro",
+}
+
+
+@api.post("/anagrafiche/{aid}/documenti/{tipo}")
+async def upload_documento_anagrafica(
+    aid: str, tipo: str,
+    file: UploadFile = File(...),
+    scadenza: Optional[str] = Form(None),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Carica un documento del cliente (CI, patente, passaporto, CF, privacy firmata, ecc.)."""
+    if tipo not in ANAGRAFICA_DOC_TIPI:
+        raise HTTPException(400, f"Tipo non valido: {tipo}")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1, "ragione_sociale": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 15 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/{tipo}_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    doc_entry = {
+        "url": url, "storage_path": result["path"],
+        "nome_file": file.filename, "mime": ct,
+        "size_kb": round(len(data) / 1024, 1),
+        "data_caricamento": _now_iso(),
+        "scadenza": scadenza,
+        "caricato_da": user.get("id"),
+    }
+    set_fields = {f"documenti.{tipo}": doc_entry, "updated_at": _now_iso()}
+    if tipo == "privacy_firmata":
+        set_fields.update({
+            "privacy_firmata_url": url,
+            "privacy_firmata_il": _now_iso(),
+            "consenso_privacy": True,
+            "data_consenso_privacy": _now_iso()[:10],
+        })
+    await db.anagrafiche.update_one({"id": aid}, {"$set": set_fields})
+    await log_attivita(user, "upload", "anagrafica_doc", aid, f"Caricato {tipo}: {file.filename}")
+    await log_diario_cliente(aid, "documento",
+        titolo=f"Caricato documento: {tipo.replace('_', ' ')}",
+        descrizione=f"File: {file.filename} ({doc_entry['size_kb']} KB)", autore=user)
+    return {tipo: doc_entry}
+
+
+@api.delete("/anagrafiche/{aid}/documenti/{tipo}")
+async def delete_documento_anagrafica(aid: str, tipo: str,
+                                       user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    if tipo not in ANAGRAFICA_DOC_TIPI:
+        raise HTTPException(400, "Tipo non valido")
+    await db.anagrafiche.update_one(
+        {"id": aid},
+        {"$unset": {f"documenti.{tipo}": ""}, "$set": {"updated_at": _now_iso()}},
+    )
+    return {"ok": True}
+
+@api.get("/anagrafiche/{aid}/privacy/genera-pdf")
+async def genera_pdf_privacy(aid: str, user=Depends(current_user)):
+    """Genera PDF di informativa privacy precompilato con i dati del cliente."""
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    headers = ["Voce", "Valore"]
+    rows = [
+        ["Cognome e nome / Ragione sociale", ana.get("ragione_sociale") or ""],
+        ["Codice fiscale", ana.get("codice_fiscale") or ana.get("partita_iva") or ""],
+        ["Data di nascita", ana.get("data_nascita") or ""],
+        ["Indirizzo", f"{ana.get('indirizzo') or ''}, {ana.get('cap') or ''} {ana.get('comune') or ''} "
+                     f"({ana.get('provincia') or ''})"],
+        ["Email", ana.get("email") or ""],
+        ["Telefono", ana.get("cellulare") or ana.get("telefono") or ""],
+        ["", ""],
+        ["INFORMATIVA EX ART. 13 GDPR", ""],
+        ["Titolare del trattamento", cfg.get("ragione_sociale") or "—"],
+        ["Sede legale", f"{cfg.get('indirizzo') or ''} {cfg.get('comune') or ''} ({cfg.get('provincia') or ''})"],
+        ["PEC", cfg.get("pec") or cfg.get("email") or "—"],
+        ["", ""],
+        ["FINALITÀ DEL TRATTAMENTO", ""],
+        ["1. Esecuzione contratto", "Stipula e gestione polizze, sinistri, comunicazioni operative"],
+        ["2. Adempimenti di legge", "Antiriciclaggio, vigilanza IVASS, obblighi fiscali"],
+        ["3. Marketing (consenso facoltativo)", "Newsletter, promozioni"],
+        ["", ""],
+        ["DIRITTI DELL'INTERESSATO", "Art. 15-22 GDPR: accesso, rettifica, cancellazione, opposizione"],
+        ["", ""],
+        ["CONSENSO PRESTATO IN DATA", _now_iso()[:10]],
+        ["FIRMA DEL CLIENTE", "_______________________________"],
+    ]
+    pdf = pdf_report.stampa_elenco(
+        f"Informativa privacy e consenso - {ana.get('ragione_sociale')}",
+        "Documento ai sensi del Regolamento UE 2016/679 (GDPR)",
+        headers, rows,
+        col_widths_mm=[55, 130], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"privacy_{ana.get('codice_fiscale') or aid}.pdf")
+
+
+
+
+@api.post("/anagrafiche/{aid}/firma-digitale")
+async def salva_firma_cliente(aid: str, body: dict,
+                               user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Salva la firma del cliente come immagine PNG (canvas base64)."""
+    img_data = body.get("immagine_base64") or body.get("data")
+    if not img_data:
+        raise HTTPException(400, "immagine_base64 richiesta")
+    import base64
+    if "," in img_data:
+        img_data = img_data.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(img_data)
+    except Exception:
+        raise HTTPException(400, "Base64 non valido")
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/firma_{_uid()}.png"
+    try:
+        result = obj_storage.put_object(path, raw, "image/png")
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    await db.anagrafiche.update_one({"id": aid},
+        {"$set": {"firma_cliente_url": url, "updated_at": _now_iso()}})
+    await log_attivita(user, "firma", "anagrafica", aid, "Firma digitale salvata")
+    return {"firma_cliente_url": url}
+
+
+# ============================================================
+# CALCOLO INPS AUTO DA ESTRATTO CONTRIBUTIVO
+# ============================================================
+@api.post("/anagrafiche/{aid}/calcolo-pensione/auto-da-estratto")
+async def calcola_pensione_da_estratto(
+    aid: str,
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Carica un PDF estratto contributivo INPS, estrae i dati e popola
+    settimane contributive + data inizio contribuzione sull'anagrafica.
+    Salva anche il PDF come documento 'estratto_contributivo'.
+    """
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande")
+    # 1) salva PDF nello storage come documento
+    ext = (file.filename or "ec.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/estratto_contributivo_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, "application/pdf")
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    doc_entry = {"url": url, "storage_path": result["path"], "nome_file": file.filename,
+                 "mime": "application/pdf", "size_kb": round(len(data) / 1024, 1),
+                 "data_caricamento": _now_iso(), "caricato_da": user.get("id")}
+    # 2) parsa il PDF
+    try:
+        parsed = inps_calculator.parse_estratto_contributivo(data)
+    except Exception as e:
+        raise HTTPException(400, f"PDF non parsabile: {e}")
+    # 3) aggiorna anagrafica
+    upd = {"documenti.estratto_contributivo": doc_entry, "updated_at": _now_iso()}
+    if parsed.get("settimane_contributive"):
+        upd["settimane_contributive"] = parsed["settimane_contributive"]
+    if parsed.get("data_inizio_contribuzione"):
+        upd["data_inizio_contribuzione"] = parsed["data_inizio_contribuzione"]
+    if parsed.get("codice_fiscale") and not ana.get("codice_fiscale"):
+        upd["codice_fiscale"] = parsed["codice_fiscale"]
+    if parsed.get("nome") and not ana.get("nome"):
+        upd["nome"] = parsed["nome"]
+    if parsed.get("cognome") and not ana.get("cognome"):
+        upd["cognome"] = parsed["cognome"]
+    if parsed.get("data_nascita") and not ana.get("data_nascita"):
+        upd["data_nascita"] = parsed["data_nascita"]
+    await db.anagrafiche.update_one({"id": aid}, {"$set": upd})
+    await log_diario_cliente(aid, "documento",
+        titolo="Estratto contributivo INPS importato",
+        descrizione=f"Settimane: {parsed.get('settimane_contributive')} - File: {file.filename}",
+        autore=user)
+    return {"ok": True, "parsed": parsed, "documento": doc_entry, "aggiornati": upd}
+
+
+
+
+# ============================================================
 # INTERVISTA
 # ============================================================
 @api.get("/anagrafiche/{aid}/interviste")
@@ -1500,6 +1699,17 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     )
     await db.movimenti.insert_one(mov_in.model_dump())
 
+    # aggiorna anagrafica con ultimo mezzo di pagamento usato
+    if pol and pol.get("contraente_id"):
+        await db.anagrafiche.update_one(
+            {"id": pol["contraente_id"]},
+            {"$set": {
+                "ultimo_mezzo_pagamento": mezzo,
+                "ultimo_mezzo_pagamento_data": data_incasso,
+                "updated_at": _now_iso(),
+            }},
+        )
+
     # Movimento uscita sconto (se applicato)
     mov_sconto_id = None
     if sconto > 0:
@@ -1959,28 +2169,30 @@ async def pipeline_move(
     """Sposta una card di pipeline in una nuova colonna (cambia stato).
 
     body: {nuovo_stato: 'attiva' | ...}
+    Supporta sia pipeline built-in (polizze/sinistri/titoli) che pipeline custom.
     """
-    if entita not in PIPELINE_STATI_VALIDI:
-        raise HTTPException(400, f"Entità non modificabile: {entita}")
-    nuovo = body.get("nuovo_stato")
-    if nuovo not in PIPELINE_STATI_VALIDI[entita]:
-        raise HTTPException(400, f"Stato non valido per {entita}: {nuovo}")
-    coll = {"polizze": db.polizze, "sinistri": db.sinistri, "titoli": db.titoli}[entita]
-    res = await coll.update_one(
-        {"id": eid},
-        {"$set": {"stato": nuovo, "updated_at": _now_iso()}},
-    )
-    if res.matched_count == 0:
-        raise HTTPException(404, "Elemento non trovato")
-    await log_attivita(user, "move_pipeline", entita, eid, f"Stato → {nuovo}")
-    return {"ok": True, "id": eid, "stato": nuovo}
+    nuovo = body.get("nuovo_stato") or body.get("colonna_key")
+    if entita in PIPELINE_STATI_VALIDI:
+        if nuovo not in PIPELINE_STATI_VALIDI[entita]:
+            raise HTTPException(400, f"Stato non valido per {entita}: {nuovo}")
+        coll = {"polizze": db.polizze, "sinistri": db.sinistri, "titoli": db.titoli}[entita]
+        res = await coll.update_one(
+            {"id": eid},
+            {"$set": {"stato": nuovo, "updated_at": _now_iso()}},
+        )
+        if res.matched_count == 0:
+            raise HTTPException(404, "Elemento non trovato")
+        await log_attivita(user, "move_pipeline", entita, eid, f"Stato → {nuovo}")
+        return {"ok": True, "id": eid, "stato": nuovo}
+    # Pipeline custom: entita = pipeline_id, eid = card_id
+    return await move_card(entita, eid, {"colonna_key": nuovo}, user)
 
 
 @api.get("/pipeline/{entita}")
 async def pipeline_data(entita: str, user=Depends(current_user)):
     """Ritorna dati per visualizzazione pipeline/kanban.
 
-    entita: 'polizze' | 'sinistri' | 'titoli' | 'clienti' | 'email'
+    entita: 'polizze' | 'sinistri' | 'titoli' | 'clienti' | 'email' | <id pipeline custom>
     """
     flt = await visibility_filter(user) if entita in ("polizze", "sinistri") else {}
     if entita == "polizze":
@@ -2092,7 +2304,288 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
         } for k, label in stages]
         return {"entita": "clienti", "colonne": cols}
 
+    # ===== PIPELINE CUSTOM (entita = id pipeline) =====
+    pipeline = await db.pipelines_custom.find_one({"id": entita}, {"_id": 0})
+    if pipeline:
+        # Visibilità: admin vede tutto, gli altri vedono solo le proprie
+        if user["role"] != "admin" and pipeline.get("operatore_id") not in (None, user.get("id")):
+            raise HTTPException(403, "Pipeline non accessibile")
+        colonne_def = sorted(pipeline.get("colonne", []), key=lambda c: c.get("ordine", 0))
+        cards = await db.pipeline_cards.find(
+            {"pipeline_id": entita, "archiviata": {"$ne": True}},
+            {"_id": 0},
+        ).sort([("colonna_key", 1), ("ordine", 1), ("created_at", -1)]).to_list(5000)
+        # Arricchimento anagrafica / operatore
+        ana_ids = list({c.get("anagrafica_id") for c in cards if c.get("anagrafica_id")})
+        anas = {}
+        if ana_ids:
+            async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+                anas[a["id"]] = a["ragione_sociale"]
+        op_ids = list({c.get("operatore_id") for c in cards if c.get("operatore_id")})
+        ops = {}
+        if op_ids:
+            async for u in db.users.find({"id": {"$in": op_ids}}, {"_id": 0, "id": 1, "name": 1}):
+                ops[u["id"]] = u["name"]
+        cols_out = []
+        for cd in colonne_def:
+            col_cards = [c for c in cards if c.get("colonna_key") == cd["key"]]
+            cols_out.append({
+                "key": cd["key"], "label": cd["label"], "colore": cd.get("colore"),
+                "count": len(col_cards),
+                "cards": [{
+                    "id": c["id"], "title": c["titolo"],
+                    "subtitle": anas.get(c.get("anagrafica_id", "")) or (c.get("descrizione") or "")[:50],
+                    "footer": ops.get(c.get("operatore_id", "")) or "",
+                    "extra": (f"€{c.get('valore_stimato', 0):.0f}" if c.get('valore_stimato') else "")
+                             + (" · " + c.get("priorita", "") if c.get("priorita") else ""),
+                    "date": c.get("scadenza"),
+                    "link": f"/anagrafiche/{c['anagrafica_id']}" if c.get("anagrafica_id") else None,
+                    "tags": c.get("tags", []),
+                    "priorita": c.get("priorita"),
+                    "card_id": c["id"],
+                } for c in col_cards[:50]],
+            })
+        return {
+            "entita": entita,
+            "pipeline": {"id": pipeline["id"], "nome": pipeline["nome"], "tipo": pipeline.get("tipo"),
+                         "icona": pipeline.get("icona"), "colore": pipeline.get("colore"),
+                         "descrizione": pipeline.get("descrizione")},
+            "colonne": cols_out,
+            "editabile_struttura": True,  # frontend sa che può modificare colonne / cards
+        }
+
     raise HTTPException(400, "Entità pipeline non supportata")
+
+
+# ============================================================
+# PIPELINE CUSTOM — CRUD pipelines + colonne + cards
+# ============================================================
+@api.get("/pipelines")
+async def list_pipelines_custom(user=Depends(current_user)):
+    """Elenco pipeline custom (built-in escluse). Filtra per visibilità."""
+    flt = {}
+    if user["role"] != "admin":
+        flt = {"$or": [{"operatore_id": user.get("id")}, {"operatore_id": None}]}
+    items = await db.pipelines_custom.find(flt, {"_id": 0}).sort("nome", 1).to_list(200)
+    # arricchimento conteggio cards
+    for p in items:
+        n = await db.pipeline_cards.count_documents({"pipeline_id": p["id"], "archiviata": {"$ne": True}})
+        p["cards_count"] = n
+    return items
+
+
+@api.post("/pipelines", status_code=201)
+async def crea_pipeline(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    if not body.get("nome"):
+        raise HTTPException(400, "Nome richiesto")
+    # se non passa colonne, usa il template del tipo
+    if not body.get("colonne"):
+        body["colonne"] = _template_colonne(body.get("tipo", "generico"))
+    body.setdefault("operatore_id", user.get("id"))
+    obj = PipelineCustom(**body)
+    await db.pipelines_custom.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "pipeline", obj.id, obj.nome)
+    return obj.model_dump()
+
+
+def _template_colonne(tipo: str) -> list:
+    templates = {
+        "marketing": [
+            {"key": "lead", "label": "Lead", "colore": "#94A3B8", "ordine": 1},
+            {"key": "contattato", "label": "Contattato", "colore": "#0EA5E9", "ordine": 2},
+            {"key": "interessato", "label": "Interessato", "colore": "#F59E0B", "ordine": 3},
+            {"key": "trattativa", "label": "Trattativa", "colore": "#7C3AED", "ordine": 4},
+            {"key": "vinto", "label": "Vinto", "colore": "#10B981", "ordine": 5},
+            {"key": "perso", "label": "Perso", "colore": "#EF4444", "ordine": 6},
+        ],
+        "vendita": [
+            {"key": "qualificazione", "label": "Qualificazione", "colore": "#94A3B8", "ordine": 1},
+            {"key": "proposta", "label": "Proposta", "colore": "#0EA5E9", "ordine": 2},
+            {"key": "negoziazione", "label": "Negoziazione", "colore": "#F59E0B", "ordine": 3},
+            {"key": "chiuso_vinto", "label": "Chiuso vinto", "colore": "#10B981", "ordine": 4},
+            {"key": "chiuso_perso", "label": "Chiuso perso", "colore": "#EF4444", "ordine": 5},
+        ],
+        "onboarding": [
+            {"key": "da_iniziare", "label": "Da iniziare", "colore": "#94A3B8", "ordine": 1},
+            {"key": "documenti", "label": "Raccolta documenti", "colore": "#0EA5E9", "ordine": 2},
+            {"key": "verifica", "label": "Verifica", "colore": "#F59E0B", "ordine": 3},
+            {"key": "completato", "label": "Completato", "colore": "#10B981", "ordine": 4},
+        ],
+        "supporto": [
+            {"key": "aperto", "label": "Aperto", "colore": "#0EA5E9", "ordine": 1},
+            {"key": "in_lavorazione", "label": "In lavorazione", "colore": "#F59E0B", "ordine": 2},
+            {"key": "in_attesa_cliente", "label": "In attesa cliente", "colore": "#94A3B8", "ordine": 3},
+            {"key": "risolto", "label": "Risolto", "colore": "#10B981", "ordine": 4},
+        ],
+    }
+    return templates.get(tipo, [
+        {"key": "todo", "label": "Da fare", "colore": "#94A3B8", "ordine": 1},
+        {"key": "in_corso", "label": "In corso", "colore": "#0EA5E9", "ordine": 2},
+        {"key": "fatto", "label": "Fatto", "colore": "#10B981", "ordine": 3},
+    ])
+
+
+@api.get("/pipelines/{pid}")
+async def get_pipeline(pid: str, user=Depends(current_user)):
+    p = await db.pipelines_custom.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Pipeline non trovata")
+    return p
+
+
+@api.put("/pipelines/{pid}")
+async def update_pipeline(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body.pop("id", None)
+    body["updated_at"] = _now_iso()
+    res = await db.pipelines_custom.update_one({"id": pid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Pipeline non trovata")
+    return await db.pipelines_custom.find_one({"id": pid}, {"_id": 0})
+
+
+@api.delete("/pipelines/{pid}")
+async def delete_pipeline(pid: str, user=Depends(require_user("admin"))):
+    await db.pipeline_cards.delete_many({"pipeline_id": pid})
+    res = await db.pipelines_custom.delete_one({"id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Pipeline non trovata")
+    return {"ok": True}
+
+
+# ----- Colonne (manipolazione singola colonna nella pipeline) -----
+@api.post("/pipelines/{pid}/colonne")
+async def aggiungi_colonna(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    if not body.get("label"):
+        raise HTTPException(400, "Label colonna richiesto")
+    p = await db.pipelines_custom.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Pipeline non trovata")
+    key = body.get("key") or _slugify(body["label"])
+    if any(c["key"] == key for c in p.get("colonne", [])):
+        raise HTTPException(400, f"Esiste già una colonna con chiave '{key}'")
+    nuova = PipelineColonna(
+        key=key, label=body["label"], colore=body.get("colore"),
+        ordine=body.get("ordine", len(p.get("colonne", [])) + 1),
+        descrizione=body.get("descrizione"),
+    ).model_dump()
+    await db.pipelines_custom.update_one({"id": pid}, {"$push": {"colonne": nuova}, "$set": {"updated_at": _now_iso()}})
+    return nuova
+
+
+@api.put("/pipelines/{pid}/colonne/{col_key}")
+async def modifica_colonna(pid: str, col_key: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    # rinomina, sposta, cambia colore
+    set_ops = {}
+    for k, v in body.items():
+        if k in ("label", "colore", "descrizione", "ordine"):
+            set_ops[f"colonne.$.{k}"] = v
+    if not set_ops:
+        raise HTTPException(400, "Nessun campo da modificare")
+    set_ops["updated_at"] = _now_iso()
+    res = await db.pipelines_custom.update_one(
+        {"id": pid, "colonne.key": col_key},
+        {"$set": set_ops},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Colonna non trovata")
+    return {"ok": True}
+
+
+@api.delete("/pipelines/{pid}/colonne/{col_key}")
+async def elimina_colonna(pid: str, col_key: str,
+                           sposta_in: Optional[str] = None,
+                           user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Elimina una colonna. Se sposta_in è specificato, le card vengono spostate; altrimenti vengono archiviate."""
+    p = await db.pipelines_custom.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Pipeline non trovata")
+    rimanenti = [c for c in p.get("colonne", []) if c["key"] != col_key]
+    if len(rimanenti) == len(p.get("colonne", [])):
+        raise HTTPException(404, "Colonna non trovata")
+    await db.pipelines_custom.update_one({"id": pid},
+        {"$set": {"colonne": rimanenti, "updated_at": _now_iso()}})
+    if sposta_in:
+        if not any(c["key"] == sposta_in for c in rimanenti):
+            raise HTTPException(400, f"Colonna destinazione '{sposta_in}' non esiste")
+        await db.pipeline_cards.update_many(
+            {"pipeline_id": pid, "colonna_key": col_key},
+            {"$set": {"colonna_key": sposta_in, "updated_at": _now_iso()}},
+        )
+    else:
+        await db.pipeline_cards.update_many(
+            {"pipeline_id": pid, "colonna_key": col_key},
+            {"$set": {"archiviata": True, "updated_at": _now_iso()}},
+        )
+    return {"ok": True}
+
+
+# ----- Cards CRUD -----
+@api.post("/pipelines/{pid}/cards", status_code=201)
+async def crea_card(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    p = await db.pipelines_custom.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Pipeline non trovata")
+    cols = p.get("colonne", [])
+    if not cols:
+        raise HTTPException(400, "La pipeline non ha colonne")
+    col_key = body.get("colonna_key") or cols[0]["key"]
+    if not any(c["key"] == col_key for c in cols):
+        raise HTTPException(400, f"Colonna '{col_key}' non esiste")
+    body["pipeline_id"] = pid
+    body["colonna_key"] = col_key
+    body.setdefault("operatore_id", user.get("id"))
+    obj = PipelineCard(**body)
+    await db.pipeline_cards.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "pipeline_card", obj.id, obj.titolo)
+    return obj.model_dump()
+
+
+@api.put("/pipelines/{pid}/cards/{card_id}")
+async def update_card(pid: str, card_id: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body.pop("id", None)
+    body.pop("pipeline_id", None)
+    body["updated_at"] = _now_iso()
+    res = await db.pipeline_cards.update_one(
+        {"id": card_id, "pipeline_id": pid}, {"$set": body},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Card non trovata")
+    return await db.pipeline_cards.find_one({"id": card_id}, {"_id": 0})
+
+
+@api.delete("/pipelines/{pid}/cards/{card_id}")
+async def delete_card(pid: str, card_id: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    res = await db.pipeline_cards.delete_one({"id": card_id, "pipeline_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Card non trovata")
+    return {"ok": True}
+
+
+@api.post("/pipelines/{pid}/cards/{card_id}/move")
+async def move_card(pid: str, card_id: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Sposta una card in una nuova colonna della stessa pipeline."""
+    nuova_col = body.get("nuovo_stato") or body.get("colonna_key")
+    if not nuova_col:
+        raise HTTPException(400, "colonna_key richiesto")
+    p = await db.pipelines_custom.find_one({"id": pid}, {"_id": 0, "colonne": 1})
+    if not p:
+        raise HTTPException(404, "Pipeline non trovata")
+    if not any(c["key"] == nuova_col for c in p.get("colonne", [])):
+        raise HTTPException(400, f"Colonna '{nuova_col}' non esiste in questa pipeline")
+    res = await db.pipeline_cards.update_one(
+        {"id": card_id, "pipeline_id": pid},
+        {"$set": {"colonna_key": nuova_col, "updated_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Card non trovata")
+    await log_attivita(user, "move_card", "pipeline_card", card_id, f"→ {nuova_col}")
+    return {"ok": True}
+
+
+def _slugify(s: str) -> str:
+    import re as _re
+    s = _re.sub(r"[^a-zA-Z0-9]+", "_", s.lower()).strip("_")
+    return s[:40] or "col"
 
 
 # ============================================================
