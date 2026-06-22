@@ -10,10 +10,12 @@ import re
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 
-PROMPT = """Sei un OCR specializzato in carte d'identità italiane (cartacea ed elettronica).
-Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
+PROMPT = """Sei un OCR specializzato in documenti di identità italiani:
+carta d'identità (cartacea ed elettronica), patente di guida, passaporto.
+Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido:
 
 {
+  "tipo_documento": "carta_identita | patente | passaporto | null",
   "cognome": "stringa o null",
   "nome": "stringa o null",
   "sesso": "M | F | null",
@@ -24,16 +26,17 @@ Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido con questo schem
   "numero_documento": "stringa o null",
   "data_rilascio": "YYYY-MM-DD o null",
   "data_scadenza": "YYYY-MM-DD o null",
-  "comune_emissione": "stringa o null",
+  "comune_emissione": "stringa (o 'MIT-UCO' per patenti, 'Questura di X' per passaporti) o null",
   "indirizzo_residenza": "stringa o null",
   "comune_residenza": "stringa o null",
-  "cittadinanza": "stringa o null"
+  "cittadinanza": "stringa o null",
+  "categorie_patente": "lista categorie es. ['B','BE'] (solo se patente) o null"
 }
 
 Regole:
-- Tutti i campi opzionali, restituisci null se non leggibili
+- Tutti i campi opzionali. Restituisci null se non leggibili
 - Cognome/Nome in MAIUSCOLO senza accenti speciali
-- Date sempre in formato YYYY-MM-DD
+- Date sempre YYYY-MM-DD
 - Non aggiungere testo prima o dopo il JSON
 - Non includere markdown ```json```
 """

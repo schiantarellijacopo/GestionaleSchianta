@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, ScanLine } from "lucide-react";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
@@ -111,6 +111,9 @@ export default function Polizze() {
 function NuovaPolizzaDialog({ onClose }) {
     const [ana, setAna] = useState([]);
     const [comp, setComp] = useState([]);
+    const [ocrLoading, setOcrLoading] = useState(false);
+    const ocrRef = useRef(null);
+    const [polizzaFile, setPolizzaFile] = useState(null);
     const [f, setF] = useState({
         numero_polizza: "", compagnia_id: "", contraente_id: "",
         ramo: "RCA", prodotto: "", effetto: "", scadenza: "",
@@ -123,19 +126,73 @@ function NuovaPolizzaDialog({ onClose }) {
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    const onOcrPolizza = async (file) => {
+        if (!file) return;
+        setOcrLoading(true);
+        setPolizzaFile(file);
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const r = await api.post("/utility/ocr-polizza", fd,
+                { headers: { "Content-Type": "multipart/form-data" }, timeout: 90000 });
+            const d = r.data;
+            // mappa ramo OCR → ramo standard
+            const ramoMap = { RCAUTO: "RCA", INFR: "INFORTUNI" };
+            const ramo = ramoMap[d.ramo] || d.ramo || "RCA";
+            // match compagnia per nome
+            const compMatch = d.compagnia
+                ? comp.find((c) => c.ragione_sociale?.toUpperCase().includes(d.compagnia.toUpperCase().split(" ")[0]))
+                : null;
+            // match contraente per CF
+            const cfContr = d.contraente?.codice_fiscale || d.contraente?.partita_iva;
+            const contrMatch = cfContr
+                ? ana.find((a) => a.codice_fiscale === cfContr || a.partita_iva === cfContr)
+                : null;
+            setF((p) => ({
+                ...p,
+                numero_polizza: d.numero_polizza || p.numero_polizza,
+                compagnia_id: compMatch?.id || p.compagnia_id,
+                contraente_id: contrMatch?.id || p.contraente_id,
+                ramo, prodotto: d.prodotto || p.prodotto,
+                effetto: d.data_decorrenza || p.effetto,
+                scadenza: d.data_scadenza || p.scadenza,
+                premio_lordo: d.premio_lordo_totale ?? p.premio_lordo,
+                premio_netto: d.premio_netto_totale ?? p.premio_netto,
+                provvigioni: d.provvigioni_totali ?? p.provvigioni,
+                targa: d.veicolo?.targa || p.targa,
+                frazionamento: d.frazionamento || p.frazionamento,
+            }));
+            let msg = `Polizza riconosciuta: ${d.numero_polizza || "?"}`;
+            if (!compMatch && d.compagnia) msg += ` · ⚠ Compagnia "${d.compagnia}" da abbinare manualmente`;
+            if (!contrMatch && cfContr) msg += ` · ⚠ Contraente CF ${cfContr} da abbinare manualmente`;
+            toast.success(msg);
+        } catch (e) {
+            toast.error("OCR fallito: " + (e.response?.data?.detail || e.message));
+        } finally { setOcrLoading(false); }
+    };
+
     const save = async () => {
         if (!f.numero_polizza || !f.compagnia_id || !f.contraente_id || !f.effetto || !f.scadenza) {
             toast.error("Compila tutti i campi obbligatori");
             return;
         }
         try {
-            await api.post("/polizze", {
+            const created = await api.post("/polizze", {
                 ...f,
                 premio_lordo: parseFloat(f.premio_lordo) || 0,
                 premio_netto: parseFloat(f.premio_netto) || 0,
                 provvigioni: parseFloat(f.provvigioni) || 0,
                 assicurato_ids: [f.contraente_id],
             });
+            // se ho un file polizza caricato per OCR, lo salvo come allegato
+            if (polizzaFile && created.data?.id) {
+                const fd = new FormData();
+                fd.append("file", polizzaFile);
+                fd.append("salva_come_allegato", "true");
+                fd.append("polizza_id", created.data.id);
+                api.post("/utility/ocr-polizza", fd,
+                    { headers: { "Content-Type": "multipart/form-data" } }).catch(() => {});
+            }
             toast.success("Polizza creata");
             onClose();
         } catch (e) {
@@ -146,6 +203,32 @@ function NuovaPolizzaDialog({ onClose }) {
     return (
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Nuova polizza</DialogTitle></DialogHeader>
+
+            {/* Toolbar OCR polizza */}
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="pol-ocr-toolbar">
+                <div className="text-xs text-sky-900 flex-1">
+                    <strong>Auto-compila</strong> caricando il PDF della polizza (Cattolica, UnipolSai, Generali, Allianz, ecc.).
+                    Verrà anche salvata come allegato.
+                </div>
+                <input
+                    ref={ocrRef}
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => onOcrPolizza(e.target.files?.[0])}
+                    data-testid="pol-ocr-input"
+                />
+                <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={() => ocrRef.current?.click()}
+                    disabled={ocrLoading}
+                    data-testid="pol-ocr-button"
+                >
+                    <ScanLine size={13} className="mr-1" />
+                    {ocrLoading ? "Riconoscimento..." : "Carica PDF polizza"}
+                </Button>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 py-2">
                 <div><Label>Numero polizza *</Label><Input data-testid="pol-numero-input" value={f.numero_polizza} onChange={(e) => set("numero_polizza", e.target.value)} /></div>
                 <div>

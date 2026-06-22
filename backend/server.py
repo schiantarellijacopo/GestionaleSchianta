@@ -669,6 +669,157 @@ async def utility_geocoding(body: dict, user=Depends(current_user)):
     return {"trovato": True, **result}
 
 
+@api.post("/utility/ocr-documento-identita")
+async def ocr_documento_identita(
+    file: UploadFile = File(...),
+    anagrafica_id: Optional[str] = Form(None),
+    tipo: str = Form("carta_identita"),  # carta_identita | patente | passaporto
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """OCR universale per CI / patente / passaporto italiani.
+
+    Se anagrafica_id è fornito, salva il file come documento del relativo tipo.
+    """
+    import ocr_ci
+    valid = {"carta_identita", "patente", "passaporto"}
+    if tipo not in valid:
+        raise HTTPException(400, f"Tipo non valido: {tipo}")
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    file_for_ocr = contents
+    ct_for_ocr = ct
+    if ct == "application/pdf":
+        try:
+            import pdfplumber
+            from io import BytesIO
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                if not pdf.pages:
+                    raise HTTPException(400, "PDF vuoto")
+                img = pdf.pages[0].to_image(resolution=200).original
+                out = BytesIO()
+                img.save(out, format="JPEG", quality=85)
+                file_for_ocr = out.getvalue()
+                ct_for_ocr = "image/jpeg"
+        except Exception as e:
+            raise HTTPException(400, f"Errore conversione PDF: {e}")
+    elif not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
+    try:
+        data = await ocr_ci.estrai_dati_ci(file_for_ocr, ct_for_ocr)
+    except Exception as e:
+        raise HTTPException(503, f"Errore OCR: {e}")
+
+    documento_url = None
+    if anagrafica_id:
+        ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_{_uid()}.{ext}"
+        try:
+            result = obj_storage.put_object(path, contents, ct)
+            documento_url = f"/api/storage/{result['path']}"
+            doc_entry = {
+                "url": documento_url, "storage_path": result["path"],
+                "nome_file": file.filename, "mime": ct,
+                "size_kb": round(len(contents) / 1024, 1),
+                "data_caricamento": _now_iso(),
+                "scadenza": data.get("data_scadenza"),
+                "caricato_da": user.get("id"),
+            }
+            await db.anagrafiche.update_one(
+                {"id": anagrafica_id},
+                {"$set": {f"documenti.{tipo}": doc_entry, "updated_at": _now_iso()}},
+            )
+        except Exception:
+            pass
+
+    await log_attivita(user, "ocr", tipo, anagrafica_id,
+                       f"OCR {tipo}: {data.get('cognome')} {data.get('nome')}")
+    if documento_url:
+        data["_documento_salvato"] = documento_url
+    return data
+
+
+@api.post("/utility/ocr-polizza")
+async def ocr_polizza_endpoint(
+    file: UploadFile = File(...),
+    salva_come_allegato: bool = Form(False),
+    polizza_id: Optional[str] = Form(None),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """OCR di una polizza italiana. Estrae dati strutturati (contraente, veicolo, garanzie, premi).
+
+    Se polizza_id + salva_come_allegato → salva il file come allegato della polizza.
+    """
+    import ocr_polizza as ocr_pol
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 20 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    file_for_ocr = contents
+    ct_for_ocr = ct
+    if ct == "application/pdf":
+        try:
+            import pdfplumber
+            from io import BytesIO
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                if not pdf.pages:
+                    raise HTTPException(400, "PDF vuoto")
+                # per polizze processa prime 2 pagine (frontespizio + dettagli)
+                images = []
+                for p in pdf.pages[:2]:
+                    img = p.to_image(resolution=200).original
+                    out = BytesIO()
+                    img.save(out, format="JPEG", quality=85)
+                    images.append(out.getvalue())
+                # combina in unica immagine verticale se più pagine
+                if len(images) == 1:
+                    file_for_ocr = images[0]
+                else:
+                    from PIL import Image
+                    imgs = [Image.open(BytesIO(x)) for x in images]
+                    w = max(i.width for i in imgs)
+                    h = sum(i.height for i in imgs)
+                    combined = Image.new("RGB", (w, h), "white")
+                    y = 0
+                    for i in imgs:
+                        combined.paste(i, (0, y))
+                        y += i.height
+                    out = BytesIO()
+                    combined.save(out, format="JPEG", quality=80)
+                    file_for_ocr = out.getvalue()
+                ct_for_ocr = "image/jpeg"
+        except Exception as e:
+            raise HTTPException(400, f"Errore conversione PDF: {e}")
+    elif not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
+    try:
+        data = await ocr_pol.estrai_dati_polizza(file_for_ocr, ct_for_ocr)
+    except Exception as e:
+        raise HTTPException(503, f"Errore OCR polizza: {e}")
+
+    if salva_come_allegato and polizza_id:
+        ext = (file.filename or "polizza.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/polizze/{polizza_id}/polizza_{_uid()}.{ext}"
+        try:
+            result = obj_storage.put_object(path, contents, ct)
+            url = f"/api/storage/{result['path']}"
+            alleg = Allegato(
+                entita_tipo="polizza", entita_id=polizza_id,
+                nome_file=file.filename or "polizza.pdf",
+                url=url, storage_path=result["path"],
+                mime=ct, size_kb=round(len(contents) / 1024, 1),
+                caricato_da=user.get("id"),
+            )
+            await db.allegati.insert_one(alleg.model_dump())
+        except Exception:
+            pass
+
+    await log_attivita(user, "ocr", "polizza", polizza_id,
+                       f"OCR polizza: {data.get('numero_polizza')} - {data.get('compagnia')}")
+    return data
+
+
 @api.post("/utility/ocr-carta-identita")
 async def ocr_carta_identita(
     file: UploadFile = File(...),
@@ -3339,19 +3490,25 @@ async def auto_genera_tags(user=Depends(require_user("admin", "collaboratore")))
 
     Tag generati:
       - genitore_con_figli_minori (se ha relazioni 'figlio' con anagrafiche con data_nascita < 18 anni fa)
-      - gen_anni_XX (es. gen_anni_70 per nati 1970-1979, ...)
-      - cliente_attivo (almeno 1 polizza attiva)
-      - prospect (nessuna polizza)
-      - top_cliente (>= 4 polizze attive)
+      - figli_minori (alias, su richiesta utente)
+      - gen_anni_XX
+      - cliente_attivo / prospect / top_cliente
+      - dipendente / autonomo / professionista / imprenditore / pensionato (da tipologia_lavoratore)
     """
     from datetime import date
     today = date.today()
+    AUTO_TAGS_GESTITI = {
+        "genitore_con_figli_minori", "figli_minori",
+        "cliente_attivo", "prospect", "top_cliente",
+        "anziano_over_65", "giovane_under_30",
+        "dipendente", "autonomo", "professionista", "imprenditore",
+        "pensionato", "disoccupato", "studente", "casalinga",
+    }
     aggiornate = 0
     cursor = db.anagrafiche.find({}, {"_id": 0})
     async for ana in cursor:
-        existing_manual = [t for t in (ana.get("tags") or []) if not (t.startswith("gen_") or t in (
-            "genitore_con_figli_minori", "cliente_attivo", "prospect", "top_cliente",
-            "anziano_over_65", "giovane_under_30"))]
+        existing_manual = [t for t in (ana.get("tags") or [])
+                           if not (t.startswith("gen_") or t in AUTO_TAGS_GESTITI)]
         auto = []
         # generazione
         if ana.get("data_nascita"):
@@ -3364,7 +3521,7 @@ async def auto_genera_tags(user=Depends(require_user("admin", "collaboratore")))
                 if eta < 30: auto.append("giovane_under_30")
             except Exception:
                 pass
-        # genitore con figli minori
+        # genitore con figli minori (genera entrambi i tag: completo + breve)
         for rel in (ana.get("parente_di") or []):
             if rel.get("relazione") != "figlio": continue
             child = await db.anagrafiche.find_one({"id": rel.get("anagrafica_id")}, {"_id": 0, "data_nascita": 1})
@@ -3373,9 +3530,15 @@ async def auto_genera_tags(user=Depends(require_user("admin", "collaboratore")))
                 cd = date.fromisoformat(child["data_nascita"])
                 eta_f = today.year - cd.year
                 if eta_f < 18:
-                    auto.append("genitore_con_figli_minori"); break
+                    auto.append("genitore_con_figli_minori")
+                    auto.append("figli_minori")
+                    break
             except Exception:
                 continue
+        # tipologia lavoratore
+        tl = ana.get("tipologia_lavoratore")
+        if tl:
+            auto.append(tl)
         # stato cliente
         n_attive = await db.polizze.count_documents({"contraente_id": ana["id"], "stato": "attiva"})
         if n_attive == 0:

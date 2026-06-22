@@ -226,6 +226,8 @@ function NuovaAnagraficaDialog({ onClose }) {
         numero_documento: "", data_rilascio: "", data_scadenza: "",
         comune_emissione: "",
         collaboratore_id: "",
+        tipologia_lavoratore: null,
+        professione: "",
         lat: null, lng: null,
     });
 
@@ -592,6 +594,36 @@ function NuovaAnagraficaDialog({ onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
+
+                {isPF && (
+                    <>
+                        <div className="col-span-2 text-xs uppercase tracking-widest font-semibold text-slate-500 pt-3 border-t border-slate-100">Lavoro</div>
+                        <div>
+                            <Label>Tipologia lavoratore</Label>
+                            <Select value={form.tipologia_lavoratore || "__none__"} onValueChange={(v) => set("tipologia_lavoratore", v === "__none__" ? null : v)}>
+                                <SelectTrigger data-testid="anag-tipo-lavoro"><SelectValue placeholder="—" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__none__">— non specificato —</SelectItem>
+                                    <SelectItem value="dipendente">Dipendente</SelectItem>
+                                    <SelectItem value="autonomo">Autonomo / P.IVA</SelectItem>
+                                    <SelectItem value="professionista">Professionista (albo)</SelectItem>
+                                    <SelectItem value="imprenditore">Imprenditore</SelectItem>
+                                    <SelectItem value="pensionato">Pensionato</SelectItem>
+                                    <SelectItem value="disoccupato">Disoccupato</SelectItem>
+                                    <SelectItem value="studente">Studente</SelectItem>
+                                    <SelectItem value="casalinga">Casalinga / Casalingo</SelectItem>
+                                    <SelectItem value="altro">Altro</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Professione</Label>
+                            <Input value={form.professione || ""}
+                                   onChange={(e) => set("professione", e.target.value)}
+                                   placeholder="Es: medico, impiegato" />
+                        </div>
+                    </>
+                )}
             </div>
 
             <DialogFooter>

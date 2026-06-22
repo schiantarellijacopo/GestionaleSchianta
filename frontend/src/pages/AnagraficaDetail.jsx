@@ -235,6 +235,33 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Comune</Label><Input value={f.comune || ""} onChange={(e) => set("comune", e.target.value)} /></div>
                 <div><Label>Provincia</Label><Input maxLength={2} value={f.provincia || ""} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
                 <div><Label>CAP</Label><Input value={f.cap || ""} onChange={(e) => set("cap", e.target.value)} /></div>
+                <div>
+                    <Label>Tipologia lavoratore</Label>
+                    <Select value={f.tipologia_lavoratore || "__none__"} onValueChange={(v) => set("tipologia_lavoratore", v === "__none__" ? null : v)}>
+                        <SelectTrigger data-testid="anag-tipo-lavoro"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__none__">— non specificato —</SelectItem>
+                            <SelectItem value="dipendente">Dipendente</SelectItem>
+                            <SelectItem value="autonomo">Autonomo / Partita IVA</SelectItem>
+                            <SelectItem value="professionista">Professionista (albo)</SelectItem>
+                            <SelectItem value="imprenditore">Imprenditore</SelectItem>
+                            <SelectItem value="pensionato">Pensionato</SelectItem>
+                            <SelectItem value="disoccupato">Disoccupato</SelectItem>
+                            <SelectItem value="studente">Studente</SelectItem>
+                            <SelectItem value="casalinga">Casalinga / Casalingo</SelectItem>
+                            <SelectItem value="altro">Altro</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label>Professione</Label>
+                    <Input value={f.professione || ""} onChange={(e) => set("professione", e.target.value)}
+                           placeholder="Es: medico, geometra, impiegato" />
+                </div>
+                <div>
+                    <Label>Datore di lavoro</Label>
+                    <Input value={f.datore_lavoro || ""} onChange={(e) => set("datore_lavoro", e.target.value)} />
+                </div>
             </div>
             <div className="mt-4">
                 <Label>Note</Label>
@@ -758,14 +785,38 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const upload = async (tipo, file, scadenza) => {
         if (!file) return;
         setBusyTipo(tipo);
-        const fd = new FormData();
-        fd.append("file", file);
-        if (scadenza) fd.append("scadenza", scadenza);
+        // Per CI/patente/passaporto, prima OCR + aggiornamento campi anagrafica, poi upload
+        const isOcrable = ["carta_identita", "patente", "passaporto"].includes(tipo);
         try {
-            const r = await api.post(`/anagrafiche/${anagrafica_id}/documenti/${tipo}`, fd,
-                { headers: { "Content-Type": "multipart/form-data" } });
-            setDocs((p) => ({ ...p, [tipo]: r.data[tipo] }));
-            toast.success("Documento caricato");
+            if (isOcrable) {
+                const fd = new FormData();
+                fd.append("file", file);
+                fd.append("anagrafica_id", anagrafica_id);
+                fd.append("tipo", tipo);
+                const r = await api.post("/utility/ocr-documento-identita", fd,
+                    { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 });
+                const d = r.data;
+                // proponi aggiornamento campi su anagrafica
+                const updates = {};
+                if (d.codice_fiscale && !ana.codice_fiscale) updates.codice_fiscale = d.codice_fiscale;
+                if (d.data_nascita && !ana.data_nascita) updates.data_nascita = d.data_nascita;
+                if (d.numero_documento && tipo === "carta_identita") updates.numero_documento = d.numero_documento;
+                if (d.data_scadenza && tipo === "carta_identita") updates.data_scadenza = d.data_scadenza;
+                if (Object.keys(updates).length > 0 && window.confirm(
+                    `OCR ha estratto:\n${Object.entries(updates).map(([k, v]) => `• ${k}: ${v}`).join("\n")}\n\nAggiornare l'anagrafica?`)) {
+                    await api.put(`/anagrafiche/${anagrafica_id}`, updates);
+                }
+                setDocs((p) => ({ ...p, [tipo]: { url: d._documento_salvato, nome_file: file.name, data_caricamento: new Date().toISOString(), size_kb: Math.round(file.size / 1024) } }));
+                toast.success(`${tipo.replace("_", " ")} riconosciuto e salvato`);
+            } else {
+                const fd = new FormData();
+                fd.append("file", file);
+                if (scadenza) fd.append("scadenza", scadenza);
+                const r = await api.post(`/anagrafiche/${anagrafica_id}/documenti/${tipo}`, fd,
+                    { headers: { "Content-Type": "multipart/form-data" } });
+                setDocs((p) => ({ ...p, [tipo]: r.data[tipo] }));
+                toast.success("Documento caricato");
+            }
             onReload?.();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");

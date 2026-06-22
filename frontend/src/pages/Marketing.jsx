@@ -269,6 +269,8 @@ function TagTab() {
                     <li><strong>generazione_z</strong> · <strong>millennials</strong> · <strong>gen_x</strong> · <strong>boomers</strong></li>
                     <li><strong>condominio</strong> · <strong>azienda</strong> · <strong>privato</strong></li>
                     <li><strong>con_polizze</strong> · <strong>senza_polizze</strong></li>
+                    <li><strong>genitore_con_figli_minori</strong> · <strong>figli_minori</strong></li>
+                    <li><strong>dipendente</strong> · <strong>autonomo</strong> · <strong>professionista</strong> · <strong>imprenditore</strong> · <strong>pensionato</strong></li>
                 </ul>
                 <Button onClick={autogenera} disabled={busy} className="bg-amber-600 hover:bg-amber-700" data-testid="mkt-autotag">
                     <Sparkles size={13} className="mr-1.5" /> {busy ? "Elaborazione..." : "Auto-genera tag su tutti i clienti"}

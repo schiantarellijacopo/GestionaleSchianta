@@ -152,6 +152,13 @@ class Anagrafica(BaseDoc):
     preferenza_pagamento: Optional[Literal["contanti", "bonifico", "assegno", "pos", "rid", "altro"]] = None
     ultimo_mezzo_pagamento: Optional[str] = None
     ultimo_mezzo_pagamento_data: Optional[str] = None
+    # tipologia lavoratore (per tagging marketing + INPS)
+    tipologia_lavoratore: Optional[Literal[
+        "dipendente", "autonomo", "professionista", "imprenditore",
+        "pensionato", "disoccupato", "studente", "casalinga", "altro"
+    ]] = None
+    professione: Optional[str] = None
+    datore_lavoro: Optional[str] = None
     # tag automatici/manuali per segmentazione e newsletter
     tags: List[str] = Field(default_factory=list)
     # collegamenti esterni dall'import
