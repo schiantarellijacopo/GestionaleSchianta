@@ -240,7 +240,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 polizza_id_map[id_exp] = obj.id
                 log.polizze_create += 1
 
-    # rec21 -> aggiorna targa su polizze RCA
+    # rec21 -> aggiorna targa + dettagli veicolo su polizze RCA
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec21":
             continue
@@ -251,9 +251,70 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
-            targa = row.get("targa") or None
-            if targa:
-                await db.polizze.update_one({"id": pol_id}, {"$set": {"targa": targa, "updated_at": _now_iso()}})
+            upd = {
+                "targa": row.get("targa") or None,
+                "veicolo_marca": (row.get("marca_veicolo") or "").upper() or None,
+                "veicolo_modello": (row.get("modello_veicolo") or "").upper() or None,
+                "veicolo_tipo": row.get("tipo_veicolo") or None,
+                "veicolo_alimentazione": row.get("alimentazione") or None,
+                "veicolo_uso": row.get("uso_veicolo") or None,
+                "veicolo_data_immatricolazione": _parse_date(row.get("data_immatricolazione", "")),
+                "veicolo_cilindrata": int(row.get("cilindrata") or 0) or None,
+                "veicolo_cv_fiscali": int(row.get("cv_fiscali") or 0) or None,
+                "veicolo_kw": _parse_float(row.get("kw", "")),
+                "veicolo_quintali": _parse_float(row.get("quintali") or row.get("portata") or ""),
+                "veicolo_posti": int(row.get("numero_posti") or 0) or None,
+                "veicolo_gancio_traino": (row.get("gancio_traino") or "").upper() in ("S", "SI", "Y", "1"),
+                "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
+                "tipo_tariffa": row.get("tipo_tariffa") or None,
+                "bm_provenienza": row.get("bm_provenienza") or None,
+                "bm_assegnata": row.get("bm_assegnata") or None,
+                "bm_assegnata_cu": row.get("bm_assegnata_cu") or None,
+                "pejus": _parse_float(row.get("pejus", "")),
+                "franchigia": _parse_float(row.get("franchigia", "")),
+                "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
+                "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
+                "valore_accessori": _parse_float(row.get("valore_accessori", "")),
+                "guida_esperta": (row.get("guida_esperta") or "").upper() in ("S", "SI", "Y", "1"),
+                "guida_esclusiva": (row.get("guida_esclusiva") or "").upper() in ("S", "SI", "Y", "1"),
+                "rinuncia_rivalsa": (row.get("rinuncia_rivalsa") or "").upper() in ("S", "SI", "Y", "1"),
+                "massimali": row.get("massimali") or None,
+                "updated_at": _now_iso(),
+            }
+            upd = {k: v for k, v in upd.items() if v not in (None, "", 0, 0.0) or k in ("targa",)}
+            if upd:
+                await db.polizze.update_one({"id": pol_id}, {"$set": upd})
+
+    # rec30 -> garanzie della polizza
+    for fname, content in files_data.items():
+        if _detect_record_type(fname) != "rec30":
+            continue
+        rows = _read_csv_text(content)
+        counts["rec30"] = counts.get("rec30", 0) + len(rows)
+        # raggruppo per polizza
+        from collections import defaultdict as _dd
+        gar_per_pol = _dd(list)
+        for row in rows:
+            pol_exp = row.get("id_polizza_exp")
+            pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
+            if not pol_id:
+                continue
+            gar_per_pol[pol_id].append({
+                "garanzia": row.get("descrizione_garanzia") or row.get("garanzia") or row.get("codice_garanzia"),
+                "netto": _parse_float(row.get("netto_garanzia", "")),
+                "accessori": _parse_float(row.get("accessori", "")),
+                "imposte": _parse_float(row.get("imposte", "")),
+                "ssn": _parse_float(row.get("ssn", "")),
+                "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
+                "diritti": _parse_float(row.get("diritti", "")),
+                "provvigione": _parse_float(row.get("provvigione_garanzia") or row.get("provvigione", "")),
+            })
+        for pol_id, garanzie in gar_per_pol.items():
+            diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
+            await db.polizze.update_one(
+                {"id": pol_id},
+                {"$set": {"garanzie": garanzie, "diritti": diritti_tot, "updated_at": _now_iso()}},
+            )
 
     # 4) Titoli (rec40)
     for fname, content in files_data.items():
