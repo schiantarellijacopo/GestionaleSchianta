@@ -66,7 +66,7 @@ export default function Pensioni() {
             <Card className="p-4 border-amber-200 bg-amber-50 mb-6 flex gap-3 items-start" data-testid="pensioni-info">
                 <Info size={16} className="text-amber-600 mt-0.5 shrink-0" />
                 <div className="text-xs text-amber-800">
-                    {"Le stime sono indicative basate sui parametri INPS 2025/2026 (calcolo contributivo + coefficienti di trasformazione). Non sostituiscono il calcolo ufficiale INPS. Carica l'estratto conto contributivo in formato testo (.txt) per pre-compilare automaticamente settimane e retribuzione."}
+                    {"Le stime sono indicative basate sui parametri INPS 2025/2026 (calcolo contributivo + coefficienti di trasformazione). Non sostituiscono il calcolo ufficiale INPS. Carica l'estratto conto contributivo INPS in formato PDF, TXT o CSV per pre-compilare automaticamente settimane e retribuzione."}
                 </div>
             </Card>
 
@@ -118,7 +118,7 @@ export default function Pensioni() {
                         </div>
 
                         <div className="pt-2 border-t border-slate-100 flex items-center gap-3">
-                            <input ref={fileRef} type="file" accept=".txt,.csv" className="hidden" onChange={(e) => parseFile(e.target.files?.[0])} />
+                            <input ref={fileRef} type="file" accept=".pdf,.txt,.csv" className="hidden" onChange={(e) => parseFile(e.target.files?.[0])} />
                             <Button variant="outline" onClick={() => fileRef.current?.click()} data-testid="pens-import-button">
                                 <FileUp size={14} className="mr-1" /> Carica estratto INPS
                             </Button>

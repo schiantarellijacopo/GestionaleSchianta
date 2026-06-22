@@ -617,16 +617,44 @@ async def calcola_pensione(body: CalcoloRequest, user=Depends(current_user)):
 @api.post("/pensioni/parse-estratto")
 async def parse_estratto(file: UploadFile = File(...), user=Depends(current_user)):
     raw = await file.read()
-    try:
-        text = raw.decode("utf-8", errors="ignore")
-    except Exception:
-        text = raw.decode("latin-1", errors="ignore")
-    # se PDF non parsabile in puro testo, ritorna comunque qualcosa
-    if file.filename.lower().endswith(".pdf"):
-        # pandas non legge PDF, restituisci hint
-        return {"settimane_contributive": 0, "retribuzione_media_annua": 0.0, "anni_stimati": 0,
-                "warning": "Caricamento PDF: parsing automatico non eseguito. Inserisci manualmente i dati."}
-    return inps_calculator.parse_estratto_conto_inps(text)
+    fname = (file.filename or "").lower()
+    text = ""
+
+    if fname.endswith(".pdf"):
+        try:
+            import pdfplumber
+            import io as _io
+            with pdfplumber.open(_io.BytesIO(raw)) as pdf:
+                pages_text = []
+                for page in pdf.pages:
+                    t = page.extract_text() or ""
+                    pages_text.append(t)
+                text = "\n".join(pages_text)
+        except Exception as e:
+            logger.error("PDF parse error: %s", e)
+            raise HTTPException(400, f"Impossibile leggere il PDF: {e}")
+        if not text.strip():
+            return {
+                "settimane_contributive": 0,
+                "retribuzione_media_annua": 0.0,
+                "anni_stimati": 0,
+                "warning": "Il PDF non contiene testo estraibile (potrebbe essere scansionato). Inserisci manualmente i dati.",
+            }
+    else:
+        try:
+            text = raw.decode("utf-8", errors="ignore")
+        except Exception:
+            text = raw.decode("latin-1", errors="ignore")
+
+    result = inps_calculator.parse_estratto_conto_inps(text)
+    # se non ho trovato nulla nel PDF avviso
+    if fname.endswith(".pdf") and not result.get("settimane_contributive") and not result.get("retribuzione_media_annua"):
+        result["warning"] = (
+            "PDF letto correttamente ma non sono riuscito a riconoscere settimane/retribuzione. "
+            "Inseriscili manualmente o controlla che l'estratto contenga voci come "
+            "\"Totale settimane\" e \"Retribuzione imponibile\"."
+        )
+    return result
 
 
 @api.get("/pensioni/storico")
