@@ -91,3 +91,34 @@ File `/app/memory/test_credentials.md`. Admin: `admin@assicura.it / Admin123!`
 
 ### Backend health
 ✅ UP. Tutti i nuovi endpoint testati con curl: CF calcola/decodifica, Geocoding, Saldi compagnie, Calendario CRUD.
+
+---
+
+## 2026-06-22 — Tab "Analisi Cliente" completa (SatorCRM-like)
+
+### Aggiunto
+- **Tab "Analisi Cliente"** in scheda anagrafica con **7 sotto-tab**:
+  1. **Situazione Finanziaria** — reddito lordo, dividendi, altri redditi, affitti, regime forfettario, TFR, liquidità, debiti, oneri deducibili/fondo pensione, capacità risparmio, appetito al rischio (entrate/patrimonio)
+  2. **Patrimonio** — Immobili (tipo, titolo, %, valore, cat. catastale, rendita), Veicoli, Beni, Aziende (formula EBITDA×7 ± PFN)
+  3. **Contesto & Obiettivi** — 3 box contesto + 4 domande aspirazionali (felicità, carriera, eredità, pensione)
+  4. **Approfondimento Redditi** — calcolo automatico contributi previdenziali, IRPEF lorda/netta con scaglioni 2026, detrazioni coniuge/lavoro dipendente, reddito netto
+  5. **Pensione INPS** — carriera contributiva, storico redditi multi-anno, pensioni di **OGGI** (Invalidità grave 66-99%, Inabilità totale 100%, Superstiti — calcolate **sempre tutte e tre**), pensioni del **DOMANI** (proiezione 64-71 anni con modalità Anticipata/Vecchiaia, montante)
+  6. **Riepilogo Pensionistico** — scoperture mensili/annuali, capitale da assicurare per Invalidità/Inabilità/Premorienza/Vecchiaia, copertura percentuale con KPI colorati
+  7. **Successione** — calcolo automatico quote senza testamento (artt. 565-586 c.c.) e quote di legittima (artt. 536-553 c.c.) con grafico a barre + tabella euro
+
+- **Generazione PDF** professionali:
+  - `GET /api/anagrafiche/{id}/analisi/pdf-diagnosi-reddito` — "**Diagnosi del Reddito**" (17 pagine: situazione famigliare, contributiva, prestazioni maturate, riserve, fabbisogno, raccomandazione, checklist controlli)
+  - `GET /api/anagrafiche/{id}/analisi/pdf-progetto-azzob` — "**Progetto Futuro Senza Sorprese**" (metodo AZZOB ISO 31000: Contesto, Obiettivi, Appetito al rischio con scaglioni, Mappatura 4 rischi, Valutazione)
+
+### Nuovi moduli backend
+- `/app/backend/successione_calc.py` — calcolo quote successione legittima e legittima per i casi standard del Codice Civile italiano
+- `/app/backend/reddito_calc.py` — calcolo contributi/IRPEF/netto + funzione `calcola_scoperture_pensionistiche`
+- `/app/backend/pdf_diagnosi.py` — generatore reportlab dei due PDF
+- Estensione `db_models.py` con `AnalisiCliente`, `ImmobileItem`, `VeicoloItem`, `BeneItem`, `AziendaItem`, `RedditoStoricoItem`, `PeriodoContributivoItem`
+- 8 nuovi endpoint API sotto `/api/anagrafiche/{aid}/analisi/*`
+
+### Nuovo componente frontend
+- `/app/frontend/src/components/AnalisiClienteTab.jsx` (700+ righe) — composto con sotto-tab, infografica KPI, grafici a barre per successione, tabelle interattive
+
+### Mantenuto
+- Vecchio tab "Pensione INPS" preservato per retrocompatibilità (richiesta utente)

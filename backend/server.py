@@ -29,12 +29,16 @@ from db_models import (
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
     AziendaConfig, SchemaProvvigionale, EventoCalendario,
     PipelineCustom, PipelineColonna, PipelineCard,
+    AnalisiCliente,
     _now_iso, _uid,
 )
 import ania_importer
 import inps_calculator
+import successione_calc
+import reddito_calc
 import storage as obj_storage
 import pdf_report
+import pdf_diagnosi
 import brogliaccio as brog
 import cf_calc
 import geocoder as geocoder_svc
@@ -2445,6 +2449,401 @@ async def calcolo_pensione_anagrafica(aid: str, body: dict, user=Depends(current
         "risultati": risultati,
         "gap_reddito": gap,
     }
+
+
+
+# ============================================================
+# ANALISI CLIENTE COMPLETA (Diagnosi - SatorCRM-like)
+# ============================================================
+async def _ensure_analisi(aid: str) -> dict:
+    """Carica o crea l'analisi cliente per un'anagrafica."""
+    doc = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
+    if not doc:
+        ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+        if not ana:
+            raise HTTPException(404, "Anagrafica non trovata")
+        # Pre-popola dai campi anagrafica
+        ac = AnalisiCliente(
+            anagrafica_id=aid,
+            reddito_lordo_annuo=float(ana.get("reddito_annuo_lordo") or 0),
+        )
+        await db.analisi_cliente.insert_one(ac.model_dump())
+        doc = ac.model_dump()
+    return doc
+
+
+@api.get("/anagrafiche/{aid}/analisi")
+async def get_analisi_cliente(aid: str, user=Depends(current_user)):
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    return await _ensure_analisi(aid)
+
+
+@api.put("/anagrafiche/{aid}/analisi")
+async def update_analisi_cliente(
+    aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna i campi dell'analisi cliente (qualunque sezione)."""
+    await _ensure_analisi(aid)
+    # Filtra solo i campi del modello
+    allowed = set(AnalisiCliente.model_fields.keys()) - {"id", "anagrafica_id", "created_at", "updated_at"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    update["updated_at"] = _now_iso()
+    await db.analisi_cliente.update_one({"anagrafica_id": aid}, {"$set": update})
+    await log_attivita(user, "update_analisi", "analisi_cliente", aid)
+    doc = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
+    return doc
+
+
+@api.post("/anagrafiche/{aid}/analisi/calcola-redditi")
+async def calcola_redditi_analisi(aid: str, user=Depends(current_user)):
+    """Calcola approfondimento redditi (contributi, IRPEF, netto) usando i dati
+    salvati nell'analisi e nell'anagrafica."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+
+    # Determina coniuge a carico
+    parente = ana.get("parente_di") or []
+    coniuge_present = any((p.get("relazione") or "").lower() in ("coniuge", "sposo", "sposa") for p in parente)
+    has_coniuge_a_carico = bool(coniuge_present)
+
+    tipo_lav = ac.get("tipo_lavoratore") or ana.get("tipologia_lavoratore") or ana.get("tipo_lavoratore") or "altro"
+    risultato = reddito_calc.calcola_redditi(
+        reddito_lordo=float(ac.get("reddito_lordo_annuo") or 0),
+        tipo_lavoratore=tipo_lav,
+        altri_redditi=float(ac.get("altri_redditi_annuali") or 0) +
+                      float(ac.get("dividendi_partecipazioni") or 0) +
+                      float(ac.get("reddito_da_affitti") or 0),
+        oneri_deducibili=float(ac.get("oneri_deducibili") or 0),
+        oneri_fondo_pensione=float(ac.get("oneri_fondo_pensione") or 0),
+        altre_detrazioni=float(ac.get("altre_detrazioni") or 0),
+        ha_coniuge_a_carico=has_coniuge_a_carico,
+        numero_figli_a_carico=int(ana.get("numero_figli_a_carico") or 0),
+        regime_forfettario=bool(ac.get("regime_forfettario")),
+    )
+    return risultato
+
+
+@api.post("/anagrafiche/{aid}/analisi/calcola-successione")
+async def calcola_successione_analisi(aid: str, user=Depends(current_user)):
+    """Calcola quote di successione (intestata e quote di legittima) basandosi
+    sull'albero genealogico (parente_di) dell'anagrafica."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    ac = await _ensure_analisi(aid)
+
+    parente = ana.get("parente_di") or []
+    coniuge = any((p.get("relazione") or "").lower() in ("coniuge", "sposo", "sposa") for p in parente)
+    n_figli = sum(1 for p in parente if (p.get("relazione") or "").lower() in ("figlio", "figlia"))
+    n_genitori = sum(1 for p in parente if (p.get("relazione") or "").lower() in ("padre", "madre", "genitore"))
+    n_fratelli = sum(1 for p in parente if (p.get("relazione") or "").lower() in ("fratello", "sorella"))
+
+    # Calcola patrimonio totale
+    patrimonio = _calcola_patrimonio_totale(ac)
+
+    risultato = successione_calc.calcola_successione(
+        coniuge=coniuge,
+        numero_figli=n_figli,
+        genitori_vivi=n_genitori,
+        fratelli=n_fratelli,
+        patrimonio=patrimonio,
+    )
+    risultato["componenti_familiari"] = {
+        "coniuge": coniuge,
+        "figli": n_figli,
+        "genitori": n_genitori,
+        "fratelli": n_fratelli,
+    }
+    return risultato
+
+
+def _calcola_patrimonio_totale(ac: dict) -> dict | float:
+    """Helper: somma valori patrimoniali (per uso interno)."""
+    immobili_tot = sum(float(i.get("valore_commerciale") or 0) * float(i.get("percentuale_proprieta") or 100) / 100
+                       for i in (ac.get("immobili") or []))
+    veicoli_tot = sum(float(v.get("valore_commerciale") or 0) for v in (ac.get("veicoli") or []))
+    beni_tot = sum(float(b.get("valore") or 0) for b in (ac.get("beni") or []))
+    aziende_tot = sum(float(a.get("valore_ipotetico") or 0) * float(a.get("percentuale_partecipazione") or 100) / 100
+                      for a in (ac.get("aziende") or []))
+    return round(immobili_tot + veicoli_tot + beni_tot + aziende_tot, 2)
+
+
+@api.get("/anagrafiche/{aid}/analisi/patrimonio")
+async def get_patrimonio_riepilogo(aid: str, user=Depends(current_user)):
+    """Riepilogo patrimoniale: liquidità, immobili, veicoli, beni, aziende, debiti, montante."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    immobili_tot = sum(float(i.get("valore_commerciale") or 0) * float(i.get("percentuale_proprieta") or 100) / 100
+                       for i in (ac.get("immobili") or []))
+    veicoli_tot = sum(float(v.get("valore_commerciale") or 0) for v in (ac.get("veicoli") or []))
+    beni_tot = sum(float(b.get("valore") or 0) for b in (ac.get("beni") or []))
+    aziende_tot = sum(float(a.get("valore_ipotetico") or 0) * float(a.get("percentuale_partecipazione") or 100) / 100
+                      for a in (ac.get("aziende") or []))
+    liquidita = float(ac.get("liquidita") or 0)
+    tfr = float(ac.get("tfr_maturato") or 0)
+    debiti = float(ac.get("debiti") or 0)
+    # Montante contributivo dallo storico redditi
+    storico = ac.get("storico_redditi") or []
+    montante = round(sum(float(r.get("reddito") or 0) * 0.33 for r in storico), 2)
+    return {
+        "patrimonio_liquido": round(liquidita + tfr, 2),
+        "patrimonio_immobiliare": round(immobili_tot, 2),
+        "patrimonio_aziendale": round(aziende_tot, 2),
+        "patrimonio_veicoli": round(veicoli_tot, 2),
+        "altri_beni": round(beni_tot, 2),
+        "montante_contributivo": montante,
+        "debiti": debiti,
+        "patrimonio_netto": round(liquidita + tfr + immobili_tot + aziende_tot + veicoli_tot + beni_tot - debiti, 2),
+        "patrimonio_totale": round(liquidita + tfr + immobili_tot + aziende_tot + veicoli_tot + beni_tot, 2),
+    }
+
+
+@api.post("/anagrafiche/{aid}/analisi/calcola-pensioni-future")
+async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
+    """Calcola la proiezione delle pensioni di vecchiaia da 64 a 71 anni
+    (anticipate e vecchiaia), oltre a invalidità/inabilità/superstiti
+    sulla base dello storico redditi e dei periodi contributivi."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+
+    from datetime import date
+    eta_attuale = 0
+    if ana.get("data_nascita"):
+        try:
+            d = date.fromisoformat(ana["data_nascita"])
+            today = date.today()
+            eta_attuale = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
+        except Exception:
+            pass
+
+    storico = ac.get("storico_redditi") or []
+    periodi = ac.get("periodi_contributivi") or []
+
+    # Calcolo anni e settimane dai periodi contributivi
+    settimane = 0
+    if periodi:
+        from datetime import date as _date
+        for p in periodi:
+            try:
+                ini = _date.fromisoformat(p["inizio_periodo"])
+                fin = _date.fromisoformat(p["fine_periodo"]) if p.get("fine_periodo") else _date.today()
+                gg = (fin - ini).days
+                settimane += gg // 7
+            except Exception:
+                pass
+    settimane = settimane or int(ana.get("settimane_contributive") or 0)
+    anni_contrib = settimane / 52.0
+
+    # Retribuzione media (ultimi 5 anni se disponibili)
+    redditi = sorted([(r.get("anno") or 0, float(r.get("reddito") or 0)) for r in storico], reverse=True)
+    if redditi:
+        ultimi5 = redditi[:5]
+        retribuzione_media = sum(r[1] for r in ultimi5) / len(ultimi5)
+    else:
+        retribuzione_media = float(ac.get("reddito_lordo_annuo") or 0)
+
+    # Pensioni di OGGI (invalidità/inabilità/superstiti)
+    parente = ana.get("parente_di") or []
+    coniuge = any((p.get("relazione") or "").lower() in ("coniuge", "sposo", "sposa") for p in parente)
+    figli_carico = int(ana.get("numero_figli_a_carico") or 0)
+    n_familiari = (1 if coniuge else 0) + figli_carico
+
+    pensioni_oggi = {}
+    for tipo in ("invalidita", "inabilita", "superstite"):
+        if tipo == "superstite" and n_familiari == 0:
+            pensioni_oggi[tipo] = {
+                "pensione_lorda_mensile": 0, "pensione_lorda_annua": 0,
+                "pensione_netta_stimata": 0,
+                "metodologia": "Non spettante (no familiari)", "coefficiente_applicato": 0, "dettaglio": {},
+            }
+            continue
+        pensioni_oggi[tipo] = inps_calculator.calcola_pensione(
+            tipo=tipo, settimane_contributive=settimane,
+            retribuzione_media_annua=retribuzione_media, eta=eta_attuale,
+            percentuale_invalidita=75, numero_familiari=n_familiari,
+        )
+
+    # Pensioni DOMANI: proiezione da 64 a 71
+    pensioni_domani = []
+    montante_attuale = round(retribuzione_media * 0.33 * anni_contrib, 2)
+    for eta_pens in range(64, 72):
+        anni_extra = eta_pens - eta_attuale
+        if anni_extra <= 0:
+            continue
+        anni_tot = anni_contrib + anni_extra
+        montante = retribuzione_media * 0.33 * anni_tot
+        coeff = inps_calculator._coefficiente_trasformazione(eta_pens)
+        importo_annuo = montante * coeff
+        modalita = "Anticipata" if eta_pens < 67 else "Vecchiaia"
+        pensioni_domani.append({
+            "eta_pensionamento": eta_pens,
+            "anno_pensionamento": (ana.get("data_nascita", "1990-01-01")[:4] if ana.get("data_nascita") else "?"),
+            "modalita": modalita,
+            "anni_contribuzione_totali": round(anni_tot, 1),
+            "settimane_totali": int(anni_tot * 52),
+            "importo_annuo": round(importo_annuo, 2),
+            "importo_mensile": round(importo_annuo / 13.0, 2),
+            "montante_contributivo": round(montante, 2),
+            "coefficiente_trasformazione": coeff,
+        })
+
+    # Calcolo data anno pensionamento corretto
+    if ana.get("data_nascita"):
+        try:
+            anno_nascita = int(ana["data_nascita"][:4])
+            for p in pensioni_domani:
+                p["anno_pensionamento"] = anno_nascita + p["eta_pensionamento"]
+        except Exception:
+            pass
+
+    # Totale versato / rivalutato (basato su redditi storici + 24% aliquota commerciante)
+    aliquota_storica = reddito_calc.ALIQUOTE_CONTRIBUTIVE.get(
+        (ac.get("tipo_lavoratore") or "commerciante").lower(), 0.24
+    )
+    totale_versato = round(sum(r[1] for r in redditi) * aliquota_storica, 2)
+    totale_rivalutato = round(totale_versato * 1.068, 2)  # rivalutazione media ~6.8%
+
+    return {
+        "eta_attuale": eta_attuale,
+        "anni_contribuzione": round(anni_contrib, 1),
+        "settimane_contributive": settimane,
+        "retribuzione_media_annua": round(retribuzione_media, 2),
+        "totale_versato": totale_versato,
+        "totale_rivalutato": totale_rivalutato,
+        "montante_contributivo_attuale": montante_attuale,
+        "pensioni_oggi": pensioni_oggi,
+        "pensioni_domani": pensioni_domani,
+        "numero_familiari": n_familiari,
+        "ha_coniuge": coniuge,
+    }
+
+
+@api.post("/anagrafiche/{aid}/analisi/calcola-scoperture")
+async def calcola_scoperture_analisi(aid: str, user=Depends(current_user)):
+    """Calcola scoperture pensionistiche (problema oggi/futuro) e capitale da assicurare."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+    from datetime import date
+
+    # Recupera pensioni future
+    pens_data = await calcola_pensioni_future(aid, user)
+    pensioni_oggi = pens_data["pensioni_oggi"]
+
+    # Pensione di vecchiaia (a 67 anni o prima disponibile)
+    pensione_vecchiaia_annua = 0.0
+    for p in pens_data["pensioni_domani"]:
+        if p["eta_pensionamento"] == 67:
+            pensione_vecchiaia_annua = p["importo_annuo"]
+            break
+    if not pensione_vecchiaia_annua and pens_data["pensioni_domani"]:
+        pensione_vecchiaia_annua = pens_data["pensioni_domani"][0]["importo_annuo"]
+
+    eta_attuale = pens_data["eta_attuale"]
+
+    # Età coniuge
+    eta_coniuge = None
+    parente = ana.get("parente_di") or []
+    has_coniuge = False
+    has_figli = False
+    eta_figlio_piu_piccolo = None
+    for p in parente:
+        rel = (p.get("relazione") or "").lower()
+        if rel in ("coniuge", "sposo", "sposa"):
+            has_coniuge = True
+            # Recupera età coniuge dall'anagrafica collegata
+            con = await db.anagrafiche.find_one({"id": p.get("anagrafica_id")}, {"_id": 0, "data_nascita": 1})
+            if con and con.get("data_nascita"):
+                try:
+                    d = date.fromisoformat(con["data_nascita"])
+                    today = date.today()
+                    eta_coniuge = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
+                except Exception:
+                    pass
+        elif rel in ("figlio", "figlia"):
+            has_figli = True
+            figlio = await db.anagrafiche.find_one({"id": p.get("anagrafica_id")}, {"_id": 0, "data_nascita": 1})
+            if figlio and figlio.get("data_nascita"):
+                try:
+                    d = date.fromisoformat(figlio["data_nascita"])
+                    today = date.today()
+                    eta_f = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
+                    if eta_figlio_piu_piccolo is None or eta_f < eta_figlio_piu_piccolo:
+                        eta_figlio_piu_piccolo = eta_f
+                except Exception:
+                    pass
+
+    return reddito_calc.calcola_scoperture_pensionistiche(
+        reddito_lordo=float(ac.get("reddito_lordo_annuo") or 0),
+        altri_redditi=float(ac.get("altri_redditi_annuali") or 0) + float(ac.get("reddito_da_affitti") or 0),
+        dividendi=float(ac.get("dividendi_partecipazioni") or 0),
+        pensione_invalidita_annua=pensioni_oggi.get("invalidita", {}).get("pensione_lorda_annua", 0),
+        pensione_inabilita_annua=pensioni_oggi.get("inabilita", {}).get("pensione_lorda_annua", 0),
+        pensione_superstite_annua=pensioni_oggi.get("superstite", {}).get("pensione_lorda_annua", 0),
+        pensione_vecchiaia_annua=pensione_vecchiaia_annua,
+        eta_attuale=eta_attuale,
+        eta_pensionamento=67,
+        eta_max_target=70,
+        eta_coniuge=eta_coniuge,
+        eta_figlio_piu_piccolo=eta_figlio_piu_piccolo,
+        debiti=float(ac.get("debiti") or 0),
+        has_coniuge=has_coniuge,
+        has_figli=has_figli,
+        has_convivente=False,
+    )
+
+
+@api.get("/anagrafiche/{aid}/analisi/pdf-diagnosi-reddito")
+async def pdf_diagnosi_reddito(aid: str, user=Depends(current_user)):
+    """Genera il PDF 'Diagnosi del Reddito' (17 pagine, stile HubSicura)."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    ac = await _ensure_analisi(aid)
+    pens = await calcola_pensioni_future(aid, user)
+    scop = await calcola_scoperture_analisi(aid, user)
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    pdf_bytes = pdf_diagnosi.genera_diagnosi_reddito(ana, ac, pens, scop, az, user)
+    return StreamingResponse(
+        _io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=diagnosi_reddito_{ana['ragione_sociale'].replace(' ', '_')}.pdf"},
+    )
+
+
+@api.get("/anagrafiche/{aid}/analisi/pdf-progetto-azzob")
+async def pdf_progetto_azzob(aid: str, user=Depends(current_user)):
+    """Genera il PDF 'Progetto Futuro Senza Sorprese - metodo AZZOB / ISO 31000'."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    ac = await _ensure_analisi(aid)
+    pens = await calcola_pensioni_future(aid, user)
+    scop = await calcola_scoperture_analisi(aid, user)
+    patr = await get_patrimonio_riepilogo(aid, user)
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    pdf_bytes = pdf_diagnosi.genera_progetto_azzob(ana, ac, pens, scop, patr, az, user)
+    return StreamingResponse(
+        _io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=progetto_azzob_{ana['ragione_sociale'].replace(' ', '_')}.pdf"},
+    )
 
 
 # ============================================================

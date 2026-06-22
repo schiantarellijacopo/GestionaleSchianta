@@ -632,3 +632,110 @@ class PipelineCard(BaseDoc):
     tags: List[str] = Field(default_factory=list)
     priorita: Literal["bassa", "media", "alta"] = "media"
     archiviata: bool = False
+
+
+
+# =============== ANALISI CLIENTE (Diagnosi completa) ===============
+class ImmobileItem(BaseModel):
+    tipo: Literal["abitativo", "commerciale", "ufficio", "garage", "terreno", "altro"] = "abitativo"
+    indirizzo: Optional[str] = None
+    comune: Optional[str] = None
+    foglio: Optional[str] = None
+    particella: Optional[str] = None
+    sub: Optional[str] = None
+    categoria_catastale: Optional[str] = None
+    rendita_catastale: float = 0.0
+    valore_commerciale: float = 0.0
+    titolo: Literal["proprieta", "comproprieta", "usufrutto", "nuda_proprieta", "locazione"] = "proprieta"
+    percentuale_proprieta: float = 100.0
+    targa_immobile: Optional[str] = None
+    note: Optional[str] = None
+
+
+class VeicoloItem(BaseModel):
+    tipo: Literal["auto", "moto", "furgone", "camper", "barca", "altro"] = "auto"
+    marca: Optional[str] = None
+    modello: Optional[str] = None
+    targa: Optional[str] = None
+    anno: Optional[int] = None
+    valore_commerciale: float = 0.0
+    note: Optional[str] = None
+
+
+class BeneItem(BaseModel):
+    descrizione: str
+    valore: float = 0.0
+    note: Optional[str] = None
+
+
+class AziendaItem(BaseModel):
+    tipo: Literal["srl", "snc", "sas", "spa", "ditta_individuale", "altro"] = "srl"
+    ragione_sociale: str
+    partita_iva: Optional[str] = None
+    percentuale_partecipazione: float = 100.0
+    ebitda: float = 0.0
+    posizione_finanziaria_netta: float = 0.0
+    valore_ipotetico: float = 0.0
+    note: Optional[str] = None
+
+
+class RedditoStoricoItem(BaseModel):
+    anno: int
+    reddito: float = 0.0
+    contributi: float = 0.0
+    cassa: Optional[str] = "Commerciante"
+
+
+class PeriodoContributivoItem(BaseModel):
+    fondo: str = "Commerciante"
+    inizio_periodo: str  # YYYY-MM-DD
+    fine_periodo: Optional[str] = None
+    riscattato: bool = False
+
+
+class AnalisiCliente(BaseDoc):
+    """Analisi completa del cliente (situazione finanziaria, patrimonio, contesto,
+    redditi, pensioni, scoperture, successione). Una sola per anagrafica."""
+    anagrafica_id: str
+
+    # --- 1. Situazione finanziaria ---
+    reddito_lordo_annuo: float = 0.0
+    dividendi_partecipazioni: float = 0.0
+    altri_redditi_annuali: float = 0.0
+    reddito_da_affitti: float = 0.0
+    reddito_estero: bool = False
+    regime_forfettario: bool = False
+    tfr_maturato: float = 0.0
+    liquidita: float = 0.0  # conto corrente + investimenti liquidi
+    debiti: float = 0.0  # mutui, finanziamenti, residui
+    oneri_deducibili: float = 0.0
+    oneri_fondo_pensione: float = 0.0
+    altre_detrazioni: float = 0.0
+    capacita_risparmio_annuale: float = 0.0
+
+    # --- 1b. Appetito al rischio ---
+    danno_devastante_entrate_mensili: float = 0.0  # €/mese soglia
+    danno_devastante_patrimonio: float = 0.0  # € soglia
+
+    # --- 2. Patrimonio ---
+    immobili: List[ImmobileItem] = Field(default_factory=list)
+    veicoli: List[VeicoloItem] = Field(default_factory=list)
+    beni: List[BeneItem] = Field(default_factory=list)
+    aziende: List[AziendaItem] = Field(default_factory=list)
+
+    # --- 3. Contesto & Obiettivi ---
+    contesto_familiare: Optional[str] = None
+    contesto_lavorativo: Optional[str] = None
+    contesto_patrimoniale: Optional[str] = None
+    cosa_renderebbe_felice: Optional[str] = None  # sogni/aspirazioni
+    cosa_non_vuoi_carriera: Optional[str] = None
+    cosa_non_vuoi_dopo: Optional[str] = None
+    cosa_non_vuoi_pensione: Optional[str] = None
+
+    # --- 5. Pensione - storico redditi e periodi (override del calcolo automatico) ---
+    storico_redditi: List[RedditoStoricoItem] = Field(default_factory=list)
+    periodi_contributivi: List[PeriodoContributivoItem] = Field(default_factory=list)
+
+    # --- Snapshot risultati (calcolati on-demand) ---
+    ultimo_calcolo: Optional[dict] = None
+    ultimo_calcolo_data: Optional[str] = None

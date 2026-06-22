@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import AnalisiClienteTab from "@/components/AnalisiClienteTab";
 
 export default function AnagraficaDetail() {
     const { id } = useParams();
@@ -69,6 +70,7 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
                     <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Altri allegati</TabsTrigger>
+                    <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
                     <TabsTrigger value="pensione" data-testid="tab-pensione"><Calculator size={13} className="mr-1" />Pensione INPS</TabsTrigger>
                 </TabsList>
 
@@ -81,6 +83,7 @@ export default function AnagraficaDetail() {
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="documenti"><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>
+                <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
             </Tabs>
         </div>
