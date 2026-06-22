@@ -672,13 +672,17 @@ async def utility_geocoding(body: dict, user=Depends(current_user)):
 @api.post("/utility/ocr-documento-identita")
 async def ocr_documento_identita(
     file: UploadFile = File(...),
+    file_retro: Optional[UploadFile] = File(None),
     anagrafica_id: Optional[str] = Form(None),
-    tipo: str = Form("carta_identita"),  # carta_identita | patente | passaporto
+    tipo: str = Form("carta_identita"),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """OCR universale per CI / patente / passaporto italiani.
+    """OCR universale per CI / patente / passaporto.
 
-    Se anagrafica_id è fornito, salva il file come documento del relativo tipo.
+    Supporta:
+    - 1 PDF (multi-pagina automatico)
+    - 1 immagine (solo fronte)
+    - 2 immagini (fronte + retro) -> combinate verticalmente prima dell'OCR
     """
     import ocr_ci
     valid = {"carta_identita", "patente", "passaporto"}
@@ -690,6 +694,13 @@ async def ocr_documento_identita(
     ct = file.content_type or obj_storage.mime_for(file.filename or "")
     file_for_ocr = contents
     ct_for_ocr = ct
+    contents_retro = None
+    ct_retro = None
+    if file_retro is not None:
+        contents_retro = await file_retro.read()
+        ct_retro = file_retro.content_type or obj_storage.mime_for(file_retro.filename or "")
+        if len(contents_retro) > 10 * 1024 * 1024:
+            raise HTTPException(400, "Retro troppo grande (max 10 MB)")
     if ct == "application/pdf":
         try:
             import pdfplumber
@@ -706,6 +717,31 @@ async def ocr_documento_identita(
             raise HTTPException(400, f"Errore conversione PDF: {e}")
     elif not ct.startswith("image/"):
         raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
+
+    # Combina fronte + retro in singola immagine verticale
+    if contents_retro and ct_retro and ct_retro.startswith("image/"):
+        try:
+            from PIL import Image
+            from io import BytesIO
+            img_f = Image.open(BytesIO(file_for_ocr))
+            img_r = Image.open(BytesIO(contents_retro))
+            # Normalizza alla stessa larghezza
+            w = max(img_f.width, img_r.width)
+            def _resize(i):
+                if i.width == w: return i
+                h = int(i.height * (w / i.width))
+                return i.resize((w, h))
+            img_f, img_r = _resize(img_f), _resize(img_r)
+            combined = Image.new("RGB", (w, img_f.height + img_r.height + 10), "white")
+            combined.paste(img_f.convert("RGB"), (0, 0))
+            combined.paste(img_r.convert("RGB"), (0, img_f.height + 10))
+            out = BytesIO()
+            combined.save(out, format="JPEG", quality=85)
+            file_for_ocr = out.getvalue()
+            ct_for_ocr = "image/jpeg"
+        except Exception as e:
+            raise HTTPException(400, f"Errore combinazione fronte/retro: {e}")
+
     try:
         data = await ocr_ci.estrai_dati_ci(file_for_ocr, ct_for_ocr)
     except Exception as e:
@@ -713,6 +749,7 @@ async def ocr_documento_identita(
 
     documento_url = None
     if anagrafica_id:
+        # salva file fronte (o PDF) come documento principale; retro come allegato
         ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
         path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_{_uid()}.{ext}"
         try:
@@ -726,6 +763,16 @@ async def ocr_documento_identita(
                 "scadenza": data.get("data_scadenza"),
                 "caricato_da": user.get("id"),
             }
+            if contents_retro:
+                # salva retro come allegato addizionale
+                ext_r = (file_retro.filename or "retro.jpg").rsplit(".", 1)[-1].lower() or "jpg"
+                path_r = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_retro_{_uid()}.{ext_r}"
+                try:
+                    res_r = obj_storage.put_object(path_r, contents_retro, ct_retro)
+                    doc_entry["url_retro"] = f"/api/storage/{res_r['path']}"
+                    doc_entry["nome_file_retro"] = file_retro.filename
+                except Exception:
+                    pass
             await db.anagrafiche.update_one(
                 {"id": anagrafica_id},
                 {"$set": {f"documenti.{tipo}": doc_entry, "updated_at": _now_iso()}},
@@ -734,7 +781,7 @@ async def ocr_documento_identita(
             pass
 
     await log_attivita(user, "ocr", tipo, anagrafica_id,
-                       f"OCR {tipo}: {data.get('cognome')} {data.get('nome')}")
+                       f"OCR {tipo}{'(fronte+retro)' if contents_retro else ''}: {data.get('cognome')} {data.get('nome')}")
     if documento_url:
         data["_documento_salvato"] = documento_url
     return data
