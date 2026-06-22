@@ -1,0 +1,94 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) modified for Data-Dense SaaS",
+  "domain": "Insurance / Finance / B2B SaaS Dashboard (Italian Language)",
+  "rationale": "Insurance requires a UI that communicates authority, precision, and trust. We avoid 'tech-bro' neon and dark themes in favor of a crisp, stark light theme with high-contrast structural greys and a strong signal accent (Authoritative Sky Blue). This maximizes readability for dense data tables, forms, and charts.",
+  "color_palette": {
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "primary": "#0369A1",
+    "primary_hover": "#0284C7",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569",
+    "border": "#E2E8F0",
+    "accent_warning": "#F59E0B",
+    "accent_success": "#10B981",
+    "accent_danger": "#EF4444",
+    "sidebar_bg": "#0F172A",
+    "sidebar_text": "#F8FAFC",
+    "sidebar_active": "#1E293B"
+  },
+  "typography": {
+    "heading_font": "Work Sans",
+    "body_font": "IBM Plex Sans",
+    "rationale": "IBM Plex Sans has exceptional numerals and tabular figures, making it perfect for accounting, policy numbers, and dates. Work Sans provides a slightly humanist but professional touch for headings.",
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-semibold text-slate-900",
+      "h2": "text-2xl tracking-tight font-medium text-slate-900",
+      "h3": "text-xl font-medium text-slate-800",
+      "body": "text-sm text-slate-700 leading-relaxed",
+      "table_header": "text-xs uppercase tracking-[0.1em] font-semibold text-slate-500",
+      "data_cell": "text-sm text-slate-800 font-medium",
+      "labels": "text-xs font-medium text-slate-500 uppercase tracking-wider"
+    }
+  },
+  "spacing_and_layout": {
+    "dashboard_grid": "Mode B: 'Control Room Grid' - grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 or gap-6",
+    "container_padding": "p-6",
+    "table_density": "Dense SaaS layout. Use compact rows with py-2 px-4 to fit maximum data. Implement progressive disclosure (expandable rows or side-drawers for details).",
+    "border_radius": "rounded-md (subtle roundness, max 8px)",
+    "shadows": "shadow-sm for cards. 1px subtle borders (border-slate-200) are MANDATORY. Do not rely entirely on shadows to separate elements."
+  },
+  "component_instructions": {
+    "general": "Use shadcn/ui components extensively. Customize to have 1px borders and slight rounded corners.",
+    "tables": "Crucial for Anagrafiche, Polizze, Titoli, Sinistri. Use sticky headers, sortable columns, pagination, and clear status tags. Right-align all currency and numerical columns.",
+    "forms": "Multi-column bento layouts for 'Intervista al cliente' (Data Collection). Left-aligned labels, distinct focus rings (focus:ring-2 focus:ring-sky-500).",
+    "charts": "Use Recharts or Shadcn Charts for statistics. Ensure high-contrast palettes (Sky 700, Emerald 500, Amber 500).",
+    "cards": "Flat surface backgrounds. Hover state: slight lift (-translate-y-1) and shadow-md.",
+    "sidebar": "Dark sidebar (bg-slate-900) to frame the bright data area. Group links logically (Anagrafiche, Assicurazione, Contabilità, Strumenti)."
+  },
+  "animations": {
+    "hover": "Transition background-color and text-color 0.2s ease.",
+    "focus": "focus:ring-2 focus:ring-sky-500 focus:ring-offset-1",
+    "modals_and_drawers": "Slide in smoothly, use backdrop-blur-sm on the overlay."
+  },
+  "icons_library": "@phosphor-icons/react (Use regular or duotone for a premium enterprise feel)",
+  "accessibility_and_testing": {
+    "testing_attributes": "All interactive elements MUST include data-testid attributes (e.g., data-testid='polizza-submit-button', data-testid='nav-clienti').",
+    "contrast": "Ensure APCA standards. Text on primary buttons must be white or #F8FAFC."
+  },
+  "media_assets": {
+    "login_backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1742148186848-8b257455009b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODh8MHwxfHNlYXJjaHwxfHxtaWxhbiUyMHNreWxpbmUlMjBtb2Rlcm58ZW58MHx8fHwxNzgyMTE2NjQ2fDA&ixlib=rb-4.1.0&q=85",
+        "category": "login_background",
+        "description": "Milan skyline. Apply a heavy dark blue/slate overlay (e.g. bg-slate-900/80) to ensure login form readability."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1664329182818-f375993c0a00?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMG1pbmltYWxpc3QlMjBnZW9tZXRyaWMlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MjExNjY0Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "abstract_background",
+        "description": "Abstract geometric pattern for empty states."
+      }
+    ],
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMG9mZmljZXxlbnwwfHx8fDE3ODIxMTY2NDZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "user_avatar",
+        "description": "Male avatar for dummy data / current user."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMG9mZmljZXxlbnwwfHx8fDE3ODIxMTY2NDZ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "user_avatar",
+        "description": "Female avatar for dummy data / clients."
+      }
+    ]
+  },
+  "specific_pages_guidance": {
+    "dashboard_home": "Display high-level metrics (Premi Incassati, Sinistri Aperti, Polizze in Scadenza) in a 4-col bento grid. Include a 'Pipeline Email' quick view and 'Activity Log' feed.",
+    "anagrafiche_clienti": "Dense table layout. Detail view must include 'Albero Genealogico' (can be visualized as a hierarchical tree or nested cards) and the 'Intervista' form.",
+    "polizze_titoli_sinistri": "Tabbed interface or dedicated pages. Use prominent status badges (e.g., Attiva: Green, Sospesa: Amber, Scaduta: Red).",
+    "contabilita": "Ledger style tables for Prima nota and Estratti conto. Strict alignment of numerical columns to the right. Alternating row colors (bg-slate-50) for readability.",
+    "import_csv": "Dedicated drag-and-drop zone. Progress bar for ANIA 16-record types daily processing.",
+    "calcolo_pensioni_inps": "Wizard-style form for data entry (estratti conto contributivo), followed by a large-typography result screen calculating invalidity/disability/survivor pensions."
+  }
+}
