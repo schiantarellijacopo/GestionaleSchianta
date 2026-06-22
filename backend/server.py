@@ -791,6 +791,137 @@ async def list_titoli(
     return items
 
 
+@api.post("/titoli/bulk-azione-allegato")
+async def bulk_azione_allegato(
+    action: str = Query(...),  # "incassa" | "copertura"
+    ids_json: str = Query(...),  # JSON list di titoli
+    data_incasso: Optional[str] = Query(None),
+    mezzo_pagamento: Optional[str] = Query("bonifico"),
+    conto_cassa_id: Optional[str] = Query(None),
+    coperto_fino_a: Optional[str] = Query(None),
+    invia_cliente: bool = Query(False),
+    invia_collaboratore: bool = Query(False),
+    note_email: Optional[str] = Query(None),
+    file: Optional[UploadFile] = File(None),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Esegue bulk incasso/copertura con allegato opzionale e invio email a cliente/collaboratore."""
+    import json as _json
+    try:
+        ids = _json.loads(ids_json) if isinstance(ids_json, str) else ids_json
+    except Exception:
+        raise HTTPException(400, "ids_json non valido")
+    if not ids:
+        raise HTTPException(400, "Nessun titolo selezionato")
+
+    # 1) carica file su object storage (se presente)
+    allegato_meta = None
+    if file:
+        data = await file.read()
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "File troppo grande (max 25 MB)")
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin"
+        file_id = _uid()
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/titoli/{file_id}.{ext}"
+        ct = file.content_type or obj_storage.mime_for(file.filename or "")
+        try:
+            result = obj_storage.put_object(path, data, ct)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        allegato_meta = {
+            "nome_file": file.filename, "storage_path": result["path"],
+            "content_type": ct, "size": result.get("size", len(data)),
+        }
+
+    # 2) esegui l'azione sui titoli
+    risultato = {}
+    if action == "incassa":
+        risultato = await bulk_incassa({
+            "ids": ids, "data_incasso": data_incasso,
+            "mezzo_pagamento": mezzo_pagamento, "conto_cassa_id": conto_cassa_id,
+        }, user)
+    elif action == "copertura":
+        if not coperto_fino_a:
+            raise HTTPException(400, "coperto_fino_a richiesto")
+        risultato = await bulk_copertura({"ids": ids, "coperto_fino_a": coperto_fino_a}, user)
+    else:
+        raise HTTPException(400, "action non valida")
+
+    # 3) raccogli contraenti e collaboratori coinvolti
+    titoli = await db.titoli.find({"id": {"$in": ids}}, {"_id": 0}).to_list(2000)
+    pol_ids = list({t["polizza_id"] for t in titoli})
+    polizze = await db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0}).to_list(2000)
+    ana_ids = list({p["contraente_id"] for p in polizze if p.get("contraente_id")})
+    collab_ids = list({p["collaboratore_id"] for p in polizze if p.get("collaboratore_id")})
+    anas = await db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0}).to_list(500)
+    collabs = await db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "password_hash": 0}).to_list(100)
+
+    azione_label = "Quietanza incasso titolo" if action == "incassa" else "Conferma copertura titolo"
+    email_create = 0
+
+    # 4) salva l'allegato come record in db.allegati (collegato al primo cliente per ACL)
+    allegato_id = None
+    if allegato_meta and anas:
+        al = Allegato(
+            entita_tipo="anagrafica", entita_id=anas[0]["id"],
+            nome_file=allegato_meta["nome_file"], storage_path=allegato_meta["storage_path"],
+            content_type=allegato_meta["content_type"], size=allegato_meta["size"],
+            descrizione=f"{azione_label} — {len(ids)} titoli", autore_id=user["id"],
+        )
+        await db.allegati.insert_one(al.model_dump())
+        allegato_id = al.id
+
+    # 5) crea email in coda per ogni cliente
+    if invia_cliente:
+        for ana in anas:
+            if not ana.get("email"):
+                continue
+            corpo = (note_email or
+                     f"Gentile {ana['ragione_sociale']},\n\n"
+                     f"in allegato {azione_label.lower()} relativa alle Sue polizze.\n\n"
+                     f"Cordiali saluti.")
+            e = EmailMessaggio(
+                destinatario_anagrafica_id=ana["id"], destinatario_email=ana["email"],
+                oggetto=azione_label, corpo=corpo,
+                template="titolo_quietanza", stato="in_coda", autore_id=user["id"],
+            )
+            await db.email.insert_one(e.model_dump())
+            email_create += 1
+            # auto-diario sul cliente
+            await log_diario_cliente(
+                ana["id"], "documento",
+                titolo=f"📎 {azione_label}",
+                descrizione=f"{len(ids)} titoli interessati. File: {allegato_meta['nome_file'] if allegato_meta else '—'}",
+                autore=user,
+            )
+
+    # 6) email ai collaboratori
+    if invia_collaboratore:
+        for c in collabs:
+            if not c.get("email"):
+                continue
+            corpo = (f"Ciao {c.get('name', '')},\n\n"
+                     f"{azione_label} per {len(ids)} titoli delle polizze da te gestite.\n"
+                     f"Operazione effettuata da {user.get('name')}.\n\n"
+                     + (note_email or ""))
+            e = EmailMessaggio(
+                destinatario_email=c["email"], oggetto=f"{azione_label} (notifica collaboratore)",
+                corpo=corpo, template="titolo_notifica_collab", stato="in_coda",
+                autore_id=user["id"],
+            )
+            await db.email.insert_one(e.model_dump())
+            email_create += 1
+
+    return {
+        **risultato,
+        "allegato_id": allegato_id,
+        "allegato_nome": allegato_meta["nome_file"] if allegato_meta else None,
+        "email_create": email_create,
+        "clienti_notificati": len([a for a in anas if a.get("email")]) if invia_cliente else 0,
+        "collaboratori_notificati": len([c for c in collabs if c.get("email")]) if invia_collaboratore else 0,
+    }
+
+
 # Bulk actions sui titoli
 @api.post("/titoli/bulk-incassa")
 async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):

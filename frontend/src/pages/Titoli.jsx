@@ -389,10 +389,41 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
     const [mezzo, setMezzo] = useState("bonifico");
     const [conto_id, setContoId] = useState("");
     const [coperto, setCoperto] = useState(in30);
+    const [file, setFile] = useState(null);
+    const [inviaCliente, setInviaCliente] = useState(false);
+    const [inviaCollab, setInviaCollab] = useState(false);
+    const [noteEmail, setNoteEmail] = useState("");
 
     const submit = async () => {
         try {
-            if (action === "incassa") {
+            // se c'è file o invio email, usa endpoint multipart con allegato
+            if (file || inviaCliente || inviaCollab) {
+                const fd = new FormData();
+                if (file) fd.append("file", file);
+                const qs = new URLSearchParams({
+                    action,
+                    ids_json: JSON.stringify(ids),
+                    invia_cliente: String(inviaCliente),
+                    invia_collaboratore: String(inviaCollab),
+                });
+                if (action === "incassa") {
+                    qs.append("data_incasso", data_incasso);
+                    qs.append("mezzo_pagamento", mezzo);
+                    if (conto_id) qs.append("conto_cassa_id", conto_id);
+                } else {
+                    qs.append("coperto_fino_a", coperto);
+                }
+                if (noteEmail) qs.append("note_email", noteEmail);
+                const r = await api.post(`/titoli/bulk-azione-allegato?${qs}`, fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+                const parts = [];
+                if (action === "incassa") parts.push(`${r.data.incassati} incassati per ${fmtEur(r.data.totale)}`);
+                else parts.push(`Copertura su ${r.data.aggiornati} titoli`);
+                if (r.data.allegato_nome) parts.push(`allegato "${r.data.allegato_nome}" salvato`);
+                if (r.data.email_create) parts.push(`${r.data.email_create} email in coda`);
+                toast.success(parts.join(" · "));
+            } else if (action === "incassa") {
                 const r = await api.post("/titoli/bulk-incassa", {
                     ids, data_incasso, mezzo_pagamento: mezzo, conto_cassa_id: conto_id || null,
                 });
@@ -433,11 +464,46 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                             <Label>Copertura fino al</Label>
                             <Input type="date" value={coperto} onChange={(e) => setCoperto(e.target.value)} data-testid="bulk-coperto" />
                         </div>
-                        <p className="text-xs text-slate-500">
-                            Imposta la data fino a cui consideri questi titoli &quot;coperti&quot; pur senza incasso effettivo.
-                        </p>
                     </div>
                 )}
+
+                <div className="pt-3 border-t border-slate-200 space-y-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Allegato e invio email</div>
+                    <div>
+                        <Label>Allega file (quietanza PDF, ricevuta, ecc.)</Label>
+                        <Input
+                            type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                            data-testid="bulk-file"
+                            onChange={(e) => setFile(e.target.files?.[0] || null)}
+                        />
+                        {file && <div className="text-xs text-slate-500 mt-1 truncate">{file.name} · {(file.size / 1024).toFixed(0)} KB</div>}
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                                type="checkbox" checked={inviaCliente}
+                                onChange={(e) => setInviaCliente(e.target.checked)}
+                                data-testid="bulk-invia-cliente"
+                            />
+                            Invia email ai clienti contraenti
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                                type="checkbox" checked={inviaCollab}
+                                onChange={(e) => setInviaCollab(e.target.checked)}
+                                data-testid="bulk-invia-collab"
+                            />
+                            Notifica i collaboratori delle polizze
+                        </label>
+                    </div>
+                    {(inviaCliente || inviaCollab) && (
+                        <div>
+                            <Label>Testo aggiuntivo email (opzionale)</Label>
+                            <Input value={noteEmail} onChange={(e) => setNoteEmail(e.target.value)} placeholder="Verrà inserito nel corpo dell'email" />
+                        </div>
+                    )}
+                </div>
+
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
                     <Button onClick={submit} data-testid="bulk-confirm" className="bg-sky-700 hover:bg-sky-800">
