@@ -246,6 +246,9 @@ class Titolo(BaseDoc):
     imposte: float = 0.0
     provvigioni: float = 0.0
     data_incasso: Optional[str] = None
+    importo_pagato: Optional[float] = None       # se diverso dal lordo → sconto applicato
+    sconto_applicato: float = 0.0                # importo dello sconto (positivo)
+    motivo_sconto: Optional[str] = None
     titolo_coperto: bool = False
     data_copertura: Optional[str] = None
     data_competenza: Optional[str] = None
@@ -285,7 +288,8 @@ class Sinistro(BaseDoc):
 MovimentoTipo = Literal["entrata", "uscita"]
 MovimentoCategoria = Literal[
     "incasso_premio", "pagamento_compagnia", "provvigioni",
-    "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto", "altro"
+    "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto",
+    "sconto_cliente", "altro",
 ]
 
 

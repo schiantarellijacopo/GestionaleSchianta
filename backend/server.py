@@ -1105,6 +1105,7 @@ async def bulk_azione_allegato(
     mezzo_pagamento: Optional[str] = Query("bonifico"),
     conto_cassa_id: Optional[str] = Query(None),
     coperto_fino_a: Optional[str] = Query(None),
+    data_copertura: Optional[str] = Query(None),
     invia_cliente: bool = Query(False),
     invia_collaboratore: bool = Query(False),
     note_email: Optional[str] = Query(None),
@@ -1147,9 +1148,8 @@ async def bulk_azione_allegato(
             "mezzo_pagamento": mezzo_pagamento, "conto_cassa_id": conto_cassa_id,
         }, user)
     elif action == "copertura":
-        if not coperto_fino_a:
-            raise HTTPException(400, "coperto_fino_a richiesto")
-        risultato = await bulk_copertura({"ids": ids, "coperto_fino_a": coperto_fino_a}, user)
+        coperto = data_copertura or coperto_fino_a or _now_iso()[:10]
+        risultato = await bulk_copertura({"ids": ids, "data_copertura": coperto}, user)
     else:
         raise HTTPException(400, "action non valida")
 
@@ -1229,6 +1229,71 @@ async def bulk_azione_allegato(
 
 
 # Bulk actions sui titoli
+@api.get("/titoli/sospesi")
+async def titoli_sospesi(
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Elenco titoli COPERTI DALL'AGENZIA (anticipati) ma ancora DA INCASSARE dal cliente.
+
+    Per ogni titolo restituisce: contraente, collaboratore, data_copertura,
+    scadenza polizza, importo lordo. Usato dalla pagina 'Sospesi'.
+    """
+    flt = {"titolo_coperto": True, "stato": {"$in": ["da_incassare", "insoluto"]}}
+    items = await db.titoli.find(flt, {"_id": 0}).sort("data_copertura", 1).to_list(5000)
+    if not items:
+        return []
+    pol_ids = list({t["polizza_id"] for t in items if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0})}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0})}
+    collab_ids = list({(p.get("collaboratore_id") or t.get("collaboratore_id"))
+                       for t, p in [(t, pols.get(t["polizza_id"], {})) for t in items]
+                       if (p.get("collaboratore_id") or t.get("collaboratore_id"))})
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+    result = []
+    for t in items:
+        p = pols.get(t["polizza_id"], {})
+        a = anas.get(p.get("contraente_id", ""), {})
+        collab_id = p.get("collaboratore_id") or t.get("collaboratore_id")
+        if collaboratore_id and collab_id != collaboratore_id:
+            continue
+        result.append({
+            "id": t["id"],
+            "polizza_id": t["polizza_id"],
+            "numero_polizza": p.get("numero_polizza"),
+            "ramo": p.get("ramo"),
+            "targa": p.get("targa"),
+            "contraente_id": a.get("id"),
+            "contraente_nome": a.get("ragione_sociale"),
+            "cellulare": a.get("cellulare") or a.get("telefono"),
+            "collaboratore_id": collab_id,
+            "collaboratore_nome": collab_map.get(collab_id) if collab_id else None,
+            "data_copertura": t.get("data_copertura"),
+            "scadenza_polizza": p.get("scadenza"),
+            "scadenza_titolo": t.get("scadenza"),
+            "importo_lordo": t.get("importo_lordo", 0.0),
+            "provvigioni": t.get("provvigioni", 0.0),
+            "giorni_anticipo": _giorni_da_oggi(t.get("data_copertura")),
+        })
+    # totali aggregati
+    return result
+
+
+def _giorni_da_oggi(data_iso: Optional[str]) -> Optional[int]:
+    if not data_iso:
+        return None
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(data_iso[:10])
+        return (_date.today() - d).days
+    except Exception:
+        return None
+
+
 @api.post("/titoli/bulk-incassa")
 async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """body: {ids: [...], data_incasso, mezzo_pagamento, conto_cassa_id}"""
@@ -1269,19 +1334,30 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
 
 @api.post("/titoli/bulk-copertura")
 async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Imposta una data di copertura sui titoli (senza incassarli).
-    body: {ids: [...], coperto_fino_a: 'YYYY-MM-DD'}"""
+    """Marca i titoli come coperti dall'agenzia: l'agenzia ha anticipato i soldi al cliente.
+
+    body: {ids: [...], data_copertura?: 'YYYY-MM-DD' (default oggi), note?}
+    Il titolo resta DA INCASSARE finché il cliente non paga.
+    """
     ids = body.get("ids") or []
-    coperto = body.get("coperto_fino_a")
-    if not ids or not coperto:
-        raise HTTPException(400, "ids e coperto_fino_a richiesti")
+    if not ids:
+        raise HTTPException(400, "ids richiesti")
+    data_copertura = body.get("data_copertura") or _now_iso()[:10]
+    note = body.get("note")
+    set_fields = {
+        "titolo_coperto": True,
+        "data_copertura": data_copertura,
+        "updated_at": _now_iso(),
+    }
+    if note:
+        set_fields["note_copertura"] = note
     res = await db.titoli.update_many(
         {"id": {"$in": ids}},
-        {"$set": {"coperto_fino_a": coperto, "updated_at": _now_iso()}},
+        {"$set": set_fields},
     )
     await log_attivita(user, "bulk_copertura", "titolo", None,
-                       f"{res.modified_count} titoli con copertura fino al {coperto}")
-    return {"aggiornati": res.modified_count}
+                       f"{res.modified_count} titoli coperti dall'agenzia il {data_copertura}")
+    return {"aggiornati": res.modified_count, "data_copertura": data_copertura}
 
 
 @api.get("/export/titoli.csv")
@@ -1301,7 +1377,7 @@ async def export_titoli_csv(stato: Optional[str] = None,
                     t.get("ramo"), t.get("tipo"), t.get("effetto"), t.get("scadenza"),
                     t.get("stato"), t.get("importo_lordo"), t.get("importo_netto"),
                     t.get("imposte"), t.get("provvigioni"),
-                    t.get("mezzo_pagamento"), t.get("data_incasso"), t.get("coperto_fino_a")])
+                    t.get("mezzo_pagamento"), t.get("data_incasso"), t.get("data_copertura")])
     csv_bytes = out.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         _io.BytesIO(csv_bytes), media_type="text/csv",
@@ -1374,33 +1450,101 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
 
 @api.post("/titoli/{tid}/incassa")
 async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Marca un titolo come incassato e crea un movimento contabile."""
+    """Marca un titolo come incassato, crea movimento contabile entrata e
+    (opzionalmente) movimento uscita 'sconto_cliente' se importo_pagato < lordo.
+
+    body: {data_incasso?, mezzo_pagamento?, conto_cassa_id?, importo_pagato?, motivo_sconto?}
+    Se importo_pagato è omesso → si assume pagamento completo del lordo (no sconto).
+    """
     titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
     if not titolo:
         raise HTTPException(404, "Titolo non trovato")
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
     mezzo = body.get("mezzo_pagamento") or "bonifico"
+    conto_id = body.get("conto_cassa_id")
+    lordo = float(titolo.get("importo_lordo") or 0)
+    importo_pagato_raw = body.get("importo_pagato")
+    importo_pagato = float(importo_pagato_raw) if importo_pagato_raw is not None else lordo
+    sconto = round(max(0.0, lordo - importo_pagato), 2)
+    motivo_sconto = body.get("motivo_sconto")
+
     await db.titoli.update_one(
         {"id": tid},
-        {"$set": {"stato": "incassato", "data_incasso": data_incasso,
-                  "mezzo_pagamento": mezzo, "updated_at": _now_iso()}},
+        {"$set": {
+            "stato": "incassato",
+            "data_incasso": data_incasso,
+            "mezzo_pagamento": mezzo,
+            "conto_cassa_id": conto_id,
+            "importo_pagato": importo_pagato,
+            "sconto_applicato": sconto,
+            "motivo_sconto": motivo_sconto,
+            "updated_at": _now_iso(),
+        }},
     )
     pol = await db.polizze.find_one({"id": titolo["polizza_id"]}, {"_id": 0})
-    mov = MovimentoContabile(
+
+    # Movimento entrata = importo effettivamente pagato dal cliente
+    mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
         categoria="incasso_premio",
-        importo=titolo.get("importo_lordo", 0.0),
-        descrizione=f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}",
+        importo=importo_pagato,
+        descrizione=f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
+                    + (f" (era €{lordo:.2f}, sconto €{sconto:.2f})" if sconto > 0 else ""),
         polizza_id=titolo["polizza_id"],
         titolo_id=tid,
         anagrafica_id=pol.get("contraente_id") if pol else None,
         compagnia_id=pol.get("compagnia_id") if pol else None,
+        conto_cassa_id=conto_id,
         mezzo_pagamento=mezzo,
+        provvigioni=titolo.get("provvigioni", 0.0),
     )
-    await db.movimenti.insert_one(mov.model_dump())
-    await log_attivita(user, "incasso", "titolo", tid)
-    return {"ok": True, "movimento": mov.model_dump()}
+    await db.movimenti.insert_one(mov_in.model_dump())
+
+    # Movimento uscita sconto (se applicato)
+    mov_sconto_id = None
+    if sconto > 0:
+        mov_sconto = MovimentoContabile(
+            data_movimento=data_incasso,
+            tipo="uscita",
+            categoria="sconto_cliente",
+            importo=sconto,
+            descrizione=(f"Sconto applicato su titolo {pol['numero_polizza'] if pol else ''}"
+                         + (f" — {motivo_sconto}" if motivo_sconto else "")),
+            polizza_id=titolo["polizza_id"],
+            titolo_id=tid,
+            anagrafica_id=pol.get("contraente_id") if pol else None,
+            compagnia_id=pol.get("compagnia_id") if pol else None,
+            conto_cassa_id=conto_id,
+            mezzo_pagamento=mezzo,
+        )
+        await db.movimenti.insert_one(mov_sconto.model_dump())
+        mov_sconto_id = mov_sconto.id
+
+    # Audit nel diario cliente per tracciabilità storica
+    if pol and pol.get("contraente_id"):
+        desc = (f"Pagamento titolo polizza {pol.get('numero_polizza')} - "
+                f"€{importo_pagato:.2f} via {mezzo} il {data_incasso}")
+        if sconto > 0:
+            desc += f" (sconto applicato: €{sconto:.2f}"
+            if motivo_sconto:
+                desc += f" - {motivo_sconto}"
+            desc += ")"
+        await log_diario_cliente(
+            pol["contraente_id"], "documento",
+            titolo=f"Incasso titolo - polizza {pol.get('numero_polizza')}",
+            descrizione=desc, autore=user,
+        )
+
+    await log_attivita(user, "incasso", "titolo", tid,
+                       f"€{importo_pagato:.2f} {('sconto €' + format(sconto, '.2f')) if sconto > 0 else ''}".strip())
+    return {
+        "ok": True,
+        "importo_pagato": importo_pagato,
+        "sconto_applicato": sconto,
+        "movimento_entrata_id": mov_in.id,
+        "movimento_sconto_id": mov_sconto_id,
+    }
 
 
 # ============================================================

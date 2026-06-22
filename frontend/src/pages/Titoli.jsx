@@ -296,7 +296,7 @@ export default function Titoli() {
                                         <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
                                         <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
                                         <td className="num text-xs">{fmtDate(t.scadenza)}</td>
-                                        <td className="num text-xs text-emerald-700">{t.coperto_fino_a ? fmtDate(t.coperto_fino_a) : "—"}</td>
+                                        <td className="num text-xs text-emerald-700">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
                                         <td><StatusBadge stato={t.stato} /></td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
@@ -384,11 +384,10 @@ export default function Titoli() {
 
 function BulkActionDialog({ action, ids, conti, onClose }) {
     const today = new Date().toISOString().slice(0, 10);
-    const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
     const [data_incasso, setDataIncasso] = useState(today);
     const [mezzo, setMezzo] = useState("bonifico");
     const [conto_id, setContoId] = useState("");
-    const [coperto, setCoperto] = useState(in30);
+    const [coperto, setCoperto] = useState(today);  // data copertura di default = OGGI
     const [file, setFile] = useState(null);
     const [inviaCliente, setInviaCliente] = useState(false);
     const [inviaCollab, setInviaCollab] = useState(false);
@@ -411,7 +410,7 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                     qs.append("mezzo_pagamento", mezzo);
                     if (conto_id) qs.append("conto_cassa_id", conto_id);
                 } else {
-                    qs.append("coperto_fino_a", coperto);
+                    qs.append("data_copertura", coperto);
                 }
                 if (noteEmail) qs.append("note_email", noteEmail);
                 const r = await api.post(`/titoli/bulk-azione-allegato?${qs}`, fd, {
@@ -429,7 +428,7 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                 });
                 toast.success(`${r.data.incassati} titoli incassati per ${fmtEur(r.data.totale)}`);
             } else {
-                const r = await api.post("/titoli/bulk-copertura", { ids, coperto_fino_a: coperto });
+                const r = await api.post("/titoli/bulk-copertura", { ids, data_copertura: coperto });
                 toast.success(`Copertura impostata su ${r.data.aggiornati} titoli`);
             }
             onClose();
@@ -460,8 +459,13 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                     </div>
                 ) : (
                     <div className="space-y-3 py-2">
+                        <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900">
+                            <strong>Copertura titolo</strong>: l&apos;agenzia anticipa il pagamento al cliente.
+                            Il titolo resta &quot;da incassare&quot; finché il cliente non paga.
+                            Apparirà nella sezione <strong>Sospesi</strong>.
+                        </div>
                         <div>
-                            <Label>Copertura fino al</Label>
+                            <Label>Data copertura (oggi è il default)</Label>
                             <Input type="date" value={coperto} onChange={(e) => setCoperto(e.target.value)} data-testid="bulk-coperto" />
                         </div>
                     </div>
