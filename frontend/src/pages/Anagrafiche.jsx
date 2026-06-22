@@ -113,6 +113,8 @@ function NuovaAnagraficaDialog({ onClose }) {
     const [form, setForm] = useState({
         tipo: "persona_fisica",
         ragione_sociale: "",
+        nome: "",
+        cognome: "",
         codice_fiscale: "",
         partita_iva: "",
         data_nascita: "",
@@ -125,14 +127,26 @@ function NuovaAnagraficaDialog({ onClose }) {
         indirizzo: "",
     });
     const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+    // helpers: forza uppercase
+    const setU = (k, v) => set(k, (v || "").toUpperCase());
 
     const save = async () => {
-        if (!form.ragione_sociale) {
+        const isPF = form.tipo === "persona_fisica";
+        if (isPF && !form.nome && !form.cognome) {
+            toast.error("Inserisci almeno Cognome o Nome");
+            return;
+        }
+        if (!isPF && !form.ragione_sociale) {
             toast.error("Inserisci la ragione sociale");
             return;
         }
+        // ragione_sociale viene auto-composta dal backend per le persone fisiche
+        const payload = { ...form };
+        if (isPF && !payload.ragione_sociale) {
+            payload.ragione_sociale = `${form.cognome || ""} ${form.nome || ""}`.trim();
+        }
         try {
-            await api.post("/anagrafiche", form);
+            await api.post("/anagrafiche", payload);
             toast.success("Anagrafica creata");
             onClose();
         } catch (e) {
@@ -140,53 +154,97 @@ function NuovaAnagraficaDialog({ onClose }) {
         }
     };
 
+    const isPF = form.tipo === "persona_fisica";
+
     return (
         <DialogContent className="max-w-2xl">
             <DialogHeader>
                 <DialogTitle>Nuova anagrafica</DialogTitle>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-2">
-                <div>
-                    <Label>Tipo</Label>
+                <div className="col-span-2">
+                    <Label>Tipo *</Label>
                     <Select value={form.tipo} onValueChange={(v) => set("tipo", v)}>
                         <SelectTrigger data-testid="anag-tipo-select"><SelectValue /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="persona_fisica">Persona fisica</SelectItem>
-                            <SelectItem value="persona_giuridica">Persona giuridica</SelectItem>
+                            <SelectItem value="persona_giuridica">Azienda / Persona giuridica</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label>Ragione sociale *</Label>
-                    <Input data-testid="anag-rs-input" value={form.ragione_sociale} onChange={(e) => set("ragione_sociale", e.target.value)} />
-                </div>
-                <div>
-                    <Label>Codice fiscale</Label>
-                    <Input data-testid="anag-cf-input" value={form.codice_fiscale} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} />
-                </div>
-                <div>
-                    <Label>Partita IVA</Label>
-                    <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)} />
-                </div>
+                {isPF ? (
+                    <>
+                        <div>
+                            <Label>Cognome *</Label>
+                            <Input data-testid="anag-cognome-input" className="uc"
+                                value={form.cognome}
+                                onChange={(e) => setU("cognome", e.target.value)} />
+                        </div>
+                        <div>
+                            <Label>Nome *</Label>
+                            <Input data-testid="anag-nome-input" className="uc"
+                                value={form.nome}
+                                onChange={(e) => setU("nome", e.target.value)} />
+                        </div>
+                    </>
+                ) : (
+                    <div className="col-span-2">
+                        <Label>Ragione sociale *</Label>
+                        <Input data-testid="anag-rs-input" className="uc"
+                            value={form.ragione_sociale}
+                            onChange={(e) => setU("ragione_sociale", e.target.value)} />
+                    </div>
+                )}
+                {isPF ? (
+                    <div>
+                        <Label>Codice fiscale</Label>
+                        <Input data-testid="anag-cf-input" className="uc"
+                            value={form.codice_fiscale} maxLength={16}
+                            onChange={(e) => setU("codice_fiscale", e.target.value)} />
+                    </div>
+                ) : (
+                    <div>
+                        <Label>Partita IVA</Label>
+                        <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)} />
+                    </div>
+                )}
                 <div>
                     <Label>Data nascita</Label>
                     <Input type="date" value={form.data_nascita} onChange={(e) => set("data_nascita", e.target.value)} />
                 </div>
+                {isPF && (
+                    <div>
+                        <Label>Sesso</Label>
+                        <Select value={form.sesso} onValueChange={(v) => set("sesso", v)}>
+                            <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="M">Maschio</SelectItem>
+                                <SelectItem value="F">Femmina</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
                 <div>
-                    <Label>Sesso</Label>
-                    <Select value={form.sesso} onValueChange={(v) => set("sesso", v)}>
-                        <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="M">Maschio</SelectItem>
-                            <SelectItem value="F">Femmina</SelectItem>
-                        </SelectContent>
-                    </Select>
+                    <Label>Email</Label>
+                    <Input type="email" data-testid="anag-email-input"
+                        value={form.email} onChange={(e) => set("email", e.target.value.toLowerCase())} />
                 </div>
-                <div><Label>Email</Label><Input data-testid="anag-email-input" value={form.email} onChange={(e) => set("email", e.target.value)} /></div>
                 <div><Label>Cellulare</Label><Input value={form.cellulare} onChange={(e) => set("cellulare", e.target.value)} /></div>
-                <div><Label>Indirizzo</Label><Input value={form.indirizzo} onChange={(e) => set("indirizzo", e.target.value)} /></div>
-                <div><Label>Comune</Label><Input value={form.comune} onChange={(e) => set("comune", e.target.value)} /></div>
-                <div><Label>Provincia</Label><Input maxLength={2} value={form.provincia} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
+                <div className="col-span-2">
+                    <Label>Indirizzo</Label>
+                    <Input className="uc" value={form.indirizzo}
+                        onChange={(e) => setU("indirizzo", e.target.value)} />
+                </div>
+                <div>
+                    <Label>Comune</Label>
+                    <Input className="uc" value={form.comune}
+                        onChange={(e) => setU("comune", e.target.value)} />
+                </div>
+                <div>
+                    <Label>Provincia</Label>
+                    <Input className="uc" maxLength={2} value={form.provincia}
+                        onChange={(e) => setU("provincia", e.target.value)} />
+                </div>
                 <div><Label>CAP</Label><Input value={form.cap} onChange={(e) => set("cap", e.target.value)} /></div>
             </div>
             <DialogFooter>

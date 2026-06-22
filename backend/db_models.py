@@ -62,7 +62,9 @@ class Compagnia(BaseDoc):
 # =============== ANAGRAFICHE ===============
 class Anagrafica(BaseDoc):
     tipo: Literal["persona_fisica", "persona_giuridica"] = "persona_fisica"
-    ragione_sociale: str  # cognome nome o nome azienda
+    ragione_sociale: str  # auto-composta da nome+cognome se persona fisica
+    nome: Optional[str] = None
+    cognome: Optional[str] = None
     codice_fiscale: Optional[str] = None
     partita_iva: Optional[str] = None
     data_nascita: Optional[str] = None  # YYYY-MM-DD

@@ -117,6 +117,10 @@ h1, h2, h3, h4, h5 {
 }
 .dropzone.active { @apply border-sky-500 bg-sky-50; }
 
+/* Uppercase input style */
+.uc { text-transform: uppercase; }
+.uc::placeholder { text-transform: none; }
+
 /* Family tree node */
 .tree-node {
     @apply bg-white border border-slate-200 rounded-md px-3 py-2 shadow-sm text-sm;

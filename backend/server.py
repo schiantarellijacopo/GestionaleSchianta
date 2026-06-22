@@ -238,8 +238,37 @@ async def get_anagrafica(aid: str, user=Depends(current_user)):
     return doc
 
 
+UPPER_FIELDS = {
+    "ragione_sociale", "nome", "cognome", "codice_fiscale", "partita_iva",
+    "comune", "provincia", "comune_nascita", "provincia_nascita",
+    "indirizzo", "professione", "stato_civile", "titolo_studio",
+    "iban", "intestatario", "provincia_intestatario", "veicolo_marca",
+    "veicolo_modello", "targa", "veicolo_targa_rimorchio", "numero_polizza",
+    "numero_sinistro", "ragione_sociale", "codice", "nome_file",
+}
+
+
+def _normalize_upper(body: dict) -> dict:
+    """Normalizza in MAIUSCOLO i campi anagrafici/polizza dove ha senso.
+
+    Email/url restano come sono.
+    """
+    out = dict(body or {})
+    for k, v in list(out.items()):
+        if k in UPPER_FIELDS and isinstance(v, str):
+            out[k] = v.strip().upper()
+    # auto-composizione ragione_sociale per persone fisiche
+    if out.get("tipo") == "persona_fisica":
+        nome = (out.get("nome") or "").strip().upper()
+        cognome = (out.get("cognome") or "").strip().upper()
+        if nome or cognome:
+            out["ragione_sociale"] = f"{cognome} {nome}".strip()
+    return out
+
+
 @api.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body = _normalize_upper(body)
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")
@@ -248,6 +277,7 @@ async def create_anagrafica(body: dict, user=Depends(require_user("admin", "coll
 
 @api.put("/anagrafiche/{aid}")
 async def update_anagrafica(aid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body = _normalize_upper(body)
     body["updated_at"] = _now_iso()
     res = await db.anagrafiche.update_one({"id": aid}, {"$set": body})
     if res.matched_count == 0:
