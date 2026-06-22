@@ -1,115 +1,123 @@
+@import url("https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+    --background: 210 40% 98%;       /* #F8FAFC */
+    --foreground: 222 47% 11%;       /* #0F172A */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 201 96% 32%;          /* #0369A1 */
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 19% 35%; /* #475569 */
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;           /* #E2E8F0 */
+    --input: 214 32% 91%;
+    --ring: 201 96% 32%;
+    --chart-1: 201 96% 32%;          /* sky-700 */
+    --chart-2: 160 84% 39%;          /* emerald-500 */
+    --chart-3: 38 92% 50%;           /* amber-500 */
+    --chart-4: 250 89% 60%;
+    --chart-5: 343 88% 51%;
+    --radius: 6px;
+}
+
 body {
     margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "tnum" 1, "lnum" 1;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+h1, h2, h3, h4, h5 {
+    font-family: "Work Sans", sans-serif;
+    letter-spacing: -0.01em;
 }
 
-@layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+.font-mono, code, pre, .tabular {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.num {
+    font-variant-numeric: tabular-nums lining-nums;
 }
 
 @layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground; }
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
+/* Sidebar styling */
+.sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors duration-150;
+    color: rgba(248, 250, 252, 0.7);
+}
+.sidebar-link:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #f8fafc;
+}
+.sidebar-link.active {
+    background-color: #1e293b;
+    color: #f8fafc;
+    font-weight: 500;
+}
+.sidebar-section {
+    @apply text-[10px] uppercase tracking-[0.18em] font-semibold px-3 mt-6 mb-2;
+    color: rgba(148, 163, 184, 0.7);
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* Tables dense */
+.tbl thead th {
+    @apply text-[11px] uppercase tracking-[0.1em] font-semibold text-slate-500 text-left px-4 py-2 border-b border-slate-200 bg-slate-50;
+}
+.tbl tbody td {
+    @apply px-4 py-2.5 border-b border-slate-100 text-sm text-slate-800;
+}
+.tbl tbody tr:hover { @apply bg-slate-50; }
+.tbl tbody tr:nth-child(even) { background-color: #fbfcfe; }
+
+/* Stat label */
+.stat-label {
+    @apply text-[11px] uppercase tracking-[0.14em] font-semibold text-slate-500;
+}
+.stat-value {
+    @apply text-3xl font-semibold text-slate-900 num;
+}
+
+/* Status badges */
+.badge { @apply inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium; }
+.badge-success { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+.badge-warning { @apply bg-amber-50 text-amber-800 border border-amber-200; }
+.badge-danger  { @apply bg-rose-50 text-rose-700 border border-rose-200; }
+.badge-info    { @apply bg-sky-50 text-sky-700 border border-sky-200; }
+.badge-neutral { @apply bg-slate-100 text-slate-700 border border-slate-200; }
+
+/* Slight page entrance */
+.page-fade { animation: fade-up .35s ease-out both; }
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Drag drop zone */
+.dropzone {
+    @apply border-2 border-dashed border-slate-300 rounded-lg p-10 text-center transition-colors;
+}
+.dropzone.active { @apply border-sky-500 bg-sky-50; }
+
+/* Family tree node */
+.tree-node {
+    @apply bg-white border border-slate-200 rounded-md px-3 py-2 shadow-sm text-sm;
 }

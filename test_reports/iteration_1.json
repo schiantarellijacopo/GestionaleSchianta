@@ -1,0 +1,39 @@
+{
+  "summary": "Prima iterazione completata. Backend: 26/26 test pytest passati su tutte le funzionalità chiave (auth 4 ruoli, dashboard stats, CRUD anagrafiche/compagnie/polizze/titoli/sinistri/movimenti, relazioni bidirezionali, intervista, incasso titolo->movimento, import ANIA zip, calcolo INPS 3 tipi, email + avvisi scadenze, log attività, role-based access). Frontend: login 4 ruoli OK, dashboard con grafici recharts visibile, sidebar visibility corretta per ruolo (cliente non vede Compagnie/Importazione/Log attività; dipendente non vede Compagnie/Importazione/Log attività ma vede Prima nota/Pipeline Email), cliente vede solo le proprie 2 polizze, tutti i data-testid principali presenti (anagrafica-new-button, anag-rs-input, anag-save-button, mov-new-button, email-new-button, genera-avvisi-button, titolo-incassa-* x4). Import ANIA zip ritorna stato 'completato'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/stats/dashboard", "issue": "Per il ruolo 'cliente' il campo premi_anno_corrente e incassi_mensili NON applicano il visibility_filter: la pipeline su titoli aggrega tutti i titoli incassati senza filtrare per polizza del cliente. Il cliente vede 3450€ premi anno (totale aziendale) anche se ha solo le sue 2 polizze. Potenziale data leak."},
+      {"endpoint": "/api/compagnie e altri endpoint admin", "issue": "Il frontend NON ha route guard lato client: navigando direttamente a /compagnie come 'cliente' la pagina si carica (URL non cambia) anche se l'API ritorna 403 (vedi screenshot). Solo la sidebar nasconde il link. Aggiungere ProtectedRoute con role check sulle rotte admin/dipendente."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard cliente", "issues": ["Card 'Crescita +12%' mostrata anche al cliente: numero hardcoded non rappresentativo del cliente."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Applicare visibility_filter alle pipeline aggregate di /api/stats/dashboard (premi_anno_corrente, incassi_mensili) per il ruolo cliente.",
+    "Aggiungere route guard frontend (ProtectedRoute con allowed_roles) per /compagnie, /importazione, /attivita: redirect al dashboard se il ruolo non è autorizzato.",
+    "Verificare che la card 'Crescita +12%' sia un dato reale o nascondere per il ruolo cliente.",
+    "(Opzionale) Persistenza dei filtri di test: gli endpoint POST accettano body dict 'libero' senza validation 422 dedicata; gli errori di Pydantic ritornano 500 invece di 422. Aggiungere request body model Pydantic dedicato per POST /polizze, /titoli, /sinistri, /movimenti per restituire 422 dettagliato."
+  ],
+  "critical_code_review_comments": [
+    "server.py (857 righe): file mono-modulare grande, considerare split in router per dominio (anagrafiche.py, polizze.py, etc.) per migliore manutenibilità.",
+    "Gestione errori Pydantic: tutti i POST usano `Model(**body)` -> qualunque errore di validazione genera 500 invece di 422. Usare Pydantic models come parametri FastAPI.",
+    "log_attivita() su /auth/login: il decoratore Depends non si applica, va bene perché user è già recuperato dal DB; OK.",
+    "/api/stats/dashboard pipeline aggregate non rispettano il filtro per cliente (vedi sopra).",
+    "ProtectedRoute frontend: assicurarsi che gli unauthorized accedendo direttamente vengano redirect (lato client) oltre al blocco API."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100% (su flussi testati)"},
+  "test_credentials": "admin@assicura.it/Admin123!, collaboratore@assicura.it/Collab123!, dipendente@assicura.it/Dipendente123!, cliente@assicura.it/Cliente123!",
+  "seed_data_creation": "I test creano: anagrafica TEST_Anagrafica QA + TEST_Parente QA con relazione bidirezionale, compagnia TEST_Compagnia QA, polizza TEST-POL-001, titolo nuova->incassato (genera movimento entrata 600€), sinistro TEST-SIN-001, movimento uscita 100€, intervista, email bozza+inviata, avvisi-scadenze (7 generati nel test UI).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Tutti i 26 test backend passano. Il file di test riusa POST con campi validati corretti (Polizza.effetto, Titolo.tipo='nuova', Movimento.categoria='altro'). Il file ANIA /tmp/zip_extract/data.zip è disponibile. Quando si testa il filtro cliente sulla dashboard, occorre verificare le pipeline aggregate di premi anno/incassi mensili: attualmente NON filtrano per cliente.",
+  "rca_of_findings": "1) Premi cliente: pipeline mongo aggregate in stats_dashboard usa solo {stato:incassato, data_incasso:regex} senza join con polizze->contraente_id. Per il cliente serve calcolare polizza_ids del cliente e aggiungerli al $match. 2) Frontend route guard: ProtectedRoute.jsx probabilmente controlla solo user!=null, non il role. Aggiungere allowedRoles prop e redirect."
+}
