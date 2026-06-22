@@ -27,6 +27,7 @@ from db_models import (
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
+    AziendaConfig, SchemaProvvigionale,
     _now_iso, _uid,
 )
 import ania_importer
@@ -79,6 +80,14 @@ async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
         autore_nome=autore.get("name") if autore else "Sistema",
     )
     await db.diario.insert_one(voce.model_dump())
+
+
+async def _intestazione_pdf() -> dict:
+    """Ritorna kwargs (ragione_sociale, logo_bytes, indirizzo, contatti, note_footer) per stampa_elenco."""
+    try:
+        return await pdf_report.get_intestazione_azienda(db)
+    except Exception:
+        return {}
 
 
 def strip_mongo_id(doc: dict | None) -> dict | None:
@@ -387,6 +396,7 @@ async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[s
         headers, rows,
         col_widths_mm=[25, 35, 60, 25, 30, 30, 22], landscape_mode=False,
         filtri_attivi={"Dal": dal, "Al": al},
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, f"provvigioni_{collab.get('name')}.pdf")
 
@@ -1923,6 +1933,273 @@ async def delete_ramo(rid: str, user=Depends(require_user("admin"))):
 
 
 # ============================================================
+# LIBRERIE — AZIENDA (DATI INTESTAZIONE / STAMPE)
+# ============================================================
+@api.get("/librerie/azienda")
+async def get_azienda(user=Depends(current_user)):
+    """Singleton: dati dell'agenzia (usati nelle stampe)."""
+    doc = await db.azienda_config.find_one({}, {"_id": 0})
+    if not doc:
+        # crea record vuoto al primo accesso (solo se admin)
+        cfg = AziendaConfig()
+        await db.azienda_config.insert_one(cfg.model_dump())
+        doc = cfg.model_dump()
+    return doc
+
+
+@api.put("/librerie/azienda")
+async def update_azienda(body: dict, user=Depends(require_user("admin"))):
+    body.pop("id", None)
+    body["updated_at"] = _now_iso()
+    existing = await db.azienda_config.find_one({})
+    if not existing:
+        cfg = AziendaConfig(**body)
+        await db.azienda_config.insert_one(cfg.model_dump())
+    else:
+        await db.azienda_config.update_one({"id": existing["id"]}, {"$set": body})
+    await log_attivita(user, "update", "azienda", existing["id"] if existing else None,
+                       "Aggiornamento dati azienda")
+    return await db.azienda_config.find_one({}, {"_id": 0})
+
+
+@api.post("/librerie/azienda/logo")
+async def upload_logo_azienda(file: UploadFile = File(...),
+                               user=Depends(require_user("admin"))):
+    """Carica/sostituisce il logo dell'agenzia (usato in tutte le stampe PDF)."""
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Logo troppo grande (max 5 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if not ct.startswith("image/"):
+        raise HTTPException(400, "Il logo deve essere un'immagine (PNG/JPG/SVG)")
+    ext = (file.filename or "logo.png").rsplit(".", 1)[-1].lower() or "png"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/azienda/logo_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    existing = await db.azienda_config.find_one({})
+    set_fields = {"logo_url": url, "logo_storage_path": result["path"], "updated_at": _now_iso()}
+    if not existing:
+        cfg = AziendaConfig(**set_fields)
+        await db.azienda_config.insert_one(cfg.model_dump())
+    else:
+        await db.azienda_config.update_one({"id": existing["id"]}, {"$set": set_fields})
+    return {"logo_url": url}
+
+
+# ============================================================
+# LIBRERIE — SCHEMA PROVVIGIONALE
+# ============================================================
+@api.get("/librerie/schema-provvigionale")
+async def list_schemi_provvigionali(
+    collaboratore_id: Optional[str] = None,
+    compagnia_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Elenco regole provvigionali, opzionalmente filtrate per collaboratore o compagnia."""
+    q = {}
+    if collaboratore_id:
+        q["collaboratore_id"] = collaboratore_id
+    if compagnia_id:
+        q["compagnia_id"] = compagnia_id
+    items = await db.schema_provvigionale.find(q, {"_id": 0}).sort("nome", 1).to_list(500)
+    # arricchisci con nomi
+    for it in items:
+        if it.get("collaboratore_id"):
+            u = await db.users.find_one({"id": it["collaboratore_id"]}, {"_id": 0, "name": 1})
+            it["collaboratore_nome"] = u.get("name") if u else None
+        if it.get("compagnia_id"):
+            c = await db.compagnie.find_one({"id": it["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
+            it["compagnia_nome"] = c.get("ragione_sociale") if c else None
+    return items
+
+
+@api.post("/librerie/schema-provvigionale", status_code=201)
+async def create_schema_provvigionale(body: dict, user=Depends(require_user("admin"))):
+    body = {k: (v if v != "" else None) for k, v in body.items()}
+    obj = SchemaProvvigionale(**body)
+    await db.schema_provvigionale.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "schema_provvigionale", obj.id, f"Schema '{obj.nome}'")
+    return obj.model_dump()
+
+
+@api.put("/librerie/schema-provvigionale/{sid}")
+async def update_schema_provvigionale(sid: str, body: dict, user=Depends(require_user("admin"))):
+    body = {k: (v if v != "" else None) for k, v in body.items()}
+    body.pop("id", None)
+    body["updated_at"] = _now_iso()
+    res = await db.schema_provvigionale.update_one({"id": sid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Schema non trovato")
+    await log_attivita(user, "update", "schema_provvigionale", sid)
+    return await db.schema_provvigionale.find_one({"id": sid}, {"_id": 0})
+
+
+@api.delete("/librerie/schema-provvigionale/{sid}")
+async def delete_schema_provvigionale(sid: str, user=Depends(require_user("admin"))):
+    res = await db.schema_provvigionale.delete_one({"id": sid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Schema non trovato")
+    return {"ok": True}
+
+
+async def risolvi_provvigione_collaboratore(
+    collaboratore_id: str, compagnia_id: Optional[str], ramo: Optional[str],
+) -> float:
+    """Ritorna la % di provvigione spettante al collaboratore per la combinazione data.
+
+    Cerca la regola più specifica (collaboratore+compagnia+ramo) e ricade su default agenzia / utente.
+    """
+    # 1) regole specifiche del collaboratore (ordine di specificità decrescente)
+    candidati = [
+        {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": ramo},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": None},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": None, "ramo": ramo},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": None, "ramo": None},
+        {"collaboratore_id": None, "compagnia_id": compagnia_id, "ramo": ramo},
+        {"collaboratore_id": None, "compagnia_id": compagnia_id, "ramo": None},
+        {"collaboratore_id": None, "compagnia_id": None, "ramo": ramo},
+        {"collaboratore_id": None, "compagnia_id": None, "ramo": None},
+    ]
+    for q in candidati:
+        # rimuovi chiavi None tranne quelle che vogliamo esplicitamente None
+        q["attivo"] = True
+        doc = await db.schema_provvigionale.find_one(q, {"_id": 0})
+        if doc:
+            return float(doc.get("percentuale_collaboratore") or 0.0)
+    # fallback: percentuale di default sull'utente
+    u = await db.users.find_one({"id": collaboratore_id}, {"_id": 0, "perc_provvigione_default": 1})
+    return float((u or {}).get("perc_provvigione_default") or 0.0)
+
+
+@api.get("/librerie/schema-provvigionale/risolvi")
+async def api_risolvi_provvigione(
+    collaboratore_id: str,
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    perc = await risolvi_provvigione_collaboratore(collaboratore_id, compagnia_id, ramo)
+    return {"percentuale_collaboratore": perc}
+
+
+# ============================================================
+# UTENTI — DOCUMENTI E CORSI (firma digitale, CI, casellario, ecc.)
+# ============================================================
+ALLOWED_USER_DOCS = {
+    "firma_digitale": "firma_digitale_url",
+    "carta_identita": "carta_identita_url",
+    "casellario": "casellario_url",
+    "carichi_pendenti": "carichi_pendenti_url",
+    "documento_iban": "documento_iban_url",
+}
+
+
+@api.post("/auth/users/{uid}/documenti/{doc_tipo}")
+async def upload_documento_utente(
+    uid: str, doc_tipo: str,
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin")),
+):
+    """Carica un documento (firma_digitale | carta_identita | casellario | carichi_pendenti | documento_iban)."""
+    if doc_tipo not in ALLOWED_USER_DOCS:
+        raise HTTPException(400, f"Tipo documento non valido: {doc_tipo}")
+    target = await db.users.find_one({"id": uid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/{doc_tipo}_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    field = ALLOWED_USER_DOCS[doc_tipo]
+    await db.users.update_one({"id": uid}, {"$set": {field: url, "updated_at": _now_iso()}})
+    await log_attivita(user, "upload", "user_doc", uid, f"Caricato {doc_tipo} per {uid}")
+    return {field: url}
+
+
+@api.delete("/auth/users/{uid}/documenti/{doc_tipo}")
+async def delete_documento_utente(uid: str, doc_tipo: str,
+                                   user=Depends(require_user("admin"))):
+    if doc_tipo not in ALLOWED_USER_DOCS:
+        raise HTTPException(400, "Tipo documento non valido")
+    field = ALLOWED_USER_DOCS[doc_tipo]
+    await db.users.update_one({"id": uid}, {"$set": {field: None, "updated_at": _now_iso()}})
+    return {"ok": True}
+
+
+@api.post("/auth/users/{uid}/corsi")
+async def aggiungi_corso_utente(
+    uid: str, body: dict,
+    user=Depends(require_user("admin")),
+):
+    """Aggiunge un corso/attestato al collaboratore. body: {titolo, ente, data_scadenza, url_attestato}"""
+    target = await db.users.find_one({"id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    corso = {
+        "id": _uid(),
+        "titolo": body.get("titolo") or "Corso",
+        "ente": body.get("ente"),
+        "data": body.get("data"),
+        "data_scadenza": body.get("data_scadenza"),
+        "url_attestato": body.get("url_attestato"),
+        "note": body.get("note"),
+    }
+    await db.users.update_one({"id": uid}, {"$push": {"corsi": corso}, "$set": {"updated_at": _now_iso()}})
+    return corso
+
+
+@api.post("/auth/users/{uid}/corsi/upload")
+async def upload_attestato_corso(
+    uid: str,
+    file: UploadFile = File(...),
+    titolo: str = "",
+    ente: str = "",
+    data_scadenza: str = "",
+    user=Depends(require_user("admin")),
+):
+    target = await db.users.find_one({"id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/corso_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    corso = {
+        "id": _uid(),
+        "titolo": titolo or (file.filename or "Corso"),
+        "ente": ente or None,
+        "data_scadenza": data_scadenza or None,
+        "url_attestato": f"/api/storage/{result['path']}",
+        "nome_file": file.filename,
+    }
+    await db.users.update_one({"id": uid}, {"$push": {"corsi": corso}, "$set": {"updated_at": _now_iso()}})
+    return corso
+
+
+@api.delete("/auth/users/{uid}/corsi/{corso_id}")
+async def elimina_corso_utente(uid: str, corso_id: str,
+                                user=Depends(require_user("admin"))):
+    await db.users.update_one({"id": uid}, {"$pull": {"corsi": {"id": corso_id}}})
+    return {"ok": True}
+
+
+# ============================================================
 # DIARIO CLIENTE
 # ============================================================
 @api.get("/anagrafiche/{aid}/riepilogo")
@@ -2229,6 +2506,39 @@ async def delete_allegato(aid: str, user=Depends(require_user("admin", "collabor
         raise HTTPException(404, "Allegato non trovato")
     await log_attivita(user, "delete", "allegato", aid)
     return {"ok": True}
+
+
+# ============================================================
+# STORAGE GENERICO (logo azienda, documenti utente, attestati)
+# Path canonico: /api/storage/{full_path}
+# ============================================================
+@api.get("/storage/{full_path:path}")
+async def serve_storage(full_path: str, user=Depends(current_user)):
+    """Serve file dallo storage. ACL:
+    - file in /users/{uid}/...   -> solo admin o proprietario
+    - file in /azienda/...       -> qualunque utente autenticato (logo per stampe)
+    - file in /titoli/... ecc.   -> qualunque utente autenticato (gli allegati hanno ACL specifica)
+    """
+    # ACL sui documenti utente
+    parts = full_path.split("/")
+    if "users" in parts:
+        try:
+            idx = parts.index("users")
+            owner_uid = parts[idx + 1]
+        except (ValueError, IndexError):
+            owner_uid = None
+        if user["role"] != "admin" and user["id"] != owner_uid:
+            raise HTTPException(403, "Permesso negato")
+    try:
+        data, ctype = obj_storage.get_object(full_path)
+    except Exception as e:
+        raise HTTPException(404, f"File non trovato: {e}")
+    filename = full_path.rsplit("/", 1)[-1]
+    return StreamingResponse(
+        _io.BytesIO(data),
+        media_type=ctype or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ============================================================
@@ -2606,6 +2916,7 @@ async def stampa_anagrafiche(q: Optional[str] = None, user=Depends(require_user(
         "Elenco Anagrafiche", f"{len(items)} clienti", headers, rows,
         col_widths_mm=[60, 35, 12, 45, 45, 35, 35],
         filtri_attivi={"Ricerca": q} if q else None,
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "anagrafiche.pdf")
 
@@ -2636,6 +2947,7 @@ async def stampa_polizze(
         "Elenco Polizze", f"{len(items)} polizze", headers, rows,
         col_widths_mm=[35, 55, 50, 25, 22, 22, 22, 25],
         filtri_attivi={"Stato": stato, "Ramo": ramo, "Compagnia": compagnia_id},
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "polizze.pdf")
 
@@ -2680,6 +2992,7 @@ async def stampa_titoli(
         f"{len(items)} titoli" + (" - in scadenza" if in_scadenza_giorni else "") + (" - coperti non pagati" if coperti_non_pagati else ""),
         headers, rows,
         col_widths_mm=[32, 55, 25, 22, 22, 22, 25, 25, 25],
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "titoli.pdf")
 
@@ -2705,6 +3018,7 @@ async def stampa_sinistri(stato: Optional[str] = None,
     pdf = pdf_report.stampa_elenco(
         "Elenco Sinistri", f"{len(items)} sinistri", headers, rows,
         col_widths_mm=[30, 32, 55, 25, 25, 25, 28, 28],
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "sinistri.pdf")
 
@@ -2730,6 +3044,7 @@ async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
     pdf = pdf_report.stampa_elenco(
         "Prima Nota", sub, headers, rows,
         col_widths_mm=[25, 18, 35, 90, 35, 28, 28],
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "prima_nota.pdf")
 
@@ -2766,6 +3081,7 @@ async def stampa_estratto_conto(aid: str, user=Depends(current_user)):
         f"CF/P.IVA: {ana.get('codice_fiscale') or ana.get('partita_iva') or '—'}",
         headers, rows,
         col_widths_mm=[25, 130, 28, 28, 32], landscape_mode=False,
+        **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, f"estratto_{ana['ragione_sociale']}.pdf")
 

@@ -11,16 +11,18 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
+    { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "banche", label: "Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
     { key: "conti-cassa", label: "Conti cassa / Canali", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
+    { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
 ];
 
 export default function Librerie() {
@@ -30,8 +32,8 @@ export default function Librerie() {
                 title="Librerie / Anagrafiche di sistema"
                 subtitle="Banche, conti cassa, prodotti, rami: configurazioni riusate nei moduli"
             />
-            <Tabs defaultValue="banche">
-                <TabsList className="bg-slate-100">
+            <Tabs defaultValue="azienda">
+                <TabsList className="bg-slate-100 flex-wrap h-auto">
                     {SECTIONS.map((s) => (
                         <TabsTrigger key={s.key} value={s.key} data-testid={`lib-tab-${s.key}`}>
                             {s.icon}<span className="ml-1.5">{s.label}</span>
@@ -40,7 +42,7 @@ export default function Librerie() {
                 </TabsList>
                 {SECTIONS.map((s) => (
                     <TabsContent key={s.key} value={s.key} className="mt-4">
-                        <Sezione section={s} />
+                        {s.key === "azienda" ? <AziendaSezione /> : <Sezione section={s} />}
                     </TabsContent>
                 ))}
             </Tabs>
@@ -196,6 +198,29 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
             </table>
         );
     }
+    if (section.key === "schema-provvigionale") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Nome</th><th>Collaboratore</th><th>Compagnia</th><th>Ramo</th><th className="text-right">% Collab</th><th className="text-right">% Premio</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((s) => (
+                        <tr key={s.id}>
+                            <td className="font-medium">{s.nome}</td>
+                            <td className="text-xs">{s.collaboratore_nome || <span className="text-slate-400">tutti</span>}</td>
+                            <td className="text-xs">{s.compagnia_nome || <span className="text-slate-400">tutte</span>}</td>
+                            <td><span className="badge badge-neutral">{s.ramo || "tutti"}</span></td>
+                            <td className="num text-right font-semibold text-emerald-700">{s.percentuale_collaboratore}%</td>
+                            <td className="num text-right text-slate-600">{s.percentuale_su_premio}%</td>
+                            <td>{s.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(s)} onDelete={() => onDelete(s.id)} label="schema" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
     // utenti
     const ROLE_COLORS = {
         admin: "badge-danger", collaboratore: "badge-info",
@@ -235,9 +260,10 @@ const SECTION_FORMS = {
     "rami": RamoForm,
     "compagnie": CompagniaForm,
     "utenti": UtenteForm,
+    "schema-provvigionale": SchemaProvvForm,
 };
 
-function GenericForm({ section, editing, onClose, fields, defaults }) {
+function GenericForm({ section, editing, onClose, fields, defaults, dialogClass }) {
     const [f, setF] = useState(editing || defaults);
     const isEdit = !!editing;
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -256,9 +282,9 @@ function GenericForm({ section, editing, onClose, fields, defaults }) {
     };
 
     return (
-        <DialogContent className="max-w-lg">
+        <DialogContent className={dialogClass || "max-w-lg"}>
             <DialogHeader><DialogTitle>{isEdit ? "Modifica" : "Nuovo"} {section.label.toLowerCase()}</DialogTitle></DialogHeader>
-            <div className="space-y-3 py-2">
+            <div className="space-y-3 py-2 max-h-[70vh] overflow-y-auto">
                 {fields(f, set)}
             </div>
             <DialogFooter>
@@ -433,55 +459,473 @@ function CompagniaForm({ section, editing, onClose }) {
 function UtenteForm({ section, editing, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
-    return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ name: "", email: "", password: "", role: "dipendente", anagrafica_id: null }}
+    return <GenericForm section={section} editing={editing} onClose={onClose} dialogClass="max-w-3xl"
+        defaults={{
+            name: "", email: "", password: "", role: "dipendente", anagrafica_id: null,
+            codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
+            perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
+            note_fiscali: "", note_interne: "", attivo: true,
+        }}
         fields={(f, set) => (
-            <>
-                <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
-                    <div><Label>Email *</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
-                </div>
-                <div>
-                    <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : "Password *"}</Label>
-                    <Input
-                        type="password"
-                        value={f.password || ""}
-                        onChange={(e) => set("password", e.target.value)}
-                        placeholder={editing ? "•••••••• (invariata)" : ""}
-                    />
-                </div>
-                <div>
-                    <Label>Ruolo *</Label>
-                    <Select value={f.role || "dipendente"} onValueChange={(v) => set("role", v)}>
-                        <SelectTrigger data-testid="utente-role"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
-                            <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
-                            <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
-                            <SelectItem value="cliente">Cliente - vede solo i propri dati</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                {f.role === "cliente" && (
+            <Tabs defaultValue="anagrafica" className="w-full">
+                <TabsList className="bg-slate-100">
+                    <TabsTrigger value="anagrafica">Anagrafica</TabsTrigger>
+                    <TabsTrigger value="fiscale">Dati fiscali / IBAN</TabsTrigger>
+                    {editing && f.role !== "cliente" && <TabsTrigger value="documenti">Documenti</TabsTrigger>}
+                    {editing && f.role !== "cliente" && <TabsTrigger value="corsi">Corsi</TabsTrigger>}
+                </TabsList>
+
+                <TabsContent value="anagrafica" className="space-y-3 mt-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
+                        <div><Label>Email *</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
+                    </div>
                     <div>
-                        <Label>Anagrafica cliente collegata *</Label>
-                        <Select value={f.anagrafica_id || ""} onValueChange={(v) => set("anagrafica_id", v)}>
-                            <SelectTrigger><SelectValue placeholder="Seleziona anagrafica..." /></SelectTrigger>
+                        <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : "Password *"}</Label>
+                        <Input
+                            type="password"
+                            value={f.password || ""}
+                            onChange={(e) => set("password", e.target.value)}
+                            placeholder={editing ? "•••••••• (invariata)" : ""}
+                        />
+                    </div>
+                    <div>
+                        <Label>Ruolo *</Label>
+                        <Select value={f.role || "dipendente"} onValueChange={(v) => set("role", v)}>
+                            <SelectTrigger data-testid="utente-role"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
+                                <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
+                                <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
+                                <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
+                                <SelectItem value="cliente">Cliente - vede solo i propri dati</SelectItem>
                             </SelectContent>
                         </Select>
-                        <div className="text-xs text-slate-500 mt-1">Il cliente vedrà solo le polizze/sinistri legati a questa anagrafica.</div>
                     </div>
+                    {f.role === "cliente" && (
+                        <div>
+                            <Label>Anagrafica cliente collegata *</Label>
+                            <Select value={f.anagrafica_id || ""} onValueChange={(v) => set("anagrafica_id", v)}>
+                                <SelectTrigger><SelectValue placeholder="Seleziona anagrafica..." /></SelectTrigger>
+                                <SelectContent>
+                                    {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <div className="text-xs text-slate-500 mt-1">Il cliente vedrà solo le polizze/sinistri legati a questa anagrafica.</div>
+                        </div>
+                    )}
+                    {f.role !== "cliente" && (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
+                            <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value.toUpperCase())} /></div>
+                        </div>
+                    )}
+                </TabsContent>
+
+                <TabsContent value="fiscale" className="space-y-3 mt-4">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
+                        <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                    </div>
+                    <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
+                    <div className="grid grid-cols-3 gap-3 bg-amber-50 border border-amber-200 rounded-md p-3">
+                        <div>
+                            <Label>% Provvigione default</Label>
+                            <Input type="number" step="0.01" value={f.perc_provvigione_default || 0} onChange={(e) => set("perc_provvigione_default", parseFloat(e.target.value) || 0)} />
+                        </div>
+                        <div>
+                            <Label>% Ritenuta d&apos;acconto</Label>
+                            <Input type="number" step="0.01" value={f.perc_ritenuta_acconto || 0} onChange={(e) => set("perc_ritenuta_acconto", parseFloat(e.target.value) || 0)} />
+                        </div>
+                        <div>
+                            <Label>% INPS / Inarcassa</Label>
+                            <Input type="number" step="0.01" value={f.perc_inps_inarcassa || 0} onChange={(e) => set("perc_inps_inarcassa", parseFloat(e.target.value) || 0)} />
+                        </div>
+                        <div className="col-span-3 text-xs text-amber-800">
+                            Valori di default usati nei pagamenti provvigioni. Le regole specifiche per compagnia/ramo si gestiscono in <strong>Sistema provvigionale</strong>.
+                        </div>
+                    </div>
+                    <div><Label>Note fiscali</Label><Input value={f.note_fiscali || ""} onChange={(e) => set("note_fiscali", e.target.value)} /></div>
+                    <div><Label>Note interne (visibili solo admin)</Label><Input value={f.note_interne || ""} onChange={(e) => set("note_interne", e.target.value)} /></div>
+                </TabsContent>
+
+                {editing && f.role !== "cliente" && (
+                    <TabsContent value="documenti" className="space-y-3 mt-4">
+                        <DocumentiCollaboratore userId={editing.id} user={f} onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
+                    </TabsContent>
                 )}
-                <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1">
+
+                {editing && f.role !== "cliente" && (
+                    <TabsContent value="corsi" className="space-y-3 mt-4">
+                        <CorsiCollaboratore userId={editing.id} corsi={f.corsi || []} onChange={(nuovi) => set("corsi", nuovi)} />
+                    </TabsContent>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1 mt-4">
                     <div className="font-semibold text-slate-700 mb-1">Livelli di visibilità:</div>
                     <div><span className="badge badge-danger">admin</span> Accesso completo, gestione utenti, eliminazioni</div>
                     <div><span className="badge badge-info">collaboratore</span> Vede e gestisce tutto, no eliminazioni critiche</div>
                     <div><span className="badge badge-success">dipendente</span> Operatività su clienti/polizze/sinistri, no librerie</div>
                     <div><span className="badge badge-neutral">cliente</span> Vede solo le proprie polizze e i propri sinistri</div>
                 </div>
+            </Tabs>
+        )}
+    />;
+}
+
+
+// =================== AZIENDA (Singleton) ===================
+function AziendaSezione() {
+    const [f, setF] = useState(null);
+    const [logoFile, setLogoFile] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const load = () => api.get("/librerie/azienda").then((r) => setF(r.data));
+    useEffect(() => { load(); }, []);
+
+    if (!f) return <Loading />;
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            await api.put("/librerie/azienda", f);
+            if (logoFile) {
+                const fd = new FormData();
+                fd.append("file", logoFile);
+                const r = await api.post("/librerie/azienda/logo", fd, { headers: { "Content-Type": "multipart/form-data" } });
+                set("logo_url", r.data.logo_url);
+                setLogoFile(null);
+            }
+            toast.success("Dati azienda salvati");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <Card className="border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-5">
+                <div>
+                    <div className="text-base font-semibold text-slate-800">Dati Azienda</div>
+                    <div className="text-xs text-slate-500">Utilizzati come intestazione su tutte le stampe (PDF, brogliaccio, estratti)</div>
+                </div>
+                <Button onClick={salva} disabled={saving} className="bg-sky-700 hover:bg-sky-800" data-testid="azienda-save">
+                    {saving ? "Salvataggio..." : "Salva"}
+                </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-1">
+                    <Label>Logo agenzia</Label>
+                    <div className="mt-2 border border-dashed border-slate-300 rounded-md p-4 text-center bg-slate-50">
+                        {(f.logo_url || logoFile) ? (
+                            <div>
+                                {logoFile ? (
+                                    <img alt="logo preview" src={URL.createObjectURL(logoFile)} className="max-h-32 mx-auto mb-2 rounded" />
+                                ) : (
+                                    <img alt="logo" src={f.logo_url} className="max-h-32 mx-auto mb-2 rounded" />
+                                )}
+                                <div className="text-xs text-slate-500">{logoFile ? "(non ancora salvato)" : "Logo attuale"}</div>
+                            </div>
+                        ) : (
+                            <div className="text-xs text-slate-500 py-6">Nessun logo caricato</div>
+                        )}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            id="logo-upload"
+                            data-testid="azienda-logo-input"
+                            onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                            className="hidden"
+                        />
+                        <label htmlFor="logo-upload" className="cursor-pointer mt-3 inline-flex items-center gap-1 text-xs text-sky-700 hover:underline">
+                            <Upload size={12} /> Scegli logo (PNG/JPG, max 5MB)
+                        </label>
+                    </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Ragione sociale *</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value.toUpperCase())} data-testid="azienda-ragione" /></div>
+                        <div><Label>Forma giuridica</Label><Input value={f.forma_giuridica || ""} onChange={(e) => set("forma_giuridica", e.target.value.toUpperCase())} placeholder="SRL / SAS / SNC / ditta individuale" /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                        <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div><Label>N° iscr. RUI</Label><Input value={f.rui || ""} onChange={(e) => set("rui", e.target.value.toUpperCase())} /></div>
+                        <div><Label>Sezione RUI</Label><Input value={f.rui_sezione || ""} onChange={(e) => set("rui_sezione", e.target.value.toUpperCase())} placeholder="A/B/E..." /></div>
+                        <div><Label>Data iscr. RUI</Label><Input type="date" value={f.data_iscrizione_rui || ""} onChange={(e) => set("data_iscrizione_rui", e.target.value)} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>REA</Label><Input value={f.rea || ""} onChange={(e) => set("rea", e.target.value.toUpperCase())} /></div>
+                        <div><Label>Capitale sociale</Label><Input value={f.capitale_sociale || ""} onChange={(e) => set("capitale_sociale", e.target.value)} /></div>
+                    </div>
+
+                    <div className="text-xs uppercase tracking-widest font-semibold text-slate-500 pt-2 border-t border-slate-100">Sede legale</div>
+                    <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value.toUpperCase())} /></div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2"><Label>Comune</Label><Input value={f.comune || ""} onChange={(e) => set("comune", e.target.value.toUpperCase())} /></div>
+                        <div><Label>Provincia</Label><Input value={f.provincia || ""} onChange={(e) => set("provincia", e.target.value.toUpperCase())} maxLength={2} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>CAP</Label><Input value={f.cap || ""} onChange={(e) => set("cap", e.target.value)} /></div>
+                        <div><Label>Nazione</Label><Input value={f.nazione || ""} onChange={(e) => set("nazione", e.target.value.toUpperCase())} /></div>
+                    </div>
+
+                    <div className="text-xs uppercase tracking-widest font-semibold text-slate-500 pt-2 border-t border-slate-100">Contatti</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
+                        <div><Label>Fax</Label><Input value={f.fax || ""} onChange={(e) => set("fax", e.target.value)} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Email</Label><Input value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
+                        <div><Label>PEC</Label><Input value={f.pec || ""} onChange={(e) => set("pec", e.target.value.toLowerCase())} /></div>
+                    </div>
+                    <div><Label>Sito web</Label><Input value={f.sito_web || ""} onChange={(e) => set("sito_web", e.target.value)} /></div>
+
+                    <div className="text-xs uppercase tracking-widest font-semibold text-slate-500 pt-2 border-t border-slate-100">Coordinate bancarie</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Banca</Label><Input value={f.banca || ""} onChange={(e) => set("banca", e.target.value.toUpperCase())} /></div>
+                        <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
+                    </div>
+
+                    <div><Label>Note in calce alle stampe</Label>
+                        <textarea
+                            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                            rows={2}
+                            value={f.note_footer_stampe || ""}
+                            onChange={(e) => set("note_footer_stampe", e.target.value)}
+                            placeholder="Es: Polizza assicurazione professionale, autorizzazione IVASS..."
+                        />
+                    </div>
+                </div>
+            </div>
+        </Card>
+    );
+}
+
+// =================== SCHEMA PROVVIGIONALE ===================
+function SchemaProvvForm({ section, editing, onClose }) {
+    const [collab, setCollab] = useState([]);
+    const [compagnie, setCompagnie] = useState([]);
+    const [rami, setRami] = useState([]);
+    useEffect(() => {
+        api.get("/collaboratori").then((r) => setCollab(r.data));
+        api.get("/compagnie").then((r) => setCompagnie(r.data));
+        api.get("/librerie/rami").then((r) => setRami(r.data));
+    }, []);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ nome: "", collaboratore_id: null, compagnia_id: null, ramo: null,
+                    percentuale_collaboratore: 0, percentuale_su_premio: 0,
+                    descrizione: "", attivo: true }}
+        fields={(f, set) => (
+            <>
+                <div><Label>Nome regola *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} placeholder="Es: Mario Rossi - RCA UnipolSai" /></div>
+                <div className="grid grid-cols-3 gap-3">
+                    <div>
+                        <Label>Collaboratore</Label>
+                        <Select value={f.collaboratore_id || "__null__"} onValueChange={(v) => set("collaboratore_id", v === "__null__" ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__null__">— tutti —</SelectItem>
+                                {collab.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Compagnia</Label>
+                        <Select value={f.compagnia_id || "__null__"} onValueChange={(v) => set("compagnia_id", v === "__null__" ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__null__">— tutte —</SelectItem>
+                                {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Ramo</Label>
+                        <Select value={f.ramo || "__null__"} onValueChange={(v) => set("ramo", v === "__null__" ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__null__">— tutti —</SelectItem>
+                                {rami.map((r) => <SelectItem key={r.id} value={r.codice}>{r.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 bg-emerald-50 border border-emerald-200 rounded-md p-3">
+                    <div>
+                        <Label>% Provvigione al collaboratore *</Label>
+                        <Input type="number" step="0.01" value={f.percentuale_collaboratore || 0}
+                               onChange={(e) => set("percentuale_collaboratore", parseFloat(e.target.value) || 0)} />
+                        <div className="text-[10px] text-emerald-800 mt-1">Sul totale provvigione incassata dalla polizza</div>
+                    </div>
+                    <div>
+                        <Label>% Provvigione su premio lordo</Label>
+                        <Input type="number" step="0.01" value={f.percentuale_su_premio || 0}
+                               onChange={(e) => set("percentuale_su_premio", parseFloat(e.target.value) || 0)} />
+                        <div className="text-[10px] text-emerald-800 mt-1">Solo se non importata da ANIA</div>
+                    </div>
+                </div>
+                <div><Label>Descrizione / note</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
+                <div className="flex items-center gap-2">
+                    <input type="checkbox" id="sp_attivo" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} />
+                    <Label htmlFor="sp_attivo" className="cursor-pointer">Regola attiva</Label>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs text-slate-600">
+                    <strong>Risoluzione:</strong> la regola più specifica (collaboratore + compagnia + ramo) prevale sulle regole generiche.
+                    Lascia &quot;— tutti —&quot; per creare regole di default valide per più collaboratori / compagnie.
+                </div>
             </>
         )}
     />;
+}
+
+// =================== DOCUMENTI COLLABORATORE ===================
+const DOC_TIPI = [
+    { key: "firma_digitale", label: "Firma digitale", urlField: "firma_digitale_url" },
+    { key: "carta_identita", label: "Carta d'identità", urlField: "carta_identita_url" },
+    { key: "casellario", label: "Casellario giudiziale", urlField: "casellario_url" },
+    { key: "carichi_pendenti", label: "Carichi pendenti", urlField: "carichi_pendenti_url" },
+    { key: "documento_iban", label: "Documento IBAN", urlField: "documento_iban_url" },
+];
+
+function DocumentiCollaboratore({ userId, user, onChange }) {
+    const upload = async (tipo, file) => {
+        if (!file) return;
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const r = await api.post(`/auth/users/${userId}/documenti/${tipo}`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            onChange(r.data);
+            toast.success("Documento caricato");
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const del = async (tipo) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        const f = DOC_TIPI.find((d) => d.key === tipo);
+        try {
+            await api.delete(`/auth/users/${userId}/documenti/${tipo}`);
+            onChange({ [f.urlField]: null });
+            toast.success("Eliminato");
+        } catch (e) { toast.error("Errore"); }
+    };
+    return (
+        <div className="space-y-2">
+            {DOC_TIPI.map((d) => {
+                const url = user[d.urlField];
+                return (
+                    <div key={d.key} className="flex items-center justify-between border border-slate-200 rounded-md p-3 bg-slate-50">
+                        <div className="flex items-center gap-2">
+                            <FileText size={14} className="text-slate-500" />
+                            <div>
+                                <div className="text-sm font-medium">{d.label}</div>
+                                <div className="text-xs text-slate-500">
+                                    {url ? <a href={url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">Visualizza documento</a> : "Nessun file caricato"}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="file"
+                                id={`doc-${d.key}`}
+                                className="hidden"
+                                data-testid={`doc-input-${d.key}`}
+                                onChange={(e) => upload(d.key, e.target.files?.[0])}
+                            />
+                            <label htmlFor={`doc-${d.key}`} className="cursor-pointer text-xs px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-md inline-flex items-center gap-1">
+                                <Upload size={11} /> {url ? "Sostituisci" : "Carica"}
+                            </label>
+                            {url && (
+                                <button onClick={() => del(d.key)} className="text-red-600 hover:bg-red-50 p-1.5 rounded">
+                                    <Trash2 size={13} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// =================== CORSI COLLABORATORE ===================
+function CorsiCollaboratore({ userId, corsi, onChange }) {
+    const [titolo, setTitolo] = useState("");
+    const [ente, setEnte] = useState("");
+    const [scadenza, setScadenza] = useState("");
+    const [file, setFile] = useState(null);
+
+    const aggiungi = async () => {
+        if (!titolo && !file) { toast.error("Inserisci almeno titolo o attestato"); return; }
+        try {
+            let r;
+            if (file) {
+                const fd = new FormData();
+                fd.append("file", file);
+                fd.append("titolo", titolo);
+                fd.append("ente", ente);
+                fd.append("data_scadenza", scadenza);
+                r = await api.post(`/auth/users/${userId}/corsi/upload`, fd,
+                    { headers: { "Content-Type": "multipart/form-data" } });
+            } else {
+                r = await api.post(`/auth/users/${userId}/corsi`,
+                    { titolo, ente, data_scadenza: scadenza || null });
+            }
+            onChange([...(corsi || []), r.data]);
+            setTitolo(""); setEnte(""); setScadenza(""); setFile(null);
+            toast.success("Corso aggiunto");
+        } catch (e) { toast.error("Errore"); }
+    };
+    const rimuovi = async (corsoId) => {
+        try {
+            await api.delete(`/auth/users/${userId}/corsi/${corsoId}`);
+            onChange((corsi || []).filter((c) => c.id !== corsoId));
+        } catch (e) { toast.error("Errore"); }
+    };
+
+    return (
+        <div className="space-y-3">
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1">
+                    <GraduationCap size={13} /> Aggiungi corso / attestato
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div><Label className="text-xs">Titolo</Label><Input value={titolo} onChange={(e) => setTitolo(e.target.value)} placeholder="Es: IVASS 60h 2024" /></div>
+                    <div><Label className="text-xs">Ente</Label><Input value={ente} onChange={(e) => setEnte(e.target.value)} placeholder="Es: IVASS" /></div>
+                    <div><Label className="text-xs">Scadenza</Label><Input type="date" value={scadenza} onChange={(e) => setScadenza(e.target.value)} /></div>
+                    <div>
+                        <Label className="text-xs">Attestato (PDF/IMG, opz.)</Label>
+                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi}>
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+
+            {(!corsi || corsi.length === 0) ? (
+                <div className="text-center text-xs text-slate-400 py-4">Nessun corso registrato</div>
+            ) : (
+                <table className="tbl w-full">
+                    <thead><tr><th>Titolo</th><th>Ente</th><th>Scadenza</th><th>Attestato</th><th></th></tr></thead>
+                    <tbody>
+                        {corsi.map((c) => (
+                            <tr key={c.id}>
+                                <td className="font-medium">{c.titolo}</td>
+                                <td>{c.ente || "—"}</td>
+                                <td className="num">{c.data_scadenza || "—"}</td>
+                                <td>{c.url_attestato ? <a className="text-sky-700 hover:underline text-xs" href={c.url_attestato} target="_blank" rel="noreferrer">Apri</a> : "—"}</td>
+                                <td className="text-right">
+                                    <button onClick={() => rimuovi(c.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={12} /></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </div>
+    );
 }

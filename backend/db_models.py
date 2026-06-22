@@ -44,6 +44,16 @@ class UserPublic(BaseDoc):
     perc_inps_inarcassa: float = 0.0       # % contributi previdenziali
     note_fiscali: Optional[str] = None
     attivo: bool = True
+    # Documenti collaboratore (URL di storage)
+    firma_digitale_url: Optional[str] = None
+    carta_identita_url: Optional[str] = None
+    casellario_url: Optional[str] = None
+    carichi_pendenti_url: Optional[str] = None
+    documento_iban_url: Optional[str] = None
+    # Corsi completati: [{titolo, ente, data_scadenza, url_attestato}]
+    corsi: List[dict] = Field(default_factory=list)
+    # Note interne (visibile solo admin)
+    note_interne: Optional[str] = None
 
 
 class PagamentoProvvigioni(BaseDoc):
@@ -458,6 +468,63 @@ class ProgressoCorso(BaseDoc):
     completato: bool = False
     ultima_posizione_sec: int = 0
     ultima_visualizzazione: str = Field(default_factory=_now_iso)
+
+
+# =============== AZIENDA (DATI INTESTAZIONE / STAMPE) ===============
+class AziendaConfig(BaseDoc):
+    """Dati dell'agenzia: ragione sociale, P.IVA, indirizzo, contatti, logo (singleton)."""
+    ragione_sociale: str = ""
+    forma_giuridica: Optional[str] = None  # SRL, SAS, SNC, ditta individuale...
+    partita_iva: Optional[str] = None
+    codice_fiscale: Optional[str] = None
+    rui: Optional[str] = None              # numero iscrizione RUI/IVASS
+    rui_sezione: Optional[str] = None
+    data_iscrizione_rui: Optional[str] = None
+    indirizzo: Optional[str] = None
+    comune: Optional[str] = None
+    provincia: Optional[str] = None
+    cap: Optional[str] = None
+    nazione: str = "ITALIA"
+    telefono: Optional[str] = None
+    fax: Optional[str] = None
+    email: Optional[str] = None
+    pec: Optional[str] = None
+    sito_web: Optional[str] = None
+    iban: Optional[str] = None
+    banca: Optional[str] = None
+    capitale_sociale: Optional[str] = None
+    rea: Optional[str] = None
+    logo_url: Optional[str] = None         # URL logo per stampe
+    logo_storage_path: Optional[str] = None
+    note_footer_stampe: Optional[str] = None
+
+
+# =============== SCHEMA / SISTEMA PROVVIGIONALE ===============
+class SchemaProvvigionale(BaseDoc):
+    """Regola di calcolo provvigione: applicata per collaboratore + (compagnia/ramo opzionali).
+
+    Risoluzione gerarchica (la più specifica vince):
+      1. collaboratore_id + compagnia_id + ramo
+      2. collaboratore_id + compagnia_id
+      3. collaboratore_id + ramo
+      4. collaboratore_id
+      5. compagnia_id + ramo            (regola agenzia)
+      6. compagnia_id                   (regola agenzia)
+      7. ramo                           (regola agenzia)
+      8. default (collaboratore_id=null, compagnia_id=null, ramo=null)
+    """
+    nome: str
+    collaboratore_id: Optional[str] = None
+    compagnia_id: Optional[str] = None
+    ramo: Optional[str] = None
+    # percentuale che spetta al collaboratore sulla PROVVIGIONE INCASSATA dalla polizza
+    percentuale_collaboratore: float = 0.0
+    # percentuale di provvigione applicata sul PREMIO LORDO (se l'agenzia non ha già il dato)
+    percentuale_su_premio: float = 0.0
+    descrizione: Optional[str] = None
+    attivo: bool = True
+
+
 class ImportLog(BaseDoc):
     utente_id: Optional[str] = None
     nome_file: str
