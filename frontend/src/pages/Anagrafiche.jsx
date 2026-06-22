@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
@@ -29,17 +29,12 @@ export default function Anagrafiche() {
     const [catFilter, setCatFilter] = useState("all");
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
 
-    const load = () => {
+    const load = useCallback(() => {
         api.get("/anagrafiche", { params: { q: q || undefined, tag: tagFilter || undefined } })
             .then((r) => setList(r.data));
-    };
-
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
-    useEffect(() => {
-        const t = setTimeout(load, 250);
-        return () => clearTimeout(t);
-        // eslint-disable-next-line
     }, [q, tagFilter]);
+
+    useEffect(() => { load(); }, [load]);
 
     // Tag univoci per chip filtri
     const tagsUnivoci = useMemo(() => {
@@ -320,7 +315,7 @@ function NuovaAnagraficaDialog({ onClose }) {
                 setForm((f) => ({ ...f, lat: r.data.lat, lng: r.data.lng }));
                 toast.success(`Geo: ${r.data.lat.toFixed(4)}, ${r.data.lng.toFixed(4)}`);
             }
-        } catch (e) { /* silenzioso */ }
+        } catch (e) { console.warn("geocoding:", e?.message || e); }
         finally { setGeoLoading(false); }
     };
 

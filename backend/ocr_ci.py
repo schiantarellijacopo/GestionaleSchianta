@@ -74,6 +74,7 @@ async def estrai_dati_ci(image_bytes: bytes, mime_type: str = "image/jpeg") -> d
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError(f"Risposta non JSON: {raw[:300]}")
+    data: dict = {}
     try:
         data = json.loads(match.group(0))
     except json.JSONDecodeError as e:

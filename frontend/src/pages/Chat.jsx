@@ -38,7 +38,7 @@ export default function Chat() {
             setText("");
             loadMsgs(sel.id);
             loadContatti();
-        } catch (err) { /* skip */ }
+        } catch (err) { console.warn("chat polling:", err?.message || err); }
     };
 
     return (

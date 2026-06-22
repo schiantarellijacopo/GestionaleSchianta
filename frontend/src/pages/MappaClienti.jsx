@@ -44,9 +44,17 @@ export default function MappaClienti() {
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             attribution: "&copy; OpenStreetMap",
         }).addTo(map);
+        // Sanifica stringhe utente per evitare XSS nei popup Leaflet
+        const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        }[c]));
         const markers = items.map((a) => {
             const m = L.marker([a.lat, a.lng]).addTo(map);
-            m.bindPopup(`<b>${a.ragione_sociale}</b><br>${a.indirizzo || ""}<br>${a.comune || ""} (${a.provincia || ""})<br><a href="/anagrafiche/${a.id}">Apri scheda</a>`);
+            m.bindPopup(
+                `<b>${esc(a.ragione_sociale)}</b><br>${esc(a.indirizzo)}<br>` +
+                `${esc(a.comune)} (${esc(a.provincia)})<br>` +
+                `<a href="/anagrafiche/${esc(a.id)}">Apri scheda</a>`
+            );
             return m;
         });
         if (markers.length) {
@@ -67,7 +75,9 @@ export default function MappaClienti() {
                     const r = await api.post(`/geo/anagrafiche/${a.id}/geocode`);
                     if (r.data.found) ok++;
                     await new Promise((res) => setTimeout(res, 1100));  // 1 req/sec
-                } catch { /* skip */ }
+                } catch (err) {
+                    console.warn(`Geocoding fallito per ${a.id}:`, err?.message || err);
+                }
             }
             toast.success(`Geocoding completato: ${ok}/${senza.length} clienti localizzati`);
             load();

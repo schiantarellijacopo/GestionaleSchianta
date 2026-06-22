@@ -999,7 +999,6 @@ async def list_titoli(
     if user["role"] == "cliente" and user.get("anagrafica_id"):
         pol_filter["contraente_id"] = user["anagrafica_id"]
 
-    ana_match_ids = None
     if q:
         # ricerca generica: numero polizza, targa, contraente
         qrx = {"$regex": q, "$options": "i"}
@@ -2091,7 +2090,7 @@ async def invia_email(eid: str, user=Depends(require_user("admin", "collaborator
     email_doc = await db.email.find_one({"id": eid}, {"_id": 0})
     if not email_doc:
         raise HTTPException(404, "Non trovata")
-    res = await db.email.update_one(
+    await db.email.update_one(
         {"id": eid},
         {"$set": {"stato": "inviata", "data_invio": _now_iso(), "updated_at": _now_iso()}},
     )
@@ -2808,10 +2807,6 @@ async def newsletter_invia(body: dict, user=Depends(require_user("admin", "colla
     await log_attivita(user, "newsletter", "email", None,
                        f"Newsletter su tags {tags}: {creati} email create")
     return {"email_create": creati, "tags": tags}
-    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
-        raise HTTPException(403, "Permesso negato")
-    items = await db.diario.find({"anagrafica_id": aid}, {"_id": 0}).sort("data_evento", -1).to_list(500)
-    return items
 
 
 @api.get("/anagrafiche/{aid}/diario")

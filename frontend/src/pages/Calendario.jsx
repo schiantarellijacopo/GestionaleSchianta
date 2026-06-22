@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -41,13 +41,13 @@ export default function Calendario() {
 
     useEffect(() => { api.get("/collaboratori").then((r) => setOperatori(r.data)); }, []);
 
-    const load = () => {
+    const load = useCallback(() => {
         setLoading(true);
         const params = { dal, al };
         if (filtroOp !== "all") params.operatore_id = filtroOp;
         api.get("/calendario", { params }).then((r) => setEventi(r.data)).finally(() => setLoading(false));
-    };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al, filtroOp]);
+    }, [dal, al, filtroOp]);
+    useEffect(() => { load(); }, [load]);
 
     const griglia = useMemo(() => {
         // genera 6 settimane partendo dal lunedì della prima settimana
@@ -139,7 +139,7 @@ export default function Calendario() {
                                 const dayEvents = eventiPerGiorno[dayStr] || [];
                                 return (
                                     <div
-                                        key={i}
+                                        key={dayStr}
                                         className={`border-b border-r border-slate-100 min-h-[100px] p-1.5 ${
                                             isCurrent ? "bg-white" : "bg-slate-50/50"
                                         } ${isToday ? "ring-2 ring-inset ring-sky-300" : ""}`}

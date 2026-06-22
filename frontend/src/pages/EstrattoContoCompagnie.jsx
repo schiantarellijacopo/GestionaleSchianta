@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -117,11 +117,11 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const [al, setAl] = useState("");
     const [data, setData] = useState(null);
 
-    const load = () => {
+    const load = useCallback(() => {
         api.get(`/compagnie/${compagnia.id}/estratto-conto`, { params: { dal: dal || undefined, al: al || undefined } })
             .then((r) => setData(r.data));
-    };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [compagnia.id]);
+    }, [compagnia.id, dal, al]);
+    useEffect(() => { load(); }, [load]);
 
     return (
         <div data-testid="ec-dettaglio-page">
@@ -181,7 +181,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         </thead>
                         <tbody>
                             {data.righe.map((r, i) => (
-                                <tr key={i}>
+                                <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`}>
                                     <td className="num text-xs">{fmtDate(r.data)}</td>
                                     <td><span className={`badge ${r.tipo === "incasso" ? "badge-info" : "badge-success"}`}>{r.tipo}</span></td>
                                     <td className="font-mono text-xs">{r.polizza || "-"}</td>

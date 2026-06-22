@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
@@ -20,17 +20,17 @@ export default function TitoliSospesi() {
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);  // titolo in pagamento
 
-    const load = () => {
+    const load = useCallback(() => {
         const params = {};
         if (filtroCollab !== "all") params.collaboratore_id = filtroCollab;
         api.get("/titoli/sospesi", { params }).then((r) => setItems(r.data));
-    };
+    }, [filtroCollab]);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollab(r.data));
         api.get("/librerie/conti-cassa").then((r) => setConti(r.data));
     }, []);
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtroCollab]);
+    useEffect(() => { load(); }, [load]);
 
     const totali = useMemo(() => {
         const arr = items || [];

@@ -104,7 +104,7 @@ function CorsoPlayer({ corso, onBack }) {
                 });
                 setProgresso(r.data);
                 if (r.data.completato) clearInterval(t);
-            } catch { /* */ }
+        } catch (err) { console.warn("progresso corso:", err?.message || err); }
         }, 5000);
         return () => clearInterval(t);
         // eslint-disable-next-line
