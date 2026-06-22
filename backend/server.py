@@ -1794,6 +1794,178 @@ async def delete_ramo(rid: str, user=Depends(require_user("admin"))):
 # ============================================================
 # DIARIO CLIENTE
 # ============================================================
+@api.get("/anagrafiche/{aid}/riepilogo")
+async def riepilogo_cliente(aid: str, user=Depends(current_user)):
+    """Riepilogo economico: premi lordi pagati + provvigioni incassate.
+
+    Se l'anagrafica ha relazioni con persone giuridiche (aziende), aggrega anche
+    quelle ma le riporta separatamente. Risultato:
+    { privato: {premi, provvigioni, polizze_count, titoli_count},
+      azienda: {premi, provvigioni, ...},
+      totale: {...} }
+    """
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+
+    # raccogli id privati e aziende collegate
+    privati = [aid] if ana.get("tipo") != "persona_giuridica" else []
+    aziende = [aid] if ana.get("tipo") == "persona_giuridica" else []
+    for rel in (ana.get("parente_di") or []):
+        rid = rel.get("anagrafica_id")
+        if not rid: continue
+        rel_doc = await db.anagrafiche.find_one({"id": rid}, {"_id": 0, "tipo": 1})
+        if rel_doc:
+            if rel_doc.get("tipo") == "persona_giuridica":
+                aziende.append(rid)
+            else:
+                privati.append(rid)
+
+    async def aggrega(ids: list):
+        if not ids:
+            return {"premi_lordi": 0.0, "provvigioni": 0.0, "polizze_count": 0,
+                    "titoli_incassati": 0, "titoli_aperti": 0}
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"contraente_id": {"$in": ids}}, {"_id": 0, "id": 1})]
+        if not pol_ids:
+            return {"premi_lordi": 0.0, "provvigioni": 0.0,
+                    "polizze_count": 0, "titoli_incassati": 0, "titoli_aperti": 0}
+        # somma titoli incassati
+        agg = await db.titoli.aggregate([
+            {"$match": {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}},
+            {"$group": {"_id": None,
+                        "premi": {"$sum": "$importo_lordo"},
+                        "provv": {"$sum": "$provvigioni"},
+                        "n": {"$sum": 1}}},
+        ]).to_list(1)
+        n_aperti = await db.titoli.count_documents({"polizza_id": {"$in": pol_ids},
+                                                     "stato": {"$in": ["da_incassare", "insoluto"]}})
+        return {
+            "premi_lordi": round((agg[0]["premi"] if agg else 0.0), 2),
+            "provvigioni": round((agg[0]["provv"] if agg else 0.0), 2),
+            "polizze_count": len(pol_ids),
+            "titoli_incassati": agg[0]["n"] if agg else 0,
+            "titoli_aperti": n_aperti,
+        }
+
+    priv = await aggrega(privati)
+    az = await aggrega(aziende)
+    tot = {
+        "premi_lordi": round(priv["premi_lordi"] + az["premi_lordi"], 2),
+        "provvigioni": round(priv["provvigioni"] + az["provvigioni"], 2),
+        "polizze_count": priv["polizze_count"] + az["polizze_count"],
+        "titoli_incassati": priv["titoli_incassati"] + az["titoli_incassati"],
+        "titoli_aperti": priv["titoli_aperti"] + az["titoli_aperti"],
+    }
+    return {"anagrafica": ana, "privato": priv, "azienda": az, "totale": tot,
+            "ids_privati": privati, "ids_aziende": aziende}
+
+
+@api.post("/anagrafiche/tags/auto-genera")
+async def auto_genera_tags(user=Depends(require_user("admin", "collaboratore"))):
+    """Genera tag automatici per tutte le anagrafiche.
+
+    Tag generati:
+      - genitore_con_figli_minori (se ha relazioni 'figlio' con anagrafiche con data_nascita < 18 anni fa)
+      - gen_anni_XX (es. gen_anni_70 per nati 1970-1979, ...)
+      - cliente_attivo (almeno 1 polizza attiva)
+      - prospect (nessuna polizza)
+      - top_cliente (>= 4 polizze attive)
+    """
+    from datetime import date
+    today = date.today()
+    aggiornate = 0
+    cursor = db.anagrafiche.find({}, {"_id": 0})
+    async for ana in cursor:
+        existing_manual = [t for t in (ana.get("tags") or []) if not (t.startswith("gen_") or t in (
+            "genitore_con_figli_minori", "cliente_attivo", "prospect", "top_cliente",
+            "anziano_over_65", "giovane_under_30"))]
+        auto = []
+        # generazione
+        if ana.get("data_nascita"):
+            try:
+                d = date.fromisoformat(ana["data_nascita"])
+                eta = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
+                decade = (d.year // 10) * 10
+                auto.append(f"gen_anni_{str(decade)[-2:]}")
+                if eta >= 65: auto.append("anziano_over_65")
+                if eta < 30: auto.append("giovane_under_30")
+            except Exception:
+                pass
+        # genitore con figli minori
+        for rel in (ana.get("parente_di") or []):
+            if rel.get("relazione") != "figlio": continue
+            child = await db.anagrafiche.find_one({"id": rel.get("anagrafica_id")}, {"_id": 0, "data_nascita": 1})
+            if not child or not child.get("data_nascita"): continue
+            try:
+                cd = date.fromisoformat(child["data_nascita"])
+                eta_f = today.year - cd.year
+                if eta_f < 18:
+                    auto.append("genitore_con_figli_minori"); break
+            except Exception:
+                continue
+        # stato cliente
+        n_attive = await db.polizze.count_documents({"contraente_id": ana["id"], "stato": "attiva"})
+        if n_attive == 0:
+            auto.append("prospect")
+        elif n_attive >= 4:
+            auto.append("top_cliente"); auto.append("cliente_attivo")
+        else:
+            auto.append("cliente_attivo")
+        nuovi_tags = sorted(set(existing_manual + auto))
+        await db.anagrafiche.update_one({"id": ana["id"]}, {"$set": {"tags": nuovi_tags, "updated_at": _now_iso()}})
+        aggiornate += 1
+    await log_attivita(user, "auto_tag", "anagrafica", None, f"Tag auto generati su {aggiornate} anagrafiche")
+    return {"aggiornate": aggiornate}
+
+
+@api.get("/anagrafiche/tags/elenco")
+async def elenco_tags(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Lista tag distinti con conteggio."""
+    pipeline = [
+        {"$unwind": "$tags"},
+        {"$group": {"_id": "$tags", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    res = await db.anagrafiche.aggregate(pipeline).to_list(500)
+    return [{"tag": r["_id"], "count": r["count"]} for r in res]
+
+
+@api.post("/newsletter/invia")
+async def newsletter_invia(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Crea email in coda per tutti i clienti che matchano i tag (any-of).
+
+    body: { tags: [...], oggetto, corpo }
+    """
+    tags = body.get("tags") or []
+    oggetto = body.get("oggetto", "").strip()
+    corpo = body.get("corpo", "").strip()
+    if not oggetto or not corpo:
+        raise HTTPException(400, "Oggetto e corpo richiesti")
+    flt = {"tags": {"$in": tags}} if tags else {}
+    flt["email"] = {"$nin": ["", None]}
+    targets = await db.anagrafiche.find(flt, {"_id": 0, "id": 1, "email": 1, "ragione_sociale": 1}).to_list(10000)
+    creati = 0
+    for t in targets:
+        if not t.get("email"): continue
+        e = EmailMessaggio(
+            destinatario_anagrafica_id=t["id"], destinatario_email=t["email"],
+            oggetto=oggetto, corpo=corpo.replace("{{nome}}", t.get("ragione_sociale", "")),
+            template="newsletter", stato="in_coda", autore_id=user["id"],
+        )
+        await db.email.insert_one(e.model_dump())
+        creati += 1
+    await log_attivita(user, "newsletter", "email", None,
+                       f"Newsletter su tags {tags}: {creati} email create")
+    return {"email_create": creati, "tags": tags}
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    items = await db.diario.find({"anagrafica_id": aid}, {"_id": 0}).sort("data_evento", -1).to_list(500)
+    return items
+
+
 @api.get("/anagrafiche/{aid}/diario")
 async def list_diario(aid: str, user=Depends(current_user)):
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:

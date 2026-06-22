@@ -130,6 +130,8 @@ class Anagrafica(BaseDoc):
     data_consenso_privacy: Optional[str] = None
     consenso_commerciale: bool = False
     consenso_profilazione: bool = False
+    # tag automatici/manuali per segmentazione e newsletter
+    tags: List[str] = Field(default_factory=list)
     # collegamenti esterni dall'import
     id_anagrafica_exp: Optional[str] = None
     compagnia_id: Optional[str] = None
