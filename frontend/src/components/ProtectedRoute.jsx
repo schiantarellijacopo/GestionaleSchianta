@@ -13,11 +13,7 @@ export default function ProtectedRoute({ children, roles }) {
     }
     if (!user) return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
     if (roles && !roles.includes(user.role)) {
-        return (
-            <div className="p-10 text-center text-slate-600">
-                Accesso negato per il ruolo <b>{user.role}</b>.
-            </div>
-        );
+        return <Navigate to="/" replace />;
     }
     return children;
 }

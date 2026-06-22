@@ -746,10 +746,16 @@ async def stats_dashboard(user=Depends(current_user)):
     })
     sinistri_aperti = await db.sinistri.count_documents({**flt, "stato": {"$in": ["aperto", "in_istruttoria"]}})
 
-    # Premi incassati (anno corrente)
+    # Premi incassati (anno corrente) - filtra per cliente se necessario
     anno = today[:4]
+    pol_match = {}
+    if user["role"] == "cliente" and user.get("anagrafica_id"):
+        cli_pol_ids = [p["id"] async for p in db.polizze.find(
+            {"contraente_id": user["anagrafica_id"]}, {"_id": 0, "id": 1})]
+        pol_match = {"polizza_id": {"$in": cli_pol_ids}}
+
     pipeline = [
-        {"$match": {"stato": "incassato", "data_incasso": {"$regex": f"^{anno}"}}},
+        {"$match": {**pol_match, "stato": "incassato", "data_incasso": {"$regex": f"^{anno}"}}},
         {"$group": {"_id": None, "totale": {"$sum": "$importo_lordo"}}},
     ]
     cur = db.titoli.aggregate(pipeline)
@@ -778,7 +784,7 @@ async def stats_dashboard(user=Depends(current_user)):
             y -= 1
         mese = f"{y}-{m:02d}"
         agg = await db.titoli.aggregate([
-            {"$match": {"stato": "incassato", "data_incasso": {"$regex": f"^{mese}"}}},
+            {"$match": {**pol_match, "stato": "incassato", "data_incasso": {"$regex": f"^{mese}"}}},
             {"$group": {"_id": None, "totale": {"$sum": "$importo_lordo"}}},
         ]).to_list(1)
         sei_mesi.append({"mese": mese, "totale": round(agg[0]["totale"], 2) if agg else 0.0})

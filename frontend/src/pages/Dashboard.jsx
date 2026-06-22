@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtEur, fmtNum } from "@/lib/api";
 import { PageHeader } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/contexts/AuthContext";
 import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
     PieChart, Pie, Cell, Legend,
@@ -24,6 +25,7 @@ function Stat({ label, value, icon, hint, testid }) {
 }
 
 export default function Dashboard() {
+    const { user } = useAuth();
     const [data, setData] = useState(null);
     const [err, setErr] = useState("");
 
@@ -33,6 +35,8 @@ export default function Dashboard() {
 
     if (err) return <div className="text-rose-600">{err}</div>;
     if (!data) return <div className="text-slate-400">Caricamento dashboard...</div>;
+
+    const isClient = user?.role === "cliente";
 
     return (
         <div data-testid="dashboard-page">
@@ -48,7 +52,9 @@ export default function Dashboard() {
                 <Stat label="In scadenza (60gg)" value={fmtNum(data.polizze_in_scadenza)} icon={<CalendarClock size={18} />} testid="stat-scadenze" />
                 <Stat label="Sinistri aperti" value={fmtNum(data.sinistri_aperti)} icon={<AlertTriangle size={18} />} testid="stat-sinistri" />
                 <Stat label="Premi anno" value={fmtEur(data.premi_anno_corrente)} icon={<Wallet size={18} />} testid="stat-premi" />
-                <Stat label="Crescita" value="+12%" hint="vs anno scorso" icon={<TrendingUp size={18} />} testid="stat-crescita" />
+                {!isClient && (
+                    <Stat label="Crescita" value="+12%" hint="vs anno scorso" icon={<TrendingUp size={18} />} testid="stat-crescita" />
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
