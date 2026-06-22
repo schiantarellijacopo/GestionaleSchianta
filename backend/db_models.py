@@ -125,7 +125,62 @@ class Polizza(BaseDoc):
     provvigioni: float = 0.0
     note: Optional[str] = None
     targa: Optional[str] = None
-    collaboratore_id: Optional[str] = None  # utente collaboratore/dipendente referente
+    collaboratore_id: Optional[str] = None
+    # estensione campi (richiesta utente - dettaglio polizza completo)
+    sostituisce_polizza: Optional[str] = None
+    presa_in_carico: Optional[str] = None
+    prossima_quietanza: Optional[str] = None
+    scadenza_copertura: Optional[str] = None
+    termini_mora_giorni: Optional[int] = 15
+    termini_disdetta_giorni: Optional[int] = 0
+    tacito_rinnovo: bool = False
+    mandato: Optional[str] = None
+    iter_status: Optional[str] = None
+    documenti_inviati: bool = False
+    oggetto_assicurato: Optional[str] = None
+    assicurato_oggetto_nome: Optional[str] = None  # es. "BLUE DREAM SPA"
+    # dati veicolo (per polizze RCA)
+    veicolo_marca: Optional[str] = None
+    veicolo_modello: Optional[str] = None
+    veicolo_tipo: Optional[str] = None
+    veicolo_alimentazione: Optional[str] = None
+    veicolo_uso: Optional[str] = None
+    veicolo_data_immatricolazione: Optional[str] = None
+    veicolo_cilindrata: Optional[int] = None
+    veicolo_cv_fiscali: Optional[int] = None
+    veicolo_kw: Optional[float] = None
+    veicolo_quintali: Optional[float] = None
+    veicolo_posti: Optional[int] = None
+    veicolo_gancio_traino: bool = False
+    veicolo_targa_rimorchio: Optional[str] = None
+    # dati polizza/contratto
+    tipo_tariffa: Optional[str] = None
+    bm_provenienza: Optional[str] = None
+    bm_assegnata: Optional[str] = None
+    bm_assegnata_cu: Optional[str] = None
+    pejus: Optional[float] = None
+    franchigia: float = 0.0
+    valore_veicolo: float = 0.0
+    valore_residuo_veicolo: float = 0.0
+    valore_accessori: float = 0.0
+    guida_esperta: bool = False
+    guida_esclusiva: bool = False
+    rinuncia_rivalsa: bool = False
+    intestatario: Optional[str] = None
+    provincia_intestatario: Optional[str] = None
+    massimali: Optional[str] = None
+    # garanzie e premi (struttura semplice JSON)
+    garanzie: List[dict] = Field(default_factory=list)
+    # [{garanzia, netto, accessori, imposte, ssn, lordo}]
+    addizionali: List[dict] = Field(default_factory=list)
+    diritti: float = 0.0
+    # provvigioni dettagliate
+    provv_struttura: float = 0.0
+    provvigioni_operatori: List[dict] = Field(default_factory=list)
+    # [{operatore_id, operatore_nome, provvigione, provvigione_addizionali}]
+    note_interne: Optional[str] = None
+    da_restituire: Optional[str] = None
+    caratteristiche: Optional[str] = None
     # collegamenti import
     id_polizza_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
@@ -147,7 +202,11 @@ class Titolo(BaseDoc):
     imposte: float = 0.0
     provvigioni: float = 0.0
     data_incasso: Optional[str] = None
-    coperto_fino_a: Optional[str] = None  # data fino a cui il rischio è coperto anche se non pagato
+    titolo_coperto: bool = False
+    data_copertura: Optional[str] = None
+    data_competenza: Optional[str] = None
+    data_contabile: Optional[str] = None
+    scadenza_mora: Optional[str] = None
     mezzo_pagamento: Optional[str] = None
     conto_cassa_id: Optional[str] = None
     id_titolo_exp: Optional[str] = None
@@ -180,7 +239,7 @@ class Sinistro(BaseDoc):
 MovimentoTipo = Literal["entrata", "uscita"]
 MovimentoCategoria = Literal[
     "incasso_premio", "pagamento_compagnia", "provvigioni",
-    "rimborso_cliente", "spese_amministrative", "anticipo", "altro"
+    "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto", "altro"
 ]
 
 
@@ -334,6 +393,9 @@ class MessaggioChat(BaseDoc):
     destinatario_id: str
     destinatario_nome: str
     testo: str
+    allegato_id: Optional[str] = None
+    allegato_nome: Optional[str] = None
+    allegato_content_type: Optional[str] = None
     letto: bool = False
     letto_at: Optional[str] = None
 

@@ -135,6 +135,32 @@ async def list_users(user=Depends(require_user("admin", "collaboratore"))):
     return users
 
 
+@api.put("/auth/users/{uid}")
+async def update_user(uid: str, body: dict, user=Depends(require_user("admin"))):
+    body.pop("password_hash", None)
+    body.pop("id", None)
+    if body.get("password"):
+        body["password_hash"] = hash_password(body.pop("password"))
+    body["updated_at"] = _now_iso()
+    res = await db.users.update_one({"id": uid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Utente non trovato")
+    await log_attivita(user, "update", "user", uid)
+    u = await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+    return u
+
+
+@api.delete("/auth/users/{uid}")
+async def delete_user(uid: str, user=Depends(require_user("admin"))):
+    if uid == user["id"]:
+        raise HTTPException(400, "Non puoi eliminare te stesso")
+    res = await db.users.delete_one({"id": uid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Utente non trovato")
+    await log_attivita(user, "delete", "user", uid)
+    return {"ok": True}
+
+
 # ============================================================
 # COMPAGNIE
 # ============================================================
@@ -1665,24 +1691,130 @@ async def chat_messaggi(con: str, limit: int = 200, user=Depends(current_user)):
 
 
 @api.post("/chat/messaggi", status_code=201)
-async def chat_invia(body: dict, user=Depends(current_user)):
-    dest_id = body.get("destinatario_id")
-    testo = body.get("testo", "").strip()
-    if not dest_id or not testo:
-        raise HTTPException(400, "destinatario_id e testo richiesti")
+async def chat_invia(
+    destinatario_id: str = Query(None),
+    testo: str = Query(""),
+    file: Optional[UploadFile] = File(None),
+    body: Optional[dict] = None,
+    user=Depends(current_user),
+):
+    # supporta sia JSON (body) che multipart (con file)
+    if body is None:
+        try:
+            from fastapi import Request as _Req
+            pass
+        except Exception:
+            pass
+    # multipart: prendi destinatario_id e testo dai query/form param
+    dest_id = destinatario_id or (body or {}).get("destinatario_id")
+    txt = testo or (body or {}).get("testo", "")
+    if not dest_id:
+        raise HTTPException(400, "destinatario_id richiesto")
+    if not txt.strip() and not file:
+        raise HTTPException(400, "Testo o allegato richiesto")
     dest = await db.users.find_one({"id": dest_id}, {"_id": 0})
     if not dest:
         raise HTTPException(404, "Destinatario non trovato")
-    # cliente può scrivere solo a dipendenti
     if user["role"] == "cliente" and dest.get("role") == "cliente":
         raise HTTPException(403, "I clienti possono scrivere solo allo staff")
+
+    allegato_id = allegato_nome = allegato_ct = None
+    if file:
+        data = await file.read()
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "File troppo grande (max 25 MB)")
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin"
+        file_id = _uid()
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/chat/{user['id']}/{file_id}.{ext}"
+        ct = file.content_type or obj_storage.mime_for(file.filename or "")
+        try:
+            result = obj_storage.put_object(path, data, ct)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        al = Allegato(
+            entita_tipo="anagrafica", entita_id=dest_id,  # uso anagrafica come fallback
+            nome_file=file.filename, storage_path=result["path"],
+            content_type=ct, size=result.get("size", len(data)),
+            descrizione=f"Allegato chat tra {user.get('name')} e {dest.get('name')}",
+            autore_id=user["id"],
+        )
+        await db.allegati.insert_one(al.model_dump())
+        allegato_id = al.id
+        allegato_nome = file.filename
+        allegato_ct = ct
+
     msg = MessaggioChat(
         mittente_id=user["id"], mittente_nome=user.get("name", ""),
         destinatario_id=dest_id, destinatario_nome=dest.get("name", ""),
-        testo=testo,
+        testo=txt, allegato_id=allegato_id, allegato_nome=allegato_nome,
+        allegato_content_type=allegato_ct,
     )
     await db.chat.insert_one(msg.model_dump())
     return msg.model_dump()
+
+
+@api.get("/notifiche/sommario")
+async def notifiche_sommario(user=Depends(current_user)):
+    """Aggrega notifiche per il badge in sidebar."""
+    chat_unread = await db.chat.count_documents({"destinatario_id": user["id"], "letto": False})
+    res = {"chat": chat_unread, "totale": chat_unread}
+    if user["role"] in ("admin", "collaboratore", "dipendente"):
+        from datetime import date, timedelta
+        oggi = date.today().isoformat()
+        in_scad = (date.today() + timedelta(days=15)).isoformat()
+        polizze_scad = await db.polizze.count_documents({
+            "stato": "attiva", "scadenza": {"$gte": oggi, "$lte": in_scad},
+        })
+        titoli_scaduti = await db.titoli.count_documents({
+            "stato": {"$in": ["da_incassare", "insoluto"]}, "scadenza": {"$lt": oggi},
+        })
+        email_coda = await db.email.count_documents({"stato": "in_coda"})
+        sinistri_aperti = await db.sinistri.count_documents({"stato": "aperto"})
+        res["polizze_scadenza"] = polizze_scad
+        res["titoli_scaduti"] = titoli_scaduti
+        res["email_coda"] = email_coda
+        res["sinistri_aperti"] = sinistri_aperti
+        res["totale"] = chat_unread + polizze_scad + titoli_scaduti + sinistri_aperti
+    return res
+
+
+@api.get("/search")
+async def search_globale(q: str, limit: int = 8, user=Depends(current_user)):
+    """Ricerca rapida cross-entità per la barra in alto."""
+    if not q or len(q.strip()) < 2:
+        return {"anagrafiche": [], "polizze": [], "sinistri": [], "titoli": []}
+    qrx = {"$regex": q.strip(), "$options": "i"}
+    is_client = user["role"] == "cliente"
+    ana_filter = {"id": user.get("anagrafica_id")} if is_client else {
+        "$or": [{"ragione_sociale": qrx}, {"codice_fiscale": qrx}, {"partita_iva": qrx}, {"email": qrx}]
+    }
+    anas = await db.anagrafiche.find(
+        ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1, "comune": 1}
+    ).limit(limit).to_list(limit)
+
+    pol_filter = {"$or": [{"numero_polizza": qrx}, {"targa": qrx}]}
+    if is_client:
+        pol_filter = {"$and": [pol_filter, {"contraente_id": user.get("anagrafica_id")}]}
+    polizze = await db.polizze.find(
+        pol_filter, {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "stato": 1, "targa": 1, "contraente_id": 1}
+    ).limit(limit).to_list(limit)
+    # arricchisci con contraente
+    ana_ids = [p.get("contraente_id") for p in polizze if p.get("contraente_id")]
+    ana_map = {a["id"]: a["ragione_sociale"] async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    for p in polizze:
+        p["contraente_nome"] = ana_map.get(p.get("contraente_id", ""))
+
+    sin_filter = {"numero_sinistro": qrx}
+    if is_client:
+        sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
+    sinistri = await db.sinistri.find(
+        sin_filter, {"_id": 0, "id": 1, "numero_sinistro": 1, "polizza_id": 1, "stato": 1, "data_avvenimento": 1}
+    ).limit(limit).to_list(limit)
+
+    return {
+        "anagrafiche": anas, "polizze": polizze, "sinistri": sinistri, "titoli": [],
+    }
 
 
 @api.get("/chat/unread")

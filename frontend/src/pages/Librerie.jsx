@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -19,6 +19,8 @@ const SECTIONS = [
     { key: "conti-cassa", label: "Conti cassa / Canali", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
+    { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
+    { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
 ];
 
 export default function Librerie() {
@@ -153,17 +155,71 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
         );
     }
     // rami
+    if (section.key === "rami") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Codice</th><th>Nome</th><th>Descrizione</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((r) => (
+                        <tr key={r.id}>
+                            <td className="num font-medium">{r.codice}</td>
+                            <td>{r.nome}</td>
+                            <td className="text-xs text-slate-500">{r.descrizione || ""}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(r)} onDelete={() => onDelete(r.id)} label="ramo" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    if (section.key === "compagnie") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Codice</th><th>Ragione sociale</th><th>Referente</th><th>Email</th><th>Trattiene Provv.</th><th>Attiva</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((c) => (
+                        <tr key={c.id}>
+                            <td className="num text-xs">{c.codice}</td>
+                            <td className="font-medium">{c.ragione_sociale}</td>
+                            <td>{c.referente || "-"}</td>
+                            <td className="text-xs">{c.email || "-"}</td>
+                            <td>{c.trattiene_provvigioni !== false ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td>{c.attiva ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="compagnia" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    // utenti
+    const ROLE_COLORS = {
+        admin: "badge-danger", collaboratore: "badge-info",
+        dipendente: "badge-success", cliente: "badge-neutral",
+    };
     return (
         <table className="tbl w-full">
-            <thead><tr><th>Codice</th><th>Nome</th><th>Descrizione</th><th></th></tr></thead>
+            <thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Anagrafica collegata</th><th></th></tr></thead>
             <tbody>
-                {list.map((r) => (
-                    <tr key={r.id}>
-                        <td className="num font-medium">{r.codice}</td>
-                        <td>{r.nome}</td>
-                        <td className="text-xs text-slate-500">{r.descrizione || ""}</td>
+                {list.map((u) => (
+                    <tr key={u.id}>
+                        <td className="font-medium flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-semibold">
+                                {(u.name || "?").charAt(0).toUpperCase()}
+                            </div>
+                            {u.name}
+                        </td>
+                        <td className="text-xs">{u.email}</td>
+                        <td><span className={`badge ${ROLE_COLORS[u.role] || "badge-neutral"} inline-flex items-center gap-1`}>
+                            <Shield size={10} /> {u.role}
+                        </span></td>
+                        <td className="text-xs text-slate-500 num">{u.anagrafica_id ? u.anagrafica_id.slice(0, 8) : "-"}</td>
                         <td className="text-right">
-                            <RowActions onEdit={() => onEdit(r)} onDelete={() => onDelete(r.id)} label="ramo" />
+                            <RowActions onEdit={() => onEdit(u)} onDelete={() => onDelete(u.id)} label="utente" />
                         </td>
                     </tr>
                 ))}
@@ -177,6 +233,8 @@ const SECTION_FORMS = {
     "conti-cassa": ContoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
+    "compagnie": CompagniaForm,
+    "utenti": UtenteForm,
 };
 
 function GenericForm({ section, editing, onClose, fields, defaults }) {
@@ -319,6 +377,110 @@ function RamoForm({ section, editing, onClose }) {
                     <div><Label>Nome *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
+            </>
+        )}
+    />;
+}
+
+function CompagniaForm({ section, editing, onClose }) {
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{
+            codice: "", ragione_sociale: "", referente: "", email: "", telefono: "",
+            sito_web: "", mandato: "", trattiene_provvigioni: true, attiva: true,
+        }}
+        fields={(f, set) => (
+            <>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Codice *</Label><Input value={f.codice || ""} onChange={(e) => set("codice", e.target.value.toUpperCase())} /></div>
+                    <div><Label>Ragione sociale *</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} /></div>
+                    <div><Label>Mandato</Label><Input value={f.mandato || ""} onChange={(e) => set("mandato", e.target.value)} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Email</Label><Input value={f.email || ""} onChange={(e) => set("email", e.target.value)} /></div>
+                    <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
+                </div>
+                <div><Label>Sito web</Label><Input value={f.sito_web || ""} onChange={(e) => set("sito_web", e.target.value)} /></div>
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            id="trattiene_provv"
+                            checked={f.trattiene_provvigioni !== false}
+                            onChange={(e) => set("trattiene_provvigioni", e.target.checked)}
+                        />
+                        <Label htmlFor="trattiene_provv" className="cursor-pointer font-medium">
+                            Trattengo le provvigioni all&apos;incasso
+                        </Label>
+                    </div>
+                    <div className="text-xs text-amber-800 mt-1.5">
+                        {f.trattiene_provvigioni !== false
+                            ? "Verso alla compagnia il PREMIO meno le provvigioni. Saldo cassa compagnia = -(premio - provvigioni)."
+                            : "Verso il premio INTERO alla compagnia. Le provvigioni mi vengono accreditate a parte. Saldo cassa = -premio + provvigioni a credito."}
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <input type="checkbox" id="comp_attiva" checked={f.attiva !== false} onChange={(e) => set("attiva", e.target.checked)} />
+                    <Label htmlFor="comp_attiva" className="cursor-pointer">Attiva</Label>
+                </div>
+            </>
+        )}
+    />;
+}
+
+function UtenteForm({ section, editing, onClose }) {
+    const [anagrafiche, setAnagrafiche] = useState([]);
+    useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ name: "", email: "", password: "", role: "dipendente", anagrafica_id: null }}
+        fields={(f, set) => (
+            <>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
+                    <div><Label>Email *</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
+                </div>
+                <div>
+                    <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : "Password *"}</Label>
+                    <Input
+                        type="password"
+                        value={f.password || ""}
+                        onChange={(e) => set("password", e.target.value)}
+                        placeholder={editing ? "•••••••• (invariata)" : ""}
+                    />
+                </div>
+                <div>
+                    <Label>Ruolo *</Label>
+                    <Select value={f.role || "dipendente"} onValueChange={(v) => set("role", v)}>
+                        <SelectTrigger data-testid="utente-role"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
+                            <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
+                            <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
+                            <SelectItem value="cliente">Cliente - vede solo i propri dati</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                {f.role === "cliente" && (
+                    <div>
+                        <Label>Anagrafica cliente collegata *</Label>
+                        <Select value={f.anagrafica_id || ""} onValueChange={(v) => set("anagrafica_id", v)}>
+                            <SelectTrigger><SelectValue placeholder="Seleziona anagrafica..." /></SelectTrigger>
+                            <SelectContent>
+                                {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <div className="text-xs text-slate-500 mt-1">Il cliente vedrà solo le polizze/sinistri legati a questa anagrafica.</div>
+                    </div>
+                )}
+                <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1">
+                    <div className="font-semibold text-slate-700 mb-1">Livelli di visibilità:</div>
+                    <div><span className="badge badge-danger">admin</span> Accesso completo, gestione utenti, eliminazioni</div>
+                    <div><span className="badge badge-info">collaboratore</span> Vede e gestisce tutto, no eliminazioni critiche</div>
+                    <div><span className="badge badge-success">dipendente</span> Operatività su clienti/polizze/sinistri, no librerie</div>
+                    <div><span className="badge badge-neutral">cliente</span> Vede solo le proprie polizze e i propri sinistri</div>
+                </div>
             </>
         )}
     />;
