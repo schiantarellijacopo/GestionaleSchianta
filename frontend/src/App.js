@@ -26,6 +26,7 @@ import Corsi from "@/pages/Corsi";
 import Calendario from "@/pages/Calendario";
 import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
 import TitoliSospesi from "@/pages/TitoliSospesi";
+import Marketing from "@/pages/Marketing";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -55,6 +56,14 @@ function App() {
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
                                         <TitoliSospesi />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/marketing"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <Marketing />
                                     </ProtectedRoute>
                                 }
                             />

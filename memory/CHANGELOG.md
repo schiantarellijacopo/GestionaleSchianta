@@ -2,6 +2,21 @@
 
 ## 2026-06-22 — fork 2 (sessione corrente)
 
+### Marketing + OCR visura camerale + CI in documenti
+- **OCR Carta Identità** ora accetta param opzionale `anagrafica_id`: se passato, salva il file originale come documento `carta_identita` nella scheda cliente (insieme all'estrazione dati)
+- **Nuovo OCR Visura Camerale** (`ocr_visura.py` + `/api/utility/ocr-visura-camerale`) via Gemini Vision: estrae ragione sociale, P.IVA, CF ditta, REA, capitale sociale, sede, oggetto sociale, codice ATECO, stato attività, codice ateco, telefono, PEC, email, + array completo `amministratori` con cognome/nome/CF/data nascita/comune nascita/indirizzo/ruolo/poteri/data nomina
+- **Form Nuova Anagrafica**: toolbar OCR dinamica — su persona fisica carica CI, su persona giuridica carica visura camerale. Sul submit:
+  - File CI → salvato come documento anagrafica
+  - File visura → salvato come documento anagrafica
+  - Per ogni amministratore estratto → crea automaticamente la sua anagrafica persona fisica con nota "Ruolo nella ditta X: amministratore"
+- **Pagina Marketing** (`/marketing`) con 3 tab:
+  - **Newsletter**: editor email + selezione multi-tag (chip cliccabili) + preview destinatari count + invio
+  - **Campagne (Pipeline)**: griglia pipeline marketing con badge counts (fasi/lead)
+  - **Tag clienti**: bottone "Auto-genera tag su tutti i clienti" + statistiche tag con conteggi
+- **Sidebar**: nuova voce "Marketing" sotto Strumenti
+
+
+
 ### Pipeline custom + sezione marketing
 - Modelli `PipelineCustom` + `PipelineCard` + `PipelineColonna`
 - CRUD pipeline: `/api/pipelines`, `/api/pipelines/{pid}` (PUT/DELETE) + colonne (add/edit/delete con spostamento card) + cards

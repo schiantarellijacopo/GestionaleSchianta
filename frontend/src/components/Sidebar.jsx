@@ -5,7 +5,7 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    GripVertical, Settings2, Check,
+    GripVertical, Settings2, Check, Megaphone,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -31,6 +31,7 @@ const ALL_MENU_ITEMS = [
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
+    { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "chat", path: "/chat", icon: "MessageCircle", label: "Chat", section: "strumenti", roles: null },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
@@ -43,7 +44,7 @@ const ALL_MENU_ITEMS = [
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
-    MessageCircle, Wallet, Calendar, Coins, TimerReset,
+    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone,
 };
 
 const SECTION_LABELS = {

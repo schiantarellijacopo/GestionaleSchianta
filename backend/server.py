@@ -672,16 +672,22 @@ async def utility_geocoding(body: dict, user=Depends(current_user)):
 @api.post("/utility/ocr-carta-identita")
 async def ocr_carta_identita(
     file: UploadFile = File(...),
+    anagrafica_id: Optional[str] = Form(None),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """OCR di una carta d'identità italiana. Restituisce dati anagrafici estratti."""
+    """OCR di una carta d'identità italiana. Restituisce dati anagrafici estratti.
+
+    Se anagrafica_id è fornito, salva ANCHE il file come documento 'carta_identita'
+    nella scheda cliente.
+    """
     import ocr_ci
     contents = await file.read()
     if len(contents) > 8 * 1024 * 1024:
         raise HTTPException(400, "File troppo grande (max 8 MB)")
     ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    file_for_ocr = contents
+    ct_for_ocr = ct
     if ct == "application/pdf":
-        # converti la prima pagina del PDF in immagine (usa pdfplumber + Pillow se necessario)
         try:
             import pdfplumber
             from io import BytesIO
@@ -691,18 +697,110 @@ async def ocr_carta_identita(
                 img = pdf.pages[0].to_image(resolution=200).original
                 out = BytesIO()
                 img.save(out, format="JPEG", quality=85)
-                contents = out.getvalue()
-                ct = "image/jpeg"
+                file_for_ocr = out.getvalue()
+                ct_for_ocr = "image/jpeg"
         except Exception as e:
             raise HTTPException(400, f"Errore conversione PDF: {e}")
     elif not ct.startswith("image/"):
         raise HTTPException(400, "Formato non supportato (richiesto JPG/PNG/PDF)")
     try:
-        data = await ocr_ci.estrai_dati_ci(contents, ct)
+        data = await ocr_ci.estrai_dati_ci(file_for_ocr, ct_for_ocr)
     except Exception as e:
         raise HTTPException(503, f"Errore OCR: {e}")
-    await log_attivita(user, "ocr", "carta_identita", None,
+
+    # Se collegato a un'anagrafica, salva il file originale come documento
+    documento_url = None
+    if anagrafica_id:
+        ext = (file.filename or "ci.bin").rsplit(".", 1)[-1].lower() or "bin"
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/carta_identita_{_uid()}.{ext}"
+        try:
+            result = obj_storage.put_object(path, contents, ct)
+            documento_url = f"/api/storage/{result['path']}"
+            doc_entry = {
+                "url": documento_url, "storage_path": result["path"],
+                "nome_file": file.filename, "mime": ct,
+                "size_kb": round(len(contents) / 1024, 1),
+                "data_caricamento": _now_iso(),
+                "scadenza": data.get("data_scadenza"),
+                "caricato_da": user.get("id"),
+            }
+            await db.anagrafiche.update_one(
+                {"id": anagrafica_id},
+                {"$set": {"documenti.carta_identita": doc_entry, "updated_at": _now_iso()}},
+            )
+        except Exception:
+            pass  # OCR ha successo anche se l'upload fallisce
+
+    await log_attivita(user, "ocr", "carta_identita", anagrafica_id,
                        f"OCR CI: {data.get('cognome')} {data.get('nome')}")
+    if documento_url:
+        data["_documento_salvato"] = documento_url
+    return data
+
+
+@api.post("/utility/ocr-visura-camerale")
+async def ocr_visura_camerale(
+    file: UploadFile = File(...),
+    anagrafica_id: Optional[str] = Form(None),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """OCR di una visura camerale. Estrae dati ditta + amministratori.
+
+    Se anagrafica_id è fornito, salva il file come documento 'visura_camerale'.
+    Gli amministratori vengono restituiti per importazione anagrafiche legate
+    (decisione lato frontend).
+    """
+    import ocr_visura
+    contents = await file.read()
+    if len(contents) > 15 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 15 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    file_for_ocr = contents
+    ct_for_ocr = ct
+    if ct == "application/pdf":
+        try:
+            import pdfplumber
+            from io import BytesIO
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                if not pdf.pages:
+                    raise HTTPException(400, "PDF vuoto")
+                # per visure camerali analizziamo solo la prima pagina (sintesi)
+                img = pdf.pages[0].to_image(resolution=200).original
+                out = BytesIO()
+                img.save(out, format="JPEG", quality=85)
+                file_for_ocr = out.getvalue()
+                ct_for_ocr = "image/jpeg"
+        except Exception as e:
+            raise HTTPException(400, f"Errore conversione PDF: {e}")
+    elif not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
+    try:
+        data = await ocr_visura.estrai_dati_visura(file_for_ocr, ct_for_ocr)
+    except Exception as e:
+        raise HTTPException(503, f"Errore OCR visura: {e}")
+
+    # Salva il file come documento dell'azienda
+    if anagrafica_id:
+        ext = (file.filename or "visura.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/visura_camerale_{_uid()}.{ext}"
+        try:
+            result = obj_storage.put_object(path, contents, ct)
+            doc_entry = {
+                "url": f"/api/storage/{result['path']}", "storage_path": result["path"],
+                "nome_file": file.filename, "mime": ct,
+                "size_kb": round(len(contents) / 1024, 1),
+                "data_caricamento": _now_iso(),
+                "caricato_da": user.get("id"),
+            }
+            await db.anagrafiche.update_one(
+                {"id": anagrafica_id},
+                {"$set": {"documenti.visura_camerale": doc_entry, "updated_at": _now_iso()}},
+            )
+        except Exception:
+            pass
+
+    await log_attivita(user, "ocr", "visura_camerale", anagrafica_id,
+                       f"OCR visura: {data.get('ragione_sociale')} - {len(data.get('amministratori') or [])} amministratori")
     return data
 
 

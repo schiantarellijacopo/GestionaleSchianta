@@ -281,25 +281,64 @@ function NuovaAnagraficaDialog({ onClose }) {
             const r = await api.post("/utility/ocr-carta-identita", fd,
                 { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 });
             const d = r.data;
-            setForm((f) => ({
-                ...f,
+            setForm((p) => ({
+                ...p,
                 tipo: "persona_fisica",
-                cognome: (d.cognome || f.cognome || "").toUpperCase(),
-                nome: (d.nome || f.nome || "").toUpperCase(),
-                sesso: d.sesso || f.sesso,
-                data_nascita: d.data_nascita || f.data_nascita,
-                comune_nascita: (d.comune_nascita || f.comune_nascita || "").toUpperCase(),
-                provincia_nascita: d.provincia_nascita || f.provincia_nascita,
-                codice_fiscale: (d.codice_fiscale || f.codice_fiscale || "").toUpperCase(),
-                numero_documento: (d.numero_documento || f.numero_documento || "").toUpperCase(),
-                data_rilascio: d.data_rilascio || f.data_rilascio,
-                data_scadenza: d.data_scadenza || f.data_scadenza,
-                comune_emissione: (d.comune_emissione || f.comune_emissione || "").toUpperCase(),
-                indirizzo: (d.indirizzo_residenza || f.indirizzo || "").toUpperCase(),
-                comune: (d.comune_residenza || f.comune || "").toUpperCase(),
+                cognome: (d.cognome || p.cognome || "").toUpperCase(),
+                nome: (d.nome || p.nome || "").toUpperCase(),
+                sesso: d.sesso || p.sesso,
+                data_nascita: d.data_nascita || p.data_nascita,
+                comune_nascita: (d.comune_nascita || p.comune_nascita || "").toUpperCase(),
+                provincia_nascita: d.provincia_nascita || p.provincia_nascita,
+                codice_fiscale: (d.codice_fiscale || p.codice_fiscale || "").toUpperCase(),
+                numero_documento: (d.numero_documento || p.numero_documento || "").toUpperCase(),
+                data_rilascio: d.data_rilascio || p.data_rilascio,
+                data_scadenza: d.data_scadenza || p.data_scadenza,
+                comune_emissione: (d.comune_emissione || p.comune_emissione || "").toUpperCase(),
+                indirizzo: (d.indirizzo_residenza || p.indirizzo || "").toUpperCase(),
+                comune: (d.comune_residenza || p.comune || "").toUpperCase(),
+                _ci_file_da_salvare: file,  // verrà ricaricato dopo create anagrafica per salvare in documenti
             }));
             toast.success("Carta d'identità riconosciuta — verifica i campi");
         } catch (e) { toast.error("OCR fallito: " + (e.response?.data?.detail || e.message)); }
+        finally { setOcrLoading(false); }
+    };
+
+    // --- OCR Visura camerale ---
+    const onOcrVisura = async (file) => {
+        if (!file) return;
+        setOcrLoading(true);
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const r = await api.post("/utility/ocr-visura-camerale", fd,
+                { headers: { "Content-Type": "multipart/form-data" }, timeout: 90000 });
+            const d = r.data;
+            setForm((p) => ({
+                ...p,
+                tipo: "persona_giuridica",
+                ragione_sociale: (d.ragione_sociale || p.ragione_sociale || "").toUpperCase(),
+                partita_iva: d.partita_iva || p.partita_iva,
+                codice_fiscale: (d.codice_fiscale_ditta || p.codice_fiscale || "").toUpperCase(),
+                indirizzo: (d.indirizzo_sede || p.indirizzo || "").toUpperCase(),
+                comune: (d.comune_sede || p.comune || "").toUpperCase(),
+                provincia: d.provincia_sede || p.provincia,
+                cap: d.cap_sede || p.cap,
+                telefono: d.telefono || p.telefono,
+                email: d.email || p.email,
+                _visura_file_da_salvare: file,
+                _amministratori: d.amministratori || [],
+                _dati_extra_visura: {
+                    forma_giuridica: d.forma_giuridica, rea: d.rea,
+                    capitale_sociale: d.capitale_sociale, pec: d.pec,
+                    oggetto_sociale: d.oggetto_sociale, codice_ateco: d.codice_ateco,
+                    stato_attivita: d.stato_attivita, data_inizio_attivita: d.data_inizio_attivita,
+                    data_costituzione: d.data_costituzione,
+                },
+            }));
+            const nAmm = (d.amministratori || []).length;
+            toast.success(`Visura riconosciuta: ${d.ragione_sociale}${nAmm ? ` + ${nAmm} amministratori` : ""}`);
+        } catch (e) { toast.error("OCR visura fallito: " + (e.response?.data?.detail || e.message)); }
         finally { setOcrLoading(false); }
     };
 
@@ -323,13 +362,57 @@ function NuovaAnagraficaDialog({ onClose }) {
         const isPF = form.tipo === "persona_fisica";
         if (isPF && !form.nome && !form.cognome) { toast.error("Inserisci Cognome o Nome"); return; }
         if (!isPF && !form.ragione_sociale) { toast.error("Inserisci la ragione sociale"); return; }
-        const payload = { ...form };
+        const { _ci_file_da_salvare, _visura_file_da_salvare, _amministratori, _dati_extra_visura, ...payload } = form;
         if (isPF && !payload.ragione_sociale) {
             payload.ragione_sociale = `${form.cognome || ""} ${form.nome || ""}`.trim();
         }
+        // attacca note dalla visura (forma giuridica, REA, capitale, oggetto sociale)
+        if (_dati_extra_visura) {
+            const extra = Object.entries(_dati_extra_visura).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" · ");
+            if (extra) payload.note = (payload.note ? payload.note + "\n" : "") + `[Da visura] ${extra}`;
+        }
         try {
-            await api.post("/anagrafiche", payload);
-            toast.success("Anagrafica creata");
+            const created = await api.post("/anagrafiche", payload);
+            const newId = created.data.id;
+            // Salva la CI come documento, se caricata
+            if (_ci_file_da_salvare) {
+                const fd = new FormData();
+                fd.append("file", _ci_file_da_salvare);
+                api.post(`/anagrafiche/${newId}/documenti/carta_identita`, fd,
+                    { headers: { "Content-Type": "multipart/form-data" } }).catch(() => {});
+            }
+            // Salva visura come documento
+            if (_visura_file_da_salvare) {
+                const fd = new FormData();
+                fd.append("file", _visura_file_da_salvare);
+                api.post(`/anagrafiche/${newId}/documenti/visura_camerale`, fd,
+                    { headers: { "Content-Type": "multipart/form-data" } }).catch(() => {});
+            }
+            // Crea anagrafiche per amministratori
+            if (_amministratori?.length) {
+                for (const a of _amministratori) {
+                    if (!a.cognome && !a.nome) continue;
+                    const amm = {
+                        tipo: "persona_fisica",
+                        ragione_sociale: `${a.cognome || ""} ${a.nome || ""}`.trim(),
+                        cognome: (a.cognome || "").toUpperCase(),
+                        nome: (a.nome || "").toUpperCase(),
+                        codice_fiscale: (a.codice_fiscale || "").toUpperCase(),
+                        data_nascita: a.data_nascita,
+                        comune_nascita: (a.comune_nascita || "").toUpperCase(),
+                        provincia_nascita: a.provincia_nascita,
+                        indirizzo: (a.indirizzo_residenza || "").toUpperCase(),
+                        comune: (a.comune_residenza || "").toUpperCase(),
+                        note: `Ruolo nella ditta ${payload.ragione_sociale}: ${a.ruolo || "amministratore"}`
+                              + (a.poteri ? ` - ${a.poteri}` : ""),
+                        tags: ["amministratore", "da_visura"],
+                    };
+                    try { await api.post("/anagrafiche", amm); } catch (err) { /* skip */ }
+                }
+                toast.success(`Ditta + ${_amministratori.length} amministratori creati`);
+            } else {
+                toast.success("Anagrafica creata");
+            }
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
@@ -343,31 +426,32 @@ function NuovaAnagraficaDialog({ onClose }) {
             </DialogHeader>
 
             {/* Toolbar OCR */}
-            {isPF && (
-                <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="ocr-toolbar">
-                    <div className="text-xs text-sky-900 flex-1">
-                        <strong>Auto-compila</strong> caricando la carta d&apos;identità (PDF/JPG/PNG) o calcolando il CF
-                    </div>
-                    <input
-                        ref={ciFileRef}
-                        type="file"
-                        accept=".pdf,image/*"
-                        className="hidden"
-                        onChange={(e) => onOcrCI(e.target.files?.[0])}
-                        data-testid="anag-ocr-input"
-                    />
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => ciFileRef.current?.click()}
-                        disabled={ocrLoading}
-                        data-testid="anag-ocr-button"
-                    >
-                        <ScanLine size={13} className="mr-1" /> {ocrLoading ? "Riconosco..." : "Carica CI"}
-                    </Button>
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="ocr-toolbar">
+                <div className="text-xs text-sky-900 flex-1">
+                    <strong>Auto-compila</strong> caricando {isPF ? "la carta d'identità" : "la visura camerale"} (PDF/JPG/PNG).
+                    {!isPF && " Verranno create anche le anagrafiche degli amministratori."}
                 </div>
-            )}
+                <input
+                    ref={ciFileRef}
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (isPF) onOcrCI(f); else onOcrVisura(f);
+                    }}
+                    data-testid="anag-ocr-input"
+                />
+                <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={() => ciFileRef.current?.click()}
+                    disabled={ocrLoading}
+                    data-testid="anag-ocr-button"
+                >
+                    <ScanLine size={13} className="mr-1" />
+                    {ocrLoading ? "Riconosco..." : (isPF ? "Carica CI" : "Carica visura camerale")}
+                </Button>
+            </div>
 
             <div className="grid grid-cols-2 gap-3 py-2">
                 <div className="col-span-2">
