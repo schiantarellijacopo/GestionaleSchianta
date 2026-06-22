@@ -1,94 +1,93 @@
 ## Programma Assicurativo - PRD (FastAPI + React + MongoDB)
 
 ### Original problem statement
-CRM Assicurativo per agenzie italiane. Gestione completa di anagrafiche (con albero familiare + intervista), polizze, titoli (quietanze), sinistri, contabilità (prima nota, brogliaccio, estratti conto), statistiche. Multi-compagnia. Calcolo pensione INPS (vecchiaia, invalidità, reversibilità) con import PDF estratto contributivo. Import ZIP ANIA giornaliero. Ruoli: admin, collaboratore, dipendente, cliente. Stampe PDF complete con intestazione agenzia.
+CRM Assicurativo per agenzie italiane. Gestione completa anagrafiche (albero familiare, intervista), polizze, titoli, sinistri, contabilità, statistiche. Multi-compagnia. INPS pension calculator con import PDF. Import ZIP ANIA giornaliero (eccetto data incasso/copertura che sono manuali). Ruoli: admin, collaboratore, dipendente, cliente. Stampe PDF con intestazione agenzia (logo).
 
-Integrazioni richieste: WhatsApp, 3CX, Google Drive, Google Calendar, Google Contacts, OneDrive, Office 365, pipeline email.
+Integrazioni richieste: WhatsApp, 3CX, Google Drive, Google Calendar, Google Contacts, OneDrive, Office 365.
 
-UI in italiano, Shadcn/Tailwind.
+UI italiano, Shadcn/Tailwind.
 
 ---
 
-### Implementato (cronologia)
-- 2026-06-22 (fork 2):
-  - **Importer ANIA testato**: ZIP completo (rec10, rec20, rec21, rec30, rec40, rec50) - parsing veicolo + garanzie + diritti + BM + franchigia + massimali + rinuncia rivalsa. Idempotente su re-import.
-  - **Librerie / Sezione Azienda** (nuova): dati intestazione agenzia (P.IVA, RUI, IBAN, indirizzo, contatti, logo). Endpoint `/api/librerie/azienda` (GET/PUT) + `/api/librerie/azienda/logo`.
-  - **Stampe PDF con intestazione**: tutte le stampe (anagrafiche/polizze/titoli/sinistri/prima nota/estratto conto/provvigioni) ora mostrano logo + ragione sociale + indirizzo + RUI + footer.
-  - **Sistema provvigionale** (nuovo): collection `schema_provvigionale` con risoluzione gerarchica (collaboratore + compagnia + ramo). Endpoint CRUD `/api/librerie/schema-provvigionale` + endpoint risoluzione.
-  - **Utenti/Collaboratori esteso**: dati fiscali (CF, P.IVA, IBAN), provvigione default, ritenuta acconto, INPS. Documenti: firma digitale, carta identità, casellario, carichi pendenti, IBAN (upload via `/api/auth/users/{uid}/documenti/{tipo}`). Corsi/attestati (`/api/auth/users/{uid}/corsi`).
-  - **Storage endpoint generico**: `/api/storage/{path}` con ACL (solo proprietario o admin per file in /users/).
-- Fork precedente:
-  - Base CRUD: anagrafiche, polizze, titoli, sinistri, compagnie, accounting
-  - JWT auth + RBAC (admin/collaboratore/dipendente/cliente)
-  - INPS pension calculator con pdfplumber
-  - Titoli: rich filters, bulk incasso/copertura con allegato + email
-  - Diario cliente automatico (chat, email, doc)
-  - Auto-tag clienti + Newsletter backend queue
-  - Global Search TopBar
-  - Brogliaccio + estratti conto PDF
-  - Object storage Emergent
-  - UpperInput normalizzazione
+### Implementato — Sessione corrente (2026-06-22 fork 2)
 
-### Pending / In progress (NUOVE richieste dell'utente 2026-06-22)
+#### Backend
+- **ANIA importer**: test E2E completo con ZIP sintetico (rec10/20/21/30/40/50). Veicolo, garanzie, diritti, BM, franchigia, massimali, rinuncia rivalsa, valore veicolo. Idempotente. `/app/backend/tests/test_ania_import.py`.
+- **Modelli nuovi**: `AziendaConfig`, `SchemaProvvigionale`, `EventoCalendario`. Estensione `UserPublic` con documenti (firma/CI/casellario/carichi pendenti/IBAN) e corsi/attestati. Estensione `Anagrafica/Titolo/Sinistro` con `collaboratore_id`.
+- **Librerie/Azienda**: `GET/PUT /api/librerie/azienda` (singleton) + `POST /api/librerie/azienda/logo`.
+- **Sistema provvigionale**: CRUD `/api/librerie/schema-provvigionale` con risoluzione gerarchica (collaboratore+compagnia+ramo). Endpoint `risolvi`.
+- **Documenti collaboratore**: `POST/DELETE /api/auth/users/{uid}/documenti/{tipo}`, `POST /api/auth/users/{uid}/corsi`, `POST .../corsi/upload`.
+- **Storage generico ACL**: `/api/storage/{path}` con ACL (solo proprietario/admin per /users/).
+- **PDF stampe**: intestazione con logo + ragione sociale + RUI + indirizzo + footer. Funzione `pdf_report.get_intestazione_azienda(db)`.
+- **Estratto conto compagnie + Saldi cassa**: `GET /api/compagnie/{cid}/estratto-conto`, `/api/compagnie/saldi-cassa`, stampe PDF.
+- **Utility Codice Fiscale**: `POST /api/utility/codice-fiscale/calcola` e `.../decodifica` (libreria `python-codicefiscale` con dataset ISTAT).
+- **Geocoding automatico**: `POST /api/utility/geocoding` via Nominatim/OpenStreetMap (gratis, senza chiave).
+- **OCR Carta d'Identità**: `POST /api/utility/ocr-carta-identita` (Gemini 3 Flash via Emergent Universal Key). Supporta PDF (prima pagina) + JPG/PNG. Estrae: cognome, nome, sesso, data nascita, comune nascita, CF, numero doc, scadenza, comune emissione.
+- **Calendario**: CRUD `/api/calendario` con auto-eventi scadenze polizze (rosso). Filtro per operatore.
+- **List anagrafiche arricchita**: ritorna `polizze_attive_count`, `categoria_ui` (con_polizze/senza_polizze/condominio), `collaboratore_nome`. Filtro per tag.
 
-#### P0 - User Experience (richieste hot)
-1. **Geolocalizzazione automatica anagrafiche**: appena si inserisce indirizzo → calcolo lat/lng (usare Nominatim/OpenStreetMap gratuito).
-2. **Colorazione anagrafiche in lista**: BLU=con polizze, ROSSO=senza polizze, VERDE=condomini.
-3. **Tag cliccabili in lista anagrafiche** che filtrano e portano alla scheda cliente.
-4. **Operatore assegnato per riga**: in anagrafiche, polizze, titoli, sinistri permettere assegnazione collaboratore/sub-agente con dropdown; mostrare nome collaboratore (non solo id).
-5. **Pensione INPS - ripristinare**: upload PDF estratto conto contributivo + modificabilità di tutti i campi del calcolo (regressione segnalata).
-6. **Cross-navigation completa**: da sinistri/polizze/titoli si naviga tra entità correlate; tutto modificabile.
+#### Frontend
+- **Librerie**: tab Azienda (intestazione + upload logo), Sistema provvigionale, Utenti/Collaboratori esteso (tabs anagrafica/fiscale/documenti/corsi).
+- **Anagrafiche**: lista con dot colorati 🔵🔴🟢 + chip filtri categoria + chip tag univoci cliccabili che filtrano. Colonna Operatore.
+- **Form Nuova Anagrafica**: toolbar OCR CI (auto-compila tutti i campi), pulsanti Calcola CF / Decodifica CF, geocoding al blur (lat/lng), assegnazione Collaboratore.
+- **Estratto Conto Compagnie**: pagina dedicata `/compagnie-estratto` con KPI cards (totale da versare, a credito), tabella saldi, dettaglio per compagnia con filtri data e stampa PDF.
+- **Calendario**: vista mensile con 7 colonne + 6 settimane. Eventi colorati per tipo (appuntamento/scadenza polizza/titolo/sinistro/promemoria). Filtro per operatore. Doppio click su giorno → nuovo evento. Click su evento → modifica/elimina.
+- **Sidebar**: nuove voci sotto Contabilità: Titoli (incassi), E/C compagnie, Calendario.
 
-#### P0 - Contabilità (nuove voci)
-7. **Sezione Contabilità: aggiungere "Titoli" link**.
-8. **Estratto conto compagnie**: per ogni compagnia, dare/avere periodico.
-9. **Saldo cassa compagnie**: vista riassuntiva dei saldi compagnie (premio - provvigioni se trattenute).
-10. **Stampe per ogni sezione** (PDF) - già fatto per anagrafiche/polizze/titoli/sinistri/prima nota, manca: estratto conto compagnie, saldo cassa compagnie, sinistri singoli, scheda polizza completa, brogliaccio (già fatto).
+### Backlog / Pending (per prossima sessione)
 
-#### P1 - Integrazioni Calendario / Contatti
-11. **Calendario agenzia** + **calendario per operatore** con eventi (scadenze polizze, appuntamenti, sinistri).
-12. **Sync Google Calendar** (eventi).
-13. **Sync Microsoft 365 / Outlook Calendar**.
-14. **Sync Google Contacts** / Outlook Contacts.
+#### P0 — Operatività residua
+- Aggiungere campo "Operatore" (collaboratore_id) anche in form di Polizze, Titoli, Sinistri
+- Card "Premi e Provvigioni" (privato/azienda/totale) in AnagraficaDetail (backend pronto)
+- Newsletter UI con tag multi-select
+- Payout Provvigioni Collaboratore → uscita negativa nel Brogliaccio
 
-#### P1 - OCR / AI
-15. **OCR carta d'identità**: caricamento CI → auto-compila campi anagrafici (CF, scadenza, numero, comune emissione, data nascita) → usare LLM con visione (Gemini Nano Banana o Claude Vision).
+#### P1 — Integrazioni Calendar/Contacts (richiedono OAuth)
+- **Google Calendar sync**: OAuth Google + integrazione gcal
+- **Microsoft 365 Calendar sync**: Azure App registration + Graph API
+- **Google Contacts / Outlook Contacts sync**
+- Per attivarle: chiedere all'utente di creare le App OAuth (Client ID/Secret)
 
-#### P1 - Backlog precedenti non chiusi
-16. Card "Premi e Provvigioni" (privato/azienda/totale) in `AnagraficaDetail` (backend pronto: `GET /api/anagrafiche/{id}/riepilogo`).
-17. Pagina Newsletter UI (multi-select tag, preview destinatari) + filtri tag chip cliccabili in lista clienti + bottone "Auto-genera tag".
-18. Payout Provvigioni Collaboratore → movimento "uscita" nel Brogliaccio/Banca.
-19. Refactor `server.py` (~3200 righe) in router per dominio.
+#### P1 — Misc
+- INPS regressione: verificare flusso completo (parsing PDF, modifica campi, salvataggio)
+- Mappa clienti integrare lat/lng da geocoding
+- OneDrive/Google Drive per Corsi
 
-#### P2 - Integrazioni storiche
-20. WhatsApp, 3CX (centralino), Google Drive / OneDrive (per Corsi).
-21. Pipeline email (gestione casella).
-22. Mappa clienti con geolocalizzazione reale.
+#### P2 — Integrazioni avanzate
+- WhatsApp, 3CX (centralino), Pipeline email gestita
+
+#### Tech debt
+- Refactor `server.py` (~3500 righe) in router per dominio
+- Test unitari pytest sulle utility (CF, geo, OCR)
 
 ---
 
 ### Architettura
 ```
 /app/backend/
-  server.py         (~3200 righe - DA REFACTORIZZARE in router/)
-  db_models.py      (Pydantic + UUID)
+  server.py            (~3500 righe - DA REFACTORIZZARE)
+  db_models.py
   ania_importer.py
   inps_calculator.py
   brogliaccio.py
-  pdf_report.py     (con intestazione azienda + logo)
-  storage.py        (Emergent Object Storage)
-  auth.py           (JWT bcrypt)
+  pdf_report.py        (con intestazione + logo)
+  storage.py
+  auth.py
+  cf_calc.py           NEW - Codice Fiscale (calcola + decodifica)
+  geocoder.py          NEW - Nominatim OSM
+  ocr_ci.py            NEW - OCR Carta Identità via Gemini Vision
   tests/test_ania_import.py
 /app/frontend/src/
-  pages/Librerie.jsx (Azienda, Banche, Conti, Prodotti, Rami, Compagnie, Utenti, Schema Provv)
-  pages/PolizzaDetail.jsx (tabbed Cattolica style)
-  pages/Titoli.jsx (bulk actions)
-  pages/Anagrafiche.jsx
-  ...
+  pages/Anagrafiche.jsx        REWRITTEN - colori, tag chip, OCR, CF, geo
+  pages/Librerie.jsx           ESTESO - Azienda, Sistema Provv, Documenti utenti
+  pages/Calendario.jsx         NEW
+  pages/EstrattoContoCompagnie.jsx  NEW
+  pages/PolizzaDetail.jsx, Titoli.jsx, ...
+  components/Sidebar.jsx       Aggiornato con E/C compagnie, Calendario
 ```
 
 ### Test credentials
 File `/app/memory/test_credentials.md`. Admin: `admin@assicura.it / Admin123!`
 
 ### Backend health
-✅ Up. ANIA importer testato end-to-end. Endpoints Azienda/Schema Provv/Doc Utenti testati con curl. Stampe PDF generano correttamente (28KB+ con header).
+✅ UP. Tutti i nuovi endpoint testati con curl: CF calcola/decodifica, Geocoding, Saldi compagnie, Calendario CRUD.

@@ -145,6 +145,7 @@ class Anagrafica(BaseDoc):
     # collegamenti esterni dall'import
     id_anagrafica_exp: Optional[str] = None
     compagnia_id: Optional[str] = None
+    collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
 
@@ -252,6 +253,7 @@ class Titolo(BaseDoc):
     scadenza_mora: Optional[str] = None
     mezzo_pagamento: Optional[str] = None
     conto_cassa_id: Optional[str] = None
+    collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
     id_titolo_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
@@ -274,6 +276,7 @@ class Sinistro(BaseDoc):
     riserva: float = 0.0
     liquidazione: float = 0.0
     danneggiati: List[dict] = Field(default_factory=list)
+    collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
     id_sinistro_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
@@ -528,7 +531,7 @@ class SchemaProvvigionale(BaseDoc):
 class ImportLog(BaseDoc):
     utente_id: Optional[str] = None
     nome_file: str
-    record_types_processati: dict = Field(default_factory=dict)  # {"rec10": 12, ...}
+    record_types_processati: dict = Field(default_factory=dict)
     anagrafiche_create: int = 0
     anagrafiche_aggiornate: int = 0
     polizze_create: int = 0
@@ -538,3 +541,28 @@ class ImportLog(BaseDoc):
     errori: List[str] = Field(default_factory=list)
     durata_ms: int = 0
     stato: Literal["completato", "errore", "in_corso"] = "in_corso"
+
+
+# =============== CALENDARIO ===============
+class EventoCalendario(BaseDoc):
+    titolo: str
+    descrizione: Optional[str] = None
+    inizio: str                  # YYYY-MM-DDTHH:MM
+    fine: Optional[str] = None
+    tutto_il_giorno: bool = False
+    luogo: Optional[str] = None
+    tipo: Literal[
+        "appuntamento", "scadenza_polizza", "scadenza_titolo",
+        "sinistro", "promemoria", "altro"
+    ] = "appuntamento"
+    colore: Optional[str] = None
+    # destinatari / visibilità
+    operatore_id: Optional[str] = None       # collaboratore principale (proprietario evento)
+    partecipanti_user_ids: List[str] = Field(default_factory=list)
+    anagrafica_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+    sinistro_id: Optional[str] = None
+    # external sync (Google Calendar / Outlook)
+    google_event_id: Optional[str] = None
+    outlook_event_id: Optional[str] = None
+    stato: Literal["confermato", "tentativo", "annullato"] = "confermato"

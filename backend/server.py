@@ -27,7 +27,7 @@ from db_models import (
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
-    AziendaConfig, SchemaProvvigionale,
+    AziendaConfig, SchemaProvvigionale, EventoCalendario,
     _now_iso, _uid,
 )
 import ania_importer
@@ -35,6 +35,8 @@ import inps_calculator
 import storage as obj_storage
 import pdf_report
 import brogliaccio as brog
+import cf_calc
+import geocoder as geocoder_svc
 from fastapi.responses import StreamingResponse
 import io as _io
 
@@ -437,12 +439,277 @@ async def delete_compagnia(cid: str, user=Depends(require_user("admin"))):
 
 
 # ============================================================
+# COMPAGNIE — Estratto conto e Saldo cassa
+# ============================================================
+async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Optional[str]) -> dict:
+    """Aggrega dare/avere per una compagnia su un periodo.
+
+    Logica:
+      - Titoli incassati nel periodo → DARE verso compagnia = (lordo - provvigioni se trattiene)
+      - Movimenti contabili categoria 'pagamento_compagnia' verso questa compagnia → AVERE
+    """
+    comp = await db.compagnie.find_one({"id": compagnia_id}, {"_id": 0})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    trattiene = comp.get("trattiene_provvigioni", True) is not False
+
+    # titoli incassati nel periodo riferiti a polizze di questa compagnia
+    polizze = await db.polizze.find({"compagnia_id": compagnia_id}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1}).to_list(20000)
+    pol_index = {p["id"]: p for p in polizze}
+    if not pol_index:
+        return {"compagnia": comp, "righe": [], "totale_dare": 0.0, "totale_avere": 0.0, "saldo": 0.0,
+                "periodo": {"dal": dal, "al": al}, "trattiene_provvigioni": trattiene}
+
+    titoli_flt: dict = {
+        "polizza_id": {"$in": list(pol_index.keys())},
+        "stato": "incassato",
+    }
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        titoli_flt["data_incasso"] = cond
+    titoli = await db.titoli.find(titoli_flt, {"_id": 0}).sort("data_incasso", 1).to_list(20000)
+
+    # arricchimento contraenti
+    contr_ids = list({pol_index[t["polizza_id"]].get("contraente_id") for t in titoli if t["polizza_id"] in pol_index})
+    contr_map = {}
+    if contr_ids:
+        async for c in db.anagrafiche.find({"id": {"$in": contr_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+            contr_map[c["id"]] = c["ragione_sociale"]
+
+    righe = []
+    totale_dare = 0.0
+    for t in titoli:
+        pol = pol_index.get(t["polizza_id"], {})
+        provv = float(t.get("provvigioni") or 0)
+        lordo = float(t.get("importo_lordo") or 0)
+        dovuto_alla_compagnia = (lordo - provv) if trattiene else lordo
+        righe.append({
+            "data": t.get("data_incasso") or t.get("scadenza"),
+            "tipo": "incasso",
+            "polizza": pol.get("numero_polizza"),
+            "contraente": contr_map.get(pol.get("contraente_id", "")),
+            "ramo": pol.get("ramo"),
+            "dare": round(dovuto_alla_compagnia, 2),
+            "avere": 0.0,
+            "lordo": lordo, "provvigioni": provv,
+            "_movimento_id": t.get("id"),
+        })
+        totale_dare += dovuto_alla_compagnia
+
+    # pagamenti verso compagnia
+    mov_flt: dict = {"compagnia_id": compagnia_id, "categoria": "pagamento_compagnia"}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        mov_flt["data_movimento"] = cond
+    movs = await db.movimenti.find(mov_flt, {"_id": 0}).sort("data_movimento", 1).to_list(5000)
+    totale_avere = 0.0
+    for m in movs:
+        imp = float(m.get("importo") or 0)
+        righe.append({
+            "data": m.get("data_movimento"),
+            "tipo": "pagamento",
+            "polizza": None,
+            "contraente": None,
+            "ramo": None,
+            "dare": 0.0,
+            "avere": imp,
+            "descrizione": m.get("descrizione") or m.get("causale"),
+            "_movimento_id": m.get("id"),
+        })
+        totale_avere += imp
+
+    righe.sort(key=lambda r: r["data"] or "")
+    saldo = totale_dare - totale_avere
+    return {
+        "compagnia": comp,
+        "righe": righe,
+        "totale_dare": round(totale_dare, 2),
+        "totale_avere": round(totale_avere, 2),
+        "saldo": round(saldo, 2),
+        "periodo": {"dal": dal, "al": al},
+        "trattiene_provvigioni": trattiene,
+    }
+
+
+@api.get("/compagnie/{cid}/estratto-conto")
+async def compagnia_estratto_conto(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    return await _compagnia_estratto_data(cid, dal, al)
+
+
+@api.get("/compagnie/saldi-cassa")
+async def saldi_cassa_compagnie(
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Saldo da versare/da incassare per ciascuna compagnia (tutti i periodi)."""
+    compagnie = await db.compagnie.find({}, {"_id": 0}).to_list(500)
+    risultati = []
+    for c in compagnie:
+        try:
+            data = await _compagnia_estratto_data(c["id"], None, None)
+            risultati.append({
+                "compagnia_id": c["id"],
+                "codice": c.get("codice"),
+                "ragione_sociale": c.get("ragione_sociale"),
+                "trattiene_provvigioni": c.get("trattiene_provvigioni", True),
+                "totale_incassato": data["totale_dare"],
+                "totale_versato": data["totale_avere"],
+                "saldo_da_versare": data["saldo"],
+                "righe_count": len(data["righe"]),
+            })
+        except Exception:
+            continue
+    risultati.sort(key=lambda r: -abs(r["saldo_da_versare"] or 0))
+    return risultati
+
+
+@api.get("/stampa/compagnie/{cid}/estratto-conto")
+async def stampa_compagnia_estratto(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    data = await _compagnia_estratto_data(cid, dal, al)
+    comp = data["compagnia"]
+    headers = ["Data", "Tipo", "Polizza", "Contraente", "Ramo", "Dare €", "Avere €"]
+    rows = []
+    for r in data["righe"]:
+        rows.append([
+            r.get("data") or "", r.get("tipo") or "",
+            r.get("polizza") or "", (r.get("contraente") or "")[:35],
+            r.get("ramo") or "", r.get("dare") or "", r.get("avere") or "",
+        ])
+    rows.append(["", "", "", "", "TOTALE", round(data["totale_dare"], 2), round(data["totale_avere"], 2)])
+    rows.append(["", "", "", "", "SALDO DA VERSARE", round(data["saldo"], 2), ""])
+    pdf = pdf_report.stampa_elenco(
+        f"Estratto conto compagnia - {comp.get('ragione_sociale')}",
+        f"Periodo: {dal or '—'} → {al or '—'} · Trattiene provv: {'SI' if data['trattiene_provvigioni'] else 'NO'}",
+        headers, rows,
+        col_widths_mm=[22, 22, 32, 60, 22, 28, 28], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"estratto_compagnia_{comp.get('codice') or cid}.pdf")
+
+
+@api.get("/stampa/compagnie/saldi-cassa")
+async def stampa_saldi_compagnie(
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await saldi_cassa_compagnie(user=user)
+    headers = ["Codice", "Ragione sociale", "Tratt. provv.", "Incassato €", "Versato €", "Saldo €"]
+    rows = []
+    tot_inc = tot_vers = tot_sal = 0.0
+    for r in items:
+        rows.append([
+            r.get("codice") or "", (r.get("ragione_sociale") or "")[:50],
+            "SI" if r.get("trattiene_provvigioni") else "NO",
+            r.get("totale_incassato"), r.get("totale_versato"), r.get("saldo_da_versare"),
+        ])
+        tot_inc += float(r.get("totale_incassato") or 0)
+        tot_vers += float(r.get("totale_versato") or 0)
+        tot_sal += float(r.get("saldo_da_versare") or 0)
+    rows.append(["", "TOTALI", "", round(tot_inc, 2), round(tot_vers, 2), round(tot_sal, 2)])
+    pdf = pdf_report.stampa_elenco(
+        "Saldi cassa compagnie", f"{len(items)} compagnie",
+        headers, rows,
+        col_widths_mm=[22, 70, 22, 30, 30, 30], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, "saldi_compagnie.pdf")
+
+
+# ============================================================
 # ANAGRAFICHE
 # ============================================================
+# UTILITY — Codice Fiscale & Geocoding
+# ============================================================
+@api.post("/utility/codice-fiscale/calcola")
+async def calcola_codice_fiscale(body: dict, user=Depends(current_user)):
+    """body: {nome, cognome, sesso (M/F), data_nascita (YYYY-MM-DD), comune_nascita}"""
+    try:
+        cf = cf_calc.calcola_cf(
+            lastname=body.get("cognome", ""),
+            firstname=body.get("nome", ""),
+            gender=body.get("sesso", ""),
+            birthdate=body.get("data_nascita", ""),
+            birthplace=body.get("comune_nascita", ""),
+        )
+        return {"codice_fiscale": cf}
+    except Exception as e:
+        raise HTTPException(400, f"Impossibile calcolare CF: {e}")
+
+
+@api.post("/utility/codice-fiscale/decodifica")
+async def decodifica_codice_fiscale(body: dict, user=Depends(current_user)):
+    """body: {codice_fiscale}"""
+    try:
+        return cf_calc.decodifica_cf(body.get("codice_fiscale", ""))
+    except Exception as e:
+        raise HTTPException(400, f"CF non valido: {e}")
+
+
+@api.post("/utility/geocoding")
+async def utility_geocoding(body: dict, user=Depends(current_user)):
+    """body: {indirizzo, comune, cap, provincia, nazione?}. Ritorna {lat, lng, display_name}."""
+    result = await geocoder_svc.geocoda_indirizzo(
+        indirizzo=body.get("indirizzo", ""),
+        comune=body.get("comune"),
+        cap=body.get("cap"),
+        provincia=body.get("provincia"),
+        nazione=body.get("nazione") or "Italia",
+    )
+    if not result:
+        return {"trovato": False}
+    return {"trovato": True, **result}
+
+
+@api.post("/utility/ocr-carta-identita")
+async def ocr_carta_identita(
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """OCR di una carta d'identità italiana. Restituisce dati anagrafici estratti."""
+    import ocr_ci
+    contents = await file.read()
+    if len(contents) > 8 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 8 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if ct == "application/pdf":
+        # converti la prima pagina del PDF in immagine (usa pdfplumber + Pillow se necessario)
+        try:
+            import pdfplumber
+            from io import BytesIO
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                if not pdf.pages:
+                    raise HTTPException(400, "PDF vuoto")
+                img = pdf.pages[0].to_image(resolution=200).original
+                out = BytesIO()
+                img.save(out, format="JPEG", quality=85)
+                contents = out.getvalue()
+                ct = "image/jpeg"
+        except Exception as e:
+            raise HTTPException(400, f"Errore conversione PDF: {e}")
+    elif not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (richiesto JPG/PNG/PDF)")
+    try:
+        data = await ocr_ci.estrai_dati_ci(contents, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore OCR: {e}")
+    await log_attivita(user, "ocr", "carta_identita", None,
+                       f"OCR CI: {data.get('cognome')} {data.get('nome')}")
+    return data
+
+
 @api.get("/anagrafiche")
 async def list_anagrafiche(
     q: Optional[str] = None,
     limit: int = 200,
+    tag: Optional[str] = None,
     user=Depends(current_user),
 ):
     flt: dict = {}
@@ -454,7 +721,36 @@ async def list_anagrafiche(
             {"codice_fiscale": {"$regex": q, "$options": "i"}},
             {"email": {"$regex": q, "$options": "i"}},
         ]
+    if tag:
+        flt["tags"] = tag
     items = await db.anagrafiche.find(flt, {"_id": 0}).sort("ragione_sociale", 1).to_list(limit)
+    if not items:
+        return items
+    # arricchimento: conteggio polizze attive per colorazione
+    ids = [a["id"] for a in items]
+    pipeline = [
+        {"$match": {"contraente_id": {"$in": ids}, "stato": "attiva"}},
+        {"$group": {"_id": "$contraente_id", "n": {"$sum": 1}}},
+    ]
+    counts = {row["_id"]: row["n"] async for row in db.polizze.aggregate(pipeline)}
+    # collaboratore lookup
+    collab_ids = list({a.get("collaboratore_id") for a in items if a.get("collaboratore_id")})
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+    for a in items:
+        a["polizze_attive_count"] = counts.get(a["id"], 0)
+        a["collaboratore_nome"] = collab_map.get(a.get("collaboratore_id")) if a.get("collaboratore_id") else None
+        # categoria per colorazione frontend
+        rs = (a.get("ragione_sociale") or "").upper()
+        is_condominio = ("CONDOMINIO" in rs) or ("condominio" in (a.get("tags") or []))
+        if is_condominio:
+            a["categoria_ui"] = "condominio"
+        elif a["polizze_attive_count"] > 0:
+            a["categoria_ui"] = "con_polizze"
+        else:
+            a["categoria_ui"] = "senza_polizze"
     return items
 
 
@@ -3092,6 +3388,101 @@ async def stampa_estratto_conto(aid: str, user=Depends(current_user)):
 @api.get("/")
 async def root():
     return {"app": "Programma Assicurativo", "status": "ok"}
+
+
+# ============================================================
+# CALENDARIO — Eventi agenzia / per operatore
+# ============================================================
+@api.get("/calendario")
+async def list_eventi(
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    operatore_id: Optional[str] = None,
+    tipo: Optional[str] = None,
+    includi_scadenze: bool = True,
+    user=Depends(current_user),
+):
+    """Restituisce eventi calendario. Se includi_scadenze=True aggiunge auto-eventi
+    sintetici per scadenze polizze e titoli."""
+    flt: dict = {}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al + "T23:59:59"
+        flt["inizio"] = cond
+    if operatore_id:
+        flt["$or"] = [{"operatore_id": operatore_id},
+                      {"partecipanti_user_ids": operatore_id}]
+    if tipo:
+        flt["tipo"] = tipo
+    if user["role"] == "cliente":
+        flt["anagrafica_id"] = user.get("anagrafica_id")
+    items = await db.calendario.find(flt, {"_id": 0}).sort("inizio", 1).to_list(2000)
+
+    # arricchimento nome operatore
+    op_ids = {e.get("operatore_id") for e in items if e.get("operatore_id")}
+    if op_ids:
+        op_map = {u["id"]: u["name"] async for u in
+                  db.users.find({"id": {"$in": list(op_ids)}}, {"_id": 0, "id": 1, "name": 1})}
+        for e in items:
+            if e.get("operatore_id"):
+                e["operatore_nome"] = op_map.get(e["operatore_id"])
+
+    # scadenze auto
+    if includi_scadenze and user["role"] != "cliente":
+        scad_flt: dict = {"stato": "attiva"}
+        if dal or al:
+            cond = {}
+            if dal: cond["$gte"] = dal
+            if al: cond["$lte"] = al
+            scad_flt["scadenza"] = cond
+        async for p in db.polizze.find(scad_flt, {"_id": 0, "id": 1, "numero_polizza": 1, "scadenza": 1, "collaboratore_id": 1, "contraente_id": 1, "ramo": 1}):
+            if operatore_id and p.get("collaboratore_id") != operatore_id:
+                continue
+            if not p.get("scadenza"):
+                continue
+            items.append({
+                "id": f"_pol_{p['id']}", "titolo": f"Scadenza polizza {p.get('numero_polizza')}",
+                "inizio": p.get("scadenza") + "T09:00:00",
+                "tutto_il_giorno": True,
+                "tipo": "scadenza_polizza",
+                "polizza_id": p.get("id"),
+                "anagrafica_id": p.get("contraente_id"),
+                "operatore_id": p.get("collaboratore_id"),
+                "colore": "#dc2626",
+                "descrizione": f"Ramo {p.get('ramo')}",
+                "stato": "confermato",
+                "_auto": True,
+            })
+    items.sort(key=lambda e: e.get("inizio", ""))
+    return items
+
+
+@api.post("/calendario", status_code=201)
+async def crea_evento(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body.setdefault("operatore_id", user.get("id"))
+    obj = EventoCalendario(**body)
+    await db.calendario.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "evento", obj.id, obj.titolo)
+    return obj.model_dump()
+
+
+@api.put("/calendario/{eid}")
+async def aggiorna_evento(eid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body.pop("id", None)
+    body["updated_at"] = _now_iso()
+    res = await db.calendario.update_one({"id": eid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Evento non trovato")
+    return await db.calendario.find_one({"id": eid}, {"_id": 0})
+
+
+@api.delete("/calendario/{eid}")
+async def elimina_evento(eid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    res = await db.calendario.delete_one({"id": eid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Evento non trovato")
+    return {"ok": True}
 
 
 # ----- Mount -----

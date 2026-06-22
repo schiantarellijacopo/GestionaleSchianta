@@ -23,6 +23,8 @@ import Librerie from "@/pages/Librerie";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
 import Corsi from "@/pages/Corsi";
+import Calendario from "@/pages/Calendario";
+import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -46,6 +48,15 @@ function App() {
                             <Route path="/polizze/:id" element={<PolizzaDetail />} />
                             <Route path="/titoli" element={<Titoli />} />
                             <Route path="/sinistri" element={<Sinistri />} />
+                            <Route path="/calendario" element={<Calendario />} />
+                            <Route
+                                path="/compagnie-estratto"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <EstrattoContoCompagnie />
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route
                                 path="/contabilita"
                                 element={

@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
-    Library, Kanban, Map, GraduationCap, MessageCircle, Wallet,
+    Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -61,7 +61,10 @@ export default function Sidebar() {
                     <>
                         <div className="sidebar-section">Contabilità</div>
                         {item("/contabilita", <BookOpen size={16} />, "Prima nota", "nav-contabilita")}
+                        {item("/titoli", <Receipt size={16} />, "Titoli (incassi)", "nav-titoli-conta")}
                         {item("/provvigioni", <Wallet size={16} />, "Provvigioni", "nav-provvigioni")}
+                        {item("/compagnie-estratto", <Coins size={16} />, "E/C compagnie", "nav-ec-compagnie")}
+                        {item("/calendario", <Calendar size={16} />, "Calendario", "nav-calendario")}
                     </>
                 )}
 

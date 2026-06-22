@@ -25,3 +25,9 @@ python-multipart>=0.0.9
 jq>=1.6.0
 typer>=0.9.0
 emergentintegrations==0.2.0
+codicefiscale==0.9
+httpx==0.28.1
+python-codicefiscale==0.12.1
+python-fsutil==0.16.1
+python-slugify==8.0.4
+text-unidecode==1.3
