@@ -1944,6 +1944,38 @@ async def calcolo_pensione_anagrafica(aid: str, body: dict, user=Depends(current
 # ============================================================
 # PIPELINE (kanban-like data)
 # ============================================================
+PIPELINE_STATI_VALIDI = {
+    "polizze": {"in_emissione", "attiva", "sospesa", "scaduta", "annullata"},
+    "sinistri": {"aperto", "in_istruttoria", "liquidato", "chiuso_senza_seguito", "respinto"},
+    "titoli": {"da_incassare", "insoluto", "incassato", "stornato"},
+}
+
+
+@api.post("/pipeline/{entita}/{eid}/move")
+async def pipeline_move(
+    entita: str, eid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Sposta una card di pipeline in una nuova colonna (cambia stato).
+
+    body: {nuovo_stato: 'attiva' | ...}
+    """
+    if entita not in PIPELINE_STATI_VALIDI:
+        raise HTTPException(400, f"Entità non modificabile: {entita}")
+    nuovo = body.get("nuovo_stato")
+    if nuovo not in PIPELINE_STATI_VALIDI[entita]:
+        raise HTTPException(400, f"Stato non valido per {entita}: {nuovo}")
+    coll = {"polizze": db.polizze, "sinistri": db.sinistri, "titoli": db.titoli}[entita]
+    res = await coll.update_one(
+        {"id": eid},
+        {"$set": {"stato": nuovo, "updated_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Elemento non trovato")
+    await log_attivita(user, "move_pipeline", entita, eid, f"Stato → {nuovo}")
+    return {"ok": True, "id": eid, "stato": nuovo}
+
+
 @api.get("/pipeline/{entita}")
 async def pipeline_data(entita: str, user=Depends(current_user)):
     """Ritorna dati per visualizzazione pipeline/kanban.
