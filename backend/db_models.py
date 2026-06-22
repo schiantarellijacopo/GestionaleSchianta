@@ -138,8 +138,10 @@ class Anagrafica(BaseDoc):
     # consensi privacy
     consenso_privacy: bool = False
     data_consenso_privacy: Optional[str] = None
-    consenso_commerciale: bool = False
-    consenso_profilazione: bool = False
+    consenso_dati_particolari: bool = False       # punto 1 - categorie particolari
+    consenso_commerciale: bool = False             # punti 2a/2b/2c - marketing diretto
+    consenso_comunicazione_terzi: bool = False     # punto 2d - comunicazione dati a terzi
+    consenso_profilazione: bool = False            # punto 2e - profilazione
     # documenti allegati alla scheda cliente (URL storage)
     documenti: dict = Field(default_factory=dict)
     # struttura: {"carta_identita": {"url":..., "nome_file":..., "data_caricamento":..., "scadenza":...}, ...}

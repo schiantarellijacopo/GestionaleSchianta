@@ -1233,44 +1233,50 @@ async def delete_documento_anagrafica(aid: str, tipo: str,
 
 @api.get("/anagrafiche/{aid}/privacy/genera-pdf")
 async def genera_pdf_privacy(aid: str, user=Depends(current_user)):
-    """Genera PDF di informativa privacy precompilato con i dati del cliente."""
+    """Genera PDF informativa privacy GDPR completa con checkbox consensi e firma."""
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
     cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    headers = ["Voce", "Valore"]
-    rows = [
-        ["Cognome e nome / Ragione sociale", ana.get("ragione_sociale") or ""],
-        ["Codice fiscale", ana.get("codice_fiscale") or ana.get("partita_iva") or ""],
-        ["Data di nascita", ana.get("data_nascita") or ""],
-        ["Indirizzo", f"{ana.get('indirizzo') or ''}, {ana.get('cap') or ''} {ana.get('comune') or ''} "
-                     f"({ana.get('provincia') or ''})"],
-        ["Email", ana.get("email") or ""],
-        ["Telefono", ana.get("cellulare") or ana.get("telefono") or ""],
-        ["", ""],
-        ["INFORMATIVA EX ART. 13 GDPR", ""],
-        ["Titolare del trattamento", cfg.get("ragione_sociale") or "—"],
-        ["Sede legale", f"{cfg.get('indirizzo') or ''} {cfg.get('comune') or ''} ({cfg.get('provincia') or ''})"],
-        ["PEC", cfg.get("pec") or cfg.get("email") or "—"],
-        ["", ""],
-        ["FINALITÀ DEL TRATTAMENTO", ""],
-        ["1. Esecuzione contratto", "Stipula e gestione polizze, sinistri, comunicazioni operative"],
-        ["2. Adempimenti di legge", "Antiriciclaggio, vigilanza IVASS, obblighi fiscali"],
-        ["3. Marketing (consenso facoltativo)", "Newsletter, promozioni"],
-        ["", ""],
-        ["DIRITTI DELL'INTERESSATO", "Art. 15-22 GDPR: accesso, rettifica, cancellazione, opposizione"],
-        ["", ""],
-        ["CONSENSO PRESTATO IN DATA", _now_iso()[:10]],
-        ["FIRMA DEL CLIENTE", "_______________________________"],
-    ]
-    pdf = pdf_report.stampa_elenco(
-        f"Informativa privacy e consenso - {ana.get('ragione_sociale')}",
-        "Documento ai sensi del Regolamento UE 2016/679 (GDPR)",
-        headers, rows,
-        col_widths_mm=[55, 130], landscape_mode=False,
-        **(await _intestazione_pdf()),
+    import pdf_privacy
+    pdf = pdf_privacy.genera_privacy_pdf(ana, cfg, dipendente_nome=user.get("name", ""))
+    fname = f"privacy_{ana.get('codice_fiscale') or aid}.pdf"
+    return StreamingResponse(
+        _io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={fname}"},
     )
-    return _pdf_response(pdf, f"privacy_{ana.get('codice_fiscale') or aid}.pdf")
+
+
+@api.put("/anagrafiche/{aid}/consensi-privacy")
+async def aggiorna_consensi_privacy(
+    aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna i 4 consensi specifici dell'informativa GDPR.
+    body: {consenso_dati_particolari, consenso_commerciale, consenso_comunicazione_terzi,
+           consenso_profilazione, data_consenso_privacy?}"""
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    allowed = {
+        "consenso_dati_particolari", "consenso_commerciale",
+        "consenso_comunicazione_terzi", "consenso_profilazione",
+        "consenso_privacy",
+    }
+    upd = {k: bool(v) for k, v in body.items() if k in allowed}
+    # Privacy accettata = ha dato almeno il consenso base (punto 1)
+    if any(upd.get(k) for k in ("consenso_dati_particolari", "consenso_commerciale",
+                                 "consenso_comunicazione_terzi", "consenso_profilazione")):
+        upd["consenso_privacy"] = True
+    if upd:
+        upd["data_consenso_privacy"] = body.get("data_consenso_privacy") or _now_iso()[:10]
+        upd["updated_at"] = _now_iso()
+        await db.anagrafiche.update_one({"id": aid}, {"$set": upd})
+        await log_attivita(user, "consensi_privacy", "anagrafica", aid,
+                           descrizione=f"Aggiornati: {list(upd.keys())}")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    return ana
 
 
 

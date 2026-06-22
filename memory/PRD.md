@@ -122,3 +122,29 @@ File `/app/memory/test_credentials.md`. Admin: `admin@assicura.it / Admin123!`
 
 ### Mantenuto
 - Vecchio tab "Pensione INPS" preservato per retrocompatibilità (richiesta utente)
+
+---
+
+## 2026-06-22 — Privacy & Consensi GDPR (template Schiantarelli)
+
+### Aggiunto
+- **PDF Informativa Privacy GDPR** professionale ispirato al template "Assicurazioni Schiantarelli Marco Andrea SAS" (artt. 13-14 Reg. UE 2016/679):
+  - Header con ragione sociale azienda + indirizzo + "INFORMATIVA CLIENTE - PROSPECT"
+  - Tabella dati cliente precompilati (cognome/nome, CF/P.IVA, indirizzo, CAP, comune, provincia, email, cellulare, telefono)
+  - Testo informativa completo: Finalità, Natura conferimento, Modalità, Tempi, Ambito, Diritti, Titolare
+  - **4 caselle di consenso flaggabili** (☒/☐) con base giuridica per ciascuna:
+    - Trattamento dati particolari (punto 1)
+    - Marketing diretto (punti 2a, 2b, 2c)
+    - Comunicazione dati a terzi (punto 2d)
+    - Profilazione (punto 2e)
+  - **Firma digitale** del cliente (immagine PNG estratta dallo storage) integrata nel PDF
+- **Dialog "Privacy & Consensi"** nel tab Documenti: toggle dei 4 consensi, canvas per firma touch/mouse, salvataggio, generazione PDF
+
+### Backend
+- Nuovo `/app/backend/pdf_privacy.py` (450+ righe) — generatore reportlab con header/footer paginati
+- `PUT /api/anagrafiche/{aid}/consensi-privacy` — aggiorna i 4 flag di consenso
+- `GET /api/anagrafiche/{aid}/privacy/genera-pdf` — riscritto per usare nuovo template
+- 2 nuovi campi in `Anagrafica`: `consenso_dati_particolari`, `consenso_comunicazione_terzi`
+
+### Frontend
+- `/app/frontend/src/components/PrivacyConsensiDialog.jsx` — modale completa con consensi + firma + PDF

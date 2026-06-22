@@ -18,11 +18,12 @@ import {
 import RowActions, { PrintButton } from "@/components/RowActions";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
-    Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar,
+    Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AnalisiClienteTab from "@/components/AnalisiClienteTab";
+import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
 
 export default function AnagraficaDetail() {
     const { id } = useParams();
@@ -784,6 +785,7 @@ const DOC_TIPI_ANAG = [
 function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [docs, setDocs] = useState(ana?.documenti || {});
     const [busyTipo, setBusyTipo] = useState(null);
+    const [privacyOpen, setPrivacyOpen] = useState(false);
 
     const upload = async (tipo, file, scadenza) => {
         if (!file) return;
@@ -836,10 +838,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
         } catch (e) { toast.error("Errore"); }
     };
 
-    const scaricaPrivacy = () => {
-        const url = `${process.env.REACT_APP_BACKEND_URL || ""}/api/anagrafiche/${anagrafica_id}/privacy/genera-pdf`;
-        window.open(url, "_blank");
-    };
+    const scaricaPrivacy = () => setPrivacyOpen(true);
 
     return (
         <div className="space-y-4 mt-4" data-testid="documenti-tab">
@@ -849,7 +848,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     Tutti i file sono protetti (solo staff può vederli).
                 </div>
                 <Button size="sm" variant="outline" onClick={scaricaPrivacy} data-testid="genera-privacy-btn">
-                    📄 Genera PDF privacy
+                    <FileText size={13} className="mr-1" /> Privacy & Consensi
                 </Button>
             </div>
 
@@ -911,6 +910,15 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <img src={ana.firma_cliente_url} alt="firma" className="bg-white rounded-md border max-h-24" />
                 </Card>
             )}
+
+            <PrivacyConsensiDialog
+                open={privacyOpen}
+                onOpenChange={setPrivacyOpen}
+                anagrafica_id={anagrafica_id}
+                ana={ana}
+                canEdit={canEdit}
+                onReload={onReload}
+            />
         </div>
     );
 }
