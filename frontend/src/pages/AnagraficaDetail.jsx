@@ -392,6 +392,8 @@ const DIARIO_TIPI = [
     { v: "incontro", l: "Incontro", i: <Calendar size={12} /> },
     { v: "email", l: "Email", i: <Mail size={12} /> },
     { v: "whatsapp", l: "WhatsApp", i: <Phone size={12} /> },
+    { v: "chat", l: "Chat", i: <BookText size={12} /> },
+    { v: "documento", l: "Documento", i: <BookText size={12} /> },
     { v: "nota", l: "Nota", i: <BookText size={12} /> },
     { v: "altro", l: "Altro", i: <BookText size={12} /> },
 ];

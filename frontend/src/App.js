@@ -17,6 +17,7 @@ import Importazione from "@/pages/Importazione";
 import Pensioni from "@/pages/Pensioni";
 import Email from "@/pages/Email";
 import Attivita from "@/pages/Attivita";
+import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
 import MappaClienti from "@/pages/MappaClienti";
@@ -70,6 +71,11 @@ function App() {
                                 }
                             />
                             <Route path="/pensioni" element={<Pensioni />} />
+                            <Route path="/provvigioni" element={
+                                <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                    <Provvigioni />
+                                </ProtectedRoute>
+                            } />
                             <Route path="/pipeline" element={<Pipeline />} />
                             <Route path="/mappa" element={
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>

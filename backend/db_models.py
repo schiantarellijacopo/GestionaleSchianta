@@ -31,7 +31,36 @@ class UserPublic(BaseDoc):
     email: EmailStr
     name: str
     role: Role
-    anagrafica_id: Optional[str] = None  # se il ruolo è "cliente", collega all'anagrafica
+    anagrafica_id: Optional[str] = None
+    # Dati collaboratore (per ruoli collaboratore/dipendente)
+    codice_fiscale: Optional[str] = None
+    partita_iva: Optional[str] = None
+    iban: Optional[str] = None
+    indirizzo: Optional[str] = None
+    telefono: Optional[str] = None
+    # Settaggi provvigioni e ritenute
+    perc_provvigione_default: float = 0.0  # % provvigione standard sui titoli
+    perc_ritenuta_acconto: float = 0.0     # % ritenuta d'acconto su provvigione pagata
+    perc_inps_inarcassa: float = 0.0       # % contributi previdenziali
+    note_fiscali: Optional[str] = None
+    attivo: bool = True
+
+
+class PagamentoProvvigioni(BaseDoc):
+    collaboratore_id: str
+    collaboratore_nome: str
+    periodo_dal: str  # YYYY-MM-DD
+    periodo_al: str
+    provvigioni_lorde: float = 0.0
+    ritenuta_acconto: float = 0.0
+    contributi: float = 0.0
+    netto_pagato: float = 0.0
+    conto_cassa_id: Optional[str] = None
+    mezzo_pagamento: Optional[str] = "bonifico"
+    data_pagamento: str
+    movimento_id: Optional[str] = None
+    titoli_ids: List[str] = Field(default_factory=list)
+    note: Optional[str] = None
 
 
 class UserCreate(BaseModel):
@@ -381,7 +410,7 @@ class Allegato(BaseDoc):
 class DiarioVoce(BaseDoc):
     anagrafica_id: str
     data_evento: str  # YYYY-MM-DD
-    tipo: Literal["telefonata", "incontro", "email", "whatsapp", "nota", "altro"] = "nota"
+    tipo: Literal["telefonata", "incontro", "email", "whatsapp", "chat", "documento", "nota", "altro"] = "nota"
     titolo: str
     descrizione: Optional[str] = None
     autore_id: Optional[str] = None

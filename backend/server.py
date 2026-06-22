@@ -26,7 +26,8 @@ from db_models import (
     UserCreate, UserPublic, LoginRequest, Compagnia, Anagrafica, Polizza, Titolo,
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
-    Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, _now_iso, _uid,
+    Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
+    _now_iso, _uid,
 )
 import ania_importer
 import inps_calculator
@@ -59,6 +60,25 @@ async def log_attivita(utente: dict, azione: str, entita: str,
         descrizione=descrizione, payload=payload,
     )
     await db.attivita_log.insert_one(log.model_dump())
+
+
+async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
+                             descrizione: str | None = None, autore: dict | None = None):
+    """Crea automaticamente una voce di diario sull'anagrafica cliente.
+
+    Usato per email inviate, messaggi chat, documenti caricati ecc.
+    Idempotente per scelta progettuale.
+    """
+    if not anagrafica_id:
+        return
+    voce = DiarioVoce(
+        anagrafica_id=anagrafica_id,
+        data_evento=_now_iso()[:10],
+        tipo=tipo, titolo=titolo, descrizione=descrizione,
+        autore_id=autore.get("id") if autore else None,
+        autore_nome=autore.get("name") if autore else "Sistema",
+    )
+    await db.diario.insert_one(voce.model_dump())
 
 
 def strip_mongo_id(doc: dict | None) -> dict | None:
@@ -159,6 +179,216 @@ async def delete_user(uid: str, user=Depends(require_user("admin"))):
         raise HTTPException(404, "Utente non trovato")
     await log_attivita(user, "delete", "user", uid)
     return {"ok": True}
+
+
+# ============================================================
+# COLLABORATORI / PROVVIGIONI
+# ============================================================
+@api.get("/collaboratori")
+async def list_collaboratori(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Tutti gli utenti con ruolo collaboratore/dipendente."""
+    items = await db.users.find(
+        {"role": {"$in": ["collaboratore", "dipendente"]}},
+        {"_id": 0, "password_hash": 0},
+    ).sort("name", 1).to_list(500)
+    return items
+
+
+@api.get("/collaboratori/{cid}/estratto-provvigioni")
+async def estratto_provvigioni(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Estratto conto provvigioni: titoli incassati nel periodo + pagamenti effettuati.
+
+    Restituisce:
+      - titoli con provvigione maturata (da pagare o già pagata)
+      - pagamenti effettuati (storico)
+      - totali del periodo
+    """
+    collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
+    if not collab:
+        raise HTTPException(404, "Collaboratore non trovato")
+
+    pol_filter = {"collaboratore_id": cid}
+    pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1})]
+
+    titolo_filter = {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}
+    inc_cond = {}
+    if dal: inc_cond["$gte"] = dal
+    if al: inc_cond["$lte"] = al
+    if inc_cond: titolo_filter["data_incasso"] = inc_cond
+
+    titoli = await db.titoli.find(titolo_filter, {"_id": 0}).to_list(5000)
+    # arricchimento polizza/contraente
+    pol_map = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1})}
+    ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+
+    # pagamenti già effettuati nel periodo (per evitare conteggi doppi)
+    pag_filter = {"collaboratore_id": cid}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        pag_filter["data_pagamento"] = cond
+    pagamenti = await db.pagamenti_provvigioni.find(pag_filter, {"_id": 0}).sort("data_pagamento", -1).to_list(500)
+    titoli_gia_pagati = set()
+    for p in pagamenti:
+        for tid in p.get("titoli_ids", []):
+            titoli_gia_pagati.add(tid)
+
+    rows = []
+    tot_lordo = 0.0
+    tot_da_pagare = 0.0
+    for t in titoli:
+        pol = pol_map.get(t["polizza_id"], {})
+        ana = ana_map.get(pol.get("contraente_id", ""), {})
+        provv = t.get("provvigioni", 0.0) or 0.0
+        gia_pagato = t["id"] in titoli_gia_pagati
+        rows.append({
+            "titolo_id": t["id"],
+            "polizza_id": t["polizza_id"],
+            "numero_polizza": pol.get("numero_polizza"),
+            "contraente": ana.get("ragione_sociale"),
+            "ramo": pol.get("ramo"),
+            "data_incasso": t.get("data_incasso"),
+            "importo_lordo": t.get("importo_lordo", 0.0),
+            "provvigione": provv,
+            "gia_pagato": gia_pagato,
+        })
+        tot_lordo += provv
+        if not gia_pagato:
+            tot_da_pagare += provv
+
+    # calcolo trattenute sul "da pagare"
+    rit = collab.get("perc_ritenuta_acconto", 0.0) or 0.0
+    inps = collab.get("perc_inps_inarcassa", 0.0) or 0.0
+    ritenuta_calc = round(tot_da_pagare * rit / 100.0, 2)
+    contributi_calc = round(tot_da_pagare * inps / 100.0, 2)
+    netto_calc = round(tot_da_pagare - ritenuta_calc - contributi_calc, 2)
+
+    return {
+        "collaboratore": collab,
+        "periodo": {"dal": dal, "al": al},
+        "righe": rows,
+        "totali": {
+            "provvigioni_lorde_periodo": round(tot_lordo, 2),
+            "provvigioni_da_pagare": round(tot_da_pagare, 2),
+            "ritenuta_acconto_calcolata": ritenuta_calc,
+            "contributi_calcolati": contributi_calc,
+            "netto_da_pagare": netto_calc,
+        },
+        "pagamenti_periodo": pagamenti,
+    }
+
+
+@api.post("/collaboratori/{cid}/paga-provvigioni")
+async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Esegue pagamento provvigioni: crea PagamentoProvvigioni + movimento contabile uscita.
+
+    body: { titoli_ids: [...], conto_cassa_id, data_pagamento, mezzo_pagamento, note,
+            override_provvigioni_lorde?, override_ritenuta?, override_contributi? }
+    """
+    collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
+    if not collab:
+        raise HTTPException(404, "Collaboratore non trovato")
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "Seleziona almeno un titolo")
+    conto_id = body.get("conto_cassa_id")
+    data_pag = body.get("data_pagamento") or _now_iso()[:10]
+
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    lordo = sum((t.get("provvigioni") or 0.0) for t in titoli)
+    if body.get("override_provvigioni_lorde") is not None:
+        lordo = float(body["override_provvigioni_lorde"])
+
+    rit_perc = collab.get("perc_ritenuta_acconto", 0.0) or 0.0
+    inps_perc = collab.get("perc_inps_inarcassa", 0.0) or 0.0
+    ritenuta = float(body.get("override_ritenuta")) if body.get("override_ritenuta") is not None else round(lordo * rit_perc / 100.0, 2)
+    contributi = float(body.get("override_contributi")) if body.get("override_contributi") is not None else round(lordo * inps_perc / 100.0, 2)
+    netto = round(lordo - ritenuta - contributi, 2)
+
+    # determina periodo (min/max data_incasso dei titoli)
+    inc_dates = [t.get("data_incasso") for t in titoli if t.get("data_incasso")]
+    periodo_dal = min(inc_dates) if inc_dates else data_pag
+    periodo_al = max(inc_dates) if inc_dates else data_pag
+
+    # Crea movimento contabile (uscita) - va in Brogliaccio
+    mov = MovimentoContabile(
+        data_movimento=data_pag,
+        tipo="uscita",
+        categoria="provvigioni",
+        importo=netto,
+        descrizione=f"Pagamento provvigioni a {collab.get('name')} - periodo {periodo_dal} / {periodo_al}",
+        conto_cassa_id=conto_id,
+        mezzo_pagamento=body.get("mezzo_pagamento", "bonifico"),
+        note=(f"Lordo {lordo:.2f} - rit. {ritenuta:.2f} - contributi {contributi:.2f} = netto {netto:.2f}"),
+    )
+    await db.movimenti.insert_one(mov.model_dump())
+
+    pag = PagamentoProvvigioni(
+        collaboratore_id=cid,
+        collaboratore_nome=collab.get("name", ""),
+        periodo_dal=periodo_dal,
+        periodo_al=periodo_al,
+        provvigioni_lorde=round(lordo, 2),
+        ritenuta_acconto=ritenuta,
+        contributi=contributi,
+        netto_pagato=netto,
+        conto_cassa_id=conto_id,
+        mezzo_pagamento=body.get("mezzo_pagamento", "bonifico"),
+        data_pagamento=data_pag,
+        movimento_id=mov.id,
+        titoli_ids=titoli_ids,
+        note=body.get("note"),
+    )
+    await db.pagamenti_provvigioni.insert_one(pag.model_dump())
+    await log_attivita(user, "paga_provvigioni", "collaboratore", cid,
+                       f"Pagate provvigioni a {collab.get('name')} per €{netto:.2f}")
+    return {
+        "ok": True,
+        "pagamento": pag.model_dump(),
+        "movimento": mov.model_dump(),
+    }
+
+
+@api.get("/collaboratori/{cid}/pagamenti")
+async def list_pagamenti(cid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    items = await db.pagamenti_provvigioni.find({"collaboratore_id": cid}, {"_id": 0}) \
+        .sort("data_pagamento", -1).to_list(500)
+    return items
+
+
+@api.get("/stampa/provvigioni/{cid}")
+async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    data = await estratto_provvigioni(cid, dal, al, user)
+    collab = data["collaboratore"]
+    headers = ["Data", "N. polizza", "Contraente", "Ramo", "Premio €", "Provvigione €", "Pagata"]
+    rows = []
+    for r in data["righe"]:
+        rows.append([r.get("data_incasso", ""), r.get("numero_polizza", ""),
+                     r.get("contraente", ""), r.get("ramo", ""),
+                     r.get("importo_lordo", 0), r.get("provvigione", 0),
+                     "SÌ" if r.get("gia_pagato") else "NO"])
+    tot = data["totali"]
+    rows.append(["", "", "", "TOTALE LORDO", "", tot["provvigioni_lorde_periodo"], ""])
+    rows.append(["", "", "", "DA PAGARE", "", tot["provvigioni_da_pagare"], ""])
+    rows.append(["", "", "", "RITENUTA ACCONTO", "", tot["ritenuta_acconto_calcolata"], ""])
+    rows.append(["", "", "", "CONTRIBUTI", "", tot["contributi_calcolati"], ""])
+    rows.append(["", "", "", "NETTO DA PAGARE", "", tot["netto_da_pagare"], ""])
+    pdf = pdf_report.stampa_elenco(
+        f"Estratto conto provvigioni - {collab.get('name')}",
+        f"Periodo: {dal or '—'} → {al or '—'}",
+        headers, rows,
+        col_widths_mm=[25, 35, 60, 25, 30, 30, 22], landscape_mode=False,
+        filtri_attivi={"Dal": dal, "Al": al},
+    )
+    return _pdf_response(pdf, f"provvigioni_{collab.get('name')}.pdf")
 
 
 # ============================================================
@@ -1277,13 +1507,22 @@ async def create_email(body: dict, user=Depends(require_user("admin", "collabora
 @api.post("/email/{eid}/invia")
 async def invia_email(eid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """Invio email (MOCK - non invia realmente, marca come inviata)."""
+    email_doc = await db.email.find_one({"id": eid}, {"_id": 0})
+    if not email_doc:
+        raise HTTPException(404, "Non trovata")
     res = await db.email.update_one(
         {"id": eid},
         {"$set": {"stato": "inviata", "data_invio": _now_iso(), "updated_at": _now_iso()}},
     )
-    if res.matched_count == 0:
-        raise HTTPException(404, "Non trovata")
     await log_attivita(user, "invio", "email", eid, "Email inviata (mock)")
+    # auto-traccia nel diario del cliente
+    if email_doc.get("destinatario_anagrafica_id"):
+        await log_diario_cliente(
+            email_doc["destinatario_anagrafica_id"], "email",
+            titolo=f"📧 Email inviata: {email_doc.get('oggetto', '')}",
+            descrizione=(email_doc.get("corpo") or "")[:500],
+            autore=user,
+        )
     return {"ok": True, "note": "Invio simulato. Configurare SMTP per invio reale."}
 
 
@@ -1633,6 +1872,22 @@ async def upload_allegato(
     )
     await db.allegati.insert_one(obj.model_dump())
     await log_attivita(user, "upload", "allegato", obj.id, f"{file.filename} su {entita_tipo}:{entita_id}")
+    # auto-traccia nel diario se l'allegato è su anagrafica/polizza/sinistro di un cliente
+    anag_id_for_diario = None
+    if entita_tipo == "anagrafica":
+        anag_id_for_diario = entita_id
+    elif entita_tipo in ("polizza", "sinistro"):
+        coll = db.polizze if entita_tipo == "polizza" else db.sinistri
+        target = await coll.find_one({"id": entita_id}, {"_id": 0, "contraente_id": 1})
+        if target:
+            anag_id_for_diario = target.get("contraente_id")
+    if anag_id_for_diario:
+        await log_diario_cliente(
+            anag_id_for_diario, "documento_inviato" if False else "altro",
+            titolo=f"📎 Documento caricato: {file.filename}",
+            descrizione=f"Allegato a {entita_tipo} (size: {result.get('size', len(data))} bytes)" + (f" - {descrizione}" if descrizione else ""),
+            autore=user,
+        )
     return obj.model_dump()
 
 
@@ -1780,6 +2035,17 @@ async def chat_invia(
         allegato_content_type=allegato_ct,
     )
     await db.chat.insert_one(msg.model_dump())
+    # auto-traccia nel diario se l'interlocutore è un cliente
+    cliente_user = None
+    if dest.get("role") == "cliente" and dest.get("anagrafica_id"):
+        cliente_user = dest
+    elif user.get("role") == "cliente" and user.get("anagrafica_id"):
+        cliente_user = user
+    if cliente_user:
+        direction = "→" if user.get("role") != "cliente" else "←"
+        titolo = f"💬 Chat {direction} {cliente_user.get('name')}"
+        desc = txt[:300] + (" [+ allegato]" if allegato_nome else "")
+        await log_diario_cliente(cliente_user["anagrafica_id"], "chat", titolo, desc, autore=user)
     return msg.model_dump()
 
 
