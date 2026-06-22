@@ -17,6 +17,11 @@ import Importazione from "@/pages/Importazione";
 import Pensioni from "@/pages/Pensioni";
 import Email from "@/pages/Email";
 import Attivita from "@/pages/Attivita";
+import Pipeline from "@/pages/Pipeline";
+import Librerie from "@/pages/Librerie";
+import MappaClienti from "@/pages/MappaClienti";
+import Chat from "@/pages/Chat";
+import Corsi from "@/pages/Corsi";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -65,6 +70,19 @@ function App() {
                                 }
                             />
                             <Route path="/pensioni" element={<Pensioni />} />
+                            <Route path="/pipeline" element={<Pipeline />} />
+                            <Route path="/mappa" element={
+                                <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                    <MappaClienti />
+                                </ProtectedRoute>
+                            } />
+                            <Route path="/chat" element={<Chat />} />
+                            <Route path="/corsi" element={<Corsi />} />
+                            <Route path="/librerie" element={
+                                <ProtectedRoute roles={["admin", "collaboratore"]}>
+                                    <Librerie />
+                                </ProtectedRoute>
+                            } />
                             <Route
                                 path="/email"
                                 element={

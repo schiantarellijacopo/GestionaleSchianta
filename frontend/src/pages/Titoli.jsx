@@ -1,90 +1,527 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate, fmtEur } from "@/lib/api";
+import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import RowActions from "@/components/RowActions";
+import {
+    Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
+    ChevronDown, ChevronUp,
+} from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
+const PRESETS = [
+    { key: "tutti", label: "Tutti" },
+    { key: "sospesi", label: "Sospesi (da incassare)" },
+    { key: "scad15", label: "In scadenza 15gg" },
+    { key: "scad_oltre15", label: "Oltre 15gg" },
+    { key: "scadute_oggi", label: "Scadute oggi" },
+    { key: "scad_5g", label: "Scadute da 5gg" },
+    { key: "scad_10g", label: "Scadute da 10gg" },
+    { key: "scad_14g", label: "Scadute da 14gg" },
+    { key: "coperti", label: "Coperti non pagati" },
+];
+
+const presetParams = (key) => {
+    switch (key) {
+        case "sospesi": return { stato: "da_incassare" };
+        case "scad15": return { in_scadenza_giorni: 15 };
+        case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
+        case "scadute_oggi": return { scadute_oggi: true };
+        case "scad_5g": return { scadute_da_min: 5 };
+        case "scad_10g": return { scadute_da_min: 10 };
+        case "scad_14g": return { scadute_da_min: 14 };
+        case "coperti": return { coperti_non_pagati: true };
+        default: return {};
+    }
+};
+
 export default function Titoli() {
+    const { user } = useAuth();
     const [list, setList] = useState(null);
-    const [stato, setStato] = useState("all");
+    const [compagnie, setCompagnie] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [conti, setConti] = useState([]);
+    const [utenti, setUtenti] = useState([]);
+    const [editing, setEditing] = useState(null);
+    const [showFilters, setShowFilters] = useState(false);
+    const [pageSize, setPageSize] = useState(50);
+
+    const [filters, setFilters] = useState({
+        preset: "sospesi", q: "",
+        stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
+        collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
+        dal: "", al: "",
+    });
+    const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
+
+    const [selected, setSelected] = useState(new Set());
+    const [bulkOpen, setBulkOpen] = useState(null); // "incassa" | "copertura"
+
+    const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const canDelete = ["admin", "collaboratore"].includes(user?.role);
+
+    const buildParams = () => {
+        const p = { ...presetParams(filters.preset) };
+        if (filters.q) p.q = filters.q;
+        if (filters.stato !== "all" && filters.preset === "tutti") p.stato = filters.stato;
+        if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
+        if (filters.ramo !== "all") p.ramo = filters.ramo;
+        if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
+        if (filters.conto_cassa_id !== "all") p.conto_cassa_id = filters.conto_cassa_id;
+        if (filters.prodotto) p.prodotto = filters.prodotto;
+        if (filters.mezzo_pagamento) p.mezzo_pagamento = filters.mezzo_pagamento;
+        if (filters.dal) p.dal = filters.dal;
+        if (filters.al) p.al = filters.al;
+        return p;
+    };
 
     const load = () => {
-        const params = {};
-        if (stato !== "all") params.stato = stato;
-        api.get("/titoli", { params }).then((r) => setList(r.data));
+        setSelected(new Set());
+        api.get("/titoli", { params: buildParams() }).then((r) => setList(r.data));
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato]);
 
-    const incassa = async (id) => {
-        try {
-            await api.post(`/titoli/${id}/incassa`, { mezzo_pagamento: "bonifico" });
-            toast.success("Titolo incassato e movimento contabile creato");
-            load();
-        } catch { toast.error("Errore"); }
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
+    useEffect(() => {
+        Promise.all([
+            api.get("/compagnie"), api.get("/librerie/rami"),
+            api.get("/librerie/conti-cassa"),
+            api.get("/auth/users").catch(() => ({ data: [] })),
+        ]).then(([c, r, cc, u]) => {
+            setCompagnie(c.data); setRami(r.data); setConti(cc.data);
+            setUtenti((u.data || []).filter((x) => x.role !== "cliente"));
+        });
+    }, []);
+
+    const displayed = useMemo(() => (list || []).slice(0, pageSize), [list, pageSize]);
+
+    // totali calcolati sui dati visualizzati
+    const totali = useMemo(() => {
+        const src = list || [];
+        const t_lordo = src.reduce((s, t) => s + (t.importo_lordo || 0), 0);
+        const t_provv = src.reduce((s, t) => s + (t.provvigioni || 0), 0);
+        const da_pagare = src.filter((t) => t.stato !== "incassato").reduce((s, t) => s + (t.importo_lordo || 0), 0);
+        return { t_lordo, t_provv, da_pagare };
+    }, [list]);
+
+    const toggle = (id) => setSelected((p) => {
+        const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
+    });
+    const toggleAll = () => {
+        if (selected.size === displayed.length) setSelected(new Set());
+        else setSelected(new Set(displayed.map((t) => t.id)));
     };
+
+    const elimina = async (id) => {
+        try { await api.delete(`/titoli/${id}`); toast.success("Titolo eliminato"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const exportCsv = () => window.open(`${API_BASE}/export/titoli.csv`, "_blank");
+    const exportXlsx = () => window.open(`${API_BASE}/export/titoli.xlsx`, "_blank");
+    const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
 
     return (
         <div data-testid="titoli-page">
-            <PageHeader title="Titoli" subtitle="Quietanze e premi: emessi, incassati, insoluti" />
+            <PageHeader
+                title="Titoli"
+                subtitle="Sospesi · in scadenza · coperti non pagati · esportazioni e stampa"
+            />
 
-            <div className="flex items-center gap-3 mb-4">
-                <Select value={stato} onValueChange={setStato}>
-                    <SelectTrigger className="w-48" data-testid="titoli-stato-filter"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Tutti gli stati</SelectItem>
-                        <SelectItem value="da_incassare">Da incassare</SelectItem>
-                        <SelectItem value="incassato">Incassati</SelectItem>
-                        <SelectItem value="insoluto">Insoluti</SelectItem>
-                        <SelectItem value="stornato">Stornati</SelectItem>
-                    </SelectContent>
-                </Select>
-                <span className="text-sm text-slate-500 num ml-auto">{list ? `${list.length} titoli` : ""}</span>
+            {/* Preset rapidi */}
+            <div className="flex flex-wrap gap-2 mb-3">
+                {PRESETS.map((p) => (
+                    <button
+                        key={p.key}
+                        onClick={() => setF("preset", p.key)}
+                        data-testid={`preset-${p.key}`}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                            filters.preset === p.key
+                                ? "bg-slate-900 text-white border-slate-900"
+                                : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                    >
+                        {p.label}
+                    </button>
+                ))}
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+            {/* Toolbar */}
+            <div className="bg-white border border-slate-200 rounded-md p-3 mb-3">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <div className="relative flex-1 min-w-[260px]">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            data-testid="titoli-search"
+                            placeholder="Cerca per polizza, targa, contraente..."
+                            value={filters.q}
+                            onChange={(e) => setF("q", e.target.value)}
+                            className="pl-9"
+                        />
+                    </div>
+                    <span className="text-xs text-slate-600 hidden md:block">Visualizza</span>
+                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v))}>
+                        <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {[25, 50, 100, 250, 500].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <Button variant="outline" onClick={() => setShowFilters((s) => !s)} data-testid="toggle-filters">
+                        <Filter size={14} className="mr-1" /> Filtri {showFilters ? <ChevronUp size={12} className="ml-1" /> : <ChevronDown size={12} className="ml-1" />}
+                    </Button>
+                    <div className="ml-auto flex gap-2">
+                        <Button variant="outline" onClick={stampaPdf} data-testid="titoli-print">
+                            <Printer size={14} className="mr-1" /> Stampa PDF
+                        </Button>
+                        <Button variant="outline" onClick={exportCsv} data-testid="titoli-csv">
+                            <FileText size={14} className="mr-1" /> CSV
+                        </Button>
+                        <Button variant="outline" onClick={exportXlsx} data-testid="titoli-xlsx">
+                            <FileSpreadsheet size={14} className="mr-1" /> Excel
+                        </Button>
+                    </div>
+                </div>
+
+                {showFilters && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-2 pt-2 border-t border-slate-100">
+                        <Select value={filters.compagnia_id} onValueChange={(v) => setF("compagnia_id", v)}>
+                            <SelectTrigger data-testid="f-compagnia"><SelectValue placeholder="Compagnia" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutte compagnie</SelectItem>
+                                {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.ramo} onValueChange={(v) => setF("ramo", v)}>
+                            <SelectTrigger data-testid="f-ramo"><SelectValue placeholder="Ramo" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti rami</SelectItem>
+                                {rami.map((r) => <SelectItem key={r.id} value={r.codice}>{r.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.collaboratore_id} onValueChange={(v) => setF("collaboratore_id", v)}>
+                            <SelectTrigger data-testid="f-collab"><SelectValue placeholder="Collaboratore" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti collaboratori</SelectItem>
+                                {utenti.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.conto_cassa_id} onValueChange={(v) => setF("conto_cassa_id", v)}>
+                            <SelectTrigger><SelectValue placeholder="Conto / Banca" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti conti</SelectItem>
+                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Input placeholder="Prodotto..." value={filters.prodotto} onChange={(e) => setF("prodotto", e.target.value)} />
+                        <Input placeholder="Mezzo pag." value={filters.mezzo_pagamento} onChange={(e) => setF("mezzo_pagamento", e.target.value)} />
+                        <div>
+                            <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
+                            <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="f-dal" />
+                        </div>
+                        <div>
+                            <Label className="text-[10px] text-slate-500">Scadenza al</Label>
+                            <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="f-al" />
+                        </div>
+                        <button onClick={() => setFilters({
+                            preset: "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
+                            prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
+                            conto_cassa_id: "all", dal: "", al: "",
+                        })} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
+                            <X size={12} /> Azzera filtri
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Tabella */}
+            <div className="bg-white border border-slate-200 rounded-md overflow-x-auto pb-2">
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full min-w-[900px]">
+                    <table className="tbl w-full min-w-[1200px]">
                         <thead>
                             <tr>
-                                <th>Polizza</th>
-                                <th>Tipo</th>
-                                <th>Effetto</th>
-                                <th>Scadenza</th>
-                                <th>Stato</th>
-                                <th className="text-right">Lordo</th>
+                                <th className="w-10 text-center">
+                                    <input
+                                        type="checkbox"
+                                        data-testid="select-all-checkbox"
+                                        checked={displayed.length > 0 && selected.size === displayed.length}
+                                        onChange={toggleAll}
+                                    />
+                                </th>
+                                <th>Contratto / Targa</th>
+                                <th>Contraente</th>
+                                <th>Compagnia</th>
+                                <th>Collaboratore</th>
+                                <th className="text-right">Rata</th>
                                 <th className="text-right">Provv.</th>
-                                <th>Incassato il</th>
-                                <th>Mezzo</th>
+                                <th>Scadenza</th>
+                                <th>Copertura</th>
+                                <th>Stato</th>
+                                <th className="text-right">Da pagare</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {list.map((t) => (
-                                <tr key={t.id} data-testid={`titolo-row-${t.id}`}>
-                                    <td><Link to={`/polizze/${t.polizza_id}`} className="text-sky-700 hover:underline">{t.numero_polizza || t.polizza_id.slice(0, 8)}</Link></td>
-                                    <td>{t.tipo}</td>
-                                    <td className="num">{fmtDate(t.effetto)}</td>
-                                    <td className="num">{fmtDate(t.scadenza)}</td>
-                                    <td><StatusBadge stato={t.stato} /></td>
-                                    <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
-                                    <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
-                                    <td className="num">{fmtDate(t.data_incasso)}</td>
-                                    <td className="text-xs text-slate-600">{t.mezzo_pagamento || "-"}</td>
-                                    <td>
-                                        {t.stato === "da_incassare" && (
-                                            <Button size="sm" variant="outline" onClick={() => incassa(t.id)} data-testid={`titolo-incassa-${t.id}`}>
-                                                Incassa
-                                            </Button>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
+                            {displayed.map((t) => {
+                                const daPagare = t.stato === "incassato" ? 0 : (t.importo_lordo || 0);
+                                return (
+                                    <tr key={t.id} data-testid={`titolo-row-${t.id}`} className={selected.has(t.id) ? "bg-sky-50" : ""}>
+                                        <td className="text-center">
+                                            <input
+                                                type="checkbox"
+                                                data-testid={`select-${t.id}`}
+                                                checked={selected.has(t.id)}
+                                                onChange={() => toggle(t.id)}
+                                            />
+                                        </td>
+                                        <td>
+                                            <Link to={`/polizze/${t.polizza_id}`} className="text-amber-600 hover:underline font-medium block">
+                                                {t.numero_polizza || "—"}
+                                            </Link>
+                                            <div className="text-[11px] text-slate-500">{t.prodotto || t.ramo}</div>
+                                            {t.targa && (
+                                                <div className="text-xs text-sky-700 font-medium num mt-0.5">{t.targa}</div>
+                                            )}
+                                        </td>
+                                        <td className="text-xs">{t.contraente_nome || "-"}</td>
+                                        <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>
+                                        <td className="text-xs text-slate-700">{t.collaboratore_nome || "-"}</td>
+                                        <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
+                                        <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
+                                        <td className="num text-xs">{fmtDate(t.scadenza)}</td>
+                                        <td className="num text-xs text-emerald-700">{t.coperto_fino_a ? fmtDate(t.coperto_fino_a) : "—"}</td>
+                                        <td><StatusBadge stato={t.stato} /></td>
+                                        <td className="num text-right font-semibold text-rose-700">
+                                            {daPagare > 0 ? fmtEur(daPagare) : "—"}
+                                        </td>
+                                        <td className="text-right">
+                                            <RowActions
+                                                testid={`titolo-actions-${t.id}`}
+                                                onEdit={canEdit ? () => setEditing(t) : null}
+                                                onDelete={() => elimina(t.id)}
+                                                canDelete={canDelete}
+                                                label="titolo"
+                                            />
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
+                {list && list.length > pageSize && (
+                    <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
+                        Visualizzati {pageSize} di {list.length} risultati - aumenta &quot;Visualizza&quot; per vederne di più
+                    </div>
+                )}
             </div>
+
+            {/* Footer azione bulk + totali */}
+            <div className="sticky bottom-0 mt-4 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3" data-testid="bulk-footer">
+                <button onClick={() => setSelected(new Set(displayed.map((t) => t.id)))} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded text-xs font-semibold" data-testid="select-all-btn">
+                    SELEZIONA TUTTI
+                </button>
+                <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-semibold">
+                    DESELEZIONA TUTTI
+                </button>
+                <span className="text-xs text-slate-400">
+                    {selected.size > 0 ? `${selected.size} selezionati` : ""}
+                </span>
+                <button
+                    disabled={selected.size === 0}
+                    onClick={() => setBulkOpen("incassa")}
+                    data-testid="bulk-incassa-btn"
+                    className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
+                >
+                    <Wallet size={14} /> INCASSA
+                </button>
+                <button
+                    disabled={selected.size === 0}
+                    onClick={() => setBulkOpen("copertura")}
+                    data-testid="bulk-copertura-btn"
+                    className="px-4 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:bg-slate-700 disabled:text-slate-500 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
+                >
+                    <Shield size={14} /> COPERTURA
+                </button>
+                <div className="ml-auto flex gap-6">
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Rata totale</div>
+                        <div className="text-base font-semibold num">{fmtEur(totali.t_lordo)}</div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Provvigioni</div>
+                        <div className="text-base font-semibold num">{fmtEur(totali.t_provv)}</div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-amber-300">Da pagare</div>
+                        <div className="text-base font-semibold num text-amber-300">{fmtEur(totali.da_pagare)}</div>
+                    </div>
+                </div>
+            </div>
+
+            {bulkOpen && (
+                <BulkActionDialog
+                    action={bulkOpen}
+                    ids={Array.from(selected)}
+                    conti={conti}
+                    onClose={() => { setBulkOpen(null); load(); }}
+                />
+            )}
+
+            {editing && (
+                <EditTitoloDialog titolo={editing} conti={conti} onClose={() => { setEditing(null); load(); }} />
+            )}
         </div>
+    );
+}
+
+function BulkActionDialog({ action, ids, conti, onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    const [data_incasso, setDataIncasso] = useState(today);
+    const [mezzo, setMezzo] = useState("bonifico");
+    const [conto_id, setContoId] = useState("");
+    const [coperto, setCoperto] = useState(in30);
+
+    const submit = async () => {
+        try {
+            if (action === "incassa") {
+                const r = await api.post("/titoli/bulk-incassa", {
+                    ids, data_incasso, mezzo_pagamento: mezzo, conto_cassa_id: conto_id || null,
+                });
+                toast.success(`${r.data.incassati} titoli incassati per ${fmtEur(r.data.totale)}`);
+            } else {
+                const r = await api.post("/titoli/bulk-copertura", { ids, coperto_fino_a: coperto });
+                toast.success(`Copertura impostata su ${r.data.aggiornati} titoli`);
+            }
+            onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>
+                        {action === "incassa" ? `Incassa ${ids.length} titoli` : `Imposta copertura su ${ids.length} titoli`}
+                    </DialogTitle>
+                </DialogHeader>
+                {action === "incassa" ? (
+                    <div className="space-y-3 py-2">
+                        <div><Label>Data incasso</Label><Input type="date" value={data_incasso} onChange={(e) => setDataIncasso(e.target.value)} data-testid="bulk-data" /></div>
+                        <div><Label>Mezzo pagamento</Label><Input value={mezzo} onChange={(e) => setMezzo(e.target.value)} /></div>
+                        <div>
+                            <Label>Conto / Banca</Label>
+                            <Select value={conto_id} onValueChange={setContoId}>
+                                <SelectTrigger data-testid="bulk-conto"><SelectValue placeholder="-" /></SelectTrigger>
+                                <SelectContent>
+                                    {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="space-y-3 py-2">
+                        <div>
+                            <Label>Copertura fino al</Label>
+                            <Input type="date" value={coperto} onChange={(e) => setCoperto(e.target.value)} data-testid="bulk-coperto" />
+                        </div>
+                        <p className="text-xs text-slate-500">
+                            Imposta la data fino a cui consideri questi titoli &quot;coperti&quot; pur senza incasso effettivo.
+                        </p>
+                    </div>
+                )}
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={submit} data-testid="bulk-confirm" className="bg-sky-700 hover:bg-sky-800">
+                        Conferma
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function EditTitoloDialog({ titolo, conti, onClose }) {
+    const [f, setF] = useState({ ...titolo });
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const save = async () => {
+        try {
+            await api.put(`/titoli/${titolo.id}`, {
+                tipo: f.tipo, effetto: f.effetto, scadenza: f.scadenza, stato: f.stato,
+                importo_lordo: parseFloat(f.importo_lordo) || 0,
+                importo_netto: parseFloat(f.importo_netto) || 0,
+                imposte: parseFloat(f.imposte) || 0,
+                provvigioni: parseFloat(f.provvigioni) || 0,
+                mezzo_pagamento: f.mezzo_pagamento || null,
+                conto_cassa_id: f.conto_cassa_id || null,
+                data_incasso: f.data_incasso || null,
+                coperto_fino_a: f.coperto_fino_a || null,
+            });
+            toast.success("Titolo aggiornato"); onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-xl">
+                <DialogHeader><DialogTitle>Modifica titolo</DialogTitle></DialogHeader>
+                <div className="grid grid-cols-2 gap-3 py-2">
+                    <div>
+                        <Label>Tipo</Label>
+                        <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                {["nuova", "rinnovo", "appendice", "regolazione", "storno"].map((t) =>
+                                    <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Stato</Label>
+                        <Select value={f.stato} onValueChange={(v) => set("stato", v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="da_incassare">Da incassare</SelectItem>
+                                <SelectItem value="incassato">Incassato</SelectItem>
+                                <SelectItem value="insoluto">Insoluto</SelectItem>
+                                <SelectItem value="stornato">Stornato</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => set("effetto", e.target.value)} /></div>
+                    <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} /></div>
+                    <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} onChange={(e) => set("importo_lordo", e.target.value)} /></div>
+                    <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
+                    <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
+                    <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni || 0} onChange={(e) => set("provvigioni", e.target.value)} /></div>
+                    <div><Label>Data incasso</Label><Input type="date" value={f.data_incasso || ""} onChange={(e) => set("data_incasso", e.target.value)} /></div>
+                    <div><Label>Copertura fino al</Label><Input type="date" value={f.coperto_fino_a || ""} onChange={(e) => set("coperto_fino_a", e.target.value)} /></div>
+                    <div>
+                        <Label>Conto / Banca</Label>
+                        <Select value={f.conto_cassa_id || ""} onValueChange={(v) => set("conto_cassa_id", v)}>
+                            <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
+                            <SelectContent>
+                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="col-span-2">
+                        <Label>Mezzo pagamento</Label>
+                        <Input value={f.mezzo_pagamento || ""} onChange={(e) => set("mezzo_pagamento", e.target.value)} />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button onClick={save} data-testid="titolo-save-edit" className="bg-sky-700 hover:bg-sky-800">Salva</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }

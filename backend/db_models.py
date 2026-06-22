@@ -78,9 +78,19 @@ class Anagrafica(BaseDoc):
     cellulare: Optional[str] = None
     email: Optional[str] = None
     iban: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    indirizzo_geocoded: Optional[str] = None
     professione: Optional[str] = None
     stato_civile: Optional[str] = None
     titolo_studio: Optional[str] = None
+    # dati previdenziali (per calcolo INPS automatico)
+    tipo_lavoratore: Optional[Literal["dipendente", "autonomo", "parasubordinato", "pensionato", "altro"]] = None
+    reddito_annuo_lordo: Optional[float] = None
+    numero_figli: int = 0
+    numero_figli_a_carico: int = 0
+    data_inizio_contribuzione: Optional[str] = None
+    settimane_contributive: Optional[int] = None
     note: Optional[str] = None
     # albero genealogico
     parente_di: List[dict] = Field(default_factory=list)  # [{"anagrafica_id":..., "relazione":"figlio|coniuge|..."}]
@@ -115,6 +125,7 @@ class Polizza(BaseDoc):
     provvigioni: float = 0.0
     note: Optional[str] = None
     targa: Optional[str] = None
+    collaboratore_id: Optional[str] = None  # utente collaboratore/dipendente referente
     # collegamenti import
     id_polizza_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
@@ -136,7 +147,9 @@ class Titolo(BaseDoc):
     imposte: float = 0.0
     provvigioni: float = 0.0
     data_incasso: Optional[str] = None
+    coperto_fino_a: Optional[str] = None  # data fino a cui il rischio è coperto anche se non pagato
     mezzo_pagamento: Optional[str] = None
+    conto_cassa_id: Optional[str] = None
     id_titolo_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
@@ -182,8 +195,10 @@ class MovimentoContabile(BaseDoc):
     polizza_id: Optional[str] = None
     titolo_id: Optional[str] = None
     compagnia_id: Optional[str] = None
+    conto_cassa_id: Optional[str] = None
     mezzo_pagamento: Optional[str] = None
     numero_documento: Optional[str] = None
+    provvigioni: float = 0.0
     note: Optional[str] = None
 
 
@@ -248,7 +263,106 @@ class AttivitaLog(BaseDoc):
     payload: Optional[dict] = None
 
 
-# =============== IMPORT LOG ===============
+# =============== LIBRERIE / ANAGRAFICHE DI SERVIZIO ===============
+class Banca(BaseDoc):
+    nome: str
+    codice_abi: Optional[str] = None
+    iban_agenzia: Optional[str] = None
+    referente: Optional[str] = None
+    note: Optional[str] = None
+    attiva: bool = True
+
+
+class ContoCassa(BaseDoc):
+    """Conto cassa / canale incasso (es. CONTANTI, ASSEGNI, BPER SONDRIO, RID DIREZIONE)."""
+    nome: str
+    tipo: Literal["cassa", "banca", "carta", "rid", "online", "altro"] = "banca"
+    banca_id: Optional[str] = None
+    iban: Optional[str] = None
+    saldo_iniziale: float = 0.0
+    descrizione: Optional[str] = None
+    attivo: bool = True
+    ordine: int = 0
+
+
+class ProdottoLibreria(BaseDoc):
+    """Prodotto assicurativo (catalogo interno per dropdown polizze)."""
+    nome: str
+    compagnia_id: Optional[str] = None
+    ramo: Optional[str] = None
+    descrizione: Optional[str] = None
+    attivo: bool = True
+
+
+class RamoLibreria(BaseDoc):
+    """Ramo assicurativo (es. RCA, INCENDIO, VITA)."""
+    codice: str
+    nome: str
+    descrizione: Optional[str] = None
+    attivo: bool = True
+
+
+# =============== ALLEGATI / DOCUMENTI ===============
+class Allegato(BaseDoc):
+    """Allegato collegato a una entità (anagrafica/polizza/sinistro/cliente/corso)."""
+    entita_tipo: Literal["anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento"]
+    entita_id: str
+    nome_file: str
+    storage_path: str
+    content_type: str
+    size: int = 0
+    descrizione: Optional[str] = None
+    autore_id: Optional[str] = None
+    is_deleted: bool = False
+
+
+# =============== DIARIO CLIENTE ===============
+class DiarioVoce(BaseDoc):
+    anagrafica_id: str
+    data_evento: str  # YYYY-MM-DD
+    tipo: Literal["telefonata", "incontro", "email", "whatsapp", "nota", "altro"] = "nota"
+    titolo: str
+    descrizione: Optional[str] = None
+    autore_id: Optional[str] = None
+    autore_nome: Optional[str] = None
+
+
+# =============== CHAT INTERNA ===============
+class MessaggioChat(BaseDoc):
+    mittente_id: str
+    mittente_nome: str
+    destinatario_id: str
+    destinatario_nome: str
+    testo: str
+    letto: bool = False
+    letto_at: Optional[str] = None
+
+
+# =============== CORSI / FORMAZIONE ===============
+class Corso(BaseDoc):
+    titolo: str
+    descrizione: Optional[str] = None
+    categoria: Optional[str] = None
+    durata_minuti: int = 0
+    # link video esterno (YouTube/Vimeo) o storage_path se caricato
+    video_url: Optional[str] = None
+    video_storage_path: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    visibile_ruoli: List[str] = Field(default_factory=lambda: ["dipendente", "collaboratore"])
+    visibile_utenti: List[str] = Field(default_factory=list)  # user_ids specifici
+    autore_id: Optional[str] = None
+    pubblicato: bool = True
+
+
+class ProgressoCorso(BaseDoc):
+    corso_id: str
+    utente_id: str
+    secondi_visti: int = 0
+    durata_totale_sec: int = 0
+    percentuale: float = 0.0  # 0-100
+    completato: bool = False
+    ultima_posizione_sec: int = 0
+    ultima_visualizzazione: str = Field(default_factory=_now_iso)
 class ImportLog(BaseDoc):
     utente_id: Optional[str] = None
     nome_file: str

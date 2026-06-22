@@ -3,6 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
+    Library, Kanban, Map, GraduationCap, MessageCircle,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -21,6 +22,7 @@ export default function Sidebar() {
         <NavLink
             to={to}
             data-testid={testid}
+            end={to === "/"}
             className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
         >
             {icon}
@@ -42,9 +44,13 @@ export default function Sidebar() {
 
             <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
                 {item("/", <LayoutDashboard size={16} />, "Dashboard", "nav-dashboard")}
+                {item("/pipeline", <Kanban size={16} />, "Pipeline", "nav-pipeline")}
 
                 <div className="sidebar-section">Anagrafiche</div>
                 {item("/anagrafiche", <Users size={16} />, "Clienti", "nav-anagrafiche")}
+                {(role === "admin" || role === "collaboratore" || role === "dipendente") && (
+                    item("/mappa", <Map size={16} />, "Mappa clienti", "nav-mappa")
+                )}
 
                 <div className="sidebar-section">Assicurazione</div>
                 {item("/polizze", <FileText size={16} />, "Polizze", "nav-polizze")}
@@ -59,17 +65,20 @@ export default function Sidebar() {
                 )}
 
                 <div className="sidebar-section">Strumenti</div>
-                {item("/pensioni", <Calculator size={16} />, "Calcolo INPS", "nav-pensioni")}
+                {item("/corsi", <GraduationCap size={16} />, "Corsi", "nav-corsi")}
+                {item("/chat", <MessageCircle size={16} />, "Chat", "nav-chat")}
                 {(role === "admin" || role === "collaboratore" || role === "dipendente") && (
                     item("/email", <Mail size={16} />, "Pipeline Email", "nav-email")
                 )}
                 {(role === "admin" || role === "collaboratore") && (
                     <>
                         {item("/compagnie", <Building2 size={16} />, "Compagnie", "nav-compagnie")}
+                        {item("/librerie", <Library size={16} />, "Librerie", "nav-librerie")}
                         {item("/importazione", <Upload size={16} />, "Importazione ANIA", "nav-importazione")}
                         {item("/attivita", <Activity size={16} />, "Log attività", "nav-attivita")}
                     </>
                 )}
+                {item("/pensioni", <Calculator size={16} />, "Calcolo INPS", "nav-pensioni")}
             </nav>
 
             <div className="border-t border-slate-800 p-3">
