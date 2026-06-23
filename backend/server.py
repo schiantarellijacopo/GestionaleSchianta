@@ -3173,6 +3173,57 @@ async def auto_popola_trattativa(aid: str, user=Depends(current_user)):
     return tratt
 
 
+@api.get("/anagrafiche/{aid}/analisi/pdf-sezione")
+async def pdf_sezione_analisi(
+    aid: str,
+    sezione: str = "all",
+    user=Depends(current_user),
+):
+    """Genera PDF di UNA sezione (finanza/patrimonio/contesto/redditi/pensione/
+    scoperture/successione/trattativa/piramide) o di TUTTE (sezione=all).
+    Logo aziendale in alto a sinistra, header personalizzato."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    ac = await _ensure_analisi(aid)
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    import pdf_sezioni
+    if sezione not in pdf_sezioni.SEZIONI and sezione != "all":
+        raise HTTPException(400, f"Sezione non valida. Usa: {list(pdf_sezioni.SEZIONI.keys())} o 'all'")
+
+    # Calcola dati on-demand se la sezione li richiede
+    dati = {}
+    sezioni_da_calcolare = [sezione] if sezione != "all" else list(pdf_sezioni.SEZIONI.keys())
+    if any(pdf_sezioni.SEZIONI.get(s, (None, None, False))[2] for s in sezioni_da_calcolare):
+        try:
+            dati["redditi"] = await calcola_redditi_analisi(aid, user)
+        except Exception:
+            dati["redditi"] = {}
+        try:
+            dati["pensioni"] = await calcola_pensioni_future(aid, user)
+        except Exception:
+            dati["pensioni"] = {}
+        try:
+            dati["scoperture"] = await calcola_scoperture_analisi(aid, user)
+        except Exception:
+            dati["scoperture"] = {}
+        try:
+            dati["successione"] = await calcola_successione_analisi(aid, user)
+        except Exception:
+            dati["successione"] = {}
+
+    pdf_bytes = pdf_sezioni.genera_pdf_sezione(sezione, ana, ac, az, dati)
+    fname = f"analisi_{sezione}_{ana.get('codice_fiscale') or aid}.pdf"
+    return StreamingResponse(
+        _io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={fname}"},
+    )
+
+
 @api.delete("/anagrafiche/{aid}/analisi/estratto-inps/{estratto_id}")
 async def delete_estratto_inps(
     aid: str, estratto_id: str,

@@ -50,6 +50,45 @@ def _coefficiente_trasformazione(eta: int) -> float:
     return table[max(table.keys())]
 
 
+# Coefficienti di rivalutazione INPS annuali (variazione media quinquennale PIL nominale)
+# Fonte: Ministero del Lavoro - Comunicati ufficiali
+TASSI_RIVALUTAZIONE_INPS = {
+    2009: 0.033147, 2010: 0.017935, 2011: 0.016244, 2012: 0.037935,
+    2013: 0.016126, 2014: 0.010676, 2015: 0.005063, 2016: -0.001927,
+    2017: -0.002155, 2018: 0.007549, 2019: 0.013500, 2020: 0.018294,
+    2021: 0.017270, 2022: 0.047770, 2023: 0.063275, 2024: 0.038666,
+    2025: 0.020000, 2026: 0.020000,  # stima
+}
+
+
+def calcola_montante_rivalutato(storico_redditi: list, aliquota: float = 0.33) -> float:
+    """Calcola il montante contributivo rivalutato anno per anno usando i tassi
+    INPS ufficiali (variazione media quinquennale del PIL nominale).
+
+    Formula INPS (semplificata):
+      Per ogni anno: contributo[anno] = reddito[anno] × aliquota
+      Montante[anno_corrente] = somma(contributo[anno] × ∏(1 + tasso[t])
+                                       per t da anno+1 ad anno_corrente)
+    """
+    if not storico_redditi:
+        return 0.0
+    anno_corrente = datetime.now().year
+    montante = 0.0
+    for r in storico_redditi:
+        anno = int(r.get("anno", 0))
+        reddito = float(r.get("reddito") or 0)
+        # Usa contributi reali se disponibili, altrimenti reddito × aliquota
+        contributo = float(r.get("contributi") or 0) or (reddito * aliquota)
+        # Rivaluta dall'anno+1 fino all'anno corrente
+        coeff = 1.0
+        for y in range(anno + 1, anno_corrente + 1):
+            tasso = TASSI_RIVALUTAZIONE_INPS.get(y, 0.02)  # 2% default per anni mancanti
+            coeff *= (1 + tasso)
+        montante += contributo * coeff
+    return round(montante, 2)
+
+
+
 def calcola_pensione(
     tipo: Literal["invalidita", "inabilita", "superstite"],
     settimane_contributive: int,

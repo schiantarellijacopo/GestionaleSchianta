@@ -53,14 +53,9 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
         } finally { setSaving(false); }
     };
 
-    const stampaDiagnosi = () => {
-        const popup = window.open("", "_blank");
-        openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-diagnosi-reddito`, {}, popup);
-    };
-    const stampaAzzob = () => {
-        const popup = window.open("", "_blank");
-        openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-progetto-azzob`, {}, popup);
-    };
+    const stampaDiagnosi = () => openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-diagnosi-reddito`);
+    const stampaAzzob = () => openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-progetto-azzob`);
+    const stampaSezione = (sezione) => openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-sezione`, { sezione });
 
     if (!ac) return <Loading />;
 
@@ -89,6 +84,25 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                     <Button size="sm" variant="outline" onClick={stampaAzzob} data-testid="analisi-pdf-azzob-btn">
                         <FileText size={13} className="mr-1" /> PDF Progetto Senza Sorprese
                     </Button>
+                    <Button size="sm" variant="default" onClick={() => stampaSezione("all")} className="bg-violet-700 hover:bg-violet-800" data-testid="analisi-pdf-completo-btn">
+                        <FileText size={13} className="mr-1" /> 📄 STAMPA UNICA (tutte le sezioni)
+                    </Button>
+                    <Select onValueChange={stampaSezione}>
+                        <SelectTrigger className="w-[200px] h-9" data-testid="analisi-pdf-sezione-select">
+                            <SelectValue placeholder="📑 Stampa singola sezione..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="finanza">1. Situazione Finanziaria</SelectItem>
+                            <SelectItem value="patrimonio">2. Patrimonio</SelectItem>
+                            <SelectItem value="contesto">3. Contesto & Obiettivi</SelectItem>
+                            <SelectItem value="redditi">4. Approfondimento Redditi</SelectItem>
+                            <SelectItem value="pensione">5. Pensione INPS</SelectItem>
+                            <SelectItem value="scoperture">6. Riepilogo Pensionistico</SelectItem>
+                            <SelectItem value="successione">7. Successione</SelectItem>
+                            <SelectItem value="trattativa">8. Trattativa A/B</SelectItem>
+                            <SelectItem value="piramide">9. Piramide Soluzioni</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 
@@ -1420,6 +1434,22 @@ const PIR_COLORS = {
     Pensione: "bg-violet-100 border-violet-300 text-violet-900",
     Risparmio: "bg-emerald-50 border-emerald-200 text-emerald-800",
 };
+const PIR_BG = {
+    Reddito: "bg-emerald-500", Premorienza: "bg-rose-500", Invalidita: "bg-amber-500",
+    Responsabilita: "bg-orange-500", Beni: "bg-sky-500", Pensione: "bg-violet-500",
+    Risparmio: "bg-emerald-400",
+};
+// Ordine piramide dal basso (base, rischi gravi) al vertice (lusso/risparmio)
+const PIR_PYRAMID_ORDER = ["Premorienza", "Invalidita", "Responsabilita", "Beni", "Reddito", "Pensione", "Risparmio"];
+// Larghezze in percentuale per la forma piramidale (dal vertice alla base)
+const PIR_WIDTHS = [30, 45, 60, 72, 84, 92, 100];
+
+const PIR_STATI = [
+    { v: "adeguata", label: "Adeguata", emoji: "✅", color: "bg-emerald-500", ring: "ring-emerald-300" },
+    { v: "non_adeguata", label: "Non adeguata", emoji: "⚠️", color: "bg-amber-500", ring: "ring-amber-300" },
+    { v: "non_presente", label: "Non presente", emoji: "❌", color: "bg-rose-500", ring: "ring-rose-300" },
+];
+const PIR_STATO_MAP = Object.fromEntries(PIR_STATI.map(s => [s.v, s]));
 
 function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
     const piramide = (ac.piramide_soluzioni || []).slice().sort(
@@ -1445,17 +1475,34 @@ function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
     const remove = (idx) => set("piramide_soluzioni", piramide.filter((_, i) => i !== idx));
     const add = () => set("piramide_soluzioni", [
         ...piramide,
-        { id: crypto.randomUUID(), categoria: "Reddito", titolo: "", capitale_assicurato: 0, premio_annuo: 0, durata_anni: 1, compagnia: "", note: "", ordine: piramide.length + 1 },
+        { id: crypto.randomUUID(), categoria: "Reddito", titolo: "", capitale_assicurato: 0, premio_annuo: 0, durata_anni: 1, compagnia: "", note: "", ordine: piramide.length + 1, stato: "non_presente" },
     ]);
 
     const totCapitale = piramide.reduce((s, p) => s + (parseFloat(p.capitale_assicurato) || 0), 0);
     const totPremio = piramide.reduce((s, p) => s + (parseFloat(p.premio_annuo) || 0), 0);
 
+    // Calcola stato aggregato per ogni categoria (per il livello della piramide)
+    const statoPerCategoria = {};
+    PIR_CATEGORIE.forEach((cat) => {
+        const items = piramide.filter(p => p.categoria === cat);
+        if (items.length === 0) {
+            statoPerCategoria[cat] = { stato: "non_presente", items: [] };
+        } else {
+            const stati = items.map(i => i.stato || "non_presente");
+            // priorità: non_presente > non_adeguata > adeguata (mostra il peggio)
+            let aggr = "adeguata";
+            if (stati.includes("non_presente") && stati.every(s => s === "non_presente")) aggr = "non_presente";
+            else if (stati.some(s => s === "non_adeguata") || stati.some(s => s === "non_presente")) aggr = "non_adeguata";
+            statoPerCategoria[cat] = { stato: aggr, items };
+        }
+    });
+
     return (
         <div className="space-y-4 mt-4">
             <div className="bg-sky-50 border border-sky-200 rounded p-3 flex justify-between items-center flex-wrap gap-2">
                 <div className="text-xs text-sky-900">
-                    <strong>Piramide delle Soluzioni</strong> — riepilogo di tutte le coperture proposte al cliente. Modificabile in ogni voce.
+                    <strong>Piramide delle Soluzioni</strong> — copertura completa del cliente per ogni categoria di rischio.
+                    Indica lo stato (Adeguata / Non adeguata / Non presente) per ciascuna garanzia.
                 </div>
                 <div className="flex gap-2">
                     {canEdit && (
@@ -1471,6 +1518,59 @@ function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
                 </div>
             </div>
 
+            {/* === PIRAMIDE VISUALE === */}
+            <Card className="p-6 bg-gradient-to-b from-slate-50 to-white border-slate-200">
+                <h3 className="text-sm font-bold text-center text-slate-700 uppercase tracking-wider mb-4">
+                    Piramide delle Coperture
+                </h3>
+                <div className="flex flex-col items-center gap-1">
+                    {[...PIR_PYRAMID_ORDER].reverse().map((cat, idx) => {
+                        const width = PIR_WIDTHS[idx];
+                        const info = statoPerCategoria[cat];
+                        const stato = PIR_STATO_MAP[info.stato];
+                        const itemsCount = info.items.length;
+                        const capTot = info.items.reduce((s, i) => s + (parseFloat(i.capitale_assicurato) || 0), 0);
+                        return (
+                            <div
+                                key={cat}
+                                className={`relative ${PIR_BG[cat]} text-white py-3 px-4 transition-all hover:brightness-110`}
+                                style={{
+                                    width: `${width}%`,
+                                    clipPath: idx === 0
+                                        ? "polygon(50% 0%, 0% 100%, 100% 100%)"
+                                        : "polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%)",
+                                    minHeight: idx === 0 ? "56px" : "44px",
+                                }}
+                                data-testid={`pir-level-${cat}`}
+                                title={`${cat}: ${stato.label} · ${itemsCount} voci · cap. tot. ${fmtEur(capTot)}`}
+                            >
+                                <div className="flex items-center justify-center gap-2 h-full">
+                                    <span
+                                        className={`w-4 h-4 rounded-full ${stato.color} ring-2 ${stato.ring} ring-offset-1 ring-offset-white/50 flex-shrink-0`}
+                                        title={stato.label}
+                                    />
+                                    <span className="font-bold uppercase tracking-wide text-sm">{cat}</span>
+                                    {itemsCount > 0 && (
+                                        <span className="bg-white/25 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                                            {itemsCount}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                {/* Legenda */}
+                <div className="flex justify-center gap-4 mt-5 text-xs text-slate-600">
+                    {PIR_STATI.map((s) => (
+                        <div key={s.v} className="flex items-center gap-1.5">
+                            <span className={`w-3 h-3 rounded-full ${s.color}`} />
+                            {s.label}
+                        </div>
+                    ))}
+                </div>
+            </Card>
+
             {/* KPI riepilogo */}
             <div className="grid grid-cols-3 gap-3">
                 <Kpi label="Coperture totali" value={piramide.length} color="sky" big />
@@ -1480,55 +1580,76 @@ function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
 
             {piramide.length === 0 ? (
                 <div className="text-center text-sm text-slate-400 italic py-10 bg-slate-50 rounded-md border border-dashed">
-                    Nessuna copertura ancora suggerita. Clicca <strong>Pre-popola dai dati</strong> per generare automaticamente le proposte dai calcoli di scopertura/successione/patrimonio.
+                    Nessuna copertura ancora suggerita. Clicca <strong>Pre-popola dai dati</strong> per generare automaticamente le proposte.
                 </div>
             ) : (
                 <div className="space-y-2">
-                    {piramide.map((p, i) => (
-                        <Card key={p.id || i} className={`p-3 border-2 ${PIR_COLORS[p.categoria] || "border-slate-200"}`}>
-                            <div className="grid grid-cols-12 gap-2 items-end">
-                                <div className="col-span-2">
-                                    <Label className="text-[10px] uppercase tracking-wider">Categoria</Label>
-                                    <Select value={p.categoria} disabled={!canEdit} onValueChange={(v) => updateItem(i, { categoria: v })}>
-                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            {PIR_CATEGORIE.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="col-span-3">
-                                    <Label className="text-[10px] uppercase tracking-wider">Titolo copertura</Label>
-                                    <Input value={p.titolo || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { titolo: e.target.value })} className="h-8" />
-                                </div>
-                                <div className="col-span-2">
-                                    <Label className="text-[10px] uppercase tracking-wider">Capitale €</Label>
-                                    <Input type="number" value={p.capitale_assicurato || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { capitale_assicurato: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
-                                </div>
-                                <div className="col-span-2">
-                                    <Label className="text-[10px] uppercase tracking-wider">Premio €/anno</Label>
-                                    <Input type="number" value={p.premio_annuo || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { premio_annuo: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
-                                </div>
-                                <div className="col-span-1">
-                                    <Label className="text-[10px] uppercase tracking-wider">Durata</Label>
-                                    <Input type="number" value={p.durata_anni || 1} disabled={!canEdit} onChange={(e) => updateItem(i, { durata_anni: parseInt(e.target.value) || 1 })} className="h-8 num" />
-                                </div>
-                                <div className="col-span-1">
-                                    <Label className="text-[10px] uppercase tracking-wider">Compagnia</Label>
-                                    <Input value={p.compagnia || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { compagnia: e.target.value })} className="h-8 text-xs" />
-                                </div>
-                                {canEdit && (
-                                    <Button size="sm" variant="ghost" onClick={() => remove(i)} className="col-span-1">
-                                        <Trash2 size={13} className="text-rose-600" />
-                                    </Button>
-                                )}
-                                {p.note && (
-                                    <div className="col-span-12 text-[11px] text-slate-500 italic mt-1 border-t pt-1">
-                                        💡 {p.note}
+                    <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Dettaglio Coperture</h4>
+                    {piramide.map((p, i) => {
+                        const sObj = PIR_STATO_MAP[p.stato || "non_presente"];
+                        return (
+                            <Card key={p.id || i} className={`p-3 border-2 ${PIR_COLORS[p.categoria] || "border-slate-200"}`}>
+                                <div className="grid grid-cols-12 gap-2 items-end">
+                                    {/* Indicatore di stato cliccabile */}
+                                    <div className="col-span-1">
+                                        <Label className="text-[10px] uppercase tracking-wider">Stato</Label>
+                                        <div className="flex gap-1 mt-1">
+                                            {PIR_STATI.map((s) => (
+                                                <button
+                                                    key={s.v}
+                                                    onClick={() => canEdit && updateItem(i, { stato: s.v })}
+                                                    disabled={!canEdit}
+                                                    title={s.label}
+                                                    className={`w-5 h-5 rounded-full ${s.color} transition-all ${(p.stato || "non_presente") === s.v ? `ring-2 ${s.ring} ring-offset-1 scale-125` : "opacity-40 hover:opacity-100"}`}
+                                                    data-testid={`pir-stato-${i}-${s.v}`}
+                                                />
+                                            ))}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 mt-1">{sObj.label}</div>
                                     </div>
-                                )}
-                            </div>
-                        </Card>
-                    ))}
+                                    <div className="col-span-2">
+                                        <Label className="text-[10px] uppercase tracking-wider">Categoria</Label>
+                                        <Select value={p.categoria} disabled={!canEdit} onValueChange={(v) => updateItem(i, { categoria: v })}>
+                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {PIR_CATEGORIE.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="col-span-3">
+                                        <Label className="text-[10px] uppercase tracking-wider">Titolo copertura</Label>
+                                        <Input value={p.titolo || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { titolo: e.target.value })} className="h-8" />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <Label className="text-[10px] uppercase tracking-wider">Capitale €</Label>
+                                        <Input type="number" value={p.capitale_assicurato || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { capitale_assicurato: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <Label className="text-[10px] uppercase tracking-wider">Premio</Label>
+                                        <Input type="number" value={p.premio_annuo || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { premio_annuo: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <Label className="text-[10px] uppercase tracking-wider">Durata</Label>
+                                        <Input type="number" value={p.durata_anni || 1} disabled={!canEdit} onChange={(e) => updateItem(i, { durata_anni: parseInt(e.target.value) || 1 })} className="h-8 num" />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <Label className="text-[10px] uppercase tracking-wider">Comp.</Label>
+                                        <Input value={p.compagnia || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { compagnia: e.target.value })} className="h-8 text-xs" />
+                                    </div>
+                                    {canEdit && (
+                                        <Button size="sm" variant="ghost" onClick={() => remove(i)} className="col-span-1">
+                                            <Trash2 size={13} className="text-rose-600" />
+                                        </Button>
+                                    )}
+                                    {p.note && (
+                                        <div className="col-span-12 text-[11px] text-slate-500 italic mt-1 border-t pt-1">
+                                            💡 {p.note}
+                                        </div>
+                                    )}
+                                </div>
+                            </Card>
+                        );
+                    })}
                 </div>
             )}
         </div>

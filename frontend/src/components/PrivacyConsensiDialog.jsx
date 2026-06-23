@@ -133,18 +133,13 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
         } catch (e) { toast.error(e.response?.data?.detail || "Errore firma"); }
     };
 
-    const stampaPdf = () => {
-        // CRITICAL: apri la popup SUBITO nel click handler per preservare il
-        // gesto utente (Chrome blocca window.open dopo await → ERR_BLOCKED_BY_CLIENT).
-        const popup = window.open("", "_blank");
-        (async () => {
-            if (canEdit) {
-                try {
-                    await api.put(`/anagrafiche/${anagrafica_id}/consensi-privacy`, consensi);
-                } catch (_e) { /* non bloccare la stampa */ }
-            }
-            await openPdf(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`, {}, popup);
-        })();
+    const stampaPdf = async () => {
+        if (canEdit) {
+            try {
+                await api.put(`/anagrafiche/${anagrafica_id}/consensi-privacy`, consensi);
+            } catch (_e) { /* non bloccare la stampa */ }
+        }
+        openPdf(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`);
     };
 
     return (
