@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Printer, Wallet, Users } from "lucide-react";
+import { Printer, Wallet, Users, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Provvigioni() {
@@ -21,6 +21,8 @@ export default function Provvigioni() {
     const [conti, setConti] = useState([]);
     const [payOpen, setPayOpen] = useState(false);
     const [selectedTitoli, setSelectedTitoli] = useState(new Set());
+    const [selectedVoci, setSelectedVoci] = useState(new Set());
+    const [voceOpen, setVoceOpen] = useState(false);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs(r.data));
@@ -35,6 +37,7 @@ export default function Provvigioni() {
         api.get(`/collaboratori/${sel.id}/estratto-provvigioni`, { params }).then((r) => {
             setData(r.data);
             setSelectedTitoli(new Set());
+            setSelectedVoci(new Set());
         });
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al]);
@@ -43,7 +46,10 @@ export default function Provvigioni() {
         const qs = new URLSearchParams();
         if (dal) qs.append("dal", dal);
         if (al) qs.append("al", al);
-        window.open(`${API_BASE}/stampa/provvigioni/${sel.id}?${qs}`, "_blank");
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/stampa/provvigioni/${sel.id}?${qs}`;
+        link.target = "_blank";
+        document.body.appendChild(link); link.click(); link.remove();
     };
 
     const toggleTitolo = (id) => {
@@ -51,16 +57,30 @@ export default function Provvigioni() {
             const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
         });
     };
+    const toggleVoce = (id) => {
+        setSelectedVoci((p) => {
+            const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
+        });
+    };
     const selectAllUnpaid = () => {
         if (!data) return;
         setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato).map((r) => r.titolo_id)));
+        setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id)));
+    };
+
+    const rimuoviVoce = async (vid) => {
+        if (!window.confirm("Rimuovere questa voce manuale?")) return;
+        try {
+            await api.delete(`/collaboratori/${sel.id}/voci-manuali/${vid}`);
+            toast.success("Voce rimossa"); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     return (
         <div data-testid="provvigioni-page">
             <PageHeader
-                title="Estratto conto provvigioni"
-                subtitle="Provvigioni maturate e pagamenti collaboratori"
+                title="Estratto conto collaboratori"
+                subtitle="Provvigioni maturate, voci manuali e pagamenti"
             />
 
             <div className="grid grid-cols-12 gap-4">
@@ -93,7 +113,7 @@ export default function Provvigioni() {
                 <div className="col-span-9 space-y-4">
                     {!sel ? (
                         <Card className="p-12 text-center text-slate-500 border-slate-200">
-                            Seleziona un collaboratore per vedere l&apos;estratto conto provvigioni
+                            Seleziona un collaboratore per vedere l&apos;estratto conto
                         </Card>
                     ) : !data ? <Loading /> : (
                         <>
@@ -125,11 +145,16 @@ export default function Provvigioni() {
                             </Card>
 
                             {/* Totali */}
-                            <div className="grid grid-cols-5 gap-3">
+                            <div className="grid grid-cols-6 gap-3">
                                 <Stat label="Provv. lorde periodo" value={fmtEur(data.totali.provvigioni_lorde_periodo)} />
                                 <Stat label="Da pagare" value={fmtEur(data.totali.provvigioni_da_pagare)} accent="amber" />
                                 <Stat label="Ritenuta acconto" value={`- ${fmtEur(data.totali.ritenuta_acconto_calcolata)}`} accent="rose" />
                                 <Stat label="Contributi" value={`- ${fmtEur(data.totali.contributi_calcolati)}`} accent="rose" />
+                                <Stat
+                                    label="Voci manuali"
+                                    value={`${(data.totali.voci_manuali_da_pagare || 0) >= 0 ? "+" : ""} ${fmtEur(data.totali.voci_manuali_da_pagare || 0)}`}
+                                    accent={(data.totali.voci_manuali_da_pagare || 0) >= 0 ? "emerald" : "rose"}
+                                />
                                 <Stat label="Netto da pagare" value={fmtEur(data.totali.netto_da_pagare)} accent="emerald" />
                             </div>
 
@@ -139,17 +164,17 @@ export default function Provvigioni() {
                                     <div className="text-sm font-medium">Provvigioni maturate ({data.righe.length})</div>
                                     <div className="flex gap-2">
                                         <button onClick={selectAllUnpaid} className="text-xs text-sky-700 hover:underline" data-testid="select-unpaid">
-                                            Seleziona da pagare ({data.righe.filter((r) => !r.gia_pagato).length})
+                                            Seleziona tutto da pagare
                                         </button>
                                         <Button
                                             size="sm"
-                                            disabled={selectedTitoli.size === 0}
+                                            disabled={selectedTitoli.size === 0 && selectedVoci.size === 0}
                                             onClick={() => setPayOpen(true)}
                                             className="bg-emerald-600 hover:bg-emerald-700"
                                             data-testid="paga-button"
                                         >
                                             <Wallet size={14} className="mr-1" />
-                                            Paga selezionati ({selectedTitoli.size})
+                                            Paga selezionati ({selectedTitoli.size + selectedVoci.size})
                                         </Button>
                                     </div>
                                 </div>
@@ -187,6 +212,80 @@ export default function Provvigioni() {
                                                     <td className="num text-right font-medium text-emerald-700">{fmtEur(r.provvigione)}</td>
                                                     <td>
                                                         {r.gia_pagato ? <span className="badge badge-success">pagata</span> : <span className="badge badge-warning">da pagare</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </Card>
+
+                            {/* Voci manuali */}
+                            <Card className="border-slate-200 overflow-hidden">
+                                <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+                                    <div className="text-sm font-medium text-amber-900">
+                                        Voci manuali ({(data.voci_manuali || []).length})
+                                        <span className="ml-2 text-xs text-amber-700 font-normal">
+                                            Bonus (positivi) o trattenute/acconti (negativi)
+                                        </span>
+                                    </div>
+                                    <Button
+                                        size="sm" variant="outline"
+                                        onClick={() => setVoceOpen(true)}
+                                        data-testid="add-voce-manuale"
+                                    >
+                                        <Plus size={14} className="mr-1" /> Nuova voce
+                                    </Button>
+                                </div>
+                                {(data.voci_manuali || []).length === 0 ? (
+                                    <Empty message="Nessuna voce manuale inserita" />
+                                ) : (
+                                    <table className="tbl w-full">
+                                        <thead>
+                                            <tr>
+                                                <th className="w-10"></th>
+                                                <th>Data</th>
+                                                <th>Causale</th>
+                                                <th>Note</th>
+                                                <th className="text-right">Importo</th>
+                                                <th>Stato</th>
+                                                <th className="w-12"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.voci_manuali.map((v) => (
+                                                <tr key={v.id} className={selectedVoci.has(v.id) ? "bg-amber-50" : ""}>
+                                                    <td>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedVoci.has(v.id)}
+                                                            onChange={() => toggleVoce(v.id)}
+                                                            disabled={v.pagata}
+                                                            data-testid={`select-voce-${v.id}`}
+                                                        />
+                                                    </td>
+                                                    <td className="num">{fmtDate(v.data)}</td>
+                                                    <td className="font-medium">{v.causale}</td>
+                                                    <td className="text-xs text-slate-500">{v.note || "—"}</td>
+                                                    <td className={`num text-right font-semibold ${v.importo >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                                                        {v.importo >= 0 ? "+" : ""}{fmtEur(v.importo)}
+                                                    </td>
+                                                    <td>
+                                                        {v.pagata
+                                                            ? <span className="badge badge-success">pagata</span>
+                                                            : <span className="badge badge-warning">da pagare</span>}
+                                                    </td>
+                                                    <td>
+                                                        {!v.pagata && (
+                                                            <button
+                                                                onClick={() => rimuoviVoce(v.id)}
+                                                                className="text-rose-600 hover:text-rose-800"
+                                                                data-testid={`del-voce-${v.id}`}
+                                                                title="Elimina"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -234,13 +333,22 @@ export default function Provvigioni() {
                 </div>
             </div>
 
+            {voceOpen && sel && (
+                <NuovaVoceDialog
+                    collab={sel}
+                    onClose={() => { setVoceOpen(false); load(); }}
+                />
+            )}
+
             {payOpen && sel && data && (
                 <PagaDialog
                     collab={sel}
                     titoli_ids={Array.from(selectedTitoli)}
+                    voci_ids={Array.from(selectedVoci)}
                     rows={data.righe.filter((r) => selectedTitoli.has(r.titolo_id))}
+                    voci_sel={(data.voci_manuali || []).filter((v) => selectedVoci.has(v.id))}
                     conti={conti}
-                    onClose={() => { setPayOpen(false); setSelectedTitoli(new Set()); load(); }}
+                    onClose={() => { setPayOpen(false); setSelectedTitoli(new Set()); setSelectedVoci(new Set()); load(); }}
                 />
             )}
         </div>
@@ -261,9 +369,85 @@ function Stat({ label, value, accent }) {
     );
 }
 
-function PagaDialog({ collab, titoli_ids, rows, conti, onClose }) {
+function NuovaVoceDialog({ collab, onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [data, setData] = useState(today);
+    const [causale, setCausale] = useState("");
+    const [segno, setSegno] = useState("+");
+    const [importo, setImporto] = useState("");
+    const [note, setNote] = useState("");
+
+    const submit = async () => {
+        if (!causale.trim()) { toast.error("Inserisci la causale"); return; }
+        const imp = parseFloat(importo);
+        if (isNaN(imp) || imp <= 0) { toast.error("Inserisci un importo valido (in valore assoluto)"); return; }
+        try {
+            await api.post(`/collaboratori/${collab.id}/voci-manuali`, {
+                data, causale, importo: segno === "-" ? -imp : imp, note,
+            });
+            toast.success("Voce manuale aggiunta");
+            onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-md">
+                <DialogHeader><DialogTitle>Nuova voce manuale per {collab.name}</DialogTitle></DialogHeader>
+                <div className="space-y-3 py-2">
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+                        Inserisci un <b>bonus (+)</b> o una <b>trattenuta/acconto (−)</b>. Verrà aggiunta al netto da pagare al collaboratore.
+                    </div>
+                    <div>
+                        <Label>Data</Label>
+                        <Input type="date" value={data} onChange={(e) => setData(e.target.value)} data-testid="voce-data" />
+                    </div>
+                    <div>
+                        <Label>Causale *</Label>
+                        <Input
+                            value={causale} onChange={(e) => setCausale(e.target.value)}
+                            placeholder="Es. Bonus produzione Q1 / Acconto"
+                            data-testid="voce-causale"
+                        />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                        <div>
+                            <Label>Segno</Label>
+                            <Select value={segno} onValueChange={setSegno}>
+                                <SelectTrigger data-testid="voce-segno"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="+">+ (bonus / aumenta)</SelectItem>
+                                    <SelectItem value="-">− (trattenuta / riduce)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="col-span-2">
+                            <Label>Importo € *</Label>
+                            <Input
+                                type="number" step="0.01" min="0"
+                                value={importo} onChange={(e) => setImporto(e.target.value)}
+                                data-testid="voce-importo"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Note (opzionale)</Label>
+                        <Input value={note} onChange={(e) => setNote(e.target.value)} data-testid="voce-note" />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={submit} className="bg-sky-700 hover:bg-sky-800" data-testid="voce-save">Salva voce</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClose }) {
     const today = new Date().toISOString().slice(0, 10);
     const lordo = rows.reduce((s, r) => s + (r.provvigione || 0), 0);
+    const totVoci = (voci_sel || []).reduce((s, v) => s + (v.importo || 0), 0);
     const ritPerc = collab.perc_ritenuta_acconto || 0;
     const inpsPerc = collab.perc_inps_inarcassa || 0;
     const [rit, setRit] = useState((lordo * ritPerc / 100).toFixed(2));
@@ -273,13 +457,13 @@ function PagaDialog({ collab, titoli_ids, rows, conti, onClose }) {
     const [mezzo, setMezzo] = useState("bonifico");
     const [note, setNote] = useState("");
 
-    const netto = lordo - parseFloat(rit || 0) - parseFloat(contr || 0);
+    const netto = lordo - parseFloat(rit || 0) - parseFloat(contr || 0) + totVoci;
 
     const submit = async () => {
         if (!conto_id) { toast.error("Seleziona il conto/banca da cui paghi"); return; }
         try {
             const r = await api.post(`/collaboratori/${collab.id}/paga-provvigioni`, {
-                titoli_ids, conto_cassa_id: conto_id,
+                titoli_ids, voci_manuali_ids: voci_ids, conto_cassa_id: conto_id,
                 data_pagamento: data_pag, mezzo_pagamento: mezzo, note,
                 override_ritenuta: parseFloat(rit) || 0,
                 override_contributi: parseFloat(contr) || 0,
@@ -292,10 +476,10 @@ function PagaDialog({ collab, titoli_ids, rows, conti, onClose }) {
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-xl">
-                <DialogHeader><DialogTitle>Paga provvigioni a {collab.name}</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>Paga {collab.name}</DialogTitle></DialogHeader>
                 <div className="space-y-3 py-2">
                     <div className="text-sm bg-sky-50 border border-sky-200 rounded p-3">
-                        <div>{titoli_ids.length} titoli selezionati</div>
+                        <div>{titoli_ids.length} titoli + {voci_ids.length} voci manuali</div>
                         <div className="text-xs text-sky-900 mt-1">
                             Verrà creato un movimento contabile USCITA (categoria provvigioni) sul conto selezionato, visibile nel Brogliaccio.
                         </div>
@@ -314,6 +498,17 @@ function PagaDialog({ collab, titoli_ids, rows, conti, onClose }) {
                             <Input type="number" step="0.01" value={contr} onChange={(e) => setContr(e.target.value)} />
                         </div>
                     </div>
+                    {voci_ids.length > 0 && (
+                        <div className="grid grid-cols-2 gap-3 bg-amber-50 border border-amber-200 rounded p-3">
+                            <div>
+                                <Label className="text-amber-900">Voci manuali € (somma)</Label>
+                                <Input value={totVoci.toFixed(2)} disabled className="bg-white num font-medium" />
+                            </div>
+                            <div className="text-xs text-amber-800 self-end pb-2">
+                                {voci_sel.map((v) => `${v.importo >= 0 ? "+" : ""}${v.importo.toFixed(2)} ${v.causale}`).join(" · ")}
+                            </div>
+                        </div>
+                    )}
                     <div className="bg-emerald-50 border border-emerald-300 rounded p-3 flex items-center justify-between">
                         <div className="text-xs uppercase tracking-wider text-emerald-700">Netto da pagare</div>
                         <div className="text-2xl font-bold text-emerald-700 num">{fmtEur(netto)}</div>

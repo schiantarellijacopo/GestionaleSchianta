@@ -27,11 +27,15 @@ function Stat({ label, value, icon, hint, testid }) {
 export default function Dashboard() {
     const { user } = useAuth();
     const [data, setData] = useState(null);
+    const [admin, setAdmin] = useState(null);
     const [err, setErr] = useState("");
 
     useEffect(() => {
         api.get("/stats/dashboard").then((r) => setData(r.data)).catch((e) => setErr(e.message));
-    }, []);
+        if (user?.role === "admin") {
+            api.get("/stats/dashboard-admin").then((r) => setAdmin(r.data)).catch(() => {});
+        }
+    }, [user]);
 
     if (err) return <div className="text-rose-600">{err}</div>;
     if (!data) return <div className="text-slate-400">Caricamento dashboard...</div>;
@@ -104,6 +108,60 @@ export default function Dashboard() {
                     </ResponsiveContainer>
                 </Card>
             </div>
+
+            {admin && user?.role === "admin" && (
+                <div className="mt-8" data-testid="dashboard-admin-section">
+                    <h2 className="text-lg font-bold text-slate-900 mb-3">📊 KPI Amministratore</h2>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <Stat label="Provvigioni anno" value={fmtEur(admin.provvigioni_anno)} icon={<Wallet size={18} />} testid="kpi-provv" />
+                        <Stat label="Premi incassati anno" value={fmtEur(admin.premi_anno)} icon={<TrendingUp size={18} />} testid="kpi-premi-anno" />
+                        <Stat label="N. titoli anno" value={fmtNum(admin.n_titoli_anno)} icon={<FileText size={18} />} testid="kpi-titoli" />
+                        <Stat label="Sinistri liquidati" value={fmtNum(admin.sinistri_per_stato?.liquidato?.n || 0)}
+                              hint={fmtEur(admin.sinistri_per_stato?.liquidato?.totale || 0)} icon={<AlertTriangle size={18} />} testid="kpi-sin-liq" />
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                        <Card className="p-5 border-slate-200">
+                            <h3 className="font-semibold mb-3">Clienti per categoria</h3>
+                            <div className="grid grid-cols-2 gap-2">
+                                {Object.entries(admin.clienti_per_categoria || {}).map(([k, v]) => (
+                                    <div key={k} className="flex justify-between bg-slate-50 rounded p-2 text-sm">
+                                        <span>{k}</span>
+                                        <span className="font-bold text-sky-700">{v}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                        <Card className="p-5 border-slate-200">
+                            <h3 className="font-semibold mb-3">Polizze in scadenza</h3>
+                            <div className="grid grid-cols-5 gap-1">
+                                {Object.entries(admin.scadenze || {}).map(([k, v]) => (
+                                    <div key={k} className={`text-center rounded p-2 ${v > 0 ? "bg-amber-100" : "bg-slate-50"}`}>
+                                        <div className="text-xs text-slate-500">{k}</div>
+                                        <div className={`font-bold text-lg ${v > 0 ? "text-amber-700" : "text-slate-400"}`}>{v}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    </div>
+                    <Card className="p-5 border-slate-200">
+                        <h3 className="font-semibold mb-3">Nuova produzione per ramo (anno corrente)</h3>
+                        <table className="w-full text-sm">
+                            <thead><tr className="text-xs text-slate-500 border-b">
+                                <th className="text-left py-1">Ramo</th><th className="text-right">N. polizze</th><th className="text-right">Premio totale</th>
+                            </tr></thead>
+                            <tbody>
+                                {(admin.produzione_per_ramo || []).map((p) => (
+                                    <tr key={p.ramo} className="border-b border-slate-100">
+                                        <td className="py-1.5">{p.ramo}</td>
+                                        <td className="text-right">{p.n}</td>
+                                        <td className="text-right font-semibold text-emerald-700">{fmtEur(p.premio)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </Card>
+                </div>
+            )}
         </div>
     );
 }

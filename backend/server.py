@@ -26,7 +26,7 @@ from db_models import (
     UserCreate, UserPublic, LoginRequest, Compagnia, Anagrafica, Polizza, Titolo,
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
-    Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni,
+    Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni, VoceManualeCollab,
     AziendaConfig, SchemaProvvigionale, EventoCalendario,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
@@ -252,9 +252,12 @@ async def estratto_provvigioni(
         pag_filter["data_pagamento"] = cond
     pagamenti = await db.pagamenti_provvigioni.find(pag_filter, {"_id": 0}).sort("data_pagamento", -1).to_list(500)
     titoli_gia_pagati = set()
+    voci_gia_pagate = set()
     for p in pagamenti:
         for tid in p.get("titoli_ids", []):
             titoli_gia_pagati.add(tid)
+        for vid in p.get("voci_manuali_ids", []):
+            voci_gia_pagate.add(vid)
 
     rows = []
     tot_lordo = 0.0
@@ -284,21 +287,96 @@ async def estratto_provvigioni(
     inps = collab.get("perc_inps_inarcassa", 0.0) or 0.0
     ritenuta_calc = round(tot_da_pagare * rit / 100.0, 2)
     contributi_calc = round(tot_da_pagare * inps / 100.0, 2)
-    netto_calc = round(tot_da_pagare - ritenuta_calc - contributi_calc, 2)
+
+    # voci manuali nel periodo (bonus / trattenute / acconti)
+    voci_filter = {"collaboratore_id": cid}
+    voci_cond = {}
+    if dal: voci_cond["$gte"] = dal
+    if al: voci_cond["$lte"] = al
+    if voci_cond: voci_filter["data"] = voci_cond
+    voci_manuali = await db.voci_manuali_collab.find(voci_filter, {"_id": 0}).sort("data", -1).to_list(500)
+    tot_voci_da_pagare = 0.0
+    tot_voci_totale = 0.0
+    for v in voci_manuali:
+        imp = float(v.get("importo") or 0.0)
+        tot_voci_totale += imp
+        if not v.get("pagata") and v["id"] not in voci_gia_pagate:
+            tot_voci_da_pagare += imp
+        # marca pagata se è in un pagamento
+        if v["id"] in voci_gia_pagate:
+            v["pagata"] = True
+
+    netto_calc = round(tot_da_pagare - ritenuta_calc - contributi_calc + tot_voci_da_pagare, 2)
 
     return {
         "collaboratore": collab,
         "periodo": {"dal": dal, "al": al},
         "righe": rows,
+        "voci_manuali": voci_manuali,
         "totali": {
             "provvigioni_lorde_periodo": round(tot_lordo, 2),
             "provvigioni_da_pagare": round(tot_da_pagare, 2),
             "ritenuta_acconto_calcolata": ritenuta_calc,
             "contributi_calcolati": contributi_calc,
+            "voci_manuali_periodo": round(tot_voci_totale, 2),
+            "voci_manuali_da_pagare": round(tot_voci_da_pagare, 2),
             "netto_da_pagare": netto_calc,
         },
         "pagamenti_periodo": pagamenti,
     }
+
+
+# --- Voci manuali (bonus/trattenute/acconti) sull'estratto conto collaboratore ---
+@api.get("/collaboratori/{cid}/voci-manuali")
+async def list_voci_manuali_collab(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    f = {"collaboratore_id": cid}
+    cond = {}
+    if dal: cond["$gte"] = dal
+    if al: cond["$lte"] = al
+    if cond: f["data"] = cond
+    items = await db.voci_manuali_collab.find(f, {"_id": 0}).sort("data", -1).to_list(500)
+    return items
+
+
+@api.post("/collaboratori/{cid}/voci-manuali", status_code=201)
+async def create_voce_manuale_collab(
+    cid: str, body: dict, user=Depends(require_user("admin")),
+):
+    collab = await db.users.find_one({"id": cid}, {"_id": 0, "id": 1})
+    if not collab:
+        raise HTTPException(404, "Collaboratore non trovato")
+    if not body.get("causale"):
+        raise HTTPException(400, "Causale obbligatoria")
+    if body.get("importo") in (None, ""):
+        raise HTTPException(400, "Importo obbligatorio (positivo = bonus, negativo = trattenuta)")
+    voce = VoceManualeCollab(
+        collaboratore_id=cid,
+        data=body.get("data") or _now_iso()[:10],
+        causale=str(body["causale"]).strip(),
+        importo=float(body["importo"]),
+        note=body.get("note"),
+    )
+    await db.voci_manuali_collab.insert_one(voce.model_dump())
+    await log_attivita(user, "create", "voce_manuale_collab", voce.id,
+                       f"Voce manuale {voce.causale} €{voce.importo:.2f} per collaboratore {cid}")
+    return voce.model_dump()
+
+
+@api.delete("/collaboratori/{cid}/voci-manuali/{vid}")
+async def delete_voce_manuale_collab(
+    cid: str, vid: str, user=Depends(require_user("admin")),
+):
+    v = await db.voci_manuali_collab.find_one({"id": vid, "collaboratore_id": cid}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Voce non trovata")
+    if v.get("pagata"):
+        raise HTTPException(400, "Voce già pagata: non eliminabile")
+    await db.voci_manuali_collab.delete_one({"id": vid})
+    await log_attivita(user, "delete", "voce_manuale_collab", vid)
+    return {"ok": True}
 
 
 @api.post("/collaboratori/{cid}/paga-provvigioni")
@@ -312,12 +390,13 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
     titoli_ids = body.get("titoli_ids") or []
-    if not titoli_ids:
-        raise HTTPException(400, "Seleziona almeno un titolo")
+    voci_ids = body.get("voci_manuali_ids") or []
+    if not titoli_ids and not voci_ids:
+        raise HTTPException(400, "Seleziona almeno un titolo o una voce manuale")
     conto_id = body.get("conto_cassa_id")
     data_pag = body.get("data_pagamento") or _now_iso()[:10]
 
-    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000) if titoli_ids else []
     lordo = sum((t.get("provvigioni") or 0.0) for t in titoli)
     if body.get("override_provvigioni_lorde") is not None:
         lordo = float(body["override_provvigioni_lorde"])
@@ -326,23 +405,30 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     inps_perc = collab.get("perc_inps_inarcassa", 0.0) or 0.0
     ritenuta = float(body.get("override_ritenuta")) if body.get("override_ritenuta") is not None else round(lordo * rit_perc / 100.0, 2)
     contributi = float(body.get("override_contributi")) if body.get("override_contributi") is not None else round(lordo * inps_perc / 100.0, 2)
-    netto = round(lordo - ritenuta - contributi, 2)
 
-    # determina periodo (min/max data_incasso dei titoli)
+    # Voci manuali (somma algebrica)
+    voci = await db.voci_manuali_collab.find({"id": {"$in": voci_ids}, "collaboratore_id": cid}, {"_id": 0}).to_list(500) if voci_ids else []
+    tot_voci = round(sum(float(v.get("importo") or 0.0) for v in voci), 2)
+
+    netto = round(lordo - ritenuta - contributi + tot_voci, 2)
+
+    # determina periodo (min/max data_incasso dei titoli + date voci)
     inc_dates = [t.get("data_incasso") for t in titoli if t.get("data_incasso")]
+    inc_dates += [v.get("data") for v in voci if v.get("data")]
     periodo_dal = min(inc_dates) if inc_dates else data_pag
     periodo_al = max(inc_dates) if inc_dates else data_pag
 
+    descr_extra = f" (+ {len(voci)} voci manuali: €{tot_voci:.2f})" if voci else ""
     # Crea movimento contabile (uscita) - va in Brogliaccio
     mov = MovimentoContabile(
         data_movimento=data_pag,
         tipo="uscita",
         categoria="provvigioni",
         importo=netto,
-        descrizione=f"Pagamento provvigioni a {collab.get('name')} - periodo {periodo_dal} / {periodo_al}",
+        descrizione=f"Pagamento provvigioni a {collab.get('name')} - periodo {periodo_dal} / {periodo_al}{descr_extra}",
         conto_cassa_id=conto_id,
         mezzo_pagamento=body.get("mezzo_pagamento", "bonifico"),
-        note=(f"Lordo {lordo:.2f} - rit. {ritenuta:.2f} - contributi {contributi:.2f} = netto {netto:.2f}"),
+        note=(f"Lordo {lordo:.2f} - rit. {ritenuta:.2f} - contributi {contributi:.2f} + voci {tot_voci:.2f} = netto {netto:.2f}"),
     )
     await db.movimenti.insert_one(mov.model_dump())
 
@@ -360,9 +446,16 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
         data_pagamento=data_pag,
         movimento_id=mov.id,
         titoli_ids=titoli_ids,
+        voci_manuali_ids=voci_ids,
         note=body.get("note"),
     )
     await db.pagamenti_provvigioni.insert_one(pag.model_dump())
+    # Marca voci manuali come pagate
+    if voci_ids:
+        await db.voci_manuali_collab.update_many(
+            {"id": {"$in": voci_ids}, "collaboratore_id": cid},
+            {"$set": {"pagata": True, "pagamento_id": pag.id, "updated_at": _now_iso()}},
+        )
     await log_attivita(user, "paga_provvigioni", "collaboratore", cid,
                        f"Pagate provvigioni a {collab.get('name')} per €{netto:.2f}")
     return {
@@ -392,13 +485,19 @@ async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[s
                      r.get("importo_lordo", 0), r.get("provvigione", 0),
                      "SÌ" if r.get("gia_pagato") else "NO"])
     tot = data["totali"]
+    # Voci manuali
+    for v in data.get("voci_manuali", []):
+        rows.append([v.get("data", ""), "—", "VOCE MANUALE", v.get("causale", ""),
+                     "", v.get("importo", 0),
+                     "SÌ" if v.get("pagata") else "NO"])
     rows.append(["", "", "", "TOTALE LORDO", "", tot["provvigioni_lorde_periodo"], ""])
     rows.append(["", "", "", "DA PAGARE", "", tot["provvigioni_da_pagare"], ""])
     rows.append(["", "", "", "RITENUTA ACCONTO", "", tot["ritenuta_acconto_calcolata"], ""])
     rows.append(["", "", "", "CONTRIBUTI", "", tot["contributi_calcolati"], ""])
+    rows.append(["", "", "", "VOCI MANUALI", "", tot.get("voci_manuali_da_pagare", 0), ""])
     rows.append(["", "", "", "NETTO DA PAGARE", "", tot["netto_da_pagare"], ""])
     pdf = pdf_report.stampa_elenco(
-        f"Estratto conto provvigioni - {collab.get('name')}",
+        f"Estratto conto collaboratore - {collab.get('name')}",
         f"Periodo: {dal or '—'} → {al or '—'}",
         headers, rows,
         col_widths_mm=[25, 35, 60, 25, 30, 30, 22], landscape_mode=False,
@@ -1070,7 +1169,13 @@ async def get_anagrafica(aid: str, user=Depends(current_user)):
             {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1, "data_nascita": 1},
         )
         if rel_doc:
-            relazioni_risolte.append({**rel_doc, "relazione": rel.get("relazione")})
+            relazioni_risolte.append({
+                **rel_doc,
+                "relazione": rel.get("relazione"),
+                "lavoratore": rel.get("lavoratore"),
+                "a_carico": rel.get("a_carico"),
+                "handicap": rel.get("handicap"),
+            })
     doc["relazioni_risolte"] = relazioni_risolte
     return doc
 
@@ -1162,22 +1267,60 @@ async def delete_anagrafica(aid: str, user=Depends(require_user("admin"))):
 
 @api.post("/anagrafiche/{aid}/relazioni")
 async def add_relazione(aid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Aggiunge una relazione di parentela bidirezionale."""
+    """Aggiunge una relazione di parentela bidirezionale.
+
+    Attributi opzionali (impattano assegno familiare / nucleo familiare):
+      - lavoratore: bool  (per coniuge: se True non è a carico)
+      - a_carico:   bool  (per figli/coniuge)
+      - handicap:   bool  (per figli con disabilità)
+    """
     target = body.get("anagrafica_id")
     relazione = body.get("relazione", "altro")
     relazione_inversa = body.get("relazione_inversa", "altro")
     if not target or target == aid:
         raise HTTPException(400, "anagrafica_id non valido")
+    extra_dir = {}
+    for k in ("lavoratore", "a_carico", "handicap"):
+        if k in body and body[k] is not None:
+            extra_dir[k] = bool(body[k])
+    extra_inv = {}
+    for k in ("lavoratore_inverso", "a_carico_inverso", "handicap_inverso"):
+        if k in body and body[k] is not None:
+            extra_inv[k.replace("_inverso", "")] = bool(body[k])
     await db.anagrafiche.update_one(
         {"id": aid},
-        {"$push": {"parente_di": {"anagrafica_id": target, "relazione": relazione}}},
+        {"$push": {"parente_di": {"anagrafica_id": target, "relazione": relazione, **extra_dir}}},
     )
     await db.anagrafiche.update_one(
         {"id": target},
-        {"$push": {"parente_di": {"anagrafica_id": aid, "relazione": relazione_inversa}}},
+        {"$push": {"parente_di": {"anagrafica_id": aid, "relazione": relazione_inversa, **extra_inv}}},
     )
     await log_attivita(user, "update", "anagrafica", aid,
                        f"Relazione {relazione} con {target}")
+    return {"ok": True}
+
+
+@api.patch("/anagrafiche/{aid}/relazioni/{target_id}")
+async def update_relazione(
+    aid: str, target_id: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna gli attributi di una relazione esistente (lavoratore / a_carico / handicap)."""
+    set_fields = {}
+    for k in ("lavoratore", "a_carico", "handicap"):
+        if k in body:
+            set_fields[f"parente_di.$.{k}"] = bool(body[k]) if body[k] is not None else None
+    if "relazione" in body and body["relazione"]:
+        set_fields["parente_di.$.relazione"] = body["relazione"]
+    if not set_fields:
+        return {"ok": True, "no_changes": True}
+    res = await db.anagrafiche.update_one(
+        {"id": aid, "parente_di.anagrafica_id": target_id},
+        {"$set": set_fields},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Relazione non trovata")
+    await log_attivita(user, "update", "anagrafica", aid, f"Aggiornati attributi relazione con {target_id}")
     return {"ok": True}
 
 
@@ -1459,8 +1602,19 @@ async def list_polizze(
     q: Optional[str] = None,
     stato: Optional[str] = None,
     ramo: Optional[str] = None,
+    prodotto: Optional[str] = None,
     contraente_id: Optional[str] = None,
-    limit: int = 500,
+    compagnia_id: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    # filtri periodo (su scadenza)
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    in_scadenza_giorni: Optional[int] = None,
+    scadenza_oltre_giorni: Optional[int] = None,
+    scadute_oggi: Optional[bool] = None,
+    scadute_da_min: Optional[int] = None,
+    scadute_da_max: Optional[int] = None,
+    limit: int = 2000,
     user=Depends(current_user),
 ):
     flt = await visibility_filter(user)
@@ -1468,24 +1622,64 @@ async def list_polizze(
         flt["stato"] = stato
     if ramo:
         flt["ramo"] = ramo
+    if prodotto:
+        flt["prodotto"] = prodotto
     if contraente_id:
         flt["contraente_id"] = contraente_id
+    if compagnia_id:
+        flt["compagnia_id"] = compagnia_id
+    if collaboratore_id:
+        flt["collaboratore_id"] = collaboratore_id
     if q:
-        flt["$or"] = [
-            {"numero_polizza": {"$regex": q, "$options": "i"}},
-            {"targa": {"$regex": q, "$options": "i"}},
-        ]
+        qrx = {"$regex": q, "$options": "i"}
+        ana_ids = [a["id"] async for a in db.anagrafiche.find(
+            {"ragione_sociale": qrx}, {"_id": 0, "id": 1}
+        )]
+        or_cond = [{"numero_polizza": qrx}, {"targa": qrx}]
+        if ana_ids:
+            or_cond.append({"contraente_id": {"$in": ana_ids}})
+        flt["$or"] = or_cond
+
+    # filtri di scadenza (presets)
+    from datetime import date, timedelta
+    today = date.today()
+    today_s = today.isoformat()
+    scad_cond: dict = {}
+    if in_scadenza_giorni is not None:
+        limite = (today + timedelta(days=int(in_scadenza_giorni))).isoformat()
+        scad_cond["$gte"] = today_s
+        scad_cond["$lte"] = limite
+    if scadenza_oltre_giorni is not None:
+        oltre = (today + timedelta(days=int(scadenza_oltre_giorni))).isoformat()
+        scad_cond["$gt"] = oltre
+    if scadute_oggi:
+        flt["scadenza"] = today_s
+    if scadute_da_min is not None:
+        scad_cond["$lte"] = (today - timedelta(days=int(scadute_da_min))).isoformat()
+    if scadute_da_max is not None:
+        scad_cond["$gte"] = (today - timedelta(days=int(scadute_da_max))).isoformat()
+    if dal:
+        scad_cond["$gte"] = dal
+    if al:
+        scad_cond["$lte"] = al
+    if scad_cond and "scadenza" not in flt:
+        flt["scadenza"] = scad_cond
+
     items = await db.polizze.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(limit)
-    # enrich con contraente e compagnia
+    # enrich con contraente, compagnia, collaboratore
     ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
     comp_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
+    collab_ids = list({i.get("collaboratore_id") for i in items if i.get("collaboratore_id")})
     anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}},
                                                           {"_id": 0, "id": 1, "ragione_sociale": 1})}
     comps = {c["id"]: c async for c in db.compagnie.find({"id": {"$in": comp_ids}},
                                                          {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
+    collabs = {u["id"]: u async for u in db.users.find({"id": {"$in": collab_ids}},
+                                                       {"_id": 0, "id": 1, "name": 1})}
     for it in items:
         it["contraente_nome"] = anas.get(it.get("contraente_id"), {}).get("ragione_sociale")
         it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
+        it["collaboratore_nome"] = collabs.get(it.get("collaboratore_id", ""), {}).get("name")
     return items
 
 
@@ -1987,6 +2181,108 @@ async def export_titoli_xlsx(stato: Optional[str] = None,
     return StreamingResponse(
         out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="titoli.xlsx"'},
+    )
+
+
+def _polizze_export_filters(**kw):
+    """Pulisce i kwargs filtro dell'export polizze (rimuove None)."""
+    return {k: v for k, v in kw.items() if v is not None and v != ""}
+
+
+@api.get("/export/polizze.csv")
+async def export_polizze_csv(
+    q: Optional[str] = None, stato: Optional[str] = None,
+    compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    prodotto: Optional[str] = None, collaboratore_id: Optional[str] = None,
+    contraente_id: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None,
+    in_scadenza_giorni: Optional[int] = None,
+    scadenza_oltre_giorni: Optional[int] = None,
+    scadute_oggi: Optional[bool] = None,
+    scadute_da_min: Optional[int] = None,
+    scadute_da_max: Optional[int] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_polizze(
+        q=q, stato=stato, ramo=ramo, prodotto=prodotto,
+        contraente_id=contraente_id, compagnia_id=compagnia_id,
+        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        in_scadenza_giorni=in_scadenza_giorni,
+        scadenza_oltre_giorni=scadenza_oltre_giorni,
+        scadute_oggi=scadute_oggi,
+        scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
+        limit=10000, user=user,
+    )
+    import csv as _csv
+    out = _io.StringIO()
+    w = _csv.writer(out, delimiter=";")
+    w.writerow(["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
+                "Ramo", "Prodotto", "Stato", "Effetto", "Scadenza",
+                "Premio lordo", "Premio netto", "Provvigioni", "Frazionamento"])
+    for p in items:
+        w.writerow([p.get("numero_polizza"), p.get("targa"), p.get("contraente_nome"),
+                    p.get("compagnia_nome"), p.get("collaboratore_nome"),
+                    p.get("ramo"), p.get("prodotto"), p.get("stato"),
+                    p.get("effetto"), p.get("scadenza"),
+                    p.get("premio_lordo"), p.get("premio_netto"),
+                    p.get("provvigioni"), p.get("frazionamento")])
+    csv_bytes = out.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        _io.BytesIO(csv_bytes), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="polizze.csv"'},
+    )
+
+
+@api.get("/export/polizze.xlsx")
+async def export_polizze_xlsx(
+    q: Optional[str] = None, stato: Optional[str] = None,
+    compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    prodotto: Optional[str] = None, collaboratore_id: Optional[str] = None,
+    contraente_id: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None,
+    in_scadenza_giorni: Optional[int] = None,
+    scadenza_oltre_giorni: Optional[int] = None,
+    scadute_oggi: Optional[bool] = None,
+    scadute_da_min: Optional[int] = None,
+    scadute_da_max: Optional[int] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_polizze(
+        q=q, stato=stato, ramo=ramo, prodotto=prodotto,
+        contraente_id=contraente_id, compagnia_id=compagnia_id,
+        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        in_scadenza_giorni=in_scadenza_giorni,
+        scadenza_oltre_giorni=scadenza_oltre_giorni,
+        scadute_oggi=scadute_oggi,
+        scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
+        limit=10000, user=user,
+    )
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Polizze"
+    headers = ["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
+               "Ramo", "Prodotto", "Stato", "Effetto", "Scadenza",
+               "Premio lordo €", "Premio netto €", "Provvigioni €", "Frazionamento"]
+    ws.append(headers)
+    head_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    head_font = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = head_fill; c.font = head_font; c.alignment = Alignment(horizontal="center")
+    for p in items:
+        ws.append([p.get("numero_polizza"), p.get("targa"), p.get("contraente_nome"),
+                   p.get("compagnia_nome"), p.get("collaboratore_nome"),
+                   p.get("ramo"), p.get("prodotto"), p.get("stato"),
+                   p.get("effetto"), p.get("scadenza"),
+                   p.get("premio_lordo"), p.get("premio_netto"),
+                   p.get("provvigioni"), p.get("frazionamento")])
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 30)
+    out = _io.BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="polizze.xlsx"'},
     )
 
 
@@ -5188,30 +5484,41 @@ async def stampa_anagrafiche(q: Optional[str] = None, user=Depends(require_user(
 
 @api.get("/stampa/polizze")
 async def stampa_polizze(
+    q: Optional[str] = None,
     stato: Optional[str] = None, compagnia_id: Optional[str] = None,
-    ramo: Optional[str] = None, collaboratore_id: Optional[str] = None,
+    ramo: Optional[str] = None, prodotto: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, contraente_id: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None,
+    in_scadenza_giorni: Optional[int] = None,
+    scadenza_oltre_giorni: Optional[int] = None,
+    scadute_oggi: Optional[bool] = None,
+    scadute_da_min: Optional[int] = None,
+    scadute_da_max: Optional[int] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    flt = await visibility_filter(user)
-    if stato: flt["stato"] = stato
-    if compagnia_id: flt["compagnia_id"] = compagnia_id
-    if ramo: flt["ramo"] = ramo
-    if collaboratore_id: flt["collaboratore_id"] = collaboratore_id
-    items = await db.polizze.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(5000)
-    ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
-    com_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
-    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
-    coms = {c["id"]: c async for c in db.compagnie.find({"id": {"$in": com_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
-    headers = ["N. polizza", "Contraente", "Compagnia", "Ramo", "Stato", "Effetto", "Scadenza", "Premio €"]
-    rows = [[p["numero_polizza"],
-             anas.get(p.get("contraente_id",""), {}).get("ragione_sociale", ""),
-             coms.get(p.get("compagnia_id",""), {}).get("ragione_sociale", ""),
-             p.get("ramo",""), p.get("stato",""), p.get("effetto",""), p.get("scadenza",""),
-             p.get("premio_lordo", 0)] for p in items]
+    items = await list_polizze(
+        q=q, stato=stato, ramo=ramo, prodotto=prodotto,
+        contraente_id=contraente_id, compagnia_id=compagnia_id,
+        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        in_scadenza_giorni=in_scadenza_giorni,
+        scadenza_oltre_giorni=scadenza_oltre_giorni,
+        scadute_oggi=scadute_oggi,
+        scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
+        limit=10000, user=user,
+    )
+    headers = ["N. polizza", "Contraente", "Compagnia", "Collaboratore", "Ramo", "Stato", "Effetto", "Scadenza", "Premio €", "Provv. €"]
+    rows = [[p.get("numero_polizza", ""),
+             p.get("contraente_nome", ""),
+             p.get("compagnia_nome", ""),
+             p.get("collaboratore_nome", ""),
+             p.get("ramo", ""), p.get("stato", ""),
+             p.get("effetto", ""), p.get("scadenza", ""),
+             p.get("premio_lordo", 0), p.get("provvigioni", 0)] for p in items]
     pdf = pdf_report.stampa_elenco(
         "Elenco Polizze", f"{len(items)} polizze", headers, rows,
-        col_widths_mm=[35, 55, 50, 25, 22, 22, 22, 25],
-        filtri_attivi={"Stato": stato, "Ramo": ramo, "Compagnia": compagnia_id},
+        col_widths_mm=[28, 45, 40, 30, 22, 22, 22, 22, 22, 22],
+        filtri_attivi={"Stato": stato, "Ramo": ramo, "Compagnia": compagnia_id,
+                       "Collaboratore": collaboratore_id, "Dal": dal, "Al": al},
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "polizze.pdf")

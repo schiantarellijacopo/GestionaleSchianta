@@ -70,7 +70,23 @@ class PagamentoProvvigioni(BaseDoc):
     data_pagamento: str
     movimento_id: Optional[str] = None
     titoli_ids: List[str] = Field(default_factory=list)
+    voci_manuali_ids: List[str] = Field(default_factory=list)
     note: Optional[str] = None
+
+
+class VoceManualeCollab(BaseDoc):
+    """Voce manuale (bonus / trattenuta / acconto / nota di credito) sull'estratto conto collaboratore.
+
+    importo positivo = aumenta il dovuto al collaboratore (es. bonus)
+    importo negativo = riduce il dovuto (es. acconto già dato, storno)
+    """
+    collaboratore_id: str
+    data: str  # YYYY-MM-DD
+    causale: str
+    importo: float  # può essere negativo
+    note: Optional[str] = None
+    pagata: bool = False
+    pagamento_id: Optional[str] = None  # set when included in a payment
 
 
 class UserCreate(BaseModel):

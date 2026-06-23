@@ -367,21 +367,50 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
     const [target, setTarget] = useState("");
     const [rel, setRel] = useState("figlio");
     const [relInv, setRelInv] = useState("genitore");
+    const [lavoratore, setLavoratore] = useState(false);
+    const [aCarico, setACarico] = useState(true);
+    const [handicap, setHandicap] = useState(false);
     const [options, setOptions] = useState([]);
+    const [editing, setEditing] = useState(null);
     useEffect(() => { api.get("/anagrafiche").then((r) => setOptions(r.data.filter((a) => a.id !== ana.id))); }, [ana.id]);
+
+    // mostra attributi differenti in base alla relazione
+    const showLavoratore = rel === "coniuge";
+    const showCarico = rel === "coniuge" || rel === "figlio";
+    const showHandicap = rel === "figlio";
 
     const aggiungi = async () => {
         if (!target) return;
         try {
-            await api.post(`/anagrafiche/${ana.id}/relazioni`, {
+            const body = {
                 anagrafica_id: target, relazione: rel, relazione_inversa: relInv,
-            });
-            toast.success("Relazione aggiunta"); setOpen(false); setTarget(""); onReload();
+            };
+            if (showLavoratore) body.lavoratore = lavoratore;
+            if (showCarico) body.a_carico = aCarico;
+            if (showHandicap) body.handicap = handicap;
+            await api.post(`/anagrafiche/${ana.id}/relazioni`, body);
+            toast.success("Relazione aggiunta");
+            setOpen(false); setTarget("");
+            setLavoratore(false); setACarico(true); setHandicap(false);
+            onReload();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
     const rimuovi = async (tid) => {
         if (!window.confirm("Rimuovere la relazione?")) return;
         await api.delete(`/anagrafiche/${ana.id}/relazioni/${tid}`); toast.success("Relazione rimossa"); onReload();
+    };
+
+    const saveEdit = async () => {
+        if (!editing) return;
+        try {
+            const body = {};
+            if (editing.relazione === "coniuge") body.lavoratore = !!editing.lavoratore;
+            if (editing.relazione === "coniuge" || editing.relazione === "figlio") body.a_carico = !!editing.a_carico;
+            if (editing.relazione === "figlio") body.handicap = !!editing.handicap;
+            await api.patch(`/anagrafiche/${ana.id}/relazioni/${editing.id}`, body);
+            toast.success("Attributi aggiornati");
+            setEditing(null); onReload();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     return (
@@ -399,7 +428,7 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                 <div>
                                     <Label>Anagrafica collegata</Label>
                                     <Select value={target} onValueChange={setTarget}>
-                                        <SelectTrigger><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                                        <SelectTrigger data-testid="rel-target"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                                         <SelectContent>
                                             {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.ragione_sociale}</SelectItem>)}
                                         </SelectContent>
@@ -408,7 +437,7 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <Label>{ana.ragione_sociale} &egrave;</Label>
-                                        <Select value={rel} onValueChange={setRel}><SelectTrigger><SelectValue /></SelectTrigger>
+                                        <Select value={rel} onValueChange={setRel}><SelectTrigger data-testid="rel-relazione"><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 {["genitore", "figlio", "coniuge", "fratello", "nonno", "nipote", "zio", "cugino", "altro"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                                             </SelectContent>
@@ -423,8 +452,46 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                         </Select>
                                     </div>
                                 </div>
+
+                                {(showLavoratore || showCarico || showHandicap) && (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
+                                        <div className="text-xs font-semibold text-amber-900 uppercase tracking-wider">
+                                            Dati per assegno familiare / nucleo
+                                        </div>
+                                        {showLavoratore && (
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox" checked={lavoratore}
+                                                    onChange={(e) => setLavoratore(e.target.checked)}
+                                                    data-testid="rel-lavoratore"
+                                                />
+                                                Il coniuge è lavoratore (incide sull&apos;assegno familiare)
+                                            </label>
+                                        )}
+                                        {showCarico && (
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox" checked={aCarico}
+                                                    onChange={(e) => setACarico(e.target.checked)}
+                                                    data-testid="rel-carico"
+                                                />
+                                                A carico fiscalmente
+                                            </label>
+                                        )}
+                                        {showHandicap && (
+                                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input
+                                                    type="checkbox" checked={handicap}
+                                                    onChange={(e) => setHandicap(e.target.checked)}
+                                                    data-testid="rel-handicap"
+                                                />
+                                                Figlio con handicap (L.104)
+                                            </label>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                            <DialogFooter><Button onClick={aggiungi} className="bg-sky-700 hover:bg-sky-800">Salva</Button></DialogFooter>
+                            <DialogFooter><Button onClick={aggiungi} className="bg-sky-700 hover:bg-sky-800" data-testid="rel-save">Salva</Button></DialogFooter>
                         </DialogContent>
                     </Dialog>
                 )}
@@ -437,19 +504,102 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                         <div className="tree-node bg-sky-50 border-sky-200 font-medium">{ana.ragione_sociale}</div>
                     </div>
                     <div className="flex flex-wrap justify-center gap-4">
-                        {ana.relazioni_risolte.map((r) => (
+                        {ana.relazioni_risolte.map((r) => {
+                            const badges = [];
+                            if (r.relazione === "coniuge") {
+                                badges.push(r.lavoratore ? { t: "lavoratore", c: "bg-sky-100 text-sky-800" } : { t: "non lavoratore", c: "bg-slate-100 text-slate-700" });
+                            }
+                            if (r.relazione === "coniuge" || r.relazione === "figlio") {
+                                if (r.a_carico) badges.push({ t: "a carico", c: "bg-emerald-100 text-emerald-800" });
+                                else if (r.a_carico === false) badges.push({ t: "non a carico", c: "bg-slate-100 text-slate-700" });
+                            }
+                            if (r.relazione === "figlio" && r.handicap) {
+                                badges.push({ t: "L.104", c: "bg-amber-100 text-amber-800" });
+                            }
+                            return (
                             <div key={r.id} className="flex flex-col items-center" data-testid={`relation-${r.id}`}>
                                 <div className="h-6 w-px bg-slate-300 -mt-8" />
                                 <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">{r.relazione}</div>
                                 <div className="tree-node">
                                     <Link to={`/anagrafiche/${r.id}`} className="text-sky-700 hover:underline">{r.ragione_sociale}</Link>
                                     <div className="text-[11px] text-slate-500 num">{r.codice_fiscale || "-"}</div>
-                                    {canEdit && <button onClick={() => rimuovi(r.id)} className="text-[10px] text-rose-600 hover:underline mt-1">rimuovi</button>}
+                                    {badges.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-1 justify-center">
+                                            {badges.map((b, i) => (
+                                                <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded ${b.c}`}>{b.t}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {canEdit && (
+                                        <div className="flex gap-2 justify-center mt-1">
+                                            {(r.relazione === "coniuge" || r.relazione === "figlio") && (
+                                                <button
+                                                    onClick={() => setEditing(r)}
+                                                    className="text-[10px] text-sky-700 hover:underline"
+                                                    data-testid={`relation-edit-${r.id}`}
+                                                >
+                                                    modifica
+                                                </button>
+                                            )}
+                                            <button onClick={() => rimuovi(r.id)} className="text-[10px] text-rose-600 hover:underline">rimuovi</button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                        ))}
+                        );
+                        })}
                     </div>
                 </div>
+            )}
+
+            {editing && (
+                <Dialog open onOpenChange={(o) => !o && setEditing(null)}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Attributi relazione: {editing.ragione_sociale}</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-2 py-2">
+                            <div className="text-xs text-slate-500">Relazione: <b>{editing.relazione}</b></div>
+                            {editing.relazione === "coniuge" && (
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!editing.lavoratore}
+                                        onChange={(e) => setEditing({ ...editing, lavoratore: e.target.checked })}
+                                        data-testid="rel-edit-lavoratore"
+                                    />
+                                    Il coniuge è lavoratore
+                                </label>
+                            )}
+                            {(editing.relazione === "coniuge" || editing.relazione === "figlio") && (
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!editing.a_carico}
+                                        onChange={(e) => setEditing({ ...editing, a_carico: e.target.checked })}
+                                        data-testid="rel-edit-carico"
+                                    />
+                                    A carico fiscalmente
+                                </label>
+                            )}
+                            {editing.relazione === "figlio" && (
+                                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!editing.handicap}
+                                        onChange={(e) => setEditing({ ...editing, handicap: e.target.checked })}
+                                        data-testid="rel-edit-handicap"
+                                    />
+                                    Figlio con handicap (L.104)
+                                </label>
+                            )}
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setEditing(null)}>Annulla</Button>
+                            <Button onClick={saveEdit} className="bg-sky-700 hover:bg-sky-800" data-testid="rel-edit-save">Salva</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             )}
         </Card>
     );

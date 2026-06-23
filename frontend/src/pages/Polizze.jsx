@@ -1,39 +1,136 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate, fmtEur } from "@/lib/api";
+import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Search, Plus, ScanLine } from "lucide-react";
+import { Label } from "@/components/ui/label";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import {
+    Search, Plus, ScanLine, Filter, X, Printer, FileSpreadsheet, FileText,
+    ChevronDown, ChevronUp,
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+
+const PRESETS = [
+    { key: "tutti", label: "Tutte" },
+    { key: "attive", label: "Attive" },
+    { key: "scad15", label: "In scadenza 15gg" },
+    { key: "scad_oltre15", label: "Oltre 15gg" },
+    { key: "scadute_oggi", label: "Scadute oggi" },
+    { key: "scad_5g", label: "Scadute da 5gg" },
+    { key: "scad_10g", label: "Scadute da 10gg" },
+    { key: "scad_14g", label: "Scadute da 14gg" },
+    { key: "scadute", label: "Scadute" },
+    { key: "sospese", label: "Sospese" },
+    { key: "annullate", label: "Annullate" },
+];
+
+const presetParams = (key) => {
+    switch (key) {
+        case "attive": return { stato: "attiva" };
+        case "sospese": return { stato: "sospesa" };
+        case "scadute": return { stato: "scaduta" };
+        case "annullate": return { stato: "annullata" };
+        case "scad15": return { in_scadenza_giorni: 15 };
+        case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
+        case "scadute_oggi": return { scadute_oggi: true };
+        case "scad_5g": return { scadute_da_min: 5 };
+        case "scad_10g": return { scadute_da_min: 10 };
+        case "scad_14g": return { scadute_da_min: 14 };
+        default: return {};
+    }
+};
+
+const INITIAL_FILTERS = {
+    preset: "tutti", q: "",
+    stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
+    collaboratore_id: "all",
+    dal: "", al: "",
+};
 
 export default function Polizze() {
     const { user } = useAuth();
     const [list, setList] = useState(null);
-    const [q, setQ] = useState("");
-    const [stato, setStato] = useState("all");
+    const [compagnie, setCompagnie] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [utenti, setUtenti] = useState([]);
     const [open, setOpen] = useState(false);
+    const [showFilters, setShowFilters] = useState(false);
+    const [pageSize, setPageSize] = useState(50);
+    const [filters, setFilters] = useState(INITIAL_FILTERS);
+    const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
 
-    const load = () => {
-        const params = { q: q || undefined };
-        if (stato && stato !== "all") params.stato = stato;
-        api.get("/polizze", { params }).then((r) => setList(r.data));
+    const buildParams = () => {
+        const p = { ...presetParams(filters.preset) };
+        if (filters.q) p.q = filters.q;
+        if (filters.stato !== "all" && filters.preset === "tutti") p.stato = filters.stato;
+        if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
+        if (filters.ramo !== "all") p.ramo = filters.ramo;
+        if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
+        if (filters.prodotto) p.prodotto = filters.prodotto;
+        if (filters.dal) p.dal = filters.dal;
+        if (filters.al) p.al = filters.al;
+        return p;
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato]);
-    useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q]);
+
+    const load = () => {
+        api.get("/polizze", { params: buildParams() }).then((r) => setList(r.data));
+    };
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
+
+    useEffect(() => {
+        Promise.all([
+            api.get("/compagnie"), api.get("/librerie/rami"),
+            api.get("/auth/users").catch(() => ({ data: [] })),
+        ]).then(([c, r, u]) => {
+            setCompagnie(c.data); setRami(r.data);
+            setUtenti((u.data || []).filter((x) => x.role !== "cliente"));
+        });
+    }, []);
+
+    const displayed = useMemo(() => (list || []).slice(0, pageSize), [list, pageSize]);
+
+    const totali = useMemo(() => {
+        const src = list || [];
+        const t_lordo = src.reduce((s, p) => s + (p.premio_lordo || 0), 0);
+        const t_provv = src.reduce((s, p) => s + (p.provvigioni || 0), 0);
+        return { t_lordo, t_provv };
+    }, [list]);
+
+    const qs = (params) => {
+        const u = new URLSearchParams();
+        Object.entries(params).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== "" && v !== false) u.append(k, String(v));
+        });
+        return u.toString();
+    };
+
+    const exportCsv = () => {
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/export/polizze.csv?${qs(buildParams())}`;
+        link.target = "_blank";
+        document.body.appendChild(link); link.click(); link.remove();
+    };
+    const exportXlsx = () => {
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/export/polizze.xlsx?${qs(buildParams())}`;
+        link.target = "_blank";
+        document.body.appendChild(link); link.click(); link.remove();
+    };
+    const stampaPdf = () => openPdf("/stampa/polizze", buildParams());
 
     return (
         <div data-testid="polizze-page">
             <PageHeader
                 title="Polizze"
-                subtitle="Portafoglio polizze attive, sospese e annullate"
+                subtitle="Portafoglio polizze - filtri, presets ed esportazioni"
                 actions={canCreate && (
                     <Dialog open={open} onOpenChange={setOpen}>
                         <DialogTrigger asChild>
@@ -46,38 +143,128 @@ export default function Polizze() {
                 )}
             />
 
-            <div className="flex items-center gap-3 mb-4">
-                <div className="relative flex-1 max-w-md">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <Input
-                        data-testid="polizze-search"
-                        placeholder="Numero polizza o targa..."
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        className="pl-9"
-                    />
+            {/* Preset rapidi */}
+            <div className="flex flex-wrap gap-2 mb-3">
+                {PRESETS.map((p) => (
+                    <button
+                        key={p.key}
+                        onClick={() => setF("preset", p.key)}
+                        data-testid={`pol-preset-${p.key}`}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                            filters.preset === p.key
+                                ? "bg-slate-900 text-white border-slate-900"
+                                : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                        }`}
+                    >
+                        {p.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Toolbar */}
+            <div className="bg-white border border-slate-200 rounded-md p-3 mb-3">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <div className="relative flex-1 min-w-[260px]">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            data-testid="polizze-search"
+                            placeholder="Cerca per polizza, targa, contraente..."
+                            value={filters.q}
+                            onChange={(e) => setF("q", e.target.value)}
+                            className="pl-9"
+                        />
+                    </div>
+                    <span className="text-xs text-slate-600 hidden md:block">Visualizza</span>
+                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v))}>
+                        <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {[25, 50, 100, 250, 500].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <Button variant="outline" onClick={() => setShowFilters((s) => !s)} data-testid="pol-toggle-filters">
+                        <Filter size={14} className="mr-1" /> Filtri {showFilters ? <ChevronUp size={12} className="ml-1" /> : <ChevronDown size={12} className="ml-1" />}
+                    </Button>
+                    <div className="ml-auto flex gap-2">
+                        <Button variant="outline" onClick={stampaPdf} data-testid="polizze-print">
+                            <Printer size={14} className="mr-1" /> Stampa PDF
+                        </Button>
+                        <Button variant="outline" onClick={exportCsv} data-testid="polizze-csv">
+                            <FileText size={14} className="mr-1" /> CSV
+                        </Button>
+                        <Button variant="outline" onClick={exportXlsx} data-testid="polizze-xlsx">
+                            <FileSpreadsheet size={14} className="mr-1" /> Excel
+                        </Button>
+                    </div>
                 </div>
-                <Select value={stato} onValueChange={setStato}>
-                    <SelectTrigger className="w-40"><SelectValue placeholder="Stato" /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">Tutti gli stati</SelectItem>
-                        <SelectItem value="attiva">Attive</SelectItem>
-                        <SelectItem value="sospesa">Sospese</SelectItem>
-                        <SelectItem value="scaduta">Scadute</SelectItem>
-                        <SelectItem value="annullata">Annullate</SelectItem>
-                    </SelectContent>
-                </Select>
-                <span className="text-sm text-slate-500 num ml-auto">{list ? `${list.length} polizze` : ""}</span>
+
+                {showFilters && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-2 pt-2 border-t border-slate-100">
+                        <Select value={filters.stato} onValueChange={(v) => setF("stato", v)}>
+                            <SelectTrigger data-testid="pol-f-stato"><SelectValue placeholder="Stato" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti stati</SelectItem>
+                                <SelectItem value="attiva">Attiva</SelectItem>
+                                <SelectItem value="sospesa">Sospesa</SelectItem>
+                                <SelectItem value="in_emissione">In emissione</SelectItem>
+                                <SelectItem value="scaduta">Scaduta</SelectItem>
+                                <SelectItem value="annullata">Annullata</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.compagnia_id} onValueChange={(v) => setF("compagnia_id", v)}>
+                            <SelectTrigger data-testid="pol-f-compagnia"><SelectValue placeholder="Compagnia" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutte compagnie</SelectItem>
+                                {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.ramo} onValueChange={(v) => setF("ramo", v)}>
+                            <SelectTrigger data-testid="pol-f-ramo"><SelectValue placeholder="Ramo" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti rami</SelectItem>
+                                {rami.map((r) => <SelectItem key={r.id} value={r.codice}>{r.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.collaboratore_id} onValueChange={(v) => setF("collaboratore_id", v)}>
+                            <SelectTrigger data-testid="pol-f-collab"><SelectValue placeholder="Collaboratore" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti collaboratori</SelectItem>
+                                {utenti.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Input
+                            placeholder="Prodotto..." value={filters.prodotto}
+                            onChange={(e) => setF("prodotto", e.target.value)}
+                            data-testid="pol-f-prodotto"
+                        />
+                        <div></div>
+                        <div>
+                            <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
+                            <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="pol-f-dal" />
+                        </div>
+                        <div>
+                            <Label className="text-[10px] text-slate-500">Scadenza al</Label>
+                            <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="pol-f-al" />
+                        </div>
+                        <button
+                            onClick={() => setFilters(INITIAL_FILTERS)}
+                            className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2"
+                            data-testid="pol-clear-filters"
+                        >
+                            <X size={12} /> Azzera filtri
+                        </button>
+                    </div>
+                )}
             </div>
 
             <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full min-w-[1000px]">
+                    <table className="tbl w-full min-w-[1100px]">
                         <thead>
                             <tr>
                                 <th>Numero polizza</th>
                                 <th>Contraente</th>
                                 <th>Compagnia</th>
+                                <th>Collaboratore</th>
                                 <th>Ramo</th>
                                 <th>Stato</th>
                                 <th>Effetto</th>
@@ -87,15 +274,19 @@ export default function Polizze() {
                             </tr>
                         </thead>
                         <tbody>
-                            {list.map((p) => (
+                            {displayed.map((p) => (
                                 <tr key={p.id} data-testid={`polizza-row-${p.id}`}>
-                                    <td><Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline font-medium">{p.numero_polizza}</Link></td>
-                                    <td>{p.contraente_nome || "—"}</td>
-                                    <td className="text-slate-600">{p.compagnia_nome || "—"}</td>
+                                    <td>
+                                        <Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline font-medium">{p.numero_polizza}</Link>
+                                        {p.targa && <div className="text-xs text-sky-700 font-medium num mt-0.5">{p.targa}</div>}
+                                    </td>
+                                    <td className="text-xs">{p.contraente_nome || "—"}</td>
+                                    <td className="text-xs text-slate-600">{p.compagnia_nome || "—"}</td>
+                                    <td className="text-xs text-slate-600">{p.collaboratore_nome || "—"}</td>
                                     <td><span className="badge badge-neutral">{p.ramo}</span></td>
                                     <td><StatusBadge stato={p.stato} /></td>
-                                    <td className="num">{fmtDate(p.effetto)}</td>
-                                    <td className="num">{fmtDate(p.scadenza)}</td>
+                                    <td className="num text-xs">{fmtDate(p.effetto)}</td>
+                                    <td className="num text-xs">{fmtDate(p.scadenza)}</td>
                                     <td className="num text-right font-medium">{fmtEur(p.premio_lordo)}</td>
                                     <td className="num text-right text-slate-600">{fmtEur(p.provvigioni)}</td>
                                 </tr>
@@ -103,6 +294,28 @@ export default function Polizze() {
                         </tbody>
                     </table>
                 )}
+                {list && list.length > pageSize && (
+                    <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
+                        Visualizzate {pageSize} di {list.length} polizze - aumenta &quot;Visualizza&quot; per vederne di più
+                    </div>
+                )}
+            </div>
+
+            {/* Footer totali */}
+            <div className="sticky bottom-0 mt-4 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3" data-testid="pol-footer">
+                <span className="text-xs text-slate-400">
+                    {list ? `${list.length} polizze${filters.preset !== "tutti" ? ` · preset: ${filters.preset}` : ""}` : ""}
+                </span>
+                <div className="ml-auto flex gap-6">
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Premio totale</div>
+                        <div className="text-base font-semibold num">{fmtEur(totali.t_lordo)}</div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Provvigioni</div>
+                        <div className="text-base font-semibold num">{fmtEur(totali.t_provv)}</div>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -136,14 +349,11 @@ function NuovaPolizzaDialog({ onClose }) {
             const r = await api.post("/utility/ocr-polizza", fd,
                 { headers: { "Content-Type": "multipart/form-data" }, timeout: 90000 });
             const d = r.data;
-            // mappa ramo OCR → ramo standard
             const ramoMap = { RCAUTO: "RCA", INFR: "INFORTUNI" };
             const ramo = ramoMap[d.ramo] || d.ramo || "RCA";
-            // match compagnia per nome
             const compMatch = d.compagnia
                 ? comp.find((c) => c.ragione_sociale?.toUpperCase().includes(d.compagnia.toUpperCase().split(" ")[0]))
                 : null;
-            // match contraente per CF
             const cfContr = d.contraente?.codice_fiscale || d.contraente?.partita_iva;
             const contrMatch = cfContr
                 ? ana.find((a) => a.codice_fiscale === cfContr || a.partita_iva === cfContr)
@@ -184,7 +394,6 @@ function NuovaPolizzaDialog({ onClose }) {
                 provvigioni: parseFloat(f.provvigioni) || 0,
                 assicurato_ids: [f.contraente_id],
             });
-            // se ho un file polizza caricato per OCR, lo salvo come allegato
             if (polizzaFile && created.data?.id) {
                 const fd = new FormData();
                 fd.append("file", polizzaFile);
@@ -204,7 +413,6 @@ function NuovaPolizzaDialog({ onClose }) {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Nuova polizza</DialogTitle></DialogHeader>
 
-            {/* Toolbar OCR polizza */}
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="pol-ocr-toolbar">
                 <div className="text-xs text-sky-900 flex-1">
                     <strong>Auto-compila</strong> caricando il PDF della polizza (Cattolica, UnipolSai, Generali, Allianz, ecc.).
