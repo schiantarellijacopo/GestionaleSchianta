@@ -1103,9 +1103,33 @@ def _normalize_upper(body: dict) -> dict:
     return out
 
 
+async def _auto_geocode(body: dict) -> dict:
+    """Se l'indirizzo è valorizzato e lat/lng mancano (o indirizzo è cambiato),
+    chiama Nominatim per ottenere le coordinate."""
+    ind = body.get("indirizzo")
+    com = body.get("comune")
+    if not (ind and com):
+        return body
+    # Evita di geocodificare se già presente
+    if body.get("lat") and body.get("lng"):
+        return body
+    try:
+        res = await geocoder_svc.geocoda_indirizzo(
+            indirizzo=ind, comune=com,
+            cap=body.get("cap") or "", provincia=body.get("provincia") or "",
+        )
+        if res and res.get("lat"):
+            body["lat"] = res["lat"]
+            body["lng"] = res["lng"]
+    except Exception:
+        pass
+    return body
+
+
 @api.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
+    body = await _auto_geocode(body)
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")
@@ -1115,6 +1139,12 @@ async def create_anagrafica(body: dict, user=Depends(require_user("admin", "coll
 @api.put("/anagrafiche/{aid}")
 async def update_anagrafica(aid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
+    # Re-geocodifica se l'indirizzo è cambiato
+    existing = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "indirizzo": 1, "comune": 1, "cap": 1, "lat": 1, "lng": 1})
+    if existing and any(body.get(k) != existing.get(k) for k in ("indirizzo", "comune", "cap") if k in body):
+        body["lat"] = None
+        body["lng"] = None
+        body = await _auto_geocode(body)
     body["updated_at"] = _now_iso()
     res = await db.anagrafiche.update_one({"id": aid}, {"$set": body})
     if res.matched_count == 0:
@@ -3941,6 +3971,85 @@ async def stats_dashboard(user=Depends(current_user)):
         "premi_anno_corrente": round(premi_anno, 2),
         "polizze_per_ramo": [{"ramo": r["_id"] or "N/D", "count": r["count"]} for r in rami],
         "incassi_mensili": sei_mesi,
+    }
+
+
+@api.get("/stats/dashboard-admin")
+async def stats_dashboard_admin(user=Depends(require_user("admin"))):
+    """KPI estesi solo admin: provvigioni, nuova produzione per ramo, sinistri liquidati,
+    clienti per categoria, scadenze 5/10/15 gg."""
+    from datetime import date, timedelta
+    today = date.today()
+    today_iso = today.isoformat()
+    inizio_anno = f"{today.year}-01-01"
+
+    # Provvigioni totali annue (somma provvigioni titoli incassati anno corrente)
+    pipe_provv = [
+        {"$match": {"stato": "incassato", "data_incasso": {"$gte": inizio_anno}}},
+        {"$group": {"_id": None,
+                    "provv_totali": {"$sum": {"$ifNull": ["$provvigione_lorda", 0]}},
+                    "premi_totali": {"$sum": "$importo_lordo"},
+                    "n_titoli": {"$sum": 1}}},
+    ]
+    pres = await db.titoli.aggregate(pipe_provv).to_list(1)
+    provv_anno = pres[0]["provv_totali"] if pres else 0
+    premi_anno = pres[0]["premi_totali"] if pres else 0
+
+    # Nuova produzione per ramo (polizze emesse anno corrente con premio)
+    pipe_prod = [
+        {"$match": {"data_decorrenza": {"$gte": inizio_anno}}},
+        {"$group": {"_id": "$ramo", "count": {"$sum": 1}, "premio": {"$sum": {"$ifNull": ["$premio_lordo", 0]}}}},
+        {"$sort": {"premio": -1}},
+    ]
+    prod_per_ramo = await db.polizze.aggregate(pipe_prod).to_list(50)
+
+    # Nuova produzione giornaliera (oggi)
+    pipe_oggi = [
+        {"$match": {"data_decorrenza": today_iso}},
+        {"$group": {"_id": "$ramo", "count": {"$sum": 1}, "premio": {"$sum": {"$ifNull": ["$premio_lordo", 0]}}}},
+    ]
+    prod_oggi = await db.polizze.aggregate(pipe_oggi).to_list(20)
+
+    # Sinistri (numero + totale per stato)
+    pipe_sin = [
+        {"$group": {"_id": "$stato", "n": {"$sum": 1}, "tot": {"$sum": {"$ifNull": ["$importo_risarcito", 0]}}}},
+    ]
+    sin = await db.sinistri.aggregate(pipe_sin).to_list(20)
+    sinistri_by_stato = {s["_id"] or "aperto": {"n": s["n"], "totale": round(s["tot"], 2)} for s in sin}
+
+    # Clienti attivi suddivisi per categoria
+    cat_counts = {"Condominio": 0, "Azienda": 0, "Parrocchia": 0, "Privato": 0}
+    async for a in db.anagrafiche.find({}, {"_id": 0, "ragione_sociale": 1, "tipo": 1, "tags": 1, "categoria": 1}):
+        rs = (a.get("ragione_sociale") or "").upper()
+        tags = a.get("tags") or []
+        cat = (a.get("categoria") or "").lower()
+        if "CONDOMINIO" in rs or "condominio" in tags or cat == "condominio":
+            cat_counts["Condominio"] += 1
+        elif "PARROCCHIA" in rs or "parrocchia" in tags or cat == "parrocchia":
+            cat_counts["Parrocchia"] += 1
+        elif a.get("tipo") == "persona_giuridica" or "azienda" in tags or cat == "azienda":
+            cat_counts["Azienda"] += 1
+        else:
+            cat_counts["Privato"] += 1
+
+    # Scadenze a 5, 10, 15 giorni
+    scadenze = {}
+    for g in (5, 10, 15, 30, 60):
+        fine = (today + timedelta(days=g)).isoformat()
+        cnt = await db.polizze.count_documents({
+            "stato": "attiva", "scadenza": {"$gte": today_iso, "$lte": fine},
+        })
+        scadenze[f"{g}gg"] = cnt
+
+    return {
+        "provvigioni_anno": round(provv_anno, 2),
+        "premi_anno": round(premi_anno, 2),
+        "n_titoli_anno": pres[0]["n_titoli"] if pres else 0,
+        "produzione_per_ramo": [{"ramo": p["_id"] or "N/D", "n": p["count"], "premio": round(p["premio"], 2)} for p in prod_per_ramo],
+        "produzione_oggi": [{"ramo": p["_id"] or "N/D", "n": p["count"], "premio": round(p["premio"], 2)} for p in prod_oggi],
+        "sinistri_per_stato": sinistri_by_stato,
+        "clienti_per_categoria": cat_counts,
+        "scadenze": scadenze,
     }
 
 

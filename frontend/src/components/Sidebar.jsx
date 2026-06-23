@@ -27,7 +27,7 @@ const ALL_MENU_ITEMS = [
     { id: "primanota", path: "/contabilita", icon: "BookOpen", label: "Prima nota", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "titoli_conta", path: "/titoli", icon: "Receipt", label: "Titoli (incassi)", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "sospesi", path: "/sospesi", icon: "TimerReset", label: "Sospesi (anticipati)", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Provvigioni", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
