@@ -968,7 +968,15 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
             const sett = r.data?.parsed?.settimane_contributive || 0;
             const anni = r.data?.parsed?.storico_redditi?.length || 0;
             const peri = r.data?.parsed?.periodi_contributivi_count || 0;
-            toast.success(`Estratto caricato: ${sett} sett., ${anni} anni di redditi, ${peri} periodi.`);
+            if (peri === 0 && anni === 0) {
+                toast.warning(
+                    "Estratto salvato ma nessun periodo/reddito riconosciuto. " +
+                    "Il PDF potrebbe essere scansionato o avere un layout non supportato. Inserisci i dati manualmente.",
+                    { duration: 8000 },
+                );
+            } else {
+                toast.success(`Estratto caricato: ${sett} sett., ${anni} anni di redditi, ${peri} periodi.`);
+            }
             onUpdate?.();
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore upload");
@@ -979,10 +987,21 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
     };
 
     const elimina = async (id, nome) => {
-        if (!window.confirm(`Eliminare l'estratto "${nome}"? Il file verrà rimosso (i dati nello storico restano).`)) return;
+        const pulisciTxt = window.prompt(
+            `Eliminare l'estratto "${nome}"?\n\n` +
+            `• Scrivi "ok" per cancellare SOLO il file dall'archivio (mantieni storico/carriera già popolati)\n` +
+            `• Scrivi "tutto" per cancellare ANCHE storico redditi e carriera contributiva\n` +
+            `• Lascia vuoto per annullare`,
+            "",
+        );
+        if (!pulisciTxt) return;
+        const pulisci = pulisciTxt.toLowerCase().trim() === "tutto";
         try {
-            await api.delete(`/anagrafiche/${anagrafica_id}/analisi/estratto-inps/${id}`);
-            toast.success("Estratto rimosso");
+            await api.delete(
+                `/anagrafiche/${anagrafica_id}/analisi/estratto-inps/${id}`,
+                { params: { pulisci_storico: pulisci } },
+            );
+            toast.success(pulisci ? "Estratto + storico cancellati" : "Estratto rimosso (storico mantenuto)");
             onUpdate?.();
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore");

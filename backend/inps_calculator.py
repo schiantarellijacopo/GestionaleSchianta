@@ -209,60 +209,137 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         result["provincia"] = m.group(4)
 
     # === Periodi contributivi ===
+    # Parser multi-formato:
+    # - Formato INPS classico: "01/01/2020 31/12/2020 sett. 52 ... 25000,00 6500,00"
+    # - Formato SatorCRM/HubSicura: "Commerciante 01/01/2020 31/12/2020"
+    # - Formato compatto: "Dipendente 01/2020 12/2020 ..."
+    # - Riga senza retribuzione: "01/01/2020 31/12/2020"
     settimane_tot = 0
     giorni_tot = 0
     retribuzioni = []
     primo_inizio = None
-
-    # cattura "DD/MM/YYYY DD/MM/YYYY ... (sett.|giorni) N val retrib contrib?"
-    riga_re = re.compile(
-        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+(.+?)(sett\.|giorni)\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?",
+    fondi_noti = (
+        "Commerciante", "Artigiano", "Dipendente", "Autonomo", "Parasubordinato",
+        "Professionista", "Imprenditore", "Coltivatore", "Lavoratore",
+        "Gestione separata", "Lavoro dipendente", "Inps", "Inpgi", "Enasarco",
+        "Enpacl", "Enpam", "Inarcassa", "Cassa Forense", "Casagit",
     )
-    redditi_per_anno: dict = {}  # {anno: {reddito, contributi, settimane}}
+    redditi_per_anno: dict = {}
+    periodi_seen: set = set()
 
-    for m in riga_re.finditer(testo):
+    def _add_periodo(dal_iso, al_iso, fondo, sett, retrib, contrib):
+        nonlocal primo_inizio, settimane_tot
+        key = (dal_iso, al_iso, fondo)
+        if key in periodi_seen:
+            return
+        periodi_seen.add(key)
+        if primo_inizio is None or dal_iso < primo_inizio:
+            primo_inizio = dal_iso
+        settimane_tot += sett
+        if retrib > 0:
+            retribuzioni.append(retrib)
+        result["periodi_contributivi"].append({
+            "fondo": (fondo or "Lavoratore dipendente")[:80],
+            "inizio_periodo": dal_iso,
+            "fine_periodo": al_iso,
+            "settimane": sett,
+            "retribuzione": round(retrib, 2),
+            "contributi": round(contrib, 2),
+            "riscattato": False,
+        })
+        anno = dal_iso[:4]
+        slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": (fondo or "")[:40]})
+        slot["reddito"] += retrib
+        slot["contributi"] += contrib
+        result["righe_contributive"] += 1
+
+    def _to_iso(dmy: str) -> str:
+        gg, mm, aa = dmy.split("/")
+        return f"{aa}-{mm}-{gg}"
+
+    # FORMATO 1 - INPS classico con settimane/giorni + retribuzione
+    re_full = re.compile(
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+(.+?)(sett\.?|giorni)\s+(\d+)\s+(\d+)?\s*([\d.,]+)\s+([\d.,]+)?",
+        re.IGNORECASE,
+    )
+    for m in re_full.finditer(testo):
         dal, al, fondo_raw, unita, qty, _utili, retrib, contrib = m.groups()
         try:
             n = int(qty)
-            if unita == "sett.":
-                settimane_tot += n
-                sett_periodo = n
-            else:
+            sett = n if unita.lower().startswith("sett") else n // 7
+            if not unita.lower().startswith("sett"):
                 giorni_tot += n
-                sett_periodo = n // 7
+            fondo = re.sub(r"\s+", " ", (fondo_raw or "")).strip()
+            # taglia "fondo" se contiene numeri (errori di parse)
+            fondo = re.sub(r"\d+", "", fondo).strip() or "Lavoratore dipendente"
             r = _parse_num(retrib)
             c = _parse_num(contrib) if contrib else 0.0
-            if r > 0:
-                retribuzioni.append(r)
+            _add_periodo(_to_iso(dal), _to_iso(al), fondo[:60], sett, r, c)
+        except Exception:
+            continue
 
-            gg_d, mm_d, aa_d = dal.split("/")
-            iso_dal = f"{aa_d}-{mm_d}-{gg_d}"
-            gg_a, mm_a, aa_a = al.split("/")
-            iso_al = f"{aa_a}-{mm_a}-{gg_a}"
+    # FORMATO 2 - SatorCRM / layout senza settimane/retribuzione:
+    # "FONDO  DD/MM/YYYY  DD/MM/YYYY  ..."
+    re_fondo_date = re.compile(
+        r"(?:^|\n)\s*(" + "|".join(fondi_noti) + r")[^\n\d]*?(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4}|\(nessun valore\)|in corso|ancora aperto)",
+        re.IGNORECASE,
+    )
+    today = "2099-12-31"
+    for m in re_fondo_date.finditer(testo):
+        fondo, dal, al = m.groups()
+        try:
+            dal_iso = _to_iso(dal)
+            if al in ("(nessun valore)", "in corso", "ancora aperto"):
+                al_iso = None
+            else:
+                al_iso = _to_iso(al)
+            # stima settimane: 52 se anno completo
+            if al_iso and al_iso[:4] == dal_iso[:4]:
+                sett = 52
+            elif al_iso:
+                from datetime import date
+                d1 = date.fromisoformat(dal_iso)
+                d2 = date.fromisoformat(al_iso)
+                sett = ((d2 - d1).days + 1) // 7
+            else:
+                sett = 52  # periodo aperto, stima
+            _add_periodo(dal_iso, al_iso or today, fondo.title(), sett, 0.0, 0.0)
+        except Exception:
+            continue
 
-            if primo_inizio is None or iso_dal < primo_inizio:
-                primo_inizio = iso_dal
+    # FORMATO 3 - Solo coppie "DD/MM/YYYY DD/MM/YYYY" su righe orfane (fallback)
+    if not result["periodi_contributivi"]:
+        re_only_dates = re.compile(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})")
+        for m in re_only_dates.finditer(testo):
+            dal, al = m.groups()
+            try:
+                _add_periodo(_to_iso(dal), _to_iso(al), "Lavoratore dipendente", 52, 0.0, 0.0)
+            except Exception:
+                continue
 
-            fondo = (fondo_raw or "").strip()
-            # Rimuovi numeri/spazi superflui dal fondo
-            fondo = re.sub(r"\s+", " ", fondo).strip() or "Lavoratore dipendente"
-
-            result["periodi_contributivi"].append({
-                "fondo": fondo[:80],
-                "inizio_periodo": iso_dal,
-                "fine_periodo": iso_al,
-                "settimane": sett_periodo,
-                "retribuzione": round(r, 2),
-                "contributi": round(c, 2),
-                "riscattato": False,
-            })
-
-            # Aggrega per anno
-            anno = aa_d
-            slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": fondo[:40]})
-            slot["reddito"] += r
-            slot["contributi"] += c
-            result["righe_contributive"] += 1
+    # FORMATO 4 - Tabella STORICO REDDITI separata (pattern "ANNO ... importo")
+    # es: "2023  Commerciante  35.000,00"
+    re_redd_anno = re.compile(
+        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+(?:(" + "|".join(fondi_noti) + r")\s+)?([\d.]{3,}(?:[.,]\d{1,2})?)\s+([\d.]{1,}(?:[.,]\d{1,2})?)?",
+        re.IGNORECASE,
+    )
+    for m in re_redd_anno.finditer(testo):
+        anno, cassa, redd_raw, contrib_raw = m.groups()
+        try:
+            r = _parse_num(redd_raw)
+            c = _parse_num(contrib_raw) if contrib_raw else 0.0
+            # filtra valori che non sono redditi (troppo piccoli o troppo grandi)
+            if r < 1000 or r > 500000:
+                continue
+            slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": (cassa or "").title()})
+            # Se già aggregato dai periodi non sovrascrivere
+            if slot["reddito"] == 0:
+                slot["reddito"] = r
+                slot["contributi"] = c
+                if cassa:
+                    slot["cassa"] = cassa.title()
+                if r > 0:
+                    retribuzioni.append(r)
         except Exception:
             continue
 

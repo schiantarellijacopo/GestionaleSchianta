@@ -2989,9 +2989,12 @@ async def upload_estratto_inps(
 @api.delete("/anagrafiche/{aid}/analisi/estratto-inps/{estratto_id}")
 async def delete_estratto_inps(
     aid: str, estratto_id: str,
+    pulisci_storico: bool = False,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Rimuove un estratto INPS dall'archivio (file + entry)."""
+    """Rimuove un estratto INPS dall'archivio (file + entry).
+    Se pulisci_storico=true, azzera anche storico_redditi e periodi_contributivi
+    (utile se erano stati popolati solo da questo estratto)."""
     ac = await _ensure_analisi(aid)
     estratti = ac.get("estratti_conto_inps") or []
     target = next((e for e in estratti if e.get("id") == estratto_id), None)
@@ -3003,13 +3006,53 @@ async def delete_estratto_inps(
     except Exception:
         pass
     new_estratti = [e for e in estratti if e.get("id") != estratto_id]
+    update = {"estratti_conto_inps": new_estratti, "updated_at": _now_iso()}
+    if pulisci_storico:
+        update["storico_redditi"] = []
+        update["periodi_contributivi"] = []
+        # se restano altri estratti, ripopola con quelli più recenti
     await db.analisi_cliente.update_one(
-        {"anagrafica_id": aid},
-        {"$set": {"estratti_conto_inps": new_estratti, "updated_at": _now_iso()}},
+        {"anagrafica_id": aid}, {"$set": update},
     )
     await log_attivita(user, "delete_estratto_inps", "anagrafica", aid,
-                       descrizione=f"Estratto INPS {estratto_id} rimosso")
+                       descrizione=f"Estratto INPS {estratto_id} rimosso (pulisci={pulisci_storico})")
     return {"ok": True, "remaining": len(new_estratti)}
+
+
+@api.post("/anagrafiche/{aid}/analisi/debug-estratto-inps")
+async def debug_estratto_inps(
+    aid: str,
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Endpoint diagnostico: estrae il testo grezzo del PDF e mostra cosa il parser
+    riconosce, SENZA salvare niente. Utile per capire perché un PDF non viene parsato."""
+    contents = await file.read()
+    ct = file.content_type or "application/pdf"
+    text = ""
+    if ct == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
+        try:
+            import pdfplumber
+            with pdfplumber.open(_io.BytesIO(contents)) as pdf:
+                text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+        except Exception as e:
+            return {"errore": f"Impossibile leggere il PDF: {e}", "testo_estratto": ""}
+    else:
+        text = contents.decode("utf-8", errors="ignore")
+
+    parsed = inps_calculator.parse_estratto_conto_inps(text)
+    return {
+        "testo_estratto_lunghezza": len(text),
+        "testo_anteprima": text[:3000],
+        "righe_contributive": parsed.get("righe_contributive", 0),
+        "settimane_contributive": parsed.get("settimane_contributive", 0),
+        "periodi_count": len(parsed.get("periodi_contributivi") or []),
+        "storico_count": len(parsed.get("storico_redditi") or []),
+        "periodi_sample": (parsed.get("periodi_contributivi") or [])[:5],
+        "storico_sample": (parsed.get("storico_redditi") or [])[:10],
+        "totale_versato": parsed.get("totale_versato", 0),
+        "totale_retribuzioni": parsed.get("totale_retribuzioni", 0),
+    }
 
 
 
