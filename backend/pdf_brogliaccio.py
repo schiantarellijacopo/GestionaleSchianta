@@ -108,14 +108,13 @@ def stampa_brogliaccio(
     story.append(Spacer(1, 4 * mm))
 
     # === Tabella dettaglio ===
-    headers_fissi = ["Contraente / Polizza / Compagnia", "Totale", "Provv", "Saldo", "Crediti", "Spese", "Sconti", "Rimesse"]
+    headers_fissi = ["Contraente / Polizza / Compagnia", "Totale", "Provv", "Saldo", "Crediti", "Spese"]
     conti_names = [c["nome"] for c in conti_cassa]
     headers = headers_fissi + conti_names
 
     data_rows = [headers]
     for r in righe:
         per_conto = r.get("per_conto") or {}
-        # Descrizione = nome contraente in grassetto + (polizza + compagnia) sotto in piccolo
         contr = r.get("contraente") or r.get("descrizione") or "—"
         sotto_parts = []
         if r.get("numero_polizza"):
@@ -133,8 +132,6 @@ def stampa_brogliaccio(
             _eur(r.get("saldo", 0)),
             _eur(r.get("crediti", 0)),
             _eur(r.get("spese", 0)),
-            _eur(r.get("sconti", 0)),
-            _eur(r.get("rimesse", 0)),
         ]
         for c in conti_cassa:
             row.append(_eur(per_conto.get(c["id"], 0)))
@@ -150,8 +147,6 @@ def stampa_brogliaccio(
         _eur_zero(tg.get("saldo", 0)),
         _eur_zero(tg.get("crediti", 0)),
         _eur_zero(tg.get("spese", 0)),
-        _eur_zero(tg.get("sconti", 0)),
-        _eur_zero(tg.get("rimesse", 0)),
     ]
     for c in conti_cassa:
         tot_row.append(_eur_zero(tg_per_conto.get(c["id"], 0)))
@@ -159,10 +154,10 @@ def stampa_brogliaccio(
 
     # larghezze
     page_w = landscape(A4)[0] - 16 * mm
-    fixed_w = 16 * mm * 7  # totale+provv+saldo+crediti+spese+sconti+rimesse
-    conti_w = max(14 * mm, (page_w - fixed_w - 70 * mm) / max(1, len(conti_names)))
+    fixed_w = 18 * mm * 5  # totale+provv+saldo+crediti+spese
+    conti_w = max(15 * mm, (page_w - fixed_w - 70 * mm) / max(1, len(conti_names)))
     descr_w = page_w - fixed_w - conti_w * len(conti_names)
-    col_widths = [descr_w] + [16 * mm] * 7 + [conti_w] * len(conti_names)
+    col_widths = [descr_w] + [18 * mm] * 5 + [conti_w] * len(conti_names)
 
     tbl = Table(data_rows, colWidths=col_widths, repeatRows=1)
     style = TableStyle([

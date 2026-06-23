@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 4 - Brogliaccio Prima Nota adjustments verified end-to-end. Backend: 4/4 pytest cases PASSED (conti_cassa filter/rename, saldo for trattiene=true vs trattiene=false, PDF stampa). Frontend: visual verification on /contabilita confirmed (1) NO 'Sconti'/'Rimesse' columns in table header (13 headers: Contraente/Polizza/Compagnia + Totale + Provv + Saldo + Crediti + Spese + 6 conti cassa + actions); (2) row subtitle shows only 'N. <polizza> · <compagnia>' with NO mezzo_pagamento '- contanti'/'- bonifico' text; (3) Conti cassa columns = Cassa Contanti, Assegni, BPER Sondrio, Intesa Sanpaolo, Credit Agricole, Pagamento Direzione (no PayPal/Online, no RID Direzione); (4) Riepilogo Conti table lists the same 6 conti including 'Pagamento Direzione'. New saldo logic verified via API: created 2 compagnie (trattiene=true / trattiene=false) + 2 polizze + 2 movimenti incasso_premio (100€ premio, 10€ provv) on 2025-12-30 -> riga.saldo = 90 (trattiene=true) and riga.saldo = -10 (trattiene=false). totali_giornata still contains sconti/rimesse fields (used by KPI cards).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter4_brogliaccio_columns.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py seed_admin (lines 6402-6412) still seeds the legacy 'RID Direzione' and 'PayPal / Online' names. The DB has been manually migrated, but on a fresh install (empty conti_cassa) those legacy entries will be re-created. Suggest: (a) update seed list to use 'Pagamento Direzione' and remove 'PayPal / Online' (or seed it with attivo=false), AND (b) add an idempotent migration that renames 'RID Direzione' -> 'Pagamento Direzione' and sets PayPal attivo=false on every startup, so the change is reproducible across environments.",
+    "_compute_brogliaccio (server.py 2721-2735): the new saldo logic only differentiates 'incasso_premio'. If a similar payment-direct flow exists for 'rinnovo' or other entrate categories with trattiene=false, the saldo will still default to importo. Verify all entrata categorie that imply premio versato direttamente (e.g. categoria sospeso/storno) are handled.",
+    "BrogliaccioTab.jsx (line 200): subtitle uses `· {compagnia}` but no fallback if compagnia is null and numero_polizza is also null - already handled with descrizione fallback at line 201. OK.",
+    "Saldi compagnie panel still labelled 'Rimesse pagate' even when no compagnia has trattiene=false - just cosmetic, panel hides if empty (line 285)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter4_brogliaccio_columns.py (new)"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% (all critical UI checks verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! (cookie + Bearer)",
+  "seed_data_creation": "Created and cleaned up on 2025-12-30: 1 anagrafica (TEST Iter4 Cliente A), 2 compagnie (TEST Iter4 Comp TRAT T / NOTRAT N), 2 polizze (TST-IT4-T-* and TST-IT4-N-*), 2 movimenti incasso_premio. All deleted by class-scoped teardown fixture.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter4 changes fully covered by /app/backend/tests/test_iter4_brogliaccio_columns.py. Previous iter3 regression suite still passes. To re-validate: pytest /app/backend/tests/test_iter4_brogliaccio_columns.py and /app/backend/tests/test_iter3_brogliaccio.py. Frontend visually verified on https://assure-platform-3.preview.emergentagent.com/contabilita - if conti_cassa columns regress, check DB state (db.conti_cassa) since seed_admin won't re-rename existing items.",
+  "rca of the issue": "No bugs found. New saldo logic produces -provv correctly for trattiene=false compagnie. Mongo migration applied externally (rename RID->Pagamento Direzione, PayPal attivo=false) is reflected by GET /api/contabilita/brogliaccio. Suggest moving migration into server.py startup to make it idempotent."
+}

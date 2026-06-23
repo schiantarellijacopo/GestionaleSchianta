@@ -2724,7 +2724,15 @@ async def _compute_brogliaccio(data_giorno: str):
             trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
             c_totale = importo
             c_provv = provv_riga
-            c_saldo = (importo - provv_riga) if trattiene else importo
+            if trattiene:
+                # Caso A: incasso il premio, devo versare (premio - provv) alla compagnia
+                # → saldo = premio - provv (positivo = debito verso compagnia)
+                c_saldo = importo - provv_riga
+            else:
+                # Caso B: pagamento Direzione/RID. Il cliente ha pagato direttamente
+                # alla compagnia. La compagnia ha già il premio. Devo solo registrare la
+                # provvigione che mi spetta → saldo = -provv (negativo = compagnia mi deve)
+                c_saldo = -provv_riga
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo

@@ -171,7 +171,7 @@ export default function BrogliaccioTab() {
                         Nessun movimento registrato per il {data}
                     </div>
                 ) : (
-                    <table className="tbl w-full text-xs min-w-[1400px]" data-testid="brogliaccio-tbl">
+                    <table className="tbl w-full text-xs min-w-[1200px]" data-testid="brogliaccio-tbl">
                         <thead>
                             <tr className="bg-slate-900 text-white">
                                 <th className="text-left px-2 py-2">Contraente / Polizza / Compagnia</th>
@@ -180,8 +180,6 @@ export default function BrogliaccioTab() {
                                 <th className="text-right px-2 py-2">Saldo</th>
                                 <th className="text-right px-2 py-2">Crediti</th>
                                 <th className="text-right px-2 py-2">Spese</th>
-                                <th className="text-right px-2 py-2">Sconti</th>
-                                <th className="text-right px-2 py-2">Rimesse</th>
                                 {conti.map((c) => (
                                     <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap" title={c.nome}>
                                         {c.nome}
@@ -201,16 +199,13 @@ export default function BrogliaccioTab() {
                                             {r.numero_polizza && <span className="num">N. {r.numero_polizza}</span>}
                                             {r.compagnia && <span>· {r.compagnia}</span>}
                                             {!r.numero_polizza && !r.compagnia && r.contraente && r.descrizione && <span>{r.descrizione}</span>}
-                                            {r.mezzo_pagamento && <span>· {r.mezzo_pagamento}</span>}
                                         </div>
                                     </td>
                                     <td className={`num text-right px-2 ${r.totale >= 0 ? "text-emerald-700" : "text-rose-700"} font-medium`}>{fmt(r.totale)}</td>
                                     <td className="num text-right px-2 text-sky-700">{fmt(r.provv)}</td>
-                                    <td className="num text-right px-2 font-medium">{fmt(r.saldo)}</td>
+                                    <td className={`num text-right px-2 font-medium ${r.saldo < 0 ? "text-rose-700" : ""}`}>{fmt(r.saldo)}</td>
                                     <td className={`num text-right px-2 ${r.crediti > 0 ? "text-amber-700" : r.crediti < 0 ? "text-emerald-700" : ""}`}>{fmt(r.crediti)}</td>
                                     <td className="num text-right px-2 text-rose-600">{fmt(r.spese)}</td>
-                                    <td className="num text-right px-2 text-orange-600">{fmt(r.sconti)}</td>
-                                    <td className="num text-right px-2 text-violet-700">{fmt(r.rimesse)}</td>
                                     {conti.map((c) => {
                                         const v = r.per_conto?.[c.id];
                                         return (
@@ -240,8 +235,6 @@ export default function BrogliaccioTab() {
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.saldo, true)}</td>
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.crediti, true)}</td>
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.spese, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.sconti, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.rimesse, true)}</td>
                                     {conti.map((c) => (
                                         <td key={c.id} className="num text-right px-2">
                                             {fmt(b.totali_giornata.per_conto?.[c.id], true)}
