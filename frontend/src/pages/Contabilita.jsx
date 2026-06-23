@@ -12,6 +12,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Calendar } from "lucide-react";
 import { toast } from "sonner";
+import AllegatiCell from "@/components/AllegatiCell";
 
 export default function Contabilita() {
     const [dal, setDal] = useState("");
@@ -99,6 +100,7 @@ export default function Contabilita() {
                                         <th>Documento</th>
                                         <th className="text-right">Entrata</th>
                                         <th className="text-right">Uscita</th>
+                                        <th className="w-12 text-center">Allegati</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -119,6 +121,15 @@ export default function Contabilita() {
                                             </td>
                                             <td className="num text-right text-rose-700 font-medium">
                                                 {m.tipo === "uscita" ? fmtEur(m.importo) : ""}
+                                            </td>
+                                            <td className="text-center">
+                                                <AllegatiCell
+                                                    entita_tipo="movimento"
+                                                    entita_id={m.id}
+                                                    count={m.allegati_count}
+                                                    hint={m.tipo === "entrata" ? "Allega ricevuta / assegno" : "Allega fattura / busta paga"}
+                                                    onChange={load}
+                                                />
                                             </td>
                                         </tr>
                                     ))}

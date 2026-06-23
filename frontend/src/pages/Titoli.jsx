@@ -11,6 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
+import AllegatiCell from "@/components/AllegatiCell";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
     ChevronDown, ChevronUp,
@@ -265,6 +266,7 @@ export default function Titoli() {
                                 <th>Copertura</th>
                                 <th>Stato</th>
                                 <th className="text-right">Da pagare</th>
+                                <th className="w-12 text-center">Allegati</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -300,6 +302,15 @@ export default function Titoli() {
                                         <td><StatusBadge stato={t.stato} /></td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
+                                        </td>
+                                        <td className="text-center">
+                                            <AllegatiCell
+                                                entita_tipo="titolo"
+                                                entita_id={t.id}
+                                                count={t.allegati_count}
+                                                hint={t.data_incasso ? "Allega ricevuta bonifico / assegno" : "Allega documento"}
+                                                onChange={load}
+                                            />
                                         </td>
                                         <td className="text-right">
                                             <RowActions

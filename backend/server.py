@@ -1864,6 +1864,16 @@ async def list_titoli(
         t["compagnia_nome"] = coms.get(p.get("compagnia_id", ""), {}).get("ragione_sociale")
         t["collaboratore_id"] = p.get("collaboratore_id")
         t["collaboratore_nome"] = collabs.get(p.get("collaboratore_id", ""), {}).get("name")
+    # arricchimento count allegati
+    tids = [t["id"] for t in items]
+    if tids:
+        pipeline = [
+            {"$match": {"entita_tipo": "titolo", "entita_id": {"$in": tids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]
+        counts = {r["_id"]: r["n"] async for r in db.allegati.aggregate(pipeline)}
+        for t in items:
+            t["allegati_count"] = counts.get(t["id"], 0)
     return items
 
 
@@ -2506,6 +2516,16 @@ async def list_movimenti(
             cond["$lte"] = al
         flt["data_movimento"] = cond
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", -1).to_list(limit)
+    # arricchimento count allegati
+    ids = [m["id"] for m in items]
+    if ids:
+        pipeline = [
+            {"$match": {"entita_tipo": "movimento", "entita_id": {"$in": ids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]
+        counts = {r["_id"]: r["n"] async for r in db.allegati.aggregate(pipeline)}
+        for m in items:
+            m["allegati_count"] = counts.get(m["id"], 0)
     return items
 
 
@@ -2566,6 +2586,16 @@ async def prima_nota(
             cond["$lte"] = al
         flt["data_movimento"] = cond
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(2000)
+    # arricchimento count allegati
+    ids = [m["id"] for m in items]
+    if ids:
+        pipeline = [
+            {"$match": {"entita_tipo": "movimento", "entita_id": {"$in": ids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]
+        counts = {r["_id"]: r["n"] async for r in db.allegati.aggregate(pipeline)}
+        for m in items:
+            m["allegati_count"] = counts.get(m["id"], 0)
     totale_entrate = sum(m["importo"] for m in items if m["tipo"] == "entrata")
     totale_uscite = sum(m["importo"] for m in items if m["tipo"] == "uscita")
     return {
@@ -4998,7 +5028,7 @@ async def upload_allegato(
     file: UploadFile = File(...),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento"):
+    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo"):
         raise HTTPException(400, "Tipo entità non valido")
     data = await file.read()
     if len(data) > 25 * 1024 * 1024:

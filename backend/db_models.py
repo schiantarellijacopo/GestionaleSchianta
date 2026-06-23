@@ -451,7 +451,7 @@ class RamoLibreria(BaseDoc):
 # =============== ALLEGATI / DOCUMENTI ===============
 class Allegato(BaseDoc):
     """Allegato collegato a una entità (anagrafica/polizza/sinistro/cliente/corso)."""
-    entita_tipo: Literal["anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento"]
+    entita_tipo: Literal["anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo"]
     entita_id: str
     nome_file: str
     storage_path: str
