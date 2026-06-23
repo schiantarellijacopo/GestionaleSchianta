@@ -157,6 +157,7 @@ export default function Anagrafiche() {
                                                 {a.ragione_sociale}
                                             </Link>
                                             {a.tipo === "persona_giuridica" && <span className="ml-1 text-[9px] text-slate-400">PG</span>}
+                                            <ComplianceBadges ana={a} />
                                         </td>
                                         <td className="num font-mono text-xs">{a.codice_fiscale || a.partita_iva || "-"}</td>
                                         <td className="num text-center">
@@ -633,3 +634,37 @@ function NuovaAnagraficaDialog({ onClose }) {
         </DialogContent>
     );
 }
+
+// === Badge compliance: Privacy firmata + Documento di riconoscimento ===
+function ComplianceBadges({ ana }) {
+    const docs = ana?.documenti || {};
+    const hasPrivacy = !!(ana?.privacy_firmata_url || docs.privacy_firmata?.url || ana?.consenso_privacy);
+    const hasDocId = !!(
+        docs.carta_identita?.url || docs.carta_identita ||
+        docs.patente?.url || docs.patente ||
+        docs.passaporto?.url || docs.passaporto
+    );
+    return (
+        <span className="inline-flex gap-1 ml-2 align-middle">
+            <span
+                title={hasPrivacy ? "✓ Privacy firmata" : "⚠ Privacy NON firmata"}
+                className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold cursor-help ${
+                    hasPrivacy ? "bg-emerald-100 text-emerald-700 border border-emerald-300" : "bg-amber-100 text-amber-700 border border-amber-300"
+                }`}
+                data-testid={`badge-privacy-${ana.id}`}
+            >
+                P
+            </span>
+            <span
+                title={hasDocId ? "✓ Documento di riconoscimento presente (CI/Patente/Passaporto)" : "⚠ Documento di riconoscimento MANCANTE (CI/Patente/Passaporto)"}
+                className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold cursor-help ${
+                    hasDocId ? "bg-emerald-100 text-emerald-700 border border-emerald-300" : "bg-amber-100 text-amber-700 border border-amber-300"
+                }`}
+                data-testid={`badge-docid-${ana.id}`}
+            >
+                D
+            </span>
+        </span>
+    );
+}
+

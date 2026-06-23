@@ -2980,7 +2980,10 @@ async def upload_estratto_inps(
             existing_periodi[key] = nuovo
         update["periodi_contributivi"] = list(existing_periodi.values())
 
-    if parsed.get("storico_redditi"):
+    if parsed.get("reddito_annuo_lordo"):
+        # Reddito annualizzato (ultimo anno × 12/mesi se parziale)
+        update["reddito_lordo_annuo"] = parsed["reddito_annuo_lordo"]
+    elif parsed.get("storico_redditi"):
         ultimo = sorted(parsed["storico_redditi"], key=lambda x: x["anno"], reverse=True)[0]
         if ultimo.get("reddito"):
             update["reddito_lordo_annuo"] = ultimo["reddito"]
@@ -2993,8 +2996,10 @@ async def upload_estratto_inps(
         "retribuzione_media_annua": parsed.get("retribuzione_media_annua"),
         "updated_at": _now_iso(),
     }
-    # Aggiorna reddito_annuo_lordo dell'anagrafica con l'ultimo anno disponibile
-    if parsed.get("storico_redditi"):
+    # Reddito annuo lordo dell'anagrafica = ultimo anno annualizzato a 12 mesi
+    if parsed.get("reddito_annuo_lordo"):
+        ana_upd["reddito_annuo_lordo"] = parsed["reddito_annuo_lordo"]
+    elif parsed.get("storico_redditi"):
         ultimo = sorted(parsed["storico_redditi"], key=lambda x: x["anno"], reverse=True)[0]
         if ultimo.get("reddito"):
             ana_upd["reddito_annuo_lordo"] = ultimo["reddito"]

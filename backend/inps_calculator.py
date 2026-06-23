@@ -287,9 +287,10 @@ def parse_estratto_conto_inps(testo: str) -> dict:
             "riscattato": False,
         })
         anno = dal_iso[:4]
-        slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": (fondo or "")[:40]})
+        slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "settimane": 0, "cassa": (fondo or "")[:40]})
         slot["reddito"] += retrib
         slot["contributi"] += contrib
+        slot["settimane"] += sett
         result["righe_contributive"] += 1
 
     def _to_iso(dmy: str) -> str:
@@ -433,9 +434,23 @@ def parse_estratto_conto_inps(testo: str) -> dict:
             "anno": int(anno),
             "reddito": round(dati["reddito"], 2),
             "contributi": round(dati["contributi"], 2),
+            "settimane": dati.get("settimane", 52),
             "cassa": dati["cassa"],
         })
     result["storico_redditi"] = storico
+
+    # === Reddito annuo lordo: ULTIMO anno disponibile annualizzato a 12 mesi ===
+    # (es. anno parziale 26 settimane → reddito × 52/26 = annualizzato)
+    if storico:
+        ultimo = storico[0]
+        sett = ultimo.get("settimane") or 52
+        if sett > 0 and sett < 52:
+            result["reddito_annuo_lordo"] = round(ultimo["reddito"] * 52 / sett, 2)
+            result["reddito_annuo_lordo_annualizzato"] = True
+        else:
+            result["reddito_annuo_lordo"] = ultimo["reddito"]
+            result["reddito_annuo_lordo_annualizzato"] = False
+        result["ultimo_anno_riferimento"] = ultimo["anno"]
 
     # === Totali ===
     result["totale_retribuzioni"] = round(sum(retribuzioni), 2)
