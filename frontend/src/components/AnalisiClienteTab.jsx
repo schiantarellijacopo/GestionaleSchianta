@@ -127,7 +127,7 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                     <ApprofondimentoRedditi anagrafica_id={anagrafica_id} dirty={dirty} />
                 </TabsContent>
                 <TabsContent value="pensione">
-                    <PensioneInpsTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} ana={ana} onReload={onReload} dirty={dirty} />
+                    <PensioneInpsTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} ana={ana} onReload={onReload} reloadAc={load} dirty={dirty} />
                 </TabsContent>
                 <TabsContent value="scoperture">
                     <ScoperturePensione anagrafica_id={anagrafica_id} dirty={dirty} />
@@ -510,7 +510,7 @@ function ApprofondimentoRedditi({ anagrafica_id, dirty }) {
 }
 
 // ============== SEZIONE 5: PENSIONE INPS (storico + oggi + domani) ==============
-function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, dirty }) {
+function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, reloadAc, dirty }) {
     const [pens, setPens] = useState(null);
     const [loading, setLoading] = useState(false);
 
@@ -547,7 +547,7 @@ function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, dirty
             )}
 
             {/* Archivio estratti INPS */}
-            <ArchivioEstrattiInps anagrafica_id={anagrafica_id} ac={ac} canEdit={canEdit} onUpdate={() => { onReload?.(); calcola(); }} />
+            <ArchivioEstrattiInps anagrafica_id={anagrafica_id} ac={ac} canEdit={canEdit} onUpdate={async () => { await reloadAc?.(); onReload?.(); calcola(); }} />
 
             {/* Carriera contributiva (periodi) */}
             <Card className="p-5 border-slate-200">
