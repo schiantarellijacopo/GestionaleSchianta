@@ -214,15 +214,25 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
         importo: 0,
         descrizione: "",
         anagrafica_id: "",
-        mezzo_pagamento: "bonifico",
+        conto_cassa_id: "",
         numero_documento: "",
     });
+    const [conti, setConti] = useState([]);
+    useEffect(() => {
+        api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
+    }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const save = async () => {
         if (!f.descrizione || !f.importo) { toast.error("Compila descrizione e importo"); return; }
+        if (!f.conto_cassa_id) { toast.error("Seleziona il metodo di pagamento (Conto / Banca)"); return; }
         try {
-            const payload = { ...f, importo: parseFloat(f.importo) || 0 };
+            const conto = conti.find((c) => c.id === f.conto_cassa_id);
+            const payload = {
+                ...f,
+                importo: parseFloat(f.importo) || 0,
+                mezzo_pagamento: conto?.nome || "",  // mantiene compatibilità campo legacy
+            };
             if (!payload.anagrafica_id) delete payload.anagrafica_id;
             await api.post("/contabilita/movimenti", payload);
             toast.success("Movimento registrato"); onClose();
@@ -250,11 +260,12 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="incasso_premio">Incasso premio</SelectItem>
-                            <SelectItem value="pagamento_compagnia">Pagamento compagnia</SelectItem>
+                            <SelectItem value="pagamento_compagnia">Pagamento compagnia (rimessa E/C)</SelectItem>
                             <SelectItem value="provvigioni">Provvigioni</SelectItem>
                             <SelectItem value="rimborso_cliente">Rimborso cliente</SelectItem>
+                            <SelectItem value="sconto_cliente">Sconto cliente</SelectItem>
                             <SelectItem value="spese_amministrative">Spese amministrative</SelectItem>
-                            <SelectItem value="anticipo">Anticipo</SelectItem>
+                            <SelectItem value="anticipo">Anticipo / Sospeso</SelectItem>
                             <SelectItem value="altro">Altro</SelectItem>
                         </SelectContent>
                     </Select>
@@ -270,8 +281,16 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div><Label>Mezzo pagamento</Label><Input value={f.mezzo_pagamento} onChange={(e) => set("mezzo_pagamento", e.target.value)} /></div>
-                <div><Label>N. documento</Label><Input value={f.numero_documento} onChange={(e) => set("numero_documento", e.target.value)} /></div>
+                <div>
+                    <Label>Conto / Banca (Metodo di pagamento) *</Label>
+                    <Select value={f.conto_cassa_id} onValueChange={(v) => set("conto_cassa_id", v)}>
+                        <SelectTrigger data-testid="mov-conto-select"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                        <SelectContent>
+                            {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="col-span-2"><Label>N. documento</Label><Input value={f.numero_documento} onChange={(e) => set("numero_documento", e.target.value)} /></div>
             </div>
             <DialogFooter>
                 <Button data-testid="mov-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">Registra</Button>

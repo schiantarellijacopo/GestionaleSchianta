@@ -108,7 +108,7 @@ def stampa_brogliaccio(
     story.append(Spacer(1, 4 * mm))
 
     # === Tabella dettaglio ===
-    headers_fissi = ["Contraente / Polizza / Compagnia", "Totale", "Provv", "Saldo", "Crediti", "Spese"]
+    headers_fissi = ["Descrizione", "Totale", "Provv", "Saldo", "Crediti", "Spese"]
     conti_names = [c["nome"] for c in conti_cassa]
     headers = headers_fissi + conti_names
 

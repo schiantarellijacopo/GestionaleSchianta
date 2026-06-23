@@ -17,7 +17,7 @@ import { toast } from "sonner";
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "banche", label: "Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
-    { key: "conti-cassa", label: "Conti cassa / Canali", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
+    { key: "conti-cassa", label: "Metodo di Pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },

@@ -174,7 +174,7 @@ export default function BrogliaccioTab() {
                     <table className="tbl w-full text-xs min-w-[1200px]" data-testid="brogliaccio-tbl">
                         <thead>
                             <tr className="bg-slate-900 text-white">
-                                <th className="text-left px-2 py-2">Contraente / Polizza / Compagnia</th>
+                                <th className="text-left px-2 py-2">Descrizione</th>
                                 <th className="text-right px-2 py-2">Totale</th>
                                 <th className="text-right px-2 py-2">Provv</th>
                                 <th className="text-right px-2 py-2">Saldo</th>
@@ -320,17 +320,6 @@ export default function BrogliaccioTab() {
                     </table>
                 </Card>
             )}
-
-            {/* KPI bottom */}
-            <div className="grid grid-cols-7 gap-2" data-testid="brog-kpi">
-                <KPI label="Entrate" v={b.riepilogo_kpi?.entrate} accent="emerald" />
-                <KPI label="Provvigioni" v={b.riepilogo_kpi?.provvigioni} accent="sky" />
-                <KPI label="Crediti" v={b.riepilogo_kpi?.crediti} accent="amber" />
-                <KPI label="Rimesse" v={b.riepilogo_kpi?.rimesse} accent="violet" />
-                <KPI label="Sconti" v={b.riepilogo_kpi?.sconti} accent="orange" />
-                <KPI label="Spese" v={b.riepilogo_kpi?.spese} accent="rose" />
-                <KPI label="Saldo Cassa" v={b.riepilogo_kpi?.saldo_cassa} accent="slate" bold />
-            </div>
 
             {/* Dialog chiudi giornata */}
             <Dialog open={chiudiOpen} onOpenChange={setChiudiOpen}>

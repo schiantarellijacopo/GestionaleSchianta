@@ -6406,10 +6406,17 @@ async def startup():
             {"nome": "BPER Sondrio", "tipo": "banca", "ordine": 3},
             {"nome": "Intesa Sanpaolo", "tipo": "banca", "ordine": 4},
             {"nome": "Credit Agricole", "tipo": "banca", "ordine": 5},
-            {"nome": "RID Direzione", "tipo": "rid", "ordine": 6},
-            {"nome": "PayPal / Online", "tipo": "online", "ordine": 7},
+            {"nome": "Pagamento Direzione", "tipo": "rid", "ordine": 6},
         ]):
             await db.conti_cassa.insert_one(ContoCassa(**c).model_dump())
+
+    # migrazione idempotente conti cassa: rinomina legacy + disattiva PayPal
+    await db.conti_cassa.update_one(
+        {"nome": "RID Direzione"}, {"$set": {"nome": "Pagamento Direzione"}},
+    )
+    await db.conti_cassa.update_one(
+        {"nome": "PayPal / Online"}, {"$set": {"attivo": False}},
+    )
 
     if await db.rami.count_documents({}) == 0:
         for r in [
