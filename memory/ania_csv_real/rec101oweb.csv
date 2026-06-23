@@ -1,0 +1,11 @@
+tp_record_share;id_anagrafica_exp;compagnia_exp;compagnia_ania;codice_agenzia;codice_produttore;nodo;data_inizio;data_fine;descrizione_collaboratore;cod_rui;codice_fiscale;piva;codice_produttore_inviante;codice_produttore_ricevente;codice_agenzia_inviante;codice_agenzia_ricevente;timestamp_record
+101;97013776;;;;er;;;23/11/2023;ERR;;;;OWEB-23774-er;;;;
+101;97013782;;;;021;;;;Produttore - 021 - FILIALE CHIURO;E000640554;SCHNDR00T14I829N;;OWEB-23774-021;;;;
+101;97013783;;;;022;;;;Produttore - 022 - SALVADORI ADOLFO;E000134471;SLVDLF71M10F712H;;OWEB-23774-022;;;;
+101;97013784;;;;024;;;;Produttore - 024 - BS BROKER SAS;B000377907;;;OWEB-23774-024;;;;
+101;97013786;;;;036;;;;Produttore - 036 - POZZI  PAOLO;;;;OWEB-23774-036;;;;
+101;97013787;;;;077;;;;Produttore - 077 - PRUNERI  MAURIZIO;E000046621;PRNMRZ61M21E200B;00590050142;OWEB-23774-077;;;;
+101;97013789;;;;035;;;;Produttore - 035 - MARCHESI  DANIELE;E000642716;MRCDNL92A13L175H;01043870144;OWEB-23774-035;;;;
+101;97013790;;;;076;;;;Produttore - 076 - MOIOLA  MARCO;E000188083;MLOMRC84M25F712Q;00790120141;OWEB-23774-076;;;;
+101;97013791;;;;215;;;;Produttore - 215 - SONDRIO ALPI;;;;OWEB-23774-215;;;;
+101;97013792;;;;079;;;;Produttore - 079 - BUZZETTI  GIANGIACOMO;E000134470;BZZGGC76P23C623C;00850160144;OWEB-23774-079;;;;

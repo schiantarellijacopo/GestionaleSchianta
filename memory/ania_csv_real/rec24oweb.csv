@@ -1,0 +1,9 @@
+tp_record_share;id_polizza_exp;id_polizza_invio;id_polizza_inviante;id_polizza_ricevente;compagnia_ania;compagnia_exp;agenzia;numero_polizza_cmp;progressivo;codice_isin;codice_fondo;descrizione_fondo;categoria_fondo;sottocategoria_fondo;controvalore;numero_quote;valore_nav;data_ultimo_nav;valuta_share;libro_matricola;numero_applicazione_lm;timestamp_record
+24;288738544;288738544;OWEB-23774-288738544;;;GEN;;32096870;;;GRISPEVI;CATTOLICA RI.SPE.VI;;;;;2,41;01/06/2026;;N;;
+24;269785701;269785701;OWEB-23774-269785701;;;GEN;;83806000;;;GEOPR;Generali Obiettivo Protezione;;;;;5,088;12/06/2026;;N;;
+24;269785701;269785701;OWEB-23774-269785701;;;GEN;;83806000;;;GECSO;Generali Azione Sostenibile;;;;;6,625;12/06/2026;;N;;
+24;269785701;269785701;OWEB-23774-269785701;;;GEN;;83806000;;;GESSO;Generali Scelta Sostenibile;;;;;5,604;12/06/2026;;N;;
+24;269785701;269785701;OWEB-23774-269785701;;;GEN;;83806000;;;G.GLOBAL;GESAV GLOBAL;;;;;3,18;01/06/2026;;N;;
+24;269718413;269718413;OWEB-23774-269718413;;;GEN;;83806081;;;G.GLOBAL;GESAV GLOBAL;;;;;3,18;01/06/2026;;N;;
+24;269718413;269718413;OWEB-23774-269718413;;;GEN;;83806081;;;GECSO;Generali Azione Sostenibile;;;;;6,625;12/06/2026;;N;;
+24;269718414;269718414;OWEB-23774-269718414;;;GEN;;83816820;;;GESAV;GESAV;;;;;3,15;01/06/2026;;N;;

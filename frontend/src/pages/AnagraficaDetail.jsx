@@ -30,6 +30,7 @@ export default function AnagraficaDetail() {
     const { user } = useAuth();
     const [ana, setAna] = useState(null);
     const [polizze, setPolizze] = useState([]);
+    const [privacyOpenHdr, setPrivacyOpenHdr] = useState(false);
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
 
     const load = async () => {
@@ -43,16 +44,62 @@ export default function AnagraficaDetail() {
 
     if (!ana) return <Loading />;
 
+    // Stato compliance: privacy & documento riconoscimento
+    const computePrivacyStato = () => {
+        if (!ana) return "rosso";
+        if (ana.privacy_firmata_url || ana.documenti?.privacy_firmata?.url) return "verde";
+        if (ana.consenso_privacy || ana.consenso_dati_particolari || ana.consenso_commerciale) return "giallo";
+        return "rosso";
+    };
+    const computeDocIdStato = () => {
+        const d = ana?.documenti || {};
+        const has = d.carta_identita?.url || d.carta_identita ||
+                    d.patente?.url || d.patente ||
+                    d.passaporto?.url || d.passaporto;
+        return has ? "verde" : "rosso";
+    };
+    const statoPrivacy = computePrivacyStato();
+    const statoDocId = computeDocIdStato();
+    const dotColor = (s) => s === "verde" ? "bg-emerald-500" : s === "giallo" ? "bg-amber-400" : "bg-rose-500";
+    const dotLabelPrivacy = {
+        verde: "Privacy firmata ✓",
+        giallo: "Consenso dato, PDF non firmato",
+        rosso: "Nessun consenso privacy",
+    }[statoPrivacy];
+    const dotLabelDoc = statoDocId === "verde"
+        ? "Documento di riconoscimento presente"
+        : "Documento di riconoscimento MANCANTE";
+
     return (
         <div data-testid="anagrafica-detail-page">
             <Link to="/anagrafiche" className="text-sm text-slate-500 hover:text-sky-700 inline-flex items-center gap-1 mb-3">
                 <ArrowLeft size={14} /> Torna alle anagrafiche
             </Link>
             <PageHeader
-                title={ana.ragione_sociale}
+                title={
+                    <span className="flex items-center gap-3 flex-wrap">
+                        {ana.ragione_sociale}
+                        <span className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-full" title={dotLabelPrivacy}>
+                            <span className={`w-2.5 h-2.5 rounded-full ${dotColor(statoPrivacy)}`} data-testid="dot-privacy" />
+                            <span className="text-slate-600">Privacy</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 px-2 py-1 rounded-full" title={dotLabelDoc}>
+                            <span className={`w-2.5 h-2.5 rounded-full ${dotColor(statoDocId)}`} data-testid="dot-docid" />
+                            <span className="text-slate-600">Doc. Riconoscimento</span>
+                        </span>
+                    </span>
+                }
                 subtitle={`${ana.tipo === "persona_giuridica" ? "Persona giuridica" : "Persona fisica"} · ${ana.codice_fiscale || ana.partita_iva || "—"}`}
                 actions={
                     <div className="flex gap-2">
+                        <Button
+                            size="sm" variant="outline"
+                            onClick={() => setPrivacyOpenHdr(true)}
+                            className="border-sky-300 text-sky-700 hover:bg-sky-50"
+                            data-testid="hdr-privacy-btn"
+                        >
+                            <FileText size={13} className="mr-1" /> Privacy & Consensi
+                        </Button>
                         <PrintButton
                             onClick={() => openPdf(`/stampa/estratto-conto/${id}`)}
                             label="Estratto conto"
@@ -87,6 +134,15 @@ export default function AnagraficaDetail() {
                 <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
             </Tabs>
+
+            <PrivacyConsensiDialog
+                open={privacyOpenHdr}
+                onOpenChange={setPrivacyOpenHdr}
+                anagrafica_id={id}
+                ana={ana}
+                canEdit={canEdit}
+                onReload={load}
+            />
         </div>
     );
 }
