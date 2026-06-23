@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
+import BrogliaccioTab from "@/components/BrogliaccioTab";
 
 export default function Contabilita() {
     const [dal, setDal] = useState("");
@@ -55,11 +56,16 @@ export default function Contabilita() {
                 }
             />
 
-            <Tabs defaultValue="prima-nota">
+            <Tabs defaultValue="brogliaccio">
                 <TabsList className="bg-slate-100">
-                    <TabsTrigger value="prima-nota" data-testid="tab-prima-nota">Prima nota</TabsTrigger>
+                    <TabsTrigger value="brogliaccio" data-testid="tab-brogliaccio">Brogliaccio (Prima nota)</TabsTrigger>
+                    <TabsTrigger value="prima-nota" data-testid="tab-prima-nota">Movimenti (elenco)</TabsTrigger>
                     <TabsTrigger value="estratti" data-testid="tab-estratti">Estratto conto cliente</TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="brogliaccio">
+                    <BrogliaccioTab />
+                </TabsContent>
 
                 <TabsContent value="prima-nota">
                     <div className="flex items-center gap-3 mt-4 mb-4">

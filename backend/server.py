@@ -27,6 +27,7 @@ from db_models import (
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni, VoceManualeCollab,
+    ChiusuraGiorno,
     AziendaConfig, SchemaProvvigionale, EventoCalendario,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
@@ -39,6 +40,7 @@ import reddito_calc
 import storage as obj_storage
 import pdf_report
 import pdf_diagnosi
+import pdf_brogliaccio
 import brogliaccio as brog
 import cf_calc
 import geocoder as geocoder_svc
@@ -2539,6 +2541,9 @@ async def create_movimento(body: dict, user=Depends(require_user("admin", "colla
 
 @api.put("/contabilita/movimenti/{mid}")
 async def update_movimento(mid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0, "chiusura_id": 1})
+    if cur and cur.get("chiusura_id"):
+        raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per modificare")
     body["updated_at"] = _now_iso()
     res = await db.movimenti.update_one({"id": mid}, {"$set": body})
     if res.matched_count == 0:
@@ -2549,6 +2554,9 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
 
 @api.delete("/contabilita/movimenti/{mid}")
 async def delete_movimento(mid: str, user=Depends(require_user("admin", "collaboratore"))):
+    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0, "chiusura_id": 1})
+    if cur and cur.get("chiusura_id"):
+        raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per eliminare")
     res = await db.movimenti.delete_one({"id": mid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Movimento non trovato")
@@ -2604,6 +2612,397 @@ async def prima_nota(
         "totale_uscite": round(totale_uscite, 2),
         "saldo": round(totale_entrate - totale_uscite, 2),
     }
+
+
+# ============================================================
+# BROGLIACCIO - Prima Nota giornaliera con colonne per conto cassa
+# ============================================================
+async def _compute_brogliaccio(data_giorno: str):
+    """Calcola il brogliaccio per la data indicata.
+
+    Restituisce dict con: data, conti_cassa, righe, totali_giornata, conti_riepilogo,
+    riepilogo_kpi, chiusura (se presente).
+
+    Colonne fisse per riga: descrizione, totale, provv, saldo, crediti, spese.
+    Colonne dinamiche: una per ogni conto cassa attivo (mostra l'importo positivo se è
+    l'incasso/uscita su quel conto, negativo se è un'uscita).
+    """
+    # 1) Conti cassa attivi ordinati
+    conti = await db.conti_cassa.find(
+        {"attivo": True}, {"_id": 0}
+    ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
+
+    # 2) Movimenti del giorno
+    movs = await db.movimenti.find(
+        {"data_movimento": data_giorno}, {"_id": 0}
+    ).sort("created_at", 1).to_list(2000)
+
+    # arricchimento: per ogni movimento calcola le quote
+    righe = []
+    tot = {"totale": 0.0, "provv": 0.0, "saldo": 0.0, "crediti": 0.0, "spese": 0.0}
+    per_conto_tot: dict = {c["id"]: 0.0 for c in conti}
+
+    for m in movs:
+        signed = m["importo"] if m["tipo"] == "entrata" else -m["importo"]
+        provv = float(m.get("quota_provvigione") or 0)
+        if not provv and m["categoria"] == "provvigioni" and m["tipo"] == "uscita":
+            provv = -m["importo"]  # provvigioni pagate al collaboratore
+        if not provv and m["categoria"] == "incasso_premio" and m["tipo"] == "entrata":
+            # se non c'è override, usa il campo "provvigioni" del movimento
+            provv = float(m.get("provvigioni") or 0)
+        saldo_q = float(m.get("quota_saldo") or 0)
+        if not saldo_q and m["categoria"] == "incasso_premio" and m["tipo"] == "entrata":
+            saldo_q = m["importo"] - provv  # resto da versare alla compagnia
+        crediti = float(m.get("quota_credito") or 0)
+        spese = float(m.get("quota_spesa") or 0)
+        if not spese and m["categoria"] in ("spese_amministrative", "altro") and m["tipo"] == "uscita":
+            spese = -m["importo"]
+        sconti = float(m.get("quota_sconto") or 0)
+        if not sconti and m["categoria"] == "sconto_cliente":
+            sconti = -m["importo"] if m["tipo"] == "uscita" else m["importo"]
+
+        # importo sul conto
+        per_conto = {}
+        if m.get("conto_cassa_id"):
+            per_conto[m["conto_cassa_id"]] = signed
+
+        riga = {
+            "id": m["id"],
+            "descrizione": m.get("descrizione", "")[:120],
+            "categoria": m.get("categoria"),
+            "tipo": m["tipo"],
+            "totale": signed,
+            "provv": provv,
+            "saldo": saldo_q,
+            "crediti": crediti,
+            "spese": spese,
+            "sconti": sconti,
+            "per_conto": per_conto,
+            "conto_cassa_id": m.get("conto_cassa_id"),
+            "mezzo_pagamento": m.get("mezzo_pagamento"),
+            "allegati_count": 0,  # arricchito dopo
+        }
+        righe.append(riga)
+        tot["totale"] += signed
+        tot["provv"] += provv
+        tot["saldo"] += saldo_q
+        tot["crediti"] += crediti
+        tot["spese"] += spese
+        if m.get("conto_cassa_id"):
+            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + signed
+
+    # arricchimento allegati count
+    ids = [r["id"] for r in righe]
+    if ids:
+        pipeline = [
+            {"$match": {"entita_tipo": "movimento", "entita_id": {"$in": ids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]
+        counts = {x["_id"]: x["n"] async for x in db.allegati.aggregate(pipeline)}
+        for r in righe:
+            r["allegati_count"] = counts.get(r["id"], 0)
+
+    totali_giornata = {**{k: round(v, 2) for k, v in tot.items()},
+                       "per_conto": {k: round(v, 2) for k, v in per_conto_tot.items()}}
+
+    # 3) Riepilogo conti: saldo precedente, giornata, totale periodo
+    #    saldo precedente = saldo_iniziale + somma movimenti su conto fino al giorno prima
+    conti_riepilogo = []
+    for c in conti:
+        prev = await db.movimenti.aggregate([
+            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}}},
+            {"$group": {"_id": None, "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+        ]).to_list(1)
+        prev_in = prev[0]["in"] if prev else 0
+        prev_out = prev[0]["out"] if prev else 0
+        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out
+        imp_giornata = per_conto_tot.get(c["id"], 0.0)
+        conti_riepilogo.append({
+            "id": c["id"],
+            "nome": c["nome"],
+            "imp_precedente": round(imp_prec, 2),
+            "imp_giornata": round(imp_giornata, 2),
+            "totale_periodo": round(imp_prec + imp_giornata, 2),
+        })
+
+    # 4) KPI di periodo (cumulativi)
+    entr_agg = await db.movimenti.aggregate([
+        {"$match": {"tipo": "entrata"}},
+        {"$group": {"_id": "$categoria", "tot": {"$sum": "$importo"}}},
+    ]).to_list(50)
+    usc_agg = await db.movimenti.aggregate([
+        {"$match": {"tipo": "uscita"}},
+        {"$group": {"_id": "$categoria", "tot": {"$sum": "$importo"}}},
+    ]).to_list(50)
+    sum_entr = sum(x["tot"] for x in entr_agg)
+    sum_usc = sum(x["tot"] for x in usc_agg)
+    by_cat_entr = {x["_id"]: x["tot"] for x in entr_agg}
+    by_cat_usc = {x["_id"]: x["tot"] for x in usc_agg}
+
+    riepilogo_kpi = {
+        "entrate": round(sum_entr, 2),
+        "provvigioni": round(by_cat_usc.get("provvigioni", 0), 2),
+        "crediti": round(sum(r["crediti"] for r in righe), 2),
+        "rimesse": round(by_cat_usc.get("pagamento_compagnia", 0), 2),
+        "sconti": round(by_cat_usc.get("sconto_cliente", 0), 2),
+        "spese": round(sum_usc, 2),
+        "saldo_cassa": round(sum_entr - sum_usc, 2),
+    }
+
+    # 5) Chiusura?
+    chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
+
+    return {
+        "data": data_giorno,
+        "conti_cassa": [{"id": c["id"], "nome": c["nome"], "ordine": c.get("ordine", 0)} for c in conti],
+        "righe": righe,
+        "totali_giornata": totali_giornata,
+        "conti_riepilogo": conti_riepilogo,
+        "riepilogo_kpi": riepilogo_kpi,
+        "chiusura": chiusura,
+        "chiusa": bool(chiusura and not chiusura.get("riaperta_at")),
+    }
+
+
+@api.get("/contabilita/brogliaccio")
+async def brogliaccio(
+    data: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    if not data:
+        data = _now_iso()[:10]
+    return await _compute_brogliaccio(data)
+
+
+async def _generate_brogliaccio_pdf(payload: dict) -> bytes:
+    """Genera il PDF brogliaccio da un payload di _compute_brogliaccio."""
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    logo_bytes = None
+    if az.get("logo_storage_path"):
+        try:
+            logo_bytes, _ = obj_storage.get_object(az["logo_storage_path"])
+        except Exception:
+            logo_bytes = None
+    chiusura_info = None
+    if payload.get("chiusa"):
+        ch = payload["chiusura"]
+        chiusura_info = {"closed_at": ch.get("created_at", "")[:19].replace("T", " "),
+                         "closed_by_name": ch.get("closed_by_name", "")}
+    return pdf_brogliaccio.stampa_brogliaccio(
+        data_giorno=payload["data"],
+        azienda=az,
+        conti_cassa=payload["conti_cassa"],
+        righe=payload["righe"],
+        totali_giornata=payload["totali_giornata"],
+        conti_riepilogo=payload["conti_riepilogo"],
+        riepilogo_kpi=payload["riepilogo_kpi"],
+        chiusura_info=chiusura_info,
+        logo_bytes=logo_bytes,
+    )
+
+
+@api.get("/contabilita/brogliaccio/stampa")
+async def stampa_brogliaccio_pdf(
+    data: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    if not data:
+        data = _now_iso()[:10]
+    payload = await _compute_brogliaccio(data)
+    pdf_bytes = await _generate_brogliaccio_pdf(payload)
+    return _pdf_response(pdf_bytes, f"brogliaccio_{data}.pdf")
+
+
+@api.post("/contabilita/chiusura-giorno", status_code=201)
+async def chiudi_giorno(
+    body: dict, user=Depends(require_user("admin", "collaboratore")),
+):
+    """Chiude la prima nota del giorno: snapshot + PDF + segna movimenti come immutabili.
+
+    body: { data: "YYYY-MM-DD", invia_commercialista?: bool }
+    """
+    data_giorno = body.get("data") or _now_iso()[:10]
+    # già chiusa?
+    existing = await db.chiusure_giorno.find_one(
+        {"data": data_giorno, "riaperta_at": None}, {"_id": 0}
+    )
+    if existing:
+        raise HTTPException(400, f"Giornata {data_giorno} già chiusa")
+
+    payload = await _compute_brogliaccio(data_giorno)
+    if not payload["righe"]:
+        raise HTTPException(400, "Nessun movimento da chiudere per questo giorno")
+
+    chiusura = ChiusuraGiorno(
+        data=data_giorno,
+        closed_by=user["id"],
+        closed_by_name=user.get("name", user["email"]),
+        riepilogo={
+            "totali_giornata": payload["totali_giornata"],
+            "riepilogo_kpi": payload["riepilogo_kpi"],
+            "conti_riepilogo": payload["conti_riepilogo"],
+            "n_movimenti": len(payload["righe"]),
+        },
+    )
+
+    # genera PDF e salva in storage
+    payload["chiusa"] = True
+    payload["chiusura"] = chiusura.model_dump()
+    pdf_bytes = await _generate_brogliaccio_pdf(payload)
+    storage_path = (f"{os.environ.get('APP_NAME', 'assicura')}"
+                    f"/brogliaccio/{data_giorno}/{chiusura.id}.pdf")
+    try:
+        obj_storage.put_object(storage_path, pdf_bytes, "application/pdf")
+        chiusura.pdf_storage_path = storage_path
+    except Exception as e:
+        raise HTTPException(503, f"Errore salvataggio PDF: {e}")
+
+    # marca movimenti come chiusi
+    await db.movimenti.update_many(
+        {"data_movimento": data_giorno},
+        {"$set": {"chiusura_id": chiusura.id, "updated_at": _now_iso()}},
+    )
+    await db.chiusure_giorno.insert_one(chiusura.model_dump())
+    await log_attivita(user, "chiusura_giorno", "contabilita", chiusura.id,
+                       f"Chiusura brogliaccio {data_giorno} ({len(payload['righe'])} movimenti)")
+
+    invia = body.get("invia_commercialista") or False
+    invio_result = None
+    if invia:
+        invio_result = await _invia_brogliaccio_email(chiusura.id, pdf_bytes, data_giorno)
+
+    return {**chiusura.model_dump(), "invio_commercialista": invio_result}
+
+
+@api.post("/contabilita/chiusura-giorno/{chiusura_id}/invia")
+async def invia_chiusura_giorno(
+    chiusura_id: str, user=Depends(require_user("admin", "collaboratore")),
+):
+    ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Chiusura non trovata")
+    if not ch.get("pdf_storage_path"):
+        raise HTTPException(400, "PDF non disponibile")
+    try:
+        pdf_bytes, _ = obj_storage.get_object(ch["pdf_storage_path"])
+    except Exception as e:
+        raise HTTPException(503, f"Errore lettura PDF: {e}")
+    res = await _invia_brogliaccio_email(chiusura_id, pdf_bytes, ch["data"])
+    return res
+
+
+async def _invia_brogliaccio_email(chiusura_id: str, pdf_bytes: bytes, data_giorno: str):
+    """Invia il brogliaccio chiuso al commercialista (se SMTP configurato)."""
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    to_addr = az.get("email_commercialista")
+    if not to_addr:
+        await db.chiusure_giorno.update_one(
+            {"id": chiusura_id},
+            {"$set": {"email_errore": "Email commercialista non configurata in Librerie/Azienda",
+                      "updated_at": _now_iso()}},
+        )
+        return {"ok": False, "errore": "Email commercialista non configurata in Librerie/Azienda"}
+    if not az.get("smtp_host") or not az.get("smtp_user"):
+        await db.chiusure_giorno.update_one(
+            {"id": chiusura_id},
+            {"$set": {"email_errore": "SMTP non configurato (host/user mancanti)",
+                      "updated_at": _now_iso()}},
+        )
+        return {"ok": False, "errore": "SMTP non configurato (Librerie/Azienda → SMTP)"}
+
+    import smtplib
+    from email.message import EmailMessage
+    msg = EmailMessage()
+    msg["From"] = az.get("smtp_from") or az["smtp_user"]
+    msg["To"] = to_addr
+    msg["Subject"] = f"Prima Nota chiusa - {data_giorno} - {az.get('ragione_sociale', '')}"
+    nome_comm = az.get("nome_commercialista") or "Studio"
+    msg.set_content(
+        f"Gentile {nome_comm},\n\n"
+        f"in allegato la prima nota chiusa del {data_giorno}.\n\n"
+        f"Cordiali saluti,\n{az.get('ragione_sociale', '')}"
+    )
+    msg.add_attachment(
+        pdf_bytes, maintype="application", subtype="pdf",
+        filename=f"brogliaccio_{data_giorno}.pdf",
+    )
+    try:
+        port = int(az.get("smtp_port") or 587)
+        if port == 465:
+            srv = smtplib.SMTP_SSL(az["smtp_host"], port, timeout=30)
+        else:
+            srv = smtplib.SMTP(az["smtp_host"], port, timeout=30)
+            if az.get("smtp_use_tls", True):
+                srv.starttls()
+        srv.login(az["smtp_user"], az.get("smtp_password") or "")
+        srv.send_message(msg)
+        srv.quit()
+        now = _now_iso()
+        await db.chiusure_giorno.update_one(
+            {"id": chiusura_id},
+            {"$set": {"email_inviata_a": to_addr, "email_inviata_at": now,
+                      "email_errore": None, "updated_at": now}},
+        )
+        return {"ok": True, "inviata_a": to_addr}
+    except Exception as e:
+        await db.chiusure_giorno.update_one(
+            {"id": chiusura_id},
+            {"$set": {"email_errore": str(e), "updated_at": _now_iso()}},
+        )
+        return {"ok": False, "errore": str(e)}
+
+
+@api.post("/contabilita/chiusura-giorno/{chiusura_id}/riapri")
+async def riapri_chiusura_giorno(
+    chiusura_id: str, body: dict, user=Depends(require_user("admin")),
+):
+    """Riapre una giornata già chiusa (solo admin). Richiede motivo."""
+    motivo = (body or {}).get("motivo")
+    if not motivo:
+        raise HTTPException(400, "Motivo riapertura obbligatorio")
+    ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Chiusura non trovata")
+    now = _now_iso()
+    await db.chiusure_giorno.update_one(
+        {"id": chiusura_id},
+        {"$set": {"riaperta_at": now, "riaperta_by": user["id"],
+                  "riaperta_motivo": motivo, "updated_at": now}},
+    )
+    await db.movimenti.update_many(
+        {"chiusura_id": chiusura_id},
+        {"$set": {"chiusura_id": None, "updated_at": now}},
+    )
+    await log_attivita(user, "riapri_chiusura", "contabilita", chiusura_id,
+                       f"Riaperta chiusura {ch['data']} - motivo: {motivo}")
+    return {"ok": True}
+
+
+@api.get("/contabilita/chiusure-giorno")
+async def list_chiusure_giorno(
+    limit: int = 60,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await db.chiusure_giorno.find({}, {"_id": 0}).sort("data", -1).to_list(limit)
+    return items
+
+
+@api.get("/contabilita/chiusura-giorno/{chiusura_id}/pdf")
+async def download_chiusura_pdf(
+    chiusura_id: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
+    if not ch or not ch.get("pdf_storage_path"):
+        raise HTTPException(404, "PDF non trovato")
+    try:
+        data, _ = obj_storage.get_object(ch["pdf_storage_path"])
+    except Exception as e:
+        raise HTTPException(503, f"Errore: {e}")
+    return StreamingResponse(
+        _io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="brogliaccio_{ch["data"]}.pdf"'},
+    )
 
 
 # ============================================================

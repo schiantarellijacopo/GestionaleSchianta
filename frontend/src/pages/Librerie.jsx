@@ -699,6 +699,115 @@ function AziendaSezione() {
                             placeholder="Es: Polizza assicurazione professionale, autorizzazione IVASS..."
                         />
                     </div>
+
+                    {/* Sezione Commercialista */}
+                    <div className="mt-6 pt-4 border-t border-slate-200">
+                        <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">
+                            Commercialista (invio Prima Nota chiusa)
+                        </h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Nome commercialista</Label>
+                                <Input
+                                    value={f.nome_commercialista || ""}
+                                    onChange={(e) => set("nome_commercialista", e.target.value)}
+                                    placeholder="Es. Dott. Mario Rossi"
+                                    data-testid="azienda-nome-commercialista"
+                                />
+                            </div>
+                            <div>
+                                <Label>Email commercialista</Label>
+                                <Input
+                                    type="email"
+                                    value={f.email_commercialista || ""}
+                                    onChange={(e) => set("email_commercialista", e.target.value)}
+                                    placeholder="commercialista@studio.it"
+                                    data-testid="azienda-email-commercialista"
+                                />
+                            </div>
+                            <div className="col-span-2 flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="auto-chiusura"
+                                    checked={!!f.invio_automatico_chiusura}
+                                    onChange={(e) => set("invio_automatico_chiusura", e.target.checked)}
+                                    data-testid="azienda-auto-chiusura"
+                                />
+                                <Label htmlFor="auto-chiusura" className="cursor-pointer text-xs">
+                                    Suggerisci l&apos;invio automatico al commercialista alla chiusura di ogni giornata
+                                </Label>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Sezione SMTP */}
+                    <div className="mt-4 pt-4 border-t border-slate-200">
+                        <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">
+                            SMTP - Invio email (Prima Nota, ecc.)
+                        </h3>
+                        <div className="text-xs text-slate-500 mb-3">
+                            Configurazione del server SMTP per inviare email dall&apos;applicazione (es. brogliaccio al commercialista). Per Gmail: <code>smtp.gmail.com:587</code> con password applicazione.
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="col-span-2">
+                                <Label>SMTP Host</Label>
+                                <Input
+                                    value={f.smtp_host || ""}
+                                    onChange={(e) => set("smtp_host", e.target.value)}
+                                    placeholder="smtp.gmail.com"
+                                    data-testid="azienda-smtp-host"
+                                />
+                            </div>
+                            <div>
+                                <Label>Porta</Label>
+                                <Input
+                                    type="number"
+                                    value={f.smtp_port || 587}
+                                    onChange={(e) => set("smtp_port", parseInt(e.target.value || 0))}
+                                    placeholder="587"
+                                    data-testid="azienda-smtp-port"
+                                />
+                            </div>
+                            <div>
+                                <Label>SMTP User (email)</Label>
+                                <Input
+                                    value={f.smtp_user || ""}
+                                    onChange={(e) => set("smtp_user", e.target.value)}
+                                    placeholder="account@gmail.com"
+                                    data-testid="azienda-smtp-user"
+                                />
+                            </div>
+                            <div>
+                                <Label>SMTP Password</Label>
+                                <Input
+                                    type="password"
+                                    value={f.smtp_password || ""}
+                                    onChange={(e) => set("smtp_password", e.target.value)}
+                                    placeholder="password app"
+                                    data-testid="azienda-smtp-password"
+                                />
+                            </div>
+                            <div>
+                                <Label>From (mittente)</Label>
+                                <Input
+                                    value={f.smtp_from || ""}
+                                    onChange={(e) => set("smtp_from", e.target.value)}
+                                    placeholder="Assicura <noreply@assicura.it>"
+                                />
+                            </div>
+                            <div className="col-span-3 flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="smtp-tls"
+                                    checked={f.smtp_use_tls !== false}
+                                    onChange={(e) => set("smtp_use_tls", e.target.checked)}
+                                />
+                                <Label htmlFor="smtp-tls" className="cursor-pointer text-xs">
+                                    Usa STARTTLS (consigliato per porta 587). Disabilita per SSL diretto su porta 465.
+                                </Label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </Card>

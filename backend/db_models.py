@@ -345,7 +345,40 @@ class MovimentoContabile(BaseDoc):
     mezzo_pagamento: Optional[str] = None
     numero_documento: Optional[str] = None
     provvigioni: float = 0.0
+    # Split brogliaccio per incassi premio: quota_provvigione = parte agenzia,
+    # quota_saldo = parte da versare alla compagnia. Calcolato automaticamente al
+    # momento dell'incasso (provvigione del titolo) ma override manuale possibile.
+    quota_provvigione: float = 0.0
+    quota_saldo: float = 0.0
+    quota_credito: float = 0.0  # quando il movimento rappresenta una rata a credito
+    quota_spesa: float = 0.0    # spese specifiche (es. bolli, oneri)
+    quota_sconto: float = 0.0   # eventuale sconto applicato
     note: Optional[str] = None
+    # chiusura giornaliera prima nota
+    chiusura_id: Optional[str] = None
+
+
+class ChiusuraGiorno(BaseDoc):
+    """Snapshot di una giornata di prima nota chiusa.
+
+    Una volta chiusa, i movimenti del giorno sono congelati (no modifiche/cancellazioni)
+    e il PDF brogliaccio è archiviato come storage. Opzionalmente inviata via email
+    al commercialista.
+    """
+    data: str  # YYYY-MM-DD - data del brogliaccio chiuso
+    closed_by: Optional[str] = None  # user_id che ha chiuso
+    closed_by_name: Optional[str] = None
+    riepilogo: dict = Field(default_factory=dict)
+    # struttura riepilogo: {totale, provv, saldo, crediti, spese, sconti,
+    #   per_conto: {conto_id: importo}, saldi_conti_finali: {conto_id: saldo}}
+    pdf_storage_path: Optional[str] = None
+    pdf_url: Optional[str] = None
+    email_inviata_a: Optional[str] = None
+    email_inviata_at: Optional[str] = None
+    email_errore: Optional[str] = None
+    riaperta_at: Optional[str] = None
+    riaperta_by: Optional[str] = None
+    riaperta_motivo: Optional[str] = None
 
 
 # =============== INTERVISTA CLIENTE ===============
@@ -541,6 +574,17 @@ class AziendaConfig(BaseDoc):
     logo_url: Optional[str] = None         # URL logo per stampe
     logo_storage_path: Optional[str] = None
     note_footer_stampe: Optional[str] = None
+    # Commercialista (per invio prima nota chiusa)
+    email_commercialista: Optional[str] = None
+    nome_commercialista: Optional[str] = None
+    invio_automatico_chiusura: bool = False  # se true: alla chiusura giorno invia subito
+    # SMTP per invio email (Prima Nota chiusa, ecc.)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: Optional[str] = None      # es. "Assicura <noreply@assicura.it>"
+    smtp_use_tls: bool = True
 
 
 # =============== SCHEMA / SISTEMA PROVVIGIONALE ===============

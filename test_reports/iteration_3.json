@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 3 - Brogliaccio Prima Nota & Chiusura Giorno tested end-to-end. 17/17 backend pytest cases PASSED. Frontend UI verified: default tab is Brogliaccio (Prima nota), date picker works, dynamic conti cassa columns render correctly (CASSA CONTANTI, ASSEGNI, BPER SONDRIO, INTESA SANPAOLO, CREDIT AGRICOLE, RID DIREZIONE, PayPal/Online), TOTALE GIORNATA row in amber, RIEPILOGO CONTI table and KPI cards display correctly. All data-testids present (brogliaccio-tab, brogliaccio-data, brogliaccio-oggi, brogliaccio-stampa, brogliaccio-chiudi, brogliaccio-storico, brog-row-*, brog-kpi, chiudi-only, chiudi-invia). Storico dialog opens and lists closures with Scarica PDF link. Chiudi dialog shows 'Solo chiudi' and 'Chiudi e invia commercialista' buttons.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/contabilita/brogliaccio",
+        "issue": "KPI 'spese' is computed as sum of ALL uscite (sum_usc) rather than only categoria='spese_amministrative'/'altro'. This makes the SPESE KPI confusing (e.g. shows 10.930,50 € while actual operating expenses are much lower). Suggest renaming to 'USCITE TOT' or filter only spese-categorie."
+      },
+      {
+        "endpoint": "/api/contabilita/brogliaccio",
+        "issue": "KPI 'entrate' and 'spese' are cumulative across ALL history, while 'crediti' uses only current-day righe. Inconsistent timeframe - either make all KPI cumulative or all daily."
+      },
+      {
+        "endpoint": "/api/contabilita/chiusura-giorno (POST)",
+        "issue": "If obj_storage.put_object fails the function returns 503 but chiusura record was not yet inserted - OK. But movimenti.update_many happens BEFORE chiusure_giorno.insert_one (lines 2862-2866). If insert fails after update, movimenti get an orphan chiusura_id. Suggest insert chiusura first, then mark movimenti."
+      },
+      {
+        "endpoint": "/api/contabilita/chiusura-giorno/{id}/riapri",
+        "issue": "No idempotency check: calling riapri on an already-riaperta chiusura silently overwrites the riaperta_at/by/motivo. Could add 400 if already riaperta_at is set."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Contabilita / Brogliaccio", "issues": ["TOTALE GIORNATA row totale shows -200 € but per-conto columns are empty (legacy seeded movimenti without conto_cassa_id) - expected behaviour but cosmetically odd. Once movimenti are created with conto_cassa_id the per_conto columns populate correctly (verified via backend test)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_brogliaccio.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Re-evaluate KPI 'spese' semantic vs total uscite",
+    "(Optional) Reorder chiusura write to insert chiusura record before marking movimenti to avoid orphan chiusura_id",
+    "(Optional) Reject riapri on already-riaperta chiusure for clarity"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 6295 lines - well beyond the 700-line guideline. Strongly recommend splitting contabilita/brogliaccio endpoints into their own router module (e.g. /app/backend/routers/brogliaccio.py).",
+    "_compute_brogliaccio performs N+1 query (one $group per conto cassa for imp_precedente). With many conti this could be slow - consider a single $group with $facet or $bucket.",
+    "_invia_brogliaccio_email uses synchronous smtplib in async context - blocks the event loop. Wrap in asyncio.to_thread or use aiosmtplib.",
+    "smtp_password stored in plain in azienda_config - consider encrypting at rest or using env-only.",
+    "chiusura riapri response doesn't include the updated chiusura snapshot - frontend has to reload. Returning the updated doc would be more idiomatic.",
+    "BrogliaccioTab.jsx (398 lines) is reasonable size; data-testids well placed. Could extract Dialog components for chiudi/riapri/storico into separate small components."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_brogliaccio.py (new)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% (all critical UI elements & flows verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! (cookie + Bearer)",
+  "seed_data_creation": "Created and cleaned up: 1 conto_cassa (TEST_NEW_CONTO_BROG), 3 test movimenti (TEST_BROG_per_conto, TEST_CHIUSURA x2), 1 chiusura on 2025-12-29. All cleaned at end. Empty-day close on 2025-01-01 returned 400 (no movimenti) - no cleanup needed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Brogliaccio backend endpoints fully covered by /app/backend/tests/test_iter3_brogliaccio.py. Frontend SMTP form save under Librerie/Azienda was NOT tested per request (only backend PUT verified). For future iterations, can extend tests for: actual SMTP send via mock SMTP server, invio_automatico_chiusura flag flow, and PDF visual diff vs facsimile.",
+  "rca of the issue": "No bugs found requiring RCA. All endpoints returned expected status codes and payloads. Lifecycle (close -> 400 on edit -> riapri -> edit allowed) works as designed."
+}
