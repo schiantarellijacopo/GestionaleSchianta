@@ -11,11 +11,22 @@ UI italiano, Shadcn/Tailwind.
 
 ### Implementato — Sessione corrente (2026-06-23 fork 3)
 
-#### Brogliaccio Prima Nota (replica facsimile)
-- **Nuovo modulo PDF** `/app/backend/pdf_brogliaccio.py` - landscape A4, page 1 tabella con colonne dinamiche (Descrizione/Totale/Provv/Saldo/Crediti/Spese + colonna per ogni Conto Cassa attivo), page 2 RIEPILOGO CONTI (Imp.Precedente/Imp.Giornata/Totale Periodo) e KPI bottom (ENTRATE/PROVVIGIONI/CREDITI/RIMESSE/SCONTI/SPESE/SALDO CASSA).
-- **Endpoint backend**: `GET /api/contabilita/brogliaccio?data=YYYY-MM-DD` calcola in tempo reale tutti i totali; `GET /api/contabilita/brogliaccio/stampa` ritorna il PDF. Colonne conti **generate dinamicamente** da `conti_cassa.attivo=true` (aggiungere una banca in Librerie → appare automaticamente).
-- **KPI giornalieri** (coerenti con il totale giornata): Saldo Cassa = somma entrate − somma uscite del giorno.
-- **Frontend `BrogliaccioTab.jsx`** in `/contabilita`: tab di default, date picker + Oggi shortcut, banner stato chiusura, tabella scrollabile, riga gialla TOTALE GIORNATA, riepilogo conti, 7 KPI cards.
+#### Brogliaccio Prima Nota (replica facsimile + semantica assicurativa)
+- **Logica colonne** (come da specifica utente):
+  - `TOTALE` = premio lordo polizza (per incassi) o importo movimento.
+  - `PROVV` = provvigioni totali agenzia.
+  - `SALDO` = `totale − provv` se `compagnia.trattiene_provvigioni=true`; altrimenti `= totale` (provvigioni ricevute a parte).
+  - `CREDITI` = sospesi / anticipi (categoria=anticipo).
+  - `SPESE` = TUTTE le uscite (provvigioni collab, stipendi, sconti polizze, spese generali).
+  - `SCONTI` = subset di SPESE (categoria=sconto_cliente, valore "di cui").
+  - `RIMESSE` = pagamenti E/C compagnia (categoria=pagamento_compagnia).
+  - `SALDO CASSA` (KPI) = saldo del giorno; cresce con gli incassi, si scarica con le rimesse.
+- **Nuovo pannello "Saldo Cassa per Compagnia"** (cumulativo periodo): per ogni compagnia mostra incassi lordi, provvigioni, saldo dovuto, rimesse pagate, **saldo cassa attuale**.
+- **Colonna riga**: invece di "Descrizione" mostra **Contraente** (grassetto) + sotto **N. polizza · Compagnia** (auto-arricchito da polizza_id).
+- **Compagnia**: nuovo flag `trattiene_provvigioni: bool` (default true) sul modello + toggle nel form Librerie/Compagnie.
+- **PDF brogliaccio** (`/app/backend/pdf_brogliaccio.py`) - landscape A4, page 1 tabella (Contraente/Polizza/Compagnia, Totale, Provv, Saldo, Crediti, Spese, Sconti, Rimesse + conti cassa dinamici), page 2 Riepilogo Conti + **Saldo Cassa per Compagnia** + KPI bottom.
+- **Endpoint backend**: `GET /api/contabilita/brogliaccio?data=YYYY-MM-DD`, `GET /api/contabilita/brogliaccio/stampa`. Colonne conti **generate dinamicamente** da `conti_cassa.attivo=true`.
+- **Frontend `BrogliaccioTab.jsx`** in `/contabilita`: tab di default, tabella scrollabile, riga gialla TOTALE GIORNATA, pannello saldi compagnie, 7 KPI cards.
 
 #### Chiusura giornaliera + invio commercialista
 - **Nuovo modello** `ChiusuraGiorno` (data, closed_by, riepilogo snapshot, pdf_storage_path, email_inviata_a/at, riaperta_at/by/motivo).

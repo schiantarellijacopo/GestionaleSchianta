@@ -171,15 +171,17 @@ export default function BrogliaccioTab() {
                         Nessun movimento registrato per il {data}
                     </div>
                 ) : (
-                    <table className="tbl w-full text-xs min-w-[1100px]" data-testid="brogliaccio-tbl">
+                    <table className="tbl w-full text-xs min-w-[1400px]" data-testid="brogliaccio-tbl">
                         <thead>
                             <tr className="bg-slate-900 text-white">
-                                <th className="text-left px-2 py-2">Descrizione</th>
+                                <th className="text-left px-2 py-2">Contraente / Polizza / Compagnia</th>
                                 <th className="text-right px-2 py-2">Totale</th>
                                 <th className="text-right px-2 py-2">Provv</th>
                                 <th className="text-right px-2 py-2">Saldo</th>
                                 <th className="text-right px-2 py-2">Crediti</th>
                                 <th className="text-right px-2 py-2">Spese</th>
+                                <th className="text-right px-2 py-2">Sconti</th>
+                                <th className="text-right px-2 py-2">Rimesse</th>
                                 {conti.map((c) => (
                                     <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap" title={c.nome}>
                                         {c.nome}
@@ -192,14 +194,23 @@ export default function BrogliaccioTab() {
                             {b.righe.map((r) => (
                                 <tr key={r.id} className="hover:bg-slate-50" data-testid={`brog-row-${r.id}`}>
                                     <td className="px-2 py-1.5">
-                                        {r.descrizione}
-                                        {r.mezzo_pagamento && <span className="ml-1 text-[10px] text-slate-400">· {r.mezzo_pagamento}</span>}
+                                        <div className="font-medium text-slate-800">
+                                            {r.contraente || r.descrizione || "—"}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 flex flex-wrap gap-x-2">
+                                            {r.numero_polizza && <span className="num">N. {r.numero_polizza}</span>}
+                                            {r.compagnia && <span>· {r.compagnia}</span>}
+                                            {!r.numero_polizza && !r.compagnia && r.contraente && r.descrizione && <span>{r.descrizione}</span>}
+                                            {r.mezzo_pagamento && <span>· {r.mezzo_pagamento}</span>}
+                                        </div>
                                     </td>
                                     <td className={`num text-right px-2 ${r.totale >= 0 ? "text-emerald-700" : "text-rose-700"} font-medium`}>{fmt(r.totale)}</td>
-                                    <td className="num text-right px-2">{fmt(r.provv)}</td>
-                                    <td className="num text-right px-2">{fmt(r.saldo)}</td>
-                                    <td className="num text-right px-2">{fmt(r.crediti)}</td>
+                                    <td className="num text-right px-2 text-sky-700">{fmt(r.provv)}</td>
+                                    <td className="num text-right px-2 font-medium">{fmt(r.saldo)}</td>
+                                    <td className={`num text-right px-2 ${r.crediti > 0 ? "text-amber-700" : r.crediti < 0 ? "text-emerald-700" : ""}`}>{fmt(r.crediti)}</td>
                                     <td className="num text-right px-2 text-rose-600">{fmt(r.spese)}</td>
+                                    <td className="num text-right px-2 text-orange-600">{fmt(r.sconti)}</td>
+                                    <td className="num text-right px-2 text-violet-700">{fmt(r.rimesse)}</td>
                                     {conti.map((c) => {
                                         const v = r.per_conto?.[c.id];
                                         return (
@@ -229,6 +240,8 @@ export default function BrogliaccioTab() {
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.saldo, true)}</td>
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.crediti, true)}</td>
                                     <td className="num text-right px-2">{fmt(b.totali_giornata.spese, true)}</td>
+                                    <td className="num text-right px-2">{fmt(b.totali_giornata.sconti, true)}</td>
+                                    <td className="num text-right px-2">{fmt(b.totali_giornata.rimesse, true)}</td>
                                     {conti.map((c) => (
                                         <td key={c.id} className="num text-right px-2">
                                             {fmt(b.totali_giornata.per_conto?.[c.id], true)}
@@ -268,6 +281,52 @@ export default function BrogliaccioTab() {
                     </tbody>
                 </table>
             </Card>
+
+            {/* Saldi per compagnia (cumulativo periodo) */}
+            {(b.saldi_compagnie || []).length > 0 && (
+                <Card className="border-slate-200">
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
+                        <div className="text-sm font-semibold uppercase tracking-wider text-slate-700">
+                            Saldo Cassa per Compagnia
+                            <span className="ml-2 text-[11px] font-normal text-slate-500 normal-case">
+                                (cumulativo fino al {data} - cresce con gli incassi, si azzera con i pagamenti E/C)
+                            </span>
+                        </div>
+                    </div>
+                    <table className="tbl w-full text-xs">
+                        <thead>
+                            <tr className="bg-slate-900 text-white">
+                                <th className="text-left px-3 py-2">Compagnia</th>
+                                <th className="text-center px-3 py-2">Regime</th>
+                                <th className="text-right px-3 py-2">Incassi lordi</th>
+                                <th className="text-right px-3 py-2">Provvigioni</th>
+                                <th className="text-right px-3 py-2">Saldo dovuto</th>
+                                <th className="text-right px-3 py-2">Rimesse pagate</th>
+                                <th className="text-right px-3 py-2">Saldo cassa attuale</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {b.saldi_compagnie.map((s) => (
+                                <tr key={s.compagnia_id} data-testid={`saldo-comp-${s.compagnia_id}`}>
+                                    <td className="px-3 py-1.5 font-medium">{s.compagnia}</td>
+                                    <td className="text-center text-[10px]">
+                                        {s.trattiene_provvigioni
+                                            ? <span className="badge badge-success">Tratteniamo provv.</span>
+                                            : <span className="badge badge-warning">No trattenute</span>}
+                                    </td>
+                                    <td className="num text-right px-3">{fmt(s.incassi_lordi, true)}</td>
+                                    <td className="num text-right px-3 text-sky-700">{fmt(s.provvigioni, true)}</td>
+                                    <td className="num text-right px-3">{fmt(s.saldo_dovuto, true)}</td>
+                                    <td className="num text-right px-3 text-violet-700">{fmt(s.rimesse_pagate, true)}</td>
+                                    <td className={`num text-right px-3 font-bold ${s.saldo_cassa > 0 ? "text-rose-700" : s.saldo_cassa < 0 ? "text-emerald-700" : "text-slate-500"}`}>
+                                        {fmt(s.saldo_cassa, true)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </Card>
+            )}
 
             {/* KPI bottom */}
             <div className="grid grid-cols-7 gap-2" data-testid="brog-kpi">

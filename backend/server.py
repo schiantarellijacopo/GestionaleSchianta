@@ -2618,78 +2618,170 @@ async def prima_nota(
 # BROGLIACCIO - Prima Nota giornaliera con colonne per conto cassa
 # ============================================================
 async def _compute_brogliaccio(data_giorno: str):
-    """Calcola il brogliaccio per la data indicata.
+    """Calcola il brogliaccio della Prima Nota con la semantica assicurativa corretta.
 
-    Restituisce dict con: data, conti_cassa, righe, totali_giornata, conti_riepilogo,
-    riepilogo_kpi, chiusura (se presente).
+    Mappatura colonne (dal flusso descritto dall'utente):
+      - TOTALE   = importo del movimento (per incassi premi: premio LORDO di polizza)
+      - PROVV    = provvigioni totali agenzia maturate sul movimento
+      - SALDO    = importo - provv  SE compagnia.trattiene_provvigioni
+                 = importo intero  SE compagnia non trattiene (provvigioni ricevute a parte)
+      - CREDITI  = sospesi / anticipi (categorie: anticipo, anticipo_cliente)
+      - SPESE    = TUTTE le uscite (provvigioni collaboratori, stipendi, sconti polizze,
+                   spese generali, rimesse compagnia). Sconto è un "di cui".
+      - SCONTI   = subset di spese (categoria sconto_cliente)
+      - RIMESSE  = pagamenti E/C compagnia (categoria pagamento_compagnia)
+      - SALDO CASSA = sum(saldo) - sum(rimesse) (cumulativo periodo)
 
-    Colonne fisse per riga: descrizione, totale, provv, saldo, crediti, spese.
-    Colonne dinamiche: una per ogni conto cassa attivo (mostra l'importo positivo se è
-    l'incasso/uscita su quel conto, negativo se è un'uscita).
+    Inoltre restituisce `saldi_compagnie`: per ogni compagnia che lavoriamo, il saldo
+    cassa cumulativo (totale saldi su quella compagnia − totale rimesse a quella compagnia).
     """
     # 1) Conti cassa attivi ordinati
     conti = await db.conti_cassa.find(
         {"attivo": True}, {"_id": 0}
     ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
 
-    # 2) Movimenti del giorno
+    # 2) Movimenti del giorno + arricchimento polizza→compagnia
     movs = await db.movimenti.find(
         {"data_movimento": data_giorno}, {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
 
-    # arricchimento: per ogni movimento calcola le quote
+    # raccogli polizza_ids per risolvere compagnie + numero polizza + contraente
+    pol_ids = [m["polizza_id"] for m in movs if m.get("polizza_id")]
+    polizze_map = {}
+    if pol_ids:
+        async for p in db.polizze.find(
+            {"id": {"$in": pol_ids}},
+            {"_id": 0, "id": 1, "compagnia_id": 1, "numero_polizza": 1, "contraente_id": 1},
+        ):
+            polizze_map[p["id"]] = p
+
+    # contraenti da risolvere: da polizze + da movimento.anagrafica_id
+    ana_ids = list(
+        {p.get("contraente_id") for p in polizze_map.values() if p.get("contraente_id")}
+        | {m.get("anagrafica_id") for m in movs if m.get("anagrafica_id")}
+    )
+    ana_map = {}
+    if ana_ids:
+        async for a in db.anagrafiche.find(
+            {"id": {"$in": ana_ids}},
+            {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1},
+        ):
+            ana_map[a["id"]] = a
+
+    # carica compagnie utilizzate (per trattiene_provvigioni)
+    comp_ids = list({m.get("compagnia_id") for m in movs if m.get("compagnia_id")}
+                    | {p.get("compagnia_id") for p in polizze_map.values() if p.get("compagnia_id")})
+    comp_map = {}
+    if comp_ids:
+        async for c in db.compagnie.find(
+            {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "trattiene_provvigioni": 1}
+        ):
+            comp_map[c["id"]] = c
+
+    def _compagnia_di(m: dict) -> Optional[dict]:
+        if m.get("compagnia_id"):
+            return comp_map.get(m["compagnia_id"])
+        if m.get("polizza_id"):
+            pid = m["polizza_id"]
+            p = polizze_map.get(pid)
+            if p and p.get("compagnia_id"):
+                return comp_map.get(p["compagnia_id"])
+        return None
+
     righe = []
-    tot = {"totale": 0.0, "provv": 0.0, "saldo": 0.0, "crediti": 0.0, "spese": 0.0}
+    tot = {"totale": 0.0, "provv": 0.0, "saldo": 0.0,
+           "crediti": 0.0, "spese": 0.0, "sconti": 0.0, "rimesse": 0.0}
     per_conto_tot: dict = {c["id"]: 0.0 for c in conti}
 
-    for m in movs:
-        signed = m["importo"] if m["tipo"] == "entrata" else -m["importo"]
-        provv = float(m.get("quota_provvigione") or 0)
-        if not provv and m["categoria"] == "provvigioni" and m["tipo"] == "uscita":
-            provv = -m["importo"]  # provvigioni pagate al collaboratore
-        if not provv and m["categoria"] == "incasso_premio" and m["tipo"] == "entrata":
-            # se non c'è override, usa il campo "provvigioni" del movimento
-            provv = float(m.get("provvigioni") or 0)
-        saldo_q = float(m.get("quota_saldo") or 0)
-        if not saldo_q and m["categoria"] == "incasso_premio" and m["tipo"] == "entrata":
-            saldo_q = m["importo"] - provv  # resto da versare alla compagnia
-        crediti = float(m.get("quota_credito") or 0)
-        spese = float(m.get("quota_spesa") or 0)
-        if not spese and m["categoria"] in ("spese_amministrative", "altro") and m["tipo"] == "uscita":
-            spese = -m["importo"]
-        sconti = float(m.get("quota_sconto") or 0)
-        if not sconti and m["categoria"] == "sconto_cliente":
-            sconti = -m["importo"] if m["tipo"] == "uscita" else m["importo"]
+    CATS_ANTICIPI = ("anticipo",)  # sospesi/anticipi
+    CATS_RIMESSE = ("pagamento_compagnia",)
+    CATS_SCONTI = ("sconto_cliente",)
 
-        # importo sul conto
+    for m in movs:
+        cat = m["categoria"]
+        is_entrata = (m["tipo"] == "entrata")
+        importo = float(m.get("importo") or 0)
+        signed = importo if is_entrata else -importo
+
+        # default
+        c_totale = 0.0; c_provv = 0.0; c_saldo = 0.0
+        c_crediti = 0.0; c_spese = 0.0; c_sconti = 0.0; c_rimesse = 0.0
+
+        compagnia_riga = _compagnia_di(m)
+        polizza_riga = polizze_map.get(m.get("polizza_id"))
+        # contraente: dalla polizza, altrimenti dal movimento
+        contr_id = None
+        if polizza_riga and polizza_riga.get("contraente_id"):
+            contr_id = polizza_riga["contraente_id"]
+        elif m.get("anagrafica_id"):
+            contr_id = m["anagrafica_id"]
+        contr = ana_map.get(contr_id) if contr_id else None
+        contr_nome = (contr or {}).get("ragione_sociale") if contr else None
+
+        if is_entrata and cat == "incasso_premio":
+            # Premio lordo polizza
+            provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
+            trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
+            c_totale = importo
+            c_provv = provv_riga
+            c_saldo = (importo - provv_riga) if trattiene else importo
+        elif is_entrata and cat == "anticipo":
+            # anticipo che entra in cassa: alimenta crediti positivamente
+            c_totale = importo
+            c_crediti = importo
+        elif is_entrata:
+            # altre entrate generiche (es. sconto positivo, rimborso)
+            c_totale = importo
+        else:
+            # USCITE
+            c_totale = -importo  # mostra in rosso
+            if cat in CATS_RIMESSE:
+                c_rimesse = importo
+            elif cat in CATS_ANTICIPI:
+                # anticipo che esce dalla cassa (rimborso anticipo) → scarica credito
+                c_crediti = -importo
+            else:
+                # provvigioni collaboratori, sconti, spese generali, stipendi, altro
+                c_spese = importo
+                if cat in CATS_SCONTI:
+                    c_sconti = importo
+
+        # Per conto cassa
         per_conto = {}
         if m.get("conto_cassa_id"):
             per_conto[m["conto_cassa_id"]] = signed
+            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + signed
 
         riga = {
             "id": m["id"],
             "descrizione": m.get("descrizione", "")[:120],
-            "categoria": m.get("categoria"),
+            "contraente": contr_nome,
+            "numero_polizza": (polizza_riga or {}).get("numero_polizza"),
+            "categoria": cat,
             "tipo": m["tipo"],
-            "totale": signed,
-            "provv": provv,
-            "saldo": saldo_q,
-            "crediti": crediti,
-            "spese": spese,
-            "sconti": sconti,
+            "compagnia": (compagnia_riga or {}).get("ragione_sociale"),
+            "compagnia_id": (compagnia_riga or {}).get("id"),
+            "trattiene_provvigioni": (compagnia_riga or {}).get("trattiene_provvigioni"),
+            "totale": c_totale,
+            "provv": c_provv,
+            "saldo": c_saldo,
+            "crediti": c_crediti,
+            "spese": c_spese,
+            "sconti": c_sconti,
+            "rimesse": c_rimesse,
             "per_conto": per_conto,
             "conto_cassa_id": m.get("conto_cassa_id"),
             "mezzo_pagamento": m.get("mezzo_pagamento"),
-            "allegati_count": 0,  # arricchito dopo
+            "allegati_count": 0,
         }
         righe.append(riga)
-        tot["totale"] += signed
-        tot["provv"] += provv
-        tot["saldo"] += saldo_q
-        tot["crediti"] += crediti
-        tot["spese"] += spese
-        if m.get("conto_cassa_id"):
-            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + signed
+        tot["totale"] += c_totale
+        tot["provv"] += c_provv
+        tot["saldo"] += c_saldo
+        tot["crediti"] += c_crediti
+        tot["spese"] += c_spese
+        tot["sconti"] += c_sconti
+        tot["rimesse"] += c_rimesse
 
     # arricchimento allegati count
     ids = [r["id"] for r in righe]
@@ -2705,13 +2797,13 @@ async def _compute_brogliaccio(data_giorno: str):
     totali_giornata = {**{k: round(v, 2) for k, v in tot.items()},
                        "per_conto": {k: round(v, 2) for k, v in per_conto_tot.items()}}
 
-    # 3) Riepilogo conti: saldo precedente, giornata, totale periodo
-    #    saldo precedente = saldo_iniziale + somma movimenti su conto fino al giorno prima
+    # 3) Riepilogo conti cassa: saldo precedente, giornata, totale periodo
     conti_riepilogo = []
     for c in conti:
         prev = await db.movimenti.aggregate([
             {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}}},
-            {"$group": {"_id": None, "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+            {"$group": {"_id": None,
+                        "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
         ]).to_list(1)
         prev_in = prev[0]["in"] if prev else 0
@@ -2726,33 +2818,21 @@ async def _compute_brogliaccio(data_giorno: str):
             "totale_periodo": round(imp_prec + imp_giornata, 2),
         })
 
-    # 4) KPI di giornata (coerenti con il brogliaccio: solo il giorno corrente)
-    daily_entrate = sum(m["importo"] for m in movs if m["tipo"] == "entrata")
-    daily_uscite_by_cat: dict = {}
-    for m in movs:
-        if m["tipo"] == "uscita":
-            daily_uscite_by_cat[m["categoria"]] = daily_uscite_by_cat.get(m["categoria"], 0) + m["importo"]
-    daily_entrate_by_cat: dict = {}
-    for m in movs:
-        if m["tipo"] == "entrata":
-            daily_entrate_by_cat[m["categoria"]] = daily_entrate_by_cat.get(m["categoria"], 0) + m["importo"]
+    # 4) Saldi compagnie (cumulativi: dal'inizio a fine giornata)
+    saldi_compagnie = await _compute_saldi_compagnie(data_giorno)
 
-    # spese = uscite NON provvigioni / NON pagamento_compagnia / NON sconto_cliente
-    spese_other = sum(v for k, v in daily_uscite_by_cat.items()
-                      if k not in ("provvigioni", "pagamento_compagnia", "sconto_cliente"))
-
+    # 5) KPI di giornata (coerenti con totali_giornata)
     riepilogo_kpi = {
-        "entrate": round(daily_entrate, 2),
-        "provvigioni": round(daily_uscite_by_cat.get("provvigioni", 0), 2),
-        "crediti": round(sum(r["crediti"] for r in righe), 2),
-        "rimesse": round(daily_uscite_by_cat.get("pagamento_compagnia", 0), 2),
-        "sconti": round(daily_uscite_by_cat.get("sconto_cliente", 0)
-                        + daily_entrate_by_cat.get("sconto_cliente", 0), 2),
-        "spese": round(spese_other, 2),
-        "saldo_cassa": round(daily_entrate - sum(daily_uscite_by_cat.values()), 2),
+        "entrate": round(sum(float(m.get("importo") or 0) for m in movs if m["tipo"] == "entrata"), 2),
+        "provvigioni": round(tot["provv"], 2),
+        "crediti": round(tot["crediti"], 2),
+        "rimesse": round(tot["rimesse"], 2),
+        "sconti": round(tot["sconti"], 2),
+        "spese": round(tot["spese"], 2),
+        "saldo_cassa": round(tot["saldo"], 2),  # del giorno
     }
 
-    # 5) Chiusura?
+    # 6) Chiusura?
     chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
 
     return {
@@ -2761,10 +2841,73 @@ async def _compute_brogliaccio(data_giorno: str):
         "righe": righe,
         "totali_giornata": totali_giornata,
         "conti_riepilogo": conti_riepilogo,
+        "saldi_compagnie": saldi_compagnie,
         "riepilogo_kpi": riepilogo_kpi,
         "chiusura": chiusura,
         "chiusa": bool(chiusura and not chiusura.get("riaperta_at")),
     }
+
+
+async def _compute_saldi_compagnie(fino_a: str) -> list:
+    """Saldo cassa cumulativo per ogni compagnia attiva (da inizio fino al giorno incluso).
+
+    Per ogni compagnia: somma saldi (incassi premio) − somma rimesse pagate.
+    Saldo > 0 = dobbiamo ancora versare alla compagnia.
+    """
+    out = []
+    compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).to_list(500)
+    for c in compagnie:
+        cid = c["id"]
+        trattiene = c.get("trattiene_provvigioni", True)
+        # incassi premio per polizze di questa compagnia (fino a fino_a)
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"compagnia_id": cid}, {"_id": 0, "id": 1}
+        )]
+        incassi = 0.0; provv = 0.0
+        if pol_ids:
+            agg = await db.movimenti.aggregate([
+                {"$match": {
+                    "polizza_id": {"$in": pol_ids},
+                    "tipo": "entrata",
+                    "categoria": "incasso_premio",
+                    "data_movimento": {"$lte": fino_a},
+                }},
+                {"$group": {"_id": None,
+                            "tot": {"$sum": "$importo"},
+                            "provv": {"$sum": "$provvigioni"}}},
+            ]).to_list(1)
+            if agg:
+                incassi = agg[0]["tot"]
+                provv = agg[0]["provv"] or 0.0
+        # rimesse pagate a questa compagnia
+        rim_agg = await db.movimenti.aggregate([
+            {"$match": {
+                "compagnia_id": cid,
+                "tipo": "uscita",
+                "categoria": "pagamento_compagnia",
+                "data_movimento": {"$lte": fino_a},
+            }},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        rimesse = rim_agg[0]["tot"] if rim_agg else 0.0
+        # saldo = (premi - provv) se trattiene else premi  ;  meno rimesse
+        saldo_dovuto = (incassi - provv) if trattiene else incassi
+        saldo_residuo = saldo_dovuto - rimesse
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01:
+            continue  # skip compagnie senza movimenti
+        out.append({
+            "compagnia_id": cid,
+            "compagnia": c["ragione_sociale"],
+            "trattiene_provvigioni": trattiene,
+            "incassi_lordi": round(incassi, 2),
+            "provvigioni": round(provv, 2),
+            "saldo_dovuto": round(saldo_dovuto, 2),
+            "rimesse_pagate": round(rimesse, 2),
+            "saldo_cassa": round(saldo_residuo, 2),
+        })
+    # ordina per saldo_cassa descendente (le più "da pagare" in cima)
+    out.sort(key=lambda x: abs(x["saldo_cassa"]), reverse=True)
+    return out
 
 
 @api.get("/contabilita/brogliaccio")
@@ -2799,6 +2942,7 @@ async def _generate_brogliaccio_pdf(payload: dict) -> bytes:
         totali_giornata=payload["totali_giornata"],
         conti_riepilogo=payload["conti_riepilogo"],
         riepilogo_kpi=payload["riepilogo_kpi"],
+        saldi_compagnie=payload.get("saldi_compagnie"),
         chiusura_info=chiusura_info,
         logo_bytes=logo_bytes,
     )

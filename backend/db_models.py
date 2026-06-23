@@ -112,6 +112,11 @@ class Compagnia(BaseDoc):
     email: Optional[str] = None
     telefono: Optional[str] = None
     attiva: bool = True
+    # Gestione contabile prima nota:
+    # - True (default): "tratteniamo le provvigioni" → saldo = premio - provvigioni
+    # - False: dobbiamo versare il premio intero alla compagnia, le provvigioni le
+    #          riceveremo separatamente → saldo = premio intero
+    trattiene_provvigioni: bool = True
 
 
 # =============== ANAGRAFICHE ===============
