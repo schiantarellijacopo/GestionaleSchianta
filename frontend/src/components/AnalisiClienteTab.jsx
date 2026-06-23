@@ -50,8 +50,14 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
         } finally { setSaving(false); }
     };
 
-    const stampaDiagnosi = () => openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-diagnosi-reddito`);
-    const stampaAzzob = () => openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-progetto-azzob`);
+    const stampaDiagnosi = () => {
+        const popup = window.open("", "_blank");
+        openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-diagnosi-reddito`, {}, popup);
+    };
+    const stampaAzzob = () => {
+        const popup = window.open("", "_blank");
+        openPdf(`/anagrafiche/${anagrafica_id}/analisi/pdf-progetto-azzob`, {}, popup);
+    };
 
     if (!ac) return <Loading />;
 
