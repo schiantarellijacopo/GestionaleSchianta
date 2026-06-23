@@ -222,6 +222,8 @@ async def estratto_provvigioni(
       - pagamenti effettuati (storico)
       - totali del periodo
     """
+    if user.get("role") == "collaboratore" and cid != user.get("id"):
+        raise HTTPException(403, "Non autorizzato a vedere l'estratto conto di altri collaboratori")
     collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
@@ -332,6 +334,8 @@ async def list_voci_manuali_collab(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
+    if user.get("role") == "collaboratore" and cid != user.get("id"):
+        raise HTTPException(403, "Non autorizzato")
     f = {"collaboratore_id": cid}
     cond = {}
     if dal: cond["$gte"] = dal
@@ -389,6 +393,8 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
+    if user.get("role") == "collaboratore" and cid != user.get("id"):
+        raise HTTPException(403, "Non autorizzato a pagare provvigioni di altri collaboratori")
     titoli_ids = body.get("titoli_ids") or []
     voci_ids = body.get("voci_manuali_ids") or []
     if not titoli_ids and not voci_ids:

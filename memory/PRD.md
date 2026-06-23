@@ -9,7 +9,20 @@ UI italiano, Shadcn/Tailwind.
 
 ---
 
-### Implementato — Sessione corrente (2026-06-22 fork 2)
+### Implementato — Sessione corrente (2026-06-23 fork 3)
+
+#### Backend (nuove API)
+- **Voci manuali Estratto Conto Collaboratori**: nuovo modello `VoceManualeCollab` (bonus positivi / trattenute negative). Endpoints `GET/POST /api/collaboratori/{cid}/voci-manuali` e `DELETE .../{vid}`. Aggiornato `estratto-provvigioni` con totali `voci_manuali_da_pagare` e netto includente le voci. Aggiornato `paga-provvigioni` per pagare anche voci manuali; al pagamento le voci sono marcate `pagata=true` con `pagamento_id`.
+- **ACL collaboratori**: il ruolo `collaboratore` può accedere solo al proprio `cid` su `estratto-provvigioni`, `voci-manuali`, `paga-provvigioni` (403 altrimenti).
+- **Relazioni familiari estese**: `POST/PATCH /api/anagrafiche/{aid}/relazioni` accettano `lavoratore` (per coniuge), `a_carico` (coniuge/figlio), `handicap` (figlio). `GET /anagrafiche/{aid}.relazioni_risolte` espone i tre attributi.
+- **Polizze - filtri completi**: `GET /api/polizze` aggiunti filtri `q`, `compagnia_id`, `collaboratore_id`, `prodotto`, `dal/al` (scadenza), `in_scadenza_giorni`, `scadenza_oltre_giorni`, `scadute_oggi`, `scadute_da_min`, `scadute_da_max`. Enrichment con `collaboratore_nome`. Esportazioni nuove: `GET /api/export/polizze.csv`, `GET /api/export/polizze.xlsx`. Aggiornato `/stampa/polizze` con tutti i filtri + colonna collaboratore.
+
+#### Frontend
+- **Pagina Estratto Conto Collaboratori (`/provvigioni`)**: nuova sezione "Voci manuali" con dialog "Nuova voce" (data, causale, importo +/-, note). Riga voci selezionabili e pagabili insieme ai titoli. Card "Voci manuali" nel set di 6 stat cards.
+- **Pagina Polizze (`/polizze`)**: rinnovata con preset chips (tutte / attive / in scadenza 15gg / oltre 15gg / scadute oggi / scadute da 5-10-14gg / scadute / sospese / annullate), search box, filtri avanzati toggleable (stato, compagnia, ramo, collaboratore, prodotto, dal/al). Toolbar export: **Stampa PDF**, **CSV**, **Excel**. Footer con totali premio e provvigioni.
+- **AnagraficaDetail - Albero genealogico**: dialog "Aggiungi relazione" ora mostra blocco "Dati per assegno familiare / nucleo" con checkbox condizionali (lavoratore per coniuge, a_carico per coniuge/figlio, handicap per figlio). Badge colorati sulle card relazioni (verde "a carico", ambra "L.104", sky "lavoratore"). Dialog "modifica" per aggiornare gli attributi su relazioni esistenti.
+
+### Implementato — Sessione precedente (2026-06-22 fork 2)
 
 #### Backend
 - **ANIA importer**: test E2E completo con ZIP sintetico (rec10/20/21/30/40/50). Veicolo, garanzie, diritti, BM, franchigia, massimali, rinuncia rivalsa, valore veicolo. Idempotente. `/app/backend/tests/test_ania_import.py`.
