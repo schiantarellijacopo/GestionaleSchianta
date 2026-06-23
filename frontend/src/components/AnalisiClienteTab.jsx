@@ -16,6 +16,9 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
     Wallet, Home, Target, Calculator, Briefcase, Shield, Scale,
     FileText, Save, Plus, Trash2, TrendingDown, TrendingUp, Upload,
 } from "lucide-react";
@@ -573,19 +576,13 @@ function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, reloa
             <Card className="p-5 border-slate-200">
                 <SectionHeader title="Storico redditi" icon={<Wallet size={16} />} count={ac.storico_redditi?.length || 0}
                     onAdd={canEdit ? addReddito : null} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {(ac.storico_redditi || []).sort((a, b) => b.anno - a.anno).map((r, i) => {
-                        const realIdx = (ac.storico_redditi || []).findIndex(x => x === r);
-                        return (
-                            <div key={realIdx} className="grid grid-cols-12 gap-2 items-end">
-                                <div className="col-span-3"><Label className="text-xs">Anno</Label><Input type="number" value={r.anno || ""} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { anno: parseInt(e.target.value) || 0 })} className="h-8" /></div>
-                                <div className="col-span-4"><Label className="text-xs">Reddito €</Label><Input type="number" value={r.reddito || 0} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { reddito: parseFloat(e.target.value) || 0 })} className="h-8" /></div>
-                                <div className="col-span-4"><Label className="text-xs">Contributi €</Label><Input type="number" value={r.contributi || 0} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { contributi: parseFloat(e.target.value) || 0 })} className="h-8" /></div>
-                                {canEdit && <Button size="sm" variant="ghost" onClick={() => removeReddito(realIdx)} className="col-span-1"><Trash2 size={12} className="text-rose-600" /></Button>}
-                            </div>
-                        );
-                    })}
-                </div>
+                <StoricoRedditiView
+                    storico={ac.storico_redditi || []}
+                    canEdit={canEdit}
+                    onUpdate={updateReddito}
+                    onRemove={removeReddito}
+                    getRealIdx={(r) => (ac.storico_redditi || []).findIndex(x => x === r)}
+                />
             </Card>
 
             {loading && <Loading />}
@@ -945,6 +942,7 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
     const [uploading, setUploading] = useState(false);
     const [sostituisci, setSostituisci] = useState(false);
     const [lastResult, setLastResult] = useState(null);
+    const [delDialog, setDelDialog] = useState(null);  // {id, nome}
     const fileRef = useRef(null);
 
     const estratti = (ac?.estratti_conto_inps || []).slice().sort(
@@ -986,22 +984,24 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
         }
     };
 
-    const elimina = async (id, nome) => {
-        const pulisciTxt = window.prompt(
-            `Eliminare l'estratto "${nome}"?\n\n` +
-            `• Scrivi "ok" per cancellare SOLO il file dall'archivio (mantieni storico/carriera già popolati)\n` +
-            `• Scrivi "tutto" per cancellare ANCHE storico redditi e carriera contributiva\n` +
-            `• Lascia vuoto per annullare`,
-            "",
-        );
-        if (!pulisciTxt) return;
-        const pulisci = pulisciTxt.toLowerCase().trim() === "tutto";
+    const elimina = (id, nome) => {
+        setDelDialog({ id, nome });
+    };
+
+    const confermaElimina = async (pulisciStorico) => {
+        const { id, nome } = delDialog || {};
+        if (!id) return;
         try {
             await api.delete(
                 `/anagrafiche/${anagrafica_id}/analisi/estratto-inps/${id}`,
-                { params: { pulisci_storico: pulisci } },
+                { params: { pulisci_storico: pulisciStorico } },
             );
-            toast.success(pulisci ? "Estratto + storico cancellati" : "Estratto rimosso (storico mantenuto)");
+            toast.success(
+                pulisciStorico
+                    ? `"${nome}" + storico e carriera cancellati`
+                    : `"${nome}" rimosso (storico mantenuto)`,
+            );
+            setDelDialog(null);
             onUpdate?.();
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore");
@@ -1108,7 +1108,160 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
                     </tbody>
                 </table>
             )}
+
+            {/* Dialog conferma eliminazione */}
+            <Dialog open={!!delDialog} onOpenChange={(o) => !o && setDelDialog(null)}>
+                <DialogContent className="max-w-md" data-testid="del-estratto-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-rose-700">
+                            <Trash2 size={18} /> Elimina Estratto INPS
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="text-sm text-slate-700">
+                            Stai per eliminare l&apos;estratto:
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded p-2 text-sm font-mono">
+                            {delDialog?.nome || "—"}
+                        </div>
+                        <div className="text-xs text-slate-600 border-l-4 border-amber-400 bg-amber-50 p-3">
+                            Scegli cosa fare con i dati estratti da questo file:
+                        </div>
+                    </div>
+                    <DialogFooter className="gap-2 flex-col sm:flex-col sm:items-stretch">
+                        <Button
+                            onClick={() => confermaElimina(false)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            data-testid="del-keep-storico"
+                        >
+                            🗂️ Elimina SOLO il file<br/>
+                            <span className="text-xs font-normal opacity-90">Mantieni storico redditi e carriera</span>
+                        </Button>
+                        <Button
+                            onClick={() => confermaElimina(true)}
+                            className="bg-rose-700 hover:bg-rose-800 text-white"
+                            data-testid="del-all"
+                        >
+                            🗑️ Elimina file + storico + carriera<br/>
+                            <span className="text-xs font-normal opacity-90">Resetta tutti i dati estratti da questo PDF</span>
+                        </Button>
+                        <Button variant="ghost" onClick={() => setDelDialog(null)}>Annulla</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </Card>
+    );
+}
+
+
+// ============== STORICO REDDITI VIEW (tabella + grafico barre) ==============
+function StoricoRedditiView({ storico, canEdit, onUpdate, onRemove, getRealIdx }) {
+    const [editMode, setEditMode] = useState(false);
+    const sorted = (storico || []).slice().sort((a, b) => b.anno - a.anno);
+    const maxRed = Math.max(1, ...sorted.map(r => r.reddito || 0));
+    const totReddito = sorted.reduce((s, r) => s + (r.reddito || 0), 0);
+    const totContr = sorted.reduce((s, r) => s + (r.contributi || 0), 0);
+    const mediaRed = sorted.length ? totReddito / sorted.length : 0;
+
+    if (sorted.length === 0) {
+        return (
+            <div className="text-sm text-slate-400 italic text-center py-6 bg-slate-50 rounded-md">
+                Nessun reddito storico. Carica un estratto INPS oppure aggiungi manualmente.
+            </div>
+        );
+    }
+
+    return (
+        <>
+            {/* KPI riepilogo */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                <Kpi label="Anni di carriera" value={sorted.length} color="sky" big />
+                <Kpi label="Reddito totale" value={fmtEur(totReddito)} color="emerald" big />
+                <Kpi label="Reddito medio annuo" value={fmtEur(mediaRed)} color="indigo" big />
+                <Kpi label="Contributi totali" value={fmtEur(totContr)} color="amber" big />
+            </div>
+
+            {/* Toggle modalità */}
+            <div className="flex items-center justify-end mb-2 gap-2">
+                <span className="text-xs text-slate-500">Visualizzazione:</span>
+                <Button
+                    size="sm" variant={!editMode ? "default" : "outline"}
+                    onClick={() => setEditMode(false)} className="h-7"
+                    data-testid="view-mode-graph"
+                >Grafico</Button>
+                {canEdit && (
+                    <Button
+                        size="sm" variant={editMode ? "default" : "outline"}
+                        onClick={() => setEditMode(true)} className="h-7"
+                        data-testid="view-mode-edit"
+                    >Modifica</Button>
+                )}
+            </div>
+
+            {/* Vista GRAFICO (barre + tabella affiancata) */}
+            {!editMode && (
+                <div className="space-y-1">
+                    <div className="grid grid-cols-12 gap-2 text-[11px] text-slate-500 font-semibold uppercase tracking-wider border-b pb-1 mb-1">
+                        <div className="col-span-2">Anno</div>
+                        <div className="col-span-5">Reddito (con grafico)</div>
+                        <div className="col-span-2 text-right">Reddito</div>
+                        <div className="col-span-2 text-right">Contributi</div>
+                        <div className="col-span-1">Cassa</div>
+                    </div>
+                    {sorted.map((r, i) => {
+                        const widthPct = ((r.reddito || 0) / maxRed) * 100;
+                        const isAbove = (r.reddito || 0) > mediaRed;
+                        return (
+                            <div key={`${r.anno}-${i}`} className="grid grid-cols-12 gap-2 items-center text-sm py-1 hover:bg-slate-50 rounded">
+                                <div className="col-span-2 font-bold text-slate-900 text-base">{r.anno || "—"}</div>
+                                <div className="col-span-5 h-6 bg-slate-100 rounded overflow-hidden relative">
+                                    <div
+                                        className={`h-full rounded transition-all ${isAbove ? "bg-emerald-500" : "bg-sky-400"}`}
+                                        style={{ width: `${widthPct}%` }}
+                                    />
+                                </div>
+                                <div className="col-span-2 text-right num font-semibold text-emerald-700 tabular-nums">{fmtEur(r.reddito)}</div>
+                                <div className="col-span-2 text-right num text-amber-700 text-xs tabular-nums">{fmtEur(r.contributi)}</div>
+                                <div className="col-span-1 text-[10px] text-slate-500 truncate" title={r.cassa}>{r.cassa || "—"}</div>
+                            </div>
+                        );
+                    })}
+                    <div className="text-[10px] text-slate-400 italic mt-3 border-t pt-2 flex gap-3">
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded"></span> Sopra la media</span>
+                        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-sky-400 rounded"></span> Sotto la media</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Vista MODIFICA (input fields) */}
+            {editMode && canEdit && (
+                <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-2 text-[11px] text-slate-500 font-semibold uppercase tracking-wider border-b pb-1">
+                        <div className="col-span-2">Anno</div>
+                        <div className="col-span-4">Reddito €</div>
+                        <div className="col-span-3">Contributi €</div>
+                        <div className="col-span-2">Cassa</div>
+                        <div className="col-span-1"></div>
+                    </div>
+                    {sorted.map((r) => {
+                        const realIdx = getRealIdx(r);
+                        return (
+                            <div key={realIdx} className="grid grid-cols-12 gap-2 items-center">
+                                <div className="col-span-2"><Input type="number" value={r.anno || ""} onChange={(e) => onUpdate(realIdx, { anno: parseInt(e.target.value) || 0 })} className="h-8 num text-base font-semibold" /></div>
+                                <div className="col-span-4"><Input type="number" value={r.reddito || 0} onChange={(e) => onUpdate(realIdx, { reddito: parseFloat(e.target.value) || 0 })} className="h-8 num" /></div>
+                                <div className="col-span-3"><Input type="number" value={r.contributi || 0} onChange={(e) => onUpdate(realIdx, { contributi: parseFloat(e.target.value) || 0 })} className="h-8 num" /></div>
+                                <div className="col-span-2"><Input value={r.cassa || ""} onChange={(e) => onUpdate(realIdx, { cassa: e.target.value })} className="h-8 text-xs" /></div>
+                                <div className="col-span-1">
+                                    <Button size="sm" variant="ghost" onClick={() => onRemove(realIdx)}>
+                                        <Trash2 size={12} className="text-rose-600" />
+                                    </Button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </>
     );
 }
 
