@@ -2726,28 +2726,30 @@ async def _compute_brogliaccio(data_giorno: str):
             "totale_periodo": round(imp_prec + imp_giornata, 2),
         })
 
-    # 4) KPI di periodo (cumulativi)
-    entr_agg = await db.movimenti.aggregate([
-        {"$match": {"tipo": "entrata"}},
-        {"$group": {"_id": "$categoria", "tot": {"$sum": "$importo"}}},
-    ]).to_list(50)
-    usc_agg = await db.movimenti.aggregate([
-        {"$match": {"tipo": "uscita"}},
-        {"$group": {"_id": "$categoria", "tot": {"$sum": "$importo"}}},
-    ]).to_list(50)
-    sum_entr = sum(x["tot"] for x in entr_agg)
-    sum_usc = sum(x["tot"] for x in usc_agg)
-    by_cat_entr = {x["_id"]: x["tot"] for x in entr_agg}
-    by_cat_usc = {x["_id"]: x["tot"] for x in usc_agg}
+    # 4) KPI di giornata (coerenti con il brogliaccio: solo il giorno corrente)
+    daily_entrate = sum(m["importo"] for m in movs if m["tipo"] == "entrata")
+    daily_uscite_by_cat: dict = {}
+    for m in movs:
+        if m["tipo"] == "uscita":
+            daily_uscite_by_cat[m["categoria"]] = daily_uscite_by_cat.get(m["categoria"], 0) + m["importo"]
+    daily_entrate_by_cat: dict = {}
+    for m in movs:
+        if m["tipo"] == "entrata":
+            daily_entrate_by_cat[m["categoria"]] = daily_entrate_by_cat.get(m["categoria"], 0) + m["importo"]
+
+    # spese = uscite NON provvigioni / NON pagamento_compagnia / NON sconto_cliente
+    spese_other = sum(v for k, v in daily_uscite_by_cat.items()
+                      if k not in ("provvigioni", "pagamento_compagnia", "sconto_cliente"))
 
     riepilogo_kpi = {
-        "entrate": round(sum_entr, 2),
-        "provvigioni": round(by_cat_usc.get("provvigioni", 0), 2),
+        "entrate": round(daily_entrate, 2),
+        "provvigioni": round(daily_uscite_by_cat.get("provvigioni", 0), 2),
         "crediti": round(sum(r["crediti"] for r in righe), 2),
-        "rimesse": round(by_cat_usc.get("pagamento_compagnia", 0), 2),
-        "sconti": round(by_cat_usc.get("sconto_cliente", 0), 2),
-        "spese": round(sum_usc, 2),
-        "saldo_cassa": round(sum_entr - sum_usc, 2),
+        "rimesse": round(daily_uscite_by_cat.get("pagamento_compagnia", 0), 2),
+        "sconti": round(daily_uscite_by_cat.get("sconto_cliente", 0)
+                        + daily_entrate_by_cat.get("sconto_cliente", 0), 2),
+        "spese": round(spese_other, 2),
+        "saldo_cassa": round(daily_entrate - sum(daily_uscite_by_cat.values()), 2),
     }
 
     # 5) Chiusura?
@@ -2858,12 +2860,12 @@ async def chiudi_giorno(
     except Exception as e:
         raise HTTPException(503, f"Errore salvataggio PDF: {e}")
 
-    # marca movimenti come chiusi
+    # 1) salva chiusura, 2) marca movimenti. Se 2 fallisce, almeno chiusura è ok.
+    await db.chiusure_giorno.insert_one(chiusura.model_dump())
     await db.movimenti.update_many(
         {"data_movimento": data_giorno},
         {"$set": {"chiusura_id": chiusura.id, "updated_at": _now_iso()}},
     )
-    await db.chiusure_giorno.insert_one(chiusura.model_dump())
     await log_attivita(user, "chiusura_giorno", "contabilita", chiusura.id,
                        f"Chiusura brogliaccio {data_giorno} ({len(payload['righe'])} movimenti)")
 

@@ -11,8 +11,24 @@ UI italiano, Shadcn/Tailwind.
 
 ### Implementato — Sessione corrente (2026-06-23 fork 3)
 
-#### Backend (nuove API)
-- **Allegati su Movimenti Contabili e Titoli**: il modello `Allegato` ora accetta `entita_tipo="titolo"` (oltre a "movimento" già esistente). Endpoint generico `POST /api/allegati?entita_tipo=movimento|titolo&entita_id=...` (multipart upload, max 25MB). `GET /api/allegati`, `GET /api/allegati/{aid}/download`, `DELETE /api/allegati/{aid}`. Le liste `/contabilita/prima-nota`, `/contabilita/movimenti` e `/titoli` ora restituiscono `allegati_count` per ogni record.
+#### Brogliaccio Prima Nota (replica facsimile)
+- **Nuovo modulo PDF** `/app/backend/pdf_brogliaccio.py` - landscape A4, page 1 tabella con colonne dinamiche (Descrizione/Totale/Provv/Saldo/Crediti/Spese + colonna per ogni Conto Cassa attivo), page 2 RIEPILOGO CONTI (Imp.Precedente/Imp.Giornata/Totale Periodo) e KPI bottom (ENTRATE/PROVVIGIONI/CREDITI/RIMESSE/SCONTI/SPESE/SALDO CASSA).
+- **Endpoint backend**: `GET /api/contabilita/brogliaccio?data=YYYY-MM-DD` calcola in tempo reale tutti i totali; `GET /api/contabilita/brogliaccio/stampa` ritorna il PDF. Colonne conti **generate dinamicamente** da `conti_cassa.attivo=true` (aggiungere una banca in Librerie → appare automaticamente).
+- **KPI giornalieri** (coerenti con il totale giornata): Saldo Cassa = somma entrate − somma uscite del giorno.
+- **Frontend `BrogliaccioTab.jsx`** in `/contabilita`: tab di default, date picker + Oggi shortcut, banner stato chiusura, tabella scrollabile, riga gialla TOTALE GIORNATA, riepilogo conti, 7 KPI cards.
+
+#### Chiusura giornaliera + invio commercialista
+- **Nuovo modello** `ChiusuraGiorno` (data, closed_by, riepilogo snapshot, pdf_storage_path, email_inviata_a/at, riaperta_at/by/motivo).
+- **Endpoints**: `POST /api/contabilita/chiusura-giorno` (chiude + salva snapshot PDF in object storage + opzionale invio email), `POST .../{id}/invia` (invia email), `POST .../{id}/riapri` (admin only, richiede motivo), `GET /api/contabilita/chiusure-giorno` (storico), `GET /api/contabilita/chiusura-giorno/{id}/pdf` (scarica snapshot).
+- **Lock movimenti chiusi**: PUT/DELETE su movimento con `chiusura_id` ritorna 400 con messaggio chiaro.
+- **SMTP commercialista**: nuovi campi su `AziendaConfig` (`email_commercialista`, `nome_commercialista`, `invio_automatico_chiusura`, `smtp_host/port/user/password/from/use_tls`). UI in **Librerie → Azienda** con due sezioni dedicate (Commercialista + SMTP).
+- **Invio email**: usa `smtplib` con SSL/STARTTLS, allega PDF al messaggio. Se SMTP/email non configurati, ritorna `{ok:false, errore:"..."}` senza eccezioni.
+
+#### Modelli estesi
+- `MovimentoContabile` ora ha `quota_provvigione`, `quota_saldo`, `quota_credito`, `quota_spesa`, `quota_sconto`, `chiusura_id` per supportare il brogliaccio.
+
+#### Allegati su Movimenti Contabili e Titoli
+- Il modello `Allegato` ora accetta `entita_tipo="titolo"` (oltre a "movimento" già esistente). Endpoint generico `POST /api/allegati?entita_tipo=movimento|titolo&entita_id=...` (multipart upload, max 25MB). `GET /api/allegati`, `GET /api/allegati/{aid}/download`, `DELETE /api/allegati/{aid}`. Le liste `/contabilita/prima-nota`, `/contabilita/movimenti` e `/titoli` ora restituiscono `allegati_count` per ogni record.
 - **Voci manuali Estratto Conto Collaboratori**: nuovo modello `VoceManualeCollab` (bonus positivi / trattenute negative). Endpoints `GET/POST /api/collaboratori/{cid}/voci-manuali` e `DELETE .../{vid}`. Aggiornato `estratto-provvigioni` con totali `voci_manuali_da_pagare` e netto includente le voci. Aggiornato `paga-provvigioni` per pagare anche voci manuali; al pagamento le voci sono marcate `pagata=true` con `pagamento_id`.
 - **ACL collaboratori**: il ruolo `collaboratore` può accedere solo al proprio `cid` su `estratto-provvigioni`, `voci-manuali`, `paga-provvigioni` (403 altrimenti).
 - **Relazioni familiari estese**: `POST/PATCH /api/anagrafiche/{aid}/relazioni` accettano `lavoratore` (per coniuge), `a_carico` (coniuge/figlio), `handicap` (figlio). `GET /anagrafiche/{aid}.relazioni_risolte` espone i tre attributi.
