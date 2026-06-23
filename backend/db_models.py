@@ -737,6 +737,11 @@ class AnalisiCliente(BaseDoc):
     # --- 5. Pensione - storico redditi e periodi (override del calcolo automatico) ---
     storico_redditi: List[RedditoStoricoItem] = Field(default_factory=list)
     periodi_contributivi: List[PeriodoContributivoItem] = Field(default_factory=list)
+    # Archivio estratti conto INPS caricati (uno per anno, ma anche più)
+    estratti_conto_inps: List[dict] = Field(default_factory=list)
+    # ^ [{url, storage_path, nome_file, mime, size_kb, data_caricamento,
+    #     anno_riferimento, totale_settimane, totale_versato, montante_stimato,
+    #     caricato_da}]
 
     # --- Snapshot risultati (calcolati on-demand) ---
     ultimo_calcolo: Optional[dict] = None

@@ -2852,6 +2852,162 @@ async def pdf_progetto_azzob(aid: str, user=Depends(current_user)):
     )
 
 
+@api.post("/anagrafiche/{aid}/analisi/upload-estratto-inps")
+async def upload_estratto_inps(
+    aid: str,
+    file: UploadFile = File(...),
+    anno_riferimento: Optional[int] = Form(None),
+    sostituisci_storico: bool = Form(False),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Carica un estratto contributivo INPS (PDF), lo parsa, lo salva nello storage
+    e popola/aggiunge i dati nell'analisi cliente.
+
+    - sostituisci_storico=False (default): MERGE periodi/redditi nuovi che mancano
+    - sostituisci_storico=True: sostituisce integralmente storico_redditi e
+      periodi_contributivi con quelli appena letti
+    """
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    contents = await file.read()
+    if len(contents) > 15 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 15 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "") or "application/pdf"
+
+    text = ""
+    if ct == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
+        try:
+            import pdfplumber
+            with pdfplumber.open(_io.BytesIO(contents)) as pdf:
+                text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+        except Exception as e:
+            raise HTTPException(400, f"Impossibile leggere il PDF: {e}")
+    else:
+        try:
+            text = contents.decode("utf-8", errors="ignore")
+        except Exception:
+            text = contents.decode("latin-1", errors="ignore")
+
+    parsed = inps_calculator.parse_estratto_conto_inps(text)
+
+    ext = (file.filename or "estratto.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    storage_path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/estratti_inps/{_uid()}.{ext}"
+    file_url = None
+    try:
+        res = obj_storage.put_object(storage_path, contents, ct)
+        file_url = f"/api/storage/{res['path']}"
+        storage_path = res["path"]
+    except Exception as e:
+        logger.error("Errore salvataggio estratto INPS: %s", e)
+
+    if not anno_riferimento and parsed.get("storico_redditi"):
+        anno_riferimento = max((r["anno"] for r in parsed["storico_redditi"]), default=None)
+
+    ac = await _ensure_analisi(aid)
+    update = {"updated_at": _now_iso()}
+
+    estratto_entry = {
+        "id": _uid(),
+        "url": file_url,
+        "storage_path": storage_path,
+        "nome_file": file.filename,
+        "mime": ct,
+        "size_kb": round(len(contents) / 1024, 1),
+        "data_caricamento": _now_iso(),
+        "anno_riferimento": anno_riferimento,
+        "totale_settimane": parsed.get("settimane_contributive", 0),
+        "totale_versato": parsed.get("totale_versato", 0),
+        "totale_retribuzioni": parsed.get("totale_retribuzioni", 0),
+        "montante_stimato": parsed.get("montante_stimato", 0),
+        "anni_stimati": parsed.get("anni_stimati", 0),
+        "caricato_da": user.get("id"),
+        "caricato_da_nome": user.get("name") or user.get("email"),
+    }
+    estratti = list(ac.get("estratti_conto_inps") or []) + [estratto_entry]
+    update["estratti_conto_inps"] = estratti
+
+    if sostituisci_storico:
+        update["storico_redditi"] = parsed.get("storico_redditi", [])
+        update["periodi_contributivi"] = parsed.get("periodi_contributivi", [])
+    else:
+        existing_storico = {(r.get("anno"), r.get("cassa", "")): r for r in (ac.get("storico_redditi") or [])}
+        for nuovo in parsed.get("storico_redditi") or []:
+            key = (nuovo["anno"], nuovo.get("cassa", ""))
+            existing_storico[key] = nuovo
+        update["storico_redditi"] = list(existing_storico.values())
+
+        existing_periodi = {(p.get("inizio_periodo"), p.get("fondo")): p
+                            for p in (ac.get("periodi_contributivi") or [])}
+        for nuovo in parsed.get("periodi_contributivi") or []:
+            key = (nuovo["inizio_periodo"], nuovo["fondo"])
+            existing_periodi[key] = nuovo
+        update["periodi_contributivi"] = list(existing_periodi.values())
+
+    if parsed.get("storico_redditi"):
+        ultimo = sorted(parsed["storico_redditi"], key=lambda x: x["anno"], reverse=True)[0]
+        if ultimo.get("reddito"):
+            update["reddito_lordo_annuo"] = ultimo["reddito"]
+
+    await db.analisi_cliente.update_one({"anagrafica_id": aid}, {"$set": update})
+
+    ana_upd = {
+        "settimane_contributive": parsed.get("settimane_contributive", 0),
+        "data_inizio_contribuzione": parsed.get("data_inizio_contribuzione"),
+        "retribuzione_media_annua": parsed.get("retribuzione_media_annua"),
+        "updated_at": _now_iso(),
+    }
+    ana_upd = {k: v for k, v in ana_upd.items() if v}
+    if ana_upd:
+        await db.anagrafiche.update_one({"id": aid}, {"$set": ana_upd})
+
+    await log_attivita(user, "upload_estratto_inps", "anagrafica", aid,
+                       descrizione=f"Estratto INPS: {parsed.get('settimane_contributive', 0)} sett., "
+                                   f"{len(parsed.get('storico_redditi', []))} anni di redditi.")
+
+    return {
+        "estratto": estratto_entry,
+        "parsed": {
+            "settimane_contributive": parsed.get("settimane_contributive", 0),
+            "anni_stimati": parsed.get("anni_stimati", 0),
+            "righe_contributive": parsed.get("righe_contributive", 0),
+            "totale_retribuzioni": parsed.get("totale_retribuzioni", 0),
+            "totale_versato": parsed.get("totale_versato", 0),
+            "montante_stimato": parsed.get("montante_stimato", 0),
+            "storico_redditi": parsed.get("storico_redditi", [])[:50],
+            "periodi_contributivi_count": len(parsed.get("periodi_contributivi", [])),
+        },
+        "warning": parsed.get("warning"),
+    }
+
+
+@api.delete("/anagrafiche/{aid}/analisi/estratto-inps/{estratto_id}")
+async def delete_estratto_inps(
+    aid: str, estratto_id: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Rimuove un estratto INPS dall'archivio (file + entry)."""
+    ac = await _ensure_analisi(aid)
+    estratti = ac.get("estratti_conto_inps") or []
+    target = next((e for e in estratti if e.get("id") == estratto_id), None)
+    if not target:
+        raise HTTPException(404, "Estratto non trovato")
+    try:
+        if target.get("storage_path"):
+            obj_storage.delete_object(target["storage_path"])
+    except Exception:
+        pass
+    new_estratti = [e for e in estratti if e.get("id") != estratto_id]
+    await db.analisi_cliente.update_one(
+        {"anagrafica_id": aid},
+        {"$set": {"estratti_conto_inps": new_estratti, "updated_at": _now_iso()}},
+    )
+    await log_attivita(user, "delete_estratto_inps", "anagrafica", aid,
+                       descrizione=f"Estratto INPS {estratto_id} rimosso")
+    return {"ok": True, "remaining": len(new_estratti)}
+
+
+
 # ============================================================
 # PIPELINE (kanban-like data)
 # ============================================================

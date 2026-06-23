@@ -149,9 +149,9 @@ def calcola_pensione(
 def parse_estratto_conto_inps(testo: str) -> dict:
     """Parser estratti contributivi INPS in testo libero.
 
-    Estrae: cognome/nome, codice fiscale, data nascita, comune nascita, provincia nascita,
-    settimane contributive totali, data inizio contribuzione, retribuzione media, anni stimati,
-    indirizzo residenza.
+    Estrae: anagrafica, settimane/giorni totali, retribuzione media, anni stimati,
+    PERIODI contributivi dettagliati, STORICO redditi raggruppato per anno,
+    TOTALI versati e montante stimato.
     """
     import re
 
@@ -161,10 +161,14 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         "retribuzione_media_annua": 0.0,
         "anni_stimati": 0,
         "righe_contributive": 0,
+        "periodi_contributivi": [],   # [{fondo, inizio_periodo, fine_periodo, settimane, retribuzione, contributi}]
+        "storico_redditi": [],         # [{anno, reddito, contributi, cassa}]
+        "totale_versato": 0.0,
+        "totale_retribuzioni": 0.0,
+        "montante_stimato": 0.0,
     }
 
     # === Header anagrafico ===
-    # "Estratto Conto Previdenziale COGNOME NOME"
     m = re.search(r"Estratto\s+Conto\s+Previdenziale\s+([A-ZÀ-Ÿ' ]+?)(?:\n|\s+nato)", testo)
     if m:
         full = m.group(1).strip()
@@ -175,24 +179,20 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         else:
             result["cognome"] = full
 
-    # Codice fiscale (16 caratteri pattern italiano)
     m = re.search(r"\b([A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z])\b", testo)
     if m:
         result["codice_fiscale"] = m.group(1)
 
-    # "nato a CITTÀ (PROV)"
     m = re.search(r"nato\s+a\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)", testo, re.IGNORECASE)
     if m:
         result["comune_nascita"] = m.group(1).strip().title()
         result["provincia_nascita"] = m.group(2)
 
-    # "il 30/11/1983"
     m = re.search(r"\bil\s+(\d{2}/\d{2}/\d{4})\b", testo)
     if m:
         gg, mm, aa = m.group(1).split("/")
         result["data_nascita"] = f"{aa}-{mm}-{gg}"
 
-    # Sesso dal CF (settima posizione)
     if result.get("codice_fiscale"):
         try:
             mese_cf = result["codice_fiscale"][9:11]
@@ -200,7 +200,6 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         except Exception:
             pass
 
-    # "residente in INDIRIZZO" su due righe (indirizzo \n CAP comune)
     m = re.search(r"residente\s+in\s+(.+?)\n\s*(\d{5})\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)",
                   testo, re.IGNORECASE)
     if m:
@@ -210,40 +209,64 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         result["provincia"] = m.group(4)
 
     # === Periodi contributivi ===
-    # Pattern righe: "01/01/2000 31/12/2000 ... sett. 52 ..." oppure "giorni 22"
     settimane_tot = 0
     giorni_tot = 0
     retribuzioni = []
     primo_inizio = None
 
-    # cattura ogni riga "DD/MM/YYYY DD/MM/YYYY ... (sett.|giorni) N val ..."
+    # cattura "DD/MM/YYYY DD/MM/YYYY ... (sett.|giorni) N val retrib contrib?"
     riga_re = re.compile(
-        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+.+?(sett\.|giorni)\s+(\d+)\s+([\d,.]+)\s+([\d.,]+)",
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+(.+?)(sett\.|giorni)\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)(?:\s+([\d.,]+))?",
     )
+    redditi_per_anno: dict = {}  # {anno: {reddito, contributi, settimane}}
+
     for m in riga_re.finditer(testo):
-        dal, _al, unita, qty, _utili, retrib = m.groups()
+        dal, al, fondo_raw, unita, qty, _utili, retrib, contrib = m.groups()
         try:
             n = int(qty)
             if unita == "sett.":
                 settimane_tot += n
+                sett_periodo = n
             else:
                 giorni_tot += n
-            r = float(retrib.replace(".", "").replace(",", "."))
+                sett_periodo = n // 7
+            r = _parse_num(retrib)
+            c = _parse_num(contrib) if contrib else 0.0
             if r > 0:
                 retribuzioni.append(r)
-            # data inizio = data più vecchia
-            gg, mm, aa = dal.split("/")
-            iso = f"{aa}-{mm}-{gg}"
-            if primo_inizio is None or iso < primo_inizio:
-                primo_inizio = iso
+
+            gg_d, mm_d, aa_d = dal.split("/")
+            iso_dal = f"{aa_d}-{mm_d}-{gg_d}"
+            gg_a, mm_a, aa_a = al.split("/")
+            iso_al = f"{aa_a}-{mm_a}-{gg_a}"
+
+            if primo_inizio is None or iso_dal < primo_inizio:
+                primo_inizio = iso_dal
+
+            fondo = (fondo_raw or "").strip()
+            # Rimuovi numeri/spazi superflui dal fondo
+            fondo = re.sub(r"\s+", " ", fondo).strip() or "Lavoratore dipendente"
+
+            result["periodi_contributivi"].append({
+                "fondo": fondo[:80],
+                "inizio_periodo": iso_dal,
+                "fine_periodo": iso_al,
+                "settimane": sett_periodo,
+                "retribuzione": round(r, 2),
+                "contributi": round(c, 2),
+                "riscattato": False,
+            })
+
+            # Aggrega per anno
+            anno = aa_d
+            slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": fondo[:40]})
+            slot["reddito"] += r
+            slot["contributi"] += c
             result["righe_contributive"] += 1
         except Exception:
             continue
 
-    # somma anche giorni → settimane (7gg ≈ 1 sett)
-    settimane_da_giorni = giorni_tot // 7
-    settimane_tot += settimane_da_giorni
-
+    settimane_tot += giorni_tot // 7
     result["settimane_contributive"] = settimane_tot
     result["giorni_contributivi"] = giorni_tot
     result["anni_stimati"] = settimane_tot // 52 if settimane_tot else 0
@@ -252,7 +275,43 @@ def parse_estratto_conto_inps(testo: str) -> dict:
     if primo_inizio:
         result["data_inizio_contribuzione"] = primo_inizio
 
+    # === Storico redditi annuale (ordinato decrescente) ===
+    storico = []
+    for anno, dati in sorted(redditi_per_anno.items(), reverse=True):
+        storico.append({
+            "anno": int(anno),
+            "reddito": round(dati["reddito"], 2),
+            "contributi": round(dati["contributi"], 2),
+            "cassa": dati["cassa"],
+        })
+    result["storico_redditi"] = storico
+
+    # === Totali ===
+    result["totale_retribuzioni"] = round(sum(retribuzioni), 2)
+    result["totale_versato"] = round(sum(p["contributi"] for p in result["periodi_contributivi"]), 2)
+    # Montante stimato: 33% medio della retribuzione totale (aliquota commerciante)
+    if result["totale_versato"] > 0:
+        result["montante_stimato"] = result["totale_versato"]
+    else:
+        result["montante_stimato"] = round(result["totale_retribuzioni"] * 0.33, 2)
+
     return result
+
+
+def _parse_num(s: str) -> float:
+    """Parser di numeri italiani (es. '12.345,67' o '12345.67' o '12345,67')."""
+    if not s:
+        return 0.0
+    s = s.strip()
+    # Caso 1.234,56 (italiano) -> rimuovi '.', sostituisci ',' con '.'
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
 
 
 def parse_estratto_contributivo(pdf_bytes: bytes) -> dict:

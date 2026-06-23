@@ -77,6 +77,21 @@ def get_object(path: str) -> tuple[bytes, str]:
     return r.content, r.headers.get("Content-Type", "application/octet-stream")
 
 
+def delete_object(path: str) -> bool:
+    key = init_storage()
+    if not key:
+        return False
+    try:
+        r = requests.delete(
+            f"{STORAGE_URL}/objects/{path}",
+            headers={"X-Storage-Key": key}, timeout=30,
+        )
+        return r.status_code in (200, 204, 404)
+    except Exception:
+        return False
+
+
+
 MIME_TYPES = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
     "gif": "image/gif", "webp": "image/webp", "pdf": "application/pdf",

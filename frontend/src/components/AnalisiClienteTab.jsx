@@ -2,7 +2,7 @@
  * Tab "Analisi Cliente" completa - 7 sezioni ispirate al modello SatorCRM.
  * Sostituisce l'ex tab "Pensione INPS".
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { Card } from "@/components/ui/card";
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import {
     Wallet, Home, Target, Calculator, Briefcase, Shield, Scale,
-    FileText, Save, Plus, Trash2, TrendingDown, TrendingUp,
+    FileText, Save, Plus, Trash2, TrendingDown, TrendingUp, Upload,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Loading } from "@/components/Shared";
@@ -546,6 +546,9 @@ function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, dirty
                 </div>
             )}
 
+            {/* Archivio estratti INPS */}
+            <ArchivioEstrattiInps anagrafica_id={anagrafica_id} ac={ac} canEdit={canEdit} onUpdate={() => { onReload?.(); calcola(); }} />
+
             {/* Carriera contributiva (periodi) */}
             <Card className="p-5 border-slate-200">
                 <SectionHeader title="Carriera contributiva" icon={<Briefcase size={16} />} count={ac.periodi_contributivi?.length || 0}
@@ -936,3 +939,157 @@ function Scenario({ scen, titolo, color }) {
         </Card>
     );
 }
+
+// ============== ARCHIVIO ESTRATTI CONTO INPS ==============
+function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
+    const [uploading, setUploading] = useState(false);
+    const [sostituisci, setSostituisci] = useState(false);
+    const [lastResult, setLastResult] = useState(null);
+    const fileRef = useRef(null);
+
+    const estratti = (ac?.estratti_conto_inps || []).slice().sort(
+        (a, b) => (b.anno_riferimento || 0) - (a.anno_riferimento || 0),
+    );
+
+    const handleFile = async (e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        const fd = new FormData();
+        fd.append("file", f);
+        fd.append("sostituisci_storico", sostituisci ? "true" : "false");
+        setUploading(true);
+        try {
+            const r = await api.post(
+                `/anagrafiche/${anagrafica_id}/analisi/upload-estratto-inps`,
+                fd,
+                { headers: { "Content-Type": "multipart/form-data" } },
+            );
+            setLastResult(r.data);
+            const sett = r.data?.parsed?.settimane_contributive || 0;
+            const anni = r.data?.parsed?.storico_redditi?.length || 0;
+            const peri = r.data?.parsed?.periodi_contributivi_count || 0;
+            toast.success(`Estratto caricato: ${sett} sett., ${anni} anni di redditi, ${peri} periodi.`);
+            onUpdate?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore upload");
+        } finally {
+            setUploading(false);
+            if (fileRef.current) fileRef.current.value = "";
+        }
+    };
+
+    const elimina = async (id, nome) => {
+        if (!window.confirm(`Eliminare l'estratto "${nome}"? Il file verrà rimosso (i dati nello storico restano).`)) return;
+        try {
+            await api.delete(`/anagrafiche/${anagrafica_id}/analisi/estratto-inps/${id}`);
+            toast.success("Estratto rimosso");
+            onUpdate?.();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore");
+        }
+    };
+
+    return (
+        <Card className="p-5 border-sky-200 bg-sky-50/20" data-testid="archivio-inps">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="font-semibold text-slate-900 flex items-center gap-2">
+                    <FileText size={16} className="text-sky-600" /> Archivio Estratto Conto INPS
+                    <span className="text-xs text-slate-500 font-normal">({estratti.length})</span>
+                </div>
+                {canEdit && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <label className="flex items-center gap-1 text-xs text-slate-700 cursor-pointer">
+                            <input type="checkbox" checked={sostituisci} onChange={(e) => setSostituisci(e.target.checked)} />
+                            Sostituisci storico esistente
+                        </label>
+                        <input
+                            ref={fileRef} type="file" accept=".pdf,application/pdf"
+                            onChange={handleFile} className="hidden"
+                            data-testid="inps-file-input"
+                        />
+                        <Button
+                            size="sm"
+                            onClick={() => fileRef.current?.click()}
+                            disabled={uploading}
+                            className="bg-sky-700 hover:bg-sky-800"
+                            data-testid="inps-upload-btn"
+                        >
+                            <Upload size={13} className="mr-1" />
+                            {uploading ? "Caricamento..." : "Carica estratto PDF"}
+                        </Button>
+                    </div>
+                )}
+            </div>
+
+            <div className="text-xs text-slate-600 bg-white border border-slate-200 rounded p-2 mb-3">
+                Carica il PDF dell&apos;estratto contributivo (es. &laquo;Pensione_Storico_Redditi.pdf&raquo; scaricato dal portale INPS).
+                I dati verranno automaticamente estratti: <strong>periodi</strong>, <strong>storico redditi per anno</strong>,
+                <strong> settimane totali</strong>, <strong>contributi versati</strong>. In genere se ne carica uno all&apos;anno
+                ma puoi caricarne più di uno (storico annuale).
+            </div>
+
+            {/* Last upload feedback */}
+            {lastResult && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded p-3 mb-3 text-xs">
+                    <div className="font-semibold text-emerald-900 mb-1">✓ Ultimo caricamento:</div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <Kpi label="Settimane" value={lastResult.parsed?.settimane_contributive || 0} color="emerald" />
+                        <Kpi label="Anni stimati" value={lastResult.parsed?.anni_stimati || 0} color="sky" />
+                        <Kpi label="Totale versato" value={fmtEur(lastResult.parsed?.totale_versato || 0)} color="amber" />
+                        <Kpi label="Montante stimato" value={fmtEur(lastResult.parsed?.montante_stimato || 0)} color="emerald" big />
+                    </div>
+                </div>
+            )}
+
+            {/* Lista estratti caricati */}
+            {estratti.length === 0 ? (
+                <div className="text-sm text-slate-400 italic text-center py-4">
+                    Nessun estratto INPS caricato. Trascina o seleziona il PDF per popolare automaticamente lo storico redditi.
+                </div>
+            ) : (
+                <table className="w-full text-sm">
+                    <thead><tr className="text-xs text-slate-500 border-b">
+                        <th className="text-left py-1">Anno rif.</th>
+                        <th className="text-left">Nome file</th>
+                        <th className="text-left">Caricato il</th>
+                        <th className="text-right">Settimane</th>
+                        <th className="text-right">Versato</th>
+                        <th className="text-right">Montante</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {estratti.map((e) => (
+                            <tr key={e.id} className="hover:bg-white">
+                                <td className="py-1.5 font-semibold">{e.anno_riferimento || "—"}</td>
+                                <td>
+                                    {e.url ? (
+                                        <a href={e.url} target="_blank" rel="noopener noreferrer"
+                                            className="text-sky-700 hover:underline flex items-center gap-1">
+                                            <FileText size={11} /> {e.nome_file}
+                                        </a>
+                                    ) : (e.nome_file || "—")}
+                                    <span className="text-[10px] text-slate-400 ml-2">{e.size_kb} KB</span>
+                                </td>
+                                <td className="text-xs text-slate-500">
+                                    {e.data_caricamento ? new Date(e.data_caricamento).toLocaleDateString("it-IT") : "—"}
+                                    {e.caricato_da_nome && <span className="text-slate-400"> · {e.caricato_da_nome}</span>}
+                                </td>
+                                <td className="text-right num">{e.totale_settimane || 0}</td>
+                                <td className="text-right num text-amber-700">{fmtEur(e.totale_versato || 0)}</td>
+                                <td className="text-right num text-emerald-700 font-semibold">{fmtEur(e.montante_stimato || 0)}</td>
+                                <td className="text-right">
+                                    {canEdit && (
+                                        <Button size="sm" variant="ghost" onClick={() => elimina(e.id, e.nome_file)} title="Elimina">
+                                            <Trash2 size={12} className="text-rose-600" />
+                                        </Button>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </Card>
+    );
+}
+
