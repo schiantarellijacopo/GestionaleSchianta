@@ -257,24 +257,59 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         gg, mm, aa = dmy.split("/")
         return f"{aa}-{mm}-{gg}"
 
-    # FORMATO 1 - INPS classico con settimane/giorni + retribuzione
+    # FORMATO 1 - INPS classico/reale: "DD/MM/YYYY DD/MM/YYYY <fondo> (sett.|mesi|giorni) N N,000 X.XXX,XX [AZIENDA]"
+    # Esempi reali:
+    #  "01/01/2020 31/12/2020 Titolare di impresa COM. mesi 12 12,000 78.965,04 SCHIANTARELLI MARCO ANDREA"
+    #  "01/06/2008 21/09/2008 Lavoro dipendente sett. 14 14,000 4.798,00 DITTA DEL SIMONE BRUNO"
+    #  "25/07/1984 31/12/1984 Servizio militare sett. 23 23,000"
     re_full = re.compile(
-        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+(.+?)(sett\.?|giorni)\s+(\d+)\s+(\d+)?\s*([\d.,]+)\s+([\d.,]+)?",
-        re.IGNORECASE,
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+([A-Za-zÀ-ÿ'\. ]+?)\s+(sett\.?|mesi|giorni)\s+(\d+)\s+([\d.,]+)(?:\s+([\d.,]+))?(?:\s+(.+?))?(?=\n|$)",
+        re.IGNORECASE | re.MULTILINE,
     )
     for m in re_full.finditer(testo):
-        dal, al, fondo_raw, unita, qty, _utili, retrib, contrib = m.groups()
+        dal, al, fondo_raw, unita, qty, _utili, retrib, _azienda = m.groups()
         try:
             n = int(qty)
-            sett = n if unita.lower().startswith("sett") else n // 7
-            if not unita.lower().startswith("sett"):
+            u = unita.lower().rstrip(".")
+            if u.startswith("sett"):
+                sett = n
+            elif u == "mesi":
+                sett = int(round(n * 52 / 12))   # mesi → settimane
+            else:  # giorni
+                sett = n // 7
                 giorni_tot += n
             fondo = re.sub(r"\s+", " ", (fondo_raw or "")).strip()
-            # taglia "fondo" se contiene numeri (errori di parse)
-            fondo = re.sub(r"\d+", "", fondo).strip() or "Lavoratore dipendente"
-            r = _parse_num(retrib)
-            c = _parse_num(contrib) if contrib else 0.0
-            _add_periodo(_to_iso(dal), _to_iso(al), fondo[:60], sett, r, c)
+            fondo = fondo[:80] or "Lavoratore dipendente"
+            r = _parse_num(retrib) if retrib else 0.0
+            # Filtro: retrib > 100k è probabile errore di parse (qty matchata male)
+            if r > 200000:
+                r = 0.0
+            _add_periodo(_to_iso(dal), _to_iso(al), fondo, sett, r, 0.0)
+        except Exception:
+            continue
+
+    # FORMATO 1b - Parasubordinati (anno-based, no date):
+    # "2013 2.000,00 ASSICURAZIONI ... Attivita' di collaborazione 400,00 20,00"
+    re_paras = re.compile(
+        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+([\d.]+,\d{2})\s+(.+?)\s+(Attivita['\s]*di\s+collaborazione|Collaborazione|Prestazione)\s+([\d.]+,\d{2})\s+([\d,]+)",
+        re.IGNORECASE,
+    )
+    for m in re_paras.finditer(testo):
+        anno, redd_raw, _committente, tipo, contrib_raw, _aliq = m.groups()
+        try:
+            r = _parse_num(redd_raw)
+            c = _parse_num(contrib_raw)
+            if r > 0 and 1000 <= r <= 500000:
+                # Aggiungi al storico
+                slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": "Gestione separata"})
+                slot["reddito"] += r
+                slot["contributi"] += c
+                slot["cassa"] = "Gestione separata"
+                retribuzioni.append(r)
+                # Periodo annuale stimato (apr-dic stima per "Attivita' di collaborazione")
+                dal_iso = f"{anno}-01-01"
+                al_iso = f"{anno}-12-31"
+                _add_periodo(dal_iso, al_iso, "Gestione separata", 52, r, c)
         except Exception:
             continue
 

@@ -578,8 +578,8 @@ function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, reloa
                         const realIdx = (ac.storico_redditi || []).findIndex(x => x === r);
                         return (
                             <div key={realIdx} className="grid grid-cols-12 gap-2 items-end">
-                                <div className="col-span-2"><Label className="text-xs">Anno</Label><Input type="number" value={r.anno || ""} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { anno: parseInt(e.target.value) || 0 })} className="h-8" /></div>
-                                <div className="col-span-5"><Label className="text-xs">Reddito €</Label><Input type="number" value={r.reddito || 0} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { reddito: parseFloat(e.target.value) || 0 })} className="h-8" /></div>
+                                <div className="col-span-3"><Label className="text-xs">Anno</Label><Input type="number" value={r.anno || ""} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { anno: parseInt(e.target.value) || 0 })} className="h-8" /></div>
+                                <div className="col-span-4"><Label className="text-xs">Reddito €</Label><Input type="number" value={r.reddito || 0} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { reddito: parseFloat(e.target.value) || 0 })} className="h-8" /></div>
                                 <div className="col-span-4"><Label className="text-xs">Contributi €</Label><Input type="number" value={r.contributi || 0} disabled={!canEdit} onChange={(e) => updateReddito(realIdx, { contributi: parseFloat(e.target.value) || 0 })} className="h-8" /></div>
                                 {canEdit && <Button size="sm" variant="ghost" onClick={() => removeReddito(realIdx)} className="col-span-1"><Trash2 size={12} className="text-rose-600" /></Button>}
                             </div>
