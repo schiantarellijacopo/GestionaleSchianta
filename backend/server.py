@@ -2957,6 +2957,11 @@ async def upload_estratto_inps(
         "retribuzione_media_annua": parsed.get("retribuzione_media_annua"),
         "updated_at": _now_iso(),
     }
+    # Aggiorna reddito_annuo_lordo dell'anagrafica con l'ultimo anno disponibile
+    if parsed.get("storico_redditi"):
+        ultimo = sorted(parsed["storico_redditi"], key=lambda x: x["anno"], reverse=True)[0]
+        if ultimo.get("reddito"):
+            ana_upd["reddito_annuo_lordo"] = ultimo["reddito"]
     ana_upd = {k: v for k, v in ana_upd.items() if v}
     if ana_upd:
         await db.anagrafiche.update_one({"id": aid}, {"$set": ana_upd})
