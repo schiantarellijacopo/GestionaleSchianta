@@ -139,7 +139,9 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                 await api.put(`/anagrafiche/${anagrafica_id}/consensi-privacy`, consensi);
             } catch (_e) { /* non bloccare la stampa */ }
         }
-        openPdf(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`);
+        // salva_archivio=true → il PDF viene salvato anche nel modulo documenti
+        await openPdf(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`, { salva_archivio: "true" });
+        onReload?.();
     };
 
     return (

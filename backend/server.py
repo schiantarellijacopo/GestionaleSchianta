@@ -1232,8 +1232,9 @@ async def delete_documento_anagrafica(aid: str, tipo: str,
     return {"ok": True}
 
 @api.get("/anagrafiche/{aid}/privacy/genera-pdf")
-async def genera_pdf_privacy(aid: str, user=Depends(current_user)):
-    """Genera PDF informativa privacy GDPR completa con checkbox consensi e firma."""
+async def genera_pdf_privacy(aid: str, salva_archivio: bool = False, user=Depends(current_user)):
+    """Genera PDF informativa privacy GDPR completa con checkbox consensi e firma.
+    Se salva_archivio=true, salva anche il PDF nello storage e in documenti.privacy_firmata."""
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
@@ -1241,6 +1242,41 @@ async def genera_pdf_privacy(aid: str, user=Depends(current_user)):
     import pdf_privacy
     pdf = pdf_privacy.genera_privacy_pdf(ana, cfg, dipendente_nome=user.get("name", ""))
     fname = f"privacy_{ana.get('codice_fiscale') or aid}.pdf"
+
+    if salva_archivio:
+        storage_path = (
+            f"{os.environ.get('APP_NAME', 'assicura')}/"
+            f"anagrafiche/{aid}/privacy/{_uid()}.pdf"
+        )
+        try:
+            res = obj_storage.put_object(storage_path, pdf, "application/pdf")
+            url_pdf = f"/api/storage/{res['path']}"
+            documenti = dict(ana.get("documenti") or {})
+            documenti["privacy_firmata"] = {
+                "url": url_pdf,
+                "storage_path": res["path"],
+                "nome_file": fname,
+                "size_kb": round(len(pdf) / 1024, 1),
+                "data_caricamento": _now_iso(),
+                "caricato_da_nome": user.get("name") or user.get("email"),
+                "tipo": "privacy_firmata",
+            }
+            await db.anagrafiche.update_one(
+                {"id": aid},
+                {"$set": {
+                    "documenti": documenti,
+                    "privacy_firmata_url": url_pdf,
+                    "privacy_firmata_il": _now_iso(),
+                    "consenso_privacy": True,
+                    "data_consenso_privacy": _now_iso()[:10],
+                    "updated_at": _now_iso(),
+                }},
+            )
+            await log_attivita(user, "privacy_firmata", "anagrafica", aid,
+                               descrizione="PDF privacy firmato e salvato in archivio")
+        except Exception as e:
+            logger.error("Errore salvataggio PDF privacy in archivio: %s", e)
+
     return StreamingResponse(
         _io.BytesIO(pdf),
         media_type="application/pdf",
