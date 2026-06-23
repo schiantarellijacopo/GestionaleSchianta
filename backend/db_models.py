@@ -743,6 +743,23 @@ class AnalisiCliente(BaseDoc):
     #     anno_riferimento, totale_settimane, totale_versato, montante_stimato,
     #     caricato_da}]
 
+    # --- 8. Trattativa A/B (non fai nulla vs ti affidi a me) ---
+    trattativa: dict = Field(default_factory=dict)
+    # Schema atteso: {
+    #   "scenario_a": {invalidita, importo_pensione, premorienza, responsabilita,
+    #                  perdita_beni, prima_data_pensionabile, versamento_fondo,
+    #                  risparmio_annuo, vantaggio_fiscale, reddito},
+    #   "scenario_b": {...stessi campi...},
+    #   "obiettivi": "testo libero",
+    #   "perdita_entrate": "testo libero",
+    #   "soglie_devastante": {trascurabile, basso, medio, alto, molto_alto}
+    # }
+
+    # --- 9. Piramide delle soluzioni ---
+    piramide_soluzioni: List[dict] = Field(default_factory=list)
+    # ^ [{id, categoria (Reddito|Premorienza|Invalidita|Responsabilita|Beni|Pensione|Risparmio),
+    #     titolo, capitale_assicurato, premio_annuo, durata_anni, compagnia, note, ordine}]
+
     # --- Snapshot risultati (calcolati on-demand) ---
     ultimo_calcolo: Optional[dict] = None
     ultimo_calcolo_data: Optional[str] = None

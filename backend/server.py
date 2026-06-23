@@ -2986,6 +2986,193 @@ async def upload_estratto_inps(
     }
 
 
+@api.post("/anagrafiche/{aid}/analisi/piramide/auto-popola")
+async def auto_popola_piramide(aid: str, user=Depends(current_user)):
+    """Pre-popola la piramide delle soluzioni con coperture suggerite calcolate
+    dai dati già presenti (scoperture pensionistiche, successione, patrimonio)."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    try:
+        scop = await calcola_scoperture_analisi(aid, user)
+    except Exception:
+        scop = {}
+    try:
+        patr = await get_patrimonio_riepilogo(aid, user)
+    except Exception:
+        patr = {}
+
+    suggerimenti = []
+    if scop.get("invalidita"):
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Invalidita",
+            "titolo": "Capitale Invalidità Permanente",
+            "capitale_assicurato": scop["invalidita"].get("capitale_da_assicurare", 0),
+            "premio_annuo": 0,
+            "durata_anni": scop.get("anni_a_70", 30),
+            "compagnia": "",
+            "note": f"Scopertura mensile: {scop['invalidita'].get('scopertura_mensile', 0)} €",
+            "ordine": 1,
+        })
+    if scop.get("inabilita"):
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Invalidita",
+            "titolo": "Inabilità totale (NA / LTC)",
+            "capitale_assicurato": scop["inabilita"].get("capitale_da_assicurare", 0),
+            "premio_annuo": 0,
+            "durata_anni": scop.get("anni_a_70", 30),
+            "compagnia": "",
+            "note": "Rendita vitalizia per non autosufficienza",
+            "ordine": 2,
+        })
+    if scop.get("superstiti"):
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Premorienza",
+            "titolo": "TCM Temporanea Caso Morte",
+            "capitale_assicurato": scop["superstiti"].get("capitale_da_assicurare", 0),
+            "premio_annuo": 0,
+            "durata_anni": 30,
+            "compagnia": "",
+            "note": "Capitale per famiglia + debiti residui",
+            "ordine": 3,
+        })
+    if scop.get("vecchiaia"):
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Pensione",
+            "titolo": "Fondo Pensione (integrazione)",
+            "capitale_assicurato": 0,
+            "premio_annuo": int(float(ac.get("capacita_risparmio_annuale") or 0) * 0.5),
+            "durata_anni": max(1, 67 - (await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "data_nascita": 1}) or {}).get("_eta", 30) if False else 30),
+            "compagnia": "",
+            "note": f"Scopertura mensile vecchiaia: {scop['vecchiaia'].get('scopertura_mensile', 0)} €",
+            "ordine": 4,
+        })
+    # Responsabilità (basato su patrimonio)
+    if patr.get("patrimonio_totale", 0) > 50000:
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Responsabilita",
+            "titolo": "RC Capofamiglia / Professionale",
+            "capitale_assicurato": 1000000,
+            "premio_annuo": 0,
+            "durata_anni": 1,
+            "compagnia": "",
+            "note": "Massimale standard 1 milione",
+            "ordine": 5,
+        })
+    # Perdita beni (basato su patrimonio immobiliare)
+    if patr.get("patrimonio_immobiliare", 0) > 0:
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Beni",
+            "titolo": "Polizza Casa (incendio/furto)",
+            "capitale_assicurato": patr.get("patrimonio_immobiliare", 0),
+            "premio_annuo": 0,
+            "durata_anni": 1,
+            "compagnia": "",
+            "note": "Sul valore commerciale immobili",
+            "ordine": 6,
+        })
+    if patr.get("patrimonio_aziendale", 0) > 0:
+        suggerimenti.append({
+            "id": _uid(),
+            "categoria": "Beni",
+            "titolo": "Polizza Azienda (Property + RC)",
+            "capitale_assicurato": patr.get("patrimonio_aziendale", 0),
+            "premio_annuo": 0,
+            "durata_anni": 1,
+            "compagnia": "",
+            "note": "Tutela attività commerciale/aziendale",
+            "ordine": 7,
+        })
+
+    await db.analisi_cliente.update_one(
+        {"anagrafica_id": aid},
+        {"$set": {"piramide_soluzioni": suggerimenti, "updated_at": _now_iso()}},
+    )
+    return {"piramide_soluzioni": suggerimenti, "count": len(suggerimenti)}
+
+
+@api.post("/anagrafiche/{aid}/analisi/trattativa/auto-popola")
+async def auto_popola_trattativa(aid: str, user=Depends(current_user)):
+    """Pre-popola la trattativa A/B (scenario "Non fai nulla" vs "Ti affidi a me")
+    usando i dati di scoperture, redditi e patrimonio già presenti."""
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    try:
+        scop = await calcola_scoperture_analisi(aid, user)
+    except Exception:
+        scop = {}
+    try:
+        red = await calcola_redditi_analisi(aid, user)
+    except Exception:
+        red = {}
+    try:
+        pens = await calcola_pensioni_future(aid, user)
+    except Exception:
+        pens = {}
+
+    # Scenario A: "Non fai nulla" (scoperture attuali)
+    scen_a = {
+        "invalidita": scop.get("invalidita", {}).get("pensione_annua", 0),
+        "importo_pensione": scop.get("vecchiaia", {}).get("pensione_annua", 0),
+        "premorienza": scop.get("superstiti", {}).get("pensione_annua", 0),
+        "responsabilita": 0,
+        "perdita_beni": 0,
+        "prima_data_pensionabile": next(
+            (p["anno_pensionamento"] for p in pens.get("pensioni_domani", []) if p.get("modalita") == "Vecchiaia"),
+            None,
+        ),
+        "versamento_fondo": float(ac.get("oneri_fondo_pensione") or 0),
+        "risparmio_annuo": float(ac.get("capacita_risparmio_annuale") or 0),
+        "vantaggio_fiscale": 0,
+        "reddito": red.get("reddito_netto", float(ac.get("reddito_lordo_annuo") or 0)),
+    }
+    # Scenario B: "Ti affidi a me" (coperture suggerite)
+    scen_b = {
+        "invalidita": scop.get("invalidita", {}).get("capitale_da_assicurare", 0),
+        "importo_pensione": (scop.get("vecchiaia", {}).get("pensione_annua", 0)
+                             + float(ac.get("capacita_risparmio_annuale") or 0) * 0.5 * 20),
+        "premorienza": scop.get("superstiti", {}).get("capitale_da_assicurare", 0),
+        "responsabilita": 1000000,
+        "perdita_beni": sum(float(i.get("valore_commerciale") or 0) for i in (ac.get("immobili") or [])),
+        "prima_data_pensionabile": next(
+            (p["anno_pensionamento"] for p in pens.get("pensioni_domani", []) if p.get("modalita") == "Anticipata"),
+            None,
+        ),
+        "versamento_fondo": float(ac.get("capacita_risparmio_annuale") or 0) * 0.5,
+        "risparmio_annuo": float(ac.get("capacita_risparmio_annuale") or 0) * 0.5,
+        "vantaggio_fiscale": float(ac.get("capacita_risparmio_annuale") or 0) * 0.5
+                              * (red.get("aliquota_irpef_marginale_pct", 35) / 100.0),
+        "reddito": red.get("reddito_netto", 0),
+    }
+    soglia = float(ac.get("danno_devastante_entrate_mensili") or 1000)
+    soglie = {
+        "trascurabile": round(soglia / 5, 2),
+        "basso": round(soglia * 2 / 5, 2),
+        "medio": round(soglia * 3 / 5, 2),
+        "alto": round(soglia * 4 / 5, 2),
+        "molto_alto": round(soglia, 2),
+    }
+    tratt = {
+        "scenario_a": scen_a,
+        "scenario_b": scen_b,
+        "obiettivi": ac.get("cosa_renderebbe_felice") or "",
+        "perdita_entrate": ac.get("cosa_non_vuoi_carriera") or "",
+        "soglie_devastante": soglie,
+    }
+    await db.analisi_cliente.update_one(
+        {"anagrafica_id": aid},
+        {"$set": {"trattativa": tratt, "updated_at": _now_iso()}},
+    )
+    return tratt
+
+
 @api.delete("/anagrafiche/{aid}/analisi/estratto-inps/{estratto_id}")
 async def delete_estratto_inps(
     aid: str, estratto_id: str,

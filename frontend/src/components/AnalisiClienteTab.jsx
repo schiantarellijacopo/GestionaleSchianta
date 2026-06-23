@@ -115,6 +115,12 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                     <TabsTrigger value="successione" data-testid="sub-tab-successione">
                         <Scale size={13} className="mr-1" /> Successione
                     </TabsTrigger>
+                    <TabsTrigger value="trattativa" data-testid="sub-tab-trattativa">
+                        <TrendingUp size={13} className="mr-1" /> Trattativa A/B
+                    </TabsTrigger>
+                    <TabsTrigger value="piramide" data-testid="sub-tab-piramide">
+                        <Target size={13} className="mr-1" /> Piramide Soluzioni
+                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="finanza">
@@ -137,6 +143,12 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                 </TabsContent>
                 <TabsContent value="successione">
                     <SuccessioneTab anagrafica_id={anagrafica_id} dirty={dirty} />
+                </TabsContent>
+                <TabsContent value="trattativa">
+                    <TrattativaTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} reloadAc={load} />
+                </TabsContent>
+                <TabsContent value="piramide">
+                    <PiramideTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} reloadAc={load} />
                 </TabsContent>
             </Tabs>
         </div>
@@ -1262,6 +1274,264 @@ function StoricoRedditiView({ storico, canEdit, onUpdate, onRemove, getRealIdx }
                 </div>
             )}
         </>
+    );
+}
+
+
+// ============== TRATTATIVA A/B ==============
+const TRATT_VOCI = [
+    { key: "invalidita", label: "Invalidità", unit: "€" },
+    { key: "importo_pensione", label: "Importo pensione", unit: "€" },
+    { key: "premorienza", label: "Premorienza", unit: "€" },
+    { key: "responsabilita", label: "Responsabilità", unit: "€" },
+    { key: "perdita_beni", label: "Perdita Beni", unit: "€" },
+    { key: "prima_data_pensionabile", label: "Prima data pensionabile", unit: "anno" },
+    { key: "versamento_fondo", label: "Versamento Fondo Pensione", unit: "€" },
+    { key: "risparmio_annuo", label: "Risparmio Annuo", unit: "€" },
+    { key: "vantaggio_fiscale", label: "Vantaggio Fiscale", unit: "€" },
+    { key: "reddito", label: "Reddito", unit: "€" },
+];
+
+function TrattativaTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
+    const tratt = ac.trattativa || {};
+    const [busy, setBusy] = useState(false);
+
+    const setTratt = (path, val) => {
+        const next = JSON.parse(JSON.stringify(tratt));
+        const parts = path.split(".");
+        let p = next;
+        for (let i = 0; i < parts.length - 1; i++) {
+            p[parts[i]] = p[parts[i]] || {};
+            p = p[parts[i]];
+        }
+        p[parts.at(-1)] = val;
+        set("trattativa", next);
+    };
+
+    const autoPopola = async () => {
+        setBusy(true);
+        try {
+            await api.post(`/anagrafiche/${anagrafica_id}/analisi/trattativa/auto-popola`);
+            toast.success("Trattativa pre-popolata dai dati esistenti");
+            await reloadAc?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setBusy(false); }
+    };
+
+    return (
+        <div className="space-y-4 mt-4">
+            <div className="bg-sky-50 border border-sky-200 rounded p-3 flex justify-between items-center flex-wrap gap-2">
+                <div className="text-xs text-sky-900">
+                    <strong>Trattativa A/B</strong> — confronta gli scenari &laquo;Non fai nulla&raquo; vs &laquo;Ti affidi a me&raquo;.
+                    I dati sono modificabili e attingono da scoperture pensionistiche, redditi e patrimonio.
+                </div>
+                {canEdit && (
+                    <Button size="sm" onClick={autoPopola} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700" data-testid="tratt-auto">
+                        ⚡ {busy ? "Caricamento..." : "Pre-popola dai dati"}
+                    </Button>
+                )}
+            </div>
+
+            {/* Confronto A/B */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="p-5 border-rose-200 bg-rose-50/30">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-rose-800 mb-3">A · Non fai nulla</h3>
+                    <ScenarioGrid scen={tratt.scenario_a || {}} scenKey="scenario_a" canEdit={canEdit} setTratt={setTratt} color="rose" />
+                </Card>
+                <Card className="p-5 border-emerald-200 bg-emerald-50/30">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800 mb-3">B · Ti affidi a me</h3>
+                    <ScenarioGrid scen={tratt.scenario_b || {}} scenKey="scenario_b" canEdit={canEdit} setTratt={setTratt} color="emerald" />
+                </Card>
+            </div>
+
+            {/* Obiettivi & Perdita entrate */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="p-5 border-slate-200">
+                    <Label className="text-sm font-semibold">🎯 Obiettivi e Desideri</Label>
+                    <Textarea
+                        rows={4} value={tratt.obiettivi || ""} disabled={!canEdit}
+                        onChange={(e) => setTratt("obiettivi", e.target.value)}
+                        placeholder="Cosa renderebbe felice il cliente..."
+                    />
+                </Card>
+                <Card className="p-5 border-slate-200">
+                    <Label className="text-sm font-semibold">📉 Perdita Entrate (paure)</Label>
+                    <Textarea
+                        rows={4} value={tratt.perdita_entrate || ""} disabled={!canEdit}
+                        onChange={(e) => setTratt("perdita_entrate", e.target.value)}
+                        placeholder="Cosa NON deve accadere..."
+                    />
+                </Card>
+            </div>
+
+            {/* Soglie devastante (scaglioni colorati) */}
+            <Card className="p-5 border-amber-200 bg-amber-50/30">
+                <Label className="text-sm font-semibold mb-3 block">⚠ Soglie del danno devastante (€/mese)</Label>
+                <div className="grid grid-cols-5 gap-2">
+                    {["trascurabile", "basso", "medio", "alto", "molto_alto"].map((k, i) => {
+                        const bg = ["bg-emerald-200", "bg-yellow-200", "bg-orange-200", "bg-rose-200", "bg-red-300"][i];
+                        return (
+                            <div key={k} className={`p-3 rounded-md ${bg}`}>
+                                <div className="text-[10px] uppercase tracking-wider font-bold">{k.replace("_", " ")}</div>
+                                <Input
+                                    type="number" disabled={!canEdit}
+                                    value={(tratt.soglie_devastante || {})[k] || 0}
+                                    onChange={(e) => setTratt(`soglie_devastante.${k}`, parseFloat(e.target.value) || 0)}
+                                    className="num h-7 mt-1 bg-white/70 border-0"
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+            </Card>
+        </div>
+    );
+}
+
+function ScenarioGrid({ scen, scenKey, canEdit, setTratt, color }) {
+    return (
+        <div className="space-y-2">
+            {TRATT_VOCI.map((v) => (
+                <div key={v.key} className="grid grid-cols-12 gap-2 items-center text-sm border-b border-slate-100 pb-1">
+                    <div className="col-span-6 text-slate-600">{v.label}</div>
+                    <div className="col-span-6">
+                        <Input
+                            type="number" disabled={!canEdit}
+                            value={scen[v.key] ?? ""}
+                            onChange={(e) => setTratt(`${scenKey}.${v.key}`, parseFloat(e.target.value) || 0)}
+                            className={`h-8 num font-semibold text-${color}-700 text-right`}
+                            placeholder={v.unit === "anno" ? "AAAA" : "€"}
+                        />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ============== PIRAMIDE DELLE SOLUZIONI ==============
+const PIR_CATEGORIE = ["Reddito", "Premorienza", "Invalidita", "Responsabilita", "Beni", "Pensione", "Risparmio"];
+const PIR_COLORS = {
+    Reddito: "bg-emerald-100 border-emerald-300 text-emerald-900",
+    Premorienza: "bg-rose-100 border-rose-300 text-rose-900",
+    Invalidita: "bg-amber-100 border-amber-300 text-amber-900",
+    Responsabilita: "bg-orange-100 border-orange-300 text-orange-900",
+    Beni: "bg-sky-100 border-sky-300 text-sky-900",
+    Pensione: "bg-violet-100 border-violet-300 text-violet-900",
+    Risparmio: "bg-emerald-50 border-emerald-200 text-emerald-800",
+};
+
+function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
+    const piramide = (ac.piramide_soluzioni || []).slice().sort(
+        (a, b) => (a.ordine || 0) - (b.ordine || 0),
+    );
+    const [busy, setBusy] = useState(false);
+
+    const autoPopola = async () => {
+        setBusy(true);
+        try {
+            await api.post(`/anagrafiche/${anagrafica_id}/analisi/piramide/auto-popola`);
+            toast.success("Piramide pre-popolata dai dati esistenti");
+            await reloadAc?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setBusy(false); }
+    };
+
+    const updateItem = (idx, patch) => {
+        const next = [...piramide];
+        next[idx] = { ...next[idx], ...patch };
+        set("piramide_soluzioni", next);
+    };
+    const remove = (idx) => set("piramide_soluzioni", piramide.filter((_, i) => i !== idx));
+    const add = () => set("piramide_soluzioni", [
+        ...piramide,
+        { id: crypto.randomUUID(), categoria: "Reddito", titolo: "", capitale_assicurato: 0, premio_annuo: 0, durata_anni: 1, compagnia: "", note: "", ordine: piramide.length + 1 },
+    ]);
+
+    const totCapitale = piramide.reduce((s, p) => s + (parseFloat(p.capitale_assicurato) || 0), 0);
+    const totPremio = piramide.reduce((s, p) => s + (parseFloat(p.premio_annuo) || 0), 0);
+
+    return (
+        <div className="space-y-4 mt-4">
+            <div className="bg-sky-50 border border-sky-200 rounded p-3 flex justify-between items-center flex-wrap gap-2">
+                <div className="text-xs text-sky-900">
+                    <strong>Piramide delle Soluzioni</strong> — riepilogo di tutte le coperture proposte al cliente. Modificabile in ogni voce.
+                </div>
+                <div className="flex gap-2">
+                    {canEdit && (
+                        <>
+                            <Button size="sm" onClick={autoPopola} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700" data-testid="pir-auto">
+                                ⚡ {busy ? "Caricamento..." : "Pre-popola dai dati"}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={add} data-testid="pir-add">
+                                <Plus size={13} className="mr-1" /> Aggiungi voce
+                            </Button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* KPI riepilogo */}
+            <div className="grid grid-cols-3 gap-3">
+                <Kpi label="Coperture totali" value={piramide.length} color="sky" big />
+                <Kpi label="Capitale assicurato totale" value={fmtEur(totCapitale)} color="emerald" big highlight />
+                <Kpi label="Premio annuo totale" value={fmtEur(totPremio)} color="amber" big />
+            </div>
+
+            {piramide.length === 0 ? (
+                <div className="text-center text-sm text-slate-400 italic py-10 bg-slate-50 rounded-md border border-dashed">
+                    Nessuna copertura ancora suggerita. Clicca <strong>Pre-popola dai dati</strong> per generare automaticamente le proposte dai calcoli di scopertura/successione/patrimonio.
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {piramide.map((p, i) => (
+                        <Card key={p.id || i} className={`p-3 border-2 ${PIR_COLORS[p.categoria] || "border-slate-200"}`}>
+                            <div className="grid grid-cols-12 gap-2 items-end">
+                                <div className="col-span-2">
+                                    <Label className="text-[10px] uppercase tracking-wider">Categoria</Label>
+                                    <Select value={p.categoria} disabled={!canEdit} onValueChange={(v) => updateItem(i, { categoria: v })}>
+                                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {PIR_CATEGORIE.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="col-span-3">
+                                    <Label className="text-[10px] uppercase tracking-wider">Titolo copertura</Label>
+                                    <Input value={p.titolo || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { titolo: e.target.value })} className="h-8" />
+                                </div>
+                                <div className="col-span-2">
+                                    <Label className="text-[10px] uppercase tracking-wider">Capitale €</Label>
+                                    <Input type="number" value={p.capitale_assicurato || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { capitale_assicurato: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
+                                </div>
+                                <div className="col-span-2">
+                                    <Label className="text-[10px] uppercase tracking-wider">Premio €/anno</Label>
+                                    <Input type="number" value={p.premio_annuo || 0} disabled={!canEdit} onChange={(e) => updateItem(i, { premio_annuo: parseFloat(e.target.value) || 0 })} className="h-8 num font-semibold" />
+                                </div>
+                                <div className="col-span-1">
+                                    <Label className="text-[10px] uppercase tracking-wider">Durata</Label>
+                                    <Input type="number" value={p.durata_anni || 1} disabled={!canEdit} onChange={(e) => updateItem(i, { durata_anni: parseInt(e.target.value) || 1 })} className="h-8 num" />
+                                </div>
+                                <div className="col-span-1">
+                                    <Label className="text-[10px] uppercase tracking-wider">Compagnia</Label>
+                                    <Input value={p.compagnia || ""} disabled={!canEdit} onChange={(e) => updateItem(i, { compagnia: e.target.value })} className="h-8 text-xs" />
+                                </div>
+                                {canEdit && (
+                                    <Button size="sm" variant="ghost" onClick={() => remove(i)} className="col-span-1">
+                                        <Trash2 size={13} className="text-rose-600" />
+                                    </Button>
+                                )}
+                                {p.note && (
+                                    <div className="col-span-12 text-[11px] text-slate-500 italic mt-1 border-t pt-1">
+                                        💡 {p.note}
+                                    </div>
+                                )}
+                            </div>
+                        </Card>
+                    ))}
+                </div>
+            )}
+        </div>
     );
 }
 
