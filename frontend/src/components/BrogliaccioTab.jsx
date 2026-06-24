@@ -178,7 +178,7 @@ export default function BrogliaccioTab() {
                                 <th className="text-right px-2 py-2">Totale</th>
                                 <th className="text-right px-2 py-2">Provv</th>
                                 <th className="text-right px-2 py-2">Saldo</th>
-                                <th className="text-right px-2 py-2">Crediti</th>
+                                <th className="text-right px-2 py-2">Sospesi</th>
                                 <th className="text-right px-2 py-2">Spese</th>
                                 {conti.map((c) => (
                                     <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap" title={c.nome}>
@@ -291,10 +291,6 @@ export default function BrogliaccioTab() {
                             <tr className="bg-slate-900 text-white">
                                 <th className="text-left px-3 py-2">Compagnia</th>
                                 <th className="text-center px-3 py-2">Regime</th>
-                                <th className="text-right px-3 py-2">Incassi lordi</th>
-                                <th className="text-right px-3 py-2">Provvigioni</th>
-                                <th className="text-right px-3 py-2">Saldo dovuto</th>
-                                <th className="text-right px-3 py-2">Rimesse pagate</th>
                                 <th className="text-right px-3 py-2">Saldo cassa attuale</th>
                             </tr>
                         </thead>
@@ -307,10 +303,6 @@ export default function BrogliaccioTab() {
                                             ? <span className="badge badge-success">Tratteniamo provv.</span>
                                             : <span className="badge badge-warning">No trattenute</span>}
                                     </td>
-                                    <td className="num text-right px-3">{fmt(s.incassi_lordi, true)}</td>
-                                    <td className="num text-right px-3 text-sky-700">{fmt(s.provvigioni, true)}</td>
-                                    <td className="num text-right px-3">{fmt(s.saldo_dovuto, true)}</td>
-                                    <td className="num text-right px-3 text-violet-700">{fmt(s.rimesse_pagate, true)}</td>
                                     <td className={`num text-right px-3 font-bold ${s.saldo_cassa > 0 ? "text-rose-700" : s.saldo_cassa < 0 ? "text-emerald-700" : "text-slate-500"}`}>
                                         {fmt(s.saldo_cassa, true)}
                                     </td>

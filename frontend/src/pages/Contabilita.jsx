@@ -14,7 +14,6 @@ import { Plus, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
-import StatisticheTab from "@/components/StatisticheTab";
 
 export default function Contabilita() {
     const [dal, setDal] = useState("");
@@ -61,16 +60,11 @@ export default function Contabilita() {
                 <TabsList className="bg-slate-100">
                     <TabsTrigger value="brogliaccio" data-testid="tab-brogliaccio">Brogliaccio (Prima nota)</TabsTrigger>
                     <TabsTrigger value="prima-nota" data-testid="tab-prima-nota">Movimenti (elenco)</TabsTrigger>
-                    <TabsTrigger value="statistiche" data-testid="tab-statistiche">Statistiche</TabsTrigger>
                     <TabsTrigger value="estratti" data-testid="tab-estratti">Estratto conto cliente</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="brogliaccio">
                     <BrogliaccioTab />
-                </TabsContent>
-
-                <TabsContent value="statistiche">
-                    <StatisticheTab />
                 </TabsContent>
 
                 <TabsContent value="prima-nota">
