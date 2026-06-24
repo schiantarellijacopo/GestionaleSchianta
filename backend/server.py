@@ -2918,6 +2918,105 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
     return out
 
 
+@api.get("/contabilita/statistiche")
+async def statistiche_contabilita(
+    dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Statistiche contabilità per Prima Nota.
+
+    Periodo (default: dall'inizio fino ad oggi):
+      - 7 KPI: entrate, provvigioni, crediti, rimesse, sconti, spese, saldo_cassa_compagnie
+      - Saldo cassa per Compagnia (cumulativo fino ad oggi)
+      - Saldo per Conto Cassa (saldo iniziale + entrate − uscite, cumulativo)
+      - Liquidità Disponibile = sum(conti) − sospesi/anticipi attivi − saldo_cassa_compagnie
+      - Liquidità Postera = sum(conti) − saldo_cassa_compagnie
+    """
+    # Filtri periodo (usati solo per KPI di periodo, non per cumulativi)
+    flt_periodo = {"is_deleted": {"$ne": True}}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        flt_periodo["data_movimento"] = cond
+
+    # KPI di periodo
+    movs_per = await db.movimenti.find(flt_periodo, {"_id": 0}).to_list(20000)
+    entrate_per = sum(m["importo"] for m in movs_per if m["tipo"] == "entrata")
+    by_cat = {}
+    for m in movs_per:
+        if m["tipo"] == "uscita":
+            by_cat[m["categoria"]] = by_cat.get(m["categoria"], 0) + m["importo"]
+    crediti_per = sum(m["importo"] for m in movs_per
+                      if m["categoria"] == "anticipo" and m["tipo"] == "entrata")
+
+    today = _now_iso()[:10]
+    # Saldi compagnie cumulativi (fino a oggi)
+    saldi_comp = await _compute_saldi_compagnie(today)
+    saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_comp), 2)
+
+    # Saldo per conto cassa cumulativo (saldo iniziale + entrate − uscite, TUTTO il tempo)
+    conti = await db.conti_cassa.find(
+        {"attivo": True}, {"_id": 0}
+    ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
+    saldi_conti = []
+    sum_conti = 0.0
+    for c in conti:
+        agg = await db.movimenti.aggregate([
+            {"$match": {"conto_cassa_id": c["id"]}},
+            {"$group": {"_id": None,
+                        "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+        ]).to_list(1)
+        in_tot = agg[0]["in"] if agg else 0
+        out_tot = agg[0]["out"] if agg else 0
+        saldo = float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
+        sum_conti += saldo
+        saldi_conti.append({
+            "id": c["id"], "nome": c["nome"],
+            "saldo_iniziale": float(c.get("saldo_iniziale", 0)),
+            "entrate": round(in_tot, 2),
+            "uscite": round(out_tot, 2),
+            "saldo_attuale": round(saldo, 2),
+        })
+
+    # Crediti attivi = sospesi/anticipi (entrate categoria=anticipo) non ancora chiusi
+    crediti_agg = await db.movimenti.aggregate([
+        {"$match": {"categoria": "anticipo", "tipo": "entrata"}},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+    ]).to_list(1)
+    crediti_storno = await db.movimenti.aggregate([
+        {"$match": {"categoria": "anticipo", "tipo": "uscita"}},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+    ]).to_list(1)
+    crediti_attivi = (crediti_agg[0]["tot"] if crediti_agg else 0) - (crediti_storno[0]["tot"] if crediti_storno else 0)
+
+    liquidita_disponibile = round(sum_conti - crediti_attivi - saldo_cassa_compagnie_tot, 2)
+    liquidita_postera = round(sum_conti - saldo_cassa_compagnie_tot, 2)
+
+    # KPI di periodo per le 7 cards (semantica brogliaccio)
+    kpi = {
+        "entrate": round(entrate_per, 2),
+        "provvigioni": round(by_cat.get("provvigioni", 0), 2),
+        "crediti": round(crediti_per, 2),
+        "rimesse": round(by_cat.get("pagamento_compagnia", 0), 2),
+        "sconti": round(by_cat.get("sconto_cliente", 0), 2),
+        "spese": round(sum(v for k, v in by_cat.items() if k != "pagamento_compagnia"), 2),
+        "saldo_cassa_compagnie": saldo_cassa_compagnie_tot,
+    }
+
+    return {
+        "periodo": {"dal": dal, "al": al},
+        "kpi": kpi,
+        "saldi_conti": saldi_conti,
+        "saldi_compagnie": saldi_comp,
+        "sum_conti": round(sum_conti, 2),
+        "crediti_attivi": round(crediti_attivi, 2),
+        "liquidita_disponibile": liquidita_disponibile,
+        "liquidita_postera": liquidita_postera,
+    }
+
+
 @api.get("/contabilita/brogliaccio")
 async def brogliaccio(
     data: Optional[str] = None,

@@ -590,6 +590,10 @@ class AziendaConfig(BaseDoc):
     smtp_password: Optional[str] = None
     smtp_from: Optional[str] = None      # es. "Assicura <noreply@assicura.it>"
     smtp_use_tls: bool = True
+    # Notifica scadenze giornaliera (cron 08:00)
+    notifica_scadenze_attiva: bool = True
+    notifica_scadenze_giorni: int = 15
+    notifica_scadenze_email_admin: Optional[str] = None  # se vuoto usa email_commercialista o admin
 
 
 # =============== SCHEMA / SISTEMA PROVVIGIONALE ===============

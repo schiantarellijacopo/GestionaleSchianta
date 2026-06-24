@@ -11,6 +11,16 @@ UI italiano, Shadcn/Tailwind.
 
 ### Implementato — Sessione corrente (2026-06-23 fork 3)
 
+#### Brogliaccio Prima Nota - Iter 5 (semantica corretta + UI affinata)
+- **Colonne tabella**: Descrizione (= contraente bold + N. polizza · compagnia in subtitle), Totale, Provv, Saldo, Crediti, Spese + colonne dinamiche conti cassa attivi.
+- **Logica saldo**:
+  - `trattiene_provvigioni=true` (default): `saldo = totale - provv` (positivo = debito verso compagnia)
+  - `trattiene_provvigioni=false` (Direzione/RID): `saldo = -provv` (negativo = compagnia mi deve provvigione)
+- **Sezione unica sotto la tabella**: **Saldo Cassa per Compagnia** (cumulativo). Le 7 KPI cards (Entrate/Provvigioni/Crediti/Rimesse/Sconti/Spese/Saldo Cassa) sono state rimosse — verranno mostrate nel futuro **Modulo Statistiche** con Liquidità Disponibile + Liquidità Postera.
+- **Conti Cassa rinominati "Metodo di Pagamento"** in tutto l'app. Migration idempotente: ogni startup rinomina "RID Direzione" → "Pagamento Direzione" e disattiva "PayPal / Online".
+- **Nuovo movimento dialog** ora ha un dropdown **Conto / Banca (Metodo di pagamento)** obbligatorio, popolato dalla libreria conti cassa attivi. Il free-text "mezzo_pagamento" è stato rimosso (autopopolato dal nome del conto selezionato).
+- **PDF brogliaccio**: stesso schema colonne UI.
+
 #### Brogliaccio Prima Nota (replica facsimile + semantica assicurativa)
 - **Logica colonne** (come da specifica utente):
   - `TOTALE` = premio lordo polizza (per incassi) o importo movimento.
