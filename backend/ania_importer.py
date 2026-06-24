@@ -23,6 +23,38 @@ from db_models import (
 )
 
 
+async def _load_mapping_garanzie(db) -> dict:
+    """Carica mapping {codice_ania: nome_personalizzato} dalle librerie."""
+    out = {}
+    async for m in db.mapping_garanzie.find({}, {"_id": 0}):
+        key = (m.get("codice_ania") or m.get("descrizione_ania") or "").strip().upper()
+        if key:
+            out[key] = m.get("nome_personalizzato") or m.get("descrizione_ania")
+    return out
+
+
+async def _load_mapping_operatori(db) -> dict:
+    """Carica mapping {codice_ania: user_id}."""
+    out = {}
+    async for m in db.mapping_operatori.find({}, {"_id": 0}):
+        key = (m.get("codice_ania") or "").strip()
+        if key and m.get("user_id"):
+            out[key] = m["user_id"]
+    return out
+
+
+async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: str = ""):
+    """Crea voce stub nella libreria di mapping se non esiste (per permettere all'utente di mapparla)."""
+    if not codice:
+        return
+    existing = await db[collection].find_one({"codice_ania": codice}, {"_id": 0, "id": 1})
+    if not existing:
+        await db[collection].insert_one({
+            "id": _uid(), "codice_ania": codice, "descrizione_ania": descrizione,
+            "created_at": _now_iso(), "updated_at": _now_iso(), "is_deleted": False,
+        })
+
+
 def _parse_date(value: str) -> str | None:
     if not value:
         return None
@@ -76,6 +108,10 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     start = time.time()
     counts: Dict[str, int] = {}
     errors: List[str] = []
+
+    # carica librerie di mapping ANIA → applicativo (rinomina garanzie, associa operatori a utenti)
+    mapping_garanzie = await _load_mapping_garanzie(db)
+    mapping_operatori = await _load_mapping_operatori(db)
 
     files_data: Dict[str, str] = {}
     try:
@@ -214,6 +250,15 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 "e": "scaduta", "scaduta": "scaduta",
             }.get(stato_raw, "attiva")
             existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
+            operatore_codice = (row.get("cod_operatore") or row.get("operatore_share")
+                                or row.get("cod_collaboratore") or "").strip() or None
+            collaboratore_id = mapping_operatori.get(operatore_codice) if operatore_codice else None
+            # crea stub mapping operatore se non mappato
+            if operatore_codice and not collaboratore_id:
+                await _ensure_stub_mapping(
+                    db, "mapping_operatori", operatore_codice,
+                    row.get("nome_operatore") or row.get("descrizione_operatore") or "",
+                )
             data = {
                 "numero_polizza": numero,
                 "compagnia_id": comp_id or "",
@@ -225,11 +270,17 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
                 "premio_lordo": _parse_float(row.get("lordo_totale", "")),
                 "premio_netto": _parse_float(row.get("netto_totale", "")),
+                "premio_tasse": _parse_float(row.get("tasse_totale") or row.get("imposte_totali", "")),
+                "premio_imposte": _parse_float(row.get("imposte_totali") or row.get("imposte", "")),
+                "premio_ssn": _parse_float(row.get("ssn_totale") or row.get("ssn", "")),
                 "provvigioni": _parse_float(row.get("provvigioni_totali", "")),
+                "operatore_ania_codice": operatore_codice,
                 "id_polizza_exp": id_exp,
                 "fonte": "import_ania",
                 "updated_at": _now_iso(),
             }
+            if collaboratore_id:
+                data["collaboratore_id"] = collaboratore_id
             if existing:
                 await db.polizze.update_one({"id": existing["id"]}, {"$set": data})
                 polizza_id_map[id_exp] = existing["id"]
@@ -299,8 +350,18 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
+            codice_garanzia = (row.get("codice_garanzia") or "").strip().upper()
+            descr_originale = row.get("descrizione_garanzia") or row.get("garanzia") or codice_garanzia or ""
+            # applica mapping (codice o, se codice mancante, descrizione)
+            key = codice_garanzia or (descr_originale or "").strip().upper()
+            nome_finale = mapping_garanzie.get(key) or descr_originale
+            # crea stub mapping se nuova
+            if key and key not in mapping_garanzie:
+                await _ensure_stub_mapping(db, "mapping_garanzie", codice_garanzia or key, descr_originale)
             gar_per_pol[pol_id].append({
-                "garanzia": row.get("descrizione_garanzia") or row.get("garanzia") or row.get("codice_garanzia"),
+                "garanzia": nome_finale,
+                "garanzia_originale": descr_originale,
+                "codice_ania": codice_garanzia,
                 "netto": _parse_float(row.get("netto_garanzia", "")),
                 "accessori": _parse_float(row.get("accessori", "")),
                 "imposte": _parse_float(row.get("imposte", "")),
@@ -357,6 +418,16 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 obj = Titolo(**data)
                 await db.titoli.insert_one(obj.model_dump())
                 log.titoli_creati += 1
+
+            # Se la polizza non ha provvigione (o è 0) ma il titolo sì → riporta sulla polizza
+            titolo_provv = data.get("provvigioni", 0) or 0
+            if titolo_provv > 0:
+                pol = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "provvigioni": 1})
+                if pol and not (pol.get("provvigioni") or 0):
+                    await db.polizze.update_one(
+                        {"id": pol_id},
+                        {"$set": {"provvigioni": titolo_provv, "updated_at": _now_iso()}},
+                    )
 
     # 5) Sinistri (rec50)
     for fname, content in files_data.items():

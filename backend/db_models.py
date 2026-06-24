@@ -208,10 +208,14 @@ class Polizza(BaseDoc):
     frazionamento: Literal["annuale", "semestrale", "quadrimestrale", "trimestrale", "mensile", "unica"] = "annuale"
     premio_lordo: float = 0.0
     premio_netto: float = 0.0
+    premio_tasse: float = 0.0      # imposte assicurative
+    premio_imposte: float = 0.0    # altre imposte/oneri
+    premio_ssn: float = 0.0        # contributo SSN
     provvigioni: float = 0.0
     note: Optional[str] = None
     targa: Optional[str] = None
     collaboratore_id: Optional[str] = None
+    operatore_ania_codice: Optional[str] = None  # codice operatore da importazione ANIA (per mapping)
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     presa_in_carico: Optional[str] = None

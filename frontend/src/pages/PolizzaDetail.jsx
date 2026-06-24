@@ -1,29 +1,69 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
+    const navigate = useNavigate();
+    const { user } = useAuth();
     const [pol, setPol] = useState(null);
+    const [editOpen, setEditOpen] = useState(false);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
     if (!pol) return <Loading />;
+
+    const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const canDelete = user?.role === "admin";
 
     const incassa = async (tid) => {
         try { await api.post(`/titoli/${tid}/incassa`, { mezzo_pagamento: "bonifico" }); toast.success("Incassato"); load(); }
         catch { toast.error("Errore"); }
     };
 
+    const handleDelete = async () => {
+        if (!window.confirm(`Eliminare definitivamente la polizza N. ${pol.numero_polizza}?\n\nVerranno eliminati anche tutti i titoli e sinistri collegati. Operazione non reversibile.`)) return;
+        try {
+            await api.delete(`/polizze/${id}`);
+            toast.success("Polizza eliminata");
+            navigate("/polizze");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        }
+    };
+
     return (
         <div data-testid="polizza-detail-page">
-            <Link to="/polizze" className="text-sm text-slate-500 hover:text-sky-700 inline-flex items-center gap-1 mb-3">
-                <ArrowLeft size={14} /> Torna alle polizze
-            </Link>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <Link to="/polizze" className="text-sm text-slate-500 hover:text-sky-700 inline-flex items-center gap-1">
+                    <ArrowLeft size={14} /> Torna alle polizze
+                </Link>
+                <div className="flex gap-2">
+                    {canEdit && (
+                        <Button variant="outline" size="sm" onClick={() => setEditOpen(true)} data-testid="pol-edit-button">
+                            <Pencil size={14} className="mr-1" /> Modifica polizza
+                        </Button>
+                    )}
+                    {canDelete && (
+                        <Button variant="outline" size="sm" onClick={handleDelete}
+                                className="text-rose-700 hover:bg-rose-50 hover:text-rose-800" data-testid="pol-delete-button">
+                            <Trash2 size={14} className="mr-1" /> Elimina
+                        </Button>
+                    )}
+                </div>
+            </div>
 
             {/* Header tipo Cattolica */}
             <Card className="border-slate-200 mb-4 overflow-hidden">
@@ -55,6 +95,10 @@ export default function PolizzaDetail() {
                     <F label="Termini mora" value={pol.termini_mora_giorni ? `${pol.termini_mora_giorni} gg` : "—"} />
                     <F label="Termini disdetta" value={pol.termini_disdetta_giorni ? `${pol.termini_disdetta_giorni} gg` : "—"} />
                     <F label="Oggetto assicurato" value={pol.oggetto_assicurato || pol.targa} />
+                    <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
+                    <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
+                    <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
+                    <F label="SSN" value={fmtEur(pol.premio_ssn)} />
                     <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
                     <F label="Provvigioni" value={fmtEur(pol.provvigioni)} />
                 </div>
@@ -238,7 +282,169 @@ export default function PolizzaDetail() {
                     </Card>
                 </TabsContent>
             </Tabs>
+            {editOpen && (
+                <EditPolizzaDialog pol={pol} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} />
+            )}
         </div>
+    );
+}
+
+function EditPolizzaDialog({ pol, onClose, onSaved }) {
+    const [f, setF] = useState({
+        numero_polizza: pol.numero_polizza || "",
+        stato: pol.stato || "attiva",
+        ramo: pol.ramo || "",
+        prodotto: pol.prodotto || "",
+        effetto: pol.effetto || "",
+        scadenza: pol.scadenza || "",
+        scadenza_copertura: pol.scadenza_copertura || "",
+        prossima_quietanza: pol.prossima_quietanza || "",
+        frazionamento: pol.frazionamento || "annuale",
+        tacito_rinnovo: !!pol.tacito_rinnovo,
+        termini_mora_giorni: pol.termini_mora_giorni ?? 15,
+        termini_disdetta_giorni: pol.termini_disdetta_giorni ?? 0,
+        mandato: pol.mandato || "",
+        sostituisce_polizza: pol.sostituisce_polizza || "",
+        iter_status: pol.iter_status || "",
+        oggetto_assicurato: pol.oggetto_assicurato || "",
+        premio_netto: pol.premio_netto || 0,
+        premio_tasse: pol.premio_tasse || 0,
+        premio_imposte: pol.premio_imposte || 0,
+        premio_ssn: pol.premio_ssn || 0,
+        premio_lordo: pol.premio_lordo || 0,
+        provvigioni: pol.provvigioni || 0,
+        targa: pol.targa || "",
+        veicolo_marca: pol.veicolo_marca || "",
+        veicolo_modello: pol.veicolo_modello || "",
+        veicolo_tipo: pol.veicolo_tipo || "",
+        veicolo_alimentazione: pol.veicolo_alimentazione || "",
+        veicolo_uso: pol.veicolo_uso || "",
+        veicolo_data_immatricolazione: pol.veicolo_data_immatricolazione || "",
+        veicolo_cv_fiscali: pol.veicolo_cv_fiscali || "",
+        veicolo_kw: pol.veicolo_kw || "",
+        veicolo_cilindrata: pol.veicolo_cilindrata || "",
+        veicolo_posti: pol.veicolo_posti || "",
+        note: pol.note || "",
+    });
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        try {
+            const payload = { ...f };
+            ["premio_netto", "premio_tasse", "premio_imposte", "premio_ssn", "premio_lordo",
+             "provvigioni", "termini_mora_giorni", "termini_disdetta_giorni"].forEach((k) => {
+                if (payload[k] !== "" && payload[k] !== null && payload[k] !== undefined) {
+                    payload[k] = parseFloat(payload[k]) || 0;
+                }
+            });
+            await api.put(`/polizze/${pol.id}`, payload);
+            toast.success("Polizza aggiornata");
+            onSaved();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        }
+    };
+
+    const isRCA = (f.ramo || "").toUpperCase().includes("RCA");
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader><DialogTitle>Modifica polizza {pol.numero_polizza}</DialogTitle></DialogHeader>
+                <Tabs defaultValue="anagrafica" className="py-2">
+                    <TabsList className="bg-slate-100">
+                        <TabsTrigger value="anagrafica">Anagrafica</TabsTrigger>
+                        <TabsTrigger value="economici">Economici</TabsTrigger>
+                        {isRCA && <TabsTrigger value="veicolo">Veicolo</TabsTrigger>}
+                        <TabsTrigger value="altri">Altri</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="anagrafica">
+                        <div className="grid grid-cols-2 gap-3 py-3">
+                            <div><Label>N. polizza</Label><Input value={f.numero_polizza} onChange={(e) => set("numero_polizza", e.target.value)} data-testid="edit-pol-numero" /></div>
+                            <div>
+                                <Label>Stato</Label>
+                                <Select value={f.stato} onValueChange={(v) => set("stato", v)}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {["attiva", "sospesa", "in_emissione", "scaduta", "annullata"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div><Label>Ramo</Label><Input value={f.ramo} onChange={(e) => set("ramo", e.target.value)} /></div>
+                            <div><Label>Prodotto</Label><Input value={f.prodotto} onChange={(e) => set("prodotto", e.target.value)} /></div>
+                            <div><Label>Effetto</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
+                            <div><Label>Scadenza</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
+                            <div><Label>Scad. copertura</Label><Input type="date" value={f.scadenza_copertura} onChange={(e) => set("scadenza_copertura", e.target.value)} /></div>
+                            <div><Label>Prossima quietanza</Label><Input type="date" value={f.prossima_quietanza} onChange={(e) => set("prossima_quietanza", e.target.value)} /></div>
+                            <div>
+                                <Label>Frazionamento</Label>
+                                <Select value={f.frazionamento} onValueChange={(v) => set("frazionamento", v)}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {["annuale", "semestrale", "quadrimestrale", "trimestrale", "mensile", "unica"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-center gap-2 mt-6">
+                                <input type="checkbox" id="tacito" checked={f.tacito_rinnovo} onChange={(e) => set("tacito_rinnovo", e.target.checked)} />
+                                <Label htmlFor="tacito" className="cursor-pointer">Tacito rinnovo</Label>
+                            </div>
+                            <div><Label>Mandato</Label><Input value={f.mandato} onChange={(e) => set("mandato", e.target.value)} /></div>
+                            <div><Label>Sostituisce polizza</Label><Input value={f.sostituisce_polizza} onChange={(e) => set("sostituisce_polizza", e.target.value)} /></div>
+                            <div><Label>Stato iter</Label><Input value={f.iter_status} onChange={(e) => set("iter_status", e.target.value)} /></div>
+                            <div><Label>Oggetto assicurato</Label><Input value={f.oggetto_assicurato} onChange={(e) => set("oggetto_assicurato", e.target.value)} /></div>
+                            <div><Label>Termini mora (gg)</Label><Input type="number" value={f.termini_mora_giorni} onChange={(e) => set("termini_mora_giorni", e.target.value)} /></div>
+                            <div><Label>Termini disdetta (gg)</Label><Input type="number" value={f.termini_disdetta_giorni} onChange={(e) => set("termini_disdetta_giorni", e.target.value)} /></div>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="economici">
+                        <div className="grid grid-cols-2 gap-3 py-3">
+                            <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => set("premio_netto", e.target.value)} data-testid="edit-pol-premio-netto" /></div>
+                            <div><Label>Tasse €</Label><Input type="number" step="0.01" value={f.premio_tasse} onChange={(e) => set("premio_tasse", e.target.value)} data-testid="edit-pol-tasse" /></div>
+                            <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.premio_imposte} onChange={(e) => set("premio_imposte", e.target.value)} data-testid="edit-pol-imposte" /></div>
+                            <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => set("premio_ssn", e.target.value)} data-testid="edit-pol-ssn" /></div>
+                            <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} data-testid="edit-pol-premio-lordo" /></div>
+                            <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni} onChange={(e) => set("provvigioni", e.target.value)} data-testid="edit-pol-provv" /></div>
+                        </div>
+                    </TabsContent>
+
+                    {isRCA && (
+                        <TabsContent value="veicolo">
+                            <div className="grid grid-cols-2 gap-3 py-3">
+                                <div><Label>Targa</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} /></div>
+                                <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} /></div>
+                                <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} /></div>
+                                <div><Label>Tipo veicolo</Label><Input value={f.veicolo_tipo} onChange={(e) => set("veicolo_tipo", e.target.value)} /></div>
+                                <div><Label>Alimentazione</Label><Input value={f.veicolo_alimentazione} onChange={(e) => set("veicolo_alimentazione", e.target.value)} /></div>
+                                <div><Label>Tipo uso</Label><Input value={f.veicolo_uso} onChange={(e) => set("veicolo_uso", e.target.value)} /></div>
+                                <div><Label>Immatricolazione</Label><Input type="date" value={f.veicolo_data_immatricolazione} onChange={(e) => set("veicolo_data_immatricolazione", e.target.value)} /></div>
+                                <div><Label>CV fiscali</Label><Input value={f.veicolo_cv_fiscali} onChange={(e) => set("veicolo_cv_fiscali", e.target.value)} /></div>
+                                <div><Label>KW</Label><Input value={f.veicolo_kw} onChange={(e) => set("veicolo_kw", e.target.value)} /></div>
+                                <div><Label>Cilindrata</Label><Input value={f.veicolo_cilindrata} onChange={(e) => set("veicolo_cilindrata", e.target.value)} /></div>
+                                <div><Label>Posti</Label><Input value={f.veicolo_posti} onChange={(e) => set("veicolo_posti", e.target.value)} /></div>
+                            </div>
+                        </TabsContent>
+                    )}
+
+                    <TabsContent value="altri">
+                        <div className="py-3">
+                            <Label>Note</Label>
+                            <textarea
+                                rows={5}
+                                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                                value={f.note} onChange={(e) => set("note", e.target.value)}
+                            />
+                        </div>
+                    </TabsContent>
+                </Tabs>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="edit-pol-save">Salva modifiche</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

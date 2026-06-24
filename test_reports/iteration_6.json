@@ -1,0 +1,42 @@
+{
+  "summary": "Iter6 - tested ANIA Mapping (Garanzie/Operatori) CRUD + applica-a-polizze, Contabilita Statistiche endpoint and tab, PolizzaDetail edit dialog with new economic fields (premio_tasse/imposte/ssn) and Modifica/Elimina buttons. 7/7 backend tests PASS. All required frontend data-testids verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Mapping dialogs / Edit polizza dialog / Apply confirm dialog", "issues": ["Console a11y warning: 'Missing Description or aria-describedby for DialogContent' on Radix DialogContent in MappingGaranziaForm, MappingOperatoreForm, EditPolizzaDialog - non-blocking, repeat of iter5 finding"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter6_mapping_stats.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [
+    "(Low priority) Add DialogDescription / aria-describedby to MappingGaranziaForm, MappingOperatoreForm, EditPolizzaDialog and the 'Applica a polizze' confirm AlertDialog to silence Radix a11y warnings."
+  ],
+  "critical_code_review_comments": [
+    "POST /api/librerie/mapping-garanzie and /mapping-operatori correctly enforce admin role and 400 on missing codice_ania.",
+    "GET /api/librerie/mapping-operatori enriches each item with user object (name, email, role) - confirmed working.",
+    "/api/librerie/mapping-operatori/applica-a-polizze correctly sets collaboratore_id on polizze whose operatore_ania_codice matches mapping (verified polizze_aggiornate>=1 in test).",
+    "/api/librerie/mapping-garanzie/applica-a-polizze correctly renames garanzia.garanzia using nome_personalizzato by codice_ania match (case-insensitive via upper()).",
+    "/api/contabilita/statistiche returns full shape (kpi, saldi_conti, saldi_compagnie, sum_conti, crediti_attivi, liquidita_disponibile, liquidita_postera) and math checks pass: liquidita_postera == sum_conti - saldo_cassa_compagnie; liquidita_disponibile == sum_conti - crediti_attivi - saldo_cassa_compagnie.",
+    "Polizza PUT persists premio_netto/premio_tasse/premio_imposte/premio_ssn/premio_lordo/operatore_ania_codice (verified via Create→PUT→GET pattern).",
+    "Polizza Pydantic model uses 'effetto' / 'scadenza' field names (not 'data_effetto'/'data_scadenza') - frontend forms should use the same.",
+    "data-testid 'stat-kpi' is intentionally on the container wrapping 7 KPI cards (1 element holding 7 children); 'stat-liquidita' is on the 2-card container. This is by design; UI screenshot confirms all 7 KPIs render correctly.",
+    "data-testid 'edit-pol-numero' lives on the Anagrafica tab of EditPolizzaDialog; not visible from Economici tab (Radix Tabs unmounts inactive). Confirmed present at PolizzaDetail.jsx:364."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter6_mapping_stats.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all targeted testids and labels found)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests create temporary mapping_garanzie, mapping_operatori entries and Polizze prefixed 'TST-'/'TEST-' and clean up via DELETE in the same test class. No production data modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_iter6_mapping_stats.py cover Mapping (Garanzie + Operatori) CRUD, both applica-a-polizze endpoints, statistiche shape + math + period filter, and Polizza PUT for new economic fields. IMPORTANT: Polizza model fields are 'effetto'/'scadenza' (not 'data_*'). Users endpoint is /api/auth/users (not /api/users). Anagrafiche endpoint is /api/anagrafiche (not /api/clienti). Stat KPI testids are container-level (stat-kpi, stat-liquidita) not per-card.",
+  "rca of the issue": "N/A - no production bugs found. Initial test failures were due to incorrect endpoint paths and Polizza field names in the test script, all corrected."
+}

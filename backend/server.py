@@ -5085,6 +5085,116 @@ async def list_conti(attivi: Optional[bool] = None, user=Depends(current_user)):
     return await db.conti_cassa.find(flt, {"_id": 0}).sort("ordine", 1).to_list(500)
 
 
+# --- MAPPING GARANZIE ANIA → nome personalizzato ---
+@api.get("/librerie/mapping-garanzie")
+async def list_mapping_garanzie(user=Depends(current_user)):
+    return await db.mapping_garanzie.find({}, {"_id": 0}).sort("codice_ania", 1).to_list(2000)
+
+
+@api.post("/librerie/mapping-garanzie", status_code=201)
+async def create_mapping_garanzia(body: dict, user=Depends(require_user("admin"))):
+    if not body.get("codice_ania"):
+        raise HTTPException(400, "Codice ANIA obbligatorio")
+    body["id"] = body.get("id") or _uid()
+    body["created_at"] = _now_iso()
+    body["updated_at"] = _now_iso()
+    body["is_deleted"] = False
+    await db.mapping_garanzie.insert_one(body)
+    return strip_mongo_id(body)
+
+
+@api.put("/librerie/mapping-garanzie/{mid}")
+async def update_mapping_garanzia(mid: str, body: dict, user=Depends(require_user("admin"))):
+    body["updated_at"] = _now_iso()
+    r = await db.mapping_garanzie.update_one({"id": mid}, {"$set": body})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Mapping non trovato")
+    return strip_mongo_id(await db.mapping_garanzie.find_one({"id": mid}, {"_id": 0}))
+
+
+@api.delete("/librerie/mapping-garanzie/{mid}")
+async def delete_mapping_garanzia(mid: str, user=Depends(require_user("admin"))):
+    await db.mapping_garanzie.delete_one({"id": mid})
+    return {"ok": True}
+
+
+# --- MAPPING OPERATORI ANIA → user_id applicativo ---
+@api.get("/librerie/mapping-operatori")
+async def list_mapping_operatori(user=Depends(current_user)):
+    items = await db.mapping_operatori.find({}, {"_id": 0}).sort("codice_ania", 1).to_list(2000)
+    # arricchimento user
+    uids = [i["user_id"] for i in items if i.get("user_id")]
+    users = {u["id"]: u async for u in db.users.find(
+        {"id": {"$in": uids}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1},
+    )}
+    for i in items:
+        if i.get("user_id"):
+            i["user"] = users.get(i["user_id"])
+    return items
+
+
+@api.post("/librerie/mapping-operatori", status_code=201)
+async def create_mapping_operatore(body: dict, user=Depends(require_user("admin"))):
+    if not body.get("codice_ania"):
+        raise HTTPException(400, "Codice operatore obbligatorio")
+    body["id"] = body.get("id") or _uid()
+    body["created_at"] = _now_iso()
+    body["updated_at"] = _now_iso()
+    body["is_deleted"] = False
+    await db.mapping_operatori.insert_one(body)
+    return strip_mongo_id(body)
+
+
+@api.put("/librerie/mapping-operatori/{mid}")
+async def update_mapping_operatore(mid: str, body: dict, user=Depends(require_user("admin"))):
+    body["updated_at"] = _now_iso()
+    r = await db.mapping_operatori.update_one({"id": mid}, {"$set": body})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Mapping non trovato")
+    return strip_mongo_id(await db.mapping_operatori.find_one({"id": mid}, {"_id": 0}))
+
+
+@api.delete("/librerie/mapping-operatori/{mid}")
+async def delete_mapping_operatore(mid: str, user=Depends(require_user("admin"))):
+    await db.mapping_operatori.delete_one({"id": mid})
+    return {"ok": True}
+
+
+@api.post("/librerie/mapping-operatori/applica-a-polizze")
+async def applica_mapping_operatori(user=Depends(require_user("admin"))):
+    """Riapplica il mapping operatori a TUTTE le polizze esistenti (utile dopo aver mappato gli operatori)."""
+    aggiornate = 0
+    async for m in db.mapping_operatori.find({"user_id": {"$ne": None}}, {"_id": 0}):
+        if not m.get("user_id"): continue
+        r = await db.polizze.update_many(
+            {"operatore_ania_codice": m["codice_ania"]},
+            {"$set": {"collaboratore_id": m["user_id"], "updated_at": _now_iso()}},
+        )
+        aggiornate += r.modified_count
+    return {"polizze_aggiornate": aggiornate}
+
+
+@api.post("/librerie/mapping-garanzie/applica-a-polizze")
+async def applica_mapping_garanzie(user=Depends(require_user("admin"))):
+    """Riapplica il mapping garanzie alle polizze esistenti (rinomina garanzia.garanzia con nome_personalizzato)."""
+    aggiornate = 0
+    map_dict = {}
+    async for m in db.mapping_garanzie.find({}, {"_id": 0}):
+        if not m.get("nome_personalizzato"): continue
+        k = (m.get("codice_ania") or "").strip().upper()
+        if k: map_dict[k] = m["nome_personalizzato"]
+    async for p in db.polizze.find({"garanzie": {"$exists": True, "$ne": []}}, {"_id": 0, "id": 1, "garanzie": 1}):
+        changed = False
+        for g in p.get("garanzie") or []:
+            codice = (g.get("codice_ania") or "").strip().upper()
+            if codice and codice in map_dict and g.get("garanzia") != map_dict[codice]:
+                g["garanzia"] = map_dict[codice]; changed = True
+        if changed:
+            await db.polizze.update_one({"id": p["id"]}, {"$set": {"garanzie": p["garanzie"], "updated_at": _now_iso()}})
+            aggiornate += 1
+    return {"polizze_aggiornate": aggiornate}
+
+
 @api.post("/librerie/conti-cassa", status_code=201)
 async def create_conto(body: dict, user=Depends(require_user("admin", "collaboratore"))):
     obj = ContoCassa(**body)

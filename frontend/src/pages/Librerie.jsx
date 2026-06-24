@@ -23,6 +23,8 @@ const SECTIONS = [
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
+    { key: "mapping-garanzie", label: "Mapping Garanzie ANIA", icon: <Tags size={14} />, endpoint: "/librerie/mapping-garanzie" },
+    { key: "mapping-operatori", label: "Mapping Operatori ANIA", icon: <UserCog size={14} />, endpoint: "/librerie/mapping-operatori" },
 ];
 
 export default function Librerie() {
@@ -67,22 +69,42 @@ function Sezione({ section }) {
 
     const FormDialog = SECTION_FORMS[section.key];
 
+    const applicaMapping = async () => {
+        if (!window.confirm("Applicare il mapping a TUTTE le polizze esistenti?")) return;
+        try {
+            const url = section.key === "mapping-garanzie"
+                ? "/librerie/mapping-garanzie/applica-a-polizze"
+                : "/librerie/mapping-operatori/applica-a-polizze";
+            const r = await api.post(url);
+            toast.success(`${r.data.polizze_aggiornate} polizze aggiornate`);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
+
     return (
         <div>
             <div className="flex items-center justify-between mb-3">
                 <span className="text-sm text-slate-500 num">{list ? `${list.length} elementi` : ""}</span>
-                <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
-                    <DialogTrigger asChild>
-                        <Button data-testid={`lib-new-${section.key}`} onClick={() => setOpen(true)} className="bg-sky-700 hover:bg-sky-800">
-                            <Plus size={14} className="mr-1" /> Nuovo
+                <div className="flex gap-2">
+                    {showApplica && (
+                        <Button variant="outline" size="sm" onClick={applicaMapping} data-testid={`lib-apply-${section.key}`}>
+                            Applica a polizze esistenti
                         </Button>
-                    </DialogTrigger>
-                    <FormDialog
-                        section={section}
-                        editing={editing}
-                        onClose={() => { setOpen(false); setEditing(null); load(); }}
-                    />
-                </Dialog>
+                    )}
+                    <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
+                        <DialogTrigger asChild>
+                            <Button data-testid={`lib-new-${section.key}`} onClick={() => setOpen(true)} className="bg-sky-700 hover:bg-sky-800">
+                                <Plus size={14} className="mr-1" /> Nuovo
+                            </Button>
+                        </DialogTrigger>
+                        <FormDialog
+                            section={section}
+                            editing={editing}
+                            onClose={() => { setOpen(false); setEditing(null); load(); }}
+                        />
+                    </Dialog>
+                </div>
             </div>
 
             <Card className="border-slate-200 overflow-hidden">
@@ -221,6 +243,53 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
             </table>
         );
     }
+    // mapping garanzie ANIA → nome personalizzato
+    if (section.key === "mapping-garanzie") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Codice ANIA</th><th>Descrizione originale (ANIA)</th><th>Nome personalizzato</th><th>Note</th><th></th></tr></thead>
+                <tbody>
+                    {list.length === 0 && <tr><td colSpan="5" className="text-center text-slate-400 py-6">Nessun mapping. Le voci si creano automaticamente all&apos;import ANIA.</td></tr>}
+                    {list.map((m) => (
+                        <tr key={m.id}>
+                            <td className="num font-medium">{m.codice_ania}</td>
+                            <td className="text-xs">{m.descrizione_ania || "-"}</td>
+                            <td className="font-medium text-sky-700">{m.nome_personalizzato || <span className="text-slate-400 italic">da mappare</span>}</td>
+                            <td className="text-xs text-slate-500">{m.note || ""}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(m)} onDelete={() => onDelete(m.id)} label="mapping" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    // mapping operatori ANIA → user app
+    if (section.key === "mapping-operatori") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Codice ANIA</th><th>Nome operatore (ANIA)</th><th>Utente collegato</th><th></th></tr></thead>
+                <tbody>
+                    {list.length === 0 && <tr><td colSpan="4" className="text-center text-slate-400 py-6">Nessun mapping. Le voci si creano automaticamente all&apos;import ANIA.</td></tr>}
+                    {list.map((m) => (
+                        <tr key={m.id}>
+                            <td className="num font-medium">{m.codice_ania}</td>
+                            <td className="text-xs">{m.descrizione_ania || m.nome_ania || "-"}</td>
+                            <td>
+                                {m.user
+                                    ? <><span className="font-medium">{m.user.name}</span> <span className="text-[10px] text-slate-500">({m.user.role})</span></>
+                                    : <span className="text-slate-400 italic">da mappare</span>}
+                            </td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(m)} onDelete={() => onDelete(m.id)} label="mapping" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
     // utenti
     const ROLE_COLORS = {
         admin: "badge-danger", collaboratore: "badge-info",
@@ -261,7 +330,51 @@ const SECTION_FORMS = {
     "compagnie": CompagniaForm,
     "utenti": UtenteForm,
     "schema-provvigionale": SchemaProvvForm,
+    "mapping-garanzie": MappingGaranziaForm,
+    "mapping-operatori": MappingOperatoreForm,
 };
+
+function MappingGaranziaForm({ section, editing, onClose }) {
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ codice_ania: "", descrizione_ania: "", nome_personalizzato: "", note: "" }}
+        fields={(f, set) => (
+            <>
+                <div><Label>Codice ANIA *</Label><Input value={f.codice_ania || ""} onChange={(e) => set("codice_ania", e.target.value.toUpperCase())} data-testid="mg-codice" /></div>
+                <div><Label>Descrizione originale (ANIA)</Label><Input value={f.descrizione_ania || ""} onChange={(e) => set("descrizione_ania", e.target.value)} placeholder="Auto-popolato all'import" /></div>
+                <div><Label>Nome personalizzato</Label><Input value={f.nome_personalizzato || ""} onChange={(e) => set("nome_personalizzato", e.target.value)} placeholder="Come vuoi chiamarla nel CRM (es. 'RCA Standard')" data-testid="mg-nome" /></div>
+                <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+            </>
+        )}
+    />;
+}
+
+function MappingOperatoreForm({ section, editing, onClose }) {
+    const [users, setUsers] = useState([]);
+    useEffect(() => {
+        api.get("/auth/users").then((r) => setUsers(r.data.filter((u) => u.role !== "cliente")));
+    }, []);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ codice_ania: "", descrizione_ania: "", user_id: "" }}
+        fields={(f, set) => (
+            <>
+                <div><Label>Codice operatore ANIA *</Label><Input value={f.codice_ania || ""} onChange={(e) => set("codice_ania", e.target.value)} data-testid="mo-codice" /></div>
+                <div><Label>Nome operatore (ANIA)</Label><Input value={f.descrizione_ania || ""} onChange={(e) => set("descrizione_ania", e.target.value)} placeholder="Auto-popolato all'import" /></div>
+                <div>
+                    <Label>Utente del CRM collegato</Label>
+                    <Select value={f.user_id || ""} onValueChange={(v) => set("user_id", v)}>
+                        <SelectTrigger data-testid="mo-user-select"><SelectValue placeholder="Seleziona utente" /></SelectTrigger>
+                        <SelectContent>
+                            {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="text-xs text-slate-500 bg-sky-50 border border-sky-200 rounded p-2">
+                    Dopo aver mappato gli operatori puoi cliccare il pulsante <b>&quot;Applica a polizze esistenti&quot;</b> (sotto la tabella) per rinominare/riassegnare in massa.
+                </div>
+            </>
+        )}
+    />;
+}
 
 function GenericForm({ section, editing, onClose, fields, defaults, dialogClass }) {
     const [f, setF] = useState(editing || defaults);
