@@ -1,0 +1,32 @@
+{
+  "summary": "Iter14 - Verifica del fix dei 2 bug HIGH dell'iter13 (Giroconto). Pytest: 10/10 PASS (100%) su test_iter14_giroconto_fix.py + 2/2 PASS sui test iter13 che fallivano (test_giroconto_no_totale, test_delete_giroconto_elimina_pair). Entrambi i bug HIGH sono CONFERMATI RISOLTI: (1) Giroconto USCITA ora ha totale=0 in /api/contabilita/brogliaccio (era -importo). (2) POST /contabilita/giroconto salva pair_id come campo top-level su entrambe le righe in db.movimenti; DELETE /api/contabilita/movimenti/{mid} su una riga giroconto cancella la coppia (deleted_pair:true) e funziona anche con dati legacy (pair_id solo in note) tramite fallback regex. Regressione altri movimenti OK: incasso_premio totale=lordo, rimessa totale=0, paga-provvigioni totale=0, stipendio totale=-importo, rappel entrata totale=0, KPI entrate include solo incasso_premio.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter14_giroconto_fix.py",
+    "/app/test_reports/pytest/iter14_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /contabilita/giroconto restituisce 200 invece di 201 (le altre POST contabilita restituiscono 201). Inconsistenza minore nel codice di stato HTTP.",
+    "Il pair_id viene scritto sia come campo top-level che come stringa in `note` (giroconto_pair_id=...). Il fallback regex in DELETE è una mitigazione corretta per dati legacy, ma sarebbe utile una migrazione one-shot per backfillare pair_id top-level su righe legacy esistenti in DB.",
+    "server.py è ora 9388 righe — il refactor in moduli (contabilita_service.py) raccomandato nell'iter13 resta valido."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter14_giroconto_fix.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (10/10 iter14 + 2/2 retest iter13)", "frontend": "N/A (backend only)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Movimenti TEST_iter14_* su date 2026-04-01 (giroconto 250), 2026-04-02 (giroconto 75, cleanup OK), 2026-04-03 (giroconto 33, cancellato dal test), 2026-04-04 (giroconto legacy 42, cancellato dal test), 2026-04-05 (polizza + titolo incassato 300 + rimessa 100 + paga-provv 20 + stipendio 500 + rappel 40). Cleanup parziale automatico, rimangono alcuni mov TEST_ in DB su 2026-04-01 e 2026-04-05.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter14_giroconto_fix.py usa pymongo (sync) e load_dotenv per accedere a REACT_APP_BACKEND_URL e MONGO_URL/DB_NAME. Per casi legacy giroconto (pair_id solo in note) si può fare insert diretto via pymongo e poi DELETE via API. Il file iter13 NON ha load_dotenv: per rieseguirlo serve `export REACT_APP_BACKEND_URL=$(grep ... /app/frontend/.env | cut -d= -f2)`. POST /api/contabilita/giroconto risponde 200 (non 201). Il response include `pair_id`, `movimento_uscita_id`, `movimento_entrata_id`.",
+  "rca of the issue": "BUG #1 risolto in server.py linee 4556-4561: aggiunto branch esplicito `if cat == 'giroconto': c_totale = 0.0` dentro il blocco USCITE prima del catch-all. Verificato: row_out['totale'] == 0 e row_out['spese'] == 0; per_conto[cc_sorgente] == -importo. BUG #2 risolto in 2 punti: (a) POST /contabilita/giroconto (linee 4290-4293) ora costruisce out_doc/in_doc con `pair_id` come campo top-level (oltre alla stringa note legacy); (b) DELETE /contabilita/movimenti/{mid} (linee 4326-4341) legge pair_id top-level, e in fallback estrae pair_id dalla nota via regex `giroconto_pair_id=([^;\\s]+)`, poi delete_many con $or su pair_id top-level + legacy field + note regex. Verificato: count_documents({pair_id: X}) == 0 dopo DELETE; legacy insert via pymongo + DELETE → 0 doc residui."
+}

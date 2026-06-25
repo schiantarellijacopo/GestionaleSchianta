@@ -181,7 +181,7 @@ export default function BrogliaccioTab() {
             </Card>
 
             {/* Tabella brogliaccio */}
-            <Card className="border-slate-200 overflow-x-auto">
+            <Card className="border-slate-200 overflow-auto max-h-[70vh]">
                 {(b.righe?.length || 0) === 0 ? (
                     <div className="p-10 text-center text-sm text-slate-500">
                         <AlertCircle size={32} className="mx-auto text-slate-300 mb-2" />
@@ -191,19 +191,19 @@ export default function BrogliaccioTab() {
                     <table className="tbl w-full text-xs min-w-[1200px] border-separate border-spacing-0" data-testid="brogliaccio-tbl">
                         <thead>
                             <tr className="bg-slate-900 text-white">
-                                <th className="text-left px-2 py-2 sticky left-0 z-20 bg-slate-900 border-r-2 border-slate-500 min-w-[220px] w-[220px]">Descrizione</th>
-                                <th className="text-right px-2 py-2 sticky left-[220px] z-20 bg-slate-900 border-r-2 border-slate-500 min-w-[110px] w-[110px]">Totale</th>
-                                <th className="text-right px-2 py-2 sticky left-[330px] z-20 bg-slate-900 border-r-4 border-amber-400 min-w-[100px] w-[100px]">Provv</th>
-                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Saldo</th>
-                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Sospesi</th>
-                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Spese</th>
+                                <th className="text-left px-2 py-2 sticky left-0 top-0 z-40 bg-slate-900 border-r-2 border-slate-500 min-w-[220px] w-[220px]">Descrizione</th>
+                                <th className="text-right px-2 py-2 sticky left-[220px] top-0 z-40 bg-slate-900 border-r-2 border-slate-500 min-w-[110px] w-[110px]">Totale</th>
+                                <th className="text-right px-2 py-2 sticky left-[330px] top-0 z-40 bg-slate-900 border-r-4 border-amber-400 min-w-[100px] w-[100px]">Provv</th>
+                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Saldo</th>
+                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Sospesi</th>
+                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Spese</th>
                                 {conti.map((c) => (
-                                    <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap border-r-2 border-slate-500" title={c.nome}>
+                                    <th key={c.id} className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 whitespace-nowrap border-r-2 border-slate-500" title={c.nome}>
                                         {c.nome}
                                     </th>
                                 ))}
-                                <th className="w-10 text-center px-2 py-2 border-r-2 border-slate-500">All.</th>
-                                <th className="w-20 text-center px-2 py-2">Azioni</th>
+                                <th className="w-10 text-center px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">All.</th>
+                                <th className="w-20 text-center px-2 py-2 sticky top-0 z-30 bg-slate-900">Azioni</th>
                             </tr>
                         </thead>
                         <tbody>

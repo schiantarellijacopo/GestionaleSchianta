@@ -4287,7 +4287,10 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
         mezzo_pagamento="giroconto",
         note=f"giroconto_pair_id={pair_id}; da_conto_id={da_id}",
     )
-    await db.movimenti.insert_many([mov_out.model_dump(), mov_in.model_dump()])
+    # Salva il pair_id anche come campo top-level per supportare delete coppia
+    out_doc = {**mov_out.model_dump(), "pair_id": pair_id}
+    in_doc = {**mov_in.model_dump(), "pair_id": pair_id}
+    await db.movimenti.insert_many([out_doc, in_doc])
     await log_attivita(user, "giroconto", "movimento", pair_id,
                        f"€{importo:.2f}: {conto_da['nome']} → {conto_a['nome']}")
     return {
@@ -4321,8 +4324,21 @@ async def delete_movimento(mid: str, user=Depends(require_user("admin", "collabo
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per eliminare")
     # se è un giroconto, cancella anche la coppia
     pair_id = cur.get("pair_id") or cur.get("giroconto_pair_id")
+    # Fallback: estrai pair_id dalla nota (per dati legacy)
+    if not pair_id and cur.get("note"):
+        import re as _re
+        m_match = _re.search(r"giroconto_pair_id=([^;\s]+)", cur["note"])
+        if m_match:
+            pair_id = m_match.group(1)
     if pair_id:
-        await db.movimenti.delete_many({"$or": [{"pair_id": pair_id}, {"giroconto_pair_id": pair_id}]})
+        # cancella sia entries con pair_id top-level sia legacy con pair_id nella nota
+        await db.movimenti.delete_many({
+            "$or": [
+                {"pair_id": pair_id},
+                {"giroconto_pair_id": pair_id},
+                {"note": {"$regex": f"giroconto_pair_id={pair_id}"}},
+            ],
+        })
         await log_attivita(user, "delete", "giroconto", pair_id)
         return {"ok": True, "deleted_pair": True}
     # se collegato a un rappel, blocca eliminazione
@@ -4539,7 +4555,11 @@ async def _compute_brogliaccio(data_giorno: str):
             c_totale = 0.0
         else:
             # USCITE
-            if cat in CATS_RIMESSE:
+            if cat == "giroconto":
+                # Giroconto OUT-side: NON va in TOTALE (è solo un trasferimento interno).
+                # La banca uscita è già contabilizzata in per_conto.
+                c_totale = 0.0
+            elif cat in CATS_RIMESSE:
                 # Versamento compagnia: NON va in TOTALE, solo in Rimesse + Banca uscita.
                 # Riduce il saldo da versare alla compagnia (gestito da _compagnia_estratto_data).
                 c_totale = 0.0
