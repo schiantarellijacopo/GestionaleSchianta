@@ -126,7 +126,7 @@ export default function DocumentiPolizzaTab({ polizzaId, canEdit = true, onAfter
                 <div className="py-12 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-md">
                     <FileSearch size={28} className="mx-auto text-slate-300 mb-1" />
                     Nessun documento caricato per questa polizza.<br />
-                    {canEdit && <span className="text-xs">Usa "Carica documento" o "OCR Libretto" per iniziare.</span>}
+                    {canEdit && <span className="text-xs">Usa &quot;Carica documento&quot; o &quot;OCR Libretto&quot; per iniziare.</span>}
                 </div>
             ) : (
                 <table className="tbl w-full" data-testid="doc-table">

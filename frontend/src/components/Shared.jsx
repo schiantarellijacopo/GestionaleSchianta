@@ -12,9 +12,10 @@ export function PageHeader({ title, subtitle, actions }) {
     );
 }
 
-export function StatusBadge({ stato }) {
+export function StatusBadge({ stato, titolo_coperto, data_copertura }) {
     const map = {
         attiva: "badge-success", incassato: "badge-success", liquidato: "badge-success",
+        coperto: "badge-info",
         sospesa: "badge-warning", in_istruttoria: "badge-warning", da_incassare: "badge-warning",
         in_coda: "badge-warning", bozza: "badge-neutral",
         annullata: "badge-danger", scaduta: "badge-danger", insoluto: "badge-danger",
@@ -22,8 +23,10 @@ export function StatusBadge({ stato }) {
         aperto: "badge-info", in_emissione: "badge-info", inviata: "badge-info",
         chiuso_senza_seguito: "badge-neutral",
     };
-    const cls = map[stato] || "badge-neutral";
-    return <span className={`badge ${cls}`}>{(stato || "").replaceAll("_", " ")}</span>;
+    // Se l'agenzia ha anticipato (coperto) ma cliente non ha pagato → mostra "coperto"
+    const effStato = (stato !== "incassato" && (titolo_coperto || data_copertura)) ? "coperto" : stato;
+    const cls = map[effStato] || "badge-neutral";
+    return <span className={`badge ${cls}`}>{(effStato || "").replaceAll("_", " ")}</span>;
 }
 
 export function Empty({ message = "Nessun risultato" }) {

@@ -346,7 +346,7 @@ export default function Titoli() {
                                                 <td className="text-xs text-slate-700" data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</td>
                                             </>
                                         )}
-                                        <td><StatusBadge stato={t.stato} /></td>
+                                        <td><StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} /></td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
                                         </td>

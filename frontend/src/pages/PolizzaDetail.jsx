@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import TitoloDialog from "@/components/TitoloDialog";
+import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
@@ -119,6 +120,9 @@ export default function PolizzaDetail() {
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
                     <TabsTrigger value="provvigioni"><Banknote size={13} className="mr-1" />Provvigioni</TabsTrigger>
                     <TabsTrigger value="titoli"><FileText size={13} className="mr-1" />Titoli ({pol.titoli?.length || 0})</TabsTrigger>
+                    <TabsTrigger value="documenti" data-testid="tab-documenti">
+                        <FileText size={13} className="mr-1" />Documenti
+                    </TabsTrigger>
                     <TabsTrigger value="sinistri" data-testid="tab-sinistri">
                         <AlertTriangle size={13} className="mr-1" />Sinistri ({pol.sinistri?.length || 0})
                     </TabsTrigger>
@@ -298,7 +302,7 @@ export default function PolizzaDetail() {
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
                             <table className="tbl w-full">
-                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Pagato il</th><th className="text-center w-40">Azioni</th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
                                         <tr key={t.id} className="hover:bg-sky-50 cursor-pointer"
@@ -312,12 +316,13 @@ export default function PolizzaDetail() {
                                             <td>{t.tipo}</td>
                                             <td className="num">{fmtDate(t.effetto)}</td>
                                             <td className="num">{fmtDate(t.scadenza)}</td>
-                                            <td><StatusBadge stato={t.stato} /></td>
+                                            <td><StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} /></td>
                                             <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
                                             <td className="num text-right text-slate-600">{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</td>
                                             <td className="num text-right text-sky-700 font-medium" data-testid={`titolo-provv-collab-${t.id}`}>{fmtEur(t.provvigione_collaboratore || 0)}</td>
                                             <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
-                                            <td className="num">{fmtDate(t.data_incasso)}</td>
+                                            <td className="num text-xs text-emerald-700" data-testid={`titolo-coperto-${t.id}`}>{t.data_copertura ? fmtDate(t.data_copertura) : (t.coperto_fino_a ? fmtDate(t.coperto_fino_a) : "—")}</td>
+                                            <td className="num text-xs" data-testid={`titolo-pagato-${t.id}`}>{t.stato === "incassato" ? fmtDate(t.data_incasso) : "—"}</td>
                                             <td className="text-center">
                                                 <div className="flex gap-1 justify-center">
                                                     {t.stato !== "incassato" && t.stato !== "stornato" && (
@@ -372,6 +377,10 @@ export default function PolizzaDetail() {
                         <LibroMatricolaTab polizzaId={pol.id} />
                     </TabsContent>
                 )}
+
+                <TabsContent value="documenti">
+                    <DocumentiPolizzaTab polizzaId={pol.id} canEdit={canEdit} onAfterOCR={load} />
+                </TabsContent>
 
                 <TabsContent value="sinistri">
                     <Card className="border-slate-200 mt-4 overflow-hidden" data-testid="sinistri-tab-card">

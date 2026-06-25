@@ -17,6 +17,24 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
 ## Cosa è stato implementato
+### 2026-06-25 (sessione corrente, parte 3 — Avvisi + bugfix titoli)
+- 🆕 **Pagina Avvisi rifatta** con:
+  - **Aggregazione per contraente** (1 riga master per cliente + dettaglio espandibile dei singoli titoli)
+  - Selezione bulk con checkbox per titolo / contraente
+  - Bottone "Invia avvisi" che apre dialog bulk con corpo lettera **modificabile** + tabella HTML stile fac-simile
+  - Pulsanti azione **adattivi** (Email/WhatsApp/SMS appaiono solo se il contraente ha email/cellulare)
+  - Pulsante "Storico invii" che apre dialog con cronologia completa (canale, contraente, oggetto, importo, stato)
+- 🆕 Backend endpoints per Avvisi:
+  - `POST /api/email/invia-singola` → invio SMTP + log storico
+  - `POST /api/avvisi/invia-bulk-titoli` → aggrega titoli per contraente, UNA email per cliente con tabella HTML
+  - `GET /api/storico-avvisi` (filtro per contraente_id e canale)
+  - `POST /api/storico-avvisi/registra` per tracciare aperture WhatsApp/SMS
+- 🆕 Filtro **solo titoli arretrati** (scadenza < oggi, stato da_incassare/insoluto) in `cerca_scadenze`
+- 🐛 **Fix bug colonna "Pagato il"**: ora mostra "—" se titolo non è "incassato" (prima mostrava `data_incasso` anche se da_incassare)
+- 🆕 **Colonna "Coperto il"** in PolizzaDetail tabella titoli (mostra `data_copertura` quando agenzia ha anticipato il pagamento)
+- 🆕 **Stato "coperto"** in `StatusBadge`: se `titolo_coperto=True` ma non ancora incassato, mostra badge azzurro "coperto"
+- 🆕 Tab **"Documenti"** in PolizzaDetail collegata via `DocumentiPolizzaTab.jsx` (upload allegati polizza + UI OCR libretto già pronta — endpoint OCR backend ancora da implementare)
+
 ### 2026-06-25 (sessione corrente, parte 2)
 - ✅ **Breakdown provvigioni a 3 valori** (Totale / Collaboratore / Margine) in Polizza e Titoli, applicato sulla provvigione REALE della polizza/titolo + % schema collaboratore
 - ✅ Helper backend `_provv_breakdown()` riusabile
