@@ -17,6 +17,19 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
 ## Cosa è stato implementato
+### 2026-06-25 (parte 5 — Titolo sostituzione + EC Compagnie con pagamento)
+- 🆕 Tipo titolo **"sostituzione"** aggiunto al modello Titolo. Quando una polizza viene sostituita, viene **creato automaticamente** un titolo di tipo "sostituzione" con tutti i premi inseriti (Netto/Lordo/SSN/Imposte/Provvigioni)
+- 🆕 **Tab "Titoli" di una polizza ora mostra anche i titoli delle polizze sostituite** (catena storica) con etichetta "polizza prec. {numero}" e sfondo amber
+- 🆕 **Sostituzione polizza**: aggiunta cascata Ramo→Prodotto + campi tutti premi (Netto/Lordo/SSN/Imposte/Provvigioni)
+- 🆕 **Estratto Conto Compagnia (dettaglio)**:
+  - **Filtro per collaboratore** (oltre date dal/al)
+  - Colonna **"Collaboratore"** nella tabella
+  - **Selezione multipla** dei titoli con checkbox + "Seleziona tutti"
+  - **Pulsante "Paga compagnia"** che apre dialog per registrare versamento (data, conto cassa, descrizione)
+  - Endpoint backend `POST /api/compagnie/{cid}/paga-titoli` che crea il movimento contabile e marca i titoli come `pagato_alla_compagnia`
+  - Colonna **"Pag. compagnia"** con stato (pagato/da versare)
+- 🐛 Fix duplicate className su `<tr>` titoli in PolizzaDetail
+
 ### 2026-06-25 (parte 4 — Polizza Avanzata, PDF Avvisi, Libro Matricola+, UX)
 - 🆕 **Tab "Azioni" in PolizzaDetail** con 3 azioni operative:
   - **Annulla contratto** (data + motivo)

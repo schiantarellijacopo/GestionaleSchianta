@@ -309,7 +309,8 @@ export default function PolizzaDetail() {
                                 <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
-                                        <tr key={t.id} className="hover:bg-sky-50 cursor-pointer"
+                                        <tr key={t.id}
+                                            className={`hover:bg-sky-50 cursor-pointer ${t.polizza_origine_id ? "bg-amber-50/40" : ""}`}
                                             onClick={(e) => {
                                                 // ignora click sui pulsanti azione
                                                 if (e.target.closest("button")) return;
@@ -317,7 +318,14 @@ export default function PolizzaDetail() {
                                             }}
                                             data-testid={`titolo-row-${t.id}`}
                                         >
-                                            <td>{t.tipo}</td>
+                                            <td>
+                                                {t.tipo}
+                                                {t.polizza_origine_numero && (
+                                                    <div className="text-[9px] text-amber-700 italic" title="Titolo della polizza precedente (sostituita)">
+                                                        polizza prec. {t.polizza_origine_numero}
+                                                    </div>
+                                                )}
+                                            </td>
                                             <td className="num">{fmtDate(t.effetto)}</td>
                                             <td className="num">{fmtDate(t.scadenza)}</td>
                                             <td><StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} /></td>

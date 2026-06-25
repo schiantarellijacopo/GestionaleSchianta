@@ -75,7 +75,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {["nuova", "rinnovo", "appendice", "regolazione", "storno"].map((t) => (
+                                {["nuova", "rinnovo", "appendice", "regolazione", "storno", "sostituzione"].map((t) => (
                                     <SelectItem key={t} value={t}>{t}</SelectItem>
                                 ))}
                             </SelectContent>

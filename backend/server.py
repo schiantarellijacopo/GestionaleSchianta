@@ -555,20 +555,26 @@ async def delete_compagnia(cid: str, user=Depends(require_user("admin"))):
 # ============================================================
 # COMPAGNIE — Estratto conto e Saldo cassa
 # ============================================================
-async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Optional[str]) -> dict:
+async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Optional[str], collaboratore_id: Optional[str] = None) -> dict:
     """Aggrega dare/avere per una compagnia su un periodo.
 
     Logica:
       - Titoli incassati nel periodo → DARE verso compagnia = (lordo - provvigioni se trattiene)
       - Movimenti contabili categoria 'pagamento_compagnia' verso questa compagnia → AVERE
+      - Filtro opzionale collaboratore_id (polizze del collaboratore)
     """
     comp = await db.compagnie.find_one({"id": compagnia_id}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
     trattiene = comp.get("trattiene_provvigioni", True) is not False
 
-    # titoli incassati nel periodo riferiti a polizze di questa compagnia
-    polizze = await db.polizze.find({"compagnia_id": compagnia_id}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1}).to_list(20000)
+    pol_flt: dict = {"compagnia_id": compagnia_id}
+    if collaboratore_id:
+        pol_flt["collaboratore_id"] = collaboratore_id
+    polizze = await db.polizze.find(
+        pol_flt,
+        {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1, "collaboratore_id": 1},
+    ).to_list(20000)
     pol_index = {p["id"]: p for p in polizze}
     if not pol_index:
         return {"compagnia": comp, "righe": [], "totale_dare": 0.0, "totale_avere": 0.0, "saldo": 0.0,
@@ -585,12 +591,17 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         titoli_flt["data_incasso"] = cond
     titoli = await db.titoli.find(titoli_flt, {"_id": 0}).sort("data_incasso", 1).to_list(20000)
 
-    # arricchimento contraenti
+    # arricchimento contraenti e collaboratori
     contr_ids = list({pol_index[t["polizza_id"]].get("contraente_id") for t in titoli if t["polizza_id"] in pol_index})
+    collab_ids = list({pol_index[t["polizza_id"]].get("collaboratore_id") for t in titoli if t["polizza_id"] in pol_index and pol_index[t["polizza_id"]].get("collaboratore_id")})
     contr_map = {}
     if contr_ids:
         async for c in db.anagrafiche.find({"id": {"$in": contr_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
             contr_map[c["id"]] = c["ragione_sociale"]
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            collab_map[u["id"]] = u.get("name") or u.get("email")
 
     righe = []
     totale_dare = 0.0
@@ -602,12 +613,19 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         righe.append({
             "data": t.get("data_incasso") or t.get("scadenza"),
             "tipo": "incasso",
+            "titolo_id": t.get("id"),
+            "polizza_id": pol.get("id"),
             "polizza": pol.get("numero_polizza"),
+            "contraente_id": pol.get("contraente_id"),
             "contraente": contr_map.get(pol.get("contraente_id", "")),
             "ramo": pol.get("ramo"),
+            "collaboratore_id": pol.get("collaboratore_id"),
+            "collaboratore": collab_map.get(pol.get("collaboratore_id", "")),
             "dare": round(dovuto_alla_compagnia, 2),
             "avere": 0.0,
             "lordo": lordo, "provvigioni": provv,
+            "stato_pagamento": t.get("pagato_alla_compagnia") and "pagato" or "da_versare",
+            "data_pagamento_compagnia": t.get("data_pagamento_compagnia"),
             "_movimento_id": t.get("id"),
         })
         totale_dare += dovuto_alla_compagnia
@@ -652,9 +670,81 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 @api.get("/compagnie/{cid}/estratto-conto")
 async def compagnia_estratto_conto(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    return await _compagnia_estratto_data(cid, dal, al)
+    return await _compagnia_estratto_data(cid, dal, al, collaboratore_id)
+
+
+@api.post("/compagnie/{cid}/paga-titoli")
+async def compagnia_paga_titoli(
+    cid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Registra il pagamento alla compagnia di un insieme di titoli.
+
+    body: {
+        titoli_ids: [str],
+        conto_cassa_id: str,
+        data_movimento?: str (YYYY-MM-DD, default oggi),
+        descrizione?: str,
+    }
+    Crea un MovimentoContabile categoria 'pagamento_compagnia' e marca i titoli
+    come 'pagato_alla_compagnia' = True.
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio")
+    conto_cassa_id = body.get("conto_cassa_id")
+    if not conto_cassa_id:
+        raise HTTPException(400, "conto_cassa_id obbligatorio")
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    trattiene = comp.get("trattiene_provvigioni", True) is not False
+
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}, "stato": "incassato"}, {"_id": 0}).to_list(5000)
+    if not titoli:
+        raise HTTPException(404, "Nessun titolo incassato trovato")
+
+    totale = 0.0
+    for t in titoli:
+        lordo = float(t.get("importo_lordo") or 0)
+        provv = float(t.get("provvigioni") or 0)
+        totale += (lordo - provv) if trattiene else lordo
+
+    data_mov = body.get("data_movimento") or _now_iso()[:10]
+    descrizione = body.get("descrizione") or f"Versamento {comp.get('ragione_sociale')} — {len(titoli)} titoli"
+
+    mov = {
+        "id": str(uuid.uuid4()),
+        "data_movimento": data_mov,
+        "tipo": "uscita",
+        "categoria": "pagamento_compagnia",
+        "compagnia_id": cid,
+        "conto_cassa_id": conto_cassa_id,
+        "importo": round(totale, 2),
+        "descrizione": descrizione,
+        "titoli_ids_versati": [t["id"] for t in titoli],
+        "created_at": _now_iso(),
+        "creato_da": user.get("id"),
+    }
+    await db.movimenti.insert_one(mov)
+
+    # Marca titoli come pagati alla compagnia
+    await db.titoli.update_many(
+        {"id": {"$in": [t["id"] for t in titoli]}},
+        {"$set": {
+            "pagato_alla_compagnia": True,
+            "data_pagamento_compagnia": data_mov,
+            "movimento_pagamento_id": mov["id"],
+            "updated_at": _now_iso(),
+        }},
+    )
+    await log_attivita(user, "paga_compagnia", "movimento", mov["id"],
+                       f"Compagnia {comp.get('ragione_sociale')} · {len(titoli)} titoli · {round(totale, 2)}€")
+    return {"ok": True, "movimento_id": mov["id"], "totale": round(totale, 2),
+            "titoli_pagati": len(titoli)}
 
 
 @api.get("/compagnie/saldi-cassa")
@@ -1722,7 +1812,33 @@ async def get_polizza(pid: str, user=Depends(current_user)):
     doc["provvigione_margine"] = bk["provvigione_margine"]
     doc["provvigione_pct_collab"] = bk["pct_collab"]
     doc["provvigione_schema_nome"] = bk["schema_nome"]
-    doc["titoli"] = await db.titoli.find({"polizza_id": pid}, {"_id": 0}).sort("effetto", -1).to_list(100)
+    # Raccogli IDs della catena di polizze sostituite (storia)
+    polizza_ids_catena = [pid]
+    cursor_id = doc.get("sostituisce_polizza")
+    visited = {pid}
+    while cursor_id and cursor_id not in visited:
+        visited.add(cursor_id)
+        polizza_ids_catena.append(cursor_id)
+        prev = await db.polizze.find_one({"id": cursor_id}, {"_id": 0, "sostituisce_polizza": 1, "numero_polizza": 1})
+        if not prev:
+            break
+        cursor_id = prev.get("sostituisce_polizza")
+    # Carica titoli di tutta la catena (polizza corrente + sostituite)
+    doc["titoli"] = await db.titoli.find(
+        {"polizza_id": {"$in": polizza_ids_catena}}, {"_id": 0},
+    ).sort("effetto", -1).to_list(500)
+    # Mappa numeri polizza per arricchire i titoli storici
+    if len(polizza_ids_catena) > 1:
+        pmap = {p["id"]: p async for p in db.polizze.find(
+            {"id": {"$in": polizza_ids_catena}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "stato": 1},
+        )}
+        for t in doc["titoli"]:
+            if t.get("polizza_id") != pid:
+                p_old = pmap.get(t["polizza_id"]) or {}
+                t["polizza_origine_id"] = t["polizza_id"]
+                t["polizza_origine_numero"] = p_old.get("numero_polizza")
+                t["polizza_origine_stato"] = p_old.get("stato")
     # Arricchisci ogni titolo con breakdown provvigione (sul suo provvigioni reale)
     for t in doc["titoli"]:
         tbk = await _provv_breakdown(
@@ -3136,25 +3252,25 @@ async def sostituisci_polizza(
     if not body.get("numero_polizza") or not body.get("effetto"):
         raise HTTPException(400, "numero_polizza ed effetto obbligatori")
 
+    crea_titolo = bool(body.pop("crea_titolo", True))  # default: sempre crea titolo di sostituzione
     today = _now_iso()[:10]
     nuovo: dict = {
         # campi ereditati salvo override
         "contraente_id": old.get("contraente_id"),
         "assicurato_ids": old.get("assicurato_ids") or [],
         "collaboratore_id": old.get("collaboratore_id"),
-        "prodotto": old.get("prodotto"),
         "targa": old.get("targa"),
         "frazionamento": old.get("frazionamento") or "annuale",
-        "premio_lordo": old.get("premio_lordo") or 0,
         "termini_mora_giorni": old.get("termini_mora_giorni") or 15,
-        "ramo": old.get("ramo") or body.get("ramo"),
-        "compagnia_id": old.get("compagnia_id"),
-        # override dal body
+        # override dal body (compagnia, ramo, prodotto, numero, date, premi, ecc.)
         **{k: v for k, v in body.items() if v not in (None, "")},
-        # link sostituzione
+        # link sostituzione (sempre)
         "sostituisce_polizza": pid,
         "stato": "attiva",
     }
+    # garantisci compagnia/ramo se non override
+    nuovo.setdefault("compagnia_id", old.get("compagnia_id"))
+    nuovo.setdefault("ramo", old.get("ramo"))
     obj = Polizza(**nuovo)
     await db.polizze.insert_one(obj.model_dump())
     # marca vecchia
@@ -3165,9 +3281,37 @@ async def sostituisci_polizza(
         "motivo_annullamento": body.get("motivo") or "Sostituzione contratto",
         "updated_at": _now_iso(),
     }})
+
+    # Crea titolo iniziale (prima rata) se richiesto
+    titolo_id = None
+    if crea_titolo:
+        prossima_quietanza = nuovo.get("prossima_quietanza")
+        scad_titolo = prossima_quietanza if prossima_quietanza else _calcola_scadenza_titolo(
+            nuovo.get("effetto"), nuovo.get("frazionamento") or "annuale",
+        )
+        titolo_obj = Titolo(
+            polizza_id=obj.id,
+            tipo="sostituzione",
+            effetto=nuovo.get("effetto"),
+            scadenza=scad_titolo or nuovo.get("scadenza") or nuovo.get("effetto"),
+            stato="da_incassare",
+            importo_lordo=float(nuovo.get("premio_lordo") or 0),
+            importo_netto=float(nuovo.get("premio_netto") or 0),
+            imposte=float(nuovo.get("premio_imposte") or 0),
+            provvigioni=float(nuovo.get("provvigioni") or 0),
+        )
+        await db.titoli.insert_one(titolo_obj.model_dump())
+        titolo_id = titolo_obj.id
+
     await log_attivita(user, "sostituisci", "polizza", obj.id,
-                       f"{old.get('numero_polizza')} → {obj.numero_polizza}")
-    return {"ok": True, "nuova_polizza_id": obj.id, "nuova": obj.model_dump()}
+                       f"{old.get('numero_polizza')} → {obj.numero_polizza}"
+                       + (f" + titolo {titolo_id[:8]}" if titolo_id else ""))
+    return {
+        "ok": True,
+        "nuova_polizza_id": obj.id,
+        "nuova": obj.model_dump(),
+        "titolo_id": titolo_id,
+    }
 
 
 @api.put("/polizze/{pid}/applicazioni/{aid}")

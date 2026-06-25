@@ -20,6 +20,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     const navigate = useNavigate();
     const [compagnie, setCompagnie] = useState([]);
     const [rami, setRami] = useState([]);
+    const [prodotti, setProdotti] = useState([]);
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data || []));
         api.get("/librerie/rami").then((r) => setRami(r.data || []));
@@ -77,14 +78,29 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     const [sost, setSost] = useState({
         compagnia_id: polizza.compagnia_id || "",
         ramo: polizza.ramo || "",
+        prodotto: polizza.prodotto || "",
         numero_polizza: "",
         effetto: oggi,
         prossima_quietanza: "",
         scadenza: "",
         coassicurazione: false,
         premio_lordo: polizza.premio_lordo || "",
+        premio_netto: polizza.premio_netto || "",
+        premio_ssn: polizza.premio_ssn || "",
+        premio_imposte: polizza.premio_imposte || "",
+        provvigioni: polizza.provvigioni || "",
+        crea_titolo: true,
         motivo: "",
     });
+
+    // Cascata Ramo→Prodotto: ricarica prodotti quando cambia ramo o compagnia
+    useEffect(() => {
+        if (!sost.ramo) { setProdotti([]); return; }
+        const params = { ramo: sost.ramo };
+        if (sost.compagnia_id) params.compagnia_id = sost.compagnia_id;
+        api.get("/librerie/prodotti", { params }).then((r) => setProdotti(r.data || []));
+    }, [sost.ramo, sost.compagnia_id]);
+
     const [sostLoading, setSostLoading] = useState(false);
     const doSostituisci = async () => {
         if (!sost.numero_polizza || !sost.effetto || !sost.scadenza) {
@@ -93,12 +109,17 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
         if (!window.confirm(`Sostituire polizza ${polizza.numero_polizza} con la nuova?`)) return;
         setSostLoading(true);
         try {
-            const payload = {
-                ...sost,
-                premio_lordo: parseFloat(sost.premio_lordo) || 0,
-            };
+            const numFields = ["premio_lordo", "premio_netto", "premio_ssn", "premio_imposte", "provvigioni"];
+            const payload = { ...sost };
+            numFields.forEach((k) => {
+                payload[k] = parseFloat(payload[k]) || 0;
+            });
             const r = await api.post(`/polizze/${polizza.id}/sostituisci`, payload);
-            toast.success("Polizza sostituita");
+            if (r.data?.titolo_id) {
+                toast.success("Polizza sostituita + titolo creato");
+            } else {
+                toast.success("Polizza sostituita");
+            }
             if (r.data?.nuova_polizza_id) {
                 navigate(`/polizze/${r.data.nuova_polizza_id}`);
             } else {
@@ -231,10 +252,21 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                         </div>
                         <div>
                             <Label>Rischio (Ramo)</Label>
-                            <Select value={sost.ramo} onValueChange={(v) => setSost((p) => ({ ...p, ramo: v }))} disabled={isLocked}>
+                            <Select value={sost.ramo} onValueChange={(v) => { setSost((p) => ({ ...p, ramo: v, prodotto: "" })); }} disabled={isLocked}>
                                 <SelectTrigger data-testid="sost-ramo"><SelectValue placeholder="Seleziona…" /></SelectTrigger>
                                 <SelectContent>
                                     {rami.map((r) => <SelectItem key={r.id || r.nome} value={r.nome}>{r.nome}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Prodotto</Label>
+                            <Select value={sost.prodotto || ""} onValueChange={(v) => setSost((p) => ({ ...p, prodotto: v }))} disabled={isLocked || !sost.ramo}>
+                                <SelectTrigger data-testid="sost-prodotto">
+                                    <SelectValue placeholder={sost.ramo ? (prodotti.length ? "Seleziona prodotto" : "Nessun prodotto") : "Scegli prima ramo"} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {prodotti.map((p) => <SelectItem key={p.id || p.nome} value={p.nome}>{p.nome}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -263,21 +295,56 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                     onChange={(e) => setSost((p) => ({ ...p, scadenza: e.target.value }))}
                                     disabled={isLocked} data-testid="sost-scadenza" />
                             </div>
-                            <div>
-                                <Label>Premio €</Label>
-                                <Input type="number" step="0.01" value={sost.premio_lordo}
-                                    onChange={(e) => setSost((p) => ({ ...p, premio_lordo: e.target.value }))}
-                                    disabled={isLocked} />
+                        </div>
+                        <div className="border-t border-slate-100 pt-2 mt-2">
+                            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Premi & Provvigioni</div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <Label>Premio netto €</Label>
+                                    <Input type="number" step="0.01" value={sost.premio_netto}
+                                        onChange={(e) => setSost((p) => ({ ...p, premio_netto: e.target.value }))}
+                                        disabled={isLocked} data-testid="sost-pn" />
+                                </div>
+                                <div>
+                                    <Label>Premio lordo €</Label>
+                                    <Input type="number" step="0.01" value={sost.premio_lordo}
+                                        onChange={(e) => setSost((p) => ({ ...p, premio_lordo: e.target.value }))}
+                                        disabled={isLocked} data-testid="sost-pl" />
+                                </div>
+                                <div>
+                                    <Label>SSN €</Label>
+                                    <Input type="number" step="0.01" value={sost.premio_ssn}
+                                        onChange={(e) => setSost((p) => ({ ...p, premio_ssn: e.target.value }))}
+                                        disabled={isLocked} />
+                                </div>
+                                <div>
+                                    <Label>Imposte €</Label>
+                                    <Input type="number" step="0.01" value={sost.premio_imposte}
+                                        onChange={(e) => setSost((p) => ({ ...p, premio_imposte: e.target.value }))}
+                                        disabled={isLocked} />
+                                </div>
+                                <div className="col-span-2">
+                                    <Label>Provvigioni €</Label>
+                                    <Input type="number" step="0.01" value={sost.provvigioni}
+                                        onChange={(e) => setSost((p) => ({ ...p, provvigioni: e.target.value }))}
+                                        disabled={isLocked} />
+                                </div>
                             </div>
-                            <div className="flex items-end gap-2 pb-1">
-                                <Checkbox
-                                    id="coass"
-                                    checked={sost.coassicurazione}
-                                    onCheckedChange={(c) => setSost((p) => ({ ...p, coassicurazione: !!c }))}
-                                    disabled={isLocked}
-                                />
-                                <Label htmlFor="coass" className="text-sm cursor-pointer">Coassicurazione</Label>
-                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100 text-xs text-slate-600">
+                            <span className="inline-flex items-center gap-1 text-violet-700 font-medium">
+                                <ArrowLeftRight size={12} /> Tipo titolo: sostituzione
+                            </span>
+                            <span className="text-slate-400">— il titolo iniziale verrà creato in automatico con i dati inseriti</span>
+                        </div>
+                        <div className="flex items-end gap-2 pt-1">
+                            <Checkbox
+                                id="coass"
+                                checked={sost.coassicurazione}
+                                onCheckedChange={(c) => setSost((p) => ({ ...p, coassicurazione: !!c }))}
+                                disabled={isLocked}
+                            />
+                            <Label htmlFor="coass" className="text-sm cursor-pointer">Coassicurazione</Label>
                         </div>
                         <div>
                             <Label>Motivo sostituzione (opz.)</Label>
