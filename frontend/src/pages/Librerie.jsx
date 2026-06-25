@@ -165,7 +165,12 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                 <tbody>
                     {list.map((p) => (
                         <tr key={p.id}>
-                            <td className="font-medium">{p.nome}</td>
+                            <td className="font-medium">
+                                {p.nome}
+                                {p.is_libro_matricola && (
+                                    <span className="ml-2 inline-block bg-amber-100 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">L.M.</span>
+                                )}
+                            </td>
                             <td><span className="badge badge-neutral">{p.ramo || "-"}</span></td>
                             <td className="text-xs">{p.compagnia_id || "-"}</td>
                             <td className="num text-right font-medium">{p.termini_mora_giorni ?? 15}</td>
@@ -483,8 +488,11 @@ function ProdottoForm({ section, editing, onClose }) {
         return ["VITA", "VITA_RC", "PREVIDENZA"].includes(r) ? 30 : 15;
     };
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, attivo: true }}
-        fields={(f, set) => (
+        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, is_libro_matricola: false, attivo: true }}
+        fields={(f, set) => {
+            const ramoUpper = String(f.ramo || "").toUpperCase();
+            const isRcAuto = ramoUpper.includes("RCA") || ramoUpper.includes("AUTO");
+            return (
             <>
                 <div><Label>Nome prodotto *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3">
@@ -492,7 +500,6 @@ function ProdottoForm({ section, editing, onClose }) {
                         <Label>Ramo</Label>
                         <Select value={f.ramo || ""} onValueChange={(v) => {
                             set("ramo", v);
-                            // Auto-set default mora se l'utente non l'ha già modificato
                             if (!editing) set("termini_mora_giorni", defaultMoraFor(v));
                         }}>
                             <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
@@ -521,13 +528,30 @@ function ProdottoForm({ section, editing, onClose }) {
                             data-testid="prodotto-termini-mora"
                         />
                         <div className="text-[10px] text-slate-500 mt-1">
-                            Default: 15 gg · Vita = 30 gg. Verrà riportato sulle polizze e usato per calcolare automaticamente la scadenza mora dei titoli.
+                            Default: 15 gg · Vita = 30 gg.
                         </div>
                     </div>
+                    {isRcAuto && (
+                        <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={!!f.is_libro_matricola}
+                                    onChange={(e) => set("is_libro_matricola", e.target.checked)}
+                                    data-testid="prodotto-libro-matricola"
+                                />
+                                <span className="text-sm font-medium text-amber-900">È Libro Matricola?</span>
+                            </label>
+                            <div className="text-[10px] text-amber-700 mt-1">
+                                Solo per polizze RCA flotta: le polizze con questo prodotto avranno una tab "Libro Matricola" con applicazioni per veicolo.
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
             </>
-        )}
+            );
+        }}
     />;
 }
 

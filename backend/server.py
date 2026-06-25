@@ -25,7 +25,7 @@ from auth import (
 from db_models import (
     UserCreate, UserPublic, LoginRequest, Compagnia, Anagrafica, Polizza, Titolo,
     Sinistro, MovimentoContabile, Intervista, CalcoloPensione, EmailMessaggio,
-    AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria,
+    AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria, ApplicazioneLibroMatricola,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni, VoceManualeCollab,
     ChiusuraGiorno,
     AziendaConfig, SchemaProvvigionale, EventoCalendario,
@@ -1701,7 +1701,39 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         raise HTTPException(403, "Permesso negato")
     doc["contraente"] = await db.anagrafiche.find_one({"id": doc["contraente_id"]}, {"_id": 0})
     doc["compagnia"] = await db.compagnie.find_one({"id": doc["compagnia_id"]}, {"_id": 0})
+    # Arricchimento collaboratore (operatore)
+    doc["collaboratore_nome"] = None
+    if doc.get("collaboratore_id"):
+        u = await db.users.find_one(
+            {"id": doc["collaboratore_id"]}, {"_id": 0, "name": 1, "email": 1},
+        )
+        if u:
+            doc["collaboratore_nome"] = u.get("name") or u.get("email")
+    # Breakdown provvigione (totale REALE polizza → collab + margine via schema)
+    bk = await _provv_breakdown(
+        float(doc.get("provvigioni") or 0),
+        doc.get("collaboratore_id"),
+        doc.get("compagnia_id"),
+        doc.get("ramo"),
+    )
+    doc["provvigione_totale"] = bk["provvigione_totale"]
+    doc["provvigione_collaboratore"] = bk["provvigione_collaboratore"]
+    doc["provvigione_margine"] = bk["provvigione_margine"]
+    doc["provvigione_pct_collab"] = bk["pct_collab"]
+    doc["provvigione_schema_nome"] = bk["schema_nome"]
     doc["titoli"] = await db.titoli.find({"polizza_id": pid}, {"_id": 0}).sort("effetto", -1).to_list(100)
+    # Arricchisci ogni titolo con breakdown provvigione (sul suo provvigioni reale)
+    for t in doc["titoli"]:
+        tbk = await _provv_breakdown(
+            float(t.get("provvigioni") or 0),
+            t.get("collaboratore_id") or doc.get("collaboratore_id"),
+            doc.get("compagnia_id"),
+            doc.get("ramo"),
+        )
+        t["provvigione_totale"] = tbk["provvigione_totale"]
+        t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
+        t["provvigione_margine"] = tbk["provvigione_margine"]
+        t["provvigione_pct_collab"] = tbk["pct_collab"]
     doc["sinistri"] = await db.sinistri.find({"polizza_id": pid}, {"_id": 0}).sort("data_avvenimento", -1).to_list(100)
     return doc
 
@@ -1722,6 +1754,23 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             from db_models import default_mora_for_ramo
             mora = default_mora_for_ramo(body.get("ramo"))
         body["termini_mora_giorni"] = mora
+    # Auto-set is_libro_matricola dal prodotto in libreria
+    if body.get("prodotto") and "is_libro_matricola" not in body:
+        prod_lm = await db.prodotti.find_one(
+            {"nome": body["prodotto"]}, {"_id": 0, "is_libro_matricola": 1},
+        )
+        if prod_lm and prod_lm.get("is_libro_matricola"):
+            body["is_libro_matricola"] = True
+    # Auto-calcola provvigioni se non specificate manualmente e c'è schema applicabile
+    if (not body.get("provvigioni")) and body.get("premio_lordo") and body.get("collaboratore_id"):
+        calc = await _calcola_provvigione(
+            float(body["premio_lordo"]),
+            body.get("collaboratore_id"),
+            body.get("compagnia_id"),
+            body.get("ramo"),
+        )
+        if calc["provvigione_totale"]:
+            body["provvigioni"] = calc["provvigione_totale"]
     obj = Polizza(**body)
     await db.polizze.insert_one(obj.model_dump())
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
@@ -1883,6 +1932,17 @@ async def list_titoli(
         t["collaboratore_nome"] = collabs.get(p.get("collaboratore_id", ""), {}).get("name")
         t["mezzo_pagamento_preferito"] = p.get("mezzo_pagamento_preferito")
         t["ultimo_mezzo_pagamento"] = p.get("ultimo_mezzo_pagamento")
+        # Breakdown provvigione (totale REALE → quota collab + margine via schema)
+        tbk = await _provv_breakdown(
+            float(t.get("provvigioni") or 0),
+            t.get("collaboratore_id"),
+            p.get("compagnia_id"),
+            p.get("ramo"),
+        )
+        t["provvigione_totale"] = tbk["provvigione_totale"]
+        t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
+        t["provvigione_margine"] = tbk["provvigione_margine"]
+        t["provvigione_pct_collab"] = tbk["pct_collab"]
     # arricchimento count allegati
     tids = [t["id"] for t in items]
     if tids:
@@ -2457,6 +2517,24 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
             body["scadenza_mora"] = d.isoformat()
         except Exception:
             pass
+    # Auto-calc provvigioni se non specificate
+    if (not body.get("provvigioni")) and body.get("importo_lordo") and body.get("polizza_id"):
+        pol_pre = await db.polizze.find_one(
+            {"id": body["polizza_id"]},
+            {"_id": 0, "collaboratore_id": 1, "compagnia_id": 1, "ramo": 1},
+        ) or {}
+        collab_id = body.get("collaboratore_id") or pol_pre.get("collaboratore_id")
+        calc = await _calcola_provvigione(
+            float(body["importo_lordo"]),
+            collab_id,
+            pol_pre.get("compagnia_id"),
+            pol_pre.get("ramo"),
+        )
+        if calc["provvigione_totale"]:
+            body["provvigioni"] = calc["provvigione_totale"]
+        # Eredita collaboratore_id dalla polizza se non specificato
+        if not body.get("collaboratore_id") and pol_pre.get("collaboratore_id"):
+            body["collaboratore_id"] = pol_pre["collaboratore_id"]
     obj = Titolo(**body)
     await db.titoli.insert_one(obj.model_dump())
     await log_attivita(user, "create", "titolo", obj.id)
@@ -2731,6 +2809,190 @@ async def list_movimenti(
         for m in items:
             m["allegati_count"] = counts.get(m["id"], 0)
     return items
+
+
+async def _risolvi_schema_provvigionale(
+    collaboratore_id: Optional[str] = None,
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+) -> Optional[dict]:
+    """Risolve il SchemaProvvigionale più specifico applicabile.
+
+    Ordine di preferenza (la più specifica vince):
+      1. collaboratore + compagnia + ramo
+      2. collaboratore + compagnia
+      3. collaboratore + ramo
+      4. collaboratore
+      5. compagnia + ramo
+      6. compagnia
+      7. ramo
+      8. default (tutto null)
+    """
+    candidates = [
+        {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": ramo},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": None},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": None, "ramo": ramo},
+        {"collaboratore_id": collaboratore_id, "compagnia_id": None, "ramo": None},
+        {"collaboratore_id": None, "compagnia_id": compagnia_id, "ramo": ramo},
+        {"collaboratore_id": None, "compagnia_id": compagnia_id, "ramo": None},
+        {"collaboratore_id": None, "compagnia_id": None, "ramo": ramo},
+        {"collaboratore_id": None, "compagnia_id": None, "ramo": None},
+    ]
+    for q in candidates:
+        if all(v is None for v in q.values()):
+            continue  # salta combinazioni vuote
+        q["attivo"] = True
+        doc = await db.schema_provvigionale.find_one(q, {"_id": 0})
+        if doc:
+            return doc
+    return None
+
+
+async def _calcola_provvigione(
+    premio_lordo: float,
+    collaboratore_id: Optional[str],
+    compagnia_id: Optional[str],
+    ramo: Optional[str],
+) -> dict:
+    """Calcola provvigioni in base allo schema risolto.
+
+    Ritorna {provvigione_totale, provvigione_collaboratore, schema_id, schema_nome}.
+    Se non trova schema, ritorna 0.
+    """
+    if premio_lordo <= 0:
+        return {"provvigione_totale": 0.0, "provvigione_collaboratore": 0.0,
+                "schema_id": None, "schema_nome": None}
+    schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
+    if not schema:
+        return {"provvigione_totale": 0.0, "provvigione_collaboratore": 0.0,
+                "schema_id": None, "schema_nome": None}
+    pct_su_premio = float(schema.get("percentuale_su_premio") or 0)
+    pct_collab = float(schema.get("percentuale_collaboratore") or 0)
+    provv_tot = round(premio_lordo * pct_su_premio / 100.0, 2)
+    provv_collab = round(provv_tot * pct_collab / 100.0, 2)
+    return {
+        "provvigione_totale": provv_tot,
+        "provvigione_collaboratore": provv_collab,
+        "schema_id": schema.get("id"),
+        "schema_nome": schema.get("nome"),
+        "pct_su_premio": pct_su_premio,
+        "pct_collab": pct_collab,
+    }
+
+
+async def _provv_breakdown(
+    provv_totale_reale: float,
+    collaboratore_id: Optional[str],
+    compagnia_id: Optional[str],
+    ramo: Optional[str],
+) -> dict:
+    """Suddivide una provvigione totale REALE (es. quella già impostata sulla polizza/
+    titolo) in quota collaboratore e quota margine agenzia, usando la %
+    `percentuale_collaboratore` dello schema applicabile.
+
+    Ritorna:
+      {
+        provvigione_totale: float (= provv_totale_reale, arrotondato),
+        provvigione_collaboratore: float,
+        provvigione_margine: float,
+        pct_collab: float,
+        schema_id: Optional[str],
+        schema_nome: Optional[str],
+      }
+    """
+    tot = round(float(provv_totale_reale or 0), 2)
+    if tot <= 0:
+        return {
+            "provvigione_totale": 0.0,
+            "provvigione_collaboratore": 0.0,
+            "provvigione_margine": 0.0,
+            "pct_collab": 0.0,
+            "schema_id": None,
+            "schema_nome": None,
+        }
+    pct_collab = 0.0
+    schema_id = None
+    schema_nome = None
+    if collaboratore_id:
+        schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
+        if schema:
+            pct_collab = float(schema.get("percentuale_collaboratore") or 0)
+            schema_id = schema.get("id")
+            schema_nome = schema.get("nome")
+    provv_collab = round(tot * pct_collab / 100.0, 2)
+    provv_margine = round(tot - provv_collab, 2)
+    return {
+        "provvigione_totale": tot,
+        "provvigione_collaboratore": provv_collab,
+        "provvigione_margine": provv_margine,
+        "pct_collab": pct_collab,
+        "schema_id": schema_id,
+        "schema_nome": schema_nome,
+    }
+
+
+@api.get("/provvigioni/calcola")
+async def calcola_provvigione_endpoint(
+    premio_lordo: float, collaboratore_id: Optional[str] = None,
+    compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    user=Depends(current_user),
+):
+    """Calcola la provvigione attesa per un dato premio + collaboratore + compagnia + ramo."""
+    return await _calcola_provvigione(premio_lordo, collaboratore_id, compagnia_id, ramo)
+
+
+# ============================================================
+# LIBRO MATRICOLA — Applicazioni veicoli su polizza RCA flotta
+# ============================================================
+@api.get("/polizze/{pid}/applicazioni")
+async def list_applicazioni(pid: str, user=Depends(current_user)):
+    """Elenco applicazioni (veicoli) di un libro matricola."""
+    items = await db.applicazioni.find(
+        {"polizza_id": pid}, {"_id": 0},
+    ).sort("numero", 1).to_list(2000)
+    return items
+
+
+@api.post("/polizze/{pid}/applicazioni", status_code=201)
+async def create_applicazione(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "is_libro_matricola": 1})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    body["polizza_id"] = pid
+    # auto-progressivo se non fornito
+    if not body.get("numero"):
+        last = await db.applicazioni.find(
+            {"polizza_id": pid}, {"_id": 0, "numero": 1},
+        ).sort("numero", -1).limit(1).to_list(1)
+        body["numero"] = (last[0]["numero"] + 1) if last else 100
+    if not body.get("data_inclusione"):
+        body["data_inclusione"] = _now_iso()[:10]
+    obj = ApplicazioneLibroMatricola(**body)
+    await db.applicazioni.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "applicazione", obj.id,
+                       f"Veicolo {obj.targa} su polizza {pid[:6]}")
+    return obj.model_dump()
+
+
+@api.put("/polizze/{pid}/applicazioni/{aid}")
+async def update_applicazione(pid: str, aid: str, body: dict,
+                              user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    body.pop("id", None); body.pop("polizza_id", None); body.pop("created_at", None)
+    body["updated_at"] = _now_iso()
+    res = await db.applicazioni.update_one({"id": aid, "polizza_id": pid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Applicazione non trovata")
+    doc = await db.applicazioni.find_one({"id": aid}, {"_id": 0})
+    return doc
+
+
+@api.delete("/polizze/{pid}/applicazioni/{aid}")
+async def delete_applicazione(pid: str, aid: str,
+                              user=Depends(require_user("admin", "collaboratore"))):
+    res = await db.applicazioni.delete_one({"id": aid, "polizza_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Applicazione non trovata")
+    return {"ok": True}
 
 
 @api.post("/contabilita/movimenti", status_code=201)

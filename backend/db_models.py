@@ -221,6 +221,7 @@ class Polizza(BaseDoc):
     mezzo_pagamento_preferito: Optional[Literal["contanti", "bonifico", "assegno", "pos", "rid", "altro"]] = None
     ultimo_mezzo_pagamento: Optional[str] = None
     ultimo_mezzo_pagamento_data: Optional[str] = None
+    is_libro_matricola: bool = False  # se True → polizza con applicazioni veicoli (libro matricola RCA)
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     presa_in_carico: Optional[str] = None
@@ -488,7 +489,55 @@ class ProdottoLibreria(BaseDoc):
     ramo: Optional[str] = None
     descrizione: Optional[str] = None
     termini_mora_giorni: int = 15  # default 15gg; per Vita usare 30gg (vedi DEFAULT_MORA_BY_RAMO)
+    is_libro_matricola: bool = False  # se True (solo per RC_AUTO/flotte) → polizza con applicazioni veicoli
     attivo: bool = True
+
+
+class ApplicazioneLibroMatricola(BaseDoc):
+    """Applicazione (sub-polizza) di un Libro Matricola RCA — un veicolo per riga."""
+    polizza_id: str
+    numero: int  # progressivo applicazione
+    targa: str
+    stato: Literal["attiva", "annullata", "sospesa"] = "attiva"
+    data_inclusione: str  # YYYY-MM-DD
+    data_esclusione: Optional[str] = None
+    note: Optional[str] = None
+    # Dati veicolo
+    marca: Optional[str] = None
+    modello: Optional[str] = None
+    tipo_veicolo: Optional[str] = None  # Autovettura, Autocarro, Motociclo, ecc.
+    tipo_alimentazione: Optional[str] = None
+    tipo_uso: Optional[str] = None
+    data_immatricolazione: Optional[str] = None
+    data_acquisto: Optional[str] = None
+    cv_fiscali: Optional[int] = None
+    kw: Optional[float] = None
+    quintali: Optional[float] = None
+    cilindrata: Optional[int] = None
+    posti: Optional[int] = None
+    targa_rimorchio: Optional[str] = None
+    quintali_rimorchio: Optional[float] = None
+    gancio_traino: bool = False
+    # Leasing
+    leasing: Optional[str] = None  # società di leasing
+    data_leasing: Optional[str] = None
+    scadenza_leasing: Optional[str] = None
+    # Tariffa
+    tipo_tariffa: Optional[str] = None
+    bm_provenienza: Optional[str] = None
+    bm_assegnata: Optional[str] = None
+    bm_assegnata_cu: Optional[str] = None
+    pejus: float = 0.0
+    franchigia: float = 0.0
+    valore_veicolo: float = 0.0
+    valore_residuo: float = 0.0
+    valore_accessori: float = 0.0
+    guida_esperta: bool = False
+    guida_esclusiva: bool = False
+    rinuncia_rivalsa: bool = False
+    intestatario: Optional[str] = None
+    provincia_intestatario: Optional[str] = None
+    massimali: Optional[str] = None
 
 
 # Default termini di mora per ramo (giorni) — usato quando il prodotto non

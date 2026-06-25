@@ -13,6 +13,7 @@ import {
 import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
+import TitoloDialog from "@/components/TitoloDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
@@ -112,10 +113,12 @@ export default function Titoli() {
         const src = list || [];
         const t_lordo = src.reduce((s, t) => s + (t.importo_lordo || 0), 0);
         const t_netto = src.reduce((s, t) => s + (t.importo_netto || 0), 0);
-        const t_provv = src.reduce((s, t) => s + (t.provvigioni || 0), 0);
+        const t_provv = src.reduce((s, t) => s + (t.provvigione_totale ?? t.provvigioni ?? 0), 0);
+        const t_provv_collab = src.reduce((s, t) => s + (t.provvigione_collaboratore || 0), 0);
+        const t_provv_margine = src.reduce((s, t) => s + (t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0))), 0);
         const da_pagare = src.filter((t) => t.stato !== "incassato").reduce((s, t) => s + (t.importo_lordo || 0), 0);
         const incassato = src.filter((t) => t.stato === "incassato").reduce((s, t) => s + (t.importo_pagato ?? t.importo_lordo ?? 0), 0);
-        return { t_lordo, t_netto, t_provv, da_pagare, incassato };
+        return { t_lordo, t_netto, t_provv, t_provv_collab, t_provv_margine, da_pagare, incassato };
     }, [list]);
 
     const toggle = (id) => setSelected((p) => {
@@ -266,7 +269,9 @@ export default function Titoli() {
                                 <th className="w-[120px]">Compagnia</th>
                                 <th className="w-[100px]">Collaboratore</th>
                                 <th className="text-right w-[80px]">Premio €</th>
-                                <th className="text-right w-[70px]">Provv.</th>
+                                <th className="text-right w-[70px]" title="Provvigione totale">Provv. tot.</th>
+                                <th className="text-right w-[70px]" title="Quota collaboratore">Collab.</th>
+                                <th className="text-right w-[70px]" title="Margine agenzia">Margine</th>
                                 <th className="w-[80px] whitespace-nowrap">Scadenza</th>
                                 <th className="w-[80px] whitespace-nowrap">Copertura</th>
                                 <th className="w-[90px]">Stato</th>
@@ -280,7 +285,16 @@ export default function Titoli() {
                             {displayed.map((t) => {
                                 const daPagare = t.stato === "incassato" ? 0 : (t.importo_lordo || 0);
                                 return (
-                                    <tr key={t.id} data-testid={`titolo-row-${t.id}`} className={selected.has(t.id) ? "bg-sky-50" : ""}>
+                                    <tr
+                                        key={t.id}
+                                        data-testid={`titolo-row-${t.id}`}
+                                        className={`${selected.has(t.id) ? "bg-sky-50" : ""} hover:bg-sky-50/60 cursor-pointer`}
+                                        onClick={(e) => {
+                                            // ignora click su elementi interattivi (checkbox, link, button, menu)
+                                            if (e.target.closest("button, a, input, [role='menuitem'], [data-row-noclick]")) return;
+                                            if (canEdit) setEditing(t);
+                                        }}
+                                    >
                                         <td className="text-center">
                                             <input
                                                 type="checkbox"
@@ -302,7 +316,9 @@ export default function Titoli() {
                                         <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>
                                         <td className="text-xs text-slate-700">{t.collaboratore_nome || "-"}</td>
                                         <td className="num text-right font-medium" data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</td>
-                                        <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
+                                        <td className="num text-right text-slate-700" data-testid={`titolo-provv-tot-${t.id}`}>{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</td>
+                                        <td className="num text-right text-sky-700 font-medium" data-testid={`titolo-provv-collab-${t.id}`} title={t.provvigione_pct_collab > 0 ? `${t.provvigione_pct_collab}%` : "Nessuno schema"}>{fmtEur(t.provvigione_collaboratore || 0)}</td>
+                                        <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
                                         <td className="num text-xs whitespace-nowrap">{fmtDate(t.scadenza)}</td>
                                         <td className="num text-xs text-emerald-700 whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
                                         <td><StatusBadge stato={t.stato} /></td>
@@ -376,10 +392,11 @@ export default function Titoli() {
                     </button>
                 </div>
                 {/* KPI cards in stile pannello laterale Brogliaccio */}
-                <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2" data-testid="titoli-kpi-grid">
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2" data-testid="titoli-kpi-grid">
                     <KpiBar label="Rata totale" value={totali.t_lordo} accent="slate" testid="kpi-lordo" />
-                    <KpiBar label="Totale netto" value={totali.t_netto} accent="indigo" testid="kpi-netto" />
-                    <KpiBar label="Provvigioni" value={totali.t_provv} accent="sky" testid="kpi-provv" />
+                    <KpiBar label="Provv. totali" value={totali.t_provv} accent="sky" testid="kpi-provv" />
+                    <KpiBar label="Provv. collab." value={totali.t_provv_collab} accent="indigo" testid="kpi-provv-collab" />
+                    <KpiBar label="Margine" value={totali.t_provv_margine} accent="amber" testid="kpi-provv-margine" />
                     <KpiBar label="Da pagare" value={totali.da_pagare} accent="amber" testid="kpi-dapagare" highlight />
                     <KpiBar label="Incassato" value={totali.incassato} accent="emerald" testid="kpi-incassato" />
                 </div>
@@ -408,7 +425,12 @@ export default function Titoli() {
             })()}
 
             {editing && (
-                <EditTitoloDialog titolo={editing} conti={conti} onClose={() => { setEditing(null); load(); }} />
+                <TitoloDialog
+                    titolo={editing}
+                    conti={conti}
+                    onClose={() => { setEditing(null); load(); }}
+                    onDelete={() => { setEditing(null); load(); }}
+                />
             )}
 
             {paying && (
@@ -814,82 +836,6 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
     );
 }
 
-function EditTitoloDialog({ titolo, conti, onClose }) {
-    const [f, setF] = useState({ ...titolo });
-    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-    const save = async () => {
-        try {
-            await api.put(`/titoli/${titolo.id}`, {
-                tipo: f.tipo, effetto: f.effetto, scadenza: f.scadenza, stato: f.stato,
-                importo_lordo: parseFloat(f.importo_lordo) || 0,
-                importo_netto: parseFloat(f.importo_netto) || 0,
-                imposte: parseFloat(f.imposte) || 0,
-                provvigioni: parseFloat(f.provvigioni) || 0,
-                mezzo_pagamento: f.mezzo_pagamento || null,
-                conto_cassa_id: f.conto_cassa_id || null,
-                data_incasso: f.data_incasso || null,
-                coperto_fino_a: f.coperto_fino_a || null,
-            });
-            toast.success("Titolo aggiornato"); onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
-    };
-
-    return (
-        <Dialog open onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-xl">
-                <DialogHeader><DialogTitle>Modifica titolo</DialogTitle></DialogHeader>
-                <div className="grid grid-cols-2 gap-3 py-2">
-                    <div>
-                        <Label>Tipo</Label>
-                        <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                {["nuova", "rinnovo", "appendice", "regolazione", "storno"].map((t) =>
-                                    <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div>
-                        <Label>Stato</Label>
-                        <Select value={f.stato} onValueChange={(v) => set("stato", v)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="da_incassare">Da incassare</SelectItem>
-                                <SelectItem value="incassato">Incassato</SelectItem>
-                                <SelectItem value="insoluto">Insoluto</SelectItem>
-                                <SelectItem value="stornato">Stornato</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => set("effetto", e.target.value)} /></div>
-                    <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} /></div>
-                    <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} onChange={(e) => set("importo_lordo", e.target.value)} /></div>
-                    <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
-                    <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
-                    <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni || 0} onChange={(e) => set("provvigioni", e.target.value)} /></div>
-                    <div><Label>Data incasso</Label><Input type="date" value={f.data_incasso || ""} onChange={(e) => set("data_incasso", e.target.value)} /></div>
-                    <div><Label>Copertura fino al</Label><Input type="date" value={f.coperto_fino_a || ""} onChange={(e) => set("coperto_fino_a", e.target.value)} /></div>
-                    <div>
-                        <Label>Conto / Banca</Label>
-                        <Select value={f.conto_cassa_id || ""} onValueChange={(v) => set("conto_cassa_id", v)}>
-                            <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
-                            <SelectContent>
-                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div className="col-span-2">
-                        <Label>Mezzo pagamento</Label>
-                        <Input value={f.mezzo_pagamento || ""} onChange={(e) => set("mezzo_pagamento", e.target.value)} />
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button onClick={save} data-testid="titolo-save-edit" className="bg-sky-700 hover:bg-sky-800">Salva</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
-}
 
 function KpiBar({ label, value, accent = "slate", testid, highlight = false }) {
     const colors = {

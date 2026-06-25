@@ -11,10 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
+import LibroMatricolaTab from "@/components/LibroMatricolaTab";
+import TitoloDialog from "@/components/TitoloDialog";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
@@ -24,6 +26,7 @@ export default function PolizzaDetail() {
     const [editOpen, setEditOpen] = useState(false);
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);
+    const [titoloEditing, setTitoloEditing] = useState(null);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
     useEffect(() => {
@@ -83,7 +86,7 @@ export default function PolizzaDetail() {
                         <Hd label="Ultimo titolo" value={fmtDate(pol.titoli?.[0]?.data_incasso || pol.effetto)} />
                         <Hd label="Stato" value={<StatusBadge stato={pol.stato} />} />
                         <Hd label="Copertura" value={pol.scadenza_copertura || pol.scadenza} />
-                        <Hd label="Operatore" value={pol.collaboratore_id ? pol.collaboratore_id.slice(0, 6) : "—"} />
+                        <Hd label="Collaboratore" value={pol.collaboratore_nome || (pol.collaboratore_id ? pol.collaboratore_id.slice(0, 6) : "—")} />
                     </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-3 px-6 py-4 text-sm">
@@ -116,6 +119,14 @@ export default function PolizzaDetail() {
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
                     <TabsTrigger value="provvigioni"><Banknote size={13} className="mr-1" />Provvigioni</TabsTrigger>
                     <TabsTrigger value="titoli"><FileText size={13} className="mr-1" />Titoli ({pol.titoli?.length || 0})</TabsTrigger>
+                    <TabsTrigger value="sinistri" data-testid="tab-sinistri">
+                        <AlertTriangle size={13} className="mr-1" />Sinistri ({pol.sinistri?.length || 0})
+                    </TabsTrigger>
+                    {pol.is_libro_matricola && (
+                        <TabsTrigger value="libro-matricola" data-testid="tab-libro-matricola">
+                            <Car size={13} className="mr-1" />Libro Matricola
+                        </TabsTrigger>
+                    )}
                     <TabsTrigger value="altri"><Info size={13} className="mr-1" />Altri dati</TabsTrigger>
                 </TabsList>
 
@@ -221,8 +232,35 @@ export default function PolizzaDetail() {
                     <Card className="p-6 border-slate-200 mt-4">
                         <Grid items={[
                             ["Provv. struttura rata", fmtEur(pol.provv_struttura)],
-                            ["Provvigioni totali", <span className="font-semibold text-emerald-700 num">{fmtEur(pol.provvigioni)}</span>],
+                            [
+                                "Provv. totali",
+                                <span key="provv-totali" className="font-semibold text-emerald-700 num" data-testid="provv-totali">
+                                    {fmtEur(pol.provvigione_totale ?? pol.provvigioni ?? 0)}
+                                </span>,
+                            ],
+                            [
+                                "Provv. collaboratore",
+                                <span key="provv-collab" className="num font-semibold text-sky-700" data-testid="provv-collab">
+                                    {fmtEur(pol.provvigione_collaboratore || 0)}
+                                    {pol.provvigione_pct_collab > 0 && (
+                                        <span className="text-[10px] ml-2 text-slate-500 font-normal">
+                                            ({pol.provvigione_pct_collab}% — {pol.provvigione_schema_nome || "schema"})
+                                        </span>
+                                    )}
+                                </span>,
+                            ],
+                            [
+                                "Provv. margine (agenzia)",
+                                <span key="provv-margine" className="num font-semibold text-amber-700" data-testid="provv-margine">
+                                    {fmtEur(pol.provvigione_margine || ((pol.provvigione_totale ?? pol.provvigioni ?? 0) - (pol.provvigione_collaboratore || 0)))}
+                                </span>,
+                            ],
                         ]} />
+                        {pol.collaboratore_nome && (
+                            <div className="mt-2 text-xs text-slate-600">
+                                Collaboratore polizza: <strong>{pol.collaboratore_nome}</strong>
+                            </div>
+                        )}
                         {pol.provvigioni_operatori?.length > 0 && (
                             <>
                                 <SezioneTitolo titolo="Provvigioni operatori" extra />
@@ -245,41 +283,81 @@ export default function PolizzaDetail() {
 
                 <TabsContent value="titoli">
                     <Card className="border-slate-200 mt-4 overflow-hidden">
+                        <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                            <div className="text-xs text-slate-600">
+                                {pol.titoli?.length || 0} titoli su questa polizza
+                            </div>
+                            <Button
+                                size="sm"
+                                className="bg-sky-700 hover:bg-sky-800"
+                                onClick={() => setTitoloEditing({ _new: true, polizza_id: pol.id })}
+                                data-testid="new-titolo-btn"
+                            >+ Nuovo titolo</Button>
+                        </div>
                         {pol.titoli?.length === 0 ? (
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
                             <table className="tbl w-full">
-                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv.</th><th>Pagato il</th><th className="text-center">Azione</th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Pagato il</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
-                                        <tr key={t.id}>
+                                        <tr key={t.id} className="hover:bg-sky-50 cursor-pointer"
+                                            onClick={(e) => {
+                                                // ignora click sui pulsanti azione
+                                                if (e.target.closest("button")) return;
+                                                setTitoloEditing(t);
+                                            }}
+                                            data-testid={`titolo-row-${t.id}`}
+                                        >
                                             <td>{t.tipo}</td>
                                             <td className="num">{fmtDate(t.effetto)}</td>
                                             <td className="num">{fmtDate(t.scadenza)}</td>
                                             <td><StatusBadge stato={t.stato} /></td>
                                             <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
-                                            <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
+                                            <td className="num text-right text-slate-600">{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</td>
+                                            <td className="num text-right text-sky-700 font-medium" data-testid={`titolo-provv-collab-${t.id}`}>{fmtEur(t.provvigione_collaboratore || 0)}</td>
+                                            <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
                                             <td className="num">{fmtDate(t.data_incasso)}</td>
                                             <td className="text-center">
-                                                {t.stato !== "incassato" && t.stato !== "stornato" ? (
+                                                <div className="flex gap-1 justify-center">
+                                                    {t.stato !== "incassato" && t.stato !== "stornato" && (
+                                                        <Button
+                                                            size="sm"
+                                                            className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                                            onClick={() => setPaying({
+                                                                ...t,
+                                                                numero_polizza: pol.numero_polizza,
+                                                                ramo: pol.ramo,
+                                                                contraente_id: pol.contraente_id,
+                                                                contraente_nome: pol.contraente?.ragione_sociale,
+                                                                compagnia_nome: pol.compagnia?.ragione_sociale,
+                                                            })}
+                                                            data-testid={`pol-titolo-incassa-${t.id}`}
+                                                            title="Incasso/Copertura"
+                                                        >€</Button>
+                                                    )}
                                                     <Button
-                                                        size="sm"
-                                                        className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                                                        onClick={() => setPaying({
-                                                            ...t,
-                                                            numero_polizza: pol.numero_polizza,
-                                                            ramo: pol.ramo,
-                                                            contraente_id: pol.contraente_id,
-                                                            contraente_nome: pol.contraente?.ragione_sociale,
-                                                            compagnia_nome: pol.compagnia?.ragione_sociale,
-                                                        })}
-                                                        data-testid={`pol-titolo-incassa-${t.id}`}
-                                                    >
-                                                        Incasso/Copertura
-                                                    </Button>
-                                                ) : (
-                                                    <span className="text-xs text-emerald-700">✓</span>
-                                                )}
+                                                        size="sm" variant="outline"
+                                                        className="h-7 px-2 text-xs"
+                                                        onClick={() => setTitoloEditing(t)}
+                                                        data-testid={`titolo-edit-${t.id}`}
+                                                        title="Modifica"
+                                                    >✎</Button>
+                                                    <Button
+                                                        size="sm" variant="outline"
+                                                        className="h-7 px-2 text-xs text-rose-700 hover:bg-rose-50"
+                                                        onClick={async () => {
+                                                            if (!window.confirm(`Eliminare il titolo ${t.tipo} ${fmtDate(t.effetto)}?`)) return;
+                                                            try {
+                                                                await api.delete(`/titoli/${t.id}`);
+                                                                toast.success("Titolo eliminato");
+                                                                load();
+                                                            } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+                                                        }}
+                                                        data-testid={`titolo-delete-${t.id}`}
+                                                        title="Elimina"
+                                                    >🗑</Button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -288,6 +366,68 @@ export default function PolizzaDetail() {
                         )}
                     </Card>
                 </TabsContent>
+
+                {pol.is_libro_matricola && (
+                    <TabsContent value="libro-matricola">
+                        <LibroMatricolaTab polizzaId={pol.id} />
+                    </TabsContent>
+                )}
+
+                <TabsContent value="sinistri">
+                    <Card className="border-slate-200 mt-4 overflow-hidden" data-testid="sinistri-tab-card">
+                        <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                            <div className="text-xs text-slate-600">
+                                {pol.sinistri?.length || 0} sinistri su questa polizza
+                            </div>
+                            <Link
+                                to={`/sinistri?polizza_id=${pol.id}`}
+                                className="text-xs text-sky-700 hover:underline"
+                                data-testid="sinistri-fulllist-link"
+                            >
+                                Apri elenco completo →
+                            </Link>
+                        </div>
+                        {(!pol.sinistri || pol.sinistri.length === 0) ? (
+                            <div className="p-8 text-center text-slate-500 text-sm">Nessun sinistro registrato su questa polizza.</div>
+                        ) : (
+                            <table className="tbl w-full">
+                                <thead><tr>
+                                    <th>N. sinistro</th>
+                                    <th>Data avv.</th>
+                                    <th>Data den.</th>
+                                    <th>Stato</th>
+                                    <th>Luogo</th>
+                                    <th className="text-right">Riserva</th>
+                                    <th className="text-right">Liquidato</th>
+                                    <th className="text-center w-24">Azione</th>
+                                </tr></thead>
+                                <tbody>
+                                    {pol.sinistri.map((s) => (
+                                        <tr key={s.id} className="hover:bg-rose-50/40" data-testid={`sinistro-row-${s.id}`}>
+                                            <td className="num font-medium text-rose-700">{s.numero_sinistro || "—"}</td>
+                                            <td className="num">{fmtDate(s.data_avvenimento)}</td>
+                                            <td className="num">{fmtDate(s.data_denuncia)}</td>
+                                            <td><StatusBadge stato={s.stato} /></td>
+                                            <td className="text-xs text-slate-600">{s.luogo || "—"}</td>
+                                            <td className="num text-right">{fmtEur(s.riserva || 0)}</td>
+                                            <td className="num text-right text-emerald-700 font-medium">{fmtEur(s.liquidazione || 0)}</td>
+                                            <td className="text-center">
+                                                <Link
+                                                    to={`/sinistri?focus=${s.id}`}
+                                                    className="text-xs text-sky-700 hover:underline"
+                                                    data-testid={`sinistro-open-${s.id}`}
+                                                >
+                                                    Apri
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </Card>
+                </TabsContent>
+
 
                 <TabsContent value="altri">
                     <Card className="p-6 border-slate-200 mt-4 space-y-5">
@@ -316,16 +456,31 @@ export default function PolizzaDetail() {
                     onClose={() => { setPaying(null); load(); }}
                 />
             )}
+            {titoloEditing && (
+                <TitoloDialog
+                    titolo={titoloEditing}
+                    conti={conti}
+                    onClose={() => { setTitoloEditing(null); load(); }}
+                    onDelete={() => { setTitoloEditing(null); load(); }}
+                />
+            )}
         </div>
     );
 }
 
 function EditPolizzaDialog({ pol, onClose, onSaved }) {
+    const [collaboratori, setCollaboratori] = useState([]);
+    useEffect(() => {
+        api.get("/auth/users", { params: { role: "collaboratore" } })
+            .then((r) => setCollaboratori(r.data || []))
+            .catch(() => setCollaboratori([]));
+    }, []);
     const [f, setF] = useState({
         numero_polizza: pol.numero_polizza || "",
         stato: pol.stato || "attiva",
         ramo: pol.ramo || "",
         prodotto: pol.prodotto || "",
+        collaboratore_id: pol.collaboratore_id || "",
         effetto: pol.effetto || "",
         scadenza: pol.scadenza || "",
         scadenza_copertura: pol.scadenza_copertura || "",
@@ -405,6 +560,21 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                             </div>
                             <div><Label>Ramo</Label><Input value={f.ramo} onChange={(e) => set("ramo", e.target.value)} /></div>
                             <div><Label>Prodotto</Label><Input value={f.prodotto} onChange={(e) => set("prodotto", e.target.value)} /></div>
+                            <div>
+                                <Label>Collaboratore (Operatore)</Label>
+                                <Select
+                                    value={f.collaboratore_id || "__none__"}
+                                    onValueChange={(v) => set("collaboratore_id", v === "__none__" ? "" : v)}
+                                >
+                                    <SelectTrigger data-testid="edit-pol-collab"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__none__">— nessuno —</SelectItem>
+                                        {collaboratori.map((c) => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <div><Label>Effetto</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
                             <div><Label>Scadenza</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
                             <div><Label>Scad. copertura</Label><Input type="date" value={f.scadenza_copertura} onChange={(e) => set("scadenza_copertura", e.target.value)} /></div>
@@ -462,7 +632,41 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                             <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.premio_imposte} onChange={(e) => set("premio_imposte", e.target.value)} data-testid="edit-pol-imposte" /></div>
                             <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => set("premio_ssn", e.target.value)} data-testid="edit-pol-ssn" /></div>
                             <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} data-testid="edit-pol-premio-lordo" /></div>
-                            <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni} onChange={(e) => set("provvigioni", e.target.value)} data-testid="edit-pol-provv" /></div>
+                            <div>
+                                <Label>Provvigioni €</Label>
+                                <div className="flex gap-2">
+                                    <Input type="number" step="0.01" value={f.provvigioni}
+                                        onChange={(e) => set("provvigioni", e.target.value)}
+                                        data-testid="edit-pol-provv" />
+                                    <Button
+                                        variant="outline" size="sm"
+                                        onClick={async () => {
+                                            try {
+                                                const r = await api.get("/provvigioni/calcola", {
+                                                    params: {
+                                                        premio_lordo: f.premio_lordo || 0,
+                                                        collaboratore_id: f.collaboratore_id || undefined,
+                                                        compagnia_id: pol.compagnia_id,
+                                                        ramo: f.ramo,
+                                                    },
+                                                });
+                                                if (r.data.provvigione_totale > 0) {
+                                                    set("provvigioni", r.data.provvigione_totale);
+                                                    toast.success(`Provvigione: ${r.data.provvigione_totale}€ (schema: ${r.data.schema_nome})`);
+                                                } else {
+                                                    toast.warning("Nessuno schema provvigionale applicabile");
+                                                }
+                                            } catch { toast.error("Errore calcolo"); }
+                                        }}
+                                        data-testid="recalc-provv-btn"
+                                    >
+                                        Auto
+                                    </Button>
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-1">
+                                    Click <em>Auto</em> per ricalcolare dal premio lordo + collaboratore (via schema provvigionale)
+                                </div>
+                            </div>
                         </div>
                     </TabsContent>
 

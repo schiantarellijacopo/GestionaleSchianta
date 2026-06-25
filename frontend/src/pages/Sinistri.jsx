@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,6 +16,9 @@ import { toast } from "sonner";
 
 export default function Sinistri() {
     const { user } = useAuth();
+    const [searchParams] = useSearchParams();
+    const polizzaIdFilter = searchParams.get("polizza_id");
+    const focusId = searchParams.get("focus");
     const [list, setList] = useState(null);
     const [stato, setStato] = useState("all");
     const [open, setOpen] = useState(false);
@@ -24,9 +27,22 @@ export default function Sinistri() {
     const load = () => {
         const params = {};
         if (stato !== "all") params.stato = stato;
+        if (polizzaIdFilter) params.polizza_id = polizzaIdFilter;
         api.get("/sinistri", { params }).then((r) => setList(r.data));
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato, polizzaIdFilter]);
+
+    // Scroll/highlight sul sinistro indicato in query
+    useEffect(() => {
+        if (focusId && list) {
+            const el = document.querySelector(`[data-testid="sinistro-row-${focusId}"]`);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("ring-2", "ring-amber-400");
+                setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 2500);
+            }
+        }
+    }, [focusId, list]);
 
     return (
         <div data-testid="sinistri-page">
@@ -59,6 +75,13 @@ export default function Sinistri() {
                 </Select>
                 <span className="text-sm text-slate-500 num ml-auto">{list ? `${list.length} sinistri` : ""}</span>
             </div>
+
+            {polizzaIdFilter && (
+                <div className="mb-3 flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2" data-testid="filter-polizza-banner">
+                    <span>Filtrato per polizza specifica.</span>
+                    <Link to="/sinistri" className="underline hover:text-amber-700">Rimuovi filtro</Link>
+                </div>
+            )}
 
             <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
