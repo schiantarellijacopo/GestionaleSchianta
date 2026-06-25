@@ -284,7 +284,7 @@ class TestRappelCrud:
         assert mov, "movimento rappel non trovato"
         assert mov["categoria"] == "provvigioni"
         assert mov["tipo"] == "entrata"
-        assert mov.get("is_rappel") is True or mov.get("rappel_id")
+        assert mov.get("is_rappel") == True or mov.get("rappel_id")  # noqa: E712
 
     def test_delete_movimento_rappel_bloccato(self, client, setup_data):
         r = client.delete(f"{API}/contabilita/movimenti/{setup_data['rappel_mov_id']}")
@@ -391,8 +391,6 @@ class TestChiusureGiorno:
 
     def test_delete_chiusura_riapre_movimenti(self, client, setup_data):
         # crea chiusura per il giorno isolato 2026-03-17 con un movimento
-        comps = client.get(f"{API}/compagnie").json()
-        comp = comps[0]
         mov = client.post(f"{API}/contabilita/movimenti", json={
             "data_movimento": "2026-03-17", "tipo": "uscita", "categoria": "spese_amministrative",
             "importo": 5.0, "descrizione": "TEST_iter13_chiusura",

@@ -100,9 +100,6 @@ def stampa_brogliaccio(
     styles = getSampleStyleSheet()
     small = ParagraphStyle("small", parent=styles["Normal"],
                            fontName="Helvetica", fontSize=7, leading=8)
-    smaller = ParagraphStyle("smaller", parent=styles["Normal"],
-                             fontName="Helvetica", fontSize=6, leading=7,
-                             textColor=colors.HexColor("#475569"))
     story = []
     story.append(_header_table(azienda, data_giorno, logo_bytes))
     story.append(Spacer(1, 4 * mm))

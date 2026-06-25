@@ -7,6 +7,15 @@ import os
 import pytest
 import requests
 
+# Best-effort load of REACT_APP_BACKEND_URL from /app/frontend/.env when running pytest
+# directly from /app/backend (where dotenv only points to backend/.env).
+try:
+    from dotenv import load_dotenv
+    if not os.environ.get("REACT_APP_BACKEND_URL"):
+        load_dotenv("/app/frontend/.env", override=False)
+except Exception:
+    pass
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 API = f"{BASE_URL}/api"
 

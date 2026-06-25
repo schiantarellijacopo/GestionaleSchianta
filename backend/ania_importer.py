@@ -98,21 +98,14 @@ def _detect_record_type(filename: str) -> str | None:
     return None
 
 
-async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> ImportLog:
-    """Importa un file ZIP contenente i record ANIA."""
-    log = ImportLog(
-        utente_id=utente.get("id"),
-        nome_file=filename,
-        stato="in_corso",
-    )
-    start = time.time()
-    counts: Dict[str, int] = {}
-    errors: List[str] = []
 
-    # carica librerie di mapping ANIA → applicativo (rinomina garanzie, associa operatori a utenti)
-    mapping_garanzie = await _load_mapping_garanzie(db)
-    mapping_operatori = await _load_mapping_operatori(db)
+def _parse_flag_si(value: str) -> bool:
+    return (value or "").upper() in ("S", "SI", "Y", "1")
 
+
+def _extract_zip_contents(file_bytes: bytes, filename: str) -> Dict[str, str]:
+    """Decomprime lo zip e ritorna {filename: text_utf8}. In caso di non-zip
+    interpreta il payload come singolo CSV."""
     files_data: Dict[str, str] = {}
     try:
         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
@@ -121,91 +114,123 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                     continue
                 with zf.open(member) as f:
                     raw = f.read()
-                    # ANIA è in UTF-8, fallback latin-1
-                    try:
-                        text = raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        text = raw.decode("latin-1")
-                    files_data[member] = text
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = raw.decode("latin-1")
+                files_data[member] = text
     except zipfile.BadZipFile:
-        # potrebbe essere un singolo CSV
         try:
             text = file_bytes.decode("utf-8")
         except UnicodeDecodeError:
             text = file_bytes.decode("latin-1")
         files_data[filename] = text
+    return files_data
 
-    # 1) Compagnie da rec00 / rec100 / inferite dai rec20
-    compagnie_cache: Dict[str, str] = {}  # codice_compagnia_exp -> compagnia_id
 
-    async def get_or_create_compagnia(codice_exp: str, codice_ania: str = "") -> str | None:
-        if not codice_exp:
-            return None
-        if codice_exp in compagnie_cache:
-            return compagnie_cache[codice_exp]
-        existing = await db.compagnie.find_one({"codice": codice_exp})
-        if existing:
-            compagnie_cache[codice_exp] = existing["id"]
-            return existing["id"]
-        comp = Compagnia(
-            codice=codice_exp,
-            ragione_sociale=codice_exp or f"Compagnia {codice_ania}",
-            descrizione=f"Compagnia ANIA {codice_ania}" if codice_ania else None,
-        )
-        doc = comp.model_dump()
-        await db.compagnie.insert_one(doc)
-        compagnie_cache[codice_exp] = comp.id
-        return comp.id
+async def _get_or_create_compagnia(db, codice_exp: str, codice_ania: str,
+                                   cache: Dict[str, str]) -> str | None:
+    if not codice_exp:
+        return None
+    if codice_exp in cache:
+        return cache[codice_exp]
+    existing = await db.compagnie.find_one({"codice": codice_exp})
+    if existing:
+        cache[codice_exp] = existing["id"]
+        return existing["id"]
+    comp = Compagnia(
+        codice=codice_exp,
+        ragione_sociale=codice_exp or f"Compagnia {codice_ania}",
+        descrizione=f"Compagnia ANIA {codice_ania}" if codice_ania else None,
+    )
+    await db.compagnie.insert_one(comp.model_dump())
+    cache[codice_exp] = comp.id
+    return comp.id
 
-    # 2) Anagrafiche (rec10)
-    ana_id_map: Dict[str, str] = {}  # id_anagrafica_exp -> anagrafica.id
 
+# ---------------------------------------------------------------------------
+# Mapping di valori (stati polizza/titolo/sinistro)
+# ---------------------------------------------------------------------------
+_MAP_STATO_POLIZZA = {
+    "a": "attiva", "attiva": "attiva",
+    "s": "sospesa", "sospesa": "sospesa",
+    "x": "annullata", "annullata": "annullata",
+    "e": "scaduta", "scaduta": "scaduta",
+}
+_MAP_STATO_TITOLO = {
+    "i": "incassato", "incassato": "incassato",
+    "d": "da_incassare", "da_incassare": "da_incassare",
+    "n": "insoluto", "insoluto": "insoluto",
+    "s": "stornato", "stornato": "stornato",
+}
+_MAP_STATO_SINISTRO = {
+    "a": "aperto", "aperto": "aperto",
+    "i": "in_istruttoria", "in_istruttoria": "in_istruttoria",
+    "l": "liquidato", "liquidato": "liquidato",
+    "c": "chiuso_senza_seguito", "chiuso": "chiuso_senza_seguito",
+    "r": "respinto", "respinto": "respinto",
+}
+
+
+# ---------------------------------------------------------------------------
+# Processor: rec10 (anagrafiche)
+# ---------------------------------------------------------------------------
+async def _build_anagrafica_payload(db, row: dict,
+                                    compagnie_cache: Dict[str, str]) -> dict:
+    cf = row.get("codice_fiscale") or None
+    tipo = "persona_giuridica" if row.get("partita_iva") and not cf else "persona_fisica"
+    sesso_raw = (row.get("sesso_share") or "").upper()
+    return {
+        "tipo": tipo,
+        "ragione_sociale": row.get("ragione_sociale") or "Anagrafica",
+        "codice_fiscale": cf,
+        "partita_iva": row.get("partita_iva") or None,
+        "data_nascita": _parse_date(row.get("data_nascita", "")),
+        "comune_nascita": row.get("comune_nascita") or None,
+        "provincia_nascita": row.get("provincia_nascita") or None,
+        "sesso": sesso_raw[:1] if sesso_raw in ("M", "F") else None,
+        "indirizzo": row.get("indirizzo") or None,
+        "comune": row.get("comune") or None,
+        "provincia": row.get("provincia") or None,
+        "cap": row.get("cap") or None,
+        "nazione": row.get("nazione") or "ITALIA",
+        "telefono": row.get("numero_telefono") or None,
+        "cellulare": row.get("cellulare") or None,
+        "email": row.get("email") or None,
+        "iban": row.get("iban") or None,
+        "consenso_privacy": _parse_flag_si(row.get("consenso_privacy", "")),
+        "data_consenso_privacy": _parse_date(row.get("data_consenso_privacy", "")),
+        "compagnia_id": await _get_or_create_compagnia(
+            db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+        ),
+        "fonte": "import_ania",
+        "updated_at": _now_iso(),
+    }
+
+
+async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
+                                ana_id_map: Dict[str, str],
+                                compagnie_cache: Dict[str, str],
+                                counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
-        rec = _detect_record_type(fname)
-        if rec != "rec10":
+        if _detect_record_type(fname) != "rec10":
             continue
         rows = _read_csv_text(content)
         counts["rec10"] = counts.get("rec10", 0) + len(rows)
         for row in rows:
-            id_exp = row.get("id_anagrafica_exp") or row.get("id_anag_inviante") or _uid()
-            ragione = row.get("ragione_sociale") or f"Anagrafica {id_exp}"
-            cf = row.get("codice_fiscale") or None
-            existing = await db.anagrafiche.find_one(
-                {"$or": [
-                    {"id_anagrafica_exp": id_exp},
-                    {"codice_fiscale": cf} if cf else {"_id": "__none__"},
-                ]}
-            )
-            comp_id = await get_or_create_compagnia(
-                row.get("compagnia_exp", ""), row.get("compagnia_ania", "")
-            )
-            tipo = "persona_giuridica" if row.get("partita_iva") and not cf else "persona_fisica"
-            data_consenso = _parse_date(row.get("data_consenso_privacy", ""))
-            data = {
-                "tipo": tipo,
-                "ragione_sociale": ragione,
-                "codice_fiscale": cf,
-                "partita_iva": row.get("partita_iva") or None,
-                "data_nascita": _parse_date(row.get("data_nascita", "")),
-                "comune_nascita": row.get("comune_nascita") or None,
-                "provincia_nascita": row.get("provincia_nascita") or None,
-                "sesso": (row.get("sesso_share") or "").upper()[:1] if row.get("sesso_share") in ("M", "F") else None,
-                "indirizzo": row.get("indirizzo") or None,
-                "comune": row.get("comune") or None,
-                "provincia": row.get("provincia") or None,
-                "cap": row.get("cap") or None,
-                "nazione": row.get("nazione") or "ITALIA",
-                "telefono": row.get("numero_telefono") or None,
-                "cellulare": row.get("cellulare") or None,
-                "email": row.get("email") or None,
-                "iban": row.get("iban") or None,
-                "consenso_privacy": (row.get("consenso_privacy") or "").upper() in ("S", "SI", "Y", "1"),
-                "data_consenso_privacy": data_consenso,
-                "id_anagrafica_exp": id_exp,
-                "compagnia_id": comp_id,
-                "fonte": "import_ania",
-                "updated_at": _now_iso(),
-            }
+            id_exp = (row.get("id_anagrafica_exp")
+                      or row.get("id_anag_inviante")
+                      or _uid())
+            data = await _build_anagrafica_payload(db, row, compagnie_cache)
+            data["ragione_sociale"] = data["ragione_sociale"] or f"Anagrafica {id_exp}"
+            data["id_anagrafica_exp"] = id_exp
+            cf = data["codice_fiscale"]
+
+            query = [{"id_anagrafica_exp": id_exp}]
+            if cf:
+                query.append({"codice_fiscale": cf})
+            existing = await db.anagrafiche.find_one({"$or": query})
+
             if existing:
                 await db.anagrafiche.update_one({"id": existing["id"]}, {"$set": data})
                 ana_id_map[id_exp] = existing["id"]
@@ -216,49 +241,61 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 ana_id_map[id_exp] = obj.id
                 log.anagrafiche_create += 1
 
-    # 3) Polizze (rec20)
-    polizza_id_map: Dict[str, str] = {}
 
+# ---------------------------------------------------------------------------
+# Processor: rec20 (polizze)
+# ---------------------------------------------------------------------------
+async def _risolvi_contraente(db, contraente_exp: str | None,
+                              ana_id_map: Dict[str, str], log: ImportLog) -> str | None:
+    """Risolve l'id contraente (eventualmente creando un placeholder)."""
+    if not contraente_exp:
+        return None
+    if contraente_exp in ana_id_map:
+        return ana_id_map[contraente_exp]
+    ph = Anagrafica(
+        ragione_sociale=f"Anagrafica {contraente_exp}",
+        id_anagrafica_exp=contraente_exp,
+        fonte="import_ania",
+    )
+    await db.anagrafiche.insert_one(ph.model_dump())
+    ana_id_map[contraente_exp] = ph.id
+    log.anagrafiche_create += 1
+    return ph.id
+
+
+async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
+                            ana_id_map: Dict[str, str],
+                            polizza_id_map: Dict[str, str],
+                            compagnie_cache: Dict[str, str],
+                            mapping_operatori: dict,
+                            counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
-        rec = _detect_record_type(fname)
-        if rec != "rec20":
+        if _detect_record_type(fname) != "rec20":
             continue
         rows = _read_csv_text(content)
         counts["rec20"] = counts.get("rec20", 0) + len(rows)
         for row in rows:
             id_exp = row.get("id_polizza_exp") or _uid()
             numero = row.get("numero_polizza_cmp") or id_exp
-            contraente_exp = row.get("id_anagrafica_exp")
-            contraente_id = ana_id_map.get(contraente_exp) if contraente_exp else None
-            if not contraente_id and contraente_exp:
-                # crea anagrafica placeholder
-                ph = Anagrafica(
-                    ragione_sociale=f"Anagrafica {contraente_exp}",
-                    id_anagrafica_exp=contraente_exp,
-                    fonte="import_ania",
-                )
-                await db.anagrafiche.insert_one(ph.model_dump())
-                ana_id_map[contraente_exp] = ph.id
-                contraente_id = ph.id
-                log.anagrafiche_create += 1
-            comp_id = await get_or_create_compagnia(row.get("compagnia_exp", ""), row.get("compagnia_ania", ""))
-            stato_raw = (row.get("cod_stato_share") or "").lower()
-            stato = {
-                "a": "attiva", "attiva": "attiva",
-                "s": "sospesa", "sospesa": "sospesa",
-                "x": "annullata", "annullata": "annullata",
-                "e": "scaduta", "scaduta": "scaduta",
-            }.get(stato_raw, "attiva")
-            existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
-            operatore_codice = (row.get("cod_operatore") or row.get("operatore_share")
-                                or row.get("cod_collaboratore") or "").strip() or None
+            contraente_id = await _risolvi_contraente(
+                db, row.get("id_anagrafica_exp"), ana_id_map, log,
+            )
+            comp_id = await _get_or_create_compagnia(
+                db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+            )
+            stato = _MAP_STATO_POLIZZA.get((row.get("cod_stato_share") or "").lower(), "attiva")
+            operatore_codice = (row.get("cod_operatore")
+                                or row.get("operatore_share")
+                                or row.get("cod_collaboratore")
+                                or "").strip() or None
             collaboratore_id = mapping_operatori.get(operatore_codice) if operatore_codice else None
-            # crea stub mapping operatore se non mappato
             if operatore_codice and not collaboratore_id:
                 await _ensure_stub_mapping(
                     db, "mapping_operatori", operatore_codice,
                     row.get("nome_operatore") or row.get("descrizione_operatore") or "",
                 )
+
+            existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
             data = {
                 "numero_polizza": numero,
                 "compagnia_id": comp_id or "",
@@ -291,7 +328,47 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 polizza_id_map[id_exp] = obj.id
                 log.polizze_create += 1
 
-    # rec21 -> aggiorna targa + dettagli veicolo su polizze RCA
+
+# ---------------------------------------------------------------------------
+# Processor: rec21 (dettagli veicolo) — funzioni pure di mapping
+# ---------------------------------------------------------------------------
+def _build_dettagli_veicolo(row: dict) -> dict:
+    upd = {
+        "targa": row.get("targa") or None,
+        "veicolo_marca": (row.get("marca_veicolo") or "").upper() or None,
+        "veicolo_modello": (row.get("modello_veicolo") or "").upper() or None,
+        "veicolo_tipo": row.get("tipo_veicolo") or None,
+        "veicolo_alimentazione": row.get("alimentazione") or None,
+        "veicolo_uso": row.get("uso_veicolo") or None,
+        "veicolo_data_immatricolazione": _parse_date(row.get("data_immatricolazione", "")),
+        "veicolo_cilindrata": int(row.get("cilindrata") or 0) or None,
+        "veicolo_cv_fiscali": int(row.get("cv_fiscali") or 0) or None,
+        "veicolo_kw": _parse_float(row.get("kw", "")),
+        "veicolo_quintali": _parse_float(row.get("quintali") or row.get("portata") or ""),
+        "veicolo_posti": int(row.get("numero_posti") or 0) or None,
+        "veicolo_gancio_traino": _parse_flag_si(row.get("gancio_traino", "")),
+        "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
+        "tipo_tariffa": row.get("tipo_tariffa") or None,
+        "bm_provenienza": row.get("bm_provenienza") or None,
+        "bm_assegnata": row.get("bm_assegnata") or None,
+        "bm_assegnata_cu": row.get("bm_assegnata_cu") or None,
+        "pejus": _parse_float(row.get("pejus", "")),
+        "franchigia": _parse_float(row.get("franchigia", "")),
+        "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
+        "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
+        "valore_accessori": _parse_float(row.get("valore_accessori", "")),
+        "guida_esperta": _parse_flag_si(row.get("guida_esperta", "")),
+        "guida_esclusiva": _parse_flag_si(row.get("guida_esclusiva", "")),
+        "rinuncia_rivalsa": _parse_flag_si(row.get("rinuncia_rivalsa", "")),
+        "massimali": row.get("massimali") or None,
+        "updated_at": _now_iso(),
+    }
+    return {k: v for k, v in upd.items() if v not in (None, "", 0, 0.0) or k == "targa"}
+
+
+async def _processa_dettagli_veicolo(db, files_data: Dict[str, str],
+                                     polizza_id_map: Dict[str, str],
+                                     counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec21":
             continue
@@ -302,66 +379,40 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
-            upd = {
-                "targa": row.get("targa") or None,
-                "veicolo_marca": (row.get("marca_veicolo") or "").upper() or None,
-                "veicolo_modello": (row.get("modello_veicolo") or "").upper() or None,
-                "veicolo_tipo": row.get("tipo_veicolo") or None,
-                "veicolo_alimentazione": row.get("alimentazione") or None,
-                "veicolo_uso": row.get("uso_veicolo") or None,
-                "veicolo_data_immatricolazione": _parse_date(row.get("data_immatricolazione", "")),
-                "veicolo_cilindrata": int(row.get("cilindrata") or 0) or None,
-                "veicolo_cv_fiscali": int(row.get("cv_fiscali") or 0) or None,
-                "veicolo_kw": _parse_float(row.get("kw", "")),
-                "veicolo_quintali": _parse_float(row.get("quintali") or row.get("portata") or ""),
-                "veicolo_posti": int(row.get("numero_posti") or 0) or None,
-                "veicolo_gancio_traino": (row.get("gancio_traino") or "").upper() in ("S", "SI", "Y", "1"),
-                "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
-                "tipo_tariffa": row.get("tipo_tariffa") or None,
-                "bm_provenienza": row.get("bm_provenienza") or None,
-                "bm_assegnata": row.get("bm_assegnata") or None,
-                "bm_assegnata_cu": row.get("bm_assegnata_cu") or None,
-                "pejus": _parse_float(row.get("pejus", "")),
-                "franchigia": _parse_float(row.get("franchigia", "")),
-                "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
-                "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
-                "valore_accessori": _parse_float(row.get("valore_accessori", "")),
-                "guida_esperta": (row.get("guida_esperta") or "").upper() in ("S", "SI", "Y", "1"),
-                "guida_esclusiva": (row.get("guida_esclusiva") or "").upper() in ("S", "SI", "Y", "1"),
-                "rinuncia_rivalsa": (row.get("rinuncia_rivalsa") or "").upper() in ("S", "SI", "Y", "1"),
-                "massimali": row.get("massimali") or None,
-                "updated_at": _now_iso(),
-            }
-            upd = {k: v for k, v in upd.items() if v not in (None, "", 0, 0.0) or k in ("targa",)}
+            upd = _build_dettagli_veicolo(row)
             if upd:
                 await db.polizze.update_one({"id": pol_id}, {"$set": upd})
 
-    # rec30 -> garanzie della polizza
+
+# ---------------------------------------------------------------------------
+# Processor: rec30 (garanzie)
+# ---------------------------------------------------------------------------
+async def _processa_garanzie(db, files_data: Dict[str, str],
+                             polizza_id_map: Dict[str, str],
+                             mapping_garanzie: dict,
+                             counts: Dict[str, int]) -> None:
+    from collections import defaultdict as _dd
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec30":
             continue
         rows = _read_csv_text(content)
         counts["rec30"] = counts.get("rec30", 0) + len(rows)
-        # raggruppo per polizza
-        from collections import defaultdict as _dd
-        gar_per_pol = _dd(list)
+        gar_per_pol: dict[str, list[dict]] = _dd(list)
         for row in rows:
             pol_exp = row.get("id_polizza_exp")
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
-            codice_garanzia = (row.get("codice_garanzia") or "").strip().upper()
-            descr_originale = row.get("descrizione_garanzia") or row.get("garanzia") or codice_garanzia or ""
-            # applica mapping (codice o, se codice mancante, descrizione)
-            key = codice_garanzia or (descr_originale or "").strip().upper()
-            nome_finale = mapping_garanzie.get(key) or descr_originale
-            # crea stub mapping se nuova
+            codice = (row.get("codice_garanzia") or "").strip().upper()
+            descr = row.get("descrizione_garanzia") or row.get("garanzia") or codice or ""
+            key = codice or descr.strip().upper()
+            nome_finale = mapping_garanzie.get(key) or descr
             if key and key not in mapping_garanzie:
-                await _ensure_stub_mapping(db, "mapping_garanzie", codice_garanzia or key, descr_originale)
+                await _ensure_stub_mapping(db, "mapping_garanzie", codice or key, descr)
             gar_per_pol[pol_id].append({
                 "garanzia": nome_finale,
-                "garanzia_originale": descr_originale,
-                "codice_ania": codice_garanzia,
+                "garanzia_originale": descr,
+                "codice_ania": codice,
                 "netto": _parse_float(row.get("netto_garanzia", "")),
                 "accessori": _parse_float(row.get("accessori", "")),
                 "imposte": _parse_float(row.get("imposte", "")),
@@ -377,7 +428,13 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 {"$set": {"garanzie": garanzie, "diritti": diritti_tot, "updated_at": _now_iso()}},
             )
 
-    # 4) Titoli (rec40)
+
+# ---------------------------------------------------------------------------
+# Processor: rec40 (titoli)
+# ---------------------------------------------------------------------------
+async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
+                           polizza_id_map: Dict[str, str],
+                           counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -389,13 +446,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
             if not pol_id:
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
-            stato_raw = (row.get("stato_share") or "").lower()
-            stato = {
-                "i": "incassato", "incassato": "incassato",
-                "d": "da_incassare", "da_incassare": "da_incassare",
-                "n": "insoluto", "insoluto": "insoluto",
-                "s": "stornato", "stornato": "stornato",
-            }.get(stato_raw, "da_incassare")
+            stato = _MAP_STATO_TITOLO.get((row.get("stato_share") or "").lower(), "da_incassare")
             existing = await db.titoli.find_one({"id_titolo_exp": id_t})
             data = {
                 "polizza_id": pol_id,
@@ -419,7 +470,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 await db.titoli.insert_one(obj.model_dump())
                 log.titoli_creati += 1
 
-            # Se la polizza non ha provvigione (o è 0) ma il titolo sì → riporta sulla polizza
+            # back-fill provvigione su polizza se vuota
             titolo_provv = data.get("provvigioni", 0) or 0
             if titolo_provv > 0:
                 pol = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "provvigioni": 1})
@@ -429,7 +480,15 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                         {"$set": {"provvigioni": titolo_provv, "updated_at": _now_iso()}},
                     )
 
-    # 5) Sinistri (rec50)
+
+# ---------------------------------------------------------------------------
+# Processor: rec50 (sinistri)
+# ---------------------------------------------------------------------------
+async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
+                             polizza_id_map: Dict[str, str],
+                             ana_id_map: Dict[str, str],
+                             compagnie_cache: Dict[str, str],
+                             counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec50":
             continue
@@ -443,15 +502,10 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
             id_s = row.get("id_sinistro_exp") or _uid()
             contraente_exp = row.get("id_contraente_exp")
             contraente_id = ana_id_map.get(contraente_exp) if contraente_exp else None
-            comp_id = await get_or_create_compagnia(row.get("compagnia_exp", ""), row.get("compagnia_ania", ""))
-            stato_raw = (row.get("stato_sinistro") or "").lower()
-            stato = {
-                "a": "aperto", "aperto": "aperto",
-                "i": "in_istruttoria", "in_istruttoria": "in_istruttoria",
-                "l": "liquidato", "liquidato": "liquidato",
-                "c": "chiuso_senza_seguito", "chiuso": "chiuso_senza_seguito",
-                "r": "respinto", "respinto": "respinto",
-            }.get(stato_raw, "aperto")
+            comp_id = await _get_or_create_compagnia(
+                db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+            )
+            stato = _MAP_STATO_SINISTRO.get((row.get("stato_sinistro") or "").lower(), "aperto")
             existing = await db.sinistri.find_one({"id_sinistro_exp": id_s})
             data = {
                 "numero_sinistro": row.get("numero_sinistro_cmp") or id_s,
@@ -477,12 +531,47 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                 await db.sinistri.insert_one(obj.model_dump())
                 log.sinistri_creati += 1
 
-    # conta tutti gli altri record types (informativo)
+
+def _conta_record_residui(files_data: Dict[str, str], counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
         rec = _detect_record_type(fname)
         if rec and rec not in counts:
-            rows = _read_csv_text(content)
-            counts[rec] = len(rows)
+            counts[rec] = len(_read_csv_text(content))
+
+
+# ---------------------------------------------------------------------------
+# Entrypoint pubblico
+# ---------------------------------------------------------------------------
+async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> ImportLog:
+    """Importa un file ZIP contenente i record ANIA (rec10/20/21/30/40/50)."""
+    log = ImportLog(
+        utente_id=utente.get("id"),
+        nome_file=filename,
+        stato="in_corso",
+    )
+    start = time.time()
+    counts: Dict[str, int] = {}
+    errors: List[str] = []
+
+    mapping_garanzie = await _load_mapping_garanzie(db)
+    mapping_operatori = await _load_mapping_operatori(db)
+
+    files_data = _extract_zip_contents(file_bytes, filename)
+    compagnie_cache: Dict[str, str] = {}
+    ana_id_map: Dict[str, str] = {}
+    polizza_id_map: Dict[str, str] = {}
+
+    # Pipeline ordinata: l'ordine è significativo perché ogni step può
+    # riferirsi alle entità create dagli step precedenti.
+    await _processa_anagrafiche(db, files_data, log, ana_id_map, compagnie_cache, counts)
+    await _processa_polizze(db, files_data, log, ana_id_map, polizza_id_map,
+                            compagnie_cache, mapping_operatori, counts)
+    await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
+    await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts)
+    await _processa_titoli(db, files_data, log, polizza_id_map, counts)
+    await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
+                             compagnie_cache, counts)
+    _conta_record_residui(files_data, counts)
 
     log.record_types_processati = counts
     log.errori = errors

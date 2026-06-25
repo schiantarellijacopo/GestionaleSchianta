@@ -93,7 +93,6 @@ def test_incassa_without_conto_cassa(client, ctx):
         json={"mezzo_pagamento": "bonifico", "data_incasso": "2025-02-01"},
     )
     assert r.status_code == 200, f"incassa failed: {r.status_code} {r.text}"
-    body = r.json()
     # check titolo via list endpoint
     titoli_list = client.get(f"{API}/titoli", params={"polizza_id": ctx["polizza_id"]}).json()
     t = next((x for x in titoli_list if x["id"] == tid), None)

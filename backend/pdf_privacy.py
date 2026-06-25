@@ -77,7 +77,6 @@ def _make_header(azienda_nome: str, indirizzo: str):
 
 def _datacliente_table(ana: dict):
     """Tabella dati cliente in apertura (cognome/nome, CF, indirizzo, contatti)."""
-    s = _styles()
     nome = (f"{ana.get('nome', '') or ''} {ana.get('cognome', '') or ''}").strip() or ana.get("ragione_sociale", "")
     cf = ana.get("codice_fiscale") or ana.get("partita_iva") or ""
     indirizzo = ana.get("indirizzo") or ""

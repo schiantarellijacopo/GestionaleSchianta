@@ -5,10 +5,9 @@ Job giornaliero (08:00 locale) che:
 2. Compone e invia un'email di riepilogo all'amministratore (se SMTP configurato).
 3. Salva una notifica in DB (collection: ``notifiche_scadenze``) per log/audit.
 
-Configurazione (collection: ``azienda_config``):
-    - ``notifica_scadenze_attiva`` (bool, default True)
-    - ``notifica_scadenze_giorni`` (int, default 15)
-    - ``notifica_scadenze_email_admin`` (string) — destinatario; fallback ADMIN_EMAIL env.
+Refactor: `cerca_scadenze` e `esegui_job_scadenze` sono state spezzate in
+helper di responsabilità singola (query DB, formattazione record, costruzione
+log entry, risoluzione destinatario, invio email).
 """
 from __future__ import annotations
 
@@ -24,6 +23,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Helpers base
+# ---------------------------------------------------------------------------
 def _today() -> date:
     return date.today()
 
@@ -35,7 +37,7 @@ def _iso(d: date) -> str:
 def _fmt_eur(v: Optional[float]) -> str:
     try:
         return f"{float(v or 0):.2f} €"
-    except Exception:
+    except (TypeError, ValueError):
         return "0.00 €"
 
 
@@ -44,124 +46,181 @@ def _fmt_date(s: Optional[str]) -> str:
         return "—"
     try:
         return date.fromisoformat(s[:10]).strftime("%d/%m/%Y")
-    except Exception:
+    except (TypeError, ValueError):
         return s
 
 
-async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, list[dict]]:
-    """Ritorna polizze e titoli in scadenza nei prossimi `giorni` giorni (oggi compreso)."""
-    oggi = _today()
-    limite = oggi + timedelta(days=max(0, giorni))
-    oggi_iso, limite_iso = _iso(oggi), _iso(limite)
+def _giorni_da_oggi(scadenza_iso: Optional[str], oggi: date) -> Optional[int]:
+    if not scadenza_iso:
+        return None
+    try:
+        return (date.fromisoformat(scadenza_iso[:10]) - oggi).days
+    except (TypeError, ValueError):
+        return None
 
-    # POLIZZE: scadenza compresa, stato attiva/in_attesa.
-    polizze_cur = db.polizze.find(
+
+# ---------------------------------------------------------------------------
+# Query layer
+# ---------------------------------------------------------------------------
+async def _query_polizze_in_scadenza(
+    db: AsyncIOMotorDatabase, oggi_iso: str, limite_iso: str,
+) -> list[dict]:
+    cur = db.polizze.find(
         {
             "scadenza": {"$gte": oggi_iso, "$lte": limite_iso},
             "stato": {"$in": ["attiva", "in_attesa"]},
         },
         {"_id": 0},
     ).sort("scadenza", 1)
-    polizze = await polizze_cur.to_list(2000)
+    return await cur.to_list(2000)
 
-    # arricchimento: contraente + compagnia
-    ana_ids = list({p.get("contraente_id") for p in polizze if p.get("contraente_id")})
-    cmp_ids = list({p.get("compagnia_id") for p in polizze if p.get("compagnia_id")})
-    anas: dict[str, dict] = {}
-    cmps: dict[str, dict] = {}
-    if ana_ids:
-        async for a in db.anagrafiche.find(
-            {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "email": 1},
-        ):
-            anas[a["id"]] = a
-    if cmp_ids:
-        async for c in db.compagnie.find(
-            {"id": {"$in": cmp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
-        ):
-            cmps[c["id"]] = c
 
-    polizze_out: list[dict] = []
-    for p in polizze:
-        a = anas.get(p.get("contraente_id"), {})
-        c = cmps.get(p.get("compagnia_id"), {})
-        try:
-            g = (date.fromisoformat(p["scadenza"][:10]) - oggi).days
-        except Exception:
-            g = None
-        polizze_out.append({
-            "id": p["id"],
-            "numero_polizza": p.get("numero_polizza"),
-            "ramo": p.get("ramo"),
-            "targa": p.get("targa"),
-            "scadenza": p.get("scadenza"),
-            "giorni_alla_scadenza": g,
-            "premio_lordo": p.get("premio_lordo", 0.0),
-            "contraente_id": a.get("id"),
-            "contraente_nome": a.get("ragione_sociale"),
-            "contraente_cellulare": a.get("cellulare"),
-            "contraente_email": a.get("email"),
-            "compagnia_nome": c.get("ragione_sociale"),
-        })
-
-    # TITOLI ARRETRATI: scadenza precedente a oggi, stato da_incassare/insoluto.
-    # (Su richiesta utente: negli avvisi mostriamo SOLO i titoli arretrati,
-    #  non quelli "in scadenza prossima".)
-    titoli_cur = db.titoli.find(
+async def _query_titoli_arretrati(
+    db: AsyncIOMotorDatabase, oggi_iso: str,
+) -> list[dict]:
+    cur = db.titoli.find(
         {
             "scadenza": {"$lt": oggi_iso},
             "stato": {"$in": ["da_incassare", "insoluto"]},
         },
         {"_id": 0},
     ).sort("scadenza", 1)
-    titoli = await titoli_cur.to_list(2000)
+    return await cur.to_list(2000)
+
+
+async def _carica_anagrafiche(
+    db: AsyncIOMotorDatabase, ana_ids: list[str], cache: dict[str, dict],
+) -> None:
+    """Riempie `cache` in-place con anagrafiche non ancora presenti."""
+    mancanti = [aid for aid in ana_ids if aid and aid not in cache]
+    if not mancanti:
+        return
+    async for a in db.anagrafiche.find(
+        {"id": {"$in": mancanti}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "email": 1},
+    ):
+        cache[a["id"]] = a
+
+
+async def _carica_compagnie(
+    db: AsyncIOMotorDatabase, cmp_ids: list[str], cache: dict[str, dict],
+) -> None:
+    mancanti = [cid for cid in cmp_ids if cid and cid not in cache]
+    if not mancanti:
+        return
+    async for c in db.compagnie.find(
+        {"id": {"$in": mancanti}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1},
+    ):
+        cache[c["id"]] = c
+
+
+# ---------------------------------------------------------------------------
+# Formattazione record
+# ---------------------------------------------------------------------------
+def _format_polizza_record(p: dict, anas: dict, cmps: dict, oggi: date) -> dict:
+    a = anas.get(p.get("contraente_id"), {})
+    c = cmps.get(p.get("compagnia_id"), {})
+    return {
+        "id": p["id"],
+        "numero_polizza": p.get("numero_polizza"),
+        "ramo": p.get("ramo"),
+        "targa": p.get("targa"),
+        "scadenza": p.get("scadenza"),
+        "giorni_alla_scadenza": _giorni_da_oggi(p.get("scadenza"), oggi),
+        "premio_lordo": p.get("premio_lordo", 0.0),
+        "contraente_id": a.get("id"),
+        "contraente_nome": a.get("ragione_sociale"),
+        "contraente_cellulare": a.get("cellulare"),
+        "contraente_email": a.get("email"),
+        "compagnia_nome": c.get("ragione_sociale"),
+    }
+
+
+def _format_titolo_record(
+    t: dict, pol_map: dict, anas: dict, cmps: dict, oggi: date,
+) -> dict:
+    p = pol_map.get(t.get("polizza_id"), {})
+    a = anas.get(p.get("contraente_id"), {})
+    c = cmps.get(p.get("compagnia_id"), {})
+    return {
+        "id": t["id"],
+        "polizza_id": t.get("polizza_id"),
+        "numero_polizza": p.get("numero_polizza"),
+        "ramo": p.get("ramo"),
+        "scadenza": t.get("scadenza"),
+        "giorni_alla_scadenza": _giorni_da_oggi(t.get("scadenza"), oggi),
+        "importo_lordo": t.get("importo_lordo", 0.0),
+        "stato": t.get("stato"),
+        "contraente_id": a.get("id"),
+        "contraente_nome": a.get("ragione_sociale"),
+        "contraente_cellulare": a.get("cellulare"),
+        "contraente_email": a.get("email"),
+        "compagnia_nome": c.get("ragione_sociale"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# API pubblica: cerca scadenze
+# ---------------------------------------------------------------------------
+async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, list[dict]]:
+    """Ritorna polizze (in scadenza) + titoli (arretrati) entro `giorni` giorni."""
+    oggi = _today()
+    limite = oggi + timedelta(days=max(0, giorni))
+    oggi_iso, limite_iso = _iso(oggi), _iso(limite)
+
+    polizze = await _query_polizze_in_scadenza(db, oggi_iso, limite_iso)
+    titoli = await _query_titoli_arretrati(db, oggi_iso)
+
+    # carico polizze referenziate dai titoli
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
     pol_map: dict[str, dict] = {}
     if pol_ids:
         async for p in db.polizze.find(
             {"id": {"$in": pol_ids}},
-            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "compagnia_id": 1},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1,
+             "contraente_id": 1, "compagnia_id": 1},
         ):
             pol_map[p["id"]] = p
-    # arricchisci anagrafica/compagnia mancanti
-    extra_ana = [p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id") and p["contraente_id"] not in anas]
-    extra_cmp = [p.get("compagnia_id") for p in pol_map.values() if p.get("compagnia_id") and p["compagnia_id"] not in cmps]
-    if extra_ana:
-        async for a in db.anagrafiche.find(
-            {"id": {"$in": extra_ana}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "email": 1},
-        ):
-            anas[a["id"]] = a
-    if extra_cmp:
-        async for c in db.compagnie.find(
-            {"id": {"$in": extra_cmp}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
-        ):
-            cmps[c["id"]] = c
 
-    titoli_out: list[dict] = []
-    for t in titoli:
-        p = pol_map.get(t.get("polizza_id"), {})
-        a = anas.get(p.get("contraente_id"), {})
-        c = cmps.get(p.get("compagnia_id"), {})
-        try:
-            g = (date.fromisoformat(t["scadenza"][:10]) - oggi).days
-        except Exception:
-            g = None
-        titoli_out.append({
-            "id": t["id"],
-            "polizza_id": t.get("polizza_id"),
-            "numero_polizza": p.get("numero_polizza"),
-            "ramo": p.get("ramo"),
-            "scadenza": t.get("scadenza"),
-            "giorni_alla_scadenza": g,
-            "importo_lordo": t.get("importo_lordo", 0.0),
-            "stato": t.get("stato"),
-            "contraente_id": a.get("id"),
-            "contraente_nome": a.get("ragione_sociale"),
-            "contraente_cellulare": a.get("cellulare"),
-            "contraente_email": a.get("email"),
-            "compagnia_nome": c.get("ragione_sociale"),
-        })
+    # cache anagrafiche/compagnie usate da polizze + titoli
+    anas: dict[str, dict] = {}
+    cmps: dict[str, dict] = {}
+    ana_ids = [p.get("contraente_id") for p in polizze]
+    cmp_ids = [p.get("compagnia_id") for p in polizze]
+    ana_ids += [p.get("contraente_id") for p in pol_map.values()]
+    cmp_ids += [p.get("compagnia_id") for p in pol_map.values()]
+    await _carica_anagrafiche(db, ana_ids, anas)
+    await _carica_compagnie(db, cmp_ids, cmps)
 
+    polizze_out = [_format_polizza_record(p, anas, cmps, oggi) for p in polizze]
+    titoli_out = [_format_titolo_record(t, pol_map, anas, cmps, oggi) for t in titoli]
     return {"polizze": polizze_out, "titoli": titoli_out}
+
+
+# ---------------------------------------------------------------------------
+# Rendering email
+# ---------------------------------------------------------------------------
+def _email_row_html(item: dict, *, importo_key: str) -> str:
+    urgent = (item.get("giorni_alla_scadenza") or 999) <= 3
+    color = "#dc2626" if urgent else "#0f172a"
+    return (
+        "<tr>"
+        f"<td style='padding:6px 10px;color:{color};font-weight:600'>{_fmt_date(item.get('scadenza'))}</td>"
+        f"<td style='padding:6px 10px;color:{color}'>{item.get('giorni_alla_scadenza','?')} gg</td>"
+        f"<td style='padding:6px 10px;font-family:monospace'>{item.get('numero_polizza','—')}</td>"
+        f"<td style='padding:6px 10px'>{item.get('ramo','—')}</td>"
+        f"<td style='padding:6px 10px'>{item.get('contraente_nome','—')}</td>"
+        f"<td style='padding:6px 10px;text-align:right'>{_fmt_eur(item.get(importo_key))}</td>"
+        "</tr>"
+    )
+
+
+def _email_section_rows(items: list[dict], *, importo_key: str, empty_label: str) -> str:
+    if not items:
+        return (f"<tr><td colspan='6' style='padding:8px;color:#94a3b8;"
+                f"font-style:italic'>{empty_label}</td></tr>")
+    return "".join(_email_row_html(it, importo_key=importo_key) for it in items)
 
 
 def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[str, str, str]:
@@ -169,7 +228,8 @@ def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[st
     pol = scadenze.get("polizze", [])
     tit = scadenze.get("titoli", [])
     oggi = _today().strftime("%d/%m/%Y")
-    subject = f"Avvisi di scadenza — {oggi} ({len(pol)} polizze, {len(tit)} titoli nei prossimi {giorni} gg)"
+    subject = (f"Avvisi di scadenza — {oggi} "
+               f"({len(pol)} polizze, {len(tit)} titoli nei prossimi {giorni} gg)")
 
     # versione testo
     lines = [f"Riepilogo scadenze al {oggi} (prossimi {giorni} giorni)", ""]
@@ -190,46 +250,12 @@ def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[st
         )
     text = "\n".join(lines)
 
-    # versione HTML
-    def _rows_pol(items: list[dict]) -> str:
-        if not items:
-            return "<tr><td colspan='6' style='padding:8px;color:#94a3b8;font-style:italic'>Nessuna polizza in scadenza.</td></tr>"
-        rows = []
-        for p in items:
-            urgent = (p.get("giorni_alla_scadenza") or 999) <= 3
-            color = "#dc2626" if urgent else "#0f172a"
-            rows.append(
-                f"<tr>"
-                f"<td style='padding:6px 10px;color:{color};font-weight:600'>{_fmt_date(p['scadenza'])}</td>"
-                f"<td style='padding:6px 10px;color:{color}'>{p.get('giorni_alla_scadenza','?')} gg</td>"
-                f"<td style='padding:6px 10px;font-family:monospace'>{p.get('numero_polizza','—')}</td>"
-                f"<td style='padding:6px 10px'>{p.get('ramo','—')}</td>"
-                f"<td style='padding:6px 10px'>{p.get('contraente_nome','—')}</td>"
-                f"<td style='padding:6px 10px;text-align:right'>{_fmt_eur(p.get('premio_lordo'))}</td>"
-                f"</tr>"
-            )
-        return "".join(rows)
-
-    def _rows_tit(items: list[dict]) -> str:
-        if not items:
-            return "<tr><td colspan='6' style='padding:8px;color:#94a3b8;font-style:italic'>Nessun titolo in scadenza.</td></tr>"
-        rows = []
-        for t in items:
-            urgent = (t.get("giorni_alla_scadenza") or 999) <= 3
-            color = "#dc2626" if urgent else "#0f172a"
-            rows.append(
-                f"<tr>"
-                f"<td style='padding:6px 10px;color:{color};font-weight:600'>{_fmt_date(t['scadenza'])}</td>"
-                f"<td style='padding:6px 10px;color:{color}'>{t.get('giorni_alla_scadenza','?')} gg</td>"
-                f"<td style='padding:6px 10px;font-family:monospace'>{t.get('numero_polizza','—')}</td>"
-                f"<td style='padding:6px 10px'>{t.get('ramo','—')}</td>"
-                f"<td style='padding:6px 10px'>{t.get('contraente_nome','—')}</td>"
-                f"<td style='padding:6px 10px;text-align:right'>{_fmt_eur(t.get('importo_lordo'))}</td>"
-                f"</tr>"
-            )
-        return "".join(rows)
-
-    th_style = "padding:8px 10px;background:#f1f5f9;text-align:left;font-size:11px;text-transform:uppercase;color:#475569;letter-spacing:0.05em"
+    th_style = ("padding:8px 10px;background:#f1f5f9;text-align:left;font-size:11px;"
+                "text-transform:uppercase;color:#475569;letter-spacing:0.05em")
+    rows_pol = _email_section_rows(pol, importo_key="premio_lordo",
+                                   empty_label="Nessuna polizza in scadenza.")
+    rows_tit = _email_section_rows(tit, importo_key="importo_lordo",
+                                   empty_label="Nessun titolo in scadenza.")
     html = f"""<!DOCTYPE html>
 <html><head><meta charset='utf-8'></head>
 <body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#f8fafc;padding:20px;color:#0f172a'>
@@ -256,7 +282,7 @@ def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[st
           <th style='{th_style}'>N. Polizza</th><th style='{th_style}'>Ramo</th>
           <th style='{th_style}'>Contraente</th><th style='{th_style};text-align:right'>Premio</th>
         </tr></thead>
-        <tbody>{_rows_pol(pol)}</tbody>
+        <tbody>{rows_pol}</tbody>
       </table>
 
       <h3 style='margin:24px 0 8px;font-size:14px;color:#0f172a'>Titoli</h3>
@@ -266,7 +292,7 @@ def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[st
           <th style='{th_style}'>N. Polizza</th><th style='{th_style}'>Ramo</th>
           <th style='{th_style}'>Contraente</th><th style='{th_style};text-align:right'>Importo</th>
         </tr></thead>
-        <tbody>{_rows_tit(tit)}</tbody>
+        <tbody>{rows_tit}</tbody>
       </table>
     </div>
     <div style='padding:12px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;font-size:11px;color:#64748b'>
@@ -301,26 +327,20 @@ def _invia_email(az: dict, to_addr: str, subject: str, text: str, html: str) -> 
     srv.quit()
 
 
-async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False) -> dict[str, Any]:
-    """Esegue il job avvisi scadenze. Salva traccia su ``db.notifiche_scadenze``."""
-    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    if not manuale and not az.get("notifica_scadenze_attiva", True):
-        logger.info("Avvisi scadenze: disattivato in configurazione.")
-        return {"ok": False, "skipped": True, "motivo": "Disattivato in Librerie/Azienda"}
-
-    giorni = int(az.get("notifica_scadenze_giorni") or 15)
-    scadenze = await cerca_scadenze(db, giorni)
-    n_pol = len(scadenze["polizze"])
-    n_tit = len(scadenze["titoli"])
-
-    to_addr = (
+# ---------------------------------------------------------------------------
+# Job orchestrazione
+# ---------------------------------------------------------------------------
+def _resolve_destinatario(az: dict) -> Optional[str]:
+    return (
         az.get("notifica_scadenze_email_admin")
         or az.get("email_commercialista")
         or os.environ.get("ADMIN_EMAIL")
     )
-    smtp_ok = bool(az.get("smtp_host") and az.get("smtp_user"))
 
-    log_entry: dict[str, Any] = {
+
+def _build_log_entry(*, manuale: bool, giorni: int, n_pol: int, n_tit: int,
+                     to_addr: Optional[str]) -> dict[str, Any]:
+    return {
         "id": f"NS-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}",
         "eseguito_at": datetime.now(timezone.utc).isoformat(),
         "manuale": manuale,
@@ -332,37 +352,63 @@ async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False
         "errore": None,
     }
 
+
+async def _persist_log(db: AsyncIOMotorDatabase, log_entry: dict) -> None:
+    await db.notifiche_scadenze.insert_one(log_entry)
+
+
+async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False) -> dict[str, Any]:
+    """Esegue il job avvisi scadenze. Salva traccia su ``db.notifiche_scadenze``."""
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    if not manuale and not az.get("notifica_scadenze_attiva", True):
+        logger.info("Avvisi scadenze: disattivato in configurazione.")
+        return {"ok": False, "skipped": True, "motivo": "Disattivato in Librerie/Azienda"}
+
+    giorni = int(az.get("notifica_scadenze_giorni") or 15)
+    scadenze = await cerca_scadenze(db, giorni)
+    n_pol, n_tit = len(scadenze["polizze"]), len(scadenze["titoli"])
+
+    to_addr = _resolve_destinatario(az)
+    log_entry = _build_log_entry(manuale=manuale, giorni=giorni,
+                                 n_pol=n_pol, n_tit=n_tit, to_addr=to_addr)
+
+    # nothing to notify
     if n_pol == 0 and n_tit == 0:
         log_entry["motivo"] = "Nessuna scadenza nel periodo"
-        await db.notifiche_scadenze.insert_one(log_entry)
+        await _persist_log(db, log_entry)
         logger.info("Avvisi scadenze: nessuna scadenza nei prossimi %s giorni.", giorni)
         return {"ok": True, "n_polizze": 0, "n_titoli": 0, "email_inviata": False,
                 "motivo": "Nessuna scadenza nel periodo"}
 
+    # destinatario mancante
     if not to_addr:
-        log_entry["errore"] = "Destinatario non configurato (notifica_scadenze_email_admin / email_commercialista)"
-        await db.notifiche_scadenze.insert_one(log_entry)
+        log_entry["errore"] = ("Destinatario non configurato "
+                               "(notifica_scadenze_email_admin / email_commercialista)")
+        await _persist_log(db, log_entry)
         return {"ok": False, "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit}
 
-    if not smtp_ok:
+    # smtp non configurato
+    if not (az.get("smtp_host") and az.get("smtp_user")):
         log_entry["errore"] = "SMTP non configurato in Librerie/Azienda"
-        await db.notifiche_scadenze.insert_one(log_entry)
+        await _persist_log(db, log_entry)
         return {"ok": False, "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit,
                 "scadenze": scadenze}
 
+    # invio email
     subject, text, html = _render_email_html(scadenze, giorni)
     try:
         _invia_email(az, to_addr, subject, text, html)
-        log_entry["email_inviata"] = True
-        await db.notifiche_scadenze.insert_one(log_entry)
-        logger.info("Avvisi scadenze inviati a %s: %d polizze, %d titoli", to_addr, n_pol, n_tit)
-        return {"ok": True, "n_polizze": n_pol, "n_titoli": n_tit,
-                "email_inviata": True, "destinatario": to_addr}
     except Exception as e:
         log_entry["errore"] = str(e)
-        await db.notifiche_scadenze.insert_one(log_entry)
+        await _persist_log(db, log_entry)
         logger.exception("Errore invio avvisi scadenze")
         return {"ok": False, "errore": str(e), "n_polizze": n_pol, "n_titoli": n_tit}
+
+    log_entry["email_inviata"] = True
+    await _persist_log(db, log_entry)
+    logger.info("Avvisi scadenze inviati a %s: %d polizze, %d titoli", to_addr, n_pol, n_tit)
+    return {"ok": True, "n_polizze": n_pol, "n_titoli": n_tit,
+            "email_inviata": True, "destinatario": to_addr}
 
 
 # ============== Scheduler =================

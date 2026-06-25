@@ -89,6 +89,68 @@ def calcola_montante_rivalutato(storico_redditi: list, aliquota: float = 0.33) -
 
 
 
+def _calcola_invalidita(
+    *, settimane_contributive: int, montante: float,
+    pensione_contributiva_annua: float, percentuale_invalidita: Optional[float],
+) -> tuple[float, str, bool, list[str]]:
+    """Branch invalidità — ritorna (pensione_annua, metodologia, requisiti_ok, note)."""
+    note: list[str] = []
+    requisiti_ok = settimane_contributive >= PARAMS["settimane_min_invalidita"]
+    if not requisiti_ok:
+        note.append(
+            f"Settimane contributive insufficienti: minimo richiesto "
+            f"{PARAMS['settimane_min_invalidita']}, presenti {settimane_contributive}."
+        )
+        pensione_annua = PARAMS["invalidita_civile_mensile_2025"] * 13
+        return pensione_annua, "Pensione di invalidità civile (importo base 2025)", False, note
+    perc = (percentuale_invalidita or 100) / 100.0
+    pensione_annua = pensione_contributiva_annua * perc
+    return pensione_annua, "Assegno ordinario di invalidità (calcolo contributivo)", True, note
+
+
+def _calcola_inabilita(
+    *, settimane_contributive: int, montante: float, retribuzione_media_annua: float,
+    eta: int, coeff: float,
+) -> tuple[float, str, bool, list[str]]:
+    """Branch inabilità — integra contributi figurativi fino a 60 anni."""
+    note: list[str] = []
+    requisiti_ok = settimane_contributive >= PARAMS["settimane_min_invalidita"]
+    if not requisiti_ok:
+        note.append(
+            f"Settimane contributive insufficienti per pensione di inabilità: "
+            f"minimo {PARAMS['settimane_min_invalidita']} settimane."
+        )
+    anni_mancanti_60 = max(0, 60 - eta)
+    if anni_mancanti_60:
+        note.append(f"Integrazione contributi figurativi: +{anni_mancanti_60} anni fino a 60.")
+    montante_maggiorato = montante + (retribuzione_media_annua * 0.33 * anni_mancanti_60)
+    pensione_annua = montante_maggiorato * coeff if requisiti_ok else 0.0
+    return pensione_annua, "Pensione di inabilità (calcolo contributivo + maggiorazione)", requisiti_ok, note
+
+
+def _aliquota_superstite(numero_familiari: int) -> tuple[float, Optional[str]]:
+    """Ritorna (aliquota, note_msg) in base al numero di familiari."""
+    if numero_familiari <= 0:
+        return 0.0, "Nessun familiare avente diritto: pensione = 0."
+    if numero_familiari == 1:
+        return PARAMS["superstite_solo_coniuge"], None
+    if numero_familiari == 2:
+        return PARAMS["superstite_coniuge_un_figlio"], None
+    return PARAMS["superstite_coniuge_due_o_piu_figli"], None
+
+
+def _calcola_superstite(
+    *, pensione_contributiva_annua: float, numero_familiari: int,
+) -> tuple[float, str, bool, list[str]]:
+    """Branch reversibilità ai superstiti."""
+    note: list[str] = []
+    aliquota, note_msg = _aliquota_superstite(numero_familiari)
+    if note_msg:
+        note.append(note_msg)
+    note.append(f"Aliquota di reversibilità applicata: {aliquota*100:.0f}%")
+    return pensione_contributiva_annua * aliquota, "Pensione ai superstiti (reversibilità)", True, note
+
+
 def calcola_pensione(
     tipo: Literal["invalidita", "inabilita", "superstite"],
     settimane_contributive: int,
@@ -102,69 +164,36 @@ def calcola_pensione(
     L'algoritmo è una stima:
     - Calcola un montante contributivo: 33% * retribuzione * anni contributivi
     - Applica il coefficiente di trasformazione in base all'età
-    - Per invalidità/inabilità applica le rispettive percentuali/integrazioni
-    - Per la superstite applica la percentuale di reversibilità
+    - Delega a `_calcola_invalidita` / `_calcola_inabilita` / `_calcola_superstite`
+      la logica specifica del singolo tipo di pensione.
     """
     anni = settimane_contributive / 52.0
     montante = retribuzione_media_annua * 0.33 * anni
     coeff = _coefficiente_trasformazione(eta)
     pensione_contributiva_annua = montante * coeff
 
-    requisiti_ok = True
-    note = []
-    metodologia = ""
-    pensione_annua = 0.0
-
     if tipo == "invalidita":
-        metodologia = "Assegno ordinario di invalidità (calcolo contributivo)"
-        if settimane_contributive < PARAMS["settimane_min_invalidita"]:
-            requisiti_ok = False
-            note.append(
-                f"Settimane contributive insufficienti: minimo richiesto "
-                f"{PARAMS['settimane_min_invalidita']}, presenti {settimane_contributive}."
-            )
-        # In caso di invalidità civile pura (senza contributi) si usa l'importo base
-        if not requisiti_ok:
-            pensione_mensile = PARAMS["invalidita_civile_mensile_2025"]
-            pensione_annua = pensione_mensile * 13  # 13 mensilità
-            metodologia = "Pensione di invalidità civile (importo base 2025)"
-        else:
-            perc = (percentuale_invalidita or 100) / 100.0
-            pensione_annua = pensione_contributiva_annua * perc
-
+        pensione_annua, metodologia, requisiti_ok, note = _calcola_invalidita(
+            settimane_contributive=settimane_contributive,
+            montante=montante,
+            pensione_contributiva_annua=pensione_contributiva_annua,
+            percentuale_invalidita=percentuale_invalidita,
+        )
     elif tipo == "inabilita":
-        metodologia = "Pensione di inabilità (calcolo contributivo + maggiorazione)"
-        if settimane_contributive < PARAMS["settimane_min_invalidita"]:
-            requisiti_ok = False
-            note.append(
-                f"Settimane contributive insufficienti per pensione di inabilità: "
-                f"minimo {PARAMS['settimane_min_invalidita']} settimane."
-            )
-        # L'inabilità prevede l'integrazione contributi figurativi fino a 60 anni
-        anni_mancanti_60 = max(0, 60 - eta)
-        montante_maggiorato = montante + (retribuzione_media_annua * 0.33 * anni_mancanti_60)
-        pensione_annua = montante_maggiorato * coeff if requisiti_ok else 0.0
-        if anni_mancanti_60:
-            note.append(
-                f"Integrazione contributi figurativi: +{anni_mancanti_60} anni fino a 60."
-            )
-
+        pensione_annua, metodologia, requisiti_ok, note = _calcola_inabilita(
+            settimane_contributive=settimane_contributive,
+            montante=montante,
+            retribuzione_media_annua=retribuzione_media_annua,
+            eta=eta,
+            coeff=coeff,
+        )
     elif tipo == "superstite":
-        metodologia = "Pensione ai superstiti (reversibilità)"
-        # Stimiamo la pensione di base del de cuius come pensione contributiva
-        pensione_base = pensione_contributiva_annua
-        # Aliquota in base ai familiari
-        if numero_familiari <= 0:
-            note.append("Nessun familiare avente diritto: pensione = 0.")
-            aliquota = 0.0
-        elif numero_familiari == 1:
-            aliquota = PARAMS["superstite_solo_coniuge"]
-        elif numero_familiari == 2:
-            aliquota = PARAMS["superstite_coniuge_un_figlio"]
-        else:
-            aliquota = PARAMS["superstite_coniuge_due_o_piu_figli"]
-        pensione_annua = pensione_base * aliquota
-        note.append(f"Aliquota di reversibilità applicata: {aliquota*100:.0f}%")
+        pensione_annua, metodologia, requisiti_ok, note = _calcola_superstite(
+            pensione_contributiva_annua=pensione_contributiva_annua,
+            numero_familiari=numero_familiari,
+        )
+    else:
+        pensione_annua, metodologia, requisiti_ok, note = 0.0, "", False, [f"Tipo pensione non gestito: {tipo}"]
 
     pensione_mensile = pensione_annua / 13.0 if pensione_annua else 0.0
     pensione_netta_mensile = pensione_mensile * (1 - PARAMS["irpef_stimata"])

@@ -213,7 +213,6 @@ def genera_diagnosi_reddito(ana: dict, ac: dict, pens: dict, scop: dict, azienda
     el.append(_section_title("La tua situazione famigliare"))
     el.append(Spacer(1, 10 * mm))
     parente = ana.get("parente_di") or []
-    nucleo = [["Nome", "Relazione"]]
     nucleo_rows = [(f"{ana.get('nome', '') or ''} {ana.get('cognome', '') or ''}".strip() or ana.get("ragione_sociale", ""), "Cliente (contraente)")]
     nucleo_rows += [(p.get("nome", p.get("anagrafica_id", "")[:8]), (p.get("relazione") or "—").title()) for p in parente]
     el.append(_data_table(["Nome", "Relazione"], nucleo_rows, [85, 85]))

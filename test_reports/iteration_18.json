@@ -1,0 +1,37 @@
+{
+  "summary": "Iter18 - Backend regression del refactor di riduzione complessità ciclomatica (CC). Tutti i 5 moduli refactored (brogliaccio.py, avvisi_scadenze.py, geocoder.py, inps_calculator.py, ania_importer.py) sono importabili, hanno gli helper privati attesi, e gli endpoint HTTP rispettano l'identico contratto JSON/PDF. Suite iter18 nuova: 24/24 PASS. Suite di regressione (iter4 brogliaccio_columns + iter5 brogliaccio + iter15 dashboard_brogliaccio_sospesipdf + iter17 p0_refactor): 28/28 PASS. ANIA import end-to-end (asyncio script su DB di test): create + re-import idempotente con conteggi attesi (2 anagrafiche, 2 polizze, 2 titoli, 1 sinistro; re-import 0 create / 2 aggiornate). Lint: 0 errori sui 5 moduli refactored. Backend startup pulito (Scheduler avviato, nessun import error). Nessun bug introdotto dal refactor.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter18_refactor_helpers.py",
+    "/app/test_reports/pytest/iter18_results.xml",
+    "/app/test_reports/pytest/iter18_regression_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Refactor pulito: helper privati estratti come funzioni pure (_classifica_movimento, _descrizione_movimento, _build_righe_dettaglio, _calcola_col_widths, _build_tabella_principale, _build_tabella_riepilogo, _load_movimenti_arricchiti in brogliaccio.py; _query_polizze_in_scadenza, _query_titoli_arretrati, _carica_anagrafiche, _carica_compagnie, _format_polizza_record, _format_titolo_record, _giorni_da_oggi, _build_log_entry, _persist_log in avvisi_scadenze.py; _nominatim_get, _estrai_comune, _estrai_indirizzo, _parse_item in geocoder.py; _calcola_invalidita, _calcola_inabilita, _calcola_superstite, _aliquota_superstite in inps_calculator.py; _extract_zip_contents, _build_anagrafica_payload, _build_dettagli_veicolo, _get_or_create_compagnia, _conta_record_residui in ania_importer.py).",
+    "ania_importer.py 581 righe — leggibilità migliorata ma è ancora il file più grande dei 5; ulteriore split del processore _processa_polizze (che orchestra anagrafica + veicolo + garanzie + titoli) potrebbe essere considerato in iterazioni future ma non urgente.",
+    "_aliquota_superstite ritorna tuple (float, Optional[str]) — buona idea per restituire anche la nota; il chiamante _calcola_superstite la unpack correttamente.",
+    "_calcola_col_widths firma `n_bank: int` chiara; OK con annotazione type hint.",
+    "Idempotenza ANIA import preservata: re-import dello stesso zip risulta in 0 create / N aggiornate (testato sia da test_ania_import.py sia da test_iter18 HTTP).",
+    "server.py 10143 righe rimane il candidato n.1 per split modulare (router files). Non in scope per iter18."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter18_refactor_helpers.py (NEW - 24 test)",
+    "/app/backend/tests/conftest.py (load_dotenv fallback per /app/frontend/.env se REACT_APP_BACKEND_URL non in env)"
+  ],
+  "success_rate": {"backend": "100% (24/24 iter18 + 28/28 regression iter4/iter5/iter15/iter17)", "frontend": "N/A - skipped per request"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "test_import_ania_zip_200 crea via HTTP 1 anagrafica (ITER18A), 1 polizza (ITER18POL), 1 titolo (ITER18T) sul DB principale tramite endpoint POST /api/import/ania. Nessun cleanup automatico - lasciato come seed leggero. Lo script tests/test_ania_import.py invece usa DB '<DB_NAME>_test' separato e fa drop_database al termine.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Refactor CC (iter18) completato e verificato. I 5 moduli refactored sono pure-function: stesso input -> stesso output del pre-refactor (verificato confrontando counts ANIA, PDF brogliaccio magic bytes %PDF, contratto JSON avvisi-scadenze {polizze, titoli, n_polizze, n_titoli, giorni}, geo/suggest sempre array, pensioni_oggi.{invalidita,inabilita,superstite}.{pensione_lorda_mensile,pensione_lorda_annua}). conftest.py ora carica /app/frontend/.env se REACT_APP_BACKEND_URL non è nell'environment - utile per pytest lanciato da /app/backend. test_iter18 lascia 1 anagrafica/1 polizza/1 titolo seed (prefisso ITER18*) - non bloccanti, non interferiscono con altri test. Nessuna regressione su iter4/iter5/iter15/iter17.",
+  "rca of the issue": "N/A - nessun bug introdotto. Il refactor è puramente strutturale (estrazione helper). CC ridotte come dichiarato: brogliaccio (1 funzione monolite -> 7 helper), avvisi_scadenze.cerca_scadenze (113 righe -> 7 helper), geocoder.cerca_suggerimenti (55 righe -> 4 helper http/parse), inps_calculator.calcola_pensione (93 righe -> 4 branch-per-tipo functions), ania_importer.importa_zip (391 righe/CC=157 -> 11 processori). Validato via: (a) presence test su tutti gli helper, (b) unit test su funzioni pure (_aliquota_superstite ritorna 0<x<=1, _calcola_col_widths(0|3) ritorna list 6|9 widths, _classifica_movimento ritorna dict con keys totale/prov/saldo/crediti/spese), (c) HTTP endpoint contract test, (d) regression sui 4 file di test storici, (e) ANIA import end-to-end con counts identici."
+}
