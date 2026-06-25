@@ -450,6 +450,25 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
     const [file, setFile] = useState(null);
     const [noteEmail, setNoteEmail] = useState("");
 
+    // Per-titolo: importo editabile + sconto/sospeso quando residuo > 0
+    const [perTit, setPerTit] = useState(() => {
+        const m = {};
+        for (const t of (titoli || [])) {
+            m[t.id] = {
+                importo_pagato: parseFloat(t.importo_lordo) || 0,
+                tipo_chiusura: "sconto",
+            };
+        }
+        return m;
+    });
+    const setPerTitField = (tid, key, value) =>
+        setPerTit((p) => ({ ...p, [tid]: { ...(p[tid] || {}), [key]: value } }));
+    const totalePagato = Object.values(perTit).reduce((s, v) => s + (parseFloat(v.importo_pagato) || 0), 0);
+    const totaleResiduo = (titoli || []).reduce((s, t) => {
+        const pag = parseFloat(perTit[t.id]?.importo_pagato) || 0;
+        return s + Math.max(0, (parseFloat(t.importo_lordo) || 0) - pag);
+    }, 0);
+
     const submit = async () => {
         if (!doCopertura && !doIncasso) {
             toast.error("Seleziona Copertura e/o Incasso");
@@ -488,15 +507,29 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                     ));
                 }
             }
-            // 2) Incasso bulk (pagamento full lordo, no sconto/sospeso in batch)
+            // 2) Incasso per ogni titolo selezionato (importo editabile + sconto/sospeso)
             if (doIncasso) {
-                const r = await api.post("/titoli/bulk-incassa", {
-                    ids,
-                    data_incasso: dataIncasso,
-                    mezzo_pagamento: mezzo,
-                    conto_cassa_id: contoId || null,
-                });
-                messages.push(`${r.data.incassati} titoli incassati per ${fmtEur(r.data.totale)}`);
+                let ok = 0, totale = 0;
+                for (const t of (titoli || [])) {
+                    const pt = perTit[t.id] || {};
+                    const importo = parseFloat(pt.importo_pagato);
+                    if (isNaN(importo) || importo < 0) continue;
+                    const lordo = parseFloat(t.importo_lordo) || 0;
+                    const residuo = Math.max(0, lordo - importo);
+                    const tipo_ch = residuo > 0 ? (pt.tipo_chiusura || "sconto") : "sconto";
+                    try {
+                        await api.post(`/titoli/${t.id}/incassa`, {
+                            data_incasso: dataIncasso,
+                            mezzo_pagamento: mezzo,
+                            conto_cassa_id: contoId || null,
+                            importo_pagato: importo,
+                            tipo_chiusura: tipo_ch,
+                        });
+                        ok += 1;
+                        totale += importo;
+                    } catch { /* skip but continue */ }
+                }
+                messages.push(`${ok}/${(titoli || []).length} titoli incassati per ${fmtEur(totale)}`);
             }
             toast.success(messages.join(" · ") || "Operazione completata");
             onClose();
@@ -655,8 +688,78 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                     </Select>
                                 </div>
                                 <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-900">
-                                    <strong>Nota:</strong> in modalità bulk si incassa il <em>premio lordo intero</em> di ogni titolo.
-                                    Per gestire sconti o residui a sospeso usa il pulsante <em>Incasso/Copertura</em> sulla singola riga.
+                                    <strong>Modifica l&apos;importo riga per riga:</strong> sotto puoi editare il pagato di ciascun titolo. Se &lt; premio scegli sconto o sospeso (residuo).
+                                </div>
+
+                                <div className="border border-slate-200 rounded overflow-hidden" data-testid="bulk-titoli-list">
+                                    <table className="w-full text-xs">
+                                        <thead className="bg-slate-50 text-slate-600">
+                                            <tr>
+                                                <th className="text-left px-2 py-1.5">Contraente</th>
+                                                <th className="text-right px-2 py-1.5">Premio</th>
+                                                <th className="text-right px-2 py-1.5 w-[110px]">Pagato</th>
+                                                <th className="text-right px-2 py-1.5 w-[80px]">Residuo</th>
+                                                <th className="text-left px-2 py-1.5 w-[140px]">Se residuo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {(titoli || []).map((t) => {
+                                                const lordo = parseFloat(t.importo_lordo) || 0;
+                                                const pt = perTit[t.id] || {};
+                                                const pagato = parseFloat(pt.importo_pagato);
+                                                const residuo = Math.max(0, lordo - (isNaN(pagato) ? 0 : pagato));
+                                                const hasResiduo = residuo > 0.005;
+                                                return (
+                                                    <tr key={t.id} className="border-t border-slate-100">
+                                                        <td className="px-2 py-1 truncate max-w-[200px]" title={t.contraente_nome || ""}>{t.contraente_nome || "—"}</td>
+                                                        <td className="px-2 py-1 text-right num text-slate-700">{fmtEur(lordo)}</td>
+                                                        <td className="px-2 py-1">
+                                                            <Input
+                                                                type="number" step="0.01" min="0"
+                                                                value={pt.importo_pagato}
+                                                                onChange={(e) => setPerTitField(t.id, "importo_pagato", e.target.value)}
+                                                                className="h-7 text-right num text-xs px-1"
+                                                                data-testid={`bulk-row-importo-${t.id}`}
+                                                            />
+                                                        </td>
+                                                        <td className={`px-2 py-1 text-right num ${hasResiduo ? "text-amber-700 font-semibold" : "text-slate-400"}`}>
+                                                            {hasResiduo ? fmtEur(residuo) : "—"}
+                                                        </td>
+                                                        <td className="px-2 py-1">
+                                                            {hasResiduo ? (
+                                                                <Select
+                                                                    value={pt.tipo_chiusura || "sconto"}
+                                                                    onValueChange={(v) => setPerTitField(t.id, "tipo_chiusura", v)}
+                                                                >
+                                                                    <SelectTrigger
+                                                                        className="h-7 text-xs"
+                                                                        data-testid={`bulk-row-tipo-${t.id}`}
+                                                                    >
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="sconto">Sconto</SelectItem>
+                                                                        <SelectItem value="sospeso">Sospeso</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            ) : (
+                                                                <span className="text-xs text-slate-400">—</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot className="bg-slate-50 font-semibold">
+                                            <tr>
+                                                <td className="px-2 py-1.5 text-right">Totali</td>
+                                                <td className="px-2 py-1.5 text-right num">{fmtEur(totaleLordo)}</td>
+                                                <td className="px-2 py-1.5 text-right num text-emerald-700" data-testid="bulk-totale-pagato">{fmtEur(totalePagato)}</td>
+                                                <td className="px-2 py-1.5 text-right num text-amber-700">{fmtEur(totaleResiduo)}</td>
+                                                <td></td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
                                 </div>
                             </div>
                         )}
