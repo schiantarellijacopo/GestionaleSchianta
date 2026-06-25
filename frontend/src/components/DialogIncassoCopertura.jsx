@@ -147,7 +147,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                 await api.post(`/titoli/${titolo.id}/incassa`, {
                     data_incasso: inc.data_incasso,
                     mezzo_pagamento: inc.mezzo_pagamento,
-                    conto_cassa_id: inc.conto_cassa_id || null,
+                    conto_cassa_id: null,
                     importo_pagato: parseFloat(inc.importo_pagato) || 0,
                     tipo_chiusura: hasResiduo ? inc.tipo_chiusura : "sconto",
                     motivo_sconto:
@@ -391,20 +391,8 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                         )}
                                     </div>
                                 </div>
-                                <div>
-                                    <div className="text-xs text-slate-600 mb-1">Conto cassa</div>
-                                    <Select
-                                        value={inc.conto_cassa_id || "__none__"}
-                                        onValueChange={(v) => setI("conto_cassa_id", v === "__none__" ? "" : v)}
-                                    >
-                                        <SelectTrigger data-testid="ico-conto"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="__none__">— nessuno —</SelectItem>
-                                            {(conti || []).map((c) => (
-                                                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                <div className="text-[10px] text-slate-500">
+                                    Il conto/banca viene determinato automaticamente dal mezzo di pagamento (vedi Librerie → Conti cassa).
                                 </div>
 
                                 <div className="bg-emerald-50 border border-emerald-200 rounded p-3">

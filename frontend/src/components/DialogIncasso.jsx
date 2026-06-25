@@ -59,7 +59,7 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
             const res = await api.post(`/titoli/${titolo.id}/incassa`, {
                 data_incasso: f.data_incasso,
                 mezzo_pagamento: f.mezzo_pagamento,
-                conto_cassa_id: f.conto_cassa_id || null,
+                conto_cassa_id: null,
                 importo_pagato: parseFloat(f.importo_pagato) || 0,
                 tipo_chiusura: hasResiduo ? f.tipo_chiusura : "sconto",
                 motivo_sconto:
@@ -142,23 +142,8 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                             </Select>
                         </div>
                     </div>
-
-                    <div>
-                        <Label>Conto cassa di destinazione</Label>
-                        <Select
-                            value={f.conto_cassa_id || "__none__"}
-                            onValueChange={(v) => set("conto_cassa_id", v === "__none__" ? "" : v)}
-                        >
-                            <SelectTrigger data-testid="inc-conto"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">— nessuno —</SelectItem>
-                                {(conti || []).map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                        {c.nome} ({c.tipo})
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                    <div className="text-[10px] text-slate-500 -mt-1">
+                        Il conto/banca viene determinato automaticamente dal mezzo di pagamento (vedi Librerie → Conti cassa).
                     </div>
 
                     <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 space-y-2">

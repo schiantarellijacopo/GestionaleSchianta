@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Printer, Wallet, Users, Plus, Trash2 } from "lucide-react";
+import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import AllegatiCell from "@/components/AllegatiCell";
 
 export default function Provvigioni() {
     const [collabs, setCollabs] = useState([]);
@@ -295,39 +296,7 @@ export default function Provvigioni() {
                             </Card>
 
                             {/* Storico pagamenti */}
-                            {data.pagamenti_periodo.length > 0 && (
-                                <Card className="border-slate-200 overflow-hidden">
-                                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-sm font-medium">
-                                        Pagamenti effettuati nel periodo
-                                    </div>
-                                    <table className="tbl w-full">
-                                        <thead>
-                                            <tr>
-                                                <th>Data</th>
-                                                <th>Periodo</th>
-                                                <th className="text-right">Lordo</th>
-                                                <th className="text-right">Rit.</th>
-                                                <th className="text-right">Contributi</th>
-                                                <th className="text-right">Netto</th>
-                                                <th>Mezzo</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {data.pagamenti_periodo.map((p) => (
-                                                <tr key={p.id}>
-                                                    <td className="num">{fmtDate(p.data_pagamento)}</td>
-                                                    <td className="text-xs num">{p.periodo_dal} → {p.periodo_al}</td>
-                                                    <td className="num text-right">{fmtEur(p.provvigioni_lorde)}</td>
-                                                    <td className="num text-right text-rose-600">-{fmtEur(p.ritenuta_acconto)}</td>
-                                                    <td className="num text-right text-rose-600">-{fmtEur(p.contributi)}</td>
-                                                    <td className="num text-right font-semibold text-emerald-700">{fmtEur(p.netto_pagato)}</td>
-                                                    <td className="text-xs">{p.mezzo_pagamento}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </Card>
-                            )}
+                            <StoricoPagamentiCollab collab={sel} />
                         </>
                     )}
                 </div>
@@ -452,7 +421,6 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
     const inpsPerc = collab.perc_inps_inarcassa || 0;
     const [rit, setRit] = useState((lordo * ritPerc / 100).toFixed(2));
     const [contr, setContr] = useState((lordo * inpsPerc / 100).toFixed(2));
-    const [conto_id, setContoId] = useState("");
     const [data_pag, setDataPag] = useState(today);
     const [mezzo, setMezzo] = useState("bonifico");
     const [note, setNote] = useState("");
@@ -460,10 +428,9 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
     const netto = lordo - parseFloat(rit || 0) - parseFloat(contr || 0) + totVoci;
 
     const submit = async () => {
-        if (!conto_id) { toast.error("Seleziona il conto/banca da cui paghi"); return; }
         try {
             const r = await api.post(`/collaboratori/${collab.id}/paga-provvigioni`, {
-                titoli_ids, voci_manuali_ids: voci_ids, conto_cassa_id: conto_id,
+                titoli_ids, voci_manuali_ids: voci_ids,
                 data_pagamento: data_pag, mezzo_pagamento: mezzo, note,
                 override_ritenuta: parseFloat(rit) || 0,
                 override_contributi: parseFloat(contr) || 0,
@@ -519,18 +486,22 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                             <Input type="date" value={data_pag} onChange={(e) => setDataPag(e.target.value)} />
                         </div>
                         <div>
-                            <Label>Mezzo</Label>
-                            <Input value={mezzo} onChange={(e) => setMezzo(e.target.value)} />
+                            <Label>Mezzo pagamento</Label>
+                            <Select value={mezzo} onValueChange={setMezzo}>
+                                <SelectTrigger data-testid="pay-mezzo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="contanti">Contanti</SelectItem>
+                                    <SelectItem value="bonifico">Bonifico</SelectItem>
+                                    <SelectItem value="assegno">Assegno</SelectItem>
+                                    <SelectItem value="pos">POS / Carta</SelectItem>
+                                    <SelectItem value="rid">RID</SelectItem>
+                                    <SelectItem value="altro">Altro</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
-                    <div>
-                        <Label>Conto / Banca (USCITA) *</Label>
-                        <Select value={conto_id} onValueChange={setContoId}>
-                            <SelectTrigger data-testid="pay-conto"><SelectValue placeholder="Seleziona conto" /></SelectTrigger>
-                            <SelectContent>
-                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                    <div className="text-[10px] text-slate-500 -mt-1">
+                        Il conto/banca da cui esce il pagamento è derivato automaticamente dal mezzo selezionato (Librerie → Conti cassa).
                     </div>
                     <div>
                         <Label>Note</Label>
@@ -545,5 +516,176 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+
+function StoricoPagamentiCollab({ collab }) {
+    const [items, setItems] = useState(null);
+    const [expanded, setExpanded] = useState({});
+    const [details, setDetails] = useState({});
+
+    const load = () => {
+        api.get(`/collaboratori/${collab.id}/pagamenti`).then((r) => setItems(r.data || []));
+    };
+    useEffect(() => {
+        setItems(null); setExpanded({}); setDetails({});
+        load();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [collab.id]);
+
+    const toggle = async (pid) => {
+        const isOpen = !!expanded[pid];
+        setExpanded((p) => ({ ...p, [pid]: !isOpen }));
+        if (!isOpen && !details[pid]) {
+            try {
+                const r = await api.get(`/collaboratori/${collab.id}/pagamenti/${pid}`);
+                setDetails((p) => ({ ...p, [pid]: r.data }));
+            } catch (e) { toast.error("Errore caricamento dettaglio"); }
+        }
+    };
+
+    return (
+        <Card className="border-slate-200 overflow-hidden" data-testid="storico-pagamenti-card">
+            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-sm font-medium flex items-center justify-between">
+                <span>Storico pagamenti</span>
+                {items && <span className="text-xs text-slate-500">{items.length} pagamenti registrati</span>}
+            </div>
+            {items === null ? <Loading /> : items.length === 0 ? (
+                <Empty message="Nessun pagamento registrato per questo collaboratore" />
+            ) : (
+                <table className="tbl w-full">
+                    <thead>
+                        <tr>
+                            <th className="w-8"></th>
+                            <th>Data pagamento</th>
+                            <th>Periodo</th>
+                            <th className="text-right">Lordo</th>
+                            <th className="text-right">Rit.</th>
+                            <th className="text-right">Contributi</th>
+                            <th className="text-right">Netto</th>
+                            <th>Mezzo</th>
+                            <th className="text-center">Titoli</th>
+                            <th className="text-center">Allegati</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {items.map((p) => (
+                            <RowPagamentoCollab
+                                key={p.id} p={p}
+                                expanded={!!expanded[p.id]}
+                                detail={details[p.id]}
+                                onToggle={() => toggle(p.id)}
+                                onChange={load}
+                            />
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </Card>
+    );
+}
+
+function RowPagamentoCollab({ p, expanded, detail, onToggle, onChange }) {
+    return (
+        <>
+            <tr className="cursor-pointer hover:bg-slate-50" onClick={onToggle} data-testid={`storico-pag-${p.id}`}>
+                <td className="text-center">
+                    {expanded ? <ChevronDown size={14} className="inline" /> : <ChevronRight size={14} className="inline" />}
+                </td>
+                <td className="num">{fmtDate(p.data_pagamento)}</td>
+                <td className="text-xs num">{p.periodo_dal} → {p.periodo_al}</td>
+                <td className="num text-right">{fmtEur(p.provvigioni_lorde)}</td>
+                <td className="num text-right text-rose-600">-{fmtEur(p.ritenuta_acconto)}</td>
+                <td className="num text-right text-rose-600">-{fmtEur(p.contributi)}</td>
+                <td className="num text-right font-semibold text-emerald-700">{fmtEur(p.netto_pagato)}</td>
+                <td className="text-xs">{p.mezzo_pagamento}</td>
+                <td className="text-center text-xs">{p.n_titoli || 0}{p.n_voci_manuali ? ` + ${p.n_voci_manuali}v` : ""}</td>
+                <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                    {p.movimento_id ? (
+                        <AllegatiCell
+                            entita_tipo="movimento"
+                            entita_id={p.movimento_id}
+                            count={p.n_allegati}
+                            hint="Allega fattura/distinta"
+                            onChange={onChange}
+                        />
+                    ) : <span className="text-xs text-slate-300">—</span>}
+                </td>
+            </tr>
+            {expanded && (
+                <tr className="bg-slate-50">
+                    <td colSpan={10} className="p-3">
+                        {!detail ? <div className="text-xs text-slate-400">Caricamento…</div> : (
+                            <div className="space-y-3">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                    Titoli pagati ({detail.titoli?.length || 0})
+                                </div>
+                                {(!detail.titoli || detail.titoli.length === 0) ? (
+                                    <div className="text-xs text-slate-400">Nessun titolo collegato.</div>
+                                ) : (
+                                    <table className="tbl w-full text-xs">
+                                        <thead>
+                                            <tr>
+                                                <th>Polizza</th>
+                                                <th>Ramo</th>
+                                                <th>Contraente</th>
+                                                <th>Data incasso</th>
+                                                <th className="text-right">Lordo €</th>
+                                                <th className="text-right">Provv. €</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {detail.titoli.map((t) => (
+                                                <tr key={t.id}>
+                                                    <td className="font-mono">{t.numero_polizza || "—"}</td>
+                                                    <td>{t.ramo || "—"}</td>
+                                                    <td>{t.contraente_nome || "—"}</td>
+                                                    <td className="num">{fmtDate(t.data_incasso)}</td>
+                                                    <td className="num text-right">{fmtEur(t.importo_lordo)}</td>
+                                                    <td className="num text-right text-emerald-700">{fmtEur(t.provvigioni)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                                {detail.voci_manuali && detail.voci_manuali.length > 0 && (
+                                    <>
+                                        <div className="text-xs font-semibold uppercase tracking-wider text-amber-700 mt-2">
+                                            Voci manuali ({detail.voci_manuali.length})
+                                        </div>
+                                        <table className="tbl w-full text-xs">
+                                            <thead>
+                                                <tr>
+                                                    <th>Data</th>
+                                                    <th>Causale</th>
+                                                    <th>Note</th>
+                                                    <th className="text-right">Importo €</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {detail.voci_manuali.map((v) => (
+                                                    <tr key={v.id}>
+                                                        <td className="num">{fmtDate(v.data)}</td>
+                                                        <td className="font-medium">{v.causale}</td>
+                                                        <td className="text-slate-500">{v.note || "—"}</td>
+                                                        <td className={`num text-right font-semibold ${v.importo >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                                                            {v.importo >= 0 ? "+" : ""}{fmtEur(v.importo)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </>
+                                )}
+                                {p.note && (
+                                    <div className="text-xs text-slate-500 italic">Note: {p.note}</div>
+                                )}
+                            </div>
+                        )}
+                    </td>
+                </tr>
+            )}
+        </>
     );
 }

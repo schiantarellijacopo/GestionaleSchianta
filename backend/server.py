@@ -108,6 +108,44 @@ def strip_mongo_id(doc: dict | None) -> dict | None:
     return doc
 
 
+# Mapping mezzo_pagamento -> tipo ContoCassa
+_MEZZO_TO_TIPO = {
+    "contanti": "cassa",
+    "bonifico": "banca",
+    "assegno": "banca",
+    "pos": "carta",
+    "carta": "carta",
+    "rid": "rid",
+    "online": "online",
+    "altro": "altro",
+}
+
+
+async def _resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> str | None:
+    """Risolve un conto_cassa_id a partire dal mezzo di pagamento (configurato in libreria).
+
+    1. Trova il primo conto attivo del tipo mappato a `mezzo`.
+    2. Se non trovato e `fallback_any=True`, restituisce il primo conto attivo.
+    3. Altrimenti None.
+    """
+    if mezzo:
+        tipo = _MEZZO_TO_TIPO.get(mezzo.lower())
+        if tipo:
+            c = await db.conti_cassa.find_one(
+                {"tipo": tipo, "attivo": True}, {"_id": 0, "id": 1},
+                sort=[("ordine", 1)],
+            )
+            if c:
+                return c["id"]
+    if fallback_any:
+        c = await db.conti_cassa.find_one(
+            {"attivo": True}, {"_id": 0, "id": 1}, sort=[("ordine", 1)],
+        )
+        if c:
+            return c["id"]
+    return None
+
+
 async def visibility_filter(user: dict, base_filter: dict | None = None) -> dict:
     """Applica filtro per ruolo:
     - admin/collaboratore: vede tutto
@@ -404,6 +442,9 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     if not titoli_ids and not voci_ids:
         raise HTTPException(400, "Seleziona almeno un titolo o una voce manuale")
     conto_id = body.get("conto_cassa_id")
+    mezzo_pag = body.get("mezzo_pagamento", "bonifico")
+    if not conto_id:
+        conto_id = await _resolve_conto_cassa(mezzo_pag)
     data_pag = body.get("data_pagamento") or _now_iso()[:10]
 
     titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000) if titoli_ids else []
@@ -479,7 +520,86 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
 async def list_pagamenti(cid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     items = await db.pagamenti_provvigioni.find({"collaboratore_id": cid}, {"_id": 0}) \
         .sort("data_pagamento", -1).to_list(500)
+    # enrichment: count allegati on movimento_id, conto cassa name
+    mov_ids = [p["movimento_id"] for p in items if p.get("movimento_id")]
+    n_all_by_mov: dict[str, int] = {}
+    if mov_ids:
+        pipeline = [
+            {"$match": {"entita_tipo": "movimento", "entita_id": {"$in": mov_ids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]
+        async for r in db.allegati.aggregate(pipeline):
+            n_all_by_mov[r["_id"]] = r["n"]
+    conto_ids = list({p.get("conto_cassa_id") for p in items if p.get("conto_cassa_id")})
+    conti_map: dict[str, str] = {}
+    if conto_ids:
+        async for c in db.conti_cassa.find({"id": {"$in": conto_ids}}, {"_id": 0, "id": 1, "nome": 1}):
+            conti_map[c["id"]] = c["nome"]
+    for p in items:
+        p["n_allegati"] = n_all_by_mov.get(p.get("movimento_id"), 0)
+        p["conto_cassa_nome"] = conti_map.get(p.get("conto_cassa_id"))
+        p["n_titoli"] = len(p.get("titoli_ids") or [])
+        p["n_voci_manuali"] = len(p.get("voci_manuali_ids") or [])
     return items
+
+
+@api.get("/collaboratori/{cid}/pagamenti/{pid}")
+async def get_pagamento_dettaglio(
+    cid: str, pid: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Dettaglio di un pagamento provvigioni: include titoli pagati e voci manuali."""
+    pag = await db.pagamenti_provvigioni.find_one({"id": pid, "collaboratore_id": cid}, {"_id": 0})
+    if not pag:
+        raise HTTPException(404, "Pagamento non trovato")
+    # carica titoli + polizza/contraente
+    tids = pag.get("titoli_ids") or []
+    titoli: list[dict] = []
+    if tids:
+        async for t in db.titoli.find({"id": {"$in": tids}}, {"_id": 0}):
+            titoli.append(t)
+        pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+        pol_map: dict[str, dict] = {}
+        if pol_ids:
+            async for p in db.polizze.find(
+                {"id": {"$in": pol_ids}},
+                {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1},
+            ):
+                pol_map[p["id"]] = p
+        ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+        ana_map: dict[str, str] = {}
+        if ana_ids:
+            async for a in db.anagrafiche.find(
+                {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
+            ):
+                ana_map[a["id"]] = a["ragione_sociale"]
+        for t in titoli:
+            p = pol_map.get(t.get("polizza_id"), {})
+            t["numero_polizza"] = p.get("numero_polizza")
+            t["ramo"] = p.get("ramo")
+            t["contraente_nome"] = ana_map.get(p.get("contraente_id", ""))
+    # voci manuali
+    vids = pag.get("voci_manuali_ids") or []
+    voci: list[dict] = []
+    if vids:
+        async for v in db.voci_manuali_collab.find({"id": {"$in": vids}}, {"_id": 0}):
+            voci.append(v)
+    # conto cassa
+    conto_nome = None
+    if pag.get("conto_cassa_id"):
+        c = await db.conti_cassa.find_one({"id": pag["conto_cassa_id"]}, {"_id": 0, "nome": 1})
+        if c:
+            conto_nome = c["nome"]
+    n_all = await db.allegati.count_documents(
+        {"entita_tipo": "movimento", "entita_id": pag.get("movimento_id"), "is_deleted": False},
+    ) if pag.get("movimento_id") else 0
+    return {
+        **pag,
+        "titoli": titoli,
+        "voci_manuali": voci,
+        "conto_cassa_nome": conto_nome,
+        "n_allegati": n_all,
+    }
 
 
 @api.get("/stampa/provvigioni/{cid}")
@@ -676,6 +796,74 @@ async def compagnia_estratto_conto(
     return await _compagnia_estratto_data(cid, dal, al, collaboratore_id)
 
 
+@api.get("/compagnie/{cid}/rimesse-storico")
+async def compagnia_rimesse_storico(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Storico di tutte le rimesse pagate a una compagnia.
+
+    Ritorna i movimenti `pagamento_compagnia` con i titoli associati e contraenti.
+    """
+    flt: dict = {"compagnia_id": cid, "categoria": "pagamento_compagnia", "tipo": "uscita"}
+    if dal:
+        flt["data_movimento"] = flt.get("data_movimento", {})
+        flt["data_movimento"]["$gte"] = dal
+    if al:
+        flt["data_movimento"] = flt.get("data_movimento", {})
+        flt["data_movimento"]["$lte"] = al
+    rimesse = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", -1).to_list(2000)
+    # Per ogni rimessa, arricchisce con i titoli legati e nome contraenti
+    all_titoli_ids = []
+    for r in rimesse:
+        all_titoli_ids.extend(r.get("titoli_ids_versati") or [])
+    titoli_map = {}
+    contr_map = {}
+    if all_titoli_ids:
+        async for t in db.titoli.find({"id": {"$in": all_titoli_ids}}, {"_id": 0}):
+            titoli_map[t["id"]] = t
+        pol_ids = list({t.get("polizza_id") for t in titoli_map.values() if t.get("polizza_id")})
+        pol_map = {}
+        if pol_ids:
+            async for p in db.polizze.find(
+                {"id": {"$in": pol_ids}},
+                {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "targa": 1},
+            ):
+                pol_map[p["id"]] = p
+        ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+        if ana_ids:
+            async for a in db.anagrafiche.find(
+                {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
+            ):
+                contr_map[a["id"]] = a["ragione_sociale"]
+        # Inietta nome polizza/contraente in ogni titolo
+        for t in titoli_map.values():
+            p = pol_map.get(t.get("polizza_id"), {})
+            t["numero_polizza"] = p.get("numero_polizza")
+            t["ramo"] = p.get("ramo")
+            t["targa"] = p.get("targa")
+            t["contraente_nome"] = contr_map.get(p.get("contraente_id", ""))
+
+    # Conta allegati per ogni movimento
+    out = []
+    for r in rimesse:
+        ids = r.get("titoli_ids_versati") or []
+        n_all = await db.allegati.count_documents({"entita_tipo": "movimento", "entita_id": r["id"]})
+        out.append({
+            **r,
+            "titoli": [titoli_map.get(i) for i in ids if titoli_map.get(i)],
+            "n_titoli": len(ids),
+            "n_allegati": n_all,
+        })
+    totale_pagato = round(sum(r.get("importo", 0) for r in rimesse), 2)
+    return {
+        "compagnia_id": cid,
+        "rimesse": out,
+        "totale_pagato": totale_pagato,
+        "n_rimesse": len(out),
+    }
+
+
 @api.post("/compagnie/{cid}/paga-titoli")
 async def compagnia_paga_titoli(
     cid: str, body: dict,
@@ -697,7 +885,10 @@ async def compagnia_paga_titoli(
         raise HTTPException(400, "titoli_ids obbligatorio")
     conto_cassa_id = body.get("conto_cassa_id")
     if not conto_cassa_id:
-        raise HTTPException(400, "conto_cassa_id obbligatorio")
+        # auto-derive from mezzo or fallback to any active conto
+        conto_cassa_id = await _resolve_conto_cassa(body.get("mezzo_pagamento") or "bonifico")
+    if not conto_cassa_id:
+        raise HTTPException(400, "Nessun conto cassa attivo configurato. Crea un conto in Librerie.")
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
@@ -2308,6 +2499,8 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
     mezzo = body.get("mezzo_pagamento") or "bonifico"
     conto_id = body.get("conto_cassa_id")
+    if not conto_id:
+        conto_id = await _resolve_conto_cassa(mezzo)
     n_incassati = 0; tot = 0.0
     for tid in ids:
         titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
@@ -2688,6 +2881,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
     mezzo = body.get("mezzo_pagamento") or "bonifico"
     conto_id = body.get("conto_cassa_id")
+    if not conto_id:
+        conto_id = await _resolve_conto_cassa(mezzo)
     lordo = float(titolo.get("importo_lordo") or 0)
     importo_pagato_raw = body.get("importo_pagato")
     importo_pagato = float(importo_pagato_raw) if importo_pagato_raw is not None else lordo

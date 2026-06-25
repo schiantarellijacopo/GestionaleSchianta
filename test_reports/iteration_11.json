@@ -1,0 +1,34 @@
+{
+  "summary": "Iter11 - Conto/Banca selector REMOVED from all payment UIs (auto-resolved via _resolve_conto_cassa) + new Storico Pagamenti history flows. Backend: 8/8 pytest PASS. All 4 payment endpoints (POST /titoli/{tid}/incassa, POST /collaboratori/{cid}/paga-provvigioni, POST /compagnie/{cid}/paga-titoli) accept request WITHOUT conto_cassa_id and auto-resolve from mezzo_pagamento. Created titolo da_incassare and verified the entire chain: incassa → marca stato=incassato with auto-resolved conto_cassa_id; paga-provvigioni → creates PagamentoProvvigioni + MovimentoContabile uscita; paga compagnia → creates pagamento_compagnia movimento; allegati upload to entita_tipo='movimento' increments n_allegati in list endpoint. GET /collaboratori/{cid}/pagamenti returns enriched list (n_titoli, n_voci_manuali, n_allegati, conto_cassa_nome). GET /collaboratori/{cid}/pagamenti/{pid} returns titoli array enriched with numero_polizza, ramo, contraente_nome; returns 404 for invalid id. GET /compagnie/{cid}/rimesse-storico returns rimesse with embedded titoli, n_titoli, n_allegati. Frontend verified end-to-end: /provvigioni shows new 'Storico pagamenti' card with 9 columns (Data, Periodo, Lordo, Rit., Contributi, Netto, Mezzo, Titoli, Allegati). Storico rows expandable to show Titoli pagati / Voci manuali sub-tables. Allegati paperclip cell renders allegati-trigger buttons. PagaDialog opens without 'Conto / Banca' field (only pay-mezzo). /compagnie-estratto Dettaglio has new Tabs (Movimenti & versamenti / Storico rimesse), ec-tab-storico loads rimesse and ec-stor-row expands to show 4 titoli versati with polizza/ramo/contraente. DialogIncasso has no 'Conto cassa di destinazione' (only inc-mezzo). DialogIncassoCopertura has no 'Conto cassa' (only ico-mezzo). PagamentoDialog in E/C compagnie has ec-pay-mezzo only.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Provvigioni / Storico pagamenti", "issues": ["The 'Titoli' column header shows count like '0 + 1v' format - not immediately obvious that 'v' means 'voci manuali'. Consider clearer header or tooltip."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter11_payment_history.py",
+    "/app/test_reports/pytest/iter11_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_resolve_conto_cassa (server.py:124-146) silently falls back to ANY active conto when mezzo type not matched. If a user explicitly chose 'contanti' but only 'banca' contos exist, it picks the bank account. Consider returning None or logging a warning when fallback is used, so the UI can warn the user that mapping is approximated.",
+    "POST /compagnie/{cid}/paga-titoli (server.py:867) does NOT use compagnie-specific bank account (compagnia.conto_cassa_id) even when present. The _resolve_conto_cassa is called with mezzo_pagamento only; if business intent is to use the company's own configured conto, that wiring is missing. Currently auto-resolves first active conto. Verify with product owner.",
+    "GET /collaboratori/{cid}/pagamenti/{pid} (server.py:546-602) does not enforce that user.role=='collaboratore' can only view their own pagamenti — admin/dipendente check is implicit via require_user, but a collaboratore could query pid of another collab if they know cid. The existing code in paga_provvigioni (line 438) blocks cross-collab pay but the GET dettaglio does not. Add: if user.role=='collaboratore' and cid!=user.id: 403.",
+    "Storico pagamenti table in Provvigioni shows 'Titoli' column with format 'N + Mv' (e.g., '0 + 1v') merging titoli_count and voci_count. The frontend (StoricoPagamentiCollab around L592) could split these into two columns for clarity.",
+    "console.log shows /api/utenti returning 404 - this is an existing legacy endpoint reference unrelated to iter11 changes, but main agent may want to clean this up.",
+    "Backend POST /allegati uses Query parameters for entita_tipo/entita_id; while functional, multipart/form-data form fields are more standard for upload endpoints. Not a bug, but inconsistent with REST convention."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter11_payment_history.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (all 5 critical UI flows verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created 1 polizza TEST_iter11_<ts> + 1 titolo da_incassare → incassato → paid to collaboratore → paid to compagnia + 1 allegato uploaded to the pagamento movimento. Main agent should clean these up if running more iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter11_payment_history.py is reusable as regression. It validates the full E2E payment flow with conto_cassa auto-resolution. Requires REACT_APP_BACKEND_URL env var to be set. Field gotchas: (1) Titolo create requires both 'effetto' AND 'scadenza' (in addition to data_emissione/data_copertura). (2) /api/users does NOT exist; use /api/collaboratori instead. (3) /api/titoli/{id} GET does not exist - use /api/titoli?polizza_id=... to fetch a titolo. (4) POST /api/allegati uses Query params (?entita_tipo=...&entita_id=...) for the entity fields, file goes as multipart. The frontend Storico pagamenti row testid pattern is 'storico-pag-{pagamento_id}' and the allegati popover trigger is 'allegati-trigger-{movimento_id}'. The compagnia rimessa row testid is 'ec-stor-row-{movimento_id}'.",
+  "rca of the issue": "N/A - no bugs. Implementation matches spec: (1) _resolve_conto_cassa helper maps mezzo→tipo then queries db.conti_cassa for first active match (cassa/banca/carta/rid/online/altro) with fallback to ANY active. (2) All 3 payment endpoints check `if not conto_id: conto_id = await _resolve_conto_cassa(mezzo)`. (3) Frontend forms send conto_cassa_id:null and the resolver handles it. (4) Storico endpoints aggregate allegati counts via $group pipeline and inject enrichment fields. (5) StoricoPagamentiCollab and StoricoRimesseCompagnia components fetch the enriched endpoints and render expandable rows lazy-loading the detail endpoint."
+}

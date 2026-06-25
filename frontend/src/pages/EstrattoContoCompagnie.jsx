@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
-import { api, fmtEur, fmtDate } from "@/lib/api";
+import { api, fmtEur, fmtDate, API_BASE } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, FileText, Printer, ArrowLeft } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye } from "lucide-react";
+import AllegatiCell from "@/components/AllegatiCell";
 
 export default function EstrattoContoCompagnie() {
     const [compagnie, setCompagnie] = useState([]);
@@ -113,6 +115,7 @@ function KpiCard({ label, value, icon, color }) {
 }
 
 function DettaglioEstratto({ compagnia, onBack }) {
+    const [tab, setTab] = useState("movimenti");
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
     const [collaboratoreId, setCollaboratoreId] = useState("all");
@@ -169,6 +172,17 @@ function DettaglioEstratto({ compagnia, onBack }) {
                     </a>
                 }
             />
+
+            <Tabs value={tab} onValueChange={setTab}>
+                <TabsList className="mb-3">
+                    <TabsTrigger value="movimenti" data-testid="ec-tab-movimenti">
+                        <FileText size={13} className="mr-1" />Movimenti & versamenti
+                    </TabsTrigger>
+                    <TabsTrigger value="storico" data-testid="ec-tab-storico">
+                        <History size={13} className="mr-1" />Storico rimesse
+                    </TabsTrigger>
+                </TabsList>
+                <TabsContent value="movimenti">
 
             <Card className="p-4 border-slate-200 mb-4">
                 <div className="flex items-end gap-3 flex-wrap">
@@ -293,23 +307,155 @@ function DettaglioEstratto({ compagnia, onBack }) {
                     }}
                 />
             )}
+                </TabsContent>
+                <TabsContent value="storico">
+                    <StoricoRimesseCompagnia compagniaId={compagnia.id} />
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }
 
+function StoricoRimesseCompagnia({ compagniaId }) {
+    const [data, setData] = useState(null);
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
+    const [expanded, setExpanded] = useState(new Set());
+
+    const load = useCallback(() => {
+        const params = { dal: dal || undefined, al: al || undefined };
+        api.get(`/compagnie/${compagniaId}/rimesse-storico`, { params })
+            .then((r) => setData(r.data));
+    }, [compagniaId, dal, al]);
+    useEffect(() => { load(); }, [load]);
+
+    const toggle = (id) => setExpanded((p) => {
+        const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
+    });
+
+    return (
+        <div data-testid="ec-storico-tab">
+            <Card className="p-4 border-slate-200 mb-3">
+                <div className="flex items-end gap-3 flex-wrap">
+                    <div>
+                        <Label>Dal</Label>
+                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} data-testid="ec-stor-dal" />
+                    </div>
+                    <div>
+                        <Label>Al</Label>
+                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} data-testid="ec-stor-al" />
+                    </div>
+                    <Button onClick={load} data-testid="ec-stor-applica">Applica</Button>
+                    {data && (
+                        <div className="ml-auto text-sm">
+                            <span className="text-slate-500">Rimesse:</span>{" "}
+                            <span className="font-bold">{data.n_rimesse}</span>
+                            <span className="mx-3 text-slate-300">·</span>
+                            <span className="text-slate-500">Totale pagato:</span>{" "}
+                            <span className="font-bold num text-emerald-700">{fmtEur(data.totale_pagato)}</span>
+                        </div>
+                    )}
+                </div>
+            </Card>
+            <Card className="border-slate-200 overflow-hidden">
+                {!data ? <Loading /> : data.rimesse.length === 0 ? <Empty message="Nessuna rimessa registrata" /> : (
+                    <table className="tbl w-full">
+                        <thead>
+                            <tr>
+                                <th className="w-8"></th>
+                                <th>Data</th>
+                                <th>Descrizione</th>
+                                <th className="text-right">N. titoli</th>
+                                <th className="text-right">Importo</th>
+                                <th className="text-center">Allegati</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.rimesse.map((r) => (
+                                <RowRimessa key={r.id} r={r} expanded={expanded.has(r.id)} onToggle={() => toggle(r.id)} onChange={load} />
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </Card>
+        </div>
+    );
+}
+
+function RowRimessa({ r, expanded, onToggle, onChange }) {
+    return (
+        <>
+            <tr className="cursor-pointer hover:bg-slate-50" onClick={onToggle} data-testid={`ec-stor-row-${r.id}`}>
+                <td className="text-center">
+                    {expanded ? <ChevronDown size={14} className="inline" /> : <ChevronRight size={14} className="inline" />}
+                </td>
+                <td className="num text-xs">{fmtDate(r.data_movimento)}</td>
+                <td className="text-sm">{r.descrizione || "—"}</td>
+                <td className="num text-right">{r.n_titoli}</td>
+                <td className="num text-right font-semibold text-emerald-700">{fmtEur(r.importo)}</td>
+                <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                    <AllegatiCell
+                        entita_tipo="movimento"
+                        entita_id={r.id}
+                        count={r.n_allegati}
+                        hint="Allega fattura/distinta"
+                        onChange={onChange}
+                    />
+                </td>
+            </tr>
+            {expanded && (
+                <tr className="bg-slate-50">
+                    <td colSpan={6} className="p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                            Titoli versati ({r.titoli?.length || 0})
+                        </div>
+                        {(!r.titoli || r.titoli.length === 0) ? (
+                            <div className="text-xs text-slate-400">Nessun titolo collegato.</div>
+                        ) : (
+                            <table className="tbl w-full text-xs">
+                                <thead>
+                                    <tr>
+                                        <th>Polizza</th>
+                                        <th>Ramo</th>
+                                        <th>Contraente</th>
+                                        <th>Data incasso</th>
+                                        <th className="text-right">Lordo €</th>
+                                        <th className="text-right">Provv. €</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {r.titoli.map((t) => (
+                                        <tr key={t.id}>
+                                            <td className="font-mono">{t.numero_polizza || "—"}</td>
+                                            <td>{t.ramo || "—"}</td>
+                                            <td>{t.contraente_nome || "—"}</td>
+                                            <td className="num">{fmtDate(t.data_incasso)}</td>
+                                            <td className="num text-right">{fmtEur(t.importo_lordo)}</td>
+                                            <td className="num text-right text-slate-500">{fmtEur(t.provvigioni)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </td>
+                </tr>
+            )}
+        </>
+    );
+}
+
 function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
-    const [contoId, setContoId] = useState(conti?.[0]?.id || "");
     const [data, setData] = useState(new Date().toISOString().slice(0, 10));
     const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${titoliIds.length} titoli`);
+    const [mezzo, setMezzo] = useState("bonifico");
     const [saving, setSaving] = useState(false);
 
     const conferma = async () => {
-        if (!contoId) { alert("Scegli un conto cassa"); return; }
         setSaving(true);
         try {
             await api.post(`/compagnie/${compagnia.id}/paga-titoli`, {
                 titoli_ids: titoliIds,
-                conto_cassa_id: contoId,
+                mezzo_pagamento: mezzo,
                 data_movimento: data,
                 descrizione: descr,
             });
@@ -334,13 +480,21 @@ function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
                         <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
                     </div>
                     <div>
-                        <Label>Conto cassa</Label>
-                        <Select value={contoId} onValueChange={setContoId}>
-                            <SelectTrigger data-testid="ec-pay-conto"><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                        <Label>Mezzo pagamento</Label>
+                        <Select value={mezzo} onValueChange={setMezzo}>
+                            <SelectTrigger data-testid="ec-pay-mezzo"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                                <SelectItem value="contanti">Contanti</SelectItem>
+                                <SelectItem value="bonifico">Bonifico</SelectItem>
+                                <SelectItem value="assegno">Assegno</SelectItem>
+                                <SelectItem value="pos">POS / Carta</SelectItem>
+                                <SelectItem value="rid">RID</SelectItem>
+                                <SelectItem value="altro">Altro</SelectItem>
                             </SelectContent>
                         </Select>
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Il conto/banca da cui esce il pagamento è derivato dal mezzo selezionato.
+                        </div>
                     </div>
                     <div>
                         <Label>Descrizione</Label>
