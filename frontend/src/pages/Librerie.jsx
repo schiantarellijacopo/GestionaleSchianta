@@ -413,6 +413,14 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
     const isEdit = !!editing;
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    // FIX: ricarica il form quando cambia editing (es. apertura dialog su voce diversa).
+    // Senza questo, lo state resta legato alla PRIMA voce ed Edit mostrerebbe i campi vuoti.
+    useEffect(() => {
+        if (editing) setF({ ...defaults, ...editing });
+        else setF(defaults);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editing]);
+
     const save = async () => {
         try {
             if (isEdit) {
