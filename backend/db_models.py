@@ -87,6 +87,29 @@ class VoceManualeCollab(BaseDoc):
     note: Optional[str] = None
     pagata: bool = False
     pagamento_id: Optional[str] = None  # set when included in a payment
+    # se generata automaticamente da una regola ricorsiva, riferimento alla regola
+    ricorsiva_id: Optional[str] = None
+
+
+class VoceRicorsivaCollab(BaseDoc):
+    """Regola di voce ricorsiva per un collaboratore (o per TUTTI i collaboratori).
+
+    Ogni mese/anno la regola genera una `VoceManualeCollab` corrispondente, che
+    poi può essere modificata/eliminata individualmente o pagata insieme alle
+    provvigioni del periodo.
+    """
+    # __all__ per applicare la regola a TUTTI i collaboratori attivi
+    collaboratore_id: str
+    causale: str
+    importo: float  # positivo = bonus, negativo = trattenuta
+    periodicita: Literal["mensile", "annuale"] = "mensile"
+    giorno_mese: int = 1  # 1..28 (mensile) — usato anche per annuale come "giorno"
+    mese_anno: Optional[int] = None  # 1..12 — solo per "annuale"
+    data_inizio: str  # YYYY-MM-DD, prima generazione possibile
+    data_fine: Optional[str] = None  # YYYY-MM-DD, dopo questa data smette
+    note: Optional[str] = None
+    attiva: bool = True
+    created_by: Optional[str] = None
 
 
 class UserCreate(BaseModel):
@@ -938,3 +961,21 @@ class AnalisiCliente(BaseDoc):
     # --- Snapshot risultati (calcolati on-demand) ---
     ultimo_calcolo: Optional[dict] = None
     ultimo_calcolo_data: Optional[str] = None
+
+
+
+# =============== RAPPEL (sovraprovvigioni compagnia) ===============
+class Rappel(BaseDoc):
+    """Rappel = sovraprovvigione accordata dalla compagnia al raggiungimento
+    di obiettivi commerciali. È un accredito FITTIZIO (non un vero pagamento)
+    che riduce il saldo da versare alla compagnia."""
+    compagnia_id: str
+    data: str                      # YYYY-MM-DD
+    anno: int                      # anno di competenza (per archivio)
+    importo: float                 # sempre positivo
+    descrizione: Optional[str] = None
+    note: Optional[str] = None
+    stato: Literal["da_incassare", "incassato"] = "da_incassare"
+    data_incasso: Optional[str] = None
+    movimento_id: Optional[str] = None  # se incassato, ref al movimento provvigioni in Prima Nota
+    created_by: Optional[str] = None  # user id

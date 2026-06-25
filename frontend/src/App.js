@@ -29,6 +29,7 @@ import TitoliSospesi from "@/pages/TitoliSospesi";
 import Marketing from "@/pages/Marketing";
 import Avvisi from "@/pages/Avvisi";
 import RubricaCompagnie from "@/pages/RubricaCompagnie";
+import Rappel from "@/pages/Rappel";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -90,6 +91,14 @@ function App() {
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
                                         <EstrattoContoCompagnie />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/rappel"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <Rappel />
                                     </ProtectedRoute>
                                 }
                             />

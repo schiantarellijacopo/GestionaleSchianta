@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -23,6 +23,7 @@ const SECTIONS = [
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
+    { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },
     { key: "mapping-garanzie", label: "Mapping Garanzie ANIA", icon: <Tags size={14} />, endpoint: "/librerie/mapping-garanzie" },
     { key: "mapping-operatori", label: "Mapping Operatori ANIA", icon: <UserCog size={14} />, endpoint: "/librerie/mapping-operatori" },
 ];
@@ -44,7 +45,9 @@ export default function Librerie() {
                 </TabsList>
                 {SECTIONS.map((s) => (
                     <TabsContent key={s.key} value={s.key} className="mt-4">
-                        {s.key === "azienda" ? <AziendaSezione /> : <Sezione section={s} />}
+                        {s.key === "azienda" ? <AziendaSezione />
+                            : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
+                            : <Sezione section={s} />}
                     </TabsContent>
                 ))}
             </Tabs>
@@ -1198,5 +1201,313 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
                 </table>
             )}
         </div>
+    );
+}
+
+
+function VociRicorsiveSezione() {
+    const [items, setItems] = useState(null);
+    const [collabs, setCollabs] = useState([]);
+    const [open, setOpen] = useState(false);
+    const [editing, setEditing] = useState(null);
+
+    const load = () => {
+        api.get("/voci-ricorsive-collab").then((r) => setItems(r.data || []));
+    };
+    useEffect(() => {
+        load();
+        api.get("/auth/users").then((r) => {
+            setCollabs((r.data || []).filter(
+                (u) => ["collaboratore", "dipendente"].includes(u.role) && u.attivo !== false,
+            ));
+        });
+    }, []);
+
+    const elimina = async (r) => {
+        if (!window.confirm(
+            `Eliminare la regola "${r.causale}"?\nVerranno cancellate anche le voci non ancora pagate generate da questa regola.`,
+        )) return;
+        try {
+            await api.delete(`/voci-ricorsive-collab/${r.id}`, { params: { elimina_voci_non_pagate: true } });
+            toast.success("Regola eliminata");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const apriEdit = (r) => { setEditing(r); setOpen(true); };
+    const apriNuovo = () => { setEditing(null); setOpen(true); };
+
+    return (
+        <Card className="p-4 border-slate-200" data-testid="lib-voci-ricorsive">
+            <div className="flex items-start justify-between mb-3">
+                <div>
+                    <h2 className="font-semibold text-slate-900">
+                        <RotateCw size={14} className="inline mr-1.5 text-fuchsia-600" />
+                        Voci ricorsive collaboratori
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                        Bonus o trattenute periodiche (mensili/annuali) che vengono generate
+                        automaticamente nell'estratto conto del collaboratore alle date previste.
+                        L'importo è positivo (bonus) o negativo (trattenuta).
+                    </p>
+                </div>
+                <Button onClick={apriNuovo} className="bg-fuchsia-700 hover:bg-fuchsia-800" data-testid="vr-new">
+                    <Plus size={14} className="mr-1" /> Nuova regola
+                </Button>
+            </div>
+            {items === null ? <Loading /> : items.length === 0 ? (
+                <Empty message="Nessuna regola ricorsiva. Aggiungine una per automatizzare bonus/trattenute." />
+            ) : (
+                <table className="tbl w-full">
+                    <thead>
+                        <tr>
+                            <th>Collaboratore</th>
+                            <th>Causale</th>
+                            <th>Periodicità</th>
+                            <th>Quando</th>
+                            <th>Da → A</th>
+                            <th className="text-right">Importo €</th>
+                            <th>Stato</th>
+                            <th className="w-24"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {items.map((r) => (
+                            <tr key={r.id} data-testid={`vr-row-${r.id}`}>
+                                <td className="font-medium">{r.collaboratore_nome}</td>
+                                <td>{r.causale}</td>
+                                <td className="text-xs">
+                                    <span className={`badge ${r.periodicita === "mensile" ? "badge-info" : "badge-warning"}`}>
+                                        {r.periodicita}
+                                    </span>
+                                </td>
+                                <td className="text-xs num">
+                                    {r.periodicita === "mensile"
+                                        ? `giorno ${r.giorno_mese} di ogni mese`
+                                        : `${r.giorno_mese}/${r.mese_anno || "?"} di ogni anno`}
+                                </td>
+                                <td className="text-xs num">
+                                    {r.data_inizio} → {r.data_fine || "—"}
+                                </td>
+                                <td className={`num text-right font-semibold ${r.importo >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                                    {r.importo >= 0 ? "+" : ""}{r.importo.toFixed(2)}
+                                </td>
+                                <td>
+                                    {r.attiva
+                                        ? <span className="badge badge-success">attiva</span>
+                                        : <span className="badge badge-warning">disattiva</span>}
+                                </td>
+                                <td className="text-right">
+                                    <button
+                                        onClick={() => apriEdit(r)}
+                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-slate-200 hover:bg-slate-100 mr-1"
+                                        title="Modifica" data-testid={`vr-edit-${r.id}`}
+                                    >
+                                        <Pencil size={12} />
+                                    </button>
+                                    <button
+                                        onClick={() => elimina(r)}
+                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                                        title="Elimina" data-testid={`vr-del-${r.id}`}
+                                    >
+                                        <Trash2 size={12} />
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            {open && (
+                <VoceRicorsivaDialog
+                    voce={editing}
+                    collabs={collabs}
+                    onClose={(refresh) => {
+                        setOpen(false); setEditing(null);
+                        if (refresh) load();
+                    }}
+                />
+            )}
+        </Card>
+    );
+}
+
+function VoceRicorsivaDialog({ voce, collabs, onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [f, setF] = useState(() => voce ? {
+        collaboratore_id: voce.collaboratore_id,
+        causale: voce.causale,
+        importo: String(voce.importo),
+        periodicita: voce.periodicita,
+        giorno_mese: voce.giorno_mese || 1,
+        mese_anno: voce.mese_anno || 1,
+        data_inizio: voce.data_inizio,
+        data_fine: voce.data_fine || "",
+        note: voce.note || "",
+        attiva: voce.attiva !== false,
+    } : {
+        collaboratore_id: "",
+        causale: "",
+        importo: "",
+        periodicita: "mensile",
+        giorno_mese: 1,
+        mese_anno: 1,
+        data_inizio: today,
+        data_fine: "",
+        note: "",
+        attiva: true,
+    });
+    const [saving, setSaving] = useState(false);
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        if (!f.collaboratore_id) { toast.error("Seleziona il collaboratore (o 'Tutti')"); return; }
+        if (!f.causale) { toast.error("Inserisci la causale"); return; }
+        const imp = parseFloat(f.importo);
+        if (isNaN(imp) || imp === 0) { toast.error("Importo deve essere ≠ 0"); return; }
+        setSaving(true);
+        try {
+            const body = {
+                collaboratore_id: f.collaboratore_id,
+                causale: f.causale,
+                importo: imp,
+                periodicita: f.periodicita,
+                giorno_mese: parseInt(f.giorno_mese, 10) || 1,
+                mese_anno: f.periodicita === "annuale" ? (parseInt(f.mese_anno, 10) || 1) : null,
+                data_inizio: f.data_inizio,
+                data_fine: f.data_fine || null,
+                note: f.note || null,
+                attiva: !!f.attiva,
+            };
+            if (voce) {
+                await api.put(`/voci-ricorsive-collab/${voce.id}`, body);
+                toast.success("Regola aggiornata");
+            } else {
+                const r = await api.post("/voci-ricorsive-collab", body);
+                toast.success(`Regola creata · ${r.data.voci_generate || 0} voci generate`);
+            }
+            onClose(true);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-lg" data-testid="vr-dialog">
+                <DialogHeader>
+                    <DialogTitle>{voce ? "Modifica regola ricorsiva" : "Nuova regola ricorsiva"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                    <div>
+                        <Label>Collaboratore *</Label>
+                        <Select value={f.collaboratore_id} onValueChange={(v) => set("collaboratore_id", v)}>
+                            <SelectTrigger data-testid="vr-collab"><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__all__">Tutti i collaboratori (broadcast)</SelectItem>
+                                {collabs.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-1">
+                            <Label>Causale *</Label>
+                            <Input
+                                placeholder="es. Bonus presenza, Trattenuta auto..."
+                                value={f.causale}
+                                onChange={(e) => set("causale", e.target.value)}
+                                data-testid="vr-causale"
+                            />
+                        </div>
+                        <div className="col-span-1">
+                            <Label>Importo € *</Label>
+                            <Input
+                                type="number" step="0.01"
+                                placeholder="+100 bonus / -50 trattenuta"
+                                value={f.importo}
+                                onChange={(e) => set("importo", e.target.value)}
+                                data-testid="vr-importo"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <Label>Periodicità</Label>
+                            <Select value={f.periodicita} onValueChange={(v) => set("periodicita", v)}>
+                                <SelectTrigger data-testid="vr-period"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="mensile">Mensile</SelectItem>
+                                    <SelectItem value="annuale">Annuale</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Giorno (1-28)</Label>
+                            <Input
+                                type="number" min="1" max="28"
+                                value={f.giorno_mese}
+                                onChange={(e) => set("giorno_mese", e.target.value)}
+                                data-testid="vr-giorno"
+                            />
+                        </div>
+                        {f.periodicita === "annuale" && (
+                            <div>
+                                <Label>Mese (1-12)</Label>
+                                <Input
+                                    type="number" min="1" max="12"
+                                    value={f.mese_anno}
+                                    onChange={(e) => set("mese_anno", e.target.value)}
+                                    data-testid="vr-mese"
+                                />
+                            </div>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Da *</Label>
+                            <Input
+                                type="date" value={f.data_inizio}
+                                onChange={(e) => set("data_inizio", e.target.value)}
+                                data-testid="vr-dal"
+                            />
+                        </div>
+                        <div>
+                            <Label>A (opzionale)</Label>
+                            <Input
+                                type="date" value={f.data_fine}
+                                onChange={(e) => set("data_fine", e.target.value)}
+                                data-testid="vr-al"
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Note (opzionali)</Label>
+                        <Input value={f.note} onChange={(e) => set("note", e.target.value)} />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                        <input
+                            type="checkbox" checked={f.attiva}
+                            onChange={(e) => set("attiva", e.target.checked)}
+                            data-testid="vr-attiva"
+                        />
+                        Regola attiva (genera voci automaticamente)
+                    </label>
+                    <div className="text-[11px] text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded p-2">
+                        Le voci verranno generate automaticamente nell'estratto conto del
+                        collaboratore alle date previste, fino ad oggi.
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
+                    <Button
+                        onClick={save} disabled={saving}
+                        className="bg-fuchsia-700 hover:bg-fuchsia-800"
+                        data-testid="vr-save"
+                    >
+                        {saving ? "Salvataggio…" : (voce ? "Aggiorna" : "Crea regola")}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }

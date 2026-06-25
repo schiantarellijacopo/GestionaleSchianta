@@ -32,6 +32,7 @@ from db_models import (
     AziendaConfig, SchemaProvvigionale, EventoCalendario, ContattoCompagnia,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
+    Rappel, VoceRicorsivaCollab,
     _now_iso, _uid,
 )
 import ania_importer
@@ -270,6 +271,14 @@ async def estratto_provvigioni(
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
 
+    # auto-materializza voci ricorsive fino ad oggi (idempotente)
+    try:
+        await _materializza_voci_ricorsive(cid)
+    except Exception as e:
+        # non bloccare l'estratto conto in caso di errore di materializzazione
+        import logging
+        logging.getLogger(__name__).exception("Materializzazione voci ricorsive fallita: %s", e)
+
     pol_filter = {"collaboratore_id": cid}
     pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1})]
 
@@ -423,6 +432,229 @@ async def delete_voce_manuale_collab(
     await db.voci_manuali_collab.delete_one({"id": vid})
     await log_attivita(user, "delete", "voce_manuale_collab", vid)
     return {"ok": True}
+
+
+# ====================== VOCI RICORSIVE COLLABORATORI ======================
+def _genera_date_ricorsive(regola: dict, fino_a: str) -> list[str]:
+    """Restituisce la lista di date (YYYY-MM-DD) in cui la regola genera una voce,
+    fra `regola.data_inizio` e `fino_a` (incluso).
+    """
+    from datetime import date as _date, timedelta as _td
+    try:
+        di = _date.fromisoformat(regola["data_inizio"])
+    except Exception:
+        return []
+    df_raw = regola.get("data_fine") or fino_a
+    try:
+        df = _date.fromisoformat(df_raw)
+    except Exception:
+        df = _date.fromisoformat(fino_a)
+    fa = _date.fromisoformat(fino_a)
+    end = min(df, fa)
+    if di > end:
+        return []
+    out: list[str] = []
+    periodicita = regola.get("periodicita") or "mensile"
+    giorno = max(1, min(28, int(regola.get("giorno_mese") or 1)))
+    if periodicita == "annuale":
+        mese = int(regola.get("mese_anno") or di.month)
+        # primo anno utile
+        y = di.year
+        while True:
+            try:
+                d = _date(y, mese, giorno)
+            except ValueError:
+                y += 1
+                continue
+            if d < di:
+                y += 1; continue
+            if d > end: break
+            out.append(d.isoformat())
+            y += 1
+    else:  # mensile
+        # iterate month by month
+        y, m = di.year, di.month
+        while True:
+            try:
+                d = _date(y, m, giorno)
+            except ValueError:
+                # next month
+                m += 1
+                if m > 12: m = 1; y += 1
+                continue
+            if d < di:
+                m += 1
+                if m > 12: m = 1; y += 1
+                continue
+            if d > end:
+                break
+            out.append(d.isoformat())
+            m += 1
+            if m > 12: m = 1; y += 1
+    return out
+
+
+async def _materializza_voci_ricorsive(collaboratore_id: str, fino_a: Optional[str] = None) -> int:
+    """Genera in `voci_manuali_collab` tutte le occorrenze delle regole ricorsive
+    attive per il collaboratore, fino alla data `fino_a` (default: oggi).
+    Idempotente: una voce per (ricorsiva_id, data).
+    """
+    today = fino_a or _now_iso()[:10]
+    # carica regole attive applicabili al collaboratore (specifiche o __all__)
+    rules = await db.voci_ricorsive_collab.find(
+        {"attiva": True, "collaboratore_id": {"$in": [collaboratore_id, "__all__"]}},
+        {"_id": 0},
+    ).to_list(500)
+    if not rules:
+        return 0
+    created = 0
+    for r in rules:
+        dates = _genera_date_ricorsive(r, today)
+        if not dates:
+            continue
+        # voci già materializzate per questa regola (su questo collaboratore)
+        existing = await db.voci_manuali_collab.find(
+            {"ricorsiva_id": r["id"], "collaboratore_id": collaboratore_id},
+            {"_id": 0, "data": 1},
+        ).to_list(2000)
+        already = {e["data"] for e in existing}
+        for d in dates:
+            if d in already:
+                continue
+            v = VoceManualeCollab(
+                collaboratore_id=collaboratore_id,
+                data=d,
+                causale=r["causale"],
+                importo=float(r["importo"] or 0),
+                note=r.get("note"),
+                ricorsiva_id=r["id"],
+            )
+            await db.voci_manuali_collab.insert_one(v.model_dump())
+            created += 1
+    return created
+
+
+class VoceRicorsivaBody(BaseModel):
+    collaboratore_id: str  # specifico o "__all__"
+    causale: str
+    importo: float
+    periodicita: Literal["mensile", "annuale"] = "mensile"
+    giorno_mese: int = 1
+    mese_anno: Optional[int] = None
+    data_inizio: str
+    data_fine: Optional[str] = None
+    note: Optional[str] = None
+    attiva: bool = True
+
+
+@api.get("/voci-ricorsive-collab")
+async def list_voci_ricorsive(
+    collaboratore_id: Optional[str] = None,
+    solo_attive: bool = False,
+    user=Depends(require_user("admin")),
+):
+    """Lista regole di voci ricorsive (admin only)."""
+    flt: dict = {}
+    if collaboratore_id:
+        flt["collaboratore_id"] = collaboratore_id
+    if solo_attive:
+        flt["attiva"] = True
+    items = await db.voci_ricorsive_collab.find(flt, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # enrich con nome collaboratore
+    cids = list({r["collaboratore_id"] for r in items if r.get("collaboratore_id") and r["collaboratore_id"] != "__all__"})
+    name_map: dict[str, str] = {}
+    if cids:
+        async for u in db.users.find(
+            {"id": {"$in": cids}}, {"_id": 0, "id": 1, "name": 1, "email": 1},
+        ):
+            name_map[u["id"]] = u.get("name") or u.get("email")
+    for r in items:
+        if r["collaboratore_id"] == "__all__":
+            r["collaboratore_nome"] = "Tutti i collaboratori"
+        else:
+            r["collaboratore_nome"] = name_map.get(r["collaboratore_id"], "?")
+    return items
+
+
+@api.post("/voci-ricorsive-collab", status_code=201)
+async def create_voce_ricorsiva(body: VoceRicorsivaBody, user=Depends(require_user("admin"))):
+    if body.collaboratore_id != "__all__":
+        u = await db.users.find_one({"id": body.collaboratore_id}, {"_id": 0, "id": 1})
+        if not u:
+            raise HTTPException(404, "Collaboratore non trovato")
+    obj = VoceRicorsivaCollab(**body.model_dump(), created_by=user.get("id"))
+    await db.voci_ricorsive_collab.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "voce_ricorsiva_collab", obj.id)
+    # materializza subito le occorrenze fino a oggi
+    targets = []
+    if body.collaboratore_id == "__all__":
+        async for u in db.users.find(
+            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
+            {"_id": 0, "id": 1},
+        ):
+            targets.append(u["id"])
+    else:
+        targets.append(body.collaboratore_id)
+    n = 0
+    for cid in targets:
+        n += await _materializza_voci_ricorsive(cid)
+    return {**obj.model_dump(), "voci_generate": n}
+
+
+@api.put("/voci-ricorsive-collab/{rid}")
+async def update_voce_ricorsiva(
+    rid: str, body: VoceRicorsivaBody, user=Depends(require_user("admin")),
+):
+    r = await db.voci_ricorsive_collab.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Regola non trovata")
+    upd = {**body.model_dump(), "updated_at": _now_iso()}
+    await db.voci_ricorsive_collab.update_one({"id": rid}, {"$set": upd})
+    await log_attivita(user, "update", "voce_ricorsiva_collab", rid)
+    return {**r, **upd}
+
+
+@api.delete("/voci-ricorsive-collab/{rid}")
+async def delete_voce_ricorsiva(
+    rid: str,
+    elimina_voci_non_pagate: bool = False,
+    user=Depends(require_user("admin")),
+):
+    """Elimina la regola. Se `elimina_voci_non_pagate=true` rimuove anche le
+    voci già materializzate non ancora pagate."""
+    res = await db.voci_ricorsive_collab.delete_one({"id": rid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Regola non trovata")
+    n_voci = 0
+    if elimina_voci_non_pagate:
+        del_res = await db.voci_manuali_collab.delete_many(
+            {"ricorsiva_id": rid, "pagata": {"$ne": True}, "pagamento_id": None},
+        )
+        n_voci = del_res.deleted_count
+    await log_attivita(user, "delete", "voce_ricorsiva_collab", rid, payload={"n_voci_rimosse": n_voci})
+    return {"ok": True, "n_voci_rimosse": n_voci}
+
+
+@api.post("/voci-ricorsive-collab/{rid}/materializza")
+async def materializza_voce_ricorsiva(rid: str, user=Depends(require_user("admin"))):
+    """Forza la materializzazione delle occorrenze fino ad oggi."""
+    r = await db.voci_ricorsive_collab.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Regola non trovata")
+    targets: list[str] = []
+    if r["collaboratore_id"] == "__all__":
+        async for u in db.users.find(
+            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
+            {"_id": 0, "id": 1},
+        ):
+            targets.append(u["id"])
+    else:
+        targets.append(r["collaboratore_id"])
+    n = 0
+    for cid in targets:
+        n += await _materializza_voci_ricorsive(cid)
+    return {"voci_generate": n}
+
 
 
 @api.post("/collaboratori/{cid}/paga-provvigioni")
@@ -776,11 +1008,39 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 
     righe.sort(key=lambda r: r["data"] or "")
     saldo = totale_dare - totale_avere
+    # ----- Rappel (sovraprovvigioni): accreditate fittiziamente, riducono saldo -----
+    rap_flt: dict = {"compagnia_id": compagnia_id}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        rap_flt["data"] = cond
+    rappel = await db.rappel.find(rap_flt, {"_id": 0}).sort("data", 1).to_list(5000)
+    totale_rappel = 0.0
+    for r in rappel:
+        imp = float(r.get("importo") or 0)
+        righe.append({
+            "data": r.get("data"),
+            "tipo": "rappel",
+            "polizza": None,
+            "contraente": None,
+            "ramo": None,
+            "dare": 0.0,
+            "avere": imp,
+            "descrizione": f"Rappel {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
+            "_movimento_id": r.get("id"),
+            "is_rappel": True,
+        })
+        totale_rappel += imp
+    totale_avere += totale_rappel
+    saldo -= totale_rappel
+    righe.sort(key=lambda r: r["data"] or "")
     return {
         "compagnia": comp,
         "righe": righe,
         "totale_dare": round(totale_dare, 2),
         "totale_avere": round(totale_avere, 2),
+        "totale_rappel": round(totale_rappel, 2),
         "saldo": round(saldo, 2),
         "periodo": {"dal": dal, "al": al},
         "trattiene_provvigioni": trattiene,
@@ -962,6 +1222,262 @@ async def saldi_cassa_compagnie(
             continue
     risultati.sort(key=lambda r: -abs(r["saldo_da_versare"] or 0))
     return risultati
+
+
+# ====================== RAPPEL (sovraprovvigioni compagnia) ======================
+class RappelBody(BaseModel):
+    compagnia_id: str
+    data: str
+    importo: float
+    descrizione: Optional[str] = None
+    anno: Optional[int] = None
+    note: Optional[str] = None
+
+
+@api.get("/rappel")
+async def list_rappel(
+    compagnia_id: Optional[str] = None,
+    anno: Optional[int] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    stato: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Lista rappel filtrabile per compagnia, anno, periodo (data) o stato."""
+    flt: dict = {}
+    if compagnia_id: flt["compagnia_id"] = compagnia_id
+    if anno: flt["anno"] = anno
+    if stato: flt["stato"] = stato
+    if dal or al:
+        cond: dict = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        flt["data"] = cond
+    items = await db.rappel.find(flt, {"_id": 0}).sort("data", -1).to_list(5000)
+    # enrich con ragione_sociale compagnia + n_allegati
+    comp_ids = list({r["compagnia_id"] for r in items if r.get("compagnia_id")})
+    if comp_ids:
+        comp_map: dict[str, dict] = {}
+        async for c in db.compagnie.find(
+            {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
+        ):
+            comp_map[c["id"]] = c
+        for r in items:
+            c = comp_map.get(r["compagnia_id"], {})
+            r["compagnia_nome"] = c.get("ragione_sociale")
+            r["compagnia_codice"] = c.get("codice")
+    # conta allegati per rappel
+    ids = [r["id"] for r in items]
+    if ids:
+        n_all: dict[str, int] = {}
+        async for x in db.allegati.aggregate([
+            {"$match": {"entita_tipo": "rappel", "entita_id": {"$in": ids}, "is_deleted": False}},
+            {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
+        ]):
+            n_all[x["_id"]] = x["n"]
+        for r in items:
+            r["n_allegati"] = n_all.get(r["id"], 0)
+            r["stato"] = r.get("stato") or "da_incassare"
+    return items
+
+
+@api.get("/rappel/archivio")
+async def archivio_rappel(
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Ritorna i totali aggregati per anno + breakdown per compagnia."""
+    pipeline = [
+        {"$group": {
+            "_id": {"anno": "$anno", "compagnia_id": "$compagnia_id"},
+            "totale": {"$sum": "$importo"},
+            "n_movimenti": {"$sum": 1},
+        }},
+        {"$sort": {"_id.anno": -1}},
+    ]
+    out = await db.rappel.aggregate(pipeline).to_list(5000)
+    comp_ids = list({o["_id"]["compagnia_id"] for o in out})
+    comp_map: dict[str, dict] = {}
+    if comp_ids:
+        async for c in db.compagnie.find(
+            {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
+        ):
+            comp_map[c["id"]] = c
+    # aggrega per anno
+    per_anno: dict[int, dict] = {}
+    for o in out:
+        anno = o["_id"]["anno"]
+        cid = o["_id"]["compagnia_id"]
+        bucket = per_anno.setdefault(anno, {"anno": anno, "totale": 0.0, "n_movimenti": 0, "compagnie": []})
+        bucket["totale"] += o["totale"]
+        bucket["n_movimenti"] += o["n_movimenti"]
+        bucket["compagnie"].append({
+            "compagnia_id": cid,
+            "compagnia_nome": comp_map.get(cid, {}).get("ragione_sociale"),
+            "compagnia_codice": comp_map.get(cid, {}).get("codice"),
+            "totale": round(o["totale"], 2),
+            "n_movimenti": o["n_movimenti"],
+        })
+    risultato = sorted(per_anno.values(), key=lambda x: -x["anno"])
+    for r in risultato:
+        r["totale"] = round(r["totale"], 2)
+        r["compagnie"].sort(key=lambda x: -x["totale"])
+    return risultato
+
+
+@api.post("/rappel")
+async def create_rappel(
+    body: RappelBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    comp = await db.compagnie.find_one({"id": body.compagnia_id}, {"_id": 0, "id": 1})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    if body.importo <= 0:
+        raise HTTPException(400, "Importo deve essere positivo")
+    anno = body.anno or int(body.data[:4])
+    r = Rappel(
+        compagnia_id=body.compagnia_id,
+        data=body.data, anno=anno, importo=round(body.importo, 2),
+        descrizione=body.descrizione, note=body.note,
+        created_by=user.get("id"),
+    )
+    await db.rappel.insert_one(r.model_dump())
+    await log_attivita(user, "create", "rappel", r.id, payload={"importo": r.importo, "compagnia_id": r.compagnia_id})
+    return r.model_dump()
+
+
+@api.put("/rappel/{rid}")
+async def update_rappel(
+    rid: str, body: RappelBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    r = await db.rappel.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Rappel non trovato")
+    if body.importo <= 0:
+        raise HTTPException(400, "Importo deve essere positivo")
+    anno = body.anno or int(body.data[:4])
+    update = {
+        "compagnia_id": body.compagnia_id,
+        "data": body.data, "anno": anno,
+        "importo": round(body.importo, 2),
+        "descrizione": body.descrizione, "note": body.note,
+        "updated_at": _now_iso(),
+    }
+    await db.rappel.update_one({"id": rid}, {"$set": update})
+    await log_attivita(user, "update", "rappel", rid, payload=update)
+    return {**r, **update}
+
+
+@api.delete("/rappel/{rid}")
+async def delete_rappel(
+    rid: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    r = await db.rappel.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Rappel non trovato")
+    if r.get("stato") == "incassato" and r.get("movimento_id"):
+        # rimuovi anche il movimento collegato
+        await db.movimenti.delete_one({"id": r["movimento_id"]})
+    res = await db.rappel.delete_one({"id": rid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Rappel non trovato")
+    await log_attivita(user, "delete", "rappel", rid, payload={})
+    return {"ok": True}
+
+
+@api.post("/rappel/{rid}/incassa")
+async def incassa_rappel(
+    rid: str, body: dict = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Marca un rappel come incassato e crea un movimento in Prima Nota
+    nella categoria 'provvigioni' (NON è un incasso premio normale)."""
+    r = await db.rappel.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Rappel non trovato")
+    if r.get("stato") == "incassato":
+        raise HTTPException(400, "Rappel già incassato")
+    body = body or {}
+    data_incasso = body.get("data_incasso") or _now_iso()[:10]
+    comp = await db.compagnie.find_one({"id": r["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
+    importo = float(r.get("importo") or 0)
+    # Crea movimento in Prima Nota — categoria "provvigioni" entrata fittizia
+    mov_id = _uid()
+    mov = {
+        "id": mov_id,
+        "data_movimento": data_incasso,
+        "tipo": "entrata",
+        "categoria": "provvigioni",
+        "importo": round(importo, 2),
+        "descrizione": f"Rappel {r.get('anno')} — {comp.get('ragione_sociale','')}: {r.get('descrizione') or ''}".strip(),
+        "compagnia_id": r["compagnia_id"],
+        "rappel_id": rid,
+        "is_rappel": True,
+        "created_at": _now_iso(),
+        "created_by": user.get("id"),
+    }
+    await db.movimenti.insert_one(mov)
+    await db.rappel.update_one({"id": rid}, {"$set": {
+        "stato": "incassato",
+        "data_incasso": data_incasso,
+        "movimento_id": mov_id,
+        "updated_at": _now_iso(),
+    }})
+    await log_attivita(user, "incassa", "rappel", rid, payload={"importo": importo})
+    return {**r, "stato": "incassato", "data_incasso": data_incasso, "movimento_id": mov_id}
+
+
+@api.post("/rappel/{rid}/storna")
+async def storna_rappel(
+    rid: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Annulla l'incasso di un rappel: rimuove il movimento in Prima Nota
+    e riporta il rappel a stato 'da_incassare'."""
+    r = await db.rappel.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Rappel non trovato")
+    if r.get("stato") != "incassato":
+        raise HTTPException(400, "Rappel non incassato")
+    if r.get("movimento_id"):
+        await db.movimenti.delete_one({"id": r["movimento_id"]})
+    await db.rappel.update_one({"id": rid}, {"$set": {
+        "stato": "da_incassare", "data_incasso": None, "movimento_id": None,
+        "updated_at": _now_iso(),
+    }})
+    return {"ok": True}
+
+
+@api.get("/stampa/rappel/{rid}")
+async def stampa_rappel(
+    rid: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """PDF di un singolo rappel."""
+    r = await db.rappel.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Rappel non trovato")
+    comp = await db.compagnie.find_one({"id": r["compagnia_id"]}, {"_id": 0}) or {}
+    stato = r.get("stato") or "da_incassare"
+    headers = ["Campo", "Valore"]
+    rows = [
+        ["Compagnia", comp.get("ragione_sociale") or "—"],
+        ["Codice compagnia", comp.get("codice") or "—"],
+        ["Data accredito", r.get("data") or "—"],
+        ["Anno competenza", str(r.get("anno") or "—")],
+        ["Descrizione", r.get("descrizione") or "—"],
+        ["Note", r.get("note") or "—"],
+        ["Stato", "INCASSATO" if stato == "incassato" else "DA INCASSARE"],
+        ["Data incasso", r.get("data_incasso") or "—"],
+        ["Importo €", f"{float(r.get('importo') or 0):,.2f}"],
+    ]
+    pdf = pdf_report.stampa_elenco(
+        f"Rappel — {comp.get('ragione_sociale', 'Compagnia')}",
+        f"Documento di sovraprovvigione · ID {rid[:8]}",
+        headers, rows,
+        col_widths_mm=[55, 110], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"rappel_{rid[:8]}.pdf")
 
 
 @api.get("/stampa/compagnie/{cid}/estratto-conto")
@@ -4266,69 +4782,94 @@ async def dati_compagnie(
     """Modulo Dati Compagnie: per ogni compagnia incassi lordi/netti, provvigioni,
     rimesse pagate, saldo attuale (cumulativo).
 
-    Se dal/al sono passati, gli importi lordi/netti/provv/rimesse sono filtrati per
-    quel periodo; il saldo attuale rimane sempre cumulativo (fino a oggi)."""
-    pol_filter = {}
-    # data ranges per movimenti
-    cond_mov = {}
-    if dal: cond_mov["$gte"] = dal
-    if al: cond_mov["$lte"] = al
+    Usa la STESSA fonte dati di `/api/compagnie/saldi-cassa` (db.titoli con
+    stato='incassato' e db.movimenti categoria='pagamento_compagnia') per
+    garantire saldi identici fra le due viste.
 
+    Se dal/al sono passati, gli importi sono filtrati per il periodo;
+    il saldo attuale rimane sempre cumulativo (fino a oggi)."""
+    today = _now_iso()[:10]
     compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
     rows = []
-    today = _now_iso()[:10]
 
     for c in compagnie:
         cid = c["id"]
-        trattiene = c.get("trattiene_provvigioni", True)
+        trattiene = c.get("trattiene_provvigioni", True) is not False
         pol_ids = [p["id"] async for p in db.polizze.find(
-            {"compagnia_id": cid, **pol_filter}, {"_id": 0, "id": 1}
+            {"compagnia_id": cid}, {"_id": 0, "id": 1}
         )]
-        # incassi del periodo
-        match_inc = {"polizza_id": {"$in": pol_ids}, "tipo": "entrata",
-                     "categoria": "incasso_premio"} if pol_ids else None
+
+        # ---- importi del PERIODO (filtrati su data_incasso) ----
         incassi_lordi = 0.0; provv_periodo = 0.0
-        if match_inc:
-            if cond_mov:
-                match_inc["data_movimento"] = cond_mov
-            agg = await db.movimenti.aggregate([
-                {"$match": match_inc},
+        if pol_ids:
+            match_t: dict = {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}
+            if dal or al:
+                cond_t: dict = {}
+                if dal: cond_t["$gte"] = dal
+                if al: cond_t["$lte"] = al
+                match_t["data_incasso"] = cond_t
+            agg = await db.titoli.aggregate([
+                {"$match": match_t},
                 {"$group": {"_id": None,
-                            "lordo": {"$sum": "$importo"},
+                            "lordo": {"$sum": "$importo_lordo"},
                             "provv": {"$sum": "$provvigioni"}}},
             ]).to_list(1)
             if agg:
                 incassi_lordi = agg[0]["lordo"] or 0
                 provv_periodo = agg[0]["provv"] or 0
         netto_dovuto_periodo = (incassi_lordi - provv_periodo) if trattiene else incassi_lordi
-        # rimesse periodo
-        rim_match = {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia"}
-        if cond_mov: rim_match["data_movimento"] = cond_mov
+
+        # rimesse del periodo (data_movimento)
+        rim_match: dict = {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia"}
+        if dal or al:
+            cond_r: dict = {}
+            if dal: cond_r["$gte"] = dal
+            if al: cond_r["$lte"] = al
+            rim_match["data_movimento"] = cond_r
         rim_agg = await db.movimenti.aggregate([
             {"$match": rim_match}, {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rimesse_periodo = rim_agg[0]["tot"] if rim_agg else 0
 
-        # saldo attuale cumulativo (fino a oggi)
+        # rappel del periodo
+        rap_match: dict = {"compagnia_id": cid}
+        if dal or al:
+            cond_rap: dict = {}
+            if dal: cond_rap["$gte"] = dal
+            if al: cond_rap["$lte"] = al
+            rap_match["data"] = cond_rap
+        rap_agg = await db.rappel.aggregate([
+            {"$match": rap_match}, {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        rappel_periodo = rap_agg[0]["tot"] if rap_agg else 0
+
+        # ---- SALDO ATTUALE cumulativo (TUTTI i titoli incassati, senza filtro data)
+        # Stessa logica di /api/compagnie/saldi-cassa per garantire numeri identici. ----
         saldo_attuale = 0.0
         if pol_ids:
-            agg_cum = await db.movimenti.aggregate([
-                {"$match": {"polizza_id": {"$in": pol_ids}, "tipo": "entrata",
-                            "categoria": "incasso_premio", "data_movimento": {"$lte": today}}},
-                {"$group": {"_id": None, "lordo": {"$sum": "$importo"}, "provv": {"$sum": "$provvigioni"}}},
+            agg_cum = await db.titoli.aggregate([
+                {"$match": {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}},
+                {"$group": {"_id": None,
+                            "lordo": {"$sum": "$importo_lordo"},
+                            "provv": {"$sum": "$provvigioni"}}},
             ]).to_list(1)
             if agg_cum:
                 cum_lordo = agg_cum[0]["lordo"] or 0
                 cum_provv = agg_cum[0]["provv"] or 0
                 saldo_attuale = (cum_lordo - cum_provv) if trattiene else cum_lordo
         rim_cum_agg = await db.movimenti.aggregate([
-            {"$match": {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia",
-                        "data_movimento": {"$lte": today}}},
+            {"$match": {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia"}},
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         saldo_attuale -= (rim_cum_agg[0]["tot"] if rim_cum_agg else 0)
+        # sottrai rappel cumulativi (tutti)
+        rap_cum_agg = await db.rappel.aggregate([
+            {"$match": {"compagnia_id": cid}},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        saldo_attuale -= (rap_cum_agg[0]["tot"] if rap_cum_agg else 0)
 
-        if abs(incassi_lordi) < 0.01 and abs(rimesse_periodo) < 0.01 and abs(saldo_attuale) < 0.01:
+        if abs(incassi_lordi) < 0.01 and abs(rimesse_periodo) < 0.01 and abs(rappel_periodo) < 0.01 and abs(saldo_attuale) < 0.01:
             continue  # skip compagnie senza nulla
 
         rows.append({
@@ -4339,6 +4880,7 @@ async def dati_compagnie(
             "incassi_netti": round(netto_dovuto_periodo, 2),
             "provvigioni": round(provv_periodo, 2),
             "rimesse_pagate": round(rimesse_periodo, 2),
+            "rappel": round(rappel_periodo, 2),
             "saldo_attuale": round(saldo_attuale, 2),
         })
     rows.sort(key=lambda x: abs(x["saldo_attuale"]), reverse=True)
@@ -4347,6 +4889,7 @@ async def dati_compagnie(
         "incassi_netti": round(sum(r["incassi_netti"] for r in rows), 2),
         "provvigioni": round(sum(r["provvigioni"] for r in rows), 2),
         "rimesse_pagate": round(sum(r["rimesse_pagate"] for r in rows), 2),
+        "rappel": round(sum(r["rappel"] for r in rows), 2),
         "saldo_attuale": round(sum(r["saldo_attuale"] for r in rows), 2),
     }
     return {"periodo": {"dal": dal, "al": al}, "compagnie": rows, "totali": totali}
@@ -8527,6 +9070,72 @@ async def migra_sconti(user=Depends(require_user("admin"))):
 
 
 # ----- Mount -----
+
+
+# ====================== DASHBOARD LINKS (link utili rapidi) ======================
+class DashboardLinkBody(BaseModel):
+    label: str
+    url: str
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    ordine: int = 0
+
+
+@api.get("/dashboard/links")
+async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Link rapidi mostrati sulla dashboard."""
+    items = await db.dashboard_links.find({}, {"_id": 0}).sort([("ordine", 1), ("created_at", -1)]).to_list(200)
+    return items
+
+
+@api.post("/dashboard/links", status_code=201)
+async def create_dashboard_link(body: DashboardLinkBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    if not body.label or not body.url:
+        raise HTTPException(400, "Label e URL obbligatori")
+    url = body.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    item = {
+        "id": _uid(),
+        "label": body.label.strip(),
+        "url": url,
+        "icon": body.icon,
+        "color": body.color,
+        "ordine": body.ordine or 0,
+        "created_at": _now_iso(),
+        "created_by": user.get("id"),
+    }
+    await db.dashboard_links.insert_one(item)
+    item.pop("_id", None)
+    return item
+
+
+@api.put("/dashboard/links/{lid}")
+async def update_dashboard_link(lid: str, body: DashboardLinkBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    existing = await db.dashboard_links.find_one({"id": lid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Link non trovato")
+    url = body.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    upd = {
+        "label": body.label.strip(), "url": url,
+        "icon": body.icon, "color": body.color,
+        "ordine": body.ordine or 0,
+        "updated_at": _now_iso(),
+    }
+    await db.dashboard_links.update_one({"id": lid}, {"$set": upd})
+    return {**existing, **upd}
+
+
+@api.delete("/dashboard/links/{lid}")
+async def delete_dashboard_link(lid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    res = await db.dashboard_links.delete_one({"id": lid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Link non trovato")
+    return {"ok": True}
+
+
 app.include_router(api)
 
 app.add_middleware(

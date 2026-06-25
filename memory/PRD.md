@@ -16,6 +16,27 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncasso.jsx` — incasso semplice (TitoliSospesi)
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
+
+## Cosa è stato implementato
+### 2026-06-25 (parte 7 — Storico Pagamenti + Rappel + Voci Ricorsive + Link Utili)
+- 🆕 **Storico Pagamenti**: collaboratori (`/provvigioni`) e compagnie (`/compagnie-estratto > Storico rimesse`) — espandibili con titoli pagati, allegati, **Stampa PDF** per singolo estratto pagato.
+- 🆕 **Rimozione campo "Conto/Banca"** da TUTTI i dialoghi di pagamento: ora il conto viene **auto-derivato dal mezzo di pagamento** via `_resolve_conto_cassa` (mappatura mezzo→tipo conto in `_MEZZO_TO_TIPO`).
+- 🆕 **Titoli pagati spariscono dalle viste attive**: filtrati da Provvigioni maturate, Voci manuali e da E/C Compagnie "Movimenti & versamenti"; visibili solo nello **Storico**.
+- 🆕 **"Stampa selezionati"** in E/C Compagnie: PDF dei soli titoli selezionati con totale.
+- 🆕 **Allineamento saldi**: `/api/compagnie/saldi-cassa` e `/api/contabilita/dati-compagnie` ora condividono la stessa fonte dati (`db.titoli` stato=incassato). Saldi identici.
+- 🆕 **Rappel (Sovraprovvigioni Compagnie)** — nuova sezione `/rappel`:
+  - CRUD completo + filtri (compagnia/anno) + archivio storico annuale per compagnia
+  - **Riduce automaticamente** il saldo da versare in E/C compagnie e Dati compagnie
+  - **Incassa**: marca rappel come incassato e crea movimento in Prima Nota categoria=`provvigioni` (NON un incasso premio classico). Pulsante Storna reversibile.
+  - **AllegatiCell** (entita_tipo="rappel") per upload documenti per ogni rappel
+  - **Stampa PDF** per singolo rappel via `/api/stampa/rappel/{rid}`
+- 🆕 **Voci Ricorsive Collaboratori** (Librerie → tab "Voci ricorsive collab."):
+  - Regole di bonus/trattenute mensili o annuali, applicabili a singolo collaboratore o "tutti"
+  - **Auto-materializzazione**: alla prima apertura di `/api/collaboratori/{cid}/estratto-provvigioni` le voci vengono generate idempotentemente fino ad oggi
+  - Cancellando una regola si possono rimuovere anche le voci non pagate generate
+- 🆕 **Dashboard Link Utili**: card in cima alla dashboard con CRUD link rapidi (label/URL/colore/ordine), apertura in nuova scheda
+
+
 ## Cosa è stato implementato
 ### 2026-06-25 (parte 6 — Bug fix Rimesse + UX)
 - 🐛 **Fix visualizzazione Rimesse in Prima Nota**: i pagamenti alla compagnia (categoria `pagamento_compagnia`) ora appaiono in una **colonna dedicata "Rimessa"** (violet) e NON più nella colonna "Uscita". Badge cambia in `rimessa` (info).
