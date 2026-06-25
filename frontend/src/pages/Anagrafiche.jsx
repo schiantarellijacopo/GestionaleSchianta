@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap } from "lucide-react";
@@ -421,6 +421,9 @@ function PersonalizzaKpiDialog({ open, onOpenChange, onChanged }) {
             <DialogContent className="max-w-2xl" data-testid="dialog-personalizza-kpi">
                 <DialogHeader>
                     <DialogTitle>Personalizza KPI Anagrafiche</DialogTitle>
+                    <DialogDescription>
+                        Crea KPI personalizzate basate sui tag delle anagrafiche.
+                    </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                     <div className="text-xs text-slate-500">

@@ -2134,6 +2134,36 @@ async def anagrafiche_stats(user=Depends(current_user)):
         "n": sum(v["n"] for v in out.values()),
         "premio_totale": round(sum(v["premio_totale"] for v in out.values()), 2),
     }
+    # KPI custom basate sui tag dell'utente
+    kpi_customs = await db.kpi_anagrafiche_custom.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).sort("ordine", 1).to_list(50)
+    custom_out = []
+    for k in kpi_customs:
+        tag = k.get("tag")
+        if not tag:
+            continue
+        ids_tag = [a["id"] async for a in db.anagrafiche.find(
+            {"tags": tag}, {"_id": 0, "id": 1},
+        )]
+        premio = 0.0
+        if ids_tag:
+            agg = await db.polizze.aggregate([
+                {"$match": {"contraente_id": {"$in": ids_tag},
+                            "stato": {"$in": ["attiva", "in_emissione"]}}},
+                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"}}},
+            ]).to_list(1)
+            premio = float(agg[0]["tot"]) if agg else 0.0
+        custom_out.append({
+            "id": k["id"],
+            "label": k["label"],
+            "tag": tag,
+            "color": k.get("color", "sky"),
+            "icon": k.get("icon", "Star"),
+            "n": len(ids_tag),
+            "premio_totale": round(premio, 2),
+        })
+    out["custom"] = custom_out
     return out
 
 
