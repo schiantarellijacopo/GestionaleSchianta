@@ -68,7 +68,7 @@ class TestAziendaSmtp:
         data = r.json()
         assert data.get("nome_commercialista") == "Studio Test"
         assert data.get("smtp_from") == "noreply@test.it"
-        assert data.get("smtp_use_tls") is True
+        assert data.get("smtp_use_tls") == True
         # readback
         r2 = admin.get(f"{API}/librerie/azienda")
         d2 = r2.json()
@@ -216,7 +216,7 @@ class TestChiusuraLifecycle:
         # brogliaccio now chiusa
         b = admin.get(f"{API}/contabilita/brogliaccio",
                       params={"data": TEST_DAY}).json()
-        assert b["chiusa"] is True
+        assert b["chiusa"] == True
         assert b["chiusura"] and b["chiusura"]["id"] == d["id"]
         assert b["chiusura"].get("closed_by_name")
 
@@ -243,7 +243,7 @@ class TestChiusuraLifecycle:
         # should be 200 with ok:false (no exception)
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d.get("ok") is False
+        assert d.get("ok") == False
         assert "Email commercialista" in d.get("errore", "") \
             or "SMTP" in d.get("errore", "")
 
@@ -274,7 +274,7 @@ class TestChiusuraLifecycle:
         # brogliaccio now aperta
         b = admin.get(f"{API}/contabilita/brogliaccio",
                       params={"data": TEST_DAY}).json()
-        assert b["chiusa"] is False
+        assert b["chiusa"] == False
 
     def test_10_put_movimento_after_riapri(self, admin, setup_data):
         mid = setup_data["mids"][0]

@@ -118,7 +118,7 @@ def test_paga_provvigioni_without_conto_cassa(client, ctx):
     )
     assert r.status_code == 200, f"paga-provvigioni failed: {r.status_code} {r.text}"
     body = r.json()
-    assert body.get("ok") is True
+    assert body.get("ok") == True
     pag = body["pagamento"]
     mov = body["movimento"]
     assert pag.get("conto_cassa_id"), "conto_cassa_id should be auto-resolved"
@@ -210,7 +210,7 @@ def test_paga_compagnia_without_conto_cassa(client, ctx):
     )
     assert r.status_code == 200, f"paga compagnia failed: {r.status_code} {r.text}"
     body = r.json()
-    assert body.get("ok") is True
+    assert body.get("ok") == True
     assert body.get("titoli_pagati") == 1
     ctx["rimessa_mov_id"] = body["movimento_id"]
 

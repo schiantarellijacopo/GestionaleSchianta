@@ -221,22 +221,118 @@ def parse_estratto_conto_inps(testo: str) -> dict:
     PERIODI contributivi dettagliati, STORICO redditi raggruppato per anno,
     TOTALI versati e montante stimato.
     """
-    import re
-
     result: dict = {
         "settimane_contributive": 0,
         "giorni_contributivi": 0,
         "retribuzione_media_annua": 0.0,
         "anni_stimati": 0,
         "righe_contributive": 0,
-        "periodi_contributivi": [],   # [{fondo, inizio_periodo, fine_periodo, settimane, retribuzione, contributi}]
-        "storico_redditi": [],         # [{anno, reddito, contributi, cassa}]
+        "periodi_contributivi": [],
+        "storico_redditi": [],
         "totale_versato": 0.0,
         "totale_retribuzioni": 0.0,
         "montante_stimato": 0.0,
     }
 
-    # === Header anagrafico ===
+    _parse_anagrafica(testo, result)
+    state = _EstrattoState(result)
+    _parse_periodi_formato_inps(testo, state)
+    _parse_periodi_parasubordinati(testo, state)
+    _parse_periodi_satorcrm(testo, state)
+    _parse_periodi_fallback_date(testo, state)
+    _parse_storico_redditi_tabella(testo, state)
+    _consolida_totali(state)
+    return result
+
+
+def parse_estratto_contributivo(pdf_bytes: bytes) -> dict:
+    """Estrae testo da PDF dell'estratto contributivo INPS e ritorna i dati strutturati."""
+    import pdfplumber
+    from io import BytesIO
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    return parse_estratto_conto_inps(text)
+
+
+# ---------------------------------------------------------------------------
+# Helpers di supporto al parsing
+# ---------------------------------------------------------------------------
+_FONDI_NOTI = (
+    "Commerciante", "Artigiano", "Dipendente", "Autonomo", "Parasubordinato",
+    "Professionista", "Imprenditore", "Coltivatore", "Lavoratore",
+    "Gestione separata", "Lavoro dipendente", "Inps", "Inpgi", "Enasarco",
+    "Enpacl", "Enpam", "Inarcassa", "Cassa Forense", "Casagit",
+)
+
+
+def _to_iso(dmy: str) -> str:
+    gg, mm, aa = dmy.split("/")
+    return f"{aa}-{mm}-{gg}"
+
+
+def _parse_num(s: str) -> float:
+    """Parser di numeri italiani (es. '12.345,67' o '12345.67' o '12345,67')."""
+    if not s:
+        return 0.0
+    s = s.strip()
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+class _EstrattoState:
+    """Mutable state condivisa tra le funzioni di parsing del singolo estratto."""
+
+    def __init__(self, result: dict):
+        self.result = result
+        self.settimane_tot = 0
+        self.giorni_tot = 0
+        self.retribuzioni: list[float] = []
+        self.primo_inizio: Optional[str] = None
+        self.redditi_per_anno: dict[str, dict] = {}
+        self.periodi_seen: set = set()
+
+    def add_periodo(self, dal_iso: str, al_iso: str, fondo: str,
+                    sett: int, retrib: float, contrib: float) -> None:
+        key = (dal_iso, al_iso, fondo)
+        if key in self.periodi_seen:
+            return
+        self.periodi_seen.add(key)
+        if self.primo_inizio is None or dal_iso < self.primo_inizio:
+            self.primo_inizio = dal_iso
+        self.settimane_tot += sett
+        if retrib > 0:
+            self.retribuzioni.append(retrib)
+        self.result["periodi_contributivi"].append({
+            "fondo": (fondo or "Lavoratore dipendente")[:80],
+            "inizio_periodo": dal_iso,
+            "fine_periodo": al_iso,
+            "settimane": sett,
+            "retribuzione": round(retrib, 2),
+            "contributi": round(contrib, 2),
+            "riscattato": False,
+        })
+        anno = dal_iso[:4]
+        slot = self.redditi_per_anno.setdefault(
+            anno,
+            {"reddito": 0.0, "contributi": 0.0, "settimane": 0, "cassa": (fondo or "")[:40]},
+        )
+        slot["reddito"] += retrib
+        slot["contributi"] += contrib
+        slot["settimane"] += sett
+        self.result["righe_contributive"] += 1
+
+
+# ---------------------------------------------------------------------------
+# 1. Header anagrafico
+# ---------------------------------------------------------------------------
+def _parse_anagrafica(testo: str, result: dict) -> None:
+    import re
     m = re.search(r"Estratto\s+Conto\s+Previdenziale\s+([A-ZÀ-Ÿ' ]+?)(?:\n|\s+nato)", testo)
     if m:
         full = m.group(1).strip()
@@ -265,127 +361,111 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         try:
             mese_cf = result["codice_fiscale"][9:11]
             result["sesso"] = "F" if int(mese_cf) > 31 else "M"
-        except Exception:
+        except (ValueError, IndexError):
             pass
 
-    m = re.search(r"residente\s+in\s+(.+?)\n\s*(\d{5})\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)",
-                  testo, re.IGNORECASE)
+    m = re.search(
+        r"residente\s+in\s+(.+?)\n\s*(\d{5})\s+([A-ZÀ-Ÿ' ]+?)\s+\(([A-Z]{2})\)",
+        testo, re.IGNORECASE,
+    )
     if m:
         result["indirizzo"] = m.group(1).strip()
         result["cap"] = m.group(2)
         result["comune"] = m.group(3).strip().title()
         result["provincia"] = m.group(4)
 
-    # === Periodi contributivi ===
-    # Parser multi-formato:
-    # - Formato INPS classico: "01/01/2020 31/12/2020 sett. 52 ... 25000,00 6500,00"
-    # - Formato SatorCRM/HubSicura: "Commerciante 01/01/2020 31/12/2020"
-    # - Formato compatto: "Dipendente 01/2020 12/2020 ..."
-    # - Riga senza retribuzione: "01/01/2020 31/12/2020"
-    settimane_tot = 0
-    giorni_tot = 0
-    retribuzioni = []
-    primo_inizio = None
-    fondi_noti = (
-        "Commerciante", "Artigiano", "Dipendente", "Autonomo", "Parasubordinato",
-        "Professionista", "Imprenditore", "Coltivatore", "Lavoratore",
-        "Gestione separata", "Lavoro dipendente", "Inps", "Inpgi", "Enasarco",
-        "Enpacl", "Enpam", "Inarcassa", "Cassa Forense", "Casagit",
-    )
-    redditi_per_anno: dict = {}
-    periodi_seen: set = set()
 
-    def _add_periodo(dal_iso, al_iso, fondo, sett, retrib, contrib):
-        nonlocal primo_inizio, settimane_tot
-        key = (dal_iso, al_iso, fondo)
-        if key in periodi_seen:
-            return
-        periodi_seen.add(key)
-        if primo_inizio is None or dal_iso < primo_inizio:
-            primo_inizio = dal_iso
-        settimane_tot += sett
-        if retrib > 0:
-            retribuzioni.append(retrib)
-        result["periodi_contributivi"].append({
-            "fondo": (fondo or "Lavoratore dipendente")[:80],
-            "inizio_periodo": dal_iso,
-            "fine_periodo": al_iso,
-            "settimane": sett,
-            "retribuzione": round(retrib, 2),
-            "contributi": round(contrib, 2),
-            "riscattato": False,
-        })
-        anno = dal_iso[:4]
-        slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "settimane": 0, "cassa": (fondo or "")[:40]})
-        slot["reddito"] += retrib
-        slot["contributi"] += contrib
-        slot["settimane"] += sett
-        result["righe_contributive"] += 1
+# ---------------------------------------------------------------------------
+# 2. Periodi - formato INPS classico
+# ---------------------------------------------------------------------------
+def _unita_a_settimane(qty: int, unita: str, state: _EstrattoState) -> int:
+    """Converte la quantità nella sua espressione in settimane.
+    Aggiorna giorni_tot in state se l'unità è 'giorni'."""
+    u = unita.lower().rstrip(".")
+    if u.startswith("sett"):
+        return qty
+    if u == "mesi":
+        return int(round(qty * 52 / 12))
+    state.giorni_tot += qty
+    return qty // 7
 
-    def _to_iso(dmy: str) -> str:
-        gg, mm, aa = dmy.split("/")
-        return f"{aa}-{mm}-{gg}"
 
-    # FORMATO 1 - INPS classico/reale: "DD/MM/YYYY DD/MM/YYYY <fondo> (sett.|mesi|giorni) N N,000 X.XXX,XX [AZIENDA]"
-    # Esempi reali:
-    #  "01/01/2020 31/12/2020 Titolare di impresa COM. mesi 12 12,000 78.965,04 SCHIANTARELLI MARCO ANDREA"
-    #  "01/06/2008 21/09/2008 Lavoro dipendente sett. 14 14,000 4.798,00 DITTA DEL SIMONE BRUNO"
-    #  "25/07/1984 31/12/1984 Servizio militare sett. 23 23,000"
+def _parse_periodi_formato_inps(testo: str, state: _EstrattoState) -> None:
+    """Formato INPS reale: 'DD/MM/YYYY DD/MM/YYYY <fondo> (sett.|mesi|giorni) N N,000 X.XXX,XX [AZIENDA]'."""
+    import re
     re_full = re.compile(
-        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+([A-Za-zÀ-ÿ'\. ]+?)\s+(sett\.?|mesi|giorni)\s+(\d+)\s+([\d.,]+)(?:\s+([\d.,]+))?(?:\s+(.+?))?(?=\n|$)",
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+([A-Za-zÀ-ÿ'\. ]+?)\s+"
+        r"(sett\.?|mesi|giorni)\s+(\d+)\s+([\d.,]+)(?:\s+([\d.,]+))?(?:\s+(.+?))?(?=\n|$)",
         re.IGNORECASE | re.MULTILINE,
     )
     for m in re_full.finditer(testo):
         dal, al, fondo_raw, unita, qty, _utili, retrib, _azienda = m.groups()
         try:
-            n = int(qty)
-            u = unita.lower().rstrip(".")
-            if u.startswith("sett"):
-                sett = n
-            elif u == "mesi":
-                sett = int(round(n * 52 / 12))   # mesi → settimane
-            else:  # giorni
-                sett = n // 7
-                giorni_tot += n
-            fondo = re.sub(r"\s+", " ", (fondo_raw or "")).strip()
-            fondo = fondo[:80] or "Lavoratore dipendente"
+            sett = _unita_a_settimane(int(qty), unita, state)
+            fondo = re.sub(r"\s+", " ", (fondo_raw or "")).strip()[:80] or "Lavoratore dipendente"
             r = _parse_num(retrib) if retrib else 0.0
-            # Filtro: retrib > 100k è probabile errore di parse (qty matchata male)
-            if r > 200000:
+            if r > 200000:  # filtro: parse errato
                 r = 0.0
-            _add_periodo(_to_iso(dal), _to_iso(al), fondo, sett, r, 0.0)
-        except Exception:
+            state.add_periodo(_to_iso(dal), _to_iso(al), fondo, sett, r, 0.0)
+        except (ValueError, IndexError):
             continue
 
-    # FORMATO 1b - Parasubordinati (anno-based, no date):
-    # "2013 2.000,00 ASSICURAZIONI ... Attivita' di collaborazione 400,00 20,00"
+
+# ---------------------------------------------------------------------------
+# 3. Parasubordinati
+# ---------------------------------------------------------------------------
+def _parse_periodi_parasubordinati(testo: str, state: _EstrattoState) -> None:
+    """Formato Parasubordinati: 'ANNO REDDITO COMMITTENTE Attivita' di collaborazione CONTRIB ALIQ'."""
+    import re
     re_paras = re.compile(
-        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+([\d.]+,\d{2})\s+(.+?)\s+(Attivita['\s]*di\s+collaborazione|Collaborazione|Prestazione)\s+([\d.]+,\d{2})\s+([\d,]+)",
+        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+([\d.]+,\d{2})\s+(.+?)\s+"
+        r"(Attivita['\s]*di\s+collaborazione|Collaborazione|Prestazione)\s+([\d.]+,\d{2})\s+([\d,]+)",
         re.IGNORECASE,
     )
     for m in re_paras.finditer(testo):
-        anno, redd_raw, _committente, tipo, contrib_raw, _aliq = m.groups()
+        anno, redd_raw, _committente, _tipo, contrib_raw, _aliq = m.groups()
         try:
             r = _parse_num(redd_raw)
             c = _parse_num(contrib_raw)
-            if r > 0 and 1000 <= r <= 500000:
-                # Aggiungi al storico
-                slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": "Gestione separata"})
-                slot["reddito"] += r
-                slot["contributi"] += c
-                slot["cassa"] = "Gestione separata"
-                retribuzioni.append(r)
-                # Periodo annuale stimato (apr-dic stima per "Attivita' di collaborazione")
-                dal_iso = f"{anno}-01-01"
-                al_iso = f"{anno}-12-31"
-                _add_periodo(dal_iso, al_iso, "Gestione separata", 52, r, c)
-        except Exception:
+            if not (1000 <= r <= 500000):
+                continue
+            slot = state.redditi_per_anno.setdefault(
+                anno, {"reddito": 0.0, "contributi": 0.0, "cassa": "Gestione separata"},
+            )
+            slot["reddito"] += r
+            slot["contributi"] += c
+            slot["cassa"] = "Gestione separata"
+            state.retribuzioni.append(r)
+            state.add_periodo(f"{anno}-01-01", f"{anno}-12-31",
+                              "Gestione separata", 52, r, c)
+        except (ValueError, KeyError):
             continue
 
-    # FORMATO 2 - SatorCRM / layout senza settimane/retribuzione:
-    # "FONDO  DD/MM/YYYY  DD/MM/YYYY  ..."
+
+# ---------------------------------------------------------------------------
+# 4. SatorCRM (fondo+date, niente settimane esplicite)
+# ---------------------------------------------------------------------------
+def _stima_settimane(dal_iso: str, al_iso: Optional[str]) -> int:
+    """Stima settimane fra due date ISO. Anno aperto → 52, single-year → 52."""
+    if al_iso is None:
+        return 52
+    if al_iso[:4] == dal_iso[:4]:
+        return 52
+    from datetime import date
+    try:
+        d1 = date.fromisoformat(dal_iso)
+        d2 = date.fromisoformat(al_iso)
+        return max(0, ((d2 - d1).days + 1) // 7)
+    except ValueError:
+        return 52
+
+
+def _parse_periodi_satorcrm(testo: str, state: _EstrattoState) -> None:
+    """Formato SatorCRM senza retribuzione: 'FONDO  DD/MM/YYYY  DD/MM/YYYY'."""
+    import re
     re_fondo_date = re.compile(
-        r"(?:^|\n)\s*(" + "|".join(fondi_noti) + r")[^\n\d]*?(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4}|\(nessun valore\)|in corso|ancora aperto)",
+        r"(?:^|\n)\s*(" + "|".join(_FONDI_NOTI) + r")[^\n\d]*?"
+        r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4}|\(nessun valore\)|in corso|ancora aperto)",
         re.IGNORECASE,
     )
     today = "2099-12-31"
@@ -393,38 +473,40 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         fondo, dal, al = m.groups()
         try:
             dal_iso = _to_iso(dal)
-            if al in ("(nessun valore)", "in corso", "ancora aperto"):
-                al_iso = None
-            else:
-                al_iso = _to_iso(al)
-            # stima settimane: 52 se anno completo
-            if al_iso and al_iso[:4] == dal_iso[:4]:
-                sett = 52
-            elif al_iso:
-                from datetime import date
-                d1 = date.fromisoformat(dal_iso)
-                d2 = date.fromisoformat(al_iso)
-                sett = ((d2 - d1).days + 1) // 7
-            else:
-                sett = 52  # periodo aperto, stima
-            _add_periodo(dal_iso, al_iso or today, fondo.title(), sett, 0.0, 0.0)
-        except Exception:
+            al_iso = None if al in ("(nessun valore)", "in corso", "ancora aperto") else _to_iso(al)
+            sett = _stima_settimane(dal_iso, al_iso)
+            state.add_periodo(dal_iso, al_iso or today, fondo.title(), sett, 0.0, 0.0)
+        except (ValueError, IndexError):
             continue
 
-    # FORMATO 3 - Solo coppie "DD/MM/YYYY DD/MM/YYYY" su righe orfane (fallback)
-    if not result["periodi_contributivi"]:
-        re_only_dates = re.compile(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})")
-        for m in re_only_dates.finditer(testo):
-            dal, al = m.groups()
-            try:
-                _add_periodo(_to_iso(dal), _to_iso(al), "Lavoratore dipendente", 52, 0.0, 0.0)
-            except Exception:
-                continue
 
-    # FORMATO 4 - Tabella STORICO REDDITI separata (pattern "ANNO ... importo")
-    # es: "2023  Commerciante  35.000,00"
+# ---------------------------------------------------------------------------
+# 5. Solo coppie di date (fallback)
+# ---------------------------------------------------------------------------
+def _parse_periodi_fallback_date(testo: str, state: _EstrattoState) -> None:
+    """Fallback: due date consecutive su una riga, nessun altro pattern matchato."""
+    import re
+    if state.result["periodi_contributivi"]:
+        return
+    re_only_dates = re.compile(r"(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})")
+    for m in re_only_dates.finditer(testo):
+        dal, al = m.groups()
+        try:
+            state.add_periodo(_to_iso(dal), _to_iso(al),
+                              "Lavoratore dipendente", 52, 0.0, 0.0)
+        except (ValueError, IndexError):
+            continue
+
+
+# ---------------------------------------------------------------------------
+# 6. Storico redditi tabellare
+# ---------------------------------------------------------------------------
+def _parse_storico_redditi_tabella(testo: str, state: _EstrattoState) -> None:
+    """Formato tabella separata: 'ANNO [FONDO] REDDITO [CONTRIB]'."""
+    import re
     re_redd_anno = re.compile(
-        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+(?:(" + "|".join(fondi_noti) + r")\s+)?([\d.]{3,}(?:[.,]\d{1,2})?)\s+([\d.]{1,}(?:[.,]\d{1,2})?)?",
+        r"(?:^|\n)\s*(20\d{2}|19\d{2})\s+(?:(" + "|".join(_FONDI_NOTI) + r")\s+)?"
+        r"([\d.]{3,}(?:[.,]\d{1,2})?)\s+([\d.]{1,}(?:[.,]\d{1,2})?)?",
         re.IGNORECASE,
     )
     for m in re_redd_anno.finditer(testo):
@@ -432,87 +514,71 @@ def parse_estratto_conto_inps(testo: str) -> dict:
         try:
             r = _parse_num(redd_raw)
             c = _parse_num(contrib_raw) if contrib_raw else 0.0
-            # filtra valori che non sono redditi (troppo piccoli o troppo grandi)
-            if r < 1000 or r > 500000:
+            if not (1000 <= r <= 500000):
                 continue
-            slot = redditi_per_anno.setdefault(anno, {"reddito": 0.0, "contributi": 0.0, "cassa": (cassa or "").title()})
-            # Se già aggregato dai periodi non sovrascrivere
+            slot = state.redditi_per_anno.setdefault(
+                anno, {"reddito": 0.0, "contributi": 0.0, "cassa": (cassa or "").title()},
+            )
             if slot["reddito"] == 0:
                 slot["reddito"] = r
                 slot["contributi"] = c
                 if cassa:
                     slot["cassa"] = cassa.title()
                 if r > 0:
-                    retribuzioni.append(r)
-        except Exception:
+                    state.retribuzioni.append(r)
+        except (ValueError, KeyError):
             continue
 
-    settimane_tot += giorni_tot // 7
-    result["settimane_contributive"] = settimane_tot
-    result["giorni_contributivi"] = giorni_tot
-    result["anni_stimati"] = settimane_tot // 52 if settimane_tot else 0
-    if retribuzioni:
-        result["retribuzione_media_annua"] = round(sum(retribuzioni) / len(retribuzioni), 2)
-    if primo_inizio:
-        result["data_inizio_contribuzione"] = primo_inizio
 
-    # === Storico redditi annuale (ordinato decrescente) ===
-    storico = []
-    for anno, dati in sorted(redditi_per_anno.items(), reverse=True):
-        storico.append({
+# ---------------------------------------------------------------------------
+# 7. Consolidamento totali
+# ---------------------------------------------------------------------------
+def _consolida_totali(state: _EstrattoState) -> None:
+    """Calcola settimane totali, anni stimati, media retribuzione, storico ordinato,
+    reddito annuo lordo annualizzato, totale versato e montante stimato."""
+    result = state.result
+    state.settimane_tot += state.giorni_tot // 7
+    result["settimane_contributive"] = state.settimane_tot
+    result["giorni_contributivi"] = state.giorni_tot
+    result["anni_stimati"] = state.settimane_tot // 52 if state.settimane_tot else 0
+    if state.retribuzioni:
+        result["retribuzione_media_annua"] = round(
+            sum(state.retribuzioni) / len(state.retribuzioni), 2,
+        )
+    if state.primo_inizio:
+        result["data_inizio_contribuzione"] = state.primo_inizio
+
+    # Storico annuale (decrescente)
+    storico = [
+        {
             "anno": int(anno),
             "reddito": round(dati["reddito"], 2),
             "contributi": round(dati["contributi"], 2),
             "settimane": dati.get("settimane", 52),
             "cassa": dati["cassa"],
-        })
+        }
+        for anno, dati in sorted(state.redditi_per_anno.items(), reverse=True)
+    ]
     result["storico_redditi"] = storico
 
-    # === Reddito annuo lordo: ULTIMO anno disponibile annualizzato a 12 mesi ===
-    # (es. anno parziale 26 settimane → reddito × 52/26 = annualizzato)
+    # Reddito ultimo anno annualizzato
     if storico:
         ultimo = storico[0]
         sett = ultimo.get("settimane") or 52
-        if sett > 0 and sett < 52:
-            result["reddito_annuo_lordo"] = round(ultimo["reddito"] * 52 / sett, 2)
-            result["reddito_annuo_lordo_annualizzato"] = True
-        else:
-            result["reddito_annuo_lordo"] = ultimo["reddito"]
-            result["reddito_annuo_lordo_annualizzato"] = False
+        annualizzato = 0 < sett < 52
+        result["reddito_annuo_lordo"] = (
+            round(ultimo["reddito"] * 52 / sett, 2) if annualizzato else ultimo["reddito"]
+        )
+        result["reddito_annuo_lordo_annualizzato"] = annualizzato
         result["ultimo_anno_riferimento"] = ultimo["anno"]
 
-    # === Totali ===
-    result["totale_retribuzioni"] = round(sum(retribuzioni), 2)
-    result["totale_versato"] = round(sum(p["contributi"] for p in result["periodi_contributivi"]), 2)
-    # Montante stimato: 33% medio della retribuzione totale (aliquota commerciante)
-    if result["totale_versato"] > 0:
-        result["montante_stimato"] = result["totale_versato"]
-    else:
-        result["montante_stimato"] = round(result["totale_retribuzioni"] * 0.33, 2)
-
-    return result
-
-
-def _parse_num(s: str) -> float:
-    """Parser di numeri italiani (es. '12.345,67' o '12345.67' o '12345,67')."""
-    if not s:
-        return 0.0
-    s = s.strip()
-    # Caso 1.234,56 (italiano) -> rimuovi '.', sostituisci ',' con '.'
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-
-def parse_estratto_contributivo(pdf_bytes: bytes) -> dict:
-    """Estrae testo da PDF dell'estratto contributivo INPS e ritorna i dati strutturati."""
-    import pdfplumber
-    from io import BytesIO
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
-    return parse_estratto_conto_inps(text)
+    result["totale_retribuzioni"] = round(sum(state.retribuzioni), 2)
+    result["totale_versato"] = round(
+        sum(p["contributi"] for p in result["periodi_contributivi"]), 2,
+    )
+    # Montante stimato: contributi versati se > 0 altrimenti 33% delle retribuzioni
+    result["montante_stimato"] = (
+        result["totale_versato"]
+        if result["totale_versato"] > 0
+        else round(result["totale_retribuzioni"] * 0.33, 2)
+    )

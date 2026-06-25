@@ -156,8 +156,8 @@ class TestDeleteGirocontoPair:
         r_del = client.delete(f"{API}/contabilita/movimenti/{out_id}")
         assert r_del.status_code == 200, r_del.text
         body = r_del.json()
-        assert body.get("ok") is True
-        assert body.get("deleted_pair") is True, f"atteso deleted_pair=True, got {body}"
+        assert body.get("ok") == True
+        assert body.get("deleted_pair") == True, f"atteso deleted_pair=True, got {body}"
 
         # verifica in DB: zero documenti con quel pair_id
         cnt = mongo_db.movimenti.count_documents({"pair_id": pair_id})
@@ -214,7 +214,7 @@ class TestDeleteGirocontoPair:
         r_del = client.delete(f"{API}/contabilita/movimenti/{out_id}")
         assert r_del.status_code == 200, r_del.text
         body = r_del.json()
-        assert body.get("deleted_pair") is True, (
+        assert body.get("deleted_pair") == True, (
             f"DELETE legacy giroconto deve riconoscere pair_id da note via regex e cancellare coppia. "
             f"Response: {body}"
         )

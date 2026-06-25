@@ -1,0 +1,42 @@
+{
+  "summary": "Iter20 — Validato refactor complessità (parse_estratto_conto_inps INPS, _processa_polizze + _build_dettagli_veicolo ANIA, genera_pdf_avvisi, stampa_brogliaccio) + audit anti-pattern is True/is False. Backend si avvia senza errori. Suite regressione completa 93/93 PASS = 25/25 iter20 + 68/68 regression (iter4/5/15/17/18/19). PDF endpoint /api/contabilita/brogliaccio/stampa?data=YYYY-MM-DD ritorna %PDF binario >1KB. parse_estratto_conto_inps su testo realistico estrae correttamente: cognome=ROSSI, nome=MARIO, CF=RSSMRA70E15F205X, comune_nascita=Milano (MI), data_nascita=1970-05-15, sesso=M, 4 periodi contributivi (208 sett, 4 anni), retribuzione_media_annua ~27k, montante_stimato>0 e <= totale_retribuzioni. Tutti i 7 helper INPS estratti (_parse_anagrafica, _parse_periodi_formato_inps, _parse_periodi_parasubordinati, _parse_periodi_satorcrm, _parse_periodi_fallback_date, _parse_storico_redditi_tabella, _consolida_totali) + _EstrattoState importabili con attributi attesi (redditi_per_anno, retribuzioni, giorni_tot). ania_importer.py: _resolve_operatore_codice, _build_polizza_payload, _upsert_polizza, _campi_veicolo_base, _campi_tariffa_bm, _campi_valori, _campi_guida tutti presenti. pdf_avvisi.py: _build_styles/_intestazione_agenzia/_destinatario/_corpo_lettera/_modalita_pagamento/_build_riga_titolo/_tabella_titoli/_lettera_per_gruppo presenti. pdf_brogliaccio.py: 10 helper estratti (_build_riga_dettaglio, _build_riga_totale_giornata, _calcola_larghezze, _stile_tabella_dettaglio, _tabella_dettaglio, _tabella_riepilogo_conti, _tabella_saldi_compagnie, _tabella_kpi_bottom, _tabella_liquidita, _footer_chiusura) presenti. Audit anti-pattern: 0 occorrenze di `is True/is False` in tutti i test_iter*.py; `is None` preservato (16 occorrenze totali idiomatiche). Smoke 8 endpoint: tutti 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter20_complexity_refactor.py",
+    "/app/test_reports/pytest/iter20_results.xml",
+    "/app/test_reports/pytest/iter20_full_regression.xml"
+  ],
+  "action_items": [
+    "Nessuna azione bloccante richiesta per iter20: refactor puramente funzionale completato senza regressioni.",
+    "(carry-over da iter19, ancora aperto se non già fixato): GET /api/anagrafiche/stats deve includere campo 'custom' come da review iter19 — verificare se main agent ha già implementato; in caso contrario, ri-eseguire pytest backend/tests/test_iter19_split_kpi.py::test_anagrafiche_stats_has_custom_array. NB: in iter20 questo test PASSA, quindi il fix è già stato applicato.",
+    "Considerare estrazione di _intestazione_pdf da server.py verso shared.py (debito tecnico segnalato in iter19 critical_code_review #2): server.py resta a >9700 righe e l'helper è usato da 15 endpoint PDF."
+  ],
+  "critical_code_review_comments": [
+    "Refactor parse_estratto_conto_inps eccellente: orchestrator a 28 righe (CC stimato ~5-8 vs CC=57 originale) con responsabilità chiare; ogni helper ha singola responsabilità (anagrafica/periodi-fmt-inps/parasubordinati/satorcrm/fallback-dates/storico-tabella/consolida). _EstrattoState come dataclass-like incapsula correttamente lo stato condiviso (redditi_per_anno, retribuzioni, giorni_tot) evitando il pattern globale.",
+    "ania_importer._processa_polizze: separazione lookup-operatore -> build-payload -> upsert ben fatta. Il parametro count originale (8 params) è ora distribuito tra helper più piccoli. _build_polizza_payload usa Optional correttamente (import Optional aggiunto).",
+    "_build_dettagli_veicolo: 4 sezioni (_campi_veicolo_base/_campi_tariffa_bm/_campi_valori/_campi_guida) ottime per readability. Ognuna ritorna un dict pulito; aggregazione finale con dict union/merge.",
+    "pdf_avvisi.py rewrite: pattern Builder seguendo conventional helper naming (_build_styles, _intestazione_agenzia, _destinatario, _corpo_lettera, _modalita_pagamento, _build_riga_titolo, _tabella_titoli, _lettera_per_gruppo). Funzione pubblica genera_pdf_avvisi ora orchestra invece di implementare tutto inline. 201 righe totali vs 112 precedenti = +89 righe NB: significa CHE TUTTO È DIVENTATO PIÙ ESPLICITO (signature dei helper, ritorni tipizzati). Buon trade-off.",
+    "pdf_brogliaccio.stampa_brogliaccio: 10 helper estratti (max granularità). Pulizia molto buona: _tabella_dettaglio, _tabella_riepilogo_conti, _tabella_saldi_compagnie, _tabella_kpi_bottom, _tabella_liquidita, _footer_chiusura sono ora unità testabili indipendenti. Helper _calcola_larghezze e _stile_tabella_dettaglio sono puri (no I/O).",
+    "Audit `is True/is False`: tutti i ~30 occorrenze già sostituite con `== True/== False` nei test_iter*.py. `is None`/`is not None` preservato (16 file con totale ~25 occorrenze) - consistente con la review.",
+    "PDF endpoint regression: GET /api/contabilita/brogliaccio/stampa?data=2026-06-25 ritorna 200 con header `%PDF-` come primi 4 byte e content-length >1KB (assert eseguita). Conferma che il refactor del modulo pdf_brogliaccio non ha rotto l'integrazione con server.py.",
+    "Suggerimento (non bloccante): considerare type hints più stringenti su _campi_* (_campi_veicolo_base, ecc.) - attualmente `(row: dict) -> dict` ma potrebbe essere `(row: Dict[str, str]) -> Dict[str, Any]` per maggiore documentazione."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter20_complexity_refactor.py (NEW - 25 test: 9 importabilità helper + 6 INPS parser e2e + 1 PDF endpoint regression + 1 audit anti-pattern + 8 smoke endpoint)"
+  ],
+  "success_rate": {"backend": "100% (93/93 PASS = 25 iter20 + 68 regression iter4/5/15/17/18/19)", "frontend": "skipped (review iter20 = backend-only)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Nessuno persistente. Tutti gli unit test sui helper INPS sono in-memory (string fixture REALISTIC_ESTRATTO). PDF endpoint test usa data=2026-06-25 senza side-effect. Smoke test in sola lettura.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter20 è un refactor puramente funzionale (zero behavior change) completato con successo. Test file test_iter20_complexity_refactor.py è regression-ready e copre tutti e 4 i moduli toccati: inps_calculator.py (parse_estratto_conto_inps + 7 helper + _EstrattoState), ania_importer.py (_processa_polizze + _build_dettagli_veicolo + sotto-helper), pdf_avvisi.py (genera_pdf_avvisi + 8 helper), pdf_brogliaccio.py (stampa_brogliaccio + 10 helper). Include anche audit anti-pattern is True/is False e smoke 8 endpoint. Per re-run rapido dopo modifiche future a questi 4 file: `pytest backend/tests/test_iter20_complexity_refactor.py -v`. Per regressione completa P0/P1/refactor: `pytest backend/tests/test_iter4_brogliaccio_columns.py backend/tests/test_iter5_brogliaccio.py backend/tests/test_iter15_dashboard_brogliaccio_sospesipdf.py backend/tests/test_iter17_p0_refactor.py backend/tests/test_iter18_refactor_helpers.py backend/tests/test_iter19_split_kpi.py backend/tests/test_iter20_complexity_refactor.py` (93 test, ~24s). NB: il test test_anagrafiche_stats_has_custom_array in iter19 ora PASSA quindi il fix richiesto in iter19 action_items è stato applicato (campo 'custom' presente in /api/anagrafiche/stats). Debito tecnico residuo: _intestazione_pdf ancora in server.py riga 78 (vedi iter19 RCA).",
+  "rca of the issue": "Nessuna issue trovata in iter20. Durante lo sviluppo del test file ho avuto 2 false-positive iniziali (subito risolti): (a) campo 'dal'/'al' nelle struct periodi vs schema reale 'inizio_periodo'/'fine_periodo' -> fix: assert OR-compatible; (b) audit regex matchava le proprie comment/docstring nel file di test stesso -> fix: skip self-file + skip linee che iniziano con '#'. Entrambi erano bug nel mio script di test, NON nel codice di produzione. Dopo i fix, 25/25 iter20 PASS + 93/93 regressione PASS."
+}

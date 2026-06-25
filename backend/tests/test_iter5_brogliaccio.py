@@ -39,7 +39,7 @@ class TestSeedMigration:
         items = r_all.json()
         paypal = [c for c in items if c["nome"] == "PayPal / Online"]
         if paypal:
-            assert paypal[0].get("attivo") is False, f"PayPal should be inactive: {paypal[0]}"
+            assert paypal[0].get("attivo") == False, f"PayPal should be inactive: {paypal[0]}"
 
         # /attivi=true must NOT include paypal
         r_attivi = admin_client.get(f"{BASE_URL}/api/librerie/conti-cassa?attivi=true")

@@ -60,7 +60,7 @@ class TestContiCassaRename:
         # PayPal may still exist in DB but must be attivo=false
         paypal = [c for c in items if c["nome"] == "PayPal / Online"]
         if paypal:
-            assert paypal[0].get("attivo") is False, "PayPal/Online must have attivo=false"
+            assert paypal[0].get("attivo") == False, "PayPal/Online must have attivo=false"
         # RID Direzione should not exist (renamed)
         assert not [c for c in items if c["nome"] == "RID Direzione"], "RID Direzione must be renamed"
 
@@ -174,13 +174,13 @@ class TestSaldoTrattiene:
         assert r_trat["totale"] == pytest.approx(100.0)
         assert r_trat["provv"] == pytest.approx(10.0)
         assert r_trat["saldo"] == pytest.approx(90.0), f"trattiene=true expected 90, got {r_trat['saldo']}"
-        assert r_trat["trattiene_provvigioni"] is True
+        assert r_trat["trattiene_provvigioni"] == True
 
         # Case B: trattiene=false -> saldo = -provv = -10 (negative)
         assert r_notrat["totale"] == pytest.approx(100.0)
         assert r_notrat["provv"] == pytest.approx(10.0)
         assert r_notrat["saldo"] == pytest.approx(-10.0), f"trattiene=false expected -10, got {r_notrat['saldo']}"
-        assert r_notrat["trattiene_provvigioni"] is False
+        assert r_notrat["trattiene_provvigioni"] == False
 
         # ---- Totali_giornata must still include sconti/rimesse keys ----
         tg = payload.get("totali_giornata", {})

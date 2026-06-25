@@ -184,7 +184,7 @@ class TestAvvisiScadenze:
         assert r.status_code == 200, f"{r.status_code} {r.text}"
         data = r.json()
         # SMTP not configured -> ok=false with error message
-        assert data.get("ok") is False, f"Expected ok=false when SMTP missing, got {data}"
+        assert data.get("ok") == False, f"Expected ok=false when SMTP missing, got {data}"
         err = (data.get("errore") or "").lower()
         assert "smtp" in err, f"Expected SMTP-related error message, got: {data}"
 

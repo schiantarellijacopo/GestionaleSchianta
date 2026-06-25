@@ -65,7 +65,7 @@ class TestVociManuali:
         assert j["causale"] == "TEST_Bonus QA"
         assert j["importo"] == 150.50
         assert j["collaboratore_id"] == collab_id
-        assert j.get("pagata") is False
+        assert j.get("pagata") == False
         assert "id" in j
         pytest.bonus_id = j["id"]
 
@@ -138,7 +138,7 @@ class TestVociManuali:
         })
         assert r.status_code == 200, r.text
         j = r.json()
-        assert j["ok"] is True
+        assert j["ok"] == True
         assert "pagamento" in j
         assert "movimento" in j
         assert j["pagamento"]["voci_manuali_ids"] == [pytest.bonus_id]
@@ -150,7 +150,7 @@ class TestVociManuali:
         r = admin_session.get(f"{API}/collaboratori/{collab_id}/voci-manuali")
         items = r.json()
         bonus = next(v for v in items if v["id"] == pytest.bonus_id)
-        assert bonus.get("pagata") is True
+        assert bonus.get("pagata") == True
         assert bonus.get("pagamento_id")
 
     def test_cannot_delete_paid_voce(self, admin_session, collab_id):
@@ -228,16 +228,16 @@ class TestRelazioni:
         rel = next((x for x in r2.json().get("relazioni_risolte", [])
                     if x.get("id") == moglie), None)
         assert rel is not None, f"relazione non risolta: {r2.json().get('relazioni_risolte')}"
-        assert rel.get("lavoratore") is True
-        assert rel.get("a_carico") is False
+        assert rel.get("lavoratore") == True
+        assert rel.get("a_carico") == False
 
         # Inverse on moglie
         r3 = admin_session.get(f"{API}/anagrafiche/{moglie}")
         rel_inv = next((x for x in r3.json().get("relazioni_risolte", [])
                         if x.get("id") == marito), None)
         assert rel_inv is not None
-        assert rel_inv.get("lavoratore") is False
-        assert rel_inv.get("a_carico") is True
+        assert rel_inv.get("lavoratore") == False
+        assert rel_inv.get("a_carico") == True
 
     def test_add_figlio_with_carico_handicap(self, admin_session, two_anagrafiche):
         marito, _, figlio = two_anagrafiche
@@ -253,8 +253,8 @@ class TestRelazioni:
         rel = next((x for x in r2.json()["relazioni_risolte"]
                     if x.get("id") == figlio), None)
         assert rel is not None
-        assert rel.get("a_carico") is True
-        assert rel.get("handicap") is True
+        assert rel.get("a_carico") == True
+        assert rel.get("handicap") == True
 
     def test_patch_relazione_update_attrs(self, admin_session, two_anagrafiche):
         marito, moglie, _ = two_anagrafiche
@@ -266,8 +266,8 @@ class TestRelazioni:
         r2 = admin_session.get(f"{API}/anagrafiche/{marito}")
         rel = next(x for x in r2.json()["relazioni_risolte"]
                    if x["id"] == moglie)
-        assert rel.get("lavoratore") is False
-        assert rel.get("a_carico") is True
+        assert rel.get("lavoratore") == False
+        assert rel.get("a_carico") == True
 
     def test_patch_relazione_not_found(self, admin_session, two_anagrafiche):
         marito, _, _ = two_anagrafiche

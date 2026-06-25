@@ -412,7 +412,7 @@ class TestChiusureGiorno:
         # delete chiusura
         r_del = client.delete(f"{API}/contabilita/chiusura-giorno/{ch_id}")
         assert r_del.status_code == 200, r_del.text
-        assert r_del.json().get("ok") is True
+        assert r_del.json().get("ok") == True
         # movimento deve essere riaperto
         r_m2 = client.get(f"{API}/contabilita/movimenti", params={"dal": "2026-03-17", "al": "2026-03-17"})
         m_after2 = next((m for m in r_m2.json() if m["id"] == mid), None)

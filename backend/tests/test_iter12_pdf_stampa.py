@@ -213,7 +213,7 @@ def test_provvigioni_endpoint_marks_titoli_as_gia_pagato(client, setup_data):
     our_rows = [r for r in righe if r.get("titolo_id") in setup_data["titoli_ids"]]
     assert len(our_rows) == 2, f"expected 2 rows, got {len(our_rows)}"
     for r in our_rows:
-        assert r.get("gia_pagato") is True, f"titolo {r['titolo_id']} should be gia_pagato=True, got {r.get('gia_pagato')}"
+        assert r.get("gia_pagato") == True, f"titolo {r['titolo_id']} should be gia_pagato=True, got {r.get('gia_pagato')}"
 
 
 def test_titoli_marked_pagato_alla_compagnia(client, setup_data):
@@ -225,7 +225,7 @@ def test_titoli_marked_pagato_alla_compagnia(client, setup_data):
     assert len(titoli) >= 2
     for t in titoli:
         assert (
-            t.get("pagato_alla_compagnia") is True
+            t.get("pagato_alla_compagnia") == True
             or t.get("stato_pagamento") == "pagato"
             or t.get("data_pagamento_compagnia")
         ), f"titolo {t['id']} missing 'pagato alla compagnia' marker"

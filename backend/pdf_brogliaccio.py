@@ -78,66 +78,37 @@ def _header_table(azienda: dict, data_giorno: str, logo_bytes: bytes = None):
     return tbl
 
 
-def stampa_brogliaccio(
-    data_giorno: str,
-    azienda: dict,
-    conti_cassa: list,    # [{id, nome, ordine}]
-    righe: list,          # [{descrizione, contraente, numero_polizza, compagnia, totale, provv, saldo, crediti, spese, sconti, rimesse, per_conto: {conto_id: importo}}]
-    totali_giornata: dict,
-    conti_riepilogo: list,
-    riepilogo_kpi: dict,
-    saldi_compagnie: list = None,
-    chiusura_info: dict = None,
-    logo_bytes: bytes = None,
-) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
-        leftMargin=8 * mm, rightMargin=8 * mm,
-        topMargin=8 * mm, bottomMargin=10 * mm,
-        title=f"Brogliaccio {data_giorno}",
-    )
-    styles = getSampleStyleSheet()
-    small = ParagraphStyle("small", parent=styles["Normal"],
-                           fontName="Helvetica", fontSize=7, leading=8)
-    story = []
-    story.append(_header_table(azienda, data_giorno, logo_bytes))
-    story.append(Spacer(1, 4 * mm))
+# ---------------------------------------------------------------------------
+# Helpers di sezione (estratti da stampa_brogliaccio)
+# ---------------------------------------------------------------------------
+def _build_riga_dettaglio(r: dict, conti_cassa: list, small_style) -> list:
+    """Costruisce una riga della tabella dettaglio."""
+    per_conto = r.get("per_conto") or {}
+    contr = r.get("contraente") or r.get("descrizione") or "—"
+    sotto_parts = []
+    if r.get("numero_polizza"):
+        sotto_parts.append(f"N. {r['numero_polizza']}")
+    if r.get("compagnia"):
+        sotto_parts.append(r["compagnia"])
+    sotto = " · ".join(sotto_parts) if sotto_parts else r.get("descrizione", "")
+    descr_html = f"<b>{contr[:60]}</b>"
+    if sotto:
+        descr_html += f"<br/><font size=6 color='#475569'>{sotto[:80]}</font>"
+    row = [
+        Paragraph(descr_html, small_style),
+        _eur(r.get("totale", 0)),
+        _eur(r.get("provv", 0)),
+        _eur(r.get("saldo", 0)),
+        _eur(r.get("crediti", 0)),
+        _eur(r.get("spese", 0)),
+    ]
+    row.extend(_eur(per_conto.get(c["id"], 0)) for c in conti_cassa)
+    return row
 
-    # === Tabella dettaglio ===
-    headers_fissi = ["Descrizione", "Totale", "Provv", "Saldo", "Sospesi", "Spese"]
-    conti_names = [c["nome"] for c in conti_cassa]
-    headers = headers_fissi + conti_names
 
-    data_rows = [headers]
-    for r in righe:
-        per_conto = r.get("per_conto") or {}
-        contr = r.get("contraente") or r.get("descrizione") or "—"
-        sotto_parts = []
-        if r.get("numero_polizza"):
-            sotto_parts.append(f"N. {r['numero_polizza']}")
-        if r.get("compagnia"):
-            sotto_parts.append(r["compagnia"])
-        sotto = " · ".join(sotto_parts) if sotto_parts else r.get("descrizione", "")
-        descr_html = f"<b>{contr[:60]}</b>"
-        if sotto:
-            descr_html += f"<br/><font size=6 color='#475569'>{sotto[:80]}</font>"
-        row = [
-            Paragraph(descr_html, small),
-            _eur(r.get("totale", 0)),
-            _eur(r.get("provv", 0)),
-            _eur(r.get("saldo", 0)),
-            _eur(r.get("crediti", 0)),
-            _eur(r.get("spese", 0)),
-        ]
-        for c in conti_cassa:
-            row.append(_eur(per_conto.get(c["id"], 0)))
-        data_rows.append(row)
-
-    # Riga "Totale giornata"
-    tg = totali_giornata or {}
+def _build_riga_totale_giornata(tg: dict, conti_cassa: list) -> list:
     tg_per_conto = tg.get("per_conto") or {}
-    tot_row = [
+    row = [
         "TOTALE GIORNATA",
         _eur_zero(tg.get("totale", 0)),
         _eur_zero(tg.get("provv", 0)),
@@ -145,19 +116,20 @@ def stampa_brogliaccio(
         _eur_zero(tg.get("crediti", 0)),
         _eur_zero(tg.get("spese", 0)),
     ]
-    for c in conti_cassa:
-        tot_row.append(_eur_zero(tg_per_conto.get(c["id"], 0)))
-    data_rows.append(tot_row)
+    row.extend(_eur_zero(tg_per_conto.get(c["id"], 0)) for c in conti_cassa)
+    return row
 
-    # larghezze
+
+def _calcola_larghezze(n_conti: int) -> list:
     page_w = landscape(A4)[0] - 16 * mm
-    fixed_w = 18 * mm * 5  # totale+provv+saldo+crediti+spese
-    conti_w = max(15 * mm, (page_w - fixed_w - 70 * mm) / max(1, len(conti_names)))
-    descr_w = page_w - fixed_w - conti_w * len(conti_names)
-    col_widths = [descr_w] + [18 * mm] * 5 + [conti_w] * len(conti_names)
+    fixed_w = 18 * mm * 5
+    conti_w = max(15 * mm, (page_w - fixed_w - 70 * mm) / max(1, n_conti))
+    descr_w = page_w - fixed_w - conti_w * n_conti
+    return [descr_w] + [18 * mm] * 5 + [conti_w] * n_conti
 
-    tbl = Table(data_rows, colWidths=col_widths, repeatRows=1)
-    style = TableStyle([
+
+def _stile_tabella_dettaglio() -> TableStyle:
+    return TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, 0), 7),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
@@ -177,31 +149,32 @@ def stampa_brogliaccio(
         ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
         ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
     ])
-    tbl.setStyle(style)
-    story.append(tbl)
 
-    # === Pagina 2: Riepilogo conti + KPI ===
-    story.append(PageBreak())
-    story.append(_header_table(azienda, data_giorno, logo_bytes))
-    story.append(Spacer(1, 4 * mm))
 
-    # Sezione Conti
-    story.append(Paragraph(
-        "<b>RIEPILOGO CONTI</b>",
-        ParagraphStyle("h1", parent=styles["Normal"],
-                       fontName="Helvetica-Bold", fontSize=11),
-    ))
-    story.append(Spacer(1, 2 * mm))
-    conti_headers = ["Descrizione", "Imp. Precedente", "Imp. Giornata", "Totale Periodo"]
-    conti_rows = [conti_headers]
+def _tabella_dettaglio(conti_cassa: list, righe: list, totali_giornata: dict,
+                       small_style) -> Table:
+    headers = (["Descrizione", "Totale", "Provv", "Saldo", "Sospesi", "Spese"]
+               + [c["nome"] for c in conti_cassa])
+    data_rows: list[list] = [headers]
+    for r in righe:
+        data_rows.append(_build_riga_dettaglio(r, conti_cassa, small_style))
+    data_rows.append(_build_riga_totale_giornata(totali_giornata or {}, conti_cassa))
+    tbl = Table(data_rows, colWidths=_calcola_larghezze(len(conti_cassa)), repeatRows=1)
+    tbl.setStyle(_stile_tabella_dettaglio())
+    return tbl
+
+
+def _tabella_riepilogo_conti(conti_riepilogo: list) -> Table:
+    headers = ["Descrizione", "Imp. Precedente", "Imp. Giornata", "Totale Periodo"]
+    rows = [headers]
     for c in conti_riepilogo:
-        conti_rows.append([
+        rows.append([
             c.get("nome"), _eur_zero(c.get("imp_precedente", 0)),
             _eur_zero(c.get("imp_giornata", 0)),
             _eur_zero(c.get("totale_periodo", 0)),
         ])
-    conti_tbl = Table(conti_rows, colWidths=[80 * mm, 50 * mm, 50 * mm, 60 * mm])
-    conti_tbl.setStyle(TableStyle([
+    tbl = Table(rows, colWidths=[80 * mm, 50 * mm, 50 * mm, 60 * mm])
+    tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -215,66 +188,48 @@ def stampa_brogliaccio(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
     ]))
-    story.append(conti_tbl)
+    return tbl
 
-    # === Saldi cassa per compagnia ===
-    if saldi_compagnie:
-        story.append(Spacer(1, 6 * mm))
-        story.append(Paragraph(
-            "<b>SALDO CASSA PER COMPAGNIA</b> "
-            "<font size=8 color='#475569'>(cumulativo periodo)</font>",
-            ParagraphStyle("h1", parent=styles["Normal"],
-                           fontName="Helvetica-Bold", fontSize=11),
-        ))
-        story.append(Spacer(1, 2 * mm))
-        sc_headers = ["Compagnia", "Regime", "Incassi lordi",
-                      "Provvigioni", "Saldo dovuto", "Rimesse pagate", "Saldo cassa"]
-        sc_rows = [sc_headers]
-        for s in saldi_compagnie:
-            regime = "Tratteniamo" if s.get("trattiene_provvigioni") else "No trattenute"
-            sc_rows.append([
-                s.get("compagnia", "")[:40],
-                regime,
-                _eur_zero(s.get("incassi_lordi", 0)),
-                _eur_zero(s.get("provvigioni", 0)),
-                _eur_zero(s.get("saldo_dovuto", 0)),
-                _eur_zero(s.get("rimesse_pagate", 0)),
-                _eur_zero(s.get("saldo_cassa", 0)),
-            ])
-        sc_tbl = Table(sc_rows, colWidths=[60 * mm, 25 * mm, 30 * mm, 28 * mm, 30 * mm, 30 * mm, 32 * mm])
-        sc_tbl.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-            ("ALIGN", (0, 0), (1, -1), "LEFT"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-             [colors.white, colors.HexColor("#F8FAFC")]),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
-            ("FONTNAME", (-1, 1), (-1, -1), "Helvetica-Bold"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(sc_tbl)
 
-    # Bottom KPI
-    story.append(Spacer(1, 8 * mm))
-    k = riepilogo_kpi or {}
-    kpi_headers = ["ENTRATE", "PROVVIGIONI", "CREDITI", "RIMESSE", "SCONTI", "SPESE", "SALDO CASSA"]
-    kpi_values = [
-        _eur_zero(k.get("entrate", 0)),
-        _eur_zero(k.get("provvigioni", 0)),
-        _eur_zero(k.get("crediti", 0)),
-        _eur_zero(k.get("rimesse", 0)),
-        _eur_zero(k.get("sconti", 0)),
-        _eur_zero(k.get("spese", 0)),
-        _eur_zero(k.get("saldo_cassa", 0)),
-    ]
-    kpi_tbl = Table([kpi_headers, kpi_values],
-                    colWidths=[35 * mm] * 7)
-    kpi_tbl.setStyle(TableStyle([
+def _tabella_saldi_compagnie(saldi: list) -> Table:
+    headers = ["Compagnia", "Regime", "Incassi lordi",
+               "Provvigioni", "Saldo dovuto", "Rimesse pagate", "Saldo cassa"]
+    rows = [headers]
+    for s in saldi:
+        regime = "Tratteniamo" if s.get("trattiene_provvigioni") else "No trattenute"
+        rows.append([
+            s.get("compagnia", "")[:40], regime,
+            _eur_zero(s.get("incassi_lordi", 0)),
+            _eur_zero(s.get("provvigioni", 0)),
+            _eur_zero(s.get("saldo_dovuto", 0)),
+            _eur_zero(s.get("rimesse_pagate", 0)),
+            _eur_zero(s.get("saldo_cassa", 0)),
+        ])
+    tbl = Table(rows, colWidths=[60 * mm, 25 * mm, 30 * mm, 28 * mm, 30 * mm, 30 * mm, 32 * mm])
+    tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (0, 0), (1, -1), "LEFT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#F8FAFC")]),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+        ("FONTNAME", (-1, 1), (-1, -1), "Helvetica-Bold"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return tbl
+
+
+def _tabella_kpi_bottom(k: dict) -> Table:
+    headers = ["ENTRATE", "PROVVIGIONI", "CREDITI", "RIMESSE", "SCONTI", "SPESE", "SALDO CASSA"]
+    values = [_eur_zero(k.get(key, 0)) for key in
+              ("entrate", "provvigioni", "crediti", "rimesse", "sconti", "spese", "saldo_cassa")]
+    tbl = Table([headers, values], colWidths=[35 * mm] * 7)
+    tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -288,40 +243,105 @@ def stampa_brogliaccio(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
     ]))
-    story.append(kpi_tbl)
+    return tbl
 
-    story.append(Spacer(1, 4 * mm))
+
+def _tabella_liquidita(k: dict) -> Table | None:
     ld = k.get("liquidita_disponibile")
     lp = k.get("liquidita_postera")
-    if ld is not None or lp is not None:
-        liq_rows = []
-        if ld is not None:
-            liq_rows.append(["LIQUIDITÀ DISPONIBILE", _eur_zero(ld)])
-        if lp is not None:
-            liq_rows.append(["LIQUIDITÀ POSTERA", _eur_zero(lp)])
-        liq_tbl = Table(liq_rows, colWidths=[60 * mm, 45 * mm])
-        liq_tbl.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(liq_tbl)
+    if ld is None and lp is None:
+        return None
+    rows = []
+    if ld is not None:
+        rows.append(["LIQUIDITÀ DISPONIBILE", _eur_zero(ld)])
+    if lp is not None:
+        rows.append(["LIQUIDITÀ POSTERA", _eur_zero(lp)])
+    tbl = Table(rows, colWidths=[60 * mm, 45 * mm])
+    tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return tbl
 
-    # Footer chiusura
+
+def _footer_chiusura(chiusura_info: dict, styles) -> Paragraph:
+    msg = (f"Giornata chiusa il {chiusura_info.get('closed_at', '')} da "
+           f"{chiusura_info.get('closed_by_name', '')}")
+    return Paragraph(
+        f"<i>{msg}</i>",
+        ParagraphStyle("foot", parent=styles["Normal"],
+                       fontName="Helvetica-Oblique", fontSize=8,
+                       textColor=colors.HexColor("#64748B")),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Entrypoint pubblico
+# ---------------------------------------------------------------------------
+def stampa_brogliaccio(
+    data_giorno: str,
+    azienda: dict,
+    conti_cassa: list,
+    righe: list,
+    totali_giornata: dict,
+    conti_riepilogo: list,
+    riepilogo_kpi: dict,
+    saldi_compagnie: list = None,
+    chiusura_info: dict = None,
+    logo_bytes: bytes = None,
+) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=8 * mm, rightMargin=8 * mm,
+        topMargin=8 * mm, bottomMargin=10 * mm,
+        title=f"Brogliaccio {data_giorno}",
+    )
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"],
+                           fontName="Helvetica", fontSize=7, leading=8)
+    h1 = ParagraphStyle("h1", parent=styles["Normal"],
+                        fontName="Helvetica-Bold", fontSize=11)
+
+    story: list = []
+    # === Pagina 1: Dettaglio movimenti ===
+    story.append(_header_table(azienda, data_giorno, logo_bytes))
+    story.append(Spacer(1, 4 * mm))
+    story.append(_tabella_dettaglio(conti_cassa, righe, totali_giornata, small))
+
+    # === Pagina 2: Riepilogo + KPI ===
+    story.append(PageBreak())
+    story.append(_header_table(azienda, data_giorno, logo_bytes))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("<b>RIEPILOGO CONTI</b>", h1))
+    story.append(Spacer(1, 2 * mm))
+    story.append(_tabella_riepilogo_conti(conti_riepilogo))
+
+    if saldi_compagnie:
+        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph(
+            "<b>SALDO CASSA PER COMPAGNIA</b> "
+            "<font size=8 color='#475569'>(cumulativo periodo)</font>", h1,
+        ))
+        story.append(Spacer(1, 2 * mm))
+        story.append(_tabella_saldi_compagnie(saldi_compagnie))
+
+    story.append(Spacer(1, 8 * mm))
+    story.append(_tabella_kpi_bottom(riepilogo_kpi or {}))
+
+    liq = _tabella_liquidita(riepilogo_kpi or {})
+    if liq:
+        story.append(Spacer(1, 4 * mm))
+        story.append(liq)
+
     if chiusura_info:
         story.append(Spacer(1, 6 * mm))
-        msg = (f"Giornata chiusa il {chiusura_info.get('closed_at', '')} da "
-               f"{chiusura_info.get('closed_by_name', '')}")
-        story.append(Paragraph(
-            f"<i>{msg}</i>",
-            ParagraphStyle("foot", parent=styles["Normal"],
-                           fontName="Helvetica-Oblique", fontSize=8,
-                           textColor=colors.HexColor("#64748B")),
-        ))
+        story.append(_footer_chiusura(chiusura_info, styles))
 
     doc.build(story)
     buf.seek(0)

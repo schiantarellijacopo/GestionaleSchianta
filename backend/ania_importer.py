@@ -17,7 +17,7 @@ import io
 import zipfile
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from db_models import (
     Anagrafica, Polizza, Titolo, Sinistro, Compagnia, ImportLog, _uid, _now_iso,
 )
@@ -263,6 +263,69 @@ async def _risolvi_contraente(db, contraente_exp: str | None,
     return ph.id
 
 
+async def _resolve_operatore_codice(db, row: dict,
+                                   mapping_operatori: dict) -> tuple[Optional[str], Optional[str]]:
+    """Estrae l'operatore_codice dalla riga e risolve il collaboratore_id.
+
+    Crea uno stub mapping se l'operatore è presente ma non ancora mappato.
+    Ritorna (operatore_codice, collaboratore_id).
+    """
+    operatore_codice = (row.get("cod_operatore")
+                        or row.get("operatore_share")
+                        or row.get("cod_collaboratore")
+                        or "").strip() or None
+    if not operatore_codice:
+        return None, None
+    collaboratore_id = mapping_operatori.get(operatore_codice)
+    if not collaboratore_id:
+        await _ensure_stub_mapping(
+            db, "mapping_operatori", operatore_codice,
+            row.get("nome_operatore") or row.get("descrizione_operatore") or "",
+        )
+    return operatore_codice, collaboratore_id
+
+
+def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
+                           contraente_id: Optional[str], stato: str,
+                           operatore_codice: Optional[str], id_exp: str) -> dict:
+    """Costruisce il dict di payload polizza da una riga rec20."""
+    return {
+        "numero_polizza": numero,
+        "compagnia_id": comp_id or "",
+        "contraente_id": contraente_id or "",
+        "ramo": row.get("ramo_share") or row.get("ramo_cmp") or "VARIE",
+        "prodotto": row.get("prodotto_cmp") or None,
+        "stato": stato,
+        "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
+        "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
+        "premio_lordo": _parse_float(row.get("lordo_totale", "")),
+        "premio_netto": _parse_float(row.get("netto_totale", "")),
+        "premio_tasse": _parse_float(row.get("tasse_totale") or row.get("imposte_totali", "")),
+        "premio_imposte": _parse_float(row.get("imposte_totali") or row.get("imposte", "")),
+        "premio_ssn": _parse_float(row.get("ssn_totale") or row.get("ssn", "")),
+        "provvigioni": _parse_float(row.get("provvigioni_totali", "")),
+        "operatore_ania_codice": operatore_codice,
+        "id_polizza_exp": id_exp,
+        "fonte": "import_ania",
+        "updated_at": _now_iso(),
+    }
+
+
+async def _upsert_polizza(db, data: dict, log: ImportLog,
+                          polizza_id_map: Dict[str, str], id_exp: str) -> None:
+    """Esegue insert o update di una polizza in base al matching id_polizza_exp."""
+    existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
+    if existing:
+        await db.polizze.update_one({"id": existing["id"]}, {"$set": data})
+        polizza_id_map[id_exp] = existing["id"]
+        log.polizze_aggiornate += 1
+    else:
+        obj = Polizza(**data)
+        await db.polizze.insert_one(obj.model_dump())
+        polizza_id_map[id_exp] = obj.id
+        log.polizze_create += 1
+
+
 async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                             ana_id_map: Dict[str, str],
                             polizza_id_map: Dict[str, str],
@@ -284,56 +347,24 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                 db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
             )
             stato = _MAP_STATO_POLIZZA.get((row.get("cod_stato_share") or "").lower(), "attiva")
-            operatore_codice = (row.get("cod_operatore")
-                                or row.get("operatore_share")
-                                or row.get("cod_collaboratore")
-                                or "").strip() or None
-            collaboratore_id = mapping_operatori.get(operatore_codice) if operatore_codice else None
-            if operatore_codice and not collaboratore_id:
-                await _ensure_stub_mapping(
-                    db, "mapping_operatori", operatore_codice,
-                    row.get("nome_operatore") or row.get("descrizione_operatore") or "",
-                )
-
-            existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
-            data = {
-                "numero_polizza": numero,
-                "compagnia_id": comp_id or "",
-                "contraente_id": contraente_id or "",
-                "ramo": row.get("ramo_share") or row.get("ramo_cmp") or "VARIE",
-                "prodotto": row.get("prodotto_cmp") or None,
-                "stato": stato,
-                "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
-                "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
-                "premio_lordo": _parse_float(row.get("lordo_totale", "")),
-                "premio_netto": _parse_float(row.get("netto_totale", "")),
-                "premio_tasse": _parse_float(row.get("tasse_totale") or row.get("imposte_totali", "")),
-                "premio_imposte": _parse_float(row.get("imposte_totali") or row.get("imposte", "")),
-                "premio_ssn": _parse_float(row.get("ssn_totale") or row.get("ssn", "")),
-                "provvigioni": _parse_float(row.get("provvigioni_totali", "")),
-                "operatore_ania_codice": operatore_codice,
-                "id_polizza_exp": id_exp,
-                "fonte": "import_ania",
-                "updated_at": _now_iso(),
-            }
+            operatore_codice, collaboratore_id = await _resolve_operatore_codice(
+                db, row, mapping_operatori,
+            )
+            data = _build_polizza_payload(
+                row, numero=numero, comp_id=comp_id, contraente_id=contraente_id,
+                stato=stato, operatore_codice=operatore_codice, id_exp=id_exp,
+            )
             if collaboratore_id:
                 data["collaboratore_id"] = collaboratore_id
-            if existing:
-                await db.polizze.update_one({"id": existing["id"]}, {"$set": data})
-                polizza_id_map[id_exp] = existing["id"]
-                log.polizze_aggiornate += 1
-            else:
-                obj = Polizza(**data)
-                await db.polizze.insert_one(obj.model_dump())
-                polizza_id_map[id_exp] = obj.id
-                log.polizze_create += 1
+            await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
 
 
 # ---------------------------------------------------------------------------
 # Processor: rec21 (dettagli veicolo) — funzioni pure di mapping
 # ---------------------------------------------------------------------------
-def _build_dettagli_veicolo(row: dict) -> dict:
-    upd = {
+def _campi_veicolo_base(row: dict) -> dict:
+    """Campi veicolo: anagrafica + caratteristiche tecniche."""
+    return {
         "targa": row.get("targa") or None,
         "veicolo_marca": (row.get("marca_veicolo") or "").upper() or None,
         "veicolo_modello": (row.get("modello_veicolo") or "").upper() or None,
@@ -348,19 +379,50 @@ def _build_dettagli_veicolo(row: dict) -> dict:
         "veicolo_posti": int(row.get("numero_posti") or 0) or None,
         "veicolo_gancio_traino": _parse_flag_si(row.get("gancio_traino", "")),
         "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
+    }
+
+
+def _campi_tariffa_bm(row: dict) -> dict:
+    """Campi tariffa + bonus/malus."""
+    return {
         "tipo_tariffa": row.get("tipo_tariffa") or None,
         "bm_provenienza": row.get("bm_provenienza") or None,
         "bm_assegnata": row.get("bm_assegnata") or None,
         "bm_assegnata_cu": row.get("bm_assegnata_cu") or None,
         "pejus": _parse_float(row.get("pejus", "")),
         "franchigia": _parse_float(row.get("franchigia", "")),
+    }
+
+
+def _campi_valori(row: dict) -> dict:
+    """Campi valori economici del veicolo."""
+    return {
         "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
         "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
         "valore_accessori": _parse_float(row.get("valore_accessori", "")),
+    }
+
+
+def _campi_guida(row: dict) -> dict:
+    """Campi modalità di guida + massimali."""
+    return {
         "guida_esperta": _parse_flag_si(row.get("guida_esperta", "")),
         "guida_esclusiva": _parse_flag_si(row.get("guida_esclusiva", "")),
         "rinuncia_rivalsa": _parse_flag_si(row.get("rinuncia_rivalsa", "")),
         "massimali": row.get("massimali") or None,
+    }
+
+
+def _build_dettagli_veicolo(row: dict) -> dict:
+    """Compone l'update dei dettagli veicolo aggregando i 4 gruppi di campi.
+
+    Filtra valori "vuoti" (None/""/0) tranne `targa` che è sempre conservato.
+    """
+    upd = {
+        **_campi_veicolo_base(row),
+        **_campi_tariffa_bm(row),
+        **_campi_valori(row),
+        **_campi_guida(row),
         "updated_at": _now_iso(),
     }
     return {k: v for k, v in upd.items() if v not in (None, "", 0, 0.0) or k == "targa"}

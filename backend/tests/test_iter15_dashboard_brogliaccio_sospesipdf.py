@@ -101,7 +101,7 @@ class TestMezziPagamento:
         # Validate structure: each item has id, codice/nome, attivo=true
         for it in items:
             assert "id" in it
-            assert it.get("attivo", True) is True
+            assert it.get("attivo", True) == True
             # Either 'codice' or 'nome' present
             assert any(k in it for k in ("codice", "nome", "etichetta", "label"))
 

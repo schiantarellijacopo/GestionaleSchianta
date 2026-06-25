@@ -52,7 +52,7 @@ def session() -> requests.Session:
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text}"
     body = r.json()
     # access_token is also returned in response body (besides cookie)
-    assert "access_token" in body or body.get("ok") is True
+    assert "access_token" in body or body.get("ok") == True
     return s
 
 
