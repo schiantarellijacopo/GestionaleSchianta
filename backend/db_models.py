@@ -283,7 +283,7 @@ TitoloStato = Literal["incassato", "da_incassare", "insoluto", "stornato"]
 class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
-    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno"] = "rinnovo"
+    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza"] = "rinnovo"
     effetto: str
     scadenza: str
     stato: TitoloStato = "da_incassare"
@@ -297,6 +297,8 @@ class Titolo(BaseDoc):
     motivo_sconto: Optional[str] = None
     titolo_coperto: bool = False
     data_copertura: Optional[str] = None
+    data_emissione: Optional[str] = None
+    ora_effetto: Optional[str] = None
     data_competenza: Optional[str] = None
     data_contabile: Optional[str] = None
     scadenza_mora: Optional[str] = None
@@ -304,6 +306,7 @@ class Titolo(BaseDoc):
     conto_cassa_id: Optional[str] = None
     collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
     id_titolo_exp: Optional[str] = None
+    pagamento_in_direzione: bool = False   # premio pagato direttamente in compagnia (no cassa)
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
 

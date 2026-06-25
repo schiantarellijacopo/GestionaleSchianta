@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
-import DialogIncasso from "@/components/DialogIncasso";
+import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
     ChevronDown, ChevronUp,
@@ -323,7 +323,7 @@ export default function Titoli() {
                                                     onClick={() => setPaying(t)}
                                                     data-testid={`titolo-incassa-${t.id}`}
                                                 >
-                                                    Incassa
+                                                    Incasso/Copertura
                                                 </Button>
                                             ) : (
                                                 <span className="text-xs text-emerald-700">✓ {fmtDate(t.data_incasso)}</span>
@@ -408,7 +408,7 @@ export default function Titoli() {
             )}
 
             {paying && (
-                <DialogIncasso
+                <DialogIncassoCopertura
                     titolo={paying}
                     conti={conti}
                     onClose={() => { setPaying(null); load(); }}

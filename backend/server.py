@@ -2170,6 +2170,79 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     return {"aggiornati": res.modified_count, "data_copertura": data_copertura}
 
 
+@api.post("/titoli/notifica-copertura")
+async def notifica_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Invia email di notifica copertura titolo a operatori e/o contraenti.
+
+    body: {id: titolo_id, a_operatori: bool, a_contraenti: bool}
+    Se SMTP non configurato → logga l'attività e ritorna ok=False con un avviso.
+    """
+    tid = body.get("id")
+    if not tid:
+        raise HTTPException(400, "id richiesto")
+    a_op = bool(body.get("a_operatori"))
+    a_cnt = bool(body.get("a_contraenti"))
+    if not (a_op or a_cnt):
+        return {"ok": True, "inviate": 0}
+
+    titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not titolo:
+        raise HTTPException(404, "Titolo non trovato")
+    pol = await db.polizze.find_one({"id": titolo.get("polizza_id")}, {"_id": 0}) or {}
+
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    smtp_ok = bool(az.get("smtp_host") and az.get("smtp_user"))
+
+    destinatari: list[str] = []
+    if a_cnt and pol.get("contraente_id"):
+        ana = await db.anagrafiche.find_one({"id": pol["contraente_id"]}, {"_id": 0}) or {}
+        if ana.get("email"):
+            destinatari.append(ana["email"])
+    if a_op and titolo.get("collaboratore_id"):
+        op = await db.collaboratori.find_one({"id": titolo["collaboratore_id"]}, {"_id": 0}) or {}
+        if op.get("email"):
+            destinatari.append(op["email"])
+
+    await log_attivita(user, "notifica_copertura", "titolo", tid,
+                       f"a_op={a_op} a_cnt={a_cnt} destinatari={len(destinatari)} smtp={smtp_ok}")
+
+    if not smtp_ok:
+        return {"ok": False, "errore": "SMTP non configurato", "destinatari": destinatari}
+    if not destinatari:
+        return {"ok": False, "errore": "Nessun destinatario con email valida"}
+
+    # invio reale (best-effort)
+    import smtplib
+    from email.message import EmailMessage
+    try:
+        msg = EmailMessage()
+        msg["From"] = az.get("smtp_from") or az.get("smtp_user")
+        msg["To"] = ", ".join(destinatari)
+        msg["Subject"] = f"Copertura titolo polizza {pol.get('numero_polizza','—')}"
+        msg.set_content(
+            f"Notifica di copertura titolo.\n\n"
+            f"Polizza: {pol.get('numero_polizza','—')} ({pol.get('ramo','')})\n"
+            f"Importo: €{titolo.get('importo_lordo',0):.2f}\n"
+            f"Scadenza: {titolo.get('scadenza','—')}\n"
+            f"Copertura: {titolo.get('data_copertura','—')}\n",
+        )
+        port = int(az.get("smtp_port") or 587)
+        host = az["smtp_host"]
+        if port == 465:
+            srv = smtplib.SMTP_SSL(host, port, timeout=30)
+        else:
+            srv = smtplib.SMTP(host, port, timeout=30)
+            if az.get("smtp_use_tls", True):
+                srv.starttls()
+        if az.get("smtp_user"):
+            srv.login(az["smtp_user"], az.get("smtp_password") or "")
+        srv.send_message(msg)
+        srv.quit()
+        return {"ok": True, "inviate": len(destinatari), "destinatari": destinatari}
+    except Exception as e:
+        return {"ok": False, "errore": str(e), "destinatari": destinatari}
+
+
 @api.get("/export/titoli.csv")
 async def export_titoli_csv(stato: Optional[str] = None,
                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
