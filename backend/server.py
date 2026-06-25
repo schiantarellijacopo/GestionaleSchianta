@@ -10,6 +10,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
@@ -5560,6 +5561,239 @@ async def invia_email(eid: str, user=Depends(require_user("admin", "collaborator
             autore=user,
         )
     return {"ok": True, "note": "Invio simulato. Configurare SMTP per invio reale."}
+
+
+@api.post("/email/invia-singola")
+async def email_invia_singola(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invia un'email immediata via SMTP configurato in AziendaConfig.
+
+    body: {to: str, subject: str, body_text?: str, body_html?: str}
+    """
+    to = (body.get("to") or "").strip()
+    subject = (body.get("subject") or "").strip()
+    body_text = body.get("body_text") or body.get("body") or ""
+    body_html = body.get("body_html") or ""
+    if not to or not subject:
+        raise HTTPException(400, "to e subject obbligatori")
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    if not az.get("smtp_host"):
+        raise HTTPException(503, "SMTP non configurato in Librerie/Azienda")
+    from avvisi_scadenze import _invia_email
+    try:
+        _invia_email(az, to, subject, body_text or _strip_tags(body_html), body_html or f"<pre>{body_text}</pre>")
+    except Exception as e:
+        raise HTTPException(500, f"Errore invio: {e}")
+    await log_attivita(user, "email_send", "email", None, f"to={to} subject={subject[:60]}")
+    # Storico invio email singola
+    from datetime import datetime as _dt2, timezone as _tz2
+    await db.storico_avvisi.insert_one({
+        "id": str(uuid.uuid4()),
+        "tipo": body.get("tipo_avviso") or "email_singola",
+        "canale": "email",
+        "contraente_id": body.get("contraente_id"),
+        "contraente_nome": body.get("contraente_nome"),
+        "destinatario": to,
+        "soggetto": subject,
+        "titoli_ids": body.get("titoli_ids") or [],
+        "polizza_id": body.get("polizza_id"),
+        "stato": "inviato",
+        "sent_at": _dt2.now(_tz2.utc).isoformat(),
+        "utente_id": user.get("id"),
+        "utente_nome": user.get("name") or user.get("email"),
+    })
+    return {"ok": True}
+
+
+def _strip_tags(html: str) -> str:
+    import re as _re
+    return _re.sub(r"<[^>]+>", "", html or "")
+
+
+@api.post("/avvisi/invia-bulk-titoli")
+async def invia_bulk_avvisi_titoli(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invia email avviso titoli aggregando per contraente.
+
+    body: {
+        titoli_ids: [str],
+        soggetto?: str (template),
+        corpo_lettera?: str (testo libero modificabile inserito sopra la tabella),
+    }
+    Per ogni contraente con titoli coinvolti, viene inviata UNA sola email che
+    elenca tutti i suoi titoli e somma gli importi.
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio (lista)")
+    soggetto_tpl = body.get("soggetto") or "Promemoria pagamento polizza/e in scadenza"
+    corpo_lettera = body.get("corpo_lettera") or _CORPO_LETTERA_DEFAULT
+
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    if not az.get("smtp_host"):
+        raise HTTPException(503, "SMTP non configurato in Librerie/Azienda")
+
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    if not titoli:
+        raise HTTPException(404, "Nessun titolo trovato")
+
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "targa": 1,
+         "prodotto": 1, "contraente_id": 1, "compagnia_id": 1},
+    )}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "email": 1},
+    )}
+
+    # raggruppa titoli per contraente
+    from collections import defaultdict
+    bucket: dict = defaultdict(list)
+    for t in titoli:
+        p = pols.get(t.get("polizza_id"), {})
+        contraente_id = p.get("contraente_id")
+        if not contraente_id:
+            continue
+        bucket[contraente_id].append({**t, "_pol": p})
+
+    from avvisi_scadenze import _invia_email
+    inviate = 0
+    skipped: list[dict] = []
+    for contraente_id, ts in bucket.items():
+        a = anas.get(contraente_id, {})
+        to_addr = (a.get("email") or "").strip()
+        if not to_addr:
+            skipped.append({"contraente_id": contraente_id, "motivo": "email mancante"})
+            continue
+        text, html = _render_avviso_titoli_email(
+            ragione_sociale=a.get("ragione_sociale") or "Cliente",
+            corpo_lettera=corpo_lettera,
+            titoli=ts,
+            azienda=az,
+        )
+        try:
+            _invia_email(az, to_addr, soggetto_tpl, text, html)
+            inviate += 1
+        except Exception as e:
+            skipped.append({"contraente_id": contraente_id, "motivo": str(e)})
+    await log_attivita(user, "avvisi_bulk", "email", None,
+                       f"contraenti={len(bucket)} inviate={inviate} skipped={len(skipped)}")
+    # Storico invii: salva 1 record per contraente coinvolto (anche skipped)
+    from datetime import datetime as _dt, timezone as _tz
+    now_iso = _dt.now(_tz.utc).isoformat()
+    log_docs: list[dict] = []
+    for contraente_id, ts in bucket.items():
+        a = anas.get(contraente_id, {})
+        to_addr = (a.get("email") or "").strip()
+        sk = next((s for s in skipped if s.get("contraente_id") == contraente_id), None)
+        log_docs.append({
+            "id": str(uuid.uuid4()),
+            "tipo": "email_avviso_titoli",
+            "canale": "email",
+            "contraente_id": contraente_id,
+            "contraente_nome": a.get("ragione_sociale"),
+            "destinatario": to_addr or None,
+            "soggetto": soggetto_tpl,
+            "titoli_ids": [t.get("id") for t in ts],
+            "n_titoli": len(ts),
+            "totale_importo": round(sum(float(t.get("importo_lordo") or 0) for t in ts), 2),
+            "stato": "errore" if sk else "inviato",
+            "errore": sk.get("motivo") if sk else None,
+            "sent_at": now_iso,
+            "utente_id": user.get("id"),
+            "utente_nome": user.get("name") or user.get("email"),
+        })
+    if log_docs:
+        await db.storico_avvisi.insert_many(log_docs)
+    return {"ok": True, "contraenti_totali": len(bucket), "inviate": inviate, "skipped": skipped}
+
+
+@api.post("/email/avvisi-scadenze")
+
+
+def _render_avviso_titoli_email(*, ragione_sociale: str, corpo_lettera: str,
+                                 titoli: list[dict], azienda: dict) -> tuple[str, str]:
+    """Genera (text, html) per email avviso titoli aggregati per un contraente."""
+    from html import escape as _esc
+    rows_html: list[str] = []
+    rows_txt: list[str] = []
+    totale = 0.0
+    for t in titoli:
+        p = t.get("_pol") or {}
+        rischio = (p.get("prodotto") or p.get("ramo") or "").upper()
+        targa = p.get("targa") or ""
+        scad = t.get("scadenza") or ""
+        try:
+            from datetime import date as _date
+            scad_fmt = _date.fromisoformat(scad[:10]).strftime("%d-%m-%Y") if scad else ""
+        except Exception:
+            scad_fmt = scad
+        imp = float(t.get("importo_lordo") or 0)
+        totale += imp
+        rows_html.append(
+            f"<tr>"
+            f"<td style='padding:6px 8px;border-bottom:1px dotted #999'>{_esc(str(p.get('numero_polizza') or ''))}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px dotted #999'>{_esc(rischio)}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px dotted #999'>{_esc(targa)}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px dotted #999'>{_esc(scad_fmt)}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px dotted #999;text-align:right'>{imp:,.2f}</td>"
+            f"</tr>"
+        )
+        rows_txt.append(
+            f"- {p.get('numero_polizza') or '—'} | {rischio} | {targa} | {scad_fmt} | {imp:,.2f} €"
+        )
+    iban = azienda.get("iban") or ""
+    ragione_az = azienda.get("ragione_sociale") or ""
+    intestaz_pagamenti = ""
+    if ragione_az or iban:
+        intestaz_pagamenti = (
+            "<p>Il pagamento del/i premio/i potrà essere effettuato presso la nostra sede o tramite bonifico:</p>"
+            f"<p><strong>{_esc(ragione_az)}</strong>"
+            + (f"<br/><strong>IBAN: {_esc(iban)}</strong>" if iban else "")
+            + "</p>"
+        )
+    body_lettera_html = "<p>" + _esc(corpo_lettera).replace("\n\n", "</p><p>").replace("\n", "<br/>") + "</p>"
+    html = f"""<!DOCTYPE html>
+<html><body style="font-family:Georgia,serif;color:#111;line-height:1.45;max-width:680px;margin:0 auto;padding:20px">
+  {body_lettera_html}
+  {intestaz_pagamenti}
+  <table style="width:100%;border-collapse:collapse;margin-top:18px;font-size:13px">
+    <thead>
+      <tr style="border-bottom:2px solid #333">
+        <th style="text-align:left;padding:8px">Num.Contratto</th>
+        <th style="text-align:left;padding:8px">Rischio</th>
+        <th style="text-align:left;padding:8px">Targa</th>
+        <th style="text-align:left;padding:8px">Rata del</th>
+        <th style="text-align:right;padding:8px">Imp.Totale</th>
+      </tr>
+    </thead>
+    <tbody>
+      {''.join(rows_html)}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="5" style="padding-top:14px"></td></tr>
+      <tr style="border-top:2px solid #333">
+        <td colspan="4" style="text-align:right;padding:8px;font-size:14px;color:#777">Totale Complessivo</td>
+        <td style="text-align:right;padding:8px;font-size:14px;font-weight:bold">{totale:,.2f}</td>
+      </tr>
+    </tfoot>
+  </table>
+</body></html>"""
+    text = (
+        corpo_lettera
+        + "\n\n"
+        + (f"{ragione_az}\n" if ragione_az else "")
+        + (f"IBAN: {iban}\n" if iban else "")
+        + "\nNum.Contratto | Rischio | Targa | Rata del | Imp.Totale\n"
+        + "\n".join(rows_txt)
+        + f"\n\nTotale Complessivo: {totale:,.2f} €"
+    )
+    return text, html
 
 
 @api.post("/email/avvisi-scadenze")

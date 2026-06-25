@@ -103,10 +103,12 @@ async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, lis
             "compagnia_nome": c.get("ragione_sociale"),
         })
 
-    # TITOLI: scadenza nel range, stato da_incassare/insoluto.
+    # TITOLI ARRETRATI: scadenza precedente a oggi, stato da_incassare/insoluto.
+    # (Su richiesta utente: negli avvisi mostriamo SOLO i titoli arretrati,
+    #  non quelli "in scadenza prossima".)
     titoli_cur = db.titoli.find(
         {
-            "scadenza": {"$gte": oggi_iso, "$lte": limite_iso},
+            "scadenza": {"$lt": oggi_iso},
             "stato": {"$in": ["da_incassare", "insoluto"]},
         },
         {"_id": 0},

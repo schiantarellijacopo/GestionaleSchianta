@@ -57,7 +57,7 @@ export default function Avvisi() {
         <div data-testid="avvisi-page">
             <PageHeader
                 title={<><Bell className="inline mr-2 -mt-1" size={20} />Avvisi & Scadenze</>}
-                subtitle="Polizze e titoli in scadenza · invia notifiche al cliente"
+                subtitle="Polizze in scadenza · titoli arretrati · invia notifiche al cliente"
                 actions={(
                     <div className="flex items-center gap-2">
                         <Label className="text-xs text-slate-500">Periodo:</Label>
@@ -86,9 +86,9 @@ export default function Avvisi() {
                 />
                 <KpiCard
                     icon={<Receipt size={16} />}
-                    label="Titoli da incassare"
+                    label="Titoli arretrati"
                     value={totali.titoli}
-                    accent="amber"
+                    accent="rose"
                     testid="kpi-titoli-scadenza"
                 />
                 <KpiCard
@@ -99,9 +99,9 @@ export default function Avvisi() {
                     monetary
                 />
                 <KpiCard
-                    label="Importi da incassare"
+                    label="Arretrati da incassare"
                     value={fmtEur(totali.importi)}
-                    accent="emerald"
+                    accent="amber"
                     testid="kpi-importi-incasso"
                     monetary
                 />
@@ -130,7 +130,7 @@ export default function Avvisi() {
                         items={data.titoli || []}
                         type="titolo"
                         onEmail={setEmailTarget}
-                        emptyLabel={`Nessun titolo in scadenza nei prossimi ${giorni} giorni.`}
+                        emptyLabel="Nessun titolo arretrato (tutti i titoli scaduti sono stati incassati)."
                     />
                 )
             )}

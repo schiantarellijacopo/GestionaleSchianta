@@ -287,6 +287,12 @@ export default function Titoli() {
                                 <th className="text-right w-[70px]" title="Margine agenzia">Margine</th>
                                 <th className="w-[80px] whitespace-nowrap">Scadenza</th>
                                 <th className="w-[80px] whitespace-nowrap">Copertura</th>
+                                {filters.preset === "storico" && (
+                                    <>
+                                        <th className="w-[80px] whitespace-nowrap" data-testid="th-incassato-il">Incassato il</th>
+                                        <th className="w-[90px]" data-testid="th-mezzo-pag">Pagato con</th>
+                                    </>
+                                )}
                                 <th className="w-[90px]">Stato</th>
                                 <th className="text-right w-[80px]">Da pagare</th>
                                 <th className="w-[44px] text-center">All.</th>
@@ -334,6 +340,12 @@ export default function Titoli() {
                                         <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
                                         <td className="num text-xs whitespace-nowrap">{fmtDate(t.scadenza)}</td>
                                         <td className="num text-xs text-emerald-700 whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
+                                        {filters.preset === "storico" && (
+                                            <>
+                                                <td className="num text-xs whitespace-nowrap text-emerald-700" data-testid={`titolo-incassato-il-${t.id}`}>{t.data_incasso ? fmtDate(t.data_incasso) : "—"}</td>
+                                                <td className="text-xs text-slate-700" data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</td>
+                                            </>
+                                        )}
                                         <td><StatusBadge stato={t.stato} /></td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
