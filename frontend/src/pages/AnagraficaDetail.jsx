@@ -18,12 +18,13 @@ import {
 import RowActions, { PrintButton } from "@/components/RowActions";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
-    Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText,
+    Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AnalisiClienteTab from "@/components/AnalisiClienteTab";
 import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function AnagraficaDetail() {
@@ -290,7 +291,28 @@ function DatiTab({ ana, canEdit, onReload }) {
                         </div>
                     )}
                 </div>
-                <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value)} /></div>
+                <div className="col-span-2">
+                    <Label>Indirizzo</Label>
+                    <AddressAutocomplete
+                        value={f.indirizzo || ""}
+                        onChange={(v) => set("indirizzo", v)}
+                        onSelect={(p) => {
+                            // riempi tutti i campi indirizzo in un colpo + lat/lng
+                            setF((prev) => ({
+                                ...prev,
+                                indirizzo: p.indirizzo || prev.indirizzo,
+                                comune: p.comune || prev.comune,
+                                cap: p.cap || prev.cap,
+                                provincia: (p.provincia || "").slice(0, 2).toUpperCase() || prev.provincia,
+                                lat: p.lat,
+                                lng: p.lng,
+                                indirizzo_geocoded: p.display_name,
+                            }));
+                            toast.success("Indirizzo geolocalizzato automaticamente");
+                        }}
+                        testid="anag-indirizzo-autocomplete"
+                    />
+                </div>
                 <div><Label>Comune</Label><Input value={f.comune || ""} onChange={(e) => set("comune", e.target.value)} /></div>
                 <div><Label>Provincia</Label><Input maxLength={2} value={f.provincia || ""} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
                 <div><Label>CAP</Label><Input value={f.cap || ""} onChange={(e) => set("cap", e.target.value)} /></div>
@@ -371,12 +393,33 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
     const [handicap, setHandicap] = useState(false);
     const [options, setOptions] = useState([]);
     const [editing, setEditing] = useState(null);
+    const [network, setNetwork] = useState(null);
     useEffect(() => { api.get("/anagrafiche").then((r) => setOptions(r.data.filter((a) => a.id !== ana.id))); }, [ana.id]);
+    useEffect(() => { api.get(`/anagrafiche/${ana.id}/network`).then((r) => setNetwork(r.data)).catch(() => setNetwork(null)); }, [ana.id, ana.relazioni_risolte?.length]);
 
     // mostra attributi differenti in base alla relazione
     const showLavoratore = rel === "coniuge";
     const showCarico = rel === "coniuge" || rel === "figlio";
     const showHandicap = rel === "figlio";
+
+    // Lista delle relazioni possibili. Le coppie sono auto-suggerite ma modificabili.
+    const RELAZIONI_PERSONA = ["genitore", "figlio", "coniuge", "fratello", "nonno", "nipote", "zio", "cugino", "altro"];
+    const RELAZIONI_AZIENDA = ["legale_rappresentante", "rappresenta", "socio", "dipendente_di", "datore_lavoro_di"];
+    const TUTTE_RELAZIONI = [...RELAZIONI_PERSONA, ...RELAZIONI_AZIENDA];
+    const INVERSE_MAP = {
+        genitore: "figlio", figlio: "genitore", coniuge: "coniuge",
+        fratello: "fratello", nonno: "nipote", nipote: "nonno",
+        zio: "nipote", cugino: "cugino",
+        legale_rappresentante: "rappresenta", rappresenta: "legale_rappresentante",
+        socio: "socio",
+        dipendente_di: "datore_lavoro_di", datore_lavoro_di: "dipendente_di",
+        altro: "altro",
+    };
+
+    const onRelChange = (r) => {
+        setRel(r);
+        if (INVERSE_MAP[r]) setRelInv(INVERSE_MAP[r]);
+    };
 
     const aggiungi = async () => {
         if (!target) return;
@@ -413,6 +456,10 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
     };
 
     return (
+        <>
+        {network && network.collegati.length > 0 && (
+            <NetworkPositionCard network={network} />
+        )}
         <Card className="p-6 border-slate-200 mt-4">
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2"><GitBranch size={18} className="text-sky-700" /><h3 className="font-medium">Relazioni familiari</h3></div>
@@ -436,9 +483,12 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <Label>{ana.ragione_sociale} &egrave;</Label>
-                                        <Select value={rel} onValueChange={setRel}><SelectTrigger data-testid="rel-relazione"><SelectValue /></SelectTrigger>
+                                        <Select value={rel} onValueChange={onRelChange}><SelectTrigger data-testid="rel-relazione"><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                {["genitore", "figlio", "coniuge", "fratello", "nonno", "nipote", "zio", "cugino", "altro"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                                                <div className="px-2 py-1 text-[10px] uppercase font-semibold text-slate-500">Famiglia</div>
+                                                {RELAZIONI_PERSONA.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                                                <div className="px-2 py-1 text-[10px] uppercase font-semibold text-slate-500 border-t mt-1 pt-2">Aziende / Lavoro</div>
+                                                {RELAZIONI_AZIENDA.map((r) => <SelectItem key={r} value={r}>{r.replace(/_/g, " ")}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -446,7 +496,7 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                         <Label>{"L'altro è"}</Label>
                                         <Select value={relInv} onValueChange={setRelInv}><SelectTrigger><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                {["genitore", "figlio", "coniuge", "fratello", "nonno", "nipote", "zio", "cugino", "altro"].map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                                                {TUTTE_RELAZIONI.map((r) => <SelectItem key={r} value={r}>{r.replace(/_/g, " ")}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -600,6 +650,86 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                     </DialogContent>
                 </Dialog>
             )}
+        </Card>
+        </>
+    );
+}
+
+function NetworkPositionCard({ network }) {
+    const { root, collegati, totali } = network;
+    const fmt = (n) => (n || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+    return (
+        <Card className="p-6 border-slate-200 mt-4" data-testid="network-position-card">
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <Users size={18} className="text-emerald-700" />
+                    <h3 className="font-medium">Posizione assicurativa del network</h3>
+                </div>
+                <div className="text-xs text-slate-500">{totali.n_persone} entità collegate</div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="bg-slate-50 rounded p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-500">Polizze attive</div>
+                    <div className="text-lg font-bold text-slate-800 num">{totali.n_polizze_attive}</div>
+                </div>
+                <div className="bg-slate-50 rounded p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-500">Preventivi</div>
+                    <div className="text-lg font-bold text-sky-700 num">{totali.n_preventivi}</div>
+                </div>
+                <div className="bg-emerald-50 rounded p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-emerald-700">Premio totale</div>
+                    <div className="text-lg font-bold text-emerald-800 num">{fmt(totali.premio_totale)}</div>
+                </div>
+                <div className="bg-sky-50 rounded p-3">
+                    <div className="text-[10px] uppercase tracking-widest text-sky-700">Provvigioni totali</div>
+                    <div className="text-lg font-bold text-sky-800 num">{fmt(totali.provvigioni_totale)}</div>
+                </div>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="text-[11px] uppercase tracking-wider text-slate-500 border-b">
+                        <tr>
+                            <th className="text-left py-2 pr-2">Anagrafica</th>
+                            <th className="text-left py-2 pr-2">Relazione</th>
+                            <th className="text-right py-2 pr-2">Attive</th>
+                            <th className="text-right py-2 pr-2">Preventivi</th>
+                            <th className="text-right py-2 pr-2">Premio</th>
+                            <th className="text-right py-2 pr-2">Provvigioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr className="border-b border-slate-100 bg-sky-50/40">
+                            <td className="py-2 pr-2 font-semibold">
+                                <Link to={`/anagrafiche/${root.id}`} className="text-sky-700 hover:underline">{root.ragione_sociale}</Link>
+                            </td>
+                            <td className="py-2 pr-2 text-xs text-slate-500">— scheda corrente —</td>
+                            <td className="text-right py-2 pr-2 num">{root.n_polizze_attive}</td>
+                            <td className="text-right py-2 pr-2 num">{root.n_preventivi}</td>
+                            <td className="text-right py-2 pr-2 num font-semibold">{fmt(root.premio_totale)}</td>
+                            <td className="text-right py-2 pr-2 num font-semibold text-emerald-700">{fmt(root.provvigioni_totale)}</td>
+                        </tr>
+                        {collegati.map((c) => (
+                            <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-2 pr-2">
+                                    <Link to={`/anagrafiche/${c.id}`} className="text-sky-700 hover:underline">{c.ragione_sociale}</Link>
+                                </td>
+                                <td className="py-2 pr-2 text-xs text-slate-600 capitalize">{(c.relazione || "—").replace(/_/g, " ")}</td>
+                                <td className="text-right py-2 pr-2 num">{c.n_polizze_attive}</td>
+                                <td className="text-right py-2 pr-2 num">{c.n_preventivi}</td>
+                                <td className="text-right py-2 pr-2 num">{fmt(c.premio_totale)}</td>
+                                <td className="text-right py-2 pr-2 num text-emerald-700">{fmt(c.provvigioni_totale)}</td>
+                            </tr>
+                        ))}
+                        <tr className="border-t-2 border-slate-300 font-bold">
+                            <td colSpan={2} className="py-2 pr-2 text-right uppercase text-xs tracking-widest">Totale network</td>
+                            <td className="text-right py-2 pr-2 num">{totali.n_polizze_attive}</td>
+                            <td className="text-right py-2 pr-2 num">{totali.n_preventivi}</td>
+                            <td className="text-right py-2 pr-2 num">{fmt(totali.premio_totale)}</td>
+                            <td className="text-right py-2 pr-2 num text-emerald-700">{fmt(totali.provvigioni_totale)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </Card>
     );
 }

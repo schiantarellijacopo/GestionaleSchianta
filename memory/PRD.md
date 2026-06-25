@@ -1,153 +1,66 @@
-# Programma Assicurativo — PRD
+# PRD - Programma Assicurativo (Insurance CRM)
 
-## Problem Statement
-CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), Analisi Cliente con calcolo INPS, importer ANIA, generazione PDF modulare.
+## Original Problem Statement
+Italian Insurance Agency CRM (FastAPI + React + MongoDB). Full-stack: anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), analisi cliente, avvisi scadenze.
 
-## Stack
-- Frontend: React + Tailwind + Shadcn UI
-- Backend: FastAPI + MongoDB
-- Integrazioni: Gemini 3 Flash (OCR), pdfplumber, ReportLab, APScheduler, Nominatim
+## Personas
+- Admin / Collaboratore / Dipendente / Cliente
 
-## Architettura
-- `/app/backend/server.py` (monolite ~7000 righe — refactor pendente)
-- `/app/backend/avvisi_scadenze.py` (nuovo) — cron giornaliero scadenze
-- `/app/backend/ania_importer.py`, `inps_calculator.py` (parser)
-- `/app/backend/pdf_brogliaccio.py`, `pdf_sezioni.py` (ReportLab)
-- `/app/frontend/src/components/DialogIncasso.jsx` — incasso semplice (TitoliSospesi)
-- `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
+## Latest Session (Feb 2026)
 
+### A) PACCHETTO MAPPA & INDIRIZZI — DONE
+- ✅ `GET /api/geo/suggest?q=` → Nominatim autocomplete (limit 6, IT)
+- ✅ Componente `<AddressAutocomplete>` riusato in: NuovaAnagrafica + AnagraficaDetail. Al click suggerisce e geolocalizza in automatico (lat/lng/comune/cap/provincia precompilati)
+- ✅ Pagina Mappa clienti potenziata: cluster marker (leaflet.markercluster), 3 layer (Standard / Consumatore CartoDB Voyager / Satellitare ESRI), toggle Clienti (blu) / Prospect (rosso), ricerca, filtro tag, popup ricco con "Apri scheda"
+- ✅ Backend `/geo/anagrafiche` arricchito con `is_cliente` (ha ≥ 1 polizza attiva)
 
-## Cosa è stato implementato
-### 2026-06-25 (parte 7 — Storico Pagamenti + Rappel + Voci Ricorsive + Link Utili)
-- 🆕 **Storico Pagamenti**: collaboratori (`/provvigioni`) e compagnie (`/compagnie-estratto > Storico rimesse`) — espandibili con titoli pagati, allegati, **Stampa PDF** per singolo estratto pagato.
-- 🆕 **Rimozione campo "Conto/Banca"** da TUTTI i dialoghi di pagamento: ora il conto viene **auto-derivato dal mezzo di pagamento** via `_resolve_conto_cassa` (mappatura mezzo→tipo conto in `_MEZZO_TO_TIPO`).
-- 🆕 **Titoli pagati spariscono dalle viste attive**: filtrati da Provvigioni maturate, Voci manuali e da E/C Compagnie "Movimenti & versamenti"; visibili solo nello **Storico**.
-- 🆕 **"Stampa selezionati"** in E/C Compagnie: PDF dei soli titoli selezionati con totale.
-- 🆕 **Allineamento saldi**: `/api/compagnie/saldi-cassa` e `/api/contabilita/dati-compagnie` ora condividono la stessa fonte dati (`db.titoli` stato=incassato). Saldi identici.
-- 🆕 **Rappel (Sovraprovvigioni Compagnie)** — nuova sezione `/rappel`:
-  - CRUD completo + filtri (compagnia/anno) + archivio storico annuale per compagnia
-  - **Riduce automaticamente** il saldo da versare in E/C compagnie e Dati compagnie
-  - **Incassa**: marca rappel come incassato e crea movimento in Prima Nota categoria=`provvigioni` (NON un incasso premio classico). Pulsante Storna reversibile.
-  - **AllegatiCell** (entita_tipo="rappel") per upload documenti per ogni rappel
-  - **Stampa PDF** per singolo rappel via `/api/stampa/rappel/{rid}`
-- 🆕 **Voci Ricorsive Collaboratori** (Librerie → tab "Voci ricorsive collab."):
-  - Regole di bonus/trattenute mensili o annuali, applicabili a singolo collaboratore o "tutti"
-  - **Auto-materializzazione**: alla prima apertura di `/api/collaboratori/{cid}/estratto-provvigioni` le voci vengono generate idempotentemente fino ad oggi
-  - Cancellando una regola si possono rimuovere anche le voci non pagate generate
-- 🆕 **Dashboard Link Utili**: card in cima alla dashboard con CRUD link rapidi (label/URL/colore/ordine), apertura in nuova scheda
+### B) PACCHETTO COLLEGAMENTI ANAGRAFICHE — DONE
+- ✅ Nuove relazioni in `parente_di` bidirezionali: legale_rappresentante / rappresenta, socio, dipendente_di / datore_lavoro_di — oltre alle preesistenti (genitore/figlio/coniuge/fratello/nonno/...)
+- ✅ Inverse Map auto-suggerite in UI quando si sceglie la relazione
+- ✅ Backend `GET /anagrafiche/{aid}/network` → restituisce root + collegati con per ognuno: n_polizze_attive, n_preventivi, n_polizze_totali, premio_totale, provvigioni_totale + totali aggregati network
+- ✅ Frontend in Tab "Albero genealogico": Card "Posizione assicurativa del network" mostra tabella con totali per collegato + riga "Totale network"
+- ✅ Frontend in lista Anagrafiche: righe espandibili (chevron) che mostrano network
 
+### C) DASHBOARD ANAGRAFICHE — DONE
+- ✅ Backend `GET /anagrafiche/stats` → 4 categorie (privati / aziende / condomini / parrocchie) con conteggi e premi
+- ✅ 4 KPI cards in cima alla pagina /anagrafiche (Privati, Aziende, Condomini, Parrocchie) con totale Premi
+- ✅ Categorizzazione automatica: euristica su ragione_sociale (CONDOMINIO, PARROCCHIA) + tipo (persona_fisica/giuridica)
 
-## Cosa è stato implementato
-### 2026-06-25 (parte 6 — Bug fix Rimesse + UX)
-- 🐛 **Fix visualizzazione Rimesse in Prima Nota**: i pagamenti alla compagnia (categoria `pagamento_compagnia`) ora appaiono in una **colonna dedicata "Rimessa"** (violet) e NON più nella colonna "Uscita". Badge cambia in `rimessa` (info).
-- ✅ La logica backend era già corretta: le rimesse aggiornano `saldo_cassa_compagnie_tot` e diminuiscono il saldo cassa generale. La separazione era solo grafica.
+### D) BUG FIX & FEATURE PRECEDENTI (iter15) — DONE
+- ✅ Bug Brogliaccio: uscite generiche (PRELIEVO, spese, anticipi out) NON più in colonna TOTALE → totali_giornata.totale = solo incassi_premio
+- ✅ Dashboard: 15 elementi cliccabili (6 Stat + 2 chart + 4 KPI + 3 subcard) navigano alle relative sezioni
+- ✅ PDF "Sospesi Anticipi" con data di stampa odierna (endpoint + pulsante)
+- ✅ Centralizzazione `useMezziPagamento` in 5 dialog (Provvigioni, EstrattoContoCompagnie, Titoli, AnagraficaDetail, PolizzaDetail)
+- ✅ Backend syntax error in `titoli_sospesi()` riparato
 
-### 2026-06-25 (parte 5 — Titolo sostituzione + EC Compagnie con pagamento)
-- 🆕 Tipo titolo **"sostituzione"** aggiunto al modello Titolo. Quando una polizza viene sostituita, viene **creato automaticamente** un titolo di tipo "sostituzione" con tutti i premi inseriti (Netto/Lordo/SSN/Imposte/Provvigioni)
-- 🆕 **Tab "Titoli" di una polizza ora mostra anche i titoli delle polizze sostituite** (catena storica) con etichetta "polizza prec. {numero}" e sfondo amber
-- 🆕 **Sostituzione polizza**: aggiunta cascata Ramo→Prodotto + campi tutti premi (Netto/Lordo/SSN/Imposte/Provvigioni)
-- 🆕 **Estratto Conto Compagnia (dettaglio)**:
-  - **Filtro per collaboratore** (oltre date dal/al)
-  - Colonna **"Collaboratore"** nella tabella
-  - **Selezione multipla** dei titoli con checkbox + "Seleziona tutti"
-  - **Pulsante "Paga compagnia"** che apre dialog per registrare versamento (data, conto cassa, descrizione)
-  - Endpoint backend `POST /api/compagnie/{cid}/paga-titoli` che crea il movimento contabile e marca i titoli come `pagato_alla_compagnia`
-  - Colonna **"Pag. compagnia"** con stato (pagato/da versare)
-- 🐛 Fix duplicate className su `<tr>` titoli in PolizzaDetail
+## Architecture
+- `/app/backend/server.py` (~9700 righe — refactor pendente)
+- `/app/backend/db_models.py` — Anagrafica con `parente_di: List[dict]`
+- `/app/backend/geocoder.py` — Nominatim wrapper + `cerca_suggerimenti()`
+- `/app/frontend/src/pages/Anagrafiche.jsx` — lista con KPI + righe espandibili
+- `/app/frontend/src/pages/AnagraficaDetail.jsx` — Tab Albero + NetworkPositionCard
+- `/app/frontend/src/pages/MappaClienti.jsx` — mappa cluster + layer switcher
+- `/app/frontend/src/components/AddressAutocomplete.jsx` — componente riusabile
 
-### 2026-06-25 (parte 4 — Polizza Avanzata, PDF Avvisi, Libro Matricola+, UX)
-- 🆕 **Tab "Azioni" in PolizzaDetail** con 3 azioni operative:
-  - **Annulla contratto** (data + motivo)
-  - **Sospendi / Riattiva** (data + riattivazione prevista)
-  - **Sostituisci contratto** (crea nuova polizza linkata: compagnia, ramo, n° contratto, effetto, scadenza, prossima quietanza, coassicurazione, premio, motivo)
-  - Banner di stato per polizze annullate/sostituite con link cross-reference (← prec / → succ)
-- 🆕 Backend endpoints: `POST /api/polizze/{id}/annulla`, `/sospendi`, `/riattiva`, `/sostituisci`
-- 🆕 Modello Polizza esteso: `sostituita_da_polizza_id`, `data_annullamento`, `data_sospensione`, `riattivazione_prevista`, `coassicurazione`, `motivo_annullamento`
-- 🆕 **Libro Matricola avanzato**:
-  - Pulsante **Sostituisci** per applicazione (cambio veicolo) con stato "sostituita" e cross-reference (← sostituita_da / sostituisce →)
-  - Toggle **Storico** per vedere annullate/sostituite
-  - **Ricerca live** (targa, numero, intestatario, marca/modello, note)
-  - Nuove colonne: **Valore veicolo** + **Scadenza leasing** (campi aggiunti al form)
-  - Modello esteso con `sostituita_da_id`, `sostituisce_id`, `data_sostituzione`, `motivo_annullamento`
-- 🆕 **PDF Avvisi** (`POST /api/avvisi/pdf-bulk`): genera 1 PDF con un avviso per ogni contraente (intestazione agenzia + lettera + tabella titoli + IBAN). Bottone "Scarica PDF" nel BulkAvvisoDialog
-- 🆕 **Filtri Avvisi**: range date + collaboratore + mezzo pagamento + giorni → con badge "filtri attivi"
-- 🆕 **Nuova polizza UX**:
-  - **Combobox contraente** con ricerca live (nome, CF, P.IVA, città)
-  - **Cascata Ramo → Prodotto** (prodotti filtrati dal ramo selezionato, dropdown disabilitato se ramo non scelto)
-  - Backend `GET /api/librerie/prodotti?ramo=X` accetta filtro ramo
+## Endpoints Aggiunti
+- `GET /api/geo/suggest?q=` — Nominatim autocomplete
+- `GET /api/anagrafiche/stats` — 4 KPI categorie + premi
+- `GET /api/anagrafiche/{aid}/network` — root + collegati con totali
+- `GET /api/stampa/titoli/sospesi` — PDF (creato iter precedente)
 
-### 2026-06-25 (parte 3 — Avvisi + bugfix titoli)
-- 🆕 **Pagina Avvisi rifatta** con:
-  - **Aggregazione per contraente** (1 riga master per cliente + dettaglio espandibile dei singoli titoli)
-  - Selezione bulk con checkbox per titolo / contraente
-  - Bottone "Invia avvisi" che apre dialog bulk con corpo lettera **modificabile** + tabella HTML stile fac-simile
-  - Pulsanti azione **adattivi** (Email/WhatsApp/SMS appaiono solo se il contraente ha email/cellulare)
-  - Pulsante "Storico invii" che apre dialog con cronologia completa (canale, contraente, oggetto, importo, stato)
-- 🆕 Backend endpoints per Avvisi:
-  - `POST /api/email/invia-singola` → invio SMTP + log storico
-  - `POST /api/avvisi/invia-bulk-titoli` → aggrega titoli per contraente, UNA email per cliente con tabella HTML
-  - `GET /api/storico-avvisi` (filtro per contraente_id e canale)
-  - `POST /api/storico-avvisi/registra` per tracciare aperture WhatsApp/SMS
-- 🆕 Filtro **solo titoli arretrati** (scadenza < oggi, stato da_incassare/insoluto) in `cerca_scadenze`
-- 🐛 **Fix bug colonna "Pagato il"**: ora mostra "—" se titolo non è "incassato" (prima mostrava `data_incasso` anche se da_incassare)
-- 🆕 **Colonna "Coperto il"** in PolizzaDetail tabella titoli (mostra `data_copertura` quando agenzia ha anticipato il pagamento)
-- 🆕 **Stato "coperto"** in `StatusBadge`: se `titolo_coperto=True` ma non ancora incassato, mostra badge azzurro "coperto"
-- 🆕 Tab **"Documenti"** in PolizzaDetail collegata via `DocumentiPolizzaTab.jsx` (upload allegati polizza + UI OCR libretto già pronta — endpoint OCR backend ancora da implementare)
-
-### 2026-06-25 (sessione corrente, parte 2)
-- ✅ **Breakdown provvigioni a 3 valori** (Totale / Collaboratore / Margine) in Polizza e Titoli, applicato sulla provvigione REALE della polizza/titolo + % schema collaboratore
-- ✅ Helper backend `_provv_breakdown()` riusabile
-- ✅ **Tab Sinistri** in `PolizzaDetail.jsx` con lista sinistri e link Apri elenco completo
-- ✅ Filtro `polizza_id` + auto-focus su Sinistri.jsx
-- ✅ **Pagina Avvisi** (`/avvisi`) con KPI (polizze in scadenza, titoli, premio a rischio, importi da incassare), tab Polizze/Titoli, pulsanti per riga: Email (dialog precompilato + invio SMTP / fallback mailto), WhatsApp (wa.me deeplink), SMS (placeholder Twilio fine progetto)
-- ✅ **Rubrica Compagnie** (`/rubrica-compagnie`) con CRUD: ContattoCompagnia (nome, cognome, ruolo, ufficio, email, telefono, cellulare, interno, note). Endpoints `/api/contatti-compagnia`. Vista raggruppata per compagnia.
-- ✅ **Titoli storici** (preset `?preset=storico`) — voce dedicata in sidebar che filtra solo titoli `incassato`
-- ✅ Dialog "Modifica titolo" semplificato: rimossi Stato (auto), Conto/Banca; Mezzo pagamento ora **dropdown** (bonifico, RID/SDD, contanti, assegno, POS, bollettino, carta_credito, compagnia, altro)
-- ✅ Sidebar pulita: rimossi doppioni (`Titoli (incassi)` ridotto a `Titoli storici`, `Compagnie` rimossa a favore della tab nelle Librerie + nuova Rubrica)
-- ✅ Click su riga in Titoli ora apre Dialog Modifica (estratto in componente condiviso `/app/frontend/src/components/TitoloDialog.jsx`)
-
-### 2026-06-25 (sessione corrente, parte 1)
-- ✅ KPI **Sospesi** in Brogliaccio mirror esatto del totale `/titoli/sospesi` (`_total_sospesi_as_of`)
-- ✅ **Riepilogo per collaboratore** nella pagina Titoli Sospesi (groupBy + totale)
-- ✅ **Avvisi di Scadenza**: cron 08:00 (APScheduler) + `GET /avvisi-scadenze/preview`, `POST /esegui`, `GET /log` + email HTML
-- ✅ **Flusso incasso con residuo**: opzione "sconto" (uscita in Prima Nota) OPPURE "sospeso" (genera titolo residuo da_incassare)
-- ✅ **Dialog "Incasso / Copertura" unificato** replica facsimile cliente: tabella cyan, checkbox Copertura + Incasso, sub-opzioni email, "Pagamento in direzione"
-- ✅ Aggiunti campi Titolo: `data_emissione`, `ora_effetto`, `pagamento_in_direzione`; tipo "quietanza"
-- ✅ Endpoint `POST /titoli/notifica-copertura` (email a operatori/contraenti)
-
-### Sessioni precedenti
-- Voci manuali estratto conto collaboratori
-- Coniuge/figli attributi + Albero genealogico
-- Filtri e export CSV/XLSX/PDF Polizze
-- Allegati su Prima Nota e Titoli
-- Brogliaccio redesign + Daily Closure + PDF + KPI cumulativi
-- Logica contabile avanzata (premi, provvigioni, sconti, rimesse)
-- Dati Compagnie tab
-- ANIA importer (Garanzie, Operatori, premio_netto, tasse, ssn)
-- Polizza Modifica/Elimina
-- Global fix download PDF (downloadFile)
-
-## Backlog
+## Backlog / Roadmap
 ### P1
-- **Tab "Documenti" in PolizzaDetail** (allegati polizza, da implementare)
-- **OCR Libretto veicolo** (Gemini 3 Flash) → auto-fill targa/marca/modello/immatricolazione + auto-save PDF in polizza
-- **OCR Fattura / Busta paga** (Gemini 3 Flash) → estrazione dati per Analisi Cliente
-- **Piramide Soluzioni Redesign** (Release B) — blocchi impilati Adeguata/Non Adeguata + PDF
-- **Refactoring `server.py`** (>7000 righe) → split in `/app/backend/routes/`
-- **Refactoring `ania_importer.py`, `inps_calculator.py`** (parser complessi)
-- **Librerie · collegamento Metodi pagamento ↔ Banche** (refactor lib `conti-cassa`)
+- Visualizzazione albero genealogico più visiva (svg ramificato)
+- Bottone "Aggiungi LR" rapido dalla scheda Azienda (shortcut)
+- Filtri categoria su KPI cards cliccabili (al click filtra la tabella)
+- OCR Libretto/Fatture con Gemini 3 Flash su Documenti polizza
+- Piramide Soluzioni Redesign (Release B)
 
 ### P2
-- **Refactor `Anagrafiche.jsx`** componenti (perf)
-- **Avviso SMS** via Twilio (collegamento già predisposto in pagina Avvisi)
-- **Avviso WhatsApp Business API** (al momento usa `wa.me` deeplink)
+- Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS
+- Refactor server.py (>9700 righe) in `/backend/routes/`
+- Risoluzione import circolare in auth.py
+- Estrazione form sections AnagraficaDetail per perf
 
-### P3 (alla fine — esplicita richiesta utente)
-- Integrazioni 3rd party: Google Calendar OAuth, Microsoft 365, WhatsApp, 3CX, Office 365
-
-## Note importanti
-- UI in **italiano**
-- Download blob: usare `downloadFile` da `/app/frontend/src/lib/pdf.js`, MAI `window.open`
-- Backend port 8001 (interno), frontend port 3000; tutto via `REACT_APP_BACKEND_URL` + prefisso `/api`
-- KPI Brogliaccio sono **cumulativi** alla data selezionata
-- Giorni chiusi non sono modificabili senza riaprire la chiusura
+## Credenziali test
+Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!)

@@ -2127,6 +2127,51 @@ async def ocr_visura_camerale(
     return data
 
 
+@api.get("/anagrafiche/stats")
+async def anagrafiche_stats(user=Depends(current_user)):
+    """KPI aggregati anagrafiche.
+
+    Categorizzazione (euristica su ragione_sociale + tipo + tags):
+      - privati: persona_fisica
+      - aziende: persona_giuridica, NON condominio/parrocchia
+      - condomini: ragione_sociale contiene CONDOMINIO o tag 'condominio'
+      - parrocchie: ragione_sociale contiene PARROCCHIA o tag 'parrocchia'
+
+    Per ogni categoria ritorna {n, premio_totale} (premio totale dalle polizze attive).
+    """
+    if user["role"] == "cliente":
+        raise HTTPException(403, "Permesso negato")
+    anas = await db.anagrafiche.find({}, {"_id": 0, "id": 1, "tipo": 1, "ragione_sociale": 1, "tags": 1}).to_list(20000)
+    bucket = {"privati": [], "aziende": [], "condomini": [], "parrocchie": []}
+    for a in anas:
+        rs = (a.get("ragione_sociale") or "").upper()
+        tags = a.get("tags") or []
+        if "PARROCCHIA" in rs or "parrocchia" in tags:
+            bucket["parrocchie"].append(a["id"])
+        elif "CONDOMINIO" in rs or "condominio" in tags:
+            bucket["condomini"].append(a["id"])
+        elif a.get("tipo") == "persona_giuridica":
+            bucket["aziende"].append(a["id"])
+        else:
+            bucket["privati"].append(a["id"])
+    # somma premi su polizze attive per ogni bucket
+    out = {}
+    for k, ids in bucket.items():
+        premio = 0.0
+        if ids:
+            agg = await db.polizze.aggregate([
+                {"$match": {"contraente_id": {"$in": ids}, "stato": {"$in": ["attiva", "in_emissione"]}}},
+                {"$group": {"_id": None, "tot": {"$sum": "$premio_totale"}}},
+            ]).to_list(1)
+            premio = float(agg[0]["tot"]) if agg else 0.0
+        out[k] = {"n": len(ids), "premio_totale": round(premio, 2)}
+    out["totale"] = {
+        "n": sum(v["n"] for v in out.values()),
+        "premio_totale": round(sum(v["premio_totale"] for v in out.values()), 2),
+    }
+    return out
+
+
 @api.get("/anagrafiche")
 async def list_anagrafiche(
     q: Optional[str] = None,
@@ -2285,6 +2330,108 @@ async def delete_anagrafica(aid: str, user=Depends(require_user("admin"))):
     await db.anagrafiche.delete_one({"id": aid})
     await log_attivita(user, "delete", "anagrafica", aid)
     return {"ok": True}
+
+
+@api.get("/anagrafiche/{aid}/network")
+async def anagrafica_network(aid: str, user=Depends(current_user)):
+    """Restituisce TUTTE le anagrafiche collegate (parenti, legali rappresentanti,
+    aziende rappresentate, capofamiglia, ecc.) con per ognuna:
+      - n_polizze attive/preventivi/totali
+      - premio_totale, provvigioni_totale (lordi su tutte le polizze)
+    e i totali aggregati del network.
+
+    Restituisce anche l'anagrafica root.
+    """
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    root = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not root:
+        raise HTTPException(404, "Non trovata")
+
+    # Recupera tutte le ana collegate via parente_di
+    rel_ids = [r.get("anagrafica_id") for r in root.get("parente_di", []) if r.get("anagrafica_id")]
+    rel_ids = list(dict.fromkeys(rel_ids))  # dedup mantenendo ordine
+    relazione_per_id = {r["anagrafica_id"]: r.get("relazione") for r in root.get("parente_di", [])}
+
+    all_ids = [aid] + rel_ids
+    docs = {}
+    async for a in db.anagrafiche.find({"id": {"$in": all_ids}}, {"_id": 0}):
+        docs[a["id"]] = a
+
+    # Calcola statistiche polizze per ogni id
+    async def _stats(anag_id):
+        n_attive = 0; n_preventivo = 0; n_tot = 0
+        premio = 0.0; provv = 0.0
+        async for p in db.polizze.find(
+            {"contraente_id": anag_id},
+            {"_id": 0, "stato": 1, "premio_totale": 1, "provvigione_totale": 1, "numero_polizza": 1},
+        ):
+            n_tot += 1
+            stato = (p.get("stato") or "").lower()
+            if stato in ("attiva", "in_emissione"):
+                n_attive += 1
+            elif stato in ("preventivo", "bozza"):
+                n_preventivo += 1
+            premio += float(p.get("premio_totale") or 0)
+            provv += float(p.get("provvigione_totale") or 0)
+        return {
+            "n_polizze_attive": n_attive,
+            "n_preventivi": n_preventivo,
+            "n_polizze_totali": n_tot,
+            "premio_totale": round(premio, 2),
+            "provvigioni_totale": round(provv, 2),
+        }
+
+    def _light(d, relazione=None):
+        return {
+            "id": d.get("id"),
+            "ragione_sociale": d.get("ragione_sociale"),
+            "tipo": d.get("tipo"),
+            "codice_fiscale": d.get("codice_fiscale"),
+            "partita_iva": d.get("partita_iva"),
+            "email": d.get("email"),
+            "telefono": d.get("telefono") or d.get("cellulare"),
+            "comune": d.get("comune"),
+            "provincia": d.get("provincia"),
+            "relazione": relazione,
+        }
+
+    out_root = _light(root)
+    out_root.update(await _stats(aid))
+
+    out_rel = []
+    tot_premio = out_root["premio_totale"]
+    tot_provv = out_root["provvigioni_totale"]
+    tot_polizze = out_root["n_polizze_totali"]
+    tot_attive = out_root["n_polizze_attive"]
+    tot_preventivi = out_root["n_preventivi"]
+    for rid in rel_ids:
+        d = docs.get(rid)
+        if not d:
+            continue
+        rel = relazione_per_id.get(rid)
+        item = _light(d, relazione=rel)
+        st = await _stats(rid)
+        item.update(st)
+        out_rel.append(item)
+        tot_premio += st["premio_totale"]
+        tot_provv += st["provvigioni_totale"]
+        tot_polizze += st["n_polizze_totali"]
+        tot_attive += st["n_polizze_attive"]
+        tot_preventivi += st["n_preventivi"]
+
+    return {
+        "root": out_root,
+        "collegati": out_rel,
+        "totali": {
+            "n_persone": 1 + len(out_rel),
+            "n_polizze_attive": tot_attive,
+            "n_preventivi": tot_preventivi,
+            "n_polizze_totali": tot_polizze,
+            "premio_totale": round(tot_premio, 2),
+            "provvigioni_totale": round(tot_provv, 2),
+        },
+    }
 
 
 @api.post("/anagrafiche/{aid}/relazioni")
@@ -8886,14 +9033,35 @@ async def list_progressi(cid: str, user=Depends(require_user("admin", "collabora
 # ============================================================
 # GEOLOCALIZZAZIONE
 # ============================================================
+@api.get("/geo/suggest")
+async def geo_suggest(
+    q: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Autocomplete indirizzo via Nominatim (italiano). Min 3 char."""
+    return await geocoder_svc.cerca_suggerimenti(q or "", paese="it", limit=6)
+
+
 @api.get("/geo/anagrafiche")
 async def geo_anagrafiche(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """Restituisce solo anagrafiche con lat/lng valide."""
     items = await db.anagrafiche.find(
         {"lat": {"$ne": None}, "lng": {"$ne": None}},
         {"_id": 0, "id": 1, "ragione_sociale": 1, "comune": 1, "provincia": 1,
-         "indirizzo": 1, "lat": 1, "lng": 1, "telefono": 1, "cellulare": 1, "email": 1},
+         "indirizzo": 1, "lat": 1, "lng": 1, "telefono": 1, "cellulare": 1, "email": 1,
+         "tipo_persona": 1, "tags": 1, "categoria": 1},
     ).to_list(5000)
+    # Marca clienti vs prospect: ha almeno una polizza attiva?
+    ids = [a["id"] for a in items]
+    if ids:
+        with_pol = set()
+        async for p in db.polizze.find(
+            {"contraente_id": {"$in": ids}, "stato": {"$in": ["attiva", "in_emissione"]}},
+            {"_id": 0, "contraente_id": 1},
+        ):
+            with_pol.add(p["contraente_id"])
+        for a in items:
+            a["is_cliente"] = a["id"] in with_pol
     return items
 
 

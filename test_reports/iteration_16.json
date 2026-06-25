@@ -1,0 +1,38 @@
+{
+  "summary": "Iter16 - Testing complete delle nuove feature (autocomplete indirizzo + mappa potenziata + network anagrafiche + 4 KPI cards + restyling tabella + dialog relazioni esteso). Backend pytest: 6/6 PASS (geo/suggest, anagrafiche/stats con conteggi corretti 476/6/2/11, anagrafiche/{id}/network con relazione temporanea su 2 anag TEST_, geo/anagrafiche con is_cliente boolean, regressione brogliaccio uscite generiche). Frontend: KPI cards visibili e popolate; tabella con tutte le colonne richieste (Cliente/Email/Telefono/Collegati/Polizze/Preventivi/Premio totale/Provvigioni/Tag); chevron expand apre pannello anag-network-{id} con messaggio 'Nessuna anagrafica collegata' su una ana isolata; Mappa con tutti i 7 testid (toolbar/3 layer/2 toggle/search), 16 anagrafiche su Leaflet con cluster (badge 12 + 2), is_cliente reso come 'Clienti attivi (10) / Prospect (6)'; click layer satellitare OK; AddressAutocomplete in NuovaAnagrafica funzionante (digitando 'via roma como' → 6 suggerimenti → click popola comune=CAVALLASCA, provincia=CO, cap=22042); dialog 'Aggiungi relazione' con 14 opzioni (8 famiglia + altro + 5 azienda) e auto-suggerimento inverso 'rappresenta' quando si seleziona 'legale rappresentante'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AnagraficaDetail tab Anagrafica", "issues": ["Il testid 'anag-indirizzo-autocomplete' è renderizzato solo in modalità edit, e non c'è un bottone 'Modifica' immediato visibile per attivarlo nella view standard. Il componente comunque funziona correttamente in NuovaAnagrafica dialog. Da verificare che il flusso di edit di una anagrafica esistente esponga effettivamente l'autocomplete in produzione."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter16_geo_network_stats.py",
+    "/app/test_reports/pytest/iter16_results.xml"
+  ],
+  "action_items": [
+    "(verifica) Confermare che in AnagraficaDetail (tab 'Anagrafica') esista un percorso UI per entrare in edit mode (es. bottone Modifica) così che il testid anag-indirizzo-autocomplete sia raggiungibile dagli utenti. La logica conditional render è OK, manca solo il toggle visibile in questa schermata di test."
+  ],
+  "critical_code_review_comments": [
+    "server.py è ormai 9718 righe — refactor in moduli (anagrafiche_service, geocoder già esiste, contabilita_service) raccomandato.",
+    "/api/anagrafiche/{aid}/network: per ogni ana esegue una find su polizze (loop async). Su anagrafiche con molte relazioni può diventare N+1; considerare aggregate unica con $group per contraente_id.",
+    "/api/anagrafiche/stats: categoria 'condomini' e 'parrocchie' si basano su heuristica su ragione_sociale UPPERCASE — robusto ma fragile (es. 'PARROCCHIE' non match). Va bene per ora, ma in futuro spostare a un campo 'categoria' esplicito sull'anagrafica.",
+    "geocoder.cerca_suggerimenti chiama Nominatim direttamente: rate limit 1 req/sec. Il client (AddressAutocomplete) ha debounce 450ms ma se l'utente digita più caratteri rapidamente si possono lanciare più query in parallelo. Considerare aggiungere un piccolo cache LRU server-side o usare il throttle del client per evitare 429.",
+    "MappaClienti: 16 anagrafiche geolocalizzate su 495 totali (3.2%) — poche per testare cluster reali; ma la struttura cluster funziona (badge 12 + 2 visibili)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter16_geo_network_stats.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (6/6 pytest)", "frontend": "~95% (tutti i testid critici trovati e funzionanti; solo edit-mode autocomplete non triggerato da UI testata)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test crea 2 anagrafiche temporanee (TEST_iter16_capo, TEST_iter16_figlio) con relazione bidirezionale figlio/genitore, poi cleanup automatico. Test brogliaccio crea 2 movimenti uscite ('altro' 33.33 + 'spese_amministrative' 11.11) su 2026-07-15 e li cancella in teardown.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend brogliaccio endpoint usa parametro 'data' (singolo, YYYY-MM-DD) NON 'data_da'/'data_a'. AddressAutocomplete è un dialog modal (no route /anagrafiche/nuova); aprirlo cliccando bottone 'Nuova anagrafica' su /anagrafiche. Nominatim su 'via roma como' restituisce CAVALLASCA (CO 22042). Test verificato che selezionare 'legale rappresentante' nel select rel-relazione cambia automaticamente l'inverso a 'rappresenta'.",
+  "rca of the issue": "N/A - nessun bug bloccante. Singolo minor: il testid anag-indirizzo-autocomplete in AnagraficaDetail è renderizzato condizionalmente in edit mode e non c'è un bottone 'Modifica' palese sulla tab Anagrafica della view testata; il componente è verificato funzionante sull'altro punto di uso (NuovaAnagrafica dialog) quindi non è un bug critico."
+}

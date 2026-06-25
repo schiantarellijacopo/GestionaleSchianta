@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate } from "@/lib/api";
+import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,9 +9,10 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 
 // Colori per categoria
 const CAT_BADGE = {
@@ -27,6 +28,9 @@ export default function Anagrafiche() {
     const [open, setOpen] = useState(false);
     const [tagFilter, setTagFilter] = useState(null);
     const [catFilter, setCatFilter] = useState("all");
+    const [stats, setStats] = useState(null);
+    const [expanded, setExpanded] = useState({});
+    const [networks, setNetworks] = useState({});
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
 
     const load = useCallback(() => {
@@ -35,6 +39,18 @@ export default function Anagrafiche() {
     }, [q, tagFilter]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => { api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {}); }, []);
+
+    const toggleExpand = async (aid) => {
+        const next = !expanded[aid];
+        setExpanded((p) => ({ ...p, [aid]: next }));
+        if (next && !networks[aid]) {
+            try {
+                const r = await api.get(`/anagrafiche/${aid}/network`);
+                setNetworks((p) => ({ ...p, [aid]: r.data }));
+            } catch { /* ignore */ }
+        }
+    };
 
     // Tag univoci per chip filtri
     const tagsUnivoci = useMemo(() => {
@@ -77,6 +93,34 @@ export default function Anagrafiche() {
                     )
                 }
             />
+
+            {/* 4 KPI per categoria — formato come da richiesta */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <KpiCard
+                    icon={<Users size={18} />} color="sky"
+                    label="Clienti privati" testid="kpi-privati"
+                    n={stats?.privati?.n ?? "—"}
+                    premio={stats?.privati?.premio_totale}
+                />
+                <KpiCard
+                    icon={<Briefcase size={18} />} color="emerald"
+                    label="Aziende" testid="kpi-aziende"
+                    n={stats?.aziende?.n ?? "—"}
+                    premio={stats?.aziende?.premio_totale}
+                />
+                <KpiCard
+                    icon={<Home size={18} />} color="amber"
+                    label="Condomini" testid="kpi-condomini"
+                    n={stats?.condomini?.n ?? "—"}
+                    premio={stats?.condomini?.premio_totale}
+                />
+                <KpiCard
+                    icon={<Church size={18} />} color="violet"
+                    label="Parrocchie" testid="kpi-parrocchie"
+                    n={stats?.parrocchie?.n ?? "—"}
+                    premio={stats?.parrocchie?.premio_totale}
+                />
+            </div>
 
             <div className="flex items-center gap-2 mb-3">
                 <div className="relative flex-1 max-w-md">
@@ -130,60 +174,36 @@ export default function Anagrafiche() {
 
             <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
                 {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full">
+                    <table className="w-full text-sm">
                         <thead>
-                            <tr>
-                                <th className="w-[10px]"></th>
-                                <th>Ragione sociale</th>
-                                <th>CF / P.IVA</th>
-                                <th>Polizze</th>
-                                <th>Comune</th>
-                                <th>Email</th>
-                                <th>Telefono</th>
-                                <th>Operatore</th>
-                                <th>Tag</th>
+                            <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
+                                <th className="w-8 py-3"></th>
+                                <th className="text-left py-3 pr-3">Cliente</th>
+                                <th className="text-left py-3 pr-3">E-mail</th>
+                                <th className="text-left py-3 pr-3">Telefono</th>
+                                <th className="text-center py-3 pr-3">Collegati</th>
+                                <th className="text-center py-3 pr-3 text-emerald-700">Polizze</th>
+                                <th className="text-center py-3 pr-3">Preventivi</th>
+                                <th className="text-right py-3 pr-3">Premio totale</th>
+                                <th className="text-right py-3 pr-3 text-emerald-700">Provvigioni</th>
+                                <th className="text-left py-3 pr-3">Tag</th>
                             </tr>
                         </thead>
                         <tbody>
                             {filtered.map((a) => {
                                 const cat = CAT_BADGE[a.categoria_ui] || CAT_BADGE.senza_polizze;
+                                const isOpen = !!expanded[a.id];
+                                const net = networks[a.id];
                                 return (
-                                    <tr key={a.id} data-testid={`anagrafica-row-${a.id}`}>
-                                        <td>
-                                            <span title={cat.label} className={`inline-block w-2 h-2 rounded-full ${cat.dot}`} />
-                                        </td>
-                                        <td>
-                                            <Link to={`/anagrafiche/${a.id}`} className={`hover:underline font-medium ${cat.text}`}>
-                                                {a.ragione_sociale}
-                                            </Link>
-                                            {a.tipo === "persona_giuridica" && <span className="ml-1 text-[9px] text-slate-400">PG</span>}
-                                            <ComplianceBadges ana={a} />
-                                        </td>
-                                        <td className="num font-mono text-xs">{a.codice_fiscale || a.partita_iva || "-"}</td>
-                                        <td className="num text-center">
-                                            {a.polizze_attive_count > 0
-                                                ? <span className="badge badge-info">{a.polizze_attive_count}</span>
-                                                : <span className="text-slate-300">—</span>}
-                                        </td>
-                                        <td>{a.comune || "-"}{a.provincia ? ` (${a.provincia})` : ""}</td>
-                                        <td className="text-xs">{a.email || "-"}</td>
-                                        <td className="text-xs">{a.cellulare || a.telefono || "-"}</td>
-                                        <td className="text-xs">{a.collaboratore_nome || <span className="text-slate-300">—</span>}</td>
-                                        <td>
-                                            <div className="flex flex-wrap gap-1">
-                                                {(a.tags || []).slice(0, 3).map((t) => (
-                                                    <button
-                                                        key={t}
-                                                        onClick={() => setTagFilter(t)}
-                                                        className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700"
-                                                    >
-                                                        {t}
-                                                    </button>
-                                                ))}
-                                                {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
-                                            </div>
-                                        </td>
-                                    </tr>
+                                    <RigaAnagrafica
+                                        key={a.id}
+                                        a={a}
+                                        cat={cat}
+                                        isOpen={isOpen}
+                                        net={net}
+                                        onToggle={() => toggleExpand(a.id)}
+                                        onTagClick={(t) => setTagFilter(t)}
+                                    />
                                 );
                             })}
                         </tbody>
@@ -191,6 +211,156 @@ export default function Anagrafiche() {
                 )}
             </div>
         </div>
+    );
+}
+
+function KpiCard({ icon, color, label, n, premio, testid }) {
+    const palettes = {
+        sky: "bg-sky-50 border-sky-200 text-sky-700",
+        emerald: "bg-emerald-50 border-emerald-200 text-emerald-700",
+        amber: "bg-amber-50 border-amber-200 text-amber-700",
+        violet: "bg-violet-50 border-violet-200 text-violet-700",
+    };
+    return (
+        <Link
+            to={`/anagrafiche?cat=${(label || "").toLowerCase()}`}
+            className={`block border rounded-lg p-4 hover:shadow-md transition-shadow ${palettes[color]}`}
+            data-testid={testid}
+            onClick={(e) => e.preventDefault()}
+        >
+            <div className="flex items-start justify-between">
+                <div className="text-[10px] uppercase tracking-widest font-semibold opacity-80">{label}</div>
+                <div className="opacity-60">{icon}</div>
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+                <span className="text-3xl font-bold num text-slate-900">{n}</span>
+                <span className="text-[10px] uppercase tracking-wider opacity-60">tot.</span>
+            </div>
+            <div className="mt-1 text-xs opacity-80">
+                Premi: <span className="font-semibold num text-slate-800">{fmtEur(premio || 0)}</span>
+            </div>
+        </Link>
+    );
+}
+
+function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
+    return (
+        <>
+            <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors" data-testid={`anagrafica-row-${a.id}`}>
+                <td className="py-3 pl-2">
+                    <button
+                        onClick={onToggle}
+                        className="text-slate-400 hover:text-sky-600 transition-colors"
+                        data-testid={`anag-expand-${a.id}`}
+                        aria-label="Espandi network"
+                    >
+                        <ChevronRight size={16} className={`transform transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    </button>
+                </td>
+                <td className="py-3 pr-3">
+                    <div className="flex items-center gap-2">
+                        <Contact size={16} className="text-slate-400 shrink-0" />
+                        <Link
+                            to={`/anagrafiche/${a.id}`}
+                            className={`hover:underline font-semibold text-[15px] tracking-wide ${cat.text}`}
+                        >
+                            {a.ragione_sociale}
+                        </Link>
+                        {a.tipo === "persona_giuridica" && <span className="ml-1 text-[9px] text-slate-400">PG</span>}
+                    </div>
+                    <ComplianceBadges ana={a} />
+                </td>
+                <td className="py-3 pr-3 text-xs">
+                    {a.email
+                        ? <span className="inline-flex items-center gap-1 text-slate-700"><Mail size={12} className="text-slate-400" />{a.email}</span>
+                        : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-3 pr-3 text-xs">
+                    {a.cellulare || a.telefono
+                        ? <span className="inline-flex items-center gap-1 text-slate-700"><Phone size={12} className="text-slate-400" />{a.cellulare || a.telefono}</span>
+                        : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-3 pr-3 text-center num text-slate-700">
+                    {net ? net.totali.n_persone - 1 : "·"}
+                </td>
+                <td className="py-3 pr-3 text-center text-emerald-700 font-semibold num">
+                    {a.polizze_attive_count || 0}
+                </td>
+                <td className="py-3 pr-3 text-center num text-slate-500">
+                    {net ? net.root.n_preventivi : "·"}
+                </td>
+                <td className="py-3 pr-3 text-right font-bold num text-slate-900 text-base">
+                    {net ? fmtEur(net.root.premio_totale || 0) : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-3 pr-3 text-right font-semibold num text-emerald-700">
+                    {net ? fmtEur(net.root.provvigioni_totale || 0) : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-3 pr-3">
+                    <div className="flex flex-wrap gap-1">
+                        {(a.tags || []).slice(0, 3).map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => onTagClick(t)}
+                                className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700"
+                            >
+                                {t}
+                            </button>
+                        ))}
+                        {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
+                    </div>
+                </td>
+            </tr>
+            {isOpen && net && (
+                <tr className="bg-slate-50/60 border-b border-slate-200" data-testid={`anag-network-${a.id}`}>
+                    <td colSpan={10} className="px-12 py-4">
+                        {net.collegati.length === 0 ? (
+                            <div className="text-xs text-slate-500 italic">
+                                Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Albero genealogico.
+                            </div>
+                        ) : (
+                            <>
+                                <div className="text-[10px] uppercase font-semibold tracking-widest text-slate-500 mb-2 flex items-center gap-1">
+                                    <Users size={11} /> Collegati ({net.collegati.length})
+                                </div>
+                                <table className="w-full text-xs">
+                                    <thead>
+                                        <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b">
+                                            <th className="text-left py-1.5 pr-2">Anagrafica</th>
+                                            <th className="text-left py-1.5 pr-2">Relazione</th>
+                                            <th className="text-center py-1.5 pr-2">Polizze</th>
+                                            <th className="text-center py-1.5 pr-2">Preventivi</th>
+                                            <th className="text-right py-1.5 pr-2">Premio</th>
+                                            <th className="text-right py-1.5 pr-2">Provvigioni</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {net.collegati.map((c) => (
+                                            <tr key={c.id} className="border-b border-slate-100 hover:bg-white">
+                                                <td className="py-1.5 pr-2">
+                                                    <Link to={`/anagrafiche/${c.id}`} className="text-sky-700 hover:underline font-medium">{c.ragione_sociale}</Link>
+                                                </td>
+                                                <td className="py-1.5 pr-2 text-slate-600 capitalize">{(c.relazione || "—").replace(/_/g, " ")}</td>
+                                                <td className="text-center py-1.5 pr-2 num text-emerald-700 font-semibold">{c.n_polizze_attive}</td>
+                                                <td className="text-center py-1.5 pr-2 num text-slate-500">{c.n_preventivi}</td>
+                                                <td className="text-right py-1.5 pr-2 num font-semibold">{fmtEur(c.premio_totale || 0)}</td>
+                                                <td className="text-right py-1.5 pr-2 num text-emerald-700">{fmtEur(c.provvigioni_totale || 0)}</td>
+                                            </tr>
+                                        ))}
+                                        <tr className="border-t-2 border-slate-300 font-bold">
+                                            <td colSpan={2} className="py-1.5 pr-2 text-right uppercase text-[10px] tracking-widest">Totale network</td>
+                                            <td className="text-center py-1.5 pr-2 num">{net.totali.n_polizze_attive}</td>
+                                            <td className="text-center py-1.5 pr-2 num">{net.totali.n_preventivi}</td>
+                                            <td className="text-right py-1.5 pr-2 num">{fmtEur(net.totali.premio_totale)}</td>
+                                            <td className="text-right py-1.5 pr-2 num text-emerald-700">{fmtEur(net.totali.provvigioni_totale)}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </>
+                        )}
+                    </td>
+                </tr>
+            )}
+        </>
     );
 }
 
@@ -566,8 +736,24 @@ function NuovaAnagraficaDialog({ onClose }) {
                 </div>
                 <div className="col-span-2">
                     <Label>Indirizzo</Label>
-                    <Input className="uc" value={form.indirizzo} onBlur={geocoda}
-                        onChange={(e) => setU("indirizzo", e.target.value)} />
+                    <AddressAutocomplete
+                        value={form.indirizzo}
+                        onChange={(v) => setU("indirizzo", v)}
+                        onSelect={(p) => {
+                            setForm((prev) => ({
+                                ...prev,
+                                indirizzo: (p.indirizzo || prev.indirizzo).toUpperCase(),
+                                comune: (p.comune || prev.comune).toUpperCase(),
+                                cap: p.cap || prev.cap,
+                                provincia: (p.provincia || prev.provincia || "").slice(0, 2).toUpperCase(),
+                                lat: p.lat,
+                                lng: p.lng,
+                                indirizzo_geocoded: p.display_name,
+                            }));
+                            toast.success("Indirizzo geolocalizzato automaticamente");
+                        }}
+                        testid="new-anag-indirizzo-autocomplete"
+                    />
                 </div>
                 <div>
                     <Label>Comune</Label>
