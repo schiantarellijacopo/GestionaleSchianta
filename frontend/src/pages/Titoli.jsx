@@ -385,15 +385,27 @@ export default function Titoli() {
                 </div>
             </div>
 
-            {bulkOpen && (
-                <BulkActionDialog
-                    action={bulkOpen}
-                    ids={Array.from(selected)}
-                    titoli={(list || []).filter((t) => selected.has(t.id))}
-                    conti={conti}
-                    onClose={() => { setBulkOpen(null); load(); }}
-                />
-            )}
+            {bulkOpen && (() => {
+                const sel = (list || []).filter((t) => selected.has(t.id));
+                if (sel.length === 1) {
+                    return (
+                        <DialogIncassoCopertura
+                            titolo={sel[0]}
+                            conti={conti}
+                            onClose={() => { setBulkOpen(null); setSelected(new Set()); load(); }}
+                        />
+                    );
+                }
+                return (
+                    <BulkActionDialog
+                        action={bulkOpen}
+                        ids={Array.from(selected)}
+                        titoli={sel}
+                        conti={conti}
+                        onClose={() => { setBulkOpen(null); load(); }}
+                    />
+                );
+            })()}
 
             {editing && (
                 <EditTitoloDialog titolo={editing} conti={conti} onClose={() => { setEditing(null); load(); }} />

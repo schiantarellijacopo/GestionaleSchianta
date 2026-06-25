@@ -10,7 +10,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Calendar } from "lucide-react";
+import { Plus, Calendar, ArrowLeftRight } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
@@ -24,6 +24,8 @@ export default function Contabilita() {
     const [estratto, setEstratto] = useState(null);
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [open, setOpen] = useState(false);
+    const [giroOpen, setGiroOpen] = useState(false);
+    const [conti, setConti] = useState([]);
 
     const load = () => {
         const params = {};
@@ -33,6 +35,7 @@ export default function Contabilita() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al]);
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
+    useEffect(() => { api.get("/contabilita/conti-cassa").then((r) => setConti(r.data || [])); }, []);
 
     const caricaEstratto = (id) => {
         setEstrattoAna(id);
@@ -46,14 +49,24 @@ export default function Contabilita() {
                 title="Contabilità"
                 subtitle="Prima nota, estratti conto, movimenti contabili"
                 actions={
-                    <Dialog open={open} onOpenChange={setOpen}>
-                        <DialogTrigger asChild>
-                            <Button data-testid="mov-new-button" className="bg-sky-700 hover:bg-sky-800">
-                                <Plus size={16} className="mr-1" /> Nuovo movimento
-                            </Button>
-                        </DialogTrigger>
-                        <NuovoMovimentoDialog anagrafiche={anagrafiche} onClose={() => { setOpen(false); load(); }} />
-                    </Dialog>
+                    <div className="flex gap-2">
+                        <Dialog open={giroOpen} onOpenChange={setGiroOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" data-testid="giroconto-button" className="border-violet-300 text-violet-700 hover:bg-violet-50">
+                                    <ArrowLeftRight size={16} className="mr-1" /> Giroconto
+                                </Button>
+                            </DialogTrigger>
+                            <GirocontoDialog conti={conti} onClose={() => { setGiroOpen(false); load(); }} />
+                        </Dialog>
+                        <Dialog open={open} onOpenChange={setOpen}>
+                            <DialogTrigger asChild>
+                                <Button data-testid="mov-new-button" className="bg-sky-700 hover:bg-sky-800">
+                                    <Plus size={16} className="mr-1" /> Nuovo movimento
+                                </Button>
+                            </DialogTrigger>
+                            <NuovoMovimentoDialog anagrafiche={anagrafiche} onClose={() => { setOpen(false); load(); }} />
+                        </Dialog>
+                    </div>
                 }
             />
 
@@ -304,3 +317,108 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
         </DialogContent>
     );
 }
+
+function GirocontoDialog({ conti, onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [f, setF] = useState({
+        data: today,
+        conto_da: "",
+        conto_a: "",
+        importo: "",
+        descrizione: "",
+    });
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const save = async () => {
+        if (!f.conto_da || !f.conto_a) { toast.error("Seleziona entrambi i conti"); return; }
+        if (f.conto_da === f.conto_a) { toast.error("I conti devono essere diversi"); return; }
+        const imp = parseFloat(f.importo);
+        if (!imp || imp <= 0) { toast.error("Importo non valido"); return; }
+        try {
+            const r = await api.post("/contabilita/giroconto", {
+                data_movimento: f.data,
+                conto_da_id: f.conto_da,
+                conto_a_id: f.conto_a,
+                importo: imp,
+                descrizione: f.descrizione || null,
+            });
+            toast.success(`Giroconto registrato: ${r.data.descrizione_breve || ""}`);
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore giroconto");
+        }
+    };
+    const nomeDa = conti.find((c) => c.id === f.conto_da)?.nome;
+    const nomeA = conti.find((c) => c.id === f.conto_a)?.nome;
+    const imp = parseFloat(f.importo) || 0;
+    return (
+        <DialogContent className="max-w-lg" data-testid="dialog-giroconto">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                    <ArrowLeftRight size={18} className="text-violet-700" />
+                    Giroconto tra conti
+                </DialogTitle>
+            </DialogHeader>
+            <div className="bg-violet-50 border border-violet-200 rounded-md p-3 text-xs text-violet-900">
+                <strong>Cosa fa:</strong> sposta un importo da un conto cassa a un altro (esempio: prelievo da banca → contanti, o trasferimento tra banche).
+                Genera due movimenti contabili gemelli: uscita dal conto di partenza, entrata sul conto di destinazione (giornata in pareggio).
+            </div>
+            <div className="space-y-3 py-2">
+                <div>
+                    <Label>Data</Label>
+                    <Input type="date" value={f.data} onChange={(e) => set("data", e.target.value)} data-testid="giro-data" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <Label className="text-rose-700 font-semibold">DA (uscita)</Label>
+                        <Select value={f.conto_da} onValueChange={(v) => set("conto_da", v)}>
+                            <SelectTrigger data-testid="giro-conto-da"><SelectValue placeholder="seleziona…" /></SelectTrigger>
+                            <SelectContent>
+                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label className="text-emerald-700 font-semibold">A (entrata)</Label>
+                        <Select value={f.conto_a} onValueChange={(v) => set("conto_a", v)}>
+                            <SelectTrigger data-testid="giro-conto-a"><SelectValue placeholder="seleziona…" /></SelectTrigger>
+                            <SelectContent>
+                                {conti.filter((c) => c.id !== f.conto_da).map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <div>
+                    <Label>Importo (€)</Label>
+                    <Input
+                        type="number" step="0.01" min="0.01"
+                        value={f.importo} onChange={(e) => set("importo", e.target.value)}
+                        className="text-lg font-semibold"
+                        data-testid="giro-importo"
+                    />
+                </div>
+                <div>
+                    <Label>Descrizione (opzionale)</Label>
+                    <Input value={f.descrizione} onChange={(e) => set("descrizione", e.target.value)} placeholder="es. Prelievo bancomat" />
+                </div>
+                {imp > 0 && nomeDa && nomeA && (
+                    <div className="bg-slate-50 border border-slate-200 rounded p-3 text-xs space-y-1" data-testid="giro-preview">
+                        <div className="font-semibold text-slate-700">Anteprima movimenti:</div>
+                        <div className="flex justify-between">
+                            <span>📤 <span className="font-medium">{nomeDa}</span></span>
+                            <span className="num font-semibold text-rose-700">- {fmtEur(imp)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span>📥 <span className="font-medium">{nomeA}</span></span>
+                            <span className="num font-semibold text-emerald-700">+ {fmtEur(imp)}</span>
+                        </div>
+                    </div>
+                )}
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={onClose}>Annulla</Button>
+                <Button onClick={save} className="bg-violet-700 hover:bg-violet-800" data-testid="giro-save">Registra giroconto</Button>
+            </DialogFooter>
+        </DialogContent>
+    );
+}
+
