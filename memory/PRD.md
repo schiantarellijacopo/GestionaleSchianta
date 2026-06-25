@@ -17,7 +17,19 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
 ## Cosa è stato implementato
-### 2026-06-25 (sessione corrente)
+### 2026-06-25 (sessione corrente, parte 2)
+- ✅ **Breakdown provvigioni a 3 valori** (Totale / Collaboratore / Margine) in Polizza e Titoli, applicato sulla provvigione REALE della polizza/titolo + % schema collaboratore
+- ✅ Helper backend `_provv_breakdown()` riusabile
+- ✅ **Tab Sinistri** in `PolizzaDetail.jsx` con lista sinistri e link Apri elenco completo
+- ✅ Filtro `polizza_id` + auto-focus su Sinistri.jsx
+- ✅ **Pagina Avvisi** (`/avvisi`) con KPI (polizze in scadenza, titoli, premio a rischio, importi da incassare), tab Polizze/Titoli, pulsanti per riga: Email (dialog precompilato + invio SMTP / fallback mailto), WhatsApp (wa.me deeplink), SMS (placeholder Twilio fine progetto)
+- ✅ **Rubrica Compagnie** (`/rubrica-compagnie`) con CRUD: ContattoCompagnia (nome, cognome, ruolo, ufficio, email, telefono, cellulare, interno, note). Endpoints `/api/contatti-compagnia`. Vista raggruppata per compagnia.
+- ✅ **Titoli storici** (preset `?preset=storico`) — voce dedicata in sidebar che filtra solo titoli `incassato`
+- ✅ Dialog "Modifica titolo" semplificato: rimossi Stato (auto), Conto/Banca; Mezzo pagamento ora **dropdown** (bonifico, RID/SDD, contanti, assegno, POS, bollettino, carta_credito, compagnia, altro)
+- ✅ Sidebar pulita: rimossi doppioni (`Titoli (incassi)` ridotto a `Titoli storici`, `Compagnie` rimossa a favore della tab nelle Librerie + nuova Rubrica)
+- ✅ Click su riga in Titoli ora apre Dialog Modifica (estratto in componente condiviso `/app/frontend/src/components/TitoloDialog.jsx`)
+
+### 2026-06-25 (sessione corrente, parte 1)
 - ✅ KPI **Sospesi** in Brogliaccio mirror esatto del totale `/titoli/sospesi` (`_total_sospesi_as_of`)
 - ✅ **Riepilogo per collaboratore** nella pagina Titoli Sospesi (groupBy + totale)
 - ✅ **Avvisi di Scadenza**: cron 08:00 (APScheduler) + `GET /avvisi-scadenze/preview`, `POST /esegui`, `GET /log` + email HTML
@@ -40,13 +52,18 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 
 ## Backlog
 ### P1
+- **Tab "Documenti" in PolizzaDetail** (allegati polizza, da implementare)
+- **OCR Libretto veicolo** (Gemini 3 Flash) → auto-fill targa/marca/modello/immatricolazione + auto-save PDF in polizza
+- **OCR Fattura / Busta paga** (Gemini 3 Flash) → estrazione dati per Analisi Cliente
 - **Piramide Soluzioni Redesign** (Release B) — blocchi impilati Adeguata/Non Adeguata + PDF
 - **Refactoring `server.py`** (>7000 righe) → split in `/app/backend/routes/`
 - **Refactoring `ania_importer.py`, `inps_calculator.py`** (parser complessi)
+- **Librerie · collegamento Metodi pagamento ↔ Banche** (refactor lib `conti-cassa`)
 
 ### P2
-- **OCR allegati** (Fatture/Ricevute) con Gemini 3 Flash per auto-compilare data/importo/numero documento
 - **Refactor `Anagrafiche.jsx`** componenti (perf)
+- **Avviso SMS** via Twilio (collegamento già predisposto in pagina Avvisi)
+- **Avviso WhatsApp Business API** (al momento usa `wa.me` deeplink)
 
 ### P3 (alla fine — esplicita richiesta utente)
 - Integrazioni 3rd party: Google Calendar OAuth, Microsoft 365, WhatsApp, 3CX, Office 365

@@ -701,6 +701,22 @@ class SchemaProvvigionale(BaseDoc):
     attivo: bool = True
 
 
+# =============== RUBRICA CONTATTI COMPAGNIA ===============
+class ContattoCompagnia(BaseDoc):
+    """Persona di riferimento di una compagnia (rubrica)."""
+    compagnia_id: str
+    nome: str
+    cognome: Optional[str] = None
+    ruolo: Optional[str] = None  # es. "Ufficio sinistri", "Ufficio incassi", "Direzione"
+    ufficio: Optional[str] = None
+    email: Optional[str] = None
+    telefono: Optional[str] = None
+    cellulare: Optional[str] = None
+    interno: Optional[str] = None
+    note: Optional[str] = None
+    attivo: bool = True
+
+
 class ImportLog(BaseDoc):
     utente_id: Optional[str] = None
     nome_file: str

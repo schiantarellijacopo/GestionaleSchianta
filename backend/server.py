@@ -28,7 +28,7 @@ from db_models import (
     AttivitaLog, ImportLog, Banca, ContoCassa, ProdottoLibreria, RamoLibreria, ApplicazioneLibroMatricola,
     Allegato, DiarioVoce, MessaggioChat, Corso, ProgressoCorso, PagamentoProvvigioni, VoceManualeCollab,
     ChiusuraGiorno,
-    AziendaConfig, SchemaProvvigionale, EventoCalendario,
+    AziendaConfig, SchemaProvvigionale, EventoCalendario, ContattoCompagnia,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
     _now_iso, _uid,
@@ -6171,6 +6171,75 @@ async def delete_schema_provvigionale(sid: str, user=Depends(require_user("admin
     res = await db.schema_provvigionale.delete_one({"id": sid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Schema non trovato")
+    return {"ok": True}
+
+
+# ============================================================
+# RUBRICA CONTATTI COMPAGNIA
+# ============================================================
+@api.get("/contatti-compagnia")
+async def list_contatti_compagnia(
+    compagnia_id: Optional[str] = None,
+    q: Optional[str] = None,
+    attivo: Optional[bool] = None,
+    user=Depends(current_user),
+):
+    flt: dict = {}
+    if compagnia_id:
+        flt["compagnia_id"] = compagnia_id
+    if attivo is not None:
+        flt["attivo"] = attivo
+    if q:
+        qrx = {"$regex": q, "$options": "i"}
+        flt["$or"] = [
+            {"nome": qrx}, {"cognome": qrx}, {"ruolo": qrx},
+            {"email": qrx}, {"telefono": qrx}, {"cellulare": qrx},
+            {"ufficio": qrx},
+        ]
+    items = await db.contatti_compagnia.find(flt, {"_id": 0}).sort([("cognome", 1), ("nome", 1)]).to_list(2000)
+    # arricchimento ragione sociale compagnia
+    cmp_ids = list({c.get("compagnia_id") for c in items if c.get("compagnia_id")})
+    cmps = {c["id"]: c async for c in db.compagnie.find(
+        {"id": {"$in": cmp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
+    )}
+    for c in items:
+        cm = cmps.get(c.get("compagnia_id"), {})
+        c["compagnia_nome"] = cm.get("ragione_sociale")
+        c["compagnia_codice"] = cm.get("codice")
+    return items
+
+
+@api.post("/contatti-compagnia", status_code=201)
+async def create_contatto_compagnia(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    if not body.get("compagnia_id") or not body.get("nome"):
+        raise HTTPException(400, "compagnia_id e nome obbligatori")
+    obj = ContattoCompagnia(**body)
+    await db.contatti_compagnia.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "contatto_compagnia", obj.id,
+                       f"Contatto '{obj.nome} {obj.cognome or ''}'")
+    return obj.model_dump()
+
+
+@api.put("/contatti-compagnia/{cid}")
+async def update_contatto_compagnia(
+    cid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    body.pop("id", None)
+    body["updated_at"] = _now_iso()
+    res = await db.contatti_compagnia.update_one({"id": cid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Contatto non trovato")
+    await log_attivita(user, "update", "contatto_compagnia", cid)
+    return await db.contatti_compagnia.find_one({"id": cid}, {"_id": 0})
+
+
+@api.delete("/contatti-compagnia/{cid}")
+async def delete_contatto_compagnia(cid: str, user=Depends(require_user("admin", "collaboratore"))):
+    res = await db.contatti_compagnia.delete_one({"id": cid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Contatto non trovato")
+    await log_attivita(user, "delete", "contatto_compagnia", cid)
     return {"ok": True}
 
 

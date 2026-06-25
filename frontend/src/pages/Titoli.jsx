@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
@@ -25,6 +25,7 @@ import { toast } from "sonner";
 const PRESETS = [
     { key: "tutti", label: "Tutti" },
     { key: "sospesi", label: "Sospesi (da incassare)" },
+    { key: "storico", label: "Storico incassati" },
     { key: "scad15", label: "In scadenza 15gg" },
     { key: "scad_oltre15", label: "Oltre 15gg" },
     { key: "scadute_oggi", label: "Scadute oggi" },
@@ -37,6 +38,7 @@ const PRESETS = [
 const presetParams = (key) => {
     switch (key) {
         case "sospesi": return { stato: "da_incassare" };
+        case "storico": return { stato: "incassato" };
         case "scad15": return { in_scadenza_giorni: 15 };
         case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
         case "scadute_oggi": return { scadute_oggi: true };
@@ -50,6 +52,8 @@ const presetParams = (key) => {
 
 export default function Titoli() {
     const { user } = useAuth();
+    const [searchParams] = useSearchParams();
+    const urlPreset = searchParams.get("preset");
     const [list, setList] = useState(null);
     const [compagnie, setCompagnie] = useState([]);
     const [rami, setRami] = useState([]);
@@ -60,11 +64,20 @@ export default function Titoli() {
     const [pageSize, setPageSize] = useState(50);
 
     const [filters, setFilters] = useState({
-        preset: "sospesi", q: "",
+        preset: urlPreset && PRESETS.find((p) => p.key === urlPreset) ? urlPreset : "sospesi",
+        q: "",
         stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
         dal: "", al: "",
     });
+
+    // Allineamento preset dall'URL (es. /titoli?preset=storico)
+    useEffect(() => {
+        if (urlPreset && PRESETS.find((p) => p.key === urlPreset)) {
+            setFilters((p) => ({ ...p, preset: urlPreset }));
+        }
+        // eslint-disable-next-line
+    }, [urlPreset]);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
 
     const [selected, setSelected] = useState(new Set());
