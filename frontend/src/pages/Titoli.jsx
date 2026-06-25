@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
+import DialogIncasso from "@/components/DialogIncasso";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
     ChevronDown, ChevronUp,
@@ -66,6 +67,7 @@ export default function Titoli() {
 
     const [selected, setSelected] = useState(new Set());
     const [bulkOpen, setBulkOpen] = useState(null); // "incassa" | "copertura"
+    const [paying, setPaying] = useState(null);     // titolo singolo da incassare
 
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
     const canDelete = ["admin", "collaboratore"].includes(user?.role);
@@ -260,13 +262,14 @@ export default function Titoli() {
                                 <th>Contraente</th>
                                 <th>Compagnia</th>
                                 <th>Collaboratore</th>
-                                <th className="text-right">Rata</th>
+                                <th className="text-right">Premio €</th>
                                 <th className="text-right">Provv.</th>
                                 <th>Scadenza</th>
                                 <th>Copertura</th>
                                 <th>Stato</th>
                                 <th className="text-right">Da pagare</th>
                                 <th className="w-12 text-center">Allegati</th>
+                                <th className="w-24 text-center">Azione</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -295,7 +298,7 @@ export default function Titoli() {
                                         <td className="text-xs">{t.contraente_nome || "-"}</td>
                                         <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>
                                         <td className="text-xs text-slate-700">{t.collaboratore_nome || "-"}</td>
-                                        <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
+                                        <td className="num text-right font-medium" data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</td>
                                         <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
                                         <td className="num text-xs">{fmtDate(t.scadenza)}</td>
                                         <td className="num text-xs text-emerald-700">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
@@ -311,6 +314,20 @@ export default function Titoli() {
                                                 hint={t.data_incasso ? "Allega ricevuta bonifico / assegno" : "Allega documento"}
                                                 onChange={load}
                                             />
+                                        </td>
+                                        <td className="text-center">
+                                            {t.stato !== "incassato" && t.stato !== "stornato" ? (
+                                                <Button
+                                                    size="sm"
+                                                    className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                                    onClick={() => setPaying(t)}
+                                                    data-testid={`titolo-incassa-${t.id}`}
+                                                >
+                                                    Incassa
+                                                </Button>
+                                            ) : (
+                                                <span className="text-xs text-emerald-700">✓ {fmtDate(t.data_incasso)}</span>
+                                            )}
                                         </td>
                                         <td className="text-right">
                                             <RowActions
@@ -388,6 +405,14 @@ export default function Titoli() {
 
             {editing && (
                 <EditTitoloDialog titolo={editing} conti={conti} onClose={() => { setEditing(null); load(); }} />
+            )}
+
+            {paying && (
+                <DialogIncasso
+                    titolo={paying}
+                    conti={conti}
+                    onClose={() => { setPaying(null); load(); }}
+                />
             )}
         </div>
     );

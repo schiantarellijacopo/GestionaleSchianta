@@ -1,17 +1,13 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
-import { PageHeader, Loading, Empty } from "@/components/Shared";
+import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
+import DialogIncasso from "@/components/DialogIncasso";
 import { Coins, Clock, AlertTriangle, CheckCircle } from "lucide-react";
-import { toast } from "sonner";
 
 export default function TitoliSospesi() {
     const [items, setItems] = useState(null);
@@ -39,6 +35,20 @@ export default function TitoliSospesi() {
             importo: arr.reduce((s, t) => s + (t.importo_lordo || 0), 0),
             piuVecchio: arr.reduce((m, t) => Math.max(m, t.giorni_anticipo || 0), 0),
         };
+    }, [items]);
+
+    const riepilogoCollab = useMemo(() => {
+        const arr = items || [];
+        const map = new Map();
+        for (const t of arr) {
+            const id = t.collaboratore_id || "__none__";
+            const nome = t.collaboratore_nome || "— senza collaboratore —";
+            const cur = map.get(id) || { id, nome, count: 0, importo: 0 };
+            cur.count += 1;
+            cur.importo += (t.importo_lordo || 0);
+            map.set(id, cur);
+        }
+        return Array.from(map.values()).sort((a, b) => b.importo - a.importo);
     }, [items]);
 
     return (
@@ -80,6 +90,39 @@ export default function TitoliSospesi() {
                     </Select>
                 </div>
             </Card>
+
+            {riepilogoCollab.length > 0 && (
+                <Card className="border-slate-200 mb-4 overflow-hidden" data-testid="sospesi-riepilogo-collab">
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-600 font-semibold">
+                        Riepilogo per collaboratore
+                    </div>
+                    <table className="tbl w-full">
+                        <thead>
+                            <tr>
+                                <th>Collaboratore</th>
+                                <th className="text-right">N° titoli</th>
+                                <th className="text-right">Totale anticipato</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {riepilogoCollab.map((r) => (
+                                <tr key={r.id} data-testid={`riep-collab-${r.id}`}>
+                                    <td className="font-medium">{r.nome}</td>
+                                    <td className="num text-right">{r.count}</td>
+                                    <td className="num text-right font-semibold">{fmtEur(r.importo)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                            <tr className="bg-slate-50 font-semibold">
+                                <td className="text-right">TOTALE</td>
+                                <td className="num text-right">{totali.count}</td>
+                                <td className="num text-right">{fmtEur(totali.importo)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </Card>
+            )}
 
             <Card className="border-slate-200 overflow-hidden">
                 {items === null ? <Loading /> : items.length === 0 ? (
@@ -173,136 +216,5 @@ function KpiCard({ icon, label, value, bg }) {
                 {icon}
             </div>
         </Card>
-    );
-}
-
-function DialogIncasso({ titolo, conti, onClose }) {
-    const oggi = new Date().toISOString().slice(0, 10);
-    const [pref, setPref] = useState(null);
-    useEffect(() => {
-        if (titolo.contraente_id) {
-            api.get(`/anagrafiche/${titolo.contraente_id}`).then((r) => setPref(r.data));
-        }
-    }, [titolo.contraente_id]);
-    const defaultMezzo = pref?.preferenza_pagamento || pref?.ultimo_mezzo_pagamento || "contanti";
-    const [f, setF] = useState({
-        data_incasso: oggi,
-        mezzo_pagamento: defaultMezzo,
-        conto_cassa_id: conti[0]?.id || "",
-        importo_pagato: titolo.importo_lordo,
-        motivo_sconto: "",
-    });
-    useEffect(() => {
-        if (pref) setF((p) => ({ ...p, mezzo_pagamento: defaultMezzo }));
-    // eslint-disable-next-line
-    }, [pref]);
-    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-    const sconto = Math.max(0, (titolo.importo_lordo || 0) - (parseFloat(f.importo_pagato) || 0));
-
-    const conferma = async () => {
-        try {
-            await api.post(`/titoli/${titolo.id}/incassa`, {
-                data_incasso: f.data_incasso,
-                mezzo_pagamento: f.mezzo_pagamento,
-                conto_cassa_id: f.conto_cassa_id || null,
-                importo_pagato: parseFloat(f.importo_pagato) || 0,
-                motivo_sconto: sconto > 0 ? (f.motivo_sconto || "Sconto applicato") : null,
-            });
-            toast.success(sconto > 0
-                ? `Incassato €${f.importo_pagato} (sconto €${sconto.toFixed(2)} in prima nota)`
-                : `Incassato €${f.importo_pagato}`);
-            onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
-    };
-
-    return (
-        <Dialog open onOpenChange={onClose}>
-            <DialogContent className="max-w-lg">
-                <DialogHeader>
-                    <DialogTitle>Incasso titolo — {titolo.contraente_nome}</DialogTitle>
-                </DialogHeader>
-
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900 space-y-0.5">
-                    <div><strong>Polizza:</strong> {titolo.numero_polizza} ({titolo.ramo})</div>
-                    <div><strong>Importo da incassare:</strong> <span className="num font-bold">{fmtEur(titolo.importo_lordo)}</span></div>
-                    <div><strong>Anticipato dall&apos;agenzia il:</strong> {fmtDate(titolo.data_copertura)} ({titolo.giorni_anticipo} gg fa)</div>
-                    {pref?.preferenza_pagamento && (
-                        <div className="mt-1 text-emerald-700">
-                            ★ <strong>Preferenza cliente:</strong> {pref.preferenza_pagamento}
-                            {pref.ultimo_mezzo_pagamento && pref.ultimo_mezzo_pagamento !== pref.preferenza_pagamento &&
-                                ` (ultimo usato: ${pref.ultimo_mezzo_pagamento})`}
-                        </div>
-                    )}
-                </div>
-
-                <div className="space-y-3 py-2">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <Label>Data incasso</Label>
-                            <Input type="date" value={f.data_incasso} onChange={(e) => set("data_incasso", e.target.value)} data-testid="inc-data" />
-                        </div>
-                        <div>
-                            <Label>Mezzo pagamento</Label>
-                            <Select value={f.mezzo_pagamento} onValueChange={(v) => set("mezzo_pagamento", v)}>
-                                <SelectTrigger data-testid="inc-mezzo"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="contanti">Contanti</SelectItem>
-                                    <SelectItem value="bonifico">Bonifico</SelectItem>
-                                    <SelectItem value="assegno">Assegno</SelectItem>
-                                    <SelectItem value="pos">POS / Carta</SelectItem>
-                                    <SelectItem value="rid">RID</SelectItem>
-                                    <SelectItem value="altro">Altro</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    <div>
-                        <Label>Conto cassa di destinazione</Label>
-                        <Select value={f.conto_cassa_id || "__none__"} onValueChange={(v) => set("conto_cassa_id", v === "__none__" ? "" : v)}>
-                            <SelectTrigger data-testid="inc-conto"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">— nessuno —</SelectItem>
-                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome} ({c.tipo})</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 space-y-2">
-                        <Label className="text-emerald-900 font-semibold">Importo effettivamente pagato dal cliente</Label>
-                        <Input
-                            type="number"
-                            step="0.01"
-                            value={f.importo_pagato}
-                            onChange={(e) => set("importo_pagato", e.target.value)}
-                            className="text-lg font-semibold"
-                            data-testid="inc-importo-pagato"
-                        />
-                        {sconto > 0 && (
-                            <div className="bg-white border border-amber-300 rounded p-2 mt-2 text-xs">
-                                <div className="flex justify-between items-center font-semibold text-amber-700">
-                                    <span>Sconto applicato:</span>
-                                    <span className="num">{fmtEur(sconto)}</span>
-                                </div>
-                                <div className="text-[10px] text-amber-600 mt-1">
-                                    Verrà registrato come <strong>uscita</strong> in prima nota (categoria &quot;sconto_cliente&quot;)
-                                </div>
-                                <Input
-                                    placeholder="Motivo dello sconto (opzionale)"
-                                    value={f.motivo_sconto}
-                                    onChange={(e) => set("motivo_sconto", e.target.value)}
-                                    className="mt-2 text-xs"
-                                    data-testid="inc-motivo-sconto"
-                                />
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button onClick={conferma} className="bg-emerald-600 hover:bg-emerald-700" data-testid="inc-conferma">
-                        Conferma incasso
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
     );
 }

@@ -44,6 +44,7 @@ import pdf_brogliaccio
 import brogliaccio as brog
 import cf_calc
 import geocoder as geocoder_svc
+import avvisi_scadenze
 from fastapi.responses import StreamingResponse
 import io as _io
 
@@ -2076,6 +2077,33 @@ def _giorni_da_oggi(data_iso: Optional[str]) -> Optional[int]:
         return None
 
 
+async def _total_sospesi_as_of(data_giorno: str) -> float:
+    """Somma importo_lordo dei titoli SOSPESI (anticipati dall'agenzia, non ancora incassati)
+    alla data indicata. Coerente con l'endpoint /titoli/sospesi.
+
+    Un titolo è 'sospeso' alla data X se:
+      - titolo_coperto = True
+      - data_copertura <= X
+      - stato in [da_incassare, insoluto]  OPPURE  (stato=incassato AND data_incasso > X)
+    """
+    pipeline = [
+        {"$match": {
+            "titolo_coperto": True,
+            "data_copertura": {"$lte": data_giorno},
+            "$or": [
+                {"stato": {"$in": ["da_incassare", "insoluto"]}},
+                {"$and": [
+                    {"stato": "incassato"},
+                    {"data_incasso": {"$gt": data_giorno}},
+                ]},
+            ],
+        }},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo_lordo"}}},
+    ]
+    agg = await db.titoli.aggregate(pipeline).to_list(1)
+    return round(float(agg[0]["tot"]) if agg else 0.0, 2)
+
+
 @api.post("/titoli/bulk-incassa")
 async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """body: {ids: [...], data_incasso, mezzo_pagamento, conto_cassa_id}"""
@@ -2334,11 +2362,17 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
 
 @api.post("/titoli/{tid}/incassa")
 async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Marca un titolo come incassato, crea movimento contabile entrata e
-    (opzionalmente) movimento uscita 'sconto_cliente' se importo_pagato < lordo.
+    """Marca un titolo come incassato, crea movimento contabile entrata e gestisce la
+    differenza eventuale (importo_pagato < lordo) in uno di due modi:
 
-    body: {data_incasso?, mezzo_pagamento?, conto_cassa_id?, importo_pagato?, motivo_sconto?}
-    Se importo_pagato è omesso → si assume pagamento completo del lordo (no sconto).
+      * ``tipo_chiusura="sconto"`` (default) → crea un movimento uscita 'sconto_cliente'
+        per il residuo (entra in Prima Nota spese).
+      * ``tipo_chiusura="sospeso"`` → genera un nuovo Titolo (tipo=regolazione) col residuo
+        in stato 'da_incassare', così resta visibile nei Sospesi.
+
+    body: {data_incasso?, mezzo_pagamento?, conto_cassa_id?, importo_pagato?,
+            tipo_chiusura?, motivo_sconto?}
+    Se importo_pagato è omesso → si assume pagamento completo del lordo (no residuo).
     """
     titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
     if not titolo:
@@ -2349,8 +2383,13 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     lordo = float(titolo.get("importo_lordo") or 0)
     importo_pagato_raw = body.get("importo_pagato")
     importo_pagato = float(importo_pagato_raw) if importo_pagato_raw is not None else lordo
-    sconto = round(max(0.0, lordo - importo_pagato), 2)
+    residuo = round(max(0.0, lordo - importo_pagato), 2)
+    tipo_chiusura = (body.get("tipo_chiusura") or "sconto").lower()
+    if tipo_chiusura not in ("sconto", "sospeso"):
+        raise HTTPException(400, "tipo_chiusura deve essere 'sconto' o 'sospeso'")
     motivo_sconto = body.get("motivo_sconto")
+    # Quando si lascia il residuo come sospeso non si applica sconto
+    sconto_applicato = residuo if (residuo > 0 and tipo_chiusura == "sconto") else 0.0
 
     await db.titoli.update_one(
         {"id": tid},
@@ -2360,21 +2399,26 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             "mezzo_pagamento": mezzo,
             "conto_cassa_id": conto_id,
             "importo_pagato": importo_pagato,
-            "sconto_applicato": sconto,
-            "motivo_sconto": motivo_sconto,
+            "sconto_applicato": sconto_applicato,
+            "motivo_sconto": motivo_sconto if sconto_applicato > 0 else None,
             "updated_at": _now_iso(),
         }},
     )
     pol = await db.polizze.find_one({"id": titolo["polizza_id"]}, {"_id": 0})
 
     # Movimento entrata = importo effettivamente pagato dal cliente
+    if residuo > 0 and tipo_chiusura == "sospeso":
+        nota_residuo = f" (era €{lordo:.2f}, residuo €{residuo:.2f} a sospeso)"
+    elif residuo > 0:
+        nota_residuo = f" (era €{lordo:.2f}, sconto €{residuo:.2f})"
+    else:
+        nota_residuo = ""
     mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
         categoria="incasso_premio",
         importo=importo_pagato,
-        descrizione=f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
-                    + (f" (era €{lordo:.2f}, sconto €{sconto:.2f})" if sconto > 0 else ""),
+        descrizione=f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}" + nota_residuo,
         polizza_id=titolo["polizza_id"],
         titolo_id=tid,
         anagrafica_id=pol.get("contraente_id") if pol else None,
@@ -2396,14 +2440,15 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             }},
         )
 
-    # Movimento uscita sconto (se applicato)
+    # Movimento uscita sconto OPPURE creazione titolo residuo a sospeso
     mov_sconto_id = None
-    if sconto > 0:
+    residuo_titolo_id = None
+    if residuo > 0 and tipo_chiusura == "sconto":
         mov_sconto = MovimentoContabile(
             data_movimento=data_incasso,
             tipo="uscita",
             categoria="sconto_cliente",
-            importo=sconto,
+            importo=residuo,
             descrizione=(f"Sconto applicato su titolo {pol['numero_polizza'] if pol else ''}"
                          + (f" — {motivo_sconto}" if motivo_sconto else "")),
             polizza_id=titolo["polizza_id"],
@@ -2415,30 +2460,61 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         )
         await db.movimenti.insert_one(mov_sconto.model_dump())
         mov_sconto_id = mov_sconto.id
+    elif residuo > 0 and tipo_chiusura == "sospeso":
+        # Crea nuovo titolo residuo a sospeso (anticipato dall'agenzia se l'originale lo era)
+        base_num = titolo.get("numero_titolo") or (pol.get("numero_polizza") if pol else None)
+        residuo_titolo = Titolo(
+            polizza_id=titolo["polizza_id"],
+            numero_titolo=(f"{base_num}-RES" if base_num else None),
+            tipo="regolazione",
+            effetto=data_incasso,
+            scadenza=titolo.get("scadenza") or data_incasso,
+            stato="da_incassare",
+            importo_lordo=residuo,
+            importo_netto=0.0,
+            imposte=0.0,
+            provvigioni=0.0,
+            titolo_coperto=bool(titolo.get("titolo_coperto")),
+            data_copertura=data_incasso if titolo.get("titolo_coperto") else None,
+            collaboratore_id=titolo.get("collaboratore_id"),
+            fonte="manuale",
+        )
+        await db.titoli.insert_one(residuo_titolo.model_dump())
+        residuo_titolo_id = residuo_titolo.id
 
     # Audit nel diario cliente per tracciabilità storica
     if pol and pol.get("contraente_id"):
         desc = (f"Pagamento titolo polizza {pol.get('numero_polizza')} - "
                 f"€{importo_pagato:.2f} via {mezzo} il {data_incasso}")
-        if sconto > 0:
-            desc += f" (sconto applicato: €{sconto:.2f}"
+        if residuo > 0 and tipo_chiusura == "sconto":
+            desc += f" (sconto applicato: €{residuo:.2f}"
             if motivo_sconto:
                 desc += f" - {motivo_sconto}"
             desc += ")"
+        elif residuo > 0 and tipo_chiusura == "sospeso":
+            desc += f" (residuo €{residuo:.2f} a sospeso)"
         await log_diario_cliente(
             pol["contraente_id"], "documento",
             titolo=f"Incasso titolo - polizza {pol.get('numero_polizza')}",
             descrizione=desc, autore=user,
         )
 
+    extra_label = ""
+    if residuo > 0 and tipo_chiusura == "sconto":
+        extra_label = f" sconto €{residuo:.2f}"
+    elif residuo > 0 and tipo_chiusura == "sospeso":
+        extra_label = f" residuo sospeso €{residuo:.2f}"
     await log_attivita(user, "incasso", "titolo", tid,
-                       f"€{importo_pagato:.2f} {('sconto €' + format(sconto, '.2f')) if sconto > 0 else ''}".strip())
+                       f"€{importo_pagato:.2f}{extra_label}".strip())
     return {
         "ok": True,
         "importo_pagato": importo_pagato,
-        "sconto_applicato": sconto,
+        "residuo": residuo,
+        "tipo_chiusura": tipo_chiusura,
+        "sconto_applicato": sconto_applicato,
         "movimento_entrata_id": mov_in.id,
         "movimento_sconto_id": mov_sconto_id,
+        "titolo_residuo_id": residuo_titolo_id,
     }
 
 
@@ -2887,6 +2963,11 @@ async def _compute_brogliaccio(data_giorno: str):
         "saldo_cassa": round(cum_saldo - cum_rimesse, 2),
     }
 
+    # Override 'crediti' (KPI Sospesi) con la stessa fonte della pagina /titoli/sospesi:
+    # somma importo_lordo dei titoli ancora sospesi alla data corrente.
+    sospesi_titoli_tot = await _total_sospesi_as_of(data_giorno)
+    riepilogo_kpi["crediti"] = sospesi_titoli_tot
+
     # 5b) Liquidità cumulative (fino al giorno corrente compreso)
     saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_compagnie), 2)
     conti_attivi = await db.conti_cassa.find({"attivo": True}, {"_id": 0}).to_list(200)
@@ -2910,7 +2991,7 @@ async def _compute_brogliaccio(data_giorno: str):
         {"$match": {"categoria": "anticipo", "tipo": "uscita", "data_movimento": {"$lte": data_giorno}}},
         {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
     ]).to_list(1)
-    sospesi_attivi = (crediti_agg[0]["tot"] if crediti_agg else 0) - (crediti_storno[0]["tot"] if crediti_storno else 0)
+    sospesi_attivi = sospesi_titoli_tot
 
     liquidita_box = {
         "sum_conti": round(sum_conti, 2),
@@ -5065,6 +5146,47 @@ async def genera_avvisi_scadenze(giorni: int = 30, user=Depends(require_user("ad
 
 
 # ============================================================
+# AVVISI SCADENZE — CRON ADMIN (08:00 daily)
+# ============================================================
+@api.get("/avvisi-scadenze/preview")
+async def preview_avvisi_scadenze(
+    giorni: Optional[int] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Anteprima: ritorna le scadenze (polizze + titoli) nei prossimi N giorni.
+
+    Se ``giorni`` non specificato, usa il valore da AziendaConfig (default 15).
+    Non invia email — usato dall'UI per mostrare il riepilogo.
+    """
+    if giorni is None:
+        az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+        giorni = int(az.get("notifica_scadenze_giorni") or 15)
+    giorni = max(1, min(giorni, 365))
+    data = await avvisi_scadenze.cerca_scadenze(db, giorni)
+    return {"giorni": giorni, **data, "n_polizze": len(data["polizze"]), "n_titoli": len(data["titoli"])}
+
+
+@api.post("/avvisi-scadenze/esegui")
+async def esegui_avvisi_scadenze(user=Depends(require_user("admin"))):
+    """Esegue manualmente il job di invio email avvisi scadenze (bypassa cron 08:00)."""
+    res = await avvisi_scadenze.esegui_job_scadenze(db, manuale=True)
+    await log_attivita(user, "esegui_avvisi_scadenze", "notifiche", None,
+                       f"polizze={res.get('n_polizze',0)} titoli={res.get('n_titoli',0)} "
+                       f"inviata={res.get('email_inviata') or res.get('ok')}")
+    return res
+
+
+@api.get("/avvisi-scadenze/log")
+async def list_log_avvisi_scadenze(
+    limit: int = 50, user=Depends(require_user("admin", "collaboratore")),
+):
+    """Storico esecuzioni del job avvisi scadenze."""
+    items = await db.notifiche_scadenze.find({}, {"_id": 0}).sort("eseguito_at", -1).to_list(limit)
+    return items
+
+
+
+# ============================================================
 # ATTIVITA LOG
 # ============================================================
 @api.get("/attivita")
@@ -6857,7 +6979,17 @@ async def startup():
     except Exception as e:
         logger.warning("Object storage non disponibile: %s", e)
 
+    # Scheduler: avvisi scadenze giornalieri (08:00 locale)
+    try:
+        avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
+    except Exception as e:
+        logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
+
 
 @app.on_event("shutdown")
 async def shutdown():
+    try:
+        avvisi_scadenze.stop_scheduler()
+    except Exception:
+        pass
     client.close()
