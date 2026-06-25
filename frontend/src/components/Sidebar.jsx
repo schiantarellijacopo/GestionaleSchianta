@@ -5,7 +5,7 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift,
+    GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -59,6 +59,7 @@ const SECTION_LABELS = {
 };
 
 const STORAGE_KEY = "assicura.sidebar.order";
+const HIDDEN_KEY = "assicura.sidebar.hidden";
 
 export default function Sidebar() {
     const { user, logout } = useAuth();
@@ -72,23 +73,43 @@ export default function Sidebar() {
         } catch (e) { /* fallback */ }
         return ALL_MENU_ITEMS.map((m) => m.id);
     });
+    const [hidden, setHidden] = useState(() => {
+        try {
+            const stored = localStorage.getItem(HIDDEN_KEY);
+            if (stored) return new Set(JSON.parse(stored));
+        } catch (e) { /* fallback */ }
+        return new Set();
+    });
     const [dragId, setDragId] = useState(null);
 
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(order)); } catch (e) { /* ignore */ }
     }, [order]);
+    useEffect(() => {
+        try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(Array.from(hidden))); } catch (e) { /* ignore */ }
+    }, [hidden]);
+
+    const toggleHide = (id) => {
+        setHidden((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
 
     // Costruisce la lista visibile: applica ordine custom + filtra per ruolo
     const visibleItems = order
         .map((id) => ALL_MENU_ITEMS.find((m) => m.id === id))
         .filter((m) => m && (!m.roles || m.roles.includes(role)))
-        // aggiungi voci nuove non presenti in localStorage in coda
         .concat(ALL_MENU_ITEMS.filter((m) => !order.includes(m.id) && (!m.roles || m.roles.includes(role))));
+
+    // In edit mode mostra tutto, altrimenti filtra le voci nascoste
+    const itemsToRender = editMode ? visibleItems : visibleItems.filter((m) => !hidden.has(m.id));
 
     // Raggruppa per sezione mantenendo l'ordine del custom
     const sezioni = [];
     let lastSec = null;
-    for (const it of visibleItems) {
+    for (const it of itemsToRender) {
         if (it.section !== lastSec) {
             sezioni.push({ key: it.section, items: [it] });
             lastSec = it.section;
@@ -119,6 +140,7 @@ export default function Sidebar() {
 
     const renderItem = (m) => {
         const Icon = ICON_MAP[m.icon] || LayoutDashboard;
+        const isHidden = hidden.has(m.id);
         if (editMode) {
             return (
                 <div
@@ -127,14 +149,23 @@ export default function Sidebar() {
                     onDragStart={() => onDragStart(m.id)}
                     onDragOver={(e) => onDragOver(e, m.id)}
                     onDragEnd={() => setDragId(null)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs cursor-grab active:cursor-grabbing ${
-                        dragId === m.id ? "bg-sky-700 opacity-60" : "bg-slate-800 hover:bg-slate-700"
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-grab active:cursor-grabbing ${
+                        dragId === m.id ? "bg-sky-700 opacity-60" : isHidden ? "bg-slate-800/30 opacity-50" : "bg-slate-800 hover:bg-slate-700"
                     }`}
                     data-testid={`drag-${m.id}`}
                 >
-                    <GripVertical size={12} className="text-slate-400" />
-                    <Icon size={14} />
-                    <span>{m.label}</span>
+                    <GripVertical size={12} className="text-slate-400 shrink-0" />
+                    <Icon size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">{m.label}</span>
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); toggleHide(m.id); }}
+                        className="p-1 rounded hover:bg-slate-600 shrink-0"
+                        title={isHidden ? "Mostra voce" : "Nascondi voce"}
+                        data-testid={`toggle-hide-${m.id}`}
+                    >
+                        {isHidden ? <EyeOff size={12} className="text-slate-400" /> : <Eye size={12} className="text-emerald-400" />}
+                    </button>
                 </div>
             );
         }
@@ -180,9 +211,9 @@ export default function Sidebar() {
 
             {editMode && (
                 <div className="px-3 py-2 bg-sky-900/40 border-b border-sky-800 text-[11px] text-sky-100">
-                    Trascina le voci per riordinarle. L&apos;ordine viene salvato sul tuo dispositivo.
-                    <button onClick={resetOrder} className="block text-[10px] underline mt-1 text-sky-200 hover:text-white" data-testid="sidebar-reset">
-                        Ripristina predefinito
+                    Trascina le voci per riordinarle. Premi <Eye size={10} className="inline mx-0.5" /> per mostrare / nascondere. Le preferenze sono salvate sul tuo dispositivo.
+                    <button onClick={resetOrder} className="flex items-center gap-1 text-[10px] underline mt-1 text-sky-200 hover:text-white" data-testid="sidebar-reset">
+                        <RotateCcw size={10} /> Ripristina predefinito
                     </button>
                 </div>
             )}

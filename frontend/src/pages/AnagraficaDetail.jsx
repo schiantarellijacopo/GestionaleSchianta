@@ -19,6 +19,7 @@ import RowActions, { PrintButton } from "@/components/RowActions";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
+    Pencil, Trash2, Briefcase,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
 import TagsEditor from "@/components/TagsEditor";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import { formatPhone } from "@/lib/phone";
 
 export default function AnagraficaDetail() {
     const { id } = useParams();
@@ -201,8 +203,8 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Sesso", ana.sesso === "M" ? "Maschio" : ana.sesso === "F" ? "Femmina" : "-"],
                         ["Comune nascita", ana.comune_nascita],
                         ["Email", ana.email],
-                        ["Telefono", ana.telefono],
-                        ["Cellulare", ana.cellulare],
+                        ["Telefono", formatPhone(ana.telefono)],
+                        ["Cellulare", formatPhone(ana.cellulare)],
                         ["IBAN", ana.iban],
                         ["Indirizzo", ana.indirizzo],
                         ["Comune", `${ana.comune || ""} ${ana.provincia ? `(${ana.provincia})` : ""}`],
@@ -487,13 +489,29 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
         )}
         <Card className="p-6 border-slate-200 mt-4">
             <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2"><GitBranch size={18} className="text-sky-700" /><h3 className="font-medium">Relazioni familiari</h3></div>
+                <div className="flex items-center gap-2"><GitBranch size={18} className="text-sky-700" /><h3 className="font-medium">Relazioni familiari e aziendali</h3></div>
                 {canEdit && (
-                    <Dialog open={open} onOpenChange={setOpen}>
-                        <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" data-testid="add-relation-button"><UserPlus size={14} className="mr-1" />Aggiungi</Button>
-                        </DialogTrigger>
-                        <DialogContent>
+                    <div className="flex gap-2">
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                                const isAzienda = ana.tipo === "persona_giuridica";
+                                setRel(isAzienda ? "legale_rappresentante" : "rappresenta");
+                                setRelInv(isAzienda ? "rappresenta" : "legale_rappresentante");
+                                setOpen(true);
+                            }}
+                            data-testid="add-azienda-lr-button"
+                            title={ana.tipo === "persona_giuridica" ? "Collega il legale rappresentante (persona)" : "Collega un'azienda di cui è legale rappresentante"}
+                        >
+                            <Briefcase size={14} className="mr-1" />
+                            {ana.tipo === "persona_giuridica" ? "Aggiungi legale rappresentante" : "Collega azienda (come LR)"}
+                        </Button>
+                        <Dialog open={open} onOpenChange={setOpen}>
+                            <DialogTrigger asChild>
+                                <Button size="sm" variant="outline" data-testid="add-relation-button"><UserPlus size={14} className="mr-1" />Aggiungi relazione</Button>
+                            </DialogTrigger>
+                            <DialogContent>
                             <DialogHeader><DialogTitle>Aggiungi relazione</DialogTitle></DialogHeader>
                             <div className="space-y-3 py-2">
                                 <div>
@@ -568,8 +586,24 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                             <DialogFooter><Button onClick={aggiungi} className="bg-sky-700 hover:bg-sky-800" data-testid="rel-save">Salva</Button></DialogFooter>
                         </DialogContent>
                     </Dialog>
+                    </div>
                 )}
             </div>
+            {/* Mini guida flusso aziende-LR */}
+            {ana.tipo === "persona_giuridica" && (
+                <div className="mb-4 p-3 rounded-md border border-sky-200 bg-sky-50/60 text-xs text-sky-900">
+                    <b>Come collegare azienda e legale rappresentante:</b><br />
+                    1. Premi &quot;Aggiungi legale rappresentante&quot;.<br />
+                    2. Scegli la persona fisica dal menu &quot;Anagrafica collegata&quot;.<br />
+                    3. La relazione viene <b>scritta automaticamente in entrambe le schede</b>: in questa azienda viene memorizzata la relazione &quot;legale rappresentante&quot;, nella scheda della persona viene memorizzata &quot;rappresenta&quot; (con il riferimento all&apos;azienda).<br />
+                    4. Aprendo la scheda del LR vedrai TUTTE le aziende che rappresenta con totale premi e provvigioni.
+                </div>
+            )}
+            {ana.tipo !== "persona_giuridica" && (
+                <div className="mb-4 p-3 rounded-md border border-emerald-200 bg-emerald-50/60 text-xs text-emerald-900">
+                    <b>Suggerimento:</b> se questa persona è legale rappresentante di una o più aziende, premi &quot;Collega azienda (come LR)&quot;. Le polizze e le provvigioni di tutte le aziende collegate confluiranno nella card &quot;Posizione assicurativa del network&quot; in alto.
+                </div>
+            )}
             {!ana.relazioni_risolte?.length ? (
                 <div className="text-sm text-slate-500 py-6 text-center">Nessuna relazione registrata.</div>
             ) : (
@@ -605,17 +639,24 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                         </div>
                                     )}
                                     {canEdit && (
-                                        <div className="flex gap-2 justify-center mt-1">
+                                        <div className="flex gap-1 justify-center mt-2">
                                             {(r.relazione === "coniuge" || r.relazione === "figlio") && (
                                                 <button
                                                     onClick={() => setEditing(r)}
-                                                    className="text-[10px] text-sky-700 hover:underline"
+                                                    className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-sky-300 bg-white text-sky-700 hover:bg-sky-50"
                                                     data-testid={`relation-edit-${r.id}`}
                                                 >
-                                                    modifica
+                                                    <Pencil size={10} /> Modifica
                                                 </button>
                                             )}
-                                            <button onClick={() => rimuovi(r.id)} className="text-[10px] text-rose-600 hover:underline">rimuovi</button>
+                                            <button
+                                                onClick={() => rimuovi(r.id)}
+                                                className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-rose-300 bg-white text-rose-600 hover:bg-rose-50"
+                                                data-testid={`relation-remove-${r.id}`}
+                                                title="Rimuove la relazione (in modo bidirezionale)"
+                                            >
+                                                <Trash2 size={10} /> Rimuovi
+                                            </button>
                                         </div>
                                     )}
                                 </div>

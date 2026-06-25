@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
+import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -253,7 +254,7 @@ export default function Anagrafiche() {
                                 <th className="text-left py-3 pr-3">Telefono</th>
                                 <th className="text-center py-3 pr-3">Collegati</th>
                                 <th className="text-center py-3 pr-3 text-emerald-700">Polizze</th>
-                                <th className="text-center py-3 pr-3">Preventivi</th>
+                                <th className="text-left py-3 pr-3">Collaboratore</th>
                                 <th className="text-right py-3 pr-3">Premio totale</th>
                                 <th className="text-right py-3 pr-3 text-emerald-700">Provvigioni</th>
                                 <th className="text-left py-3 pr-3">Tag</th>
@@ -341,12 +342,22 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
                 </td>
                 <td className="py-3 pr-3 text-xs">
                     {a.email
-                        ? <span className="inline-flex items-center gap-1 text-slate-700"><Mail size={12} className="text-slate-400" />{a.email}</span>
+                        ? <a
+                            href={`mailto:${a.email}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-sky-700 hover:underline"
+                            data-testid={`anag-email-link-${a.id}`}
+                          ><Mail size={12} className="text-slate-400" />{a.email}</a>
                         : <span className="text-slate-300">—</span>}
                 </td>
                 <td className="py-3 pr-3 text-xs">
                     {a.cellulare || a.telefono
-                        ? <span className="inline-flex items-center gap-1 text-slate-700"><Phone size={12} className="text-slate-400" />{a.cellulare || a.telefono}</span>
+                        ? <a
+                            href={`tel:${telHref(a.cellulare || a.telefono)}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-sky-700 hover:underline"
+                            data-testid={`anag-phone-link-${a.id}`}
+                          ><Phone size={12} className="text-slate-400" />{formatPhone(a.cellulare || a.telefono)}</a>
                         : <span className="text-slate-300">—</span>}
                 </td>
                 <td className="py-3 pr-3 text-center num text-slate-700">
@@ -355,8 +366,10 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
                 <td className="py-3 pr-3 text-center text-emerald-700 font-semibold num">
                     {a.polizze_attive_count || 0}
                 </td>
-                <td className="py-3 pr-3 text-center num text-slate-500">
-                    {net ? net.root.n_preventivi : "·"}
+                <td className="py-3 pr-3 text-xs">
+                    {a.collaboratore_nome
+                        ? <span className="text-slate-700">{a.collaboratore_nome}</span>
+                        : <span className="text-slate-300">—</span>}
                 </td>
                 <td className="py-3 pr-3 text-right font-bold num text-slate-900 text-base">
                     {net ? fmtEur(net.root.premio_totale || 0) : <span className="text-slate-300">—</span>}

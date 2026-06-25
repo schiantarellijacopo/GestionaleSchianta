@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
+import { formatPhone, telHref } from "@/lib/phone";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -194,7 +195,9 @@ export default function TitoliSospesi() {
                                                 {t.contraente_nome}
                                             </Link>
                                         </td>
-                                        <td className="text-xs">{t.cellulare || "—"}</td>
+                                        <td className="text-xs">{t.cellulare
+                                            ? <a href={`tel:${telHref(t.cellulare)}`} className="text-sky-700 hover:underline">{formatPhone(t.cellulare)}</a>
+                                            : "—"}</td>
                                         <td className="text-xs">{t.collaboratore_nome || <span className="text-slate-300">—</span>}</td>
                                         <td>
                                             <Link to={`/polizze/${t.polizza_id}`} className="font-mono text-xs text-sky-700 hover:underline">

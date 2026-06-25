@@ -1,66 +1,71 @@
 # PRD - Programma Assicurativo (Insurance CRM)
 
 ## Original Problem Statement
-Italian Insurance Agency CRM (FastAPI + React + MongoDB). Full-stack: anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), analisi cliente, avvisi scadenze.
+Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze.
 
 ## Personas
 - Admin / Collaboratore / Dipendente / Cliente
 
-## Latest Session (Feb 2026)
+## Latest Sessions (Feb 2026)
 
-### A) PACCHETTO MAPPA & INDIRIZZI — DONE
-- ✅ `GET /api/geo/suggest?q=` → Nominatim autocomplete (limit 6, IT)
-- ✅ Componente `<AddressAutocomplete>` riusato in: NuovaAnagrafica + AnagraficaDetail. Al click suggerisce e geolocalizza in automatico (lat/lng/comune/cap/provincia precompilati)
-- ✅ Pagina Mappa clienti potenziata: cluster marker (leaflet.markercluster), 3 layer (Standard / Consumatore CartoDB Voyager / Satellitare ESRI), toggle Clienti (blu) / Prospect (rosso), ricerca, filtro tag, popup ricco con "Apri scheda"
-- ✅ Backend `/geo/anagrafiche` arricchito con `is_cliente` (ha ≥ 1 polizza attiva)
+### Iter 16: Mappa, Indirizzi, Network (DONE)
+- ✅ `<AddressAutocomplete>` (Nominatim, gratis) usato in NuovaAnagrafica + AnagraficaDetail
+- ✅ Pagina Mappa clienti potenziata (cluster, layer Standard/Consumatore/Satellitare, toggle Clienti/Prospect, ricerca, tag)
+- ✅ Relazioni network bidirezionali (genitore/figlio/coniuge/... + legale_rappresentante/rappresenta/socio/dipendente_di/datore_lavoro_di)
+- ✅ `GET /anagrafiche/{aid}/network` con totali aggregati premi/provvigioni
+- ✅ NetworkPositionCard in AnagraficaDetail Tab Albero
 
-### B) PACCHETTO COLLEGAMENTI ANAGRAFICHE — DONE
-- ✅ Nuove relazioni in `parente_di` bidirezionali: legale_rappresentante / rappresenta, socio, dipendente_di / datore_lavoro_di — oltre alle preesistenti (genitore/figlio/coniuge/fratello/nonno/...)
-- ✅ Inverse Map auto-suggerite in UI quando si sceglie la relazione
-- ✅ Backend `GET /anagrafiche/{aid}/network` → restituisce root + collegati con per ognuno: n_polizze_attive, n_preventivi, n_polizze_totali, premio_totale, provvigioni_totale + totali aggregati network
-- ✅ Frontend in Tab "Albero genealogico": Card "Posizione assicurativa del network" mostra tabella con totali per collegato + riga "Totale network"
-- ✅ Frontend in lista Anagrafiche: righe espandibili (chevron) che mostrano network
+### Iter 17: Dashboard Tasks + Filtri + KPI (DONE)
+- ✅ Dashboard "Da fare": 8 task azionabili con conteggio + click-to-filter (Compleanni oggi/7gg, Documenti scaduti/in scadenza, Sospesi >5gg, Sinistri >30gg, Polizze in scadenza, Provvigioni da liquidare)
+- ✅ Filtri URL ?compleanno=oggi|settimana ?doc=scaduti|in_scadenza ?gg_min=N — la pagina destinazione mostra banner "Filtro attivo" + "Rimuovi filtro"
+- ✅ 4 KPI Anagrafiche (Privati/Aziende/Condomini/Parrocchie) con bordo sx colorato
+- ✅ Sezione TAG nella scheda Anagrafica (TagsEditor con autocomplete su /api/anagrafiche/tags)
 
-### C) DASHBOARD ANAGRAFICHE — DONE
-- ✅ Backend `GET /anagrafiche/stats` → 4 categorie (privati / aziende / condomini / parrocchie) con conteggi e premi
-- ✅ 4 KPI cards in cima alla pagina /anagrafiche (Privati, Aziende, Condomini, Parrocchie) con totale Premi
-- ✅ Categorizzazione automatica: euristica su ragione_sociale (CONDOMINIO, PARROCCHIA) + tipo (persona_fisica/giuridica)
+### Iter 18: UX Anagrafiche + LR (DONE)
+- ✅ Email cliccabile (mailto:) + Telefono cliccabile (tel:)
+- ✅ Formattazione automatica numero "+39 347 000 9438" (helper /app/frontend/src/lib/phone.js)
+- ✅ Colonna "Collaboratore" sostituisce "Preventivi" nella lista
+- ✅ Pulsante shortcut "Collega azienda (come LR)" nel Tab Albero (con guida flusso)
+- ✅ Pulsanti "Modifica" e "Rimuovi" relazione più visibili (bordi + icone)
 
-### D) BUG FIX & FEATURE PRECEDENTI (iter15) — DONE
-- ✅ Bug Brogliaccio: uscite generiche (PRELIEVO, spese, anticipi out) NON più in colonna TOTALE → totali_giornata.totale = solo incassi_premio
-- ✅ Dashboard: 15 elementi cliccabili (6 Stat + 2 chart + 4 KPI + 3 subcard) navigano alle relative sezioni
-- ✅ PDF "Sospesi Anticipi" con data di stampa odierna (endpoint + pulsante)
-- ✅ Centralizzazione `useMezziPagamento` in 5 dialog (Provvigioni, EstrattoContoCompagnie, Titoli, AnagraficaDetail, PolizzaDetail)
-- ✅ Backend syntax error in `titoli_sospesi()` riparato
+### Iter 19: Titoli + Sidebar personalizzabile (DONE)
+- ✅ Rimosso preset "Storico incassati" e "Coperti non pagati" dai tab Titoli
+- ✅ Rinominato "In scadenza 15gg" → "Scadute da 15gg" (logica corretta: titoli scaduti)
+- ✅ Link sidebar "Titoli storici" continua a funzionare via ?preset=storico
+- ✅ Sidebar personalizzabile: drag-drop ordinamento + hide/show per voce (Eye/EyeOff) + reset predefinito
 
-## Architecture
-- `/app/backend/server.py` (~9700 righe — refactor pendente)
-- `/app/backend/db_models.py` — Anagrafica con `parente_di: List[dict]`
-- `/app/backend/geocoder.py` — Nominatim wrapper + `cerca_suggerimenti()`
-- `/app/frontend/src/pages/Anagrafiche.jsx` — lista con KPI + righe espandibili
-- `/app/frontend/src/pages/AnagraficaDetail.jsx` — Tab Albero + NetworkPositionCard
-- `/app/frontend/src/pages/MappaClienti.jsx` — mappa cluster + layer switcher
-- `/app/frontend/src/components/AddressAutocomplete.jsx` — componente riusabile
-
-## Endpoints Aggiunti
-- `GET /api/geo/suggest?q=` — Nominatim autocomplete
-- `GET /api/anagrafiche/stats` — 4 KPI categorie + premi
-- `GET /api/anagrafiche/{aid}/network` — root + collegati con totali
-- `GET /api/stampa/titoli/sospesi` — PDF (creato iter precedente)
+## Endpoints (selezione recente)
+- GET /api/geo/suggest?q=
+- GET /api/anagrafiche/stats — 4 KPI categorie
+- GET /api/anagrafiche/{aid}/network
+- GET /api/anagrafiche/tags
+- GET /api/dashboard/tasks — 8 task azionabili
+- GET /api/stampa/titoli/sospesi — PDF con data odierna
 
 ## Backlog / Roadmap
 ### P1
-- Visualizzazione albero genealogico più visiva (svg ramificato)
-- Bottone "Aggiungi LR" rapido dalla scheda Azienda (shortcut)
-- Filtri categoria su KPI cards cliccabili (al click filtra la tabella)
+- Personalizzazione KPI Anagrafiche basata su TAG dell'agenzia (card custom)
 - OCR Libretto/Fatture con Gemini 3 Flash su Documenti polizza
 - Piramide Soluzioni Redesign (Release B)
 
 ### P2
-- Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS
-- Refactor server.py (>9700 righe) in `/backend/routes/`
+- Integrazioni Google Calendar / Microsoft 365 / WhatsApp / SMS
+- Refactor server.py (>9700 righe) in /backend/routes/
 - Risoluzione import circolare in auth.py
-- Estrazione form sections AnagraficaDetail per perf
+
+## File chiave creati / modificati
+- /app/backend/server.py — endpoint stats/network/tags/dashboard-tasks/geo-suggest
+- /app/backend/geocoder.py — cerca_suggerimenti()
+- /app/frontend/src/components/AddressAutocomplete.jsx — NEW
+- /app/frontend/src/components/TagsEditor.jsx — NEW
+- /app/frontend/src/lib/phone.js — NEW (formattazione +39)
+- /app/frontend/src/pages/MappaClienti.jsx — rewrite (cluster + layer)
+- /app/frontend/src/pages/Anagrafiche.jsx — KPI + RigaAnagrafica espandibile + filtri URL
+- /app/frontend/src/pages/AnagraficaDetail.jsx — Tab Albero esteso (LR/aziende) + NetworkPositionCard + Tag editor
+- /app/frontend/src/pages/Dashboard.jsx — DashboardTasks (8 task)
+- /app/frontend/src/pages/Titoli.jsx — preset rinominati
+- /app/frontend/src/pages/TitoliSospesi.jsx — filtro gg_min + telefono cliccabile
+- /app/frontend/src/components/Sidebar.jsx — hide/show + drag-drop
 
 ## Credenziali test
 Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!)

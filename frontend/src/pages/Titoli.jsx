@@ -26,27 +26,22 @@ import { toast } from "sonner";
 const PRESETS = [
     { key: "tutti", label: "Tutti" },
     { key: "sospesi", label: "Sospesi (da incassare)" },
-    { key: "storico", label: "Storico incassati" },
-    { key: "scad15", label: "In scadenza 15gg" },
+    { key: "scad15", label: "Scadute da 15gg" },
     { key: "scad_oltre15", label: "Oltre 15gg" },
     { key: "scadute_oggi", label: "Scadute oggi" },
     { key: "scad_5g", label: "Scadute da 5gg" },
     { key: "scad_10g", label: "Scadute da 10gg" },
-    { key: "scad_14g", label: "Scadute da 14gg" },
-    { key: "coperti", label: "Coperti non pagati" },
 ];
 
 const presetParams = (key) => {
     switch (key) {
         case "sospesi": return { stato: "da_incassare" };
-        case "storico": return { stato: "incassato" };
-        case "scad15": return { in_scadenza_giorni: 15 };
+        case "storico": return { stato: "incassato" };  // usato dal link "Titoli storici" in sidebar
+        case "scad15": return { scadute_da_min: 15 };
         case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
         case "scadute_oggi": return { scadute_oggi: true };
         case "scad_5g": return { scadute_da_min: 5 };
         case "scad_10g": return { scadute_da_min: 10 };
-        case "scad_14g": return { scadute_da_min: 14 };
-        case "coperti": return { coperti_non_pagati: true };
         default: return {};
     }
 };
@@ -64,8 +59,11 @@ export default function Titoli() {
     const [showFilters, setShowFilters] = useState(false);
     const [pageSize, setPageSize] = useState(50);
 
+    // Lista preset accettati anche tramite URL (anche quelli non visibili come tab)
+    const ACCEPTED_PRESETS = ["tutti", "sospesi", "storico", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
+
     const [filters, setFilters] = useState({
-        preset: urlPreset && PRESETS.find((p) => p.key === urlPreset) ? urlPreset : "sospesi",
+        preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : "sospesi",
         q: "",
         stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
@@ -74,7 +72,7 @@ export default function Titoli() {
 
     // Allineamento preset dall'URL (es. /titoli?preset=storico)
     useEffect(() => {
-        if (urlPreset && PRESETS.find((p) => p.key === urlPreset)) {
+        if (urlPreset && ACCEPTED_PRESETS.includes(urlPreset)) {
             setFilters((p) => ({ ...p, preset: urlPreset }));
         }
         // eslint-disable-next-line
