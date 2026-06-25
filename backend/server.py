@@ -1881,6 +1881,8 @@ async def list_titoli(
         t["compagnia_nome"] = coms.get(p.get("compagnia_id", ""), {}).get("ragione_sociale")
         t["collaboratore_id"] = p.get("collaboratore_id")
         t["collaboratore_nome"] = collabs.get(p.get("collaboratore_id", ""), {}).get("name")
+        t["mezzo_pagamento_preferito"] = p.get("mezzo_pagamento_preferito")
+        t["ultimo_mezzo_pagamento"] = p.get("ultimo_mezzo_pagamento")
     # arricchimento count allegati
     tids = [t["id"] for t in items]
     if tids:
@@ -2075,6 +2077,8 @@ async def titoli_sospesi(
             "importo_lordo": t.get("importo_lordo", 0.0),
             "provvigioni": t.get("provvigioni", 0.0),
             "giorni_anticipo": _giorni_da_oggi(t.get("data_copertura")),
+            "mezzo_pagamento_preferito": p.get("mezzo_pagamento_preferito"),
+            "ultimo_mezzo_pagamento": p.get("ultimo_mezzo_pagamento"),
         })
     # totali aggregati
     return result
@@ -2514,6 +2518,15 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         }},
     )
     pol = await db.polizze.find_one({"id": titolo["polizza_id"]}, {"_id": 0})
+    # Aggiorna ultimo mezzo pagamento sulla polizza; se manca il preferito, impostalo.
+    if pol:
+        pol_updates = {
+            "ultimo_mezzo_pagamento": mezzo,
+            "ultimo_mezzo_pagamento_data": data_incasso,
+        }
+        if not pol.get("mezzo_pagamento_preferito"):
+            pol_updates["mezzo_pagamento_preferito"] = mezzo
+        await db.polizze.update_one({"id": pol["id"]}, {"$set": pol_updates})
 
     # Movimento entrata = importo effettivamente pagato dal cliente
     if residuo > 0 and tipo_chiusura == "sospeso":

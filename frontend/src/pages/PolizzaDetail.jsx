@@ -345,6 +345,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         premio_lordo: pol.premio_lordo || 0,
         provvigioni: pol.provvigioni || 0,
         targa: pol.targa || "",
+        mezzo_pagamento_preferito: pol.mezzo_pagamento_preferito || "",
         veicolo_marca: pol.veicolo_marca || "",
         veicolo_modello: pol.veicolo_modello || "",
         veicolo_tipo: pol.veicolo_tipo || "",
@@ -427,6 +428,30 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                             <div><Label>Oggetto assicurato</Label><Input value={f.oggetto_assicurato} onChange={(e) => set("oggetto_assicurato", e.target.value)} /></div>
                             <div><Label>Termini mora (gg)</Label><Input type="number" value={f.termini_mora_giorni} onChange={(e) => set("termini_mora_giorni", e.target.value)} /></div>
                             <div><Label>Termini disdetta (gg)</Label><Input type="number" value={f.termini_disdetta_giorni} onChange={(e) => set("termini_disdetta_giorni", e.target.value)} /></div>
+                            <div>
+                                <Label>Mezzo pagamento preferito (questa polizza)</Label>
+                                <Select
+                                    value={f.mezzo_pagamento_preferito || "__auto__"}
+                                    onValueChange={(v) => set("mezzo_pagamento_preferito", v === "__auto__" ? "" : v)}
+                                >
+                                    <SelectTrigger data-testid="polizza-mezzo-preferito"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__auto__">Auto (segue ultimo incasso)</SelectItem>
+                                        <SelectItem value="contanti">Contanti</SelectItem>
+                                        <SelectItem value="bonifico">Bonifico</SelectItem>
+                                        <SelectItem value="assegno">Assegno</SelectItem>
+                                        <SelectItem value="pos">POS / Carta</SelectItem>
+                                        <SelectItem value="rid">RID</SelectItem>
+                                        <SelectItem value="altro">Altro</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                {pol.ultimo_mezzo_pagamento && (
+                                    <div className="text-[10px] text-slate-500 mt-1">
+                                        Ultimo incasso: <strong>{pol.ultimo_mezzo_pagamento}</strong>
+                                        {pol.ultimo_mezzo_pagamento_data && ` (${pol.ultimo_mezzo_pagamento_data})`}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </TabsContent>
 

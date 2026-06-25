@@ -216,6 +216,11 @@ class Polizza(BaseDoc):
     targa: Optional[str] = None
     collaboratore_id: Optional[str] = None
     operatore_ania_codice: Optional[str] = None  # codice operatore da importazione ANIA (per mapping)
+    # Metodo di pagamento preferito su questa polizza (può differire da quello dell'anagrafica).
+    # Se vuoto, viene auto-aggiornato con il mezzo usato all'ultimo incasso.
+    mezzo_pagamento_preferito: Optional[Literal["contanti", "bonifico", "assegno", "pos", "rid", "altro"]] = None
+    ultimo_mezzo_pagamento: Optional[str] = None
+    ultimo_mezzo_pagamento_data: Optional[str] = None
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     presa_in_carico: Optional[str] = None

@@ -74,19 +74,33 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
     // --- INCASSO
     const [incasso, setIncasso] = useState(false);
+    // Default mezzo pagamento (priorità):
+    //  1. polizza.mezzo_pagamento_preferito (specifico di questa polizza)
+    //  2. polizza.ultimo_mezzo_pagamento
+    //  3. anagrafica preferenza_pagamento
+    //  4. anagrafica ultimo_mezzo_pagamento
+    //  5. "contanti"
+    const polizzaPreferito = titolo.mezzo_pagamento_preferito || titolo.ultimo_mezzo_pagamento;
+    const defaultMezzoPol = polizzaPreferito
+        || pref?.preferenza_pagamento
+        || pref?.ultimo_mezzo_pagamento
+        || "contanti";
+
     const [inc, setInc] = useState({
         data_incasso: today,
-        mezzo_pagamento: pref?.preferenza_pagamento || "contanti",
+        mezzo_pagamento: defaultMezzoPol,
         conto_cassa_id: conti?.[0]?.id || "",
         importo_pagato: lordo,
         tipo_chiusura: "sconto",
         motivo_sconto: "",
     });
     useEffect(() => {
-        if (pref?.preferenza_pagamento) {
+        if (polizzaPreferito) {
+            setInc((p) => ({ ...p, mezzo_pagamento: polizzaPreferito }));
+        } else if (pref?.preferenza_pagamento) {
             setInc((p) => ({ ...p, mezzo_pagamento: pref.preferenza_pagamento }));
         }
-    }, [pref]);
+    }, [pref, polizzaPreferito]);
     const setI = (k, v) => setInc((p) => ({ ...p, [k]: v }));
 
     const residuo = useMemo(
@@ -370,6 +384,11 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                                 <SelectItem value="altro">Altro</SelectItem>
                                             </SelectContent>
                                         </Select>
+                                        {polizzaPreferito && (
+                                            <div className="text-[10px] text-emerald-700 mt-1" data-testid="hint-mezzo-polizza">
+                                                ★ Preferito su questa polizza: <strong>{polizzaPreferito}</strong>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div>
