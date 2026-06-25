@@ -1708,6 +1708,20 @@ async def get_polizza(pid: str, user=Depends(current_user)):
 
 @api.post("/polizze", status_code=201)
 async def create_polizza(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    # Applica default termini_mora_giorni dal prodotto in libreria,
+    # altrimenti dal ramo (Vita = 30gg, altri = 15gg).
+    if body.get("termini_mora_giorni") in (None, 0, ""):
+        mora = None
+        if body.get("prodotto"):
+            prod = await db.prodotti.find_one(
+                {"nome": body["prodotto"]}, {"_id": 0, "termini_mora_giorni": 1},
+            )
+            if prod and prod.get("termini_mora_giorni"):
+                mora = int(prod["termini_mora_giorni"])
+        if mora is None:
+            from db_models import default_mora_for_ramo
+            mora = default_mora_for_ramo(body.get("ramo"))
+        body["termini_mora_giorni"] = mora
     obj = Polizza(**body)
     await db.polizze.insert_one(obj.model_dump())
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
@@ -2417,6 +2431,28 @@ async def delete_titolo(tid: str, user=Depends(require_user("admin", "collaborat
 
 @api.post("/titoli", status_code=201)
 async def create_titolo(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    # Se scadenza_mora non è specificata, ricavala da: polizza.termini_mora_giorni
+    # oppure dal default per ramo (Vita=30, altri=15).
+    if not body.get("scadenza_mora") and body.get("scadenza") and body.get("polizza_id"):
+        pol = await db.polizze.find_one(
+            {"id": body["polizza_id"]}, {"_id": 0, "termini_mora_giorni": 1, "ramo": 1, "prodotto": 1},
+        ) or {}
+        giorni = pol.get("termini_mora_giorni")
+        if not giorni and pol.get("prodotto"):
+            prod = await db.prodotti.find_one(
+                {"nome": pol["prodotto"]}, {"_id": 0, "termini_mora_giorni": 1},
+            )
+            if prod:
+                giorni = prod.get("termini_mora_giorni")
+        if not giorni:
+            from db_models import default_mora_for_ramo
+            giorni = default_mora_for_ramo(pol.get("ramo"))
+        try:
+            from datetime import date as _date, timedelta as _td
+            d = _date.fromisoformat(body["scadenza"][:10]) + _td(days=int(giorni))
+            body["scadenza_mora"] = d.isoformat()
+        except Exception:
+            pass
     obj = Titolo(**body)
     await db.titoli.insert_one(obj.model_dump())
     await log_attivita(user, "create", "titolo", obj.id)
@@ -5639,6 +5675,10 @@ async def list_prodotti(compagnia_id: Optional[str] = None, user=Depends(current
 
 @api.post("/librerie/prodotti", status_code=201)
 async def create_prodotto(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    # Default termini_mora_giorni in base al ramo se non specificato
+    if not body.get("termini_mora_giorni"):
+        from db_models import default_mora_for_ramo
+        body["termini_mora_giorni"] = default_mora_for_ramo(body.get("ramo"))
     obj = ProdottoLibreria(**body)
     await db.prodotti.insert_one(obj.model_dump())
     await log_attivita(user, "create", "prodotto", obj.id, obj.nome)
@@ -7129,6 +7169,17 @@ async def startup():
             logger.info("Migrazione unify_sconti: %s sconti uniti su riga incasso", res["merged"])
     except Exception as e:
         logger.warning("Migrazione unify_sconti fallita (non bloccante): %s", e)
+
+    # One-shot: applica termini_mora_giorni di default ai prodotti esistenti
+    try:
+        from db_models import default_mora_for_ramo
+        async for p in db.prodotti.find({"termini_mora_giorni": {"$exists": False}}, {"_id": 0, "id": 1, "ramo": 1}):
+            await db.prodotti.update_one(
+                {"id": p["id"]},
+                {"$set": {"termini_mora_giorni": default_mora_for_ramo(p.get("ramo"))}},
+            )
+    except Exception as e:
+        logger.warning("Migrazione termini_mora_giorni fallita (non bloccante): %s", e)
 
 
 @app.on_event("shutdown")

@@ -13,6 +13,7 @@ import {
 import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
     ChevronDown, ChevronUp,
@@ -367,19 +368,11 @@ export default function Titoli() {
                     </span>
                     <button
                         disabled={selected.size === 0}
-                        onClick={() => setBulkOpen("incassa")}
-                        data-testid="bulk-incassa-btn"
-                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
+                        onClick={() => setBulkOpen("bulk")}
+                        data-testid="bulk-incasso-copertura-btn"
+                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
                     >
-                        <Wallet size={14} /> INCASSA
-                    </button>
-                    <button
-                        disabled={selected.size === 0}
-                        onClick={() => setBulkOpen("copertura")}
-                        data-testid="bulk-copertura-btn"
-                        className="px-4 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 disabled:text-slate-400 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
-                    >
-                        <Shield size={14} /> COPERTURA
+                        <Wallet size={14} /> INCASSO / COPERTURA
                     </button>
                 </div>
                 {/* KPI cards in stile pannello laterale Brogliaccio */}
@@ -418,136 +411,247 @@ export default function Titoli() {
 
 function BulkActionDialog({ action, ids, conti, onClose }) {
     const today = new Date().toISOString().slice(0, 10);
-    const [data_incasso, setDataIncasso] = useState(today);
-    const [mezzo, setMezzo] = useState("bonifico");
-    const [conto_id, setContoId] = useState("");
-    const [coperto, setCoperto] = useState(today);  // data copertura di default = OGGI
+    const [doCopertura, setDoCopertura] = useState(true);
+    const [doIncasso, setDoIncasso] = useState(false);
+    const [emailOperatori, setEmailOperatori] = useState(false);
+    const [emailContraenti, setEmailContraenti] = useState(false);
+    const [inDirezione, setInDirezione] = useState(false);
+    const [dataCopertura, setDataCopertura] = useState(today);
+    const [dataIncasso, setDataIncasso] = useState(today);
+    const [mezzo, setMezzo] = useState("contanti");
+    const [contoId, setContoId] = useState(conti?.[0]?.id || "");
     const [file, setFile] = useState(null);
-    const [inviaCliente, setInviaCliente] = useState(false);
-    const [inviaCollab, setInviaCollab] = useState(false);
     const [noteEmail, setNoteEmail] = useState("");
 
     const submit = async () => {
+        if (!doCopertura && !doIncasso) {
+            toast.error("Seleziona Copertura e/o Incasso");
+            return;
+        }
         try {
-            // se c'è file o invio email, usa endpoint multipart con allegato
-            if (file || inviaCliente || inviaCollab) {
-                const fd = new FormData();
-                if (file) fd.append("file", file);
-                const qs = new URLSearchParams({
-                    action,
-                    ids_json: JSON.stringify(ids),
-                    invia_cliente: String(inviaCliente),
-                    invia_collaboratore: String(inviaCollab),
-                });
-                if (action === "incassa") {
-                    qs.append("data_incasso", data_incasso);
-                    qs.append("mezzo_pagamento", mezzo);
-                    if (conto_id) qs.append("conto_cassa_id", conto_id);
+            const messages = [];
+            // 1) Copertura via endpoint multipart se file/email, altrimenti diretto
+            if (doCopertura) {
+                if (file || emailContraenti || emailOperatori) {
+                    const fd = new FormData();
+                    if (file) fd.append("file", file);
+                    const qs = new URLSearchParams({
+                        action: "copertura",
+                        ids_json: JSON.stringify(ids),
+                        invia_cliente: String(emailContraenti),
+                        invia_collaboratore: String(emailOperatori),
+                        data_copertura: dataCopertura,
+                    });
+                    if (noteEmail) qs.append("note_email", noteEmail);
+                    const r = await api.post(`/titoli/bulk-azione-allegato?${qs}`, fd, {
+                        headers: { "Content-Type": "multipart/form-data" },
+                    });
+                    messages.push(`Copertura su ${r.data.aggiornati} titoli`);
+                    if (r.data.allegato_nome) messages.push(`allegato "${r.data.allegato_nome}"`);
+                    if (r.data.email_create) messages.push(`${r.data.email_create} email in coda`);
                 } else {
-                    qs.append("data_copertura", coperto);
+                    const r = await api.post("/titoli/bulk-copertura", {
+                        ids, data_copertura: dataCopertura,
+                    });
+                    messages.push(`Copertura su ${r.data.aggiornati} titoli`);
                 }
-                if (noteEmail) qs.append("note_email", noteEmail);
-                const r = await api.post(`/titoli/bulk-azione-allegato?${qs}`, fd, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                });
-                const parts = [];
-                if (action === "incassa") parts.push(`${r.data.incassati} incassati per ${fmtEur(r.data.totale)}`);
-                else parts.push(`Copertura su ${r.data.aggiornati} titoli`);
-                if (r.data.allegato_nome) parts.push(`allegato "${r.data.allegato_nome}" salvato`);
-                if (r.data.email_create) parts.push(`${r.data.email_create} email in coda`);
-                toast.success(parts.join(" · "));
-            } else if (action === "incassa") {
-                const r = await api.post("/titoli/bulk-incassa", {
-                    ids, data_incasso, mezzo_pagamento: mezzo, conto_cassa_id: conto_id || null,
-                });
-                toast.success(`${r.data.incassati} titoli incassati per ${fmtEur(r.data.totale)}`);
-            } else {
-                const r = await api.post("/titoli/bulk-copertura", { ids, data_copertura: coperto });
-                toast.success(`Copertura impostata su ${r.data.aggiornati} titoli`);
+                if (inDirezione) {
+                    await Promise.all(ids.map((id) =>
+                        api.put(`/titoli/${id}`, { pagamento_in_direzione: true }).catch(() => null),
+                    ));
+                }
             }
+            // 2) Incasso bulk (pagamento full lordo, no sconto/sospeso in batch)
+            if (doIncasso) {
+                const r = await api.post("/titoli/bulk-incassa", {
+                    ids,
+                    data_incasso: dataIncasso,
+                    mezzo_pagamento: mezzo,
+                    conto_cassa_id: contoId || null,
+                });
+                messages.push(`${r.data.incassati} titoli incassati per ${fmtEur(r.data.totale)}`);
+            }
+            toast.success(messages.join(" · ") || "Operazione completata");
             onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        }
     };
+
+    const cellLabel = "bg-slate-100 text-slate-700 font-medium text-right px-3 py-2 align-middle border border-slate-200 w-[180px]";
+    const cellValueRO = "bg-cyan-50 text-cyan-900 px-3 py-2 align-middle border border-slate-200";
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>
-                        {action === "incassa" ? `Incassa ${ids.length} titoli` : `Imposta copertura su ${ids.length} titoli`}
+            <DialogContent className="max-w-2xl p-0 overflow-hidden bg-white" data-testid="dialog-bulk-incasso-copertura">
+                <DialogHeader className="px-6 py-3 border-b border-slate-200 bg-white">
+                    <DialogTitle className="text-slate-800 font-semibold">
+                        Incasso / Copertura — {ids.length} titoli
                     </DialogTitle>
                 </DialogHeader>
-                {action === "incassa" ? (
-                    <div className="space-y-3 py-2">
-                        <div><Label>Data incasso</Label><Input type="date" value={data_incasso} onChange={(e) => setDataIncasso(e.target.value)} data-testid="bulk-data" /></div>
-                        <div><Label>Mezzo pagamento</Label><Input value={mezzo} onChange={(e) => setMezzo(e.target.value)} /></div>
-                        <div>
-                            <Label>Conto / Banca</Label>
-                            <Select value={conto_id} onValueChange={setContoId}>
-                                <SelectTrigger data-testid="bulk-conto"><SelectValue placeholder="-" /></SelectTrigger>
-                                <SelectContent>
-                                    {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="space-y-3 py-2">
-                        <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs text-amber-900">
-                            <strong>Copertura titolo</strong>: l&apos;agenzia anticipa il pagamento al cliente.
-                            Il titolo resta &quot;da incassare&quot; finché il cliente non paga.
-                            Apparirà nella sezione <strong>Sospesi</strong>.
-                        </div>
-                        <div>
-                            <Label>Data copertura (oggi è il default)</Label>
-                            <Input type="date" value={coperto} onChange={(e) => setCoperto(e.target.value)} data-testid="bulk-coperto" />
-                        </div>
-                    </div>
-                )}
 
-                <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Allegato e invio email</div>
+                <div className="px-6 py-4 max-h-[78vh] overflow-y-auto space-y-4">
+                    <table className="w-full border-collapse text-sm">
+                        <tbody>
+                            <tr>
+                                <td className={cellLabel}>Titoli selezionati</td>
+                                <td className={cellValueRO}>{ids.length}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    {/* ---- COPERTURA ---- */}
                     <div>
-                        <Label>Allega file (quietanza PDF, ricevuta, ecc.)</Label>
-                        <Input
-                            type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                            data-testid="bulk-file"
-                            onChange={(e) => setFile(e.target.files?.[0] || null)}
-                        />
-                        {file && <div className="text-xs text-slate-500 mt-1 truncate">{file.name} · {(file.size / 1024).toFixed(0)} KB</div>}
-                    </div>
-                    <div className="space-y-1.5">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input
-                                type="checkbox" checked={inviaCliente}
-                                onChange={(e) => setInviaCliente(e.target.checked)}
-                                data-testid="bulk-invia-cliente"
+                        <label
+                            htmlFor="bulk-cb-copertura"
+                            className="flex items-center gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-cb-copertura"
+                                checked={doCopertura}
+                                onCheckedChange={(v) => setDoCopertura(v === true)}
+                                data-testid="bulk-cb-copertura"
                             />
-                            Invia email ai clienti contraenti
+                            <span className="text-cyan-700 font-semibold text-lg">Copertura</span>
                         </label>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input
-                                type="checkbox" checked={inviaCollab}
-                                onChange={(e) => setInviaCollab(e.target.checked)}
-                                data-testid="bulk-invia-collab"
-                            />
-                            Notifica i collaboratori delle polizze
-                        </label>
+                        {doCopertura && (
+                            <div className="pl-8 mt-2 space-y-2" data-testid="bulk-copertura-options">
+                                <div className="flex items-center gap-3">
+                                    <Label className="text-xs w-32">Data copertura</Label>
+                                    <Input
+                                        type="date"
+                                        value={dataCopertura}
+                                        onChange={(e) => setDataCopertura(e.target.value)}
+                                        className="max-w-[200px]"
+                                        data-testid="bulk-data-copertura"
+                                    />
+                                </div>
+                                <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
+                                    <Checkbox
+                                        checked={emailOperatori}
+                                        onCheckedChange={(v) => setEmailOperatori(v === true)}
+                                        data-testid="bulk-email-op"
+                                    />
+                                    Invia email di notifica a operatori
+                                </label>
+                                <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
+                                    <Checkbox
+                                        checked={emailContraenti}
+                                        onCheckedChange={(v) => setEmailContraenti(v === true)}
+                                        data-testid="bulk-email-cnt"
+                                    />
+                                    Invia email di notifica a contraenti
+                                </label>
+                                <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
+                                    <Checkbox
+                                        checked={inDirezione}
+                                        onCheckedChange={(v) => setInDirezione(v === true)}
+                                        data-testid="bulk-direzione"
+                                    />
+                                    Pagamento (premio) effettuato dal cliente direttamente in direzione
+                                </label>
+                            </div>
+                        )}
                     </div>
-                    {(inviaCliente || inviaCollab) && (
-                        <div>
-                            <Label>Testo aggiuntivo email (opzionale)</Label>
-                            <Input value={noteEmail} onChange={(e) => setNoteEmail(e.target.value)} placeholder="Verrà inserito nel corpo dell'email" />
+
+                    {/* ---- INCASSO ---- */}
+                    <div>
+                        <label
+                            htmlFor="bulk-cb-incasso"
+                            className="flex items-center gap-3 cursor-pointer"
+                        >
+                            <Checkbox
+                                id="bulk-cb-incasso"
+                                checked={doIncasso}
+                                onCheckedChange={(v) => setDoIncasso(v === true)}
+                                data-testid="bulk-cb-incasso"
+                            />
+                            <span className="text-cyan-700 font-semibold text-lg">Incasso</span>
+                        </label>
+                        {doIncasso && (
+                            <div className="pl-8 mt-3 space-y-3" data-testid="bulk-incasso-options">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <Label className="text-xs">Data incasso</Label>
+                                        <Input
+                                            type="date"
+                                            value={dataIncasso}
+                                            onChange={(e) => setDataIncasso(e.target.value)}
+                                            data-testid="bulk-data-incasso"
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs">Mezzo pagamento</Label>
+                                        <Select value={mezzo} onValueChange={setMezzo}>
+                                            <SelectTrigger data-testid="bulk-mezzo"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="contanti">Contanti</SelectItem>
+                                                <SelectItem value="bonifico">Bonifico</SelectItem>
+                                                <SelectItem value="assegno">Assegno</SelectItem>
+                                                <SelectItem value="pos">POS / Carta</SelectItem>
+                                                <SelectItem value="rid">RID</SelectItem>
+                                                <SelectItem value="altro">Altro</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <Label className="text-xs">Conto cassa</Label>
+                                    <Select
+                                        value={contoId || "__none__"}
+                                        onValueChange={(v) => setContoId(v === "__none__" ? "" : v)}
+                                    >
+                                        <SelectTrigger data-testid="bulk-conto"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="__none__">— nessuno —</SelectItem>
+                                            {(conti || []).map((c) => (
+                                                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-900">
+                                    <strong>Nota:</strong> in modalità bulk si incassa il <em>premio lordo intero</em> di ogni titolo.
+                                    Per gestire sconti o residui a sospeso usa il pulsante <em>Incasso/Copertura</em> sulla singola riga.
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ---- Allegato + Email ---- */}
+                    <div className="pt-3 border-t border-slate-200 space-y-3">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                            Allegato (opzionale)
                         </div>
-                    )}
+                        <div>
+                            <Label className="text-xs">Allega file (PDF, ricevuta, ecc.)</Label>
+                            <Input
+                                type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                data-testid="bulk-file"
+                                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                            />
+                            {file && <div className="text-xs text-slate-500 mt-1 truncate">{file.name} · {(file.size / 1024).toFixed(0)} KB</div>}
+                        </div>
+                        {(emailContraenti || emailOperatori) && (
+                            <div>
+                                <Label className="text-xs">Testo aggiuntivo email (opzionale)</Label>
+                                <Input value={noteEmail} onChange={(e) => setNoteEmail(e.target.value)}
+                                    placeholder="Verrà inserito nel corpo dell'email" />
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <Button onClick={submit} data-testid="bulk-confirm" className="bg-sky-700 hover:bg-sky-800">
+                <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                    <Button
+                        onClick={submit}
+                        className="bg-slate-800 hover:bg-slate-900"
+                        data-testid="bulk-confirm"
+                    >
                         Conferma
                     </Button>
-                </DialogFooter>
+                </div>
             </DialogContent>
         </Dialog>
     );

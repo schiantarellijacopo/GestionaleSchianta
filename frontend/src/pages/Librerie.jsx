@@ -161,13 +161,14 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
     if (section.key === "prodotti") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>Ramo</th><th>Compagnia</th><th>Descrizione</th><th></th></tr></thead>
+                <thead><tr><th>Nome</th><th>Ramo</th><th>Compagnia</th><th className="text-right">Mora (gg)</th><th>Descrizione</th><th></th></tr></thead>
                 <tbody>
                     {list.map((p) => (
                         <tr key={p.id}>
                             <td className="font-medium">{p.nome}</td>
                             <td><span className="badge badge-neutral">{p.ramo || "-"}</span></td>
                             <td className="text-xs">{p.compagnia_id || "-"}</td>
+                            <td className="num text-right font-medium">{p.termini_mora_giorni ?? 15}</td>
                             <td className="text-xs text-slate-500">{p.descrizione || ""}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(p)} onDelete={() => onDelete(p.id)} label="prodotto" />
@@ -475,15 +476,25 @@ function ProdottoForm({ section, editing, onClose }) {
         api.get("/compagnie").then((r) => setCompagnie(r.data));
         api.get("/librerie/rami").then((r) => setRami(r.data));
     }, []);
+    // Default mora: 30gg per Vita, 15gg per gli altri
+    const defaultMoraFor = (ramo) => {
+        if (!ramo) return 15;
+        const r = String(ramo).toUpperCase();
+        return ["VITA", "VITA_RC", "PREVIDENZA"].includes(r) ? 30 : 15;
+    };
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", attivo: true }}
+        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, attivo: true }}
         fields={(f, set) => (
             <>
                 <div><Label>Nome prodotto *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <Label>Ramo</Label>
-                        <Select value={f.ramo || ""} onValueChange={(v) => set("ramo", v)}>
+                        <Select value={f.ramo || ""} onValueChange={(v) => {
+                            set("ramo", v);
+                            // Auto-set default mora se l'utente non l'ha già modificato
+                            if (!editing) set("termini_mora_giorni", defaultMoraFor(v));
+                        }}>
                             <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
                             <SelectContent>
                                 {rami.map((r) => <SelectItem key={r.id} value={r.codice}>{r.nome}</SelectItem>)}
@@ -498,6 +509,20 @@ function ProdottoForm({ section, editing, onClose }) {
                                 {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                             </SelectContent>
                         </Select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <Label>Termini di mora (gg) *</Label>
+                        <Input
+                            type="number" min="0" max="365"
+                            value={f.termini_mora_giorni ?? 15}
+                            onChange={(e) => set("termini_mora_giorni", parseInt(e.target.value || 0, 10))}
+                            data-testid="prodotto-termini-mora"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Default: 15 gg · Vita = 30 gg. Verrà riportato sulle polizze e usato per calcolare automaticamente la scadenza mora dei titoli.
+                        </div>
                     </div>
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>

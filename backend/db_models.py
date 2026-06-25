@@ -482,7 +482,25 @@ class ProdottoLibreria(BaseDoc):
     compagnia_id: Optional[str] = None
     ramo: Optional[str] = None
     descrizione: Optional[str] = None
+    termini_mora_giorni: int = 15  # default 15gg; per Vita usare 30gg (vedi DEFAULT_MORA_BY_RAMO)
     attivo: bool = True
+
+
+# Default termini di mora per ramo (giorni) — usato quando il prodotto non
+# specifica il proprio termine. Le polizze Vita hanno mora più lunga (30gg).
+DEFAULT_MORA_BY_RAMO: dict = {
+    "VITA": 30,
+    "vita": 30,
+    "VITA_RC": 30,
+    "PREVIDENZA": 30,
+}
+
+
+def default_mora_for_ramo(ramo: Optional[str]) -> int:
+    if not ramo:
+        return 15
+    r = ramo.strip()
+    return DEFAULT_MORA_BY_RAMO.get(r, DEFAULT_MORA_BY_RAMO.get(r.upper(), 15))
 
 
 class RamoLibreria(BaseDoc):

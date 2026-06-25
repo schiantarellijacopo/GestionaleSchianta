@@ -14,6 +14,7 @@ import {
 import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
@@ -21,8 +22,13 @@ export default function PolizzaDetail() {
     const { user } = useAuth();
     const [pol, setPol] = useState(null);
     const [editOpen, setEditOpen] = useState(false);
+    const [conti, setConti] = useState([]);
+    const [paying, setPaying] = useState(null);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+    useEffect(() => {
+        api.get("/contabilita/conti-cassa").then((r) => setConti(r.data || [])).catch(() => {});
+    }, []);
     if (!pol) return <Loading />;
 
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
@@ -243,7 +249,7 @@ export default function PolizzaDetail() {
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
                             <table className="tbl w-full">
-                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv.</th><th>Pagato il</th><th></th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv.</th><th>Pagato il</th><th className="text-center">Azione</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
                                         <tr key={t.id}>
@@ -254,9 +260,27 @@ export default function PolizzaDetail() {
                                             <td className="num text-right font-medium">{fmtEur(t.importo_lordo)}</td>
                                             <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
                                             <td className="num">{fmtDate(t.data_incasso)}</td>
-                                            <td>{t.stato === "da_incassare" && (
-                                                <button onClick={() => incassa(t.id)} className="text-xs text-emerald-700 hover:underline">Incassa</button>
-                                            )}</td>
+                                            <td className="text-center">
+                                                {t.stato !== "incassato" && t.stato !== "stornato" ? (
+                                                    <Button
+                                                        size="sm"
+                                                        className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                                                        onClick={() => setPaying({
+                                                            ...t,
+                                                            numero_polizza: pol.numero_polizza,
+                                                            ramo: pol.ramo,
+                                                            contraente_id: pol.contraente_id,
+                                                            contraente_nome: pol.contraente?.ragione_sociale,
+                                                            compagnia_nome: pol.compagnia?.ragione_sociale,
+                                                        })}
+                                                        data-testid={`pol-titolo-incassa-${t.id}`}
+                                                    >
+                                                        Incasso/Copertura
+                                                    </Button>
+                                                ) : (
+                                                    <span className="text-xs text-emerald-700">✓</span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -284,6 +308,13 @@ export default function PolizzaDetail() {
             </Tabs>
             {editOpen && (
                 <EditPolizzaDialog pol={pol} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} />
+            )}
+            {paying && (
+                <DialogIncassoCopertura
+                    titolo={paying}
+                    conti={conti}
+                    onClose={() => { setPaying(null); load(); }}
+                />
             )}
         </div>
     );
