@@ -252,7 +252,6 @@ export default function Anagrafiche() {
                                 <th className="text-left py-3 pr-3">Cliente</th>
                                 <th className="text-left py-3 pr-3">E-mail</th>
                                 <th className="text-left py-3 pr-3">Telefono</th>
-                                <th className="text-center py-3 pr-3">Collegati</th>
                                 <th className="text-center py-3 pr-3 text-emerald-700">Polizze</th>
                                 <th className="text-left py-3 pr-3">Collaboratore</th>
                                 <th className="text-right py-3 pr-3">Premio totale</th>
@@ -360,9 +359,6 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
                           ><Phone size={12} className="text-slate-400" />{formatPhone(a.cellulare || a.telefono)}</a>
                         : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="py-3 pr-3 text-center num text-slate-700">
-                    {net ? net.totali.n_persone - 1 : "·"}
-                </td>
                 <td className="py-3 pr-3 text-center text-emerald-700 font-semibold num">
                     {a.polizze_attive_count || 0}
                 </td>
@@ -394,7 +390,7 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
             </tr>
             {isOpen && net && (
                 <tr className="bg-slate-50/60 border-b border-slate-200" data-testid={`anag-network-${a.id}`}>
-                    <td colSpan={10} className="px-12 py-4">
+                    <td colSpan={9} className="px-12 py-4">
                         {net.collegati.length === 0 ? (
                             <div className="text-xs text-slate-500 italic">
                                 Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Albero genealogico.

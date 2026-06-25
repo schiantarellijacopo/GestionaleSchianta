@@ -541,6 +541,25 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         veicolo_kw: pol.veicolo_kw || "",
         veicolo_cilindrata: pol.veicolo_cilindrata || "",
         veicolo_posti: pol.veicolo_posti || "",
+        veicolo_quintali: pol.veicolo_quintali ?? "",
+        veicolo_gancio_traino: !!pol.veicolo_gancio_traino,
+        veicolo_targa_rimorchio: pol.veicolo_targa_rimorchio || "",
+        // Dati associazione contratto (RCA)
+        tipo_tariffa: pol.tipo_tariffa || "",
+        bm_provenienza: pol.bm_provenienza || "",
+        bm_assegnata: pol.bm_assegnata || "",
+        bm_assegnata_cu: pol.bm_assegnata_cu || "",
+        pejus: pol.pejus ?? "",
+        franchigia: pol.franchigia ?? 0,
+        valore_veicolo: pol.valore_veicolo ?? 0,
+        valore_residuo_veicolo: pol.valore_residuo_veicolo ?? 0,
+        valore_accessori: pol.valore_accessori ?? 0,
+        guida_esperta: !!pol.guida_esperta,
+        guida_esclusiva: !!pol.guida_esclusiva,
+        rinuncia_rivalsa: !!pol.rinuncia_rivalsa,
+        intestatario: pol.intestatario || "",
+        provincia_intestatario: pol.provincia_intestatario || "",
+        massimali: pol.massimali || "",
         note: pol.note || "",
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -549,11 +568,18 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         try {
             const payload = { ...f };
             ["premio_netto", "premio_tasse", "premio_imposte", "premio_ssn", "premio_lordo",
-             "provvigioni", "termini_mora_giorni", "termini_disdetta_giorni"].forEach((k) => {
+             "provvigioni", "termini_mora_giorni", "termini_disdetta_giorni",
+             "pejus", "franchigia", "valore_veicolo", "valore_residuo_veicolo", "valore_accessori"].forEach((k) => {
                 if (payload[k] !== "" && payload[k] !== null && payload[k] !== undefined) {
                     payload[k] = parseFloat(payload[k]) || 0;
                 }
             });
+            // Quintali numeric (nullable)
+            if (payload.veicolo_quintali === "" || payload.veicolo_quintali === null) {
+                payload.veicolo_quintali = null;
+            } else if (payload.veicolo_quintali !== undefined) {
+                payload.veicolo_quintali = parseFloat(payload.veicolo_quintali) || 0;
+            }
             await api.put(`/polizze/${pol.id}`, payload);
             toast.success("Polizza aggiornata");
             onSaved();
@@ -733,18 +759,53 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
 
                     {isRCA && (
                         <TabsContent value="veicolo">
-                            <div className="grid grid-cols-2 gap-3 py-3">
-                                <div><Label>Targa</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} /></div>
-                                <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} /></div>
-                                <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} /></div>
+                            <div className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold pt-3 pb-1">Dati veicolo</div>
+                            <div className="grid grid-cols-2 gap-3 pb-3">
+                                <div><Label>Targa</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="edit-pol-targa" /></div>
+                                <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} data-testid="edit-pol-marca" /></div>
+                                <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} data-testid="edit-pol-modello" /></div>
                                 <div><Label>Tipo veicolo</Label><Input value={f.veicolo_tipo} onChange={(e) => set("veicolo_tipo", e.target.value)} /></div>
                                 <div><Label>Alimentazione</Label><Input value={f.veicolo_alimentazione} onChange={(e) => set("veicolo_alimentazione", e.target.value)} /></div>
                                 <div><Label>Tipo uso</Label><Input value={f.veicolo_uso} onChange={(e) => set("veicolo_uso", e.target.value)} /></div>
                                 <div><Label>Immatricolazione</Label><Input type="date" value={f.veicolo_data_immatricolazione} onChange={(e) => set("veicolo_data_immatricolazione", e.target.value)} /></div>
                                 <div><Label>CV fiscali</Label><Input value={f.veicolo_cv_fiscali} onChange={(e) => set("veicolo_cv_fiscali", e.target.value)} /></div>
                                 <div><Label>KW</Label><Input value={f.veicolo_kw} onChange={(e) => set("veicolo_kw", e.target.value)} /></div>
+                                <div><Label>Quintali P.C.</Label><Input type="number" step="0.01" value={f.veicolo_quintali} onChange={(e) => set("veicolo_quintali", e.target.value)} data-testid="edit-pol-quintali" /></div>
                                 <div><Label>Cilindrata</Label><Input value={f.veicolo_cilindrata} onChange={(e) => set("veicolo_cilindrata", e.target.value)} /></div>
-                                <div><Label>Posti</Label><Input value={f.veicolo_posti} onChange={(e) => set("veicolo_posti", e.target.value)} /></div>
+                                <div><Label>Numero posti</Label><Input value={f.veicolo_posti} onChange={(e) => set("veicolo_posti", e.target.value)} /></div>
+                                <div className="flex items-center gap-2 mt-6">
+                                    <input type="checkbox" id="gancio-traino" checked={f.veicolo_gancio_traino} onChange={(e) => set("veicolo_gancio_traino", e.target.checked)} data-testid="edit-pol-gancio" />
+                                    <Label htmlFor="gancio-traino" className="cursor-pointer">Gancio traino</Label>
+                                </div>
+                                <div><Label>Targa rimorchio</Label><Input value={f.veicolo_targa_rimorchio} onChange={(e) => set("veicolo_targa_rimorchio", e.target.value.toUpperCase())} data-testid="edit-pol-targa-rim" /></div>
+                            </div>
+
+                            <div className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold pt-2 pb-1 border-t border-slate-200">Dati associazione contratto</div>
+                            <div className="grid grid-cols-2 gap-3 pb-3 pt-2">
+                                <div><Label>Tipo tariffa</Label><Input value={f.tipo_tariffa} onChange={(e) => set("tipo_tariffa", e.target.value)} data-testid="edit-pol-tipo-tariffa" /></div>
+                                <div><Label>B-M provenienza</Label><Input value={f.bm_provenienza} onChange={(e) => set("bm_provenienza", e.target.value)} data-testid="edit-pol-bm-prov" /></div>
+                                <div><Label>B-M assegnata</Label><Input value={f.bm_assegnata} onChange={(e) => set("bm_assegnata", e.target.value)} data-testid="edit-pol-bm-ass" /></div>
+                                <div><Label>B-M ass. CU</Label><Input value={f.bm_assegnata_cu} onChange={(e) => set("bm_assegnata_cu", e.target.value)} data-testid="edit-pol-bm-cu" /></div>
+                                <div><Label>Pejus</Label><Input type="number" step="0.01" value={f.pejus} onChange={(e) => set("pejus", e.target.value)} data-testid="edit-pol-pejus" /></div>
+                                <div><Label>Franchigia €</Label><Input type="number" step="0.01" value={f.franchigia} onChange={(e) => set("franchigia", e.target.value)} data-testid="edit-pol-franchigia" /></div>
+                                <div><Label>Valore veicolo €</Label><Input type="number" step="0.01" value={f.valore_veicolo} onChange={(e) => set("valore_veicolo", e.target.value)} data-testid="edit-pol-valore-veicolo" /></div>
+                                <div><Label>Valore residuo €</Label><Input type="number" step="0.01" value={f.valore_residuo_veicolo} onChange={(e) => set("valore_residuo_veicolo", e.target.value)} data-testid="edit-pol-valore-residuo" /></div>
+                                <div><Label>Valore accessori €</Label><Input type="number" step="0.01" value={f.valore_accessori} onChange={(e) => set("valore_accessori", e.target.value)} data-testid="edit-pol-valore-accessori" /></div>
+                                <div className="flex items-center gap-2 mt-6">
+                                    <input type="checkbox" id="guida-esperta" checked={f.guida_esperta} onChange={(e) => set("guida_esperta", e.target.checked)} data-testid="edit-pol-guida-esperta" />
+                                    <Label htmlFor="guida-esperta" className="cursor-pointer">Guida esperta</Label>
+                                </div>
+                                <div className="flex items-center gap-2 mt-6">
+                                    <input type="checkbox" id="guida-esclusiva" checked={f.guida_esclusiva} onChange={(e) => set("guida_esclusiva", e.target.checked)} data-testid="edit-pol-guida-esclusiva" />
+                                    <Label htmlFor="guida-esclusiva" className="cursor-pointer">Guida esclusiva</Label>
+                                </div>
+                                <div className="flex items-center gap-2 mt-6">
+                                    <input type="checkbox" id="rinuncia-rivalsa" checked={f.rinuncia_rivalsa} onChange={(e) => set("rinuncia_rivalsa", e.target.checked)} data-testid="edit-pol-rinuncia-rivalsa" />
+                                    <Label htmlFor="rinuncia-rivalsa" className="cursor-pointer">Rinuncia rivalsa</Label>
+                                </div>
+                                <div><Label>Intestatario</Label><Input value={f.intestatario} onChange={(e) => set("intestatario", e.target.value)} data-testid="edit-pol-intestatario" /></div>
+                                <div><Label>Prov. intestatario</Label><Input maxLength={2} value={f.provincia_intestatario} onChange={(e) => set("provincia_intestatario", e.target.value.toUpperCase())} data-testid="edit-pol-prov-intest" /></div>
+                                <div className="col-span-2"><Label>Massimali</Label><Input value={f.massimali} onChange={(e) => set("massimali", e.target.value)} data-testid="edit-pol-massimali" /></div>
                             </div>
                         </TabsContent>
                     )}
