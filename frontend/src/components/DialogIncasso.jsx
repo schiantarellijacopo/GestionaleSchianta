@@ -23,8 +23,10 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
+    const { mezzi } = useMezziPagamento();
     const oggi = new Date().toISOString().slice(0, 10);
     const lordo = parseFloat(titolo.importo_lordo) || 0;
     const [pref, setPref] = useState(null);
@@ -132,12 +134,9 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                             <Select value={f.mezzo_pagamento} onValueChange={(v) => set("mezzo_pagamento", v)}>
                                 <SelectTrigger data-testid="inc-mezzo"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="contanti">Contanti</SelectItem>
-                                    <SelectItem value="bonifico">Bonifico</SelectItem>
-                                    <SelectItem value="assegno">Assegno</SelectItem>
-                                    <SelectItem value="pos">POS / Carta</SelectItem>
-                                    <SelectItem value="rid">RID</SelectItem>
-                                    <SelectItem value="altro">Altro</SelectItem>
+                                    {mezzi.map((m) => (
+                                        <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>

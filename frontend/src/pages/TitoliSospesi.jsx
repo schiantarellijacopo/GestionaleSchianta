@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
+import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import DialogIncasso from "@/components/DialogIncasso";
-import { Coins, Clock, AlertTriangle, CheckCircle } from "lucide-react";
+import { Coins, Clock, AlertTriangle, CheckCircle, Printer } from "lucide-react";
 
 export default function TitoliSospesi() {
     const [items, setItems] = useState(null);
@@ -89,6 +90,14 @@ export default function TitoliSospesi() {
                         </SelectContent>
                     </Select>
                 </div>
+                <Button
+                    variant="outline"
+                    onClick={() => openPdf("/stampa/titoli/sospesi", filtroCollab !== "all" ? { collaboratore_id: filtroCollab } : {})}
+                    data-testid="sospesi-print-pdf"
+                    disabled={!items || items.length === 0}
+                >
+                    <Printer size={14} className="mr-1" /> Stampa PDF
+                </Button>
             </Card>
 
             {riepilogoCollab.length > 0 && (

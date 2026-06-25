@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap } from "lucide-react";
 import { toast } from "sonner";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
@@ -494,6 +495,7 @@ export default function PolizzaDetail() {
 }
 
 function EditPolizzaDialog({ pol, onClose, onSaved }) {
+    const { mezzi } = useMezziPagamento();
     const [collaboratori, setCollaboratori] = useState([]);
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
@@ -632,12 +634,9 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                     <SelectTrigger data-testid="polizza-mezzo-preferito"><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="__auto__">Auto (segue ultimo incasso)</SelectItem>
-                                        <SelectItem value="contanti">Contanti</SelectItem>
-                                        <SelectItem value="bonifico">Bonifico</SelectItem>
-                                        <SelectItem value="assegno">Assegno</SelectItem>
-                                        <SelectItem value="pos">POS / Carta</SelectItem>
-                                        <SelectItem value="rid">RID</SelectItem>
-                                        <SelectItem value="altro">Altro</SelectItem>
+                                        {mezzi.map((m) => (
+                                            <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
                                 {pol.ultimo_mezzo_pagamento && (

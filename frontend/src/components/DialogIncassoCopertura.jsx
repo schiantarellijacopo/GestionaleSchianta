@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { X } from "lucide-react";
 import { toast } from "sonner";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 const TIPO_TITOLO_OPTS = [
     { v: "quietanza", l: "Quietanza" },
@@ -42,6 +43,7 @@ function addDays(iso, days) {
 }
 
 export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone }) {
+    const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const lordo = parseFloat(titolo.importo_lordo) || 0;
     const [pref, setPref] = useState(null);
@@ -376,12 +378,9 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                         >
                                             <SelectTrigger data-testid="ico-mezzo"><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="contanti">Contanti</SelectItem>
-                                                <SelectItem value="bonifico">Bonifico</SelectItem>
-                                                <SelectItem value="assegno">Assegno</SelectItem>
-                                                <SelectItem value="pos">POS / Carta</SelectItem>
-                                                <SelectItem value="rid">RID</SelectItem>
-                                                <SelectItem value="altro">Altro</SelectItem>
+                                                {mezzi.map((m) => (
+                                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                                ))}
                                             </SelectContent>
                                         </Select>
                                         {polizzaPreferito && (

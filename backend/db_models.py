@@ -979,3 +979,22 @@ class Rappel(BaseDoc):
     data_incasso: Optional[str] = None
     movimento_id: Optional[str] = None  # se incassato, ref al movimento provvigioni in Prima Nota
     created_by: Optional[str] = None  # user id
+
+
+
+# =============== MEZZO PAGAMENTO (libreria unificata) ===============
+class MezzoPagamento(BaseDoc):
+    """Libreria UNICA dei mezzi di pagamento usati in TUTTI i dialoghi
+    (incassi, paga-provvigioni, paga-compagnia, nuovo movimento, edit).
+
+    `codice` = chiave stabile usata nei dati esistenti (contanti, bonifico, ...).
+    `tipo_conto` = quale tipo di ContoCassa risolvere automaticamente.
+    `conto_default_id` = se valorizzato, override esplicito del conto da utilizzare.
+    """
+    codice: str         # univoco (es. "contanti", "bonifico", "assegno", "pos", "rid", "altro")
+    label: str          # testo visualizzato (es. "Contanti", "Bonifico bancario")
+    tipo_conto: Literal["cassa", "banca", "carta", "rid", "online", "altro"] = "altro"
+    conto_default_id: Optional[str] = None  # forza la mappatura ad uno specifico ContoCassa
+    icona: Optional[str] = None
+    ordine: int = 0
+    attivo: bool = True

@@ -24,6 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AnalisiClienteTab from "@/components/AnalisiClienteTab";
 import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function AnagraficaDetail() {
     const { id } = useParams();
@@ -148,6 +149,7 @@ export default function AnagraficaDetail() {
 }
 
 function DatiTab({ ana, canEdit, onReload }) {
+    const { mezzi } = useMezziPagamento();
     const [editing, setEditing] = useState(false);
     const [f, setF] = useState({ ...ana });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -276,12 +278,9 @@ function DatiTab({ ana, canEdit, onReload }) {
                         <SelectTrigger data-testid="anag-pref-pag"><SelectValue placeholder="—" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="__none__">— nessuna preferenza —</SelectItem>
-                            <SelectItem value="contanti">Contanti</SelectItem>
-                            <SelectItem value="bonifico">Bonifico</SelectItem>
-                            <SelectItem value="assegno">Assegno</SelectItem>
-                            <SelectItem value="pos">POS / Carta</SelectItem>
-                            <SelectItem value="rid">RID</SelectItem>
-                            <SelectItem value="altro">Altro</SelectItem>
+                            {mezzi.map((m) => (
+                                <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                     {f.ultimo_mezzo_pagamento && (

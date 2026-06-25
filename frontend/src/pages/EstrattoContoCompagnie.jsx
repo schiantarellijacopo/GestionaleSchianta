@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye } from "lucide-react";
 import AllegatiCell from "@/components/AllegatiCell";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function EstrattoContoCompagnie() {
     const [compagnie, setCompagnie] = useState([]);
@@ -474,6 +475,7 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
 }
 
 function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
+    const { mezzi } = useMezziPagamento();
     const [data, setData] = useState(new Date().toISOString().slice(0, 10));
     const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${titoliIds.length} titoli`);
     const [mezzo, setMezzo] = useState("bonifico");
@@ -513,12 +515,9 @@ function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
                         <Select value={mezzo} onValueChange={setMezzo}>
                             <SelectTrigger data-testid="ec-pay-mezzo"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="contanti">Contanti</SelectItem>
-                                <SelectItem value="bonifico">Bonifico</SelectItem>
-                                <SelectItem value="assegno">Assegno</SelectItem>
-                                <SelectItem value="pos">POS / Carta</SelectItem>
-                                <SelectItem value="rid">RID</SelectItem>
-                                <SelectItem value="altro">Altro</SelectItem>
+                                {mezzi.map((m) => (
+                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
                         <div className="text-[10px] text-slate-500 mt-1">

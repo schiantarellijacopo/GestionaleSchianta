@@ -1,0 +1,41 @@
+{
+  "summary": "Iter15 - Verifica completa: (1) bug brogliaccio uscite generiche risolto (c_totale=0 per spese_amministrative, altro, rimborso_cliente, sconto_cliente; totali_giornata.totale = somma di soli incassi_premio); (2) regressione /api/titoli/sospesi OK (200, lista non crashata); (3) nuovo endpoint /api/stampa/titoli/sospesi PDF OK (200, Content-Type application/pdf, filename 'sospesi_anticipi.pdf', sottotitolo include 'Data stampa: dd/mm/YYYY' e data odierna estratta via pypdf); (4) filtro ?collaboratore_id=... funziona; (5) /api/librerie/mezzi-pagamento?attivi=true ritorna 17+ mezzi seed; (6) Geocoding POST /api/geo/anagrafiche/{aid}/geocode 200 verificato anche da UI; (7) Frontend: TUTTI i 15 elementi cliccabili della Dashboard (6 stat + 2 chart + 4 KPI + 3 subcard) navigano correttamente ai path attesi; (8) pulsante 'sospesi-print-pdf' presente nella TitoliSospesi page; (9) Geocodifica button presente in AnagraficaDetail (view mode, non edit mode come scritto nel review request — il bottone è visibile in modalità visualizzazione Dati, non edit); (10) useMezziPagamento hook integrato in tutti i 5 file frontend richiesti (Provvigioni, EstrattoContoCompagnie, Titoli, AnagraficaDetail, PolizzaDetail). Pytest: 8/8 PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/contabilita/movimenti", "issue": "Pydantic ValidationError causa 500 invece di 422 quando i campi sono mancanti/non validi (es. data_movimento mancante o categoria='prelievo' non in enum). Dovrebbe restituire 422."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Generale - Console warnings", "issues": ["React warning: 'Each child in a list should have a unique \"key\" prop' nel componente TitoliByContraente (non bloccante, ma da fixare)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter15_dashboard_brogliaccio_sospesipdf.py",
+    "/app/test_reports/pytest/iter15_results.xml"
+  ],
+  "action_items": [
+    "(minor) Aggiungere un exception handler per pydantic ValidationError in POST /api/contabilita/movimenti per ritornare 422 invece di 500.",
+    "(minor) Aggiungere `key` prop ai children mappati nel componente TitoliByContraente (warning React in console su Dashboard).",
+    "Considerare la riconciliazione tra documentazione review (Geocodifica in 'Dati tab edit mode') e implementazione attuale (bottone visibile in view mode, non in edit mode). L'attuale implementazione è più sensata, ma allineare la nota di handoff."
+  ],
+  "critical_code_review_comments": [
+    "server.py è 9550 righe — il refactor in moduli (es. contabilita_service.py, stampa_service.py) raccomandato fin dall'iter13 resta valido.",
+    "Il fix del bug brogliaccio (linee 4581-4607) è corretto e copre tutte le categorie generiche di uscita. Test_iter15 verifica esplicitamente spese_amministrative, altro, rimborso_cliente, sconto_cliente con c_totale=0 e c_spese=importo.",
+    "L'endpoint /api/stampa/titoli/sospesi gestisce correttamente collaboratore_id filter e include 'Data stampa: {dd/mm/YYYY}' nel sottotitolo (verificato decodificando il PDF con pypdf).",
+    "Eccezione di ValidationError non catturata in create_movimento risulta in 500 - dovrebbe essere 422 (FastAPI gestisce automaticamente quando si usa il tipo direttamente come parametro, ma qui si fa MovimentoContabile(**body) manualmente)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter15_dashboard_brogliaccio_sospesipdf.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% navigazione Dashboard (15/15 cliccabili), PDF button presente, Geocode button funzionante, useMezziPagamento integrato in 5/5 file"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Movimenti TEST_iter15_* su 2026-05-15 (spese_amministrative 50, altro 30, rimborso_cliente 70, sconto_cliente 20, incasso_premio 200) e 2026-05-16 (pagamento_compagnia 150, provvigioni 80, giroconto 100). I movimenti vengono cancellati automaticamente al teardown della fixture; verificare residui se test interrotti.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter15 usa pypdf per verificare il contenuto testuale del PDF Sospesi (pypdf installato via pip). Il modello MovimentoContabile richiede 'data_movimento' (NON 'data') e categoria deve essere in enum: incasso_premio, pagamento_compagnia, provvigioni, rimborso_cliente, spese_amministrative, anticipo, giroconto, sconto_cliente, altro. Le librerie sono in /api/librerie/conti-cassa (NON /api/contabilita/conti-cassa). POST /api/contabilita/giroconto usa conto_da_id/conto_a_id (NON conto_cassa_sorgente/destinazione). Il bottone Geocodifica in AnagraficaDetail è nella view mode (non edit mode). Il pulsante PDF Sospesi (sospesi-print-pdf) usa openPdf() helper che apre in nuova tab.",
+  "rca of the issue": "BUG manuale outflows in TOTALE column risolto in server.py linee 4581-4607: il blocco 'else' (USCITE generiche) ora forza c_totale=0.0 e mette l'importo solo in c_spese (e c_sconti se sconto_cliente). Verificato con 4 categorie generiche su 2026-05-15: totale=0 per tutte, spese=importo. totali_giornata.totale ora rappresenta solo la somma degli incassi_premio (verificato pareggiando con la somma riga-per-riga). Regressione su categorie speciali OK: pagamento_compagnia (rimesse=150, totale=0), provvigioni-uscita (spese=80, totale=0), giroconto (totale=0). Anche /api/titoli/sospesi 200 verificato (regressione syntax error fix). PDF Sospesi: ReportLab encoding+compression dei text streams richiede pypdf per estrazione testo; 'Data stampa: 25/06/2026' confermato nel PDF."
+}

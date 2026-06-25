@@ -32,7 +32,7 @@ from db_models import (
     AziendaConfig, SchemaProvvigionale, EventoCalendario, ContattoCompagnia,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
-    Rappel, VoceRicorsivaCollab,
+    Rappel, VoceRicorsivaCollab, MezzoPagamento,
     _now_iso, _uid,
 )
 import ania_importer
@@ -123,14 +123,38 @@ _MEZZO_TO_TIPO = {
 
 
 async def _resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> str | None:
-    """Risolve un conto_cassa_id a partire dal mezzo di pagamento (configurato in libreria).
+    """Risolve un conto_cassa_id a partire dal mezzo di pagamento.
 
-    1. Trova il primo conto attivo del tipo mappato a `mezzo`.
-    2. Se non trovato e `fallback_any=True`, restituisce il primo conto attivo.
-    3. Altrimenti None.
+    Strategia:
+    1. Cerca il mezzo nella libreria `mezzi_pagamento` (codice match).
+       - Se ha `conto_default_id` → usa quello.
+       - Altrimenti usa il `tipo_conto` per cercare un ContoCassa attivo.
+    2. Fallback alla mappatura statica `_MEZZO_TO_TIPO` per compatibilità.
+    3. Se ancora niente e `fallback_any=True`, primo conto attivo.
     """
     if mezzo:
-        tipo = _MEZZO_TO_TIPO.get(mezzo.lower())
+        m_low = mezzo.lower()
+        # 1) Libreria mezzi_pagamento
+        mz = await db.mezzi_pagamento.find_one(
+            {"codice": m_low, "attivo": True}, {"_id": 0},
+        )
+        if mz:
+            if mz.get("conto_default_id"):
+                c = await db.conti_cassa.find_one(
+                    {"id": mz["conto_default_id"], "attivo": True}, {"_id": 0, "id": 1},
+                )
+                if c:
+                    return c["id"]
+            tipo = mz.get("tipo_conto")
+            if tipo:
+                c = await db.conti_cassa.find_one(
+                    {"tipo": tipo, "attivo": True}, {"_id": 0, "id": 1},
+                    sort=[("ordine", 1)],
+                )
+                if c:
+                    return c["id"]
+        # 2) fallback mappatura statica
+        tipo = _MEZZO_TO_TIPO.get(m_low)
         if tipo:
             c = await db.conti_cassa.find_one(
                 {"tipo": tipo, "attivo": True}, {"_id": 0, "id": 1},
@@ -138,6 +162,7 @@ async def _resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> 
             )
             if c:
                 return c["id"]
+    # 3) fallback any
     if fallback_any:
         c = await db.conti_cassa.find_one(
             {"attivo": True}, {"_id": 0, "id": 1}, sort=[("ordine", 1)],
@@ -3107,7 +3132,7 @@ async def titoli_sospesi(
     collaboratore_id: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Elenco titoli COPERTI DALL'AGENZIA (anticipati) ma ancora DA INCASSARE dal cliente.
+    """Restituisce i titoli COPERTI ma NON INCASSATI (sospesi/anticipati dall'agenzia).
 
     Per ogni titolo restituisce: contraente, collaboratore, data_copertura,
     scadenza polizza, importo lordo. Usato dalla pagina 'Sospesi'.
@@ -4565,7 +4590,8 @@ async def _compute_brogliaccio(data_giorno: str):
                 c_totale = 0.0
                 c_rimesse = importo
             elif cat in CATS_ANTICIPI:
-                c_totale = -importo  # anticipo restituito (vera uscita)
+                # Restituzione anticipo: NON va in TOTALE, solo in colonna Sospesi (negativa).
+                c_totale = 0.0
                 c_crediti = -importo
             elif cat == "provvigioni":
                 # Pagamento provvigioni a collaboratore: NON va in TOTALE.
@@ -4573,8 +4599,9 @@ async def _compute_brogliaccio(data_giorno: str):
                 c_totale = 0.0
                 c_spese = importo
             else:
-                # spese generali, sconti, stipendi, altro - vera uscita di cassa
-                c_totale = -importo  # mostra in rosso
+                # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
+                # Solo in colonna Spese + Banca uscita.
+                c_totale = 0.0
                 c_spese = importo
                 if cat in CATS_SCONTI:
                     c_sconti = importo
@@ -7719,6 +7746,84 @@ async def delete_conto(cid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
+
+# --- MEZZI DI PAGAMENTO (libreria unificata) ---
+class MezzoPagamentoBody(BaseModel):
+    codice: str
+    label: str
+    tipo_conto: Literal["cassa", "banca", "carta", "rid", "online", "altro"] = "altro"
+    conto_default_id: Optional[str] = None
+    icona: Optional[str] = None
+    ordine: int = 0
+    attivo: bool = True
+
+
+@api.get("/librerie/mezzi-pagamento")
+async def list_mezzi_pagamento(
+    attivi: bool = False,
+    user=Depends(current_user),
+):
+    flt = {}
+    if attivi:
+        flt["attivo"] = True
+    items = await db.mezzi_pagamento.find(flt, {"_id": 0}).sort([("ordine", 1), ("label", 1)]).to_list(200)
+    return items
+
+
+@api.post("/librerie/mezzi-pagamento", status_code=201)
+async def create_mezzo_pagamento(body: MezzoPagamentoBody, user=Depends(require_user("admin"))):
+    codice = body.codice.strip().lower()
+    if not codice or not body.label:
+        raise HTTPException(400, "Codice e label obbligatori")
+    existing = await db.mezzi_pagamento.find_one({"codice": codice}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(400, f"Codice '{codice}' già presente")
+    item = MezzoPagamento(
+        codice=codice, label=body.label, tipo_conto=body.tipo_conto,
+        conto_default_id=body.conto_default_id, icona=body.icona,
+        ordine=body.ordine, attivo=body.attivo,
+    )
+    await db.mezzi_pagamento.insert_one(item.model_dump())
+    return item.model_dump()
+
+
+@api.put("/librerie/mezzi-pagamento/{mid}")
+async def update_mezzo_pagamento(mid: str, body: MezzoPagamentoBody, user=Depends(require_user("admin"))):
+    existing = await db.mezzi_pagamento.find_one({"id": mid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Mezzo non trovato")
+    upd = {**body.model_dump(), "updated_at": _now_iso()}
+    upd["codice"] = upd["codice"].strip().lower()
+    await db.mezzi_pagamento.update_one({"id": mid}, {"$set": upd})
+    return {**existing, **upd}
+
+
+@api.delete("/librerie/mezzi-pagamento/{mid}")
+async def delete_mezzo_pagamento(mid: str, user=Depends(require_user("admin"))):
+    res = await db.mezzi_pagamento.delete_one({"id": mid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Mezzo non trovato")
+    return {"ok": True}
+
+
+async def _seed_mezzi_pagamento():
+    """Idempotente: crea i mezzi pagamento di default se mancano."""
+    defaults = [
+        {"codice": "contanti", "label": "Contanti", "tipo_conto": "cassa", "ordine": 1, "icona": "Banknote"},
+        {"codice": "bonifico", "label": "Bonifico bancario", "tipo_conto": "banca", "ordine": 2, "icona": "Building2"},
+        {"codice": "assegno", "label": "Assegno", "tipo_conto": "banca", "ordine": 3, "icona": "FileCheck"},
+        {"codice": "pos", "label": "POS / Carta", "tipo_conto": "carta", "ordine": 4, "icona": "CreditCard"},
+        {"codice": "rid", "label": "RID / SDD", "tipo_conto": "rid", "ordine": 5, "icona": "Repeat"},
+        {"codice": "altro", "label": "Altro", "tipo_conto": "altro", "ordine": 99, "icona": "MoreHorizontal"},
+    ]
+    for d in defaults:
+        existing = await db.mezzi_pagamento.find_one({"codice": d["codice"]}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        item = MezzoPagamento(**d)
+        await db.mezzi_pagamento.insert_one(item.model_dump())
+
+
 # --- PRODOTTI ---
 @api.get("/librerie/prodotti")
 async def list_prodotti(
@@ -8945,6 +9050,60 @@ async def stampa_titoli(
     return _pdf_response(pdf, "titoli.pdf")
 
 
+@api.get("/stampa/titoli/sospesi")
+async def stampa_titoli_sospesi(
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """PDF dell'elenco Sospesi Anticipi con data di stampa odierna in testata."""
+    from datetime import date as _date
+    flt = {"titolo_coperto": True, "stato": {"$in": ["da_incassare", "insoluto"]}}
+    items = await db.titoli.find(flt, {"_id": 0}).sort("data_copertura", 1).to_list(5000)
+    pol_ids = list({t["polizza_id"] for t in items if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0})}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0})}
+    collab_map = {}
+    cids = list({(p.get("collaboratore_id") or t.get("collaboratore_id"))
+                 for t, p in [(t, pols.get(t["polizza_id"], {})) for t in items]
+                 if (p.get("collaboratore_id") or t.get("collaboratore_id"))})
+    if cids:
+        async for u in db.users.find({"id": {"$in": cids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+
+    rows = []
+    totale = 0.0
+    for t in items:
+        p = pols.get(t["polizza_id"], {})
+        a = anas.get(p.get("contraente_id", ""), {})
+        cid = p.get("collaboratore_id") or t.get("collaboratore_id")
+        if collaboratore_id and cid != collaboratore_id:
+            continue
+        gg = _giorni_da_oggi(t.get("data_copertura"))
+        imp = float(t.get("importo_lordo") or 0)
+        totale += imp
+        rows.append([
+            a.get("ragione_sociale", ""),
+            collab_map.get(cid, "—") if cid else "—",
+            p.get("numero_polizza", ""),
+            p.get("ramo", "") + (f" {p.get('targa')}" if p.get("targa") else ""),
+            (t.get("data_copertura") or "")[:10],
+            f"{gg} gg" if gg is not None else "—",
+            (p.get("scadenza") or "")[:10],
+            imp,
+        ])
+    rows.append(["", "", "", "", "", "", "TOTALE", totale])
+
+    headers = ["Cliente", "Collaboratore", "Polizza", "Ramo / Targa", "Coperto il", "Anticipo", "Scad. polizza", "Importo €"]
+    sottotitolo = f"{len(rows) - 1} titoli sospesi — Data stampa: {_date.today().strftime('%d/%m/%Y')}"
+    pdf = pdf_report.stampa_elenco(
+        "Sospesi Anticipi", sottotitolo, headers, rows,
+        col_widths_mm=[45, 35, 28, 30, 22, 18, 22, 25],
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, "sospesi_anticipi.pdf")
+
+
 @api.get("/stampa/sinistri")
 async def stampa_sinistri(stato: Optional[str] = None,
                           user=Depends(require_user("admin", "collaboratore", "dipendente"))):
@@ -9300,6 +9459,9 @@ async def startup():
     # demo users (dipendente + cliente collegato a anagrafica demo)
     from seed_demo import seed_demo
     await seed_demo(db)
+
+    # Seed mezzi pagamento (libreria unica) — idempotente
+    await _seed_mezzi_pagamento()
 
     # seed librerie (banche, conti cassa, rami) - solo se vuote
     if await db.conti_cassa.count_documents({}) == 0:

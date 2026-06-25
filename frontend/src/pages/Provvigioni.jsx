@@ -12,6 +12,7 @@ import {
 import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function Provvigioni() {
     const [collabs, setCollabs] = useState([]);
@@ -404,6 +405,7 @@ function NuovaVoceDialog({ collab, onClose }) {
 }
 
 function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClose }) {
+    const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const lordo = rows.reduce((s, r) => s + (r.provvigione || 0), 0);
     const totVoci = (voci_sel || []).reduce((s, v) => s + (v.importo || 0), 0);
@@ -480,12 +482,9 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                             <Select value={mezzo} onValueChange={setMezzo}>
                                 <SelectTrigger data-testid="pay-mezzo"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="contanti">Contanti</SelectItem>
-                                    <SelectItem value="bonifico">Bonifico</SelectItem>
-                                    <SelectItem value="assegno">Assegno</SelectItem>
-                                    <SelectItem value="pos">POS / Carta</SelectItem>
-                                    <SelectItem value="rid">RID</SelectItem>
-                                    <SelectItem value="altro">Altro</SelectItem>
+                                    {mezzi.map((m) => (
+                                        <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>

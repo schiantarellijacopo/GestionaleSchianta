@@ -17,7 +17,8 @@ import { toast } from "sonner";
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "banche", label: "Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
-    { key: "conti-cassa", label: "Metodo di Pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
+    { key: "conti-cassa", label: "Conti cassa / banche", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
+    { key: "mezzi-pagamento", label: "Mezzi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
@@ -154,6 +155,27 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                             <td>{c.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="conto" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    if (section.key === "mezzi-pagamento") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Codice</th><th>Etichetta</th><th>Tipo conto</th><th className="text-right">Ordine</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((m) => (
+                        <tr key={m.id}>
+                            <td className="num font-mono text-xs">{m.codice}</td>
+                            <td className="font-medium">{m.label}</td>
+                            <td><span className="badge badge-neutral">{m.tipo_conto}</span></td>
+                            <td className="num text-right">{m.ordine}</td>
+                            <td>{m.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(m)} onDelete={() => onDelete(m.id)} label="mezzo pagamento" />
                             </td>
                         </tr>
                     ))}
@@ -334,6 +356,7 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
 const SECTION_FORMS = {
     "banche": BancaForm,
     "conti-cassa": ContoForm,
+    "mezzi-pagamento": MezzoPagamentoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
     "compagnie": CompagniaForm,
@@ -476,6 +499,101 @@ function ContoForm({ section, editing, onClose }) {
         )}
     />;
 }
+
+function MezzoPagamentoForm({ section, editing, onClose }) {
+    const [conti, setConti] = useState([]);
+    useEffect(() => {
+        api.get("/librerie/conti-cassa", { params: { attivi: true } })
+            .then((r) => setConti(r.data || []));
+    }, []);
+    return <CrudForm
+        section={section} editing={editing} onClose={onClose}
+        initial={{
+            codice: "", label: "",
+            tipo_conto: "altro", conto_default_id: "",
+            icona: "", ordine: 0, attivo: true,
+        }}
+        normalize={(f) => ({
+            ...f,
+            codice: (f.codice || "").trim().toLowerCase(),
+            conto_default_id: f.conto_default_id || null,
+            ordine: parseInt(f.ordine, 10) || 0,
+        })}
+        render={({ f, set }) => (
+            <>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <Label>Codice * (univoco, lowercase)</Label>
+                        <Input
+                            placeholder="es. bonifico, contanti"
+                            value={f.codice}
+                            onChange={(e) => set("codice", e.target.value)}
+                            data-testid="mezzo-codice"
+                        />
+                    </div>
+                    <div>
+                        <Label>Etichetta visualizzata *</Label>
+                        <Input
+                            placeholder="es. Bonifico bancario"
+                            value={f.label}
+                            onChange={(e) => set("label", e.target.value)}
+                            data-testid="mezzo-label"
+                        />
+                    </div>
+                    <div>
+                        <Label>Tipo conto associato</Label>
+                        <select
+                            className="w-full border rounded h-9 px-2 text-sm"
+                            value={f.tipo_conto}
+                            onChange={(e) => set("tipo_conto", e.target.value)}
+                            data-testid="mezzo-tipo"
+                        >
+                            <option value="cassa">Cassa</option>
+                            <option value="banca">Banca</option>
+                            <option value="carta">Carta / POS</option>
+                            <option value="rid">RID / SDD</option>
+                            <option value="online">Online</option>
+                            <option value="altro">Altro</option>
+                        </select>
+                    </div>
+                    <div>
+                        <Label>Conto default (opzionale)</Label>
+                        <select
+                            className="w-full border rounded h-9 px-2 text-sm"
+                            value={f.conto_default_id || ""}
+                            onChange={(e) => set("conto_default_id", e.target.value)}
+                            data-testid="mezzo-conto-default"
+                        >
+                            <option value="">— auto (primo del tipo) —</option>
+                            {conti.map((c) => (
+                                <option key={c.id} value={c.id}>{c.nome} ({c.tipo})</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <Label>Ordine</Label>
+                        <Input
+                            type="number"
+                            value={f.ordine}
+                            onChange={(e) => set("ordine", e.target.value)}
+                        />
+                    </div>
+                    <div className="flex items-end">
+                        <label className="flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                checked={!!f.attivo}
+                                onChange={(e) => set("attivo", e.target.checked)}
+                            />
+                            Attivo
+                        </label>
+                    </div>
+                </div>
+            </>
+        )}
+    />;
+}
+
 
 function ProdottoForm({ section, editing, onClose }) {
     const [compagnie, setCompagnie] = useState([]);

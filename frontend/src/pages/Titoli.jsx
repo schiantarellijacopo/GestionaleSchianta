@@ -14,6 +14,7 @@ import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import TitoloDialog from "@/components/TitoloDialog";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
@@ -470,6 +471,7 @@ export default function Titoli() {
 }
 
 function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
+    const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const totaleLordo = (titoli || []).reduce((s, t) => s + (parseFloat(t.importo_lordo) || 0), 0);
     const totaleProvv = (titoli || []).reduce((s, t) => s + (parseFloat(t.provvigioni) || 0), 0);
@@ -709,12 +711,9 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                         <Select value={mezzo} onValueChange={setMezzo}>
                                             <SelectTrigger data-testid="bulk-mezzo"><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="contanti">Contanti</SelectItem>
-                                                <SelectItem value="bonifico">Bonifico</SelectItem>
-                                                <SelectItem value="assegno">Assegno</SelectItem>
-                                                <SelectItem value="pos">POS / Carta</SelectItem>
-                                                <SelectItem value="rid">RID</SelectItem>
-                                                <SelectItem value="altro">Altro</SelectItem>
+                                                {mezzi.map((m) => (
+                                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
+                                                ))}
                                             </SelectContent>
                                         </Select>
                                     </div>
