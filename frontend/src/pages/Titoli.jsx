@@ -35,7 +35,7 @@ const PRESETS = [
 
 const presetParams = (key) => {
     switch (key) {
-        case "sospesi": return { stato: "da_incassare" };
+        case "sospesi": return { stato: "da_incassare", titolo_coperto: true };
         case "storico": return { stato: "incassato" };  // usato dal link "Titoli storici" in sidebar
         case "scad15": return { scadute_da_min: 15 };
         case "scad_oltre15": return { scadenza_oltre_giorni: 15 };

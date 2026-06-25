@@ -3004,6 +3004,7 @@ async def list_titoli(
     conto_cassa_id: Optional[str] = None,
     in_scadenza_giorni: Optional[int] = None,
     coperti_non_pagati: Optional[bool] = None,
+    titolo_coperto: Optional[bool] = None,  # filtra i titoli con flag titolo_coperto=true (anticipi)
     # nuovi filtri scadenza dettagliata
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,    # es. 5 (scadute da almeno 5 giorni)
@@ -3088,6 +3089,13 @@ async def list_titoli(
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
         flt["effetto"] = {"$lte": today_s}
         flt["scadenza"] = {"$gte": today_s}
+
+    # Filtra esplicitamente i titoli coperti (anticipi dall'agenzia)
+    if titolo_coperto is True:
+        flt["titolo_coperto"] = True
+        flt["data_copertura"] = {"$ne": None}
+    elif titolo_coperto is False:
+        flt["$or"] = [{"titolo_coperto": {"$ne": True}}, {"titolo_coperto": None}]
 
     # filtro periodo (sulla scadenza, sovrascrive eventuali altri set sulla scadenza)
     if dal or al:
