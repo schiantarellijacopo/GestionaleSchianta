@@ -4631,12 +4631,14 @@ async def _compute_brogliaccio(data_giorno: str):
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
-        # Rappel (entrata categoria=provvigioni) NON entra in Entrate ma SOLO in Provvigioni
-        is_rappel_entrata = (is_e and cat == "provvigioni")
-        if is_e and not is_rappel_entrata:
+        # Regola contabile dell'utente:
+        # ENTRATE = SOLO premi/titoli/appendici (incasso_premio)
+        # Rappel (entrata cat=provvigioni) → in PROVVIGIONI, non in Entrate
+        # Tutte le altre entrate generiche NON contano in Entrate
+        if is_e and cat == "incasso_premio":
             cum_entrate += importo
-        if is_rappel_entrata:
-            cum_provv += importo
+        if is_e and cat == "provvigioni":
+            cum_provv += importo  # rappel
         if is_e and cat == "incasso_premio":
             provv_riga = float(m.get("provvigioni") or 0)
             quota_sc = float(m.get("quota_sconto") or 0)
@@ -4769,10 +4771,16 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rimesse = rim_agg[0]["tot"] if rim_agg else 0.0
-        # saldo = (premi - provv) se trattiene else premi  ;  meno rimesse
+        # rappel cumulativi per questa compagnia (riducono il saldo da versare)
+        rap_agg = await db.rappel.aggregate([
+            {"$match": {"compagnia_id": cid, "data": {"$lte": fino_a}}},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        rappel = rap_agg[0]["tot"] if rap_agg else 0.0
+        # saldo = (premi - provv) se trattiene else premi  ;  meno rimesse  ; meno rappel
         saldo_dovuto = (incassi - provv) if trattiene else incassi
-        saldo_residuo = saldo_dovuto - rimesse
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01:
+        saldo_residuo = saldo_dovuto - rimesse - rappel
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
             "compagnia_id": cid,
@@ -4782,6 +4790,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             "provvigioni": round(provv, 2),
             "saldo_dovuto": round(saldo_dovuto, 2),
             "rimesse_pagate": round(rimesse, 2),
+            "rappel": round(rappel, 2),
             "saldo_cassa": round(saldo_residuo, 2),
         })
     # ordina per saldo_cassa descendente (le più "da pagare" in cima)
