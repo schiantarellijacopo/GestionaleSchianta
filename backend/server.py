@@ -10,6 +10,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
@@ -2328,7 +2329,7 @@ async def anagrafiche_stats(user=Depends(current_user)):
 @api.get("/anagrafiche")
 async def list_anagrafiche(
     q: Optional[str] = None,
-    limit: int = 200,
+    limit: int = 5000,
     tag: Optional[str] = None,
     user=Depends(current_user),
 ):
@@ -2336,11 +2337,21 @@ async def list_anagrafiche(
     if user["role"] == "cliente" and user.get("anagrafica_id"):
         flt["id"] = user["anagrafica_id"]
     if q:
-        flt["$or"] = [
-            {"ragione_sociale": {"$regex": q, "$options": "i"}},
-            {"codice_fiscale": {"$regex": q, "$options": "i"}},
-            {"email": {"$regex": q, "$options": "i"}},
-        ]
+        # Multi-token AND: ogni token deve combaciare in almeno uno dei campi.
+        # Permette di trovare "JACOPO SCHIANTARELLI" cercando "schiantarelli jacopo" o "jacopo schiantarelli".
+        tokens = [t for t in re.split(r"\s+", q.strip()) if t]
+        and_clauses = []
+        for tok in tokens:
+            and_clauses.append({"$or": [
+                {"ragione_sociale": {"$regex": re.escape(tok), "$options": "i"}},
+                {"codice_fiscale": {"$regex": re.escape(tok), "$options": "i"}},
+                {"partita_iva": {"$regex": re.escape(tok), "$options": "i"}},
+                {"email": {"$regex": re.escape(tok), "$options": "i"}},
+                {"telefono": {"$regex": re.escape(tok), "$options": "i"}},
+                {"cellulare": {"$regex": re.escape(tok), "$options": "i"}},
+            ]})
+        if and_clauses:
+            flt["$and"] = and_clauses
     if tag:
         flt["tags"] = tag
     items = await db.anagrafiche.find(flt, {"_id": 0}).sort("ragione_sociale", 1).to_list(limit)
@@ -8170,6 +8181,23 @@ async def _seed_mezzi_pagamento():
 
 
 # --- PRODOTTI ---
+def _ramo_aliases(ramo: str) -> list[str]:
+    """Restituisce gli alias possibili di un ramo (case-insensitive, con/senza spazi/underscore).
+    Es: 'RC Auto' -> ['RC Auto', 'RCAuto', 'RC_AUTO', 'RCAUTO', 'RCA', 'RC AUTO']
+    """
+    if not ramo:
+        return []
+    base = ramo.strip()
+    normalized = base.upper().replace("_", " ").replace("-", " ")
+    no_space = normalized.replace(" ", "")
+    aliases = {base, base.upper(), base.lower(), normalized, no_space, normalized.replace(" ", "_")}
+    # Map noti
+    rca_aliases = {"RC AUTO", "RCAUTO", "RCA", "RC_AUTO"}
+    if no_space in rca_aliases or normalized in rca_aliases:
+        aliases |= rca_aliases
+    return [a for a in aliases if a]
+
+
 @api.get("/librerie/prodotti")
 async def list_prodotti(
     compagnia_id: Optional[str] = None,
@@ -8180,7 +8208,9 @@ async def list_prodotti(
     if compagnia_id:
         flt["compagnia_id"] = compagnia_id
     if ramo:
-        flt["ramo"] = ramo
+        # Match fuzzy: cerca tutti gli alias del ramo (case-insensitive con/senza spazi)
+        aliases = _ramo_aliases(ramo)
+        flt["$or"] = [{"ramo": {"$regex": f"^{re.escape(a)}$", "$options": "i"}} for a in aliases]
     return await db.prodotti.find(flt, {"_id": 0}).sort("nome", 1).to_list(1000)
 
 

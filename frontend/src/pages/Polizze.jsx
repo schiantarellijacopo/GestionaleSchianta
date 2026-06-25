@@ -20,12 +20,6 @@ import { toast } from "sonner";
 const PRESETS = [
     { key: "tutti", label: "Tutte" },
     { key: "attive", label: "Attive" },
-    { key: "scad15", label: "In scadenza 15gg" },
-    { key: "scad_oltre15", label: "Oltre 15gg" },
-    { key: "scadute_oggi", label: "Scadute oggi" },
-    { key: "scad_5g", label: "Scadute da 5gg" },
-    { key: "scad_10g", label: "Scadute da 10gg" },
-    { key: "scad_14g", label: "Scadute da 14gg" },
     { key: "scadute", label: "Scadute" },
     { key: "sospese", label: "Sospese" },
     { key: "annullate", label: "Annullate" },
@@ -340,13 +334,24 @@ function NuovaPolizzaDialog({ onClose }) {
         collaboratore_id: "",
     });
     useEffect(() => {
-        api.get("/anagrafiche").then((r) => setAna(r.data));
         api.get("/compagnie").then((r) => setComp(r.data));
         api.get("/librerie/rami").then((r) => setRami(r.data || []));
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori(r.data || []))
             .catch(() => setCollaboratori([]));
     }, []);
+
+    // Ricerca anagrafiche SERVER-SIDE con debounce 250ms.
+    // Funziona anche con DB di milioni di record perche' il filtraggio e' su Mongo (regex AND multi-token).
+    useEffect(() => {
+        const q = contraenteQuery.trim();
+        const handler = setTimeout(() => {
+            api.get("/anagrafiche", { params: { q: q || undefined, limit: 50 } })
+                .then((r) => setAna(r.data))
+                .catch(() => setAna([]));
+        }, q ? 250 : 0);
+        return () => clearTimeout(handler);
+    }, [contraenteQuery]);
 
     // Carica prodotti filtrati per ramo
     useEffect(() => {
@@ -359,15 +364,8 @@ function NuovaPolizzaDialog({ onClose }) {
     // Anagrafica selezionata (per mostrare nome nel campo di ricerca)
     const contraenteSelezionato = ana.find((a) => a.id === f.contraente_id);
 
-    // Filtro live anagrafiche - cerca TUTTI i token della query nel testo, in qualsiasi ordine.
-    // Permette di trovare "JACOPO SCHIANTARELLI" cercando "schiantarelli jacopo" (e viceversa)
-    const anaFiltrate = contraenteQuery.trim()
-        ? ana.filter((a) => {
-            const hay = `${a.ragione_sociale || ""} ${a.codice_fiscale || ""} ${a.partita_iva || ""} ${a.email || ""}`.toLowerCase();
-            const tokens = contraenteQuery.toLowerCase().split(/\s+/).filter(Boolean);
-            return tokens.every((t) => hay.includes(t));
-        }).slice(0, 12)
-        : ana.slice(0, 12);
+    // Lista filtrata = quanto restituito dal server (gia' filtrato per query con AND multi-token).
+    const anaFiltrate = ana.slice(0, 50);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const onOcrPolizza = async (file) => {
