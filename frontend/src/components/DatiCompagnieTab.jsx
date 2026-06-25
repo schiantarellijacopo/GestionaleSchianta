@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtEur, API_BASE } from "@/lib/api";
+import { openPdf } from "@/lib/pdf";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,15 +21,7 @@ export default function DatiCompagnieTab() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al]);
 
-    const stampa = () => {
-        const qs = new URLSearchParams();
-        if (dal) qs.append("dal", dal);
-        if (al) qs.append("al", al);
-        const a = document.createElement("a");
-        a.href = `${API_BASE}/contabilita/dati-compagnie/stampa?${qs}`;
-        a.target = "_blank";
-        document.body.appendChild(a); a.click(); a.remove();
-    };
+    const stampa = () => openPdf("/contabilita/dati-compagnie/stampa", { dal, al });
 
     if (!d) return <div className="mt-4"><Loading /></div>;
 

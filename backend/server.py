@@ -2829,15 +2829,62 @@ async def _compute_brogliaccio(data_giorno: str):
     # 4) Saldi compagnie (cumulativi: dal'inizio a fine giornata)
     saldi_compagnie = await _compute_saldi_compagnie(data_giorno)
 
-    # 5) KPI di giornata (coerenti con totali_giornata)
+    # 5) KPI CUMULATIVI fino al giorno corrente compreso (totali progressivi che crescono ogni giorno)
+    cum_movs = await db.movimenti.find(
+        {"data_movimento": {"$lte": data_giorno}}, {"_id": 0}
+    ).to_list(50000)
+    # carica le compagnie per applicare "trattiene_provvigioni" correttamente
+    all_comp_ids = list({m.get("compagnia_id") for m in cum_movs if m.get("compagnia_id")})
+    pol_ids_cum = list({m.get("polizza_id") for m in cum_movs if m.get("polizza_id")})
+    if pol_ids_cum:
+        async for p in db.polizze.find(
+            {"id": {"$in": pol_ids_cum}}, {"_id": 0, "id": 1, "compagnia_id": 1},
+        ):
+            if p.get("compagnia_id"):
+                all_comp_ids.append(p["compagnia_id"])
+                polizze_map[p["id"]] = polizze_map.get(p["id"], p)
+    all_comp_ids = list(set(all_comp_ids))
+    if all_comp_ids:
+        async for c in db.compagnie.find(
+            {"id": {"$in": all_comp_ids}}, {"_id": 0, "id": 1, "trattiene_provvigioni": 1, "ragione_sociale": 1},
+        ):
+            comp_map.setdefault(c["id"], c)
+
+    cum_entrate = 0.0; cum_provv = 0.0; cum_sospesi = 0.0
+    cum_rimesse = 0.0; cum_sconti = 0.0; cum_spese = 0.0; cum_saldo = 0.0
+    for m in cum_movs:
+        importo = float(m.get("importo") or 0)
+        cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
+        if is_e:
+            cum_entrate += importo
+        if is_e and cat == "incasso_premio":
+            provv_riga = float(m.get("provvigioni") or 0)
+            # determina compagnia (via movimento o polizza)
+            ccid = m.get("compagnia_id")
+            if not ccid and m.get("polizza_id"):
+                ccid = polizze_map.get(m["polizza_id"], {}).get("compagnia_id")
+            trattiene = (comp_map.get(ccid) or {}).get("trattiene_provvigioni", True)
+            cum_provv += provv_riga
+            cum_saldo += (importo - provv_riga) if trattiene else (-provv_riga)
+        elif is_e and cat == "anticipo":
+            cum_sospesi += importo
+        elif (not is_e) and cat == "pagamento_compagnia":
+            cum_rimesse += importo
+        elif (not is_e) and cat == "anticipo":
+            cum_sospesi -= importo
+        elif not is_e:
+            cum_spese += importo
+            if cat == "sconto_cliente":
+                cum_sconti += importo
+
     riepilogo_kpi = {
-        "entrate": round(sum(float(m.get("importo") or 0) for m in movs if m["tipo"] == "entrata"), 2),
-        "provvigioni": round(tot["provv"], 2),
-        "crediti": round(tot["crediti"], 2),
-        "rimesse": round(tot["rimesse"], 2),
-        "sconti": round(tot["sconti"], 2),
-        "spese": round(tot["spese"], 2),
-        "saldo_cassa": round(tot["saldo"], 2),  # del giorno
+        "entrate": round(cum_entrate, 2),
+        "provvigioni": round(cum_provv, 2),
+        "crediti": round(cum_sospesi, 2),
+        "rimesse": round(cum_rimesse, 2),
+        "sconti": round(cum_sconti, 2),
+        "spese": round(cum_spese, 2),
+        "saldo_cassa": round(cum_saldo - cum_rimesse, 2),
     }
 
     # 5b) Liquidità cumulative (fino al giorno corrente compreso)

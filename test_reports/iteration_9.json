@@ -1,0 +1,34 @@
+{
+  "summary": "Iter9 - BUG FIX VERIFIED: Brogliaccio riepilogo_kpi is now CUMULATIVE (progressive across closed days), while totali_giornata stays DAILY and liquidita stays cumulative. 11/11 pytest PASS in /app/backend/tests/test_iter9_brogliaccio_kpi_cumulative.py. Verified: (1) KPI on 1900-01-01 = all zero (pre-data); (2) KPI on 2026-12-31 strictly >= KPI on 2026-01-01 for every additive metric (entrate/provvigioni/rimesse/sconti/spese); (3) totali_giornata on a no-movement future date is all-zero proving it is daily-only; (4) mathematical consistency seeded test: 2 movements on 1995-03-10 (incasso 1000 with provv 100 + spesa 50) and 2 on 1995-03-15 (incasso 500 with provv 50 + rimessa 200) -> KPI(D1) = entrate 1000, provv 100, spese 50, saldo_cassa 900 (= importo - provv since no compagnia => trattiene defaults True), and KPI(D2) = entrate 1500, provv 150, spese 50, rimesse 200, saldo_cassa 1150 (= 900 + 450 - 200) exactly matching cumulative-with-rimesse formula; (5) date between D1 and D2 with no movement returns KPI == KPI(D1) confirming cumulativity by inclusion of D1 only; (6) day-before-D1 returns KPI=0 confirming up-to-and-INCLUDING semantics; (7) totali_giornata on D2 returns ONLY the D2 movements (totale = 500 in - 200 out = 300, NOT cumulative); (8) liquidita object preserved with all 5 fields and correct math (disp = sum_conti - sospesi - saldo_cassa_compagnie; postera = sum_conti - saldo_cassa_compagnie). saldo_cassa formula matches spec: sum(incasso_premio: (importo-provv) if trattiene else -provv) - cumulative rimesse.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter9_brogliaccio_kpi_cumulative.py",
+    "/app/test_reports/pytest/iter9_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Implementation in /app/backend/server.py _compute_brogliaccio (lines 2832-2888) loads ALL movimenti with data_movimento <= data_giorno (50k limit) into memory and iterates them in Python. For agencies with high movement volume (>50k movimenti over multi-year history) this could become a perf bottleneck and silently truncate (find(...).to_list(50000)). Recommend converting to MongoDB aggregation pipeline ($match data_movimento<=date, $lookup compagnia for trattiene_provvigioni, $group with $sum/$cond) for scalability and removing the 50k cap; or at least making the cap configurable and logging when reached.",
+    "The trattiene_provvigioni default in the KPI loop (line 2866) is True if the compagnia is missing or the flag is absent. Same default exists in dati_compagnie() (noted in iter8). Consider centralizing the default in the Compagnia model (Field(default=True)) so business intent is explicit and there's a single source of truth.",
+    "totali_giornata still uses the per-row split fields (totale/provv/saldo/spese/sconti/rimesse/crediti) which are computed differently from the cumulative KPI fields (e.g. daily totale = entrate - uscite signed; cumulative entrate = only entrate sum). This is the intended distinction (per the spec) but the field names are confusingly similar between the two objects. Suggest documenting it in the API contract or adding a brief comment near the response dict.",
+    "liquidita_postera duplicates liquidita_disponibile when sospesi_attivi == 0 (which is the case for the current DB). Verified math is correct (postera = sum_conti - saldo_cassa_compagnie). Just a code-quality note.",
+    "Edge case verified: when there is no compagnia and no polizza linked to an incasso_premio movement (e.g. our seeded TEST_iter9 movements), the code correctly falls back to trattiene_provvigioni=True via comp_map.get(None) returning None and the .get('trattiene_provvigioni', True) default. saldo_cassa correctly computed as (importo - provvigioni) = 900 on D1 and 1150 cumulative on D2."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter9_brogliaccio_kpi_cumulative.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "N/A (backend-only review)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "4 TEST_iter9_* movimenti on 1995-03-10 and 1995-03-15 created and cleaned up at teardown. Fixture also pre-cleans any TEST_iter9 leftovers from previously failed runs (defensive). Confirmed no leftover data after test run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The Brogliaccio KPI cumulative bug is fully fixed and verified. The pytest file test_iter9_brogliaccio_kpi_cumulative.py is reusable for regression. It uses date 1995-03-10/15 to ensure isolation from production seeded data (which lives in 2026). Pre-cleanup is implemented. If new movements with descriptions containing 'TEST_iter9' appear in DB, they will be auto-purged on next run. Note: /api/contabilita/movimenti endpoint ignores data_dal/data_al filter params (always returns all). This isn't related to this bug but is a separate API observation if anyone later writes movimenti filtering tests.",
+  "rca of the issue": "Root cause was previously identified: _compute_brogliaccio used to compute riepilogo_kpi only from the single-day movements (variable tot accumulated during the day loop). Fix replaces it with a separate cumulative aggregation (cum_movs = find(data_movimento <= data_giorno)) and iterates with proper trattiene_provvigioni resolution via compagnia/polizza lookup. totali_giornata still uses the per-row sum from the day loop, preserving daily semantics. Verified mathematically with KPI(D2) - KPI(D1) == delta(movimenti on (D1, D2])."
+}

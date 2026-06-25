@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, fmtEur, API_BASE } from "@/lib/api";
+import { api, fmtEur } from "@/lib/api";
+import { openPdf } from "@/lib/pdf";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,12 +36,7 @@ export default function BrogliaccioTab() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [data]);
 
-    const stampa = () => {
-        const link = document.createElement("a");
-        link.href = `${API_BASE}/contabilita/brogliaccio/stampa?data=${data}`;
-        link.target = "_blank";
-        document.body.appendChild(link); link.click(); link.remove();
-    };
+    const stampa = () => openPdf("/contabilita/brogliaccio/stampa", { data });
 
     const chiudiGiornata = async (inviaCommercialista) => {
         setBusy(true);
@@ -425,11 +421,10 @@ export default function BrogliaccioTab() {
                                                 : <span className="badge badge-success">chiusa</span>}
                                         </td>
                                         <td>
-                                            <a
-                                                href={`${API_BASE}/contabilita/chiusura-giorno/${c.id}/pdf`}
-                                                target="_blank" rel="noreferrer"
+                                            <button
+                                                onClick={() => openPdf(`/contabilita/chiusura-giorno/${c.id}/pdf`)}
                                                 className="text-sky-700 hover:underline text-xs"
-                                            >Scarica PDF</a>
+                                            >Scarica PDF</button>
                                         </td>
                                     </tr>
                                 ))}
