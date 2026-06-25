@@ -579,18 +579,20 @@ function NuovaPolizzaDialog({ onClose }) {
                                     setF((prev) => ({
                                         ...prev,
                                         targa: t,
-                                        // auto-popola veicolo solo se i campi sono vuoti
-                                        marca: prev.marca || r.data.marca || "",
-                                        modello: prev.modello || r.data.modello || "",
+                                        // auto-popola veicolo solo se i campi sono vuoti — USA i nomi backend corretti veicolo_*
+                                        veicolo_marca: prev.veicolo_marca || r.data.veicolo_marca || "",
+                                        veicolo_modello: prev.veicolo_modello || r.data.veicolo_modello || "",
                                         veicolo_tipo: prev.veicolo_tipo || r.data.veicolo_tipo || "",
                                         veicolo_alimentazione: prev.veicolo_alimentazione || r.data.veicolo_alimentazione || "",
                                         veicolo_kw: prev.veicolo_kw || r.data.veicolo_kw || "",
                                         veicolo_cv_fiscali: prev.veicolo_cv_fiscali || r.data.veicolo_cv_fiscali || "",
                                         veicolo_cilindrata: prev.veicolo_cilindrata || r.data.veicolo_cilindrata || "",
                                         veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || r.data.veicolo_data_immatricolazione || "",
+                                        veicolo_uso: prev.veicolo_uso || r.data.veicolo_uso || "",
+                                        veicolo_posti: prev.veicolo_posti || r.data.veicolo_posti || "",
                                         telaio: prev.telaio || r.data.telaio || "",
                                     }));
-                                    toast.success(`Veicolo trovato: ${r.data.marca || ""} ${r.data.modello || ""} (${r.data.n_polizze} polizze precedenti)`);
+                                    toast.success(`Veicolo trovato: ${r.data.veicolo_marca || ""} ${r.data.veicolo_modello || ""} (${r.data.n_polizze} polizze precedenti)`);
                                 }
                             } catch (err) {
                                 console.warn("targa lookup", err?.message);
