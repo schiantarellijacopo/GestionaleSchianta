@@ -4507,6 +4507,12 @@ async def _compute_brogliaccio(data_giorno: str):
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
             c_crediti = importo
+        elif is_entrata and cat == "provvigioni":
+            # Rappel (sovraprovvigione fittizia): NON in Entrate, va in Provvigioni.
+            # Riduce il saldo verso la compagnia (avere fittizio).
+            c_totale = 0.0
+            c_provv = importo
+            c_saldo = -importo
         elif is_entrata:
             # altre entrate generiche (es. sconto positivo, rimborso)
             c_totale = importo
@@ -4625,10 +4631,15 @@ async def _compute_brogliaccio(data_giorno: str):
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
-        if is_e:
+        # Rappel (entrata categoria=provvigioni) NON entra in Entrate ma SOLO in Provvigioni
+        is_rappel_entrata = (is_e and cat == "provvigioni")
+        if is_e and not is_rappel_entrata:
             cum_entrate += importo
+        if is_rappel_entrata:
+            cum_provv += importo
         if is_e and cat == "incasso_premio":
             provv_riga = float(m.get("provvigioni") or 0)
+            quota_sc = float(m.get("quota_sconto") or 0)
             # determina compagnia (via movimento o polizza)
             ccid = m.get("compagnia_id")
             if not ccid and m.get("polizza_id"):
@@ -4636,6 +4647,10 @@ async def _compute_brogliaccio(data_giorno: str):
             trattiene = (comp_map.get(ccid) or {}).get("trattiene_provvigioni", True)
             cum_provv += provv_riga
             cum_saldo += (importo - provv_riga) if trattiene else (-provv_riga)
+            # Sconto cliente memorizzato sulla riga: alimenta sia Sconti che Spese
+            if quota_sc > 0:
+                cum_sconti += quota_sc
+                cum_spese += quota_sc
         elif is_e and cat == "anticipo":
             cum_sospesi += importo
         elif (not is_e) and cat == "pagamento_compagnia":
