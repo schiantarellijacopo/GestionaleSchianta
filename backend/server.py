@@ -2946,12 +2946,91 @@ async def calcola_provvigione_endpoint(
 # LIBRO MATRICOLA — Applicazioni veicoli su polizza RCA flotta
 # ============================================================
 @api.get("/polizze/{pid}/applicazioni")
-async def list_applicazioni(pid: str, user=Depends(current_user)):
-    """Elenco applicazioni (veicoli) di un libro matricola."""
-    items = await db.applicazioni.find(
-        {"polizza_id": pid}, {"_id": 0},
-    ).sort("numero", 1).to_list(2000)
+async def list_applicazioni(
+    pid: str,
+    includi_storico: bool = False,
+    q: Optional[str] = None,
+    user=Depends(current_user),
+):
+    """Elenco applicazioni (veicoli) di un libro matricola.
+
+    Default: solo applicazioni con stato 'attiva' o 'sospesa'.
+    Se includi_storico=true ritorna anche annullate/sostituite.
+    q: ricerca su targa/intestatario/marca/modello/numero/note.
+    """
+    flt: dict = {"polizza_id": pid}
+    if not includi_storico:
+        flt["stato"] = {"$in": ["attiva", "sospesa"]}
+    if q:
+        try:
+            num = int(q)
+            num_q = {"numero": num}
+        except (TypeError, ValueError):
+            num_q = None
+        qrx = {"$regex": q, "$options": "i"}
+        ors = [
+            {"targa": qrx}, {"intestatario": qrx},
+            {"marca": qrx}, {"modello": qrx}, {"note": qrx},
+        ]
+        if num_q:
+            ors.append(num_q)
+        flt["$or"] = ors
+    items = await db.applicazioni.find(flt, {"_id": 0}).sort("numero", 1).to_list(5000)
     return items
+
+
+@api.post("/polizze/{pid}/applicazioni/{aid}/sostituisci", status_code=201)
+async def sostituisci_applicazione(
+    pid: str, aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Sostituisce un'applicazione: marca la corrente come 'sostituita'
+    e crea una nuova applicazione collegata.
+
+    body: campi della nuova applicazione (es. targa, marca, modello, valore_veicolo...)
+          + motivo (opzionale)
+    """
+    old = await db.applicazioni.find_one({"id": aid, "polizza_id": pid}, {"_id": 0})
+    if not old:
+        raise HTTPException(404, "Applicazione non trovata")
+    if old.get("stato") in ("annullata", "sostituita"):
+        raise HTTPException(400, "Applicazione già non attiva")
+
+    motivo = body.pop("motivo", None)
+    today_iso = _now_iso()[:10]
+    last = await db.applicazioni.find(
+        {"polizza_id": pid}, {"_id": 0, "numero": 1},
+    ).sort("numero", -1).limit(1).to_list(1)
+    nuovo_numero = (last[0]["numero"] + 1) if last else 100
+
+    # Eredita i campi tariffari dalla vecchia, sovrascritti dal body
+    nuovo = {**{k: v for k, v in old.items() if k not in {"id", "created_at", "updated_at"}}, **body}
+    nuovo["polizza_id"] = pid
+    nuovo["numero"] = nuovo_numero
+    nuovo["stato"] = "attiva"
+    nuovo["data_inclusione"] = body.get("data_inclusione") or today_iso
+    nuovo["data_esclusione"] = None
+    nuovo["sostituisce_id"] = aid
+    nuovo["sostituita_da_id"] = None
+    nuovo["data_sostituzione"] = today_iso
+    obj = ApplicazioneLibroMatricola(**nuovo)
+    await db.applicazioni.insert_one(obj.model_dump())
+
+    # marca old come sostituita
+    await db.applicazioni.update_one(
+        {"id": aid},
+        {"$set": {
+            "stato": "sostituita",
+            "data_esclusione": today_iso,
+            "sostituita_da_id": obj.id,
+            "data_sostituzione": today_iso,
+            "motivo_annullamento": motivo,
+            "updated_at": _now_iso(),
+        }},
+    )
+    await log_attivita(user, "sostituisci", "applicazione", obj.id,
+                       f"Sostituita {old.get('targa')} → {obj.targa}")
+    return {"nuova": obj.model_dump(), "sostituita_id": aid}
 
 
 @api.post("/polizze/{pid}/applicazioni", status_code=201)
@@ -2973,6 +3052,122 @@ async def create_applicazione(pid: str, body: dict, user=Depends(require_user("a
     await log_attivita(user, "create", "applicazione", obj.id,
                        f"Veicolo {obj.targa} su polizza {pid[:6]}")
     return obj.model_dump()
+
+
+@api.post("/polizze/{pid}/annulla")
+async def annulla_polizza(
+    pid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Annulla una polizza: setta stato=annullata, data e motivo."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    if pol.get("stato") == "annullata":
+        raise HTTPException(400, "Polizza già annullata")
+    data_ann = body.get("data_annullamento") or _now_iso()[:10]
+    motivo = body.get("motivo_annullamento") or "Annullamento"
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "stato": "annullata",
+        "data_annullamento": data_ann,
+        "motivo_annullamento": motivo,
+        "updated_at": _now_iso(),
+    }})
+    await log_attivita(user, "annulla", "polizza", pid, f"Motivo: {motivo}")
+    return {"ok": True, "stato": "annullata", "data_annullamento": data_ann}
+
+
+@api.post("/polizze/{pid}/sospendi")
+async def sospendi_polizza(
+    pid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Mette in sospensione una polizza."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    data_sosp = body.get("data_sospensione") or _now_iso()[:10]
+    riatt = body.get("riattivazione_prevista")
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "stato": "sospesa",
+        "data_sospensione": data_sosp,
+        "riattivazione_prevista": riatt,
+        "updated_at": _now_iso(),
+    }})
+    await log_attivita(user, "sospendi", "polizza", pid,
+                       f"Riatt prev: {riatt or '—'}")
+    return {"ok": True, "stato": "sospesa", "data_sospensione": data_sosp}
+
+
+@api.post("/polizze/{pid}/riattiva")
+async def riattiva_polizza(
+    pid: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Riattiva una polizza sospesa."""
+    res = await db.polizze.update_one(
+        {"id": pid, "stato": "sospesa"},
+        {"$set": {"stato": "attiva", "data_sospensione": None, "riattivazione_prevista": None,
+                  "updated_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(400, "Polizza non sospesa o non trovata")
+    await log_attivita(user, "riattiva", "polizza", pid)
+    return {"ok": True, "stato": "attiva"}
+
+
+@api.post("/polizze/{pid}/sostituisci")
+async def sostituisci_polizza(
+    pid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Sostituisce una polizza con una nuova polizza.
+
+    body: {
+        compagnia_id, ramo, numero_polizza, effetto,
+        scadenza, prossima_quietanza?, coassicurazione?, premio_lordo?, ...
+    }
+    """
+    old = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not old:
+        raise HTTPException(404, "Polizza non trovata")
+    if old.get("stato") in ("annullata", "sostituita"):
+        raise HTTPException(400, "Polizza già non attiva")
+    if not body.get("numero_polizza") or not body.get("effetto"):
+        raise HTTPException(400, "numero_polizza ed effetto obbligatori")
+
+    today = _now_iso()[:10]
+    nuovo: dict = {
+        # campi ereditati salvo override
+        "contraente_id": old.get("contraente_id"),
+        "assicurato_ids": old.get("assicurato_ids") or [],
+        "collaboratore_id": old.get("collaboratore_id"),
+        "prodotto": old.get("prodotto"),
+        "targa": old.get("targa"),
+        "frazionamento": old.get("frazionamento") or "annuale",
+        "premio_lordo": old.get("premio_lordo") or 0,
+        "termini_mora_giorni": old.get("termini_mora_giorni") or 15,
+        "ramo": old.get("ramo") or body.get("ramo"),
+        "compagnia_id": old.get("compagnia_id"),
+        # override dal body
+        **{k: v for k, v in body.items() if v not in (None, "")},
+        # link sostituzione
+        "sostituisce_polizza": pid,
+        "stato": "attiva",
+    }
+    obj = Polizza(**nuovo)
+    await db.polizze.insert_one(obj.model_dump())
+    # marca vecchia
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "stato": "sostituita",
+        "sostituita_da_polizza_id": obj.id,
+        "data_annullamento": today,
+        "motivo_annullamento": body.get("motivo") or "Sostituzione contratto",
+        "updated_at": _now_iso(),
+    }})
+    await log_attivita(user, "sostituisci", "polizza", obj.id,
+                       f"{old.get('numero_polizza')} → {obj.numero_polizza}")
+    return {"ok": True, "nuova_polizza_id": obj.id, "nuova": obj.model_dump()}
 
 
 @api.put("/polizze/{pid}/applicazioni/{aid}")
@@ -5611,6 +5806,83 @@ def _strip_tags(html: str) -> str:
     return _re.sub(r"<[^>]+>", "", html or "")
 
 
+@api.post("/avvisi/pdf-bulk")
+async def avvisi_pdf_bulk(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Genera un PDF con un avviso per ciascun contraente (aggrega per contraente).
+
+    body: {titoli_ids: [str], corpo_lettera?: str, soggetto?: str}
+    Risposta: file PDF (application/pdf).
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio")
+    soggetto = body.get("soggetto") or "Promemoria pagamento polizza/e in scadenza"
+    corpo = body.get("corpo_lettera") or _CORPO_LETTERA_DEFAULT
+
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    if not titoli:
+        raise HTTPException(404, "Nessun titolo trovato")
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+         "targa": 1, "contraente_id": 1},
+    )}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "email": 1, "indirizzo": 1,
+         "cap": 1, "comune": 1, "provincia": 1, "cellulare": 1},
+    )}
+
+    from collections import defaultdict
+    bucket = defaultdict(list)
+    for t in titoli:
+        p = pols.get(t.get("polizza_id"), {})
+        cid = p.get("contraente_id")
+        if cid:
+            bucket[cid].append({
+                **t,
+                "numero_polizza": p.get("numero_polizza"),
+                "ramo": p.get("ramo"),
+                "prodotto": p.get("prodotto"),
+                "targa": p.get("targa"),
+            })
+
+    gruppi = []
+    for cid, ts in bucket.items():
+        a = anas.get(cid, {})
+        indirizzo = ", ".join(filter(None, [
+            a.get("indirizzo"),
+            " ".join(filter(None, [a.get("cap"), a.get("comune"), f"({a['provincia']})" if a.get("provincia") else None])),
+        ]))
+        gruppi.append({
+            "contraente_id": cid,
+            "contraente_nome": a.get("ragione_sociale") or "—",
+            "contraente_indirizzo": indirizzo or None,
+            "contraente_email": a.get("email"),
+            "titoli": ts,
+        })
+
+    from pdf_avvisi import genera_pdf_avvisi
+    from datetime import date as _date_pdf
+    pdf_bytes = genera_pdf_avvisi(
+        gruppi=gruppi, azienda=az, corpo_lettera=corpo, soggetto=soggetto,
+    )
+    await log_attivita(user, "avvisi_pdf", "report", None,
+                       f"contraenti={len(gruppi)} titoli={len(titoli_ids)}")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="avvisi_scadenza_{_date_pdf.today().isoformat()}.pdf"',
+        },
+    )
+
+
 @api.post("/avvisi/invia-bulk-titoli")
 async def invia_bulk_avvisi_titoli(
     body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
@@ -5838,19 +6110,48 @@ async def genera_avvisi_scadenze(giorni: int = 30, user=Depends(require_user("ad
 @api.get("/avvisi-scadenze/preview")
 async def preview_avvisi_scadenze(
     giorni: Optional[int] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    mezzo_pagamento: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Anteprima: ritorna le scadenze (polizze + titoli) nei prossimi N giorni.
 
     Se ``giorni`` non specificato, usa il valore da AziendaConfig (default 15).
-    Non invia email — usato dall'UI per mostrare il riepilogo.
+    Filtri opzionali:
+      - dal / al: range scadenza (YYYY-MM-DD) — sovrascrive `giorni`
+      - collaboratore_id: filtra polizze e titoli per collaboratore
+      - mezzo_pagamento: filtra titoli per mezzo di pagamento
     """
     if giorni is None:
         az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
         giorni = int(az.get("notifica_scadenze_giorni") or 15)
     giorni = max(1, min(giorni, 365))
     data = await avvisi_scadenze.cerca_scadenze(db, giorni)
-    return {"giorni": giorni, **data, "n_polizze": len(data["polizze"]), "n_titoli": len(data["titoli"])}
+
+    pol = data["polizze"]
+    tit = data["titoli"]
+    # Applicazione filtri post-query (semplice: la dataset è già limitato)
+    if dal:
+        tit = [t for t in tit if (t.get("scadenza") or "") >= dal]
+        pol = [p for p in pol if (p.get("scadenza") or "") >= dal]
+    if al:
+        tit = [t for t in tit if (t.get("scadenza") or "") <= al]
+        pol = [p for p in pol if (p.get("scadenza") or "") <= al]
+    if collaboratore_id and collaboratore_id != "all":
+        tit = [t for t in tit if t.get("collaboratore_id") == collaboratore_id]
+        pol = [p for p in pol if p.get("collaboratore_id") == collaboratore_id]
+    if mezzo_pagamento and mezzo_pagamento != "all":
+        tit = [t for t in tit if (t.get("mezzo_pagamento") or "").lower() == mezzo_pagamento.lower()]
+
+    return {
+        "giorni": giorni,
+        "polizze": pol,
+        "titoli": tit,
+        "n_polizze": len(pol),
+        "n_titoli": len(tit),
+    }
 
 
 @api.post("/avvisi-scadenze/esegui")
@@ -6230,10 +6531,16 @@ async def delete_conto(cid: str, user=Depends(require_user("admin"))):
 
 # --- PRODOTTI ---
 @api.get("/librerie/prodotti")
-async def list_prodotti(compagnia_id: Optional[str] = None, user=Depends(current_user)):
+async def list_prodotti(
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    user=Depends(current_user),
+):
     flt = {}
     if compagnia_id:
         flt["compagnia_id"] = compagnia_id
+    if ramo:
+        flt["ramo"] = ramo
     return await db.prodotti.find(flt, {"_id": 0}).sort("nome", 1).to_list(1000)
 
 

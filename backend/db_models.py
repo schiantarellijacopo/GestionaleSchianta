@@ -224,6 +224,12 @@ class Polizza(BaseDoc):
     is_libro_matricola: bool = False  # se True → polizza con applicazioni veicoli (libro matricola RCA)
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
+    sostituita_da_polizza_id: Optional[str] = None  # backlink dopo sostituzione
+    data_annullamento: Optional[str] = None
+    motivo_annullamento: Optional[str] = None
+    data_sospensione: Optional[str] = None
+    riattivazione_prevista: Optional[str] = None
+    coassicurazione: bool = False
     presa_in_carico: Optional[str] = None
     prossima_quietanza: Optional[str] = None
     scadenza_copertura: Optional[str] = None
@@ -498,9 +504,14 @@ class ApplicazioneLibroMatricola(BaseDoc):
     polizza_id: str
     numero: int  # progressivo applicazione
     targa: str
-    stato: Literal["attiva", "annullata", "sospesa"] = "attiva"
+    stato: Literal["attiva", "annullata", "sospesa", "sostituita"] = "attiva"
     data_inclusione: str  # YYYY-MM-DD
     data_esclusione: Optional[str] = None
+    # Sostituzione (per cambio veicolo)
+    sostituita_da_id: Optional[str] = None  # id dell'applicazione che ha sostituito questa
+    sostituisce_id: Optional[str] = None  # id dell'applicazione sostituita da questa
+    data_sostituzione: Optional[str] = None
+    motivo_annullamento: Optional[str] = None
     note: Optional[str] = None
     # Dati veicolo
     marca: Optional[str] = None

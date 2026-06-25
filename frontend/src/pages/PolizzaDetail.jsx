@@ -11,13 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
+import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
@@ -132,6 +133,9 @@ export default function PolizzaDetail() {
                         </TabsTrigger>
                     )}
                     <TabsTrigger value="altri"><Info size={13} className="mr-1" />Altri dati</TabsTrigger>
+                    <TabsTrigger value="azioni" data-testid="tab-azioni" className="text-rose-700 data-[state=active]:bg-rose-50">
+                        <Zap size={13} className="mr-1" />Azioni
+                    </TabsTrigger>
                 </TabsList>
 
                 {pol.ramo === "RCA" && (
@@ -453,6 +457,10 @@ export default function PolizzaDetail() {
                             <div className="text-sm whitespace-pre-line">{pol.note_interne || pol.note || "—"}</div>
                         </div>
                     </Card>
+                </TabsContent>
+
+                <TabsContent value="azioni">
+                    <AzioniPolizzaTab polizza={pol} onChanged={load} canEdit={canEdit} />
                 </TabsContent>
             </Tabs>
             {editOpen && (

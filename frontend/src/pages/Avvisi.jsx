@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDate, fmtEur } from "@/lib/api";
+import { api, API_BASE, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Bell, Mail, MessageCircle, Smartphone, FileText, Receipt,
-    ChevronRight, ChevronDown, FolderOpen, History, Send,
+    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,17 +35,39 @@ export default function Avvisi() {
     const [emailTarget, setEmailTarget] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
     const [storicoOpen, setStoricoOpen] = useState(false);
+    const [collaboratori, setCollaboratori] = useState([]);
+
+    // Filtri avanzati
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+        dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all",
+    });
+
+    useEffect(() => {
+        api.get("/utenti").then((r) => setCollaboratori(
+            (r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))
+        )).catch(() => {});
+    }, []);
 
     const load = async () => {
         setLoading(true);
         try {
-            const r = await api.get("/avvisi-scadenze/preview", { params: { giorni } });
+            const params = { giorni };
+            if (filters.dal) params.dal = filters.dal;
+            if (filters.al) params.al = filters.al;
+            if (filters.collaboratore_id !== "all") params.collaboratore_id = filters.collaboratore_id;
+            if (filters.mezzo_pagamento !== "all") params.mezzo_pagamento = filters.mezzo_pagamento;
+            const r = await api.get("/avvisi-scadenze/preview", { params });
             setData(r.data);
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
         } finally { setLoading(false); }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [giorni]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ },
+        [giorni, filters.dal, filters.al, filters.collaboratore_id, filters.mezzo_pagamento]);
+
+    const resetFilters = () => setFilters({ dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all" });
+    const hasActiveFilters = filters.dal || filters.al || filters.collaboratore_id !== "all" || filters.mezzo_pagamento !== "all";
 
     // Raggruppa titoli per contraente
     const grupTitoli = useMemo(() => {
@@ -82,6 +104,15 @@ export default function Avvisi() {
                 subtitle="Polizze in scadenza · titoli arretrati · invia notifiche al cliente"
                 actions={(
                     <div className="flex items-center gap-2">
+                        <Button
+                            variant={hasActiveFilters ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setShowFilters((s) => !s)}
+                            data-testid="toggle-filters"
+                            className={hasActiveFilters ? "bg-amber-500 hover:bg-amber-600" : ""}
+                        >
+                            <Filter size={14} className="mr-1" />Filtri{hasActiveFilters && " (attivi)"}
+                        </Button>
                         <Button variant="outline" size="sm" onClick={() => setStoricoOpen(true)} data-testid="open-storico-btn">
                             <History size={14} className="mr-1" />Storico invii
                         </Button>
@@ -92,6 +123,58 @@ export default function Avvisi() {
                     </div>
                 )}
             />
+
+            {showFilters && (
+                <Card className="border-slate-200 p-4 mb-4" data-testid="filters-panel">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                        <div>
+                            <label className="text-xs font-medium text-slate-600">Dal</label>
+                            <Input type="date" value={filters.dal}
+                                onChange={(e) => setFilters((p) => ({ ...p, dal: e.target.value }))}
+                                data-testid="filter-dal" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-slate-600">Al</label>
+                            <Input type="date" value={filters.al}
+                                onChange={(e) => setFilters((p) => ({ ...p, al: e.target.value }))}
+                                data-testid="filter-al" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-slate-600">Collaboratore</label>
+                            <Select value={filters.collaboratore_id}
+                                onValueChange={(v) => setFilters((p) => ({ ...p, collaboratore_id: v }))}>
+                                <SelectTrigger data-testid="filter-collab"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tutti</SelectItem>
+                                    {collaboratori.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-slate-600">Mezzo pagamento</label>
+                            <Select value={filters.mezzo_pagamento}
+                                onValueChange={(v) => setFilters((p) => ({ ...p, mezzo_pagamento: v }))}>
+                                <SelectTrigger data-testid="filter-mezzo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tutti</SelectItem>
+                                    {["bonifico", "RID/SDD", "contanti", "assegno", "POS", "bollettino", "carta_credito", "compagnia"].map((m) => (
+                                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            {hasActiveFilters && (
+                                <Button variant="outline" size="sm" onClick={resetFilters} className="w-full" data-testid="filter-reset">
+                                    Reset filtri
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </Card>
+            )}
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <KpiCard icon={<FileText size={16} />} label="Polizze in scadenza" value={totali.polizze} accent="sky" />
@@ -375,6 +458,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
     const [soggetto, setSoggetto] = useState("Promemoria pagamento polizza/e in scadenza");
     const [corpo, setCorpo] = useState(CORPO_DEFAULT);
     const [sending, setSending] = useState(false);
+    const [generatingPdf, setGeneratingPdf] = useState(false);
 
     const invia = async () => {
         setSending(true);
@@ -388,13 +472,34 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
         } finally { setSending(false); }
     };
 
+    const scaricaPdf = async () => {
+        setGeneratingPdf(true);
+        try {
+            const r = await api.post("/avvisi/pdf-bulk",
+                { titoli_ids, soggetto, corpo_lettera: corpo },
+                { responseType: "blob" }
+            );
+            const url = window.URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `avvisi_scadenza_${new Date().toISOString().slice(0, 10)}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success("PDF generato");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore PDF");
+        } finally { setGeneratingPdf(false); }
+    };
+
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-2xl" data-testid="bulk-dialog">
-                <DialogHeader><DialogTitle>Invio bulk avvisi via email</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>Invio bulk avvisi · {titoli_ids.length} titoli</DialogTitle></DialogHeader>
                 <div className="space-y-3 py-2">
                     <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 text-sky-900">
-                        I {titoli_ids.length} titoli verranno raggruppati per contraente. Ogni cliente riceverà <strong>una sola email</strong> con la tabella dei suoi titoli e somma totale.
+                        I {titoli_ids.length} titoli verranno raggruppati per contraente. Puoi inviare la lettera <strong>via email</strong> (1 email per cliente con tabella HTML) oppure <strong>scaricare il PDF</strong> con tutti gli avvisi pronti per la stampa/archivio.
                     </div>
                     <div>
                         <label className="text-xs font-medium">Oggetto</label>
@@ -405,11 +510,29 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                         <Textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={10} className="text-sm" data-testid="bulk-corpo" />
                     </div>
                 </div>
-                <DialogFooter>
+                <DialogFooter className="sm:justify-between">
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <Button onClick={invia} disabled={sending} className="bg-sky-700 hover:bg-sky-800" data-testid="bulk-confirm">
-                        {sending ? "Invio…" : `Invia (${titoli_ids.length} titoli)`}
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="outline"
+                            onClick={scaricaPdf}
+                            disabled={generatingPdf || sending}
+                            data-testid="bulk-pdf"
+                            className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                        >
+                            <FileDown size={14} className="mr-1" />
+                            {generatingPdf ? "Genero PDF…" : "Scarica PDF"}
+                        </Button>
+                        <Button
+                            onClick={invia}
+                            disabled={sending || generatingPdf}
+                            className="bg-sky-700 hover:bg-sky-800"
+                            data-testid="bulk-confirm"
+                        >
+                            <Mail size={14} className="mr-1" />
+                            {sending ? "Invio…" : "Invia email"}
+                        </Button>
+                    </div>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

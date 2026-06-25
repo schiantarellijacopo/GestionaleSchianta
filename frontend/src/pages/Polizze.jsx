@@ -324,19 +324,45 @@ export default function Polizze() {
 function NuovaPolizzaDialog({ onClose }) {
     const [ana, setAna] = useState([]);
     const [comp, setComp] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [prodotti, setProdotti] = useState([]);
+    const [contraenteQuery, setContraenteQuery] = useState("");
+    const [showContraenteList, setShowContraenteList] = useState(false);
     const [ocrLoading, setOcrLoading] = useState(false);
     const ocrRef = useRef(null);
     const [polizzaFile, setPolizzaFile] = useState(null);
     const [f, setF] = useState({
         numero_polizza: "", compagnia_id: "", contraente_id: "",
-        ramo: "RCA", prodotto: "", effetto: "", scadenza: "",
+        ramo: "", prodotto: "", effetto: "", scadenza: "",
         premio_lordo: 0, premio_netto: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
     });
     useEffect(() => {
         api.get("/anagrafiche").then((r) => setAna(r.data));
         api.get("/compagnie").then((r) => setComp(r.data));
+        api.get("/librerie/rami").then((r) => setRami(r.data || []));
     }, []);
+
+    // Carica prodotti filtrati per ramo
+    useEffect(() => {
+        if (!f.ramo) { setProdotti([]); return; }
+        const params = { ramo: f.ramo };
+        if (f.compagnia_id) params.compagnia_id = f.compagnia_id;
+        api.get("/librerie/prodotti", { params }).then((r) => setProdotti(r.data || []));
+    }, [f.ramo, f.compagnia_id]);
+
+    // Anagrafica selezionata (per mostrare nome nel campo di ricerca)
+    const contraenteSelezionato = ana.find((a) => a.id === f.contraente_id);
+
+    // Filtro live anagrafiche
+    const anaFiltrate = contraenteQuery.trim()
+        ? ana.filter((a) => {
+            const q = contraenteQuery.toLowerCase();
+            return (a.ragione_sociale || "").toLowerCase().includes(q)
+                || (a.codice_fiscale || "").toLowerCase().includes(q)
+                || (a.partita_iva || "").toLowerCase().includes(q);
+        }).slice(0, 12)
+        : ana.slice(0, 12);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const onOcrPolizza = async (file) => {
@@ -461,17 +487,76 @@ function NuovaPolizzaDialog({ onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
+                <div className="col-span-2">
                     <Label>Contraente *</Label>
-                    <Select value={f.contraente_id} onValueChange={(v) => set("contraente_id", v)}>
-                        <SelectTrigger data-testid="pol-contraente-select"><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                    <div className="relative">
+                        <Input
+                            value={
+                                showContraenteList
+                                    ? contraenteQuery
+                                    : (contraenteSelezionato?.ragione_sociale || contraenteQuery)
+                            }
+                            placeholder="Digita per cercare nome, CF, P.IVA..."
+                            onChange={(e) => { setContraenteQuery(e.target.value); setShowContraenteList(true); }}
+                            onFocus={() => setShowContraenteList(true)}
+                            onBlur={() => setTimeout(() => setShowContraenteList(false), 200)}
+                            data-testid="pol-contraente-search"
+                        />
+                        {showContraenteList && (
+                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-y-auto" data-testid="contraente-suggestions">
+                                {anaFiltrate.length === 0 ? (
+                                    <div className="p-3 text-xs text-slate-500">Nessun contraente trovato</div>
+                                ) : anaFiltrate.map((a) => (
+                                    <button
+                                        type="button"
+                                        key={a.id}
+                                        className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-0"
+                                        onMouseDown={() => {
+                                            set("contraente_id", a.id);
+                                            setContraenteQuery("");
+                                            setShowContraenteList(false);
+                                        }}
+                                        data-testid={`contraente-opt-${a.id}`}
+                                    >
+                                        <div className="text-sm font-medium">{a.ragione_sociale}</div>
+                                        <div className="text-[10px] text-slate-500">
+                                            {a.codice_fiscale || a.partita_iva || "—"}
+                                            {a.comune && ` · ${a.comune}`}
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div>
+                    <Label>Ramo</Label>
+                    <Select value={f.ramo || ""} onValueChange={(v) => { set("ramo", v); set("prodotto", ""); }}>
+                        <SelectTrigger data-testid="pol-ramo-select"><SelectValue placeholder="Seleziona ramo" /></SelectTrigger>
                         <SelectContent>
-                            {ana.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
+                            {rami.map((r) => (
+                                <SelectItem key={r.id || r.nome} value={r.nome}>{r.nome}</SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                 </div>
-                <div><Label>Ramo</Label><Input value={f.ramo} onChange={(e) => set("ramo", e.target.value)} /></div>
-                <div><Label>Prodotto</Label><Input value={f.prodotto} onChange={(e) => set("prodotto", e.target.value)} /></div>
+                <div>
+                    <Label>Prodotto</Label>
+                    <Select
+                        value={f.prodotto || ""}
+                        onValueChange={(v) => set("prodotto", v)}
+                        disabled={!f.ramo}
+                    >
+                        <SelectTrigger data-testid="pol-prodotto-select">
+                            <SelectValue placeholder={f.ramo ? (prodotti.length ? "Seleziona prodotto" : "Nessun prodotto per questo ramo") : "Scegli prima un ramo"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {prodotti.map((p) => (
+                                <SelectItem key={p.id || p.nome} value={p.nome}>{p.nome}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
                 <div><Label>Effetto *</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
                 <div><Label>Scadenza *</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
                 <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} /></div>

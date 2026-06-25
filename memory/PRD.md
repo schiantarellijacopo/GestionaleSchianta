@@ -17,7 +17,28 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
 ## Cosa è stato implementato
-### 2026-06-25 (sessione corrente, parte 3 — Avvisi + bugfix titoli)
+### 2026-06-25 (parte 4 — Polizza Avanzata, PDF Avvisi, Libro Matricola+, UX)
+- 🆕 **Tab "Azioni" in PolizzaDetail** con 3 azioni operative:
+  - **Annulla contratto** (data + motivo)
+  - **Sospendi / Riattiva** (data + riattivazione prevista)
+  - **Sostituisci contratto** (crea nuova polizza linkata: compagnia, ramo, n° contratto, effetto, scadenza, prossima quietanza, coassicurazione, premio, motivo)
+  - Banner di stato per polizze annullate/sostituite con link cross-reference (← prec / → succ)
+- 🆕 Backend endpoints: `POST /api/polizze/{id}/annulla`, `/sospendi`, `/riattiva`, `/sostituisci`
+- 🆕 Modello Polizza esteso: `sostituita_da_polizza_id`, `data_annullamento`, `data_sospensione`, `riattivazione_prevista`, `coassicurazione`, `motivo_annullamento`
+- 🆕 **Libro Matricola avanzato**:
+  - Pulsante **Sostituisci** per applicazione (cambio veicolo) con stato "sostituita" e cross-reference (← sostituita_da / sostituisce →)
+  - Toggle **Storico** per vedere annullate/sostituite
+  - **Ricerca live** (targa, numero, intestatario, marca/modello, note)
+  - Nuove colonne: **Valore veicolo** + **Scadenza leasing** (campi aggiunti al form)
+  - Modello esteso con `sostituita_da_id`, `sostituisce_id`, `data_sostituzione`, `motivo_annullamento`
+- 🆕 **PDF Avvisi** (`POST /api/avvisi/pdf-bulk`): genera 1 PDF con un avviso per ogni contraente (intestazione agenzia + lettera + tabella titoli + IBAN). Bottone "Scarica PDF" nel BulkAvvisoDialog
+- 🆕 **Filtri Avvisi**: range date + collaboratore + mezzo pagamento + giorni → con badge "filtri attivi"
+- 🆕 **Nuova polizza UX**:
+  - **Combobox contraente** con ricerca live (nome, CF, P.IVA, città)
+  - **Cascata Ramo → Prodotto** (prodotti filtrati dal ramo selezionato, dropdown disabilitato se ramo non scelto)
+  - Backend `GET /api/librerie/prodotti?ramo=X` accetta filtro ramo
+
+### 2026-06-25 (parte 3 — Avvisi + bugfix titoli)
 - 🆕 **Pagina Avvisi rifatta** con:
   - **Aggregazione per contraente** (1 riga master per cliente + dettaglio espandibile dei singoli titoli)
   - Selezione bulk con checkbox per titolo / contraente
