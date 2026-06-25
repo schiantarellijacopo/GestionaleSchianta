@@ -389,6 +389,7 @@ export default function Titoli() {
                 <BulkActionDialog
                     action={bulkOpen}
                     ids={Array.from(selected)}
+                    titoli={(list || []).filter((t) => selected.has(t.id))}
                     conti={conti}
                     onClose={() => { setBulkOpen(null); load(); }}
                 />
@@ -409,8 +410,22 @@ export default function Titoli() {
     );
 }
 
-function BulkActionDialog({ action, ids, conti, onClose }) {
+function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
     const today = new Date().toISOString().slice(0, 10);
+    const totaleLordo = (titoli || []).reduce((s, t) => s + (parseFloat(t.importo_lordo) || 0), 0);
+    const totaleProvv = (titoli || []).reduce((s, t) => s + (parseFloat(t.provvigioni) || 0), 0);
+    // Riepilogo per compagnia (utile quando si selezionano titoli di compagnie diverse)
+    const breakdown = (() => {
+        const map = new Map();
+        for (const t of (titoli || [])) {
+            const k = t.compagnia_nome || "—";
+            const cur = map.get(k) || { compagnia: k, count: 0, totale: 0 };
+            cur.count += 1;
+            cur.totale += parseFloat(t.importo_lordo) || 0;
+            map.set(k, cur);
+        }
+        return Array.from(map.values()).sort((a, b) => b.totale - a.totale);
+    })();
     const [doCopertura, setDoCopertura] = useState(true);
     const [doIncasso, setDoIncasso] = useState(false);
     const [emailOperatori, setEmailOperatori] = useState(false);
@@ -495,7 +510,24 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                         <tbody>
                             <tr>
                                 <td className={cellLabel}>Titoli selezionati</td>
-                                <td className={cellValueRO}>{ids.length}</td>
+                                <td className={cellValueRO} data-testid="bulk-count">{ids.length}</td>
+                            </tr>
+                            {breakdown.length > 1 && (
+                                <tr>
+                                    <td className={cellLabel}>Compagnie</td>
+                                    <td className={cellValueRO}>
+                                        {breakdown.map((b) => (
+                                            <div key={b.compagnia} className="flex justify-between text-xs">
+                                                <span>{b.compagnia} ({b.count})</span>
+                                                <span className="num font-medium">{fmtEur(b.totale)}</span>
+                                            </div>
+                                        ))}
+                                    </td>
+                                </tr>
+                            )}
+                            <tr>
+                                <td className={cellLabel}>Provvigioni totali</td>
+                                <td className={cellValueRO + " num"}>{fmtEur(totaleProvv)}</td>
                             </tr>
                         </tbody>
                     </table>
@@ -639,6 +671,16 @@ function BulkActionDialog({ action, ids, conti, onClose }) {
                                     placeholder="Verrà inserito nel corpo dell'email" />
                             </div>
                         )}
+                    </div>
+                    {/* ---- Totale ---- */}
+                    <div className="mt-6 border-t border-slate-200 pt-3 flex justify-end items-center gap-3">
+                        <span className="text-slate-700 font-medium">Totale:</span>
+                        <span
+                            className="bg-cyan-50 border border-slate-200 px-3 py-1.5 text-base num font-semibold text-cyan-900"
+                            data-testid="bulk-totale"
+                        >
+                            {fmtEur(totaleLordo)}
+                        </span>
                     </div>
                 </div>
 
