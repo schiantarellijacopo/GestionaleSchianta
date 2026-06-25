@@ -1,0 +1,29 @@
+{
+  "summary": "Iter12 - 3 new PDF endpoints + 'paid titoli hidden from active lists' filter. Backend: 12/12 pytest PASS for test_iter12_pdf_stampa.py. PDF endpoints validated: (1) GET /api/stampa/pagamento-provvigioni/{pid} returns 200 + %PDF (2.7KB) for valid id and 404 for unknown id. (2) GET /api/stampa/rimessa/{mov_id} returns 200 + %PDF for pagamento_compagnia movimento; 404 for unknown id and 404 for movimenti of categoria!='pagamento_compagnia' (verified using a 'provvigioni' movimento_id obtained from the enriched pagamento list - confirmed the categoria filter is strict). (3) POST /api/stampa/compagnie/{cid}/titoli-selezionati returns 200 + %PDF for non-empty titoli_ids; 400 if empty; 404 for unknown compagnia. Enriched endpoints verified: GET /api/collaboratori/{cid}/pagamenti now includes movimento_id (string) + n_titoli + n_voci_manuali + n_allegati + conto_cassa_nome. GET /api/compagnie/{cid}/rimesse-storico embeds titoli with numero_polizza/ramo/contraente_nome, n_titoli, n_allegati. The /api/collaboratori/{cid}/estratto-provvigioni endpoint correctly returns gia_pagato=true for titoli that were paid via /paga-provvigioni; raw /api/titoli returns pagato_alla_compagnia=true after /paga-titoli on compagnia. Frontend verified end-to-end on prod URL: /provvigioni shows 'Provvigioni maturate (0)' card with the empty-state hint 'Nessuna provvigione da pagare nel periodo (le pagate sono nello Storico in fondo)' - paid titoli completely removed from active list; Voci manuali count drops to 1 (the unpaid one). 'Storico pagamenti' has 6 rows each with a Stampa column rendering data-testid storico-pag-stampa-{pagamento_id} as an <a href=API/api/stampa/pagamento-provvigioni/{id} target=_blank>. /compagnie-estratto Dettaglio (Generali Italia S.p.A.): tab 'Movimenti & versamenti' is active, the 'Pag. compagnia' column is removed; after checking row checkboxes a yellow banner appears showing BOTH 'Stampa selezionati' (data-testid ec-stampa-selezionati) and 'Paga compagnia' (data-testid ec-paga-btn) buttons; iter12 titoli paid to compagnia are excluded from active list (totals stayed consistent with Saldo). 'Storico rimesse' tab renders 5 rimesse rows with ec-stor-stampa-{mov_id} link pointing to /api/stampa/rimessa/{mov_id}.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter12_pdf_stampa.py",
+    "/app/test_reports/pytest/iter12_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POST /api/stampa/compagnie/{cid}/titoli-selezionati (server.py:998) does not enforce that the provided titoli_ids actually belong to the compagnia cid - if a caller submits titoli of another compagnia, they get printed under this compagnia's header. Add a $match: {compagnia_id: cid} via polizza join, or filter the returned titoli to only those whose polizza.compagnia_id == cid.",
+    "GET /api/stampa/pagamento-provvigioni/{pid} and /api/stampa/rimessa/{mov_id} do NOT enforce that a collaboratore role can only print their OWN pagamento (same gap as the GET /collaboratori/{cid}/pagamenti/{pid} flagged in iter11). A non-admin collaboratore could print someone else's estratto if they know the pid. Add role-based authorization checks.",
+    "Field naming inconsistency for compagnia versamenti: server uses 'titoli_ids_versati' in some places and 'titoli_versati_ids' in others; the new /stampa/rimessa endpoint defensively checks both plus 'titoli_ids'. Worth a one-time data migration to standardize."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter12_pdf_stampa.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (all flows verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created 1 polizza TEST_iter12_<ts> + 2 titoli + 1 pagamento provvigioni + 1 rimessa compagnia. The iter12 fixture is module-scoped and reused across tests; consider cleanup if running more iterations.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter12_pdf_stampa.py is a complete regression suite for the 3 PDF endpoints + gia_pagato/pagato_alla_compagnia filters. Field gotchas confirmed: (1) /api/collaboratori/{cid}/estratto-provvigioni (not /provvigioni) returns the rows array with gia_pagato. (2) gia_pagato is computed at endpoint level, NOT stored on titolo. (3) pagato_alla_compagnia IS persisted on titolo. (4) movimento_id is now part of /pagamenti list and useful to test the 'wrong categoria 404' branch on /stampa/rimessa. (5) /api/stampa/pagamento-provvigioni/{pid} returns 404 for non-existent pid, no auth-related gotchas. (6) Frontend testids confirmed: storico-pag-stampa-{pid}, ec-stampa-selezionati, ec-paga-btn, ec-stor-stampa-{mov_id}, storico-pagamenti-card.",
+  "rca of the issue": "N/A - no bugs. Implementation matches spec across both backend and frontend: (1) The 3 PDF endpoints use pdf_report.stampa_elenco with proper headers/totals and respond with application/pdf. (2) /api/stampa/rimessa applies a strict 'categoria: pagamento_compagnia' filter on db.movimenti, so other movimenti return 404 even if the id exists. (3) Frontend Provvigioni.jsx filters righe with !r.gia_pagato and voci_manuali with !v.pagata for active lists. (4) EstrattoContoCompagnie.jsx derives righeAttive = daVersare + pagamenti (titoli where pagato_alla_compagnia is truthy are excluded). (5) Selection banner conditionally renders both ec-stampa-selezionati and ec-paga-btn when selected.length > 0."
+}

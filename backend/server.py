@@ -991,6 +991,196 @@ async def stampa_compagnia_estratto(
     return _pdf_response(pdf, f"estratto_compagnia_{comp.get('codice') or cid}.pdf")
 
 
+class TitoliSelectionBody(BaseModel):
+    titoli_ids: list[str]
+
+
+@api.post("/stampa/compagnie/{cid}/titoli-selezionati")
+async def stampa_compagnia_titoli_selezionati(
+    cid: str, body: TitoliSelectionBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Stampa PDF dei soli titoli selezionati di una compagnia, con totale somma."""
+    if not body.titoli_ids:
+        raise HTTPException(400, "Nessun titolo selezionato")
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    trattiene = comp.get("trattiene_provvigioni", True) is not False
+    titoli = await db.titoli.find({"id": {"$in": body.titoli_ids}}, {"_id": 0}).to_list(5000)
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pol_map = {}
+    async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0}):
+        pol_map[p["id"]] = p
+    ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {}
+    async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+        ana_map[a["id"]] = a["ragione_sociale"]
+
+    headers = ["Data incasso", "Polizza", "Contraente", "Ramo", "Lordo €", "Provv. €", "Dovuto €"]
+    rows = []
+    tot_lordo = 0.0
+    tot_provv = 0.0
+    tot_dovuto = 0.0
+    for t in sorted(titoli, key=lambda x: x.get("data_incasso") or ""):
+        pol = pol_map.get(t.get("polizza_id"), {})
+        lordo = float(t.get("importo_lordo") or 0)
+        provv = float(t.get("provvigioni") or 0)
+        dovuto = (lordo - provv) if trattiene else lordo
+        rows.append([
+            t.get("data_incasso") or "",
+            pol.get("numero_polizza") or "",
+            (ana_map.get(pol.get("contraente_id", "")) or "")[:35],
+            pol.get("ramo") or "",
+            round(lordo, 2), round(provv, 2), round(dovuto, 2),
+        ])
+        tot_lordo += lordo
+        tot_provv += provv
+        tot_dovuto += dovuto
+    rows.append(["", "", "", "TOTALE", round(tot_lordo, 2), round(tot_provv, 2), round(tot_dovuto, 2)])
+    pdf = pdf_report.stampa_elenco(
+        f"Titoli selezionati — {comp.get('ragione_sociale')}",
+        f"N. titoli: {len(titoli)} · Totale dovuto: € {tot_dovuto:,.2f} · Trattiene provv: {'SI' if trattiene else 'NO'}",
+        headers, rows,
+        col_widths_mm=[24, 30, 60, 22, 25, 25, 28], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"titoli_selezionati_{comp.get('codice') or cid}.pdf")
+
+
+@api.get("/stampa/rimessa/{mov_id}")
+async def stampa_rimessa_compagnia(
+    mov_id: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Stampa PDF di una singola rimessa (pagamento compagnia) con l'elenco dei titoli versati."""
+    mov = await db.movimenti.find_one(
+        {"id": mov_id, "categoria": "pagamento_compagnia"}, {"_id": 0},
+    )
+    if not mov:
+        raise HTTPException(404, "Rimessa non trovata")
+    comp = await db.compagnie.find_one({"id": mov.get("compagnia_id")}, {"_id": 0}) or {}
+    titoli_ids = mov.get("titoli_ids_versati") or mov.get("titoli_versati_ids") or mov.get("titoli_ids") or []
+    titoli = []
+    if titoli_ids:
+        async for t in db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}):
+            titoli.append(t)
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pol_map = {}
+    async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0}):
+        pol_map[p["id"]] = p
+    ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {}
+    async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+        ana_map[a["id"]] = a["ragione_sociale"]
+
+    headers = ["Polizza", "Ramo", "Contraente", "Data incasso", "Lordo €", "Provv. €"]
+    rows = []
+    tot_lordo = 0.0
+    tot_provv = 0.0
+    for t in sorted(titoli, key=lambda x: x.get("data_incasso") or ""):
+        pol = pol_map.get(t.get("polizza_id"), {})
+        rows.append([
+            pol.get("numero_polizza") or "",
+            pol.get("ramo") or "",
+            (ana_map.get(pol.get("contraente_id", "")) or "")[:38],
+            t.get("data_incasso") or "",
+            round(float(t.get("importo_lordo") or 0), 2),
+            round(float(t.get("provvigioni") or 0), 2),
+        ])
+        tot_lordo += float(t.get("importo_lordo") or 0)
+        tot_provv += float(t.get("provvigioni") or 0)
+    rows.append(["", "", "", "TOTALE", round(tot_lordo, 2), round(tot_provv, 2)])
+    pdf = pdf_report.stampa_elenco(
+        f"Rimessa — {comp.get('ragione_sociale', 'Compagnia')}",
+        f"Data: {mov.get('data_movimento') or '—'} · {mov.get('descrizione') or ''} · Importo versato: € {float(mov.get('importo') or 0):,.2f}",
+        headers, rows,
+        col_widths_mm=[28, 22, 70, 26, 22, 22], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"rimessa_{mov_id[:8]}.pdf")
+
+
+@api.get("/stampa/pagamento-provvigioni/{pid}")
+async def stampa_pagamento_provvigioni(
+    pid: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Stampa PDF di un singolo estratto conto provvigioni pagato a un collaboratore."""
+    pag = await db.pagamenti_provvigioni.find_one({"id": pid}, {"_id": 0})
+    if not pag:
+        raise HTTPException(404, "Pagamento non trovato")
+    collab = await db.users.find_one(
+        {"id": pag.get("collaboratore_id")}, {"_id": 0, "password_hash": 0},
+    ) or {}
+    nome_collab = collab.get("name") or collab.get("email") or pag.get("collaboratore_id")
+
+    titoli_ids = pag.get("titoli_ids") or []
+    titoli = []
+    if titoli_ids:
+        async for t in db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}):
+            titoli.append(t)
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pol_map = {}
+    async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0}):
+        pol_map[p["id"]] = p
+    ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {}
+    async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+        ana_map[a["id"]] = a["ragione_sociale"]
+
+    headers = ["Polizza", "Ramo", "Contraente", "Data incasso", "Lordo €", "Provv. €"]
+    rows = []
+    tot_lordo = 0.0
+    tot_provv = 0.0
+    for t in sorted(titoli, key=lambda x: x.get("data_incasso") or ""):
+        pol = pol_map.get(t.get("polizza_id"), {})
+        rows.append([
+            pol.get("numero_polizza") or "",
+            pol.get("ramo") or "",
+            (ana_map.get(pol.get("contraente_id", "")) or "")[:38],
+            t.get("data_incasso") or "",
+            round(float(t.get("importo_lordo") or 0), 2),
+            round(float(t.get("provvigioni") or 0), 2),
+        ])
+        tot_lordo += float(t.get("importo_lordo") or 0)
+        tot_provv += float(t.get("provvigioni") or 0)
+    rows.append(["", "", "", "TOT. TITOLI", round(tot_lordo, 2), round(tot_provv, 2)])
+
+    # Voci manuali
+    voci_ids = pag.get("voci_manuali_ids") or []
+    voci = []
+    if voci_ids:
+        async for v in db.voci_manuali_collab.find({"id": {"$in": voci_ids}}, {"_id": 0}):
+            voci.append(v)
+    if voci:
+        rows.append(["", "", "", "", "", ""])
+        rows.append(["VOCI MANUALI", "", "", "", "", ""])
+        for v in voci:
+            rows.append([
+                v.get("data") or "",
+                v.get("causale") or "",
+                (v.get("note") or "")[:38],
+                "", "", round(float(v.get("importo") or 0), 2),
+            ])
+
+    sottotitolo = (
+        f"Collaboratore: {nome_collab} · Data pagamento: {pag.get('data_pagamento')} "
+        f"· Periodo: {pag.get('periodo_dal')} → {pag.get('periodo_al')}"
+        f"\nLordo: € {pag.get('provvigioni_lorde', 0):,.2f}"
+        f" · Ritenuta: € -{pag.get('ritenuta_acconto', 0):,.2f}"
+        f" · Contributi: € -{pag.get('contributi', 0):,.2f}"
+        f" · NETTO PAGATO: € {pag.get('netto_pagato', 0):,.2f}"
+        f" · Mezzo: {pag.get('mezzo_pagamento', '—')}"
+    )
+    pdf = pdf_report.stampa_elenco(
+        f"Estratto conto provvigioni pagato — {nome_collab}",
+        sottotitolo,
+        headers, rows,
+        col_widths_mm=[28, 22, 70, 26, 22, 22], landscape_mode=False,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, f"pagamento_provv_{pid[:8]}.pdf")
+
+
 @api.get("/stampa/compagnie/saldi-cassa")
 async def stampa_saldi_compagnie(
     user=Depends(require_user("admin", "collaboratore", "dipendente")),

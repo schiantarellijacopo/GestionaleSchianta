@@ -142,9 +142,29 @@ function DettaglioEstratto({ compagnia, onBack }) {
 
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso");
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
+    const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
+    // Solo non-pagati + pagamenti vengono mostrati nella tab "Movimenti & versamenti".
+    // I titoli già pagati sono visibili solo nello "Storico rimesse".
+    const righeAttive = [...daVersare, ...pagamenti].sort(
+        (a, b) => (a.data || "").localeCompare(b.data || ""),
+    );
     const importoSel = incassi
         .filter((r) => selected.has(r.titolo_id))
         .reduce((s, r) => s + (r.dare || 0), 0);
+
+    const stampaSelezionati = async () => {
+        try {
+            const r = await api.post(
+                `/stampa/compagnie/${compagnia.id}/titoli-selezionati`,
+                { titoli_ids: Array.from(selected) },
+                { responseType: "blob" },
+            );
+            const url = URL.createObjectURL(r.data);
+            window.open(url, "_blank");
+        } catch (e) {
+            alert(e.response?.data?.detail || "Errore stampa");
+        }
+    };
 
     const toggle = (id) => setSelected((p) => {
         const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -220,16 +240,22 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         <span className="text-sm font-medium text-amber-900">
                             {selected.size} titoli selezionati · Totale: <span className="num">{fmtEur(importoSel)}</span>
                         </span>
-                        <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800 ml-auto"
-                            onClick={() => setPayOpen(true)} data-testid="ec-paga-btn">
-                            <Coins size={13} className="mr-1" />Paga compagnia
-                        </Button>
+                        <div className="ml-auto flex gap-2">
+                            <Button size="sm" variant="outline"
+                                onClick={stampaSelezionati} data-testid="ec-stampa-selezionati">
+                                <Printer size={13} className="mr-1" />Stampa selezionati
+                            </Button>
+                            <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800"
+                                onClick={() => setPayOpen(true)} data-testid="ec-paga-btn">
+                                <Coins size={13} className="mr-1" />Paga compagnia
+                            </Button>
+                        </div>
                     </div>
                 )}
             </Card>
 
             <Card className="border-slate-200 overflow-x-auto">
-                {!data ? <Loading /> : data.righe.length === 0 ? <Empty /> : (
+                {!data ? <Loading /> : righeAttive.length === 0 ? <Empty message="Nessun titolo da versare nel periodo (i titoli pagati sono nello Storico rimesse)" /> : (
                     <table className="tbl w-full min-w-[1100px]">
                         <thead>
                             <tr>
@@ -249,46 +275,36 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                 <th className="text-right">Provv. €</th>
                                 <th className="text-right">Dare €</th>
                                 <th className="text-right">Avere €</th>
-                                <th>Pag. compagnia</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {data.righe.map((r, i) => {
-                                const pagato = r.stato_pagamento === "pagato";
-                                return (
-                                    <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`} className={pagato ? "bg-slate-50/50" : ""}>
-                                        <td className="text-center">
-                                            {r.tipo === "incasso" && !pagato && (
-                                                <input type="checkbox" checked={selected.has(r.titolo_id)}
-                                                    onChange={() => toggle(r.titolo_id)}
-                                                    data-testid={`ec-check-${r.titolo_id}`} />
-                                            )}
-                                        </td>
-                                        <td className="num text-xs">{fmtDate(r.data)}</td>
-                                        <td><span className={`badge ${r.tipo === "incasso" ? "badge-info" : "badge-success"}`}>{r.tipo}</span></td>
-                                        <td className="font-mono text-xs">{r.polizza || "-"}</td>
-                                        <td className="text-xs">{r.contraente || "-"}</td>
-                                        <td className="text-xs text-sky-700">{r.collaboratore || "-"}</td>
-                                        <td className="text-xs">{r.ramo || "-"}</td>
-                                        <td className="num text-right text-slate-600">{r.lordo ? fmtEur(r.lordo) : "-"}</td>
-                                        <td className="num text-right text-slate-600">{r.provvigioni ? fmtEur(r.provvigioni) : "-"}</td>
-                                        <td className="num text-right">{r.dare ? fmtEur(r.dare) : "-"}</td>
-                                        <td className="num text-right">{r.avere ? fmtEur(r.avere) : "-"}</td>
-                                        <td className="text-xs">
-                                            {pagato
-                                                ? <span className="badge badge-success">pagato {fmtDate(r.data_pagamento_compagnia)}</span>
-                                                : (r.tipo === "incasso" ? <span className="text-amber-700">da versare</span> : "—")}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {righeAttive.map((r, i) => (
+                                <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`}>
+                                    <td className="text-center">
+                                        {r.tipo === "incasso" && (
+                                            <input type="checkbox" checked={selected.has(r.titolo_id)}
+                                                onChange={() => toggle(r.titolo_id)}
+                                                data-testid={`ec-check-${r.titolo_id}`} />
+                                        )}
+                                    </td>
+                                    <td className="num text-xs">{fmtDate(r.data)}</td>
+                                    <td><span className={`badge ${r.tipo === "incasso" ? "badge-info" : "badge-success"}`}>{r.tipo}</span></td>
+                                    <td className="font-mono text-xs">{r.polizza || "-"}</td>
+                                    <td className="text-xs">{r.contraente || "-"}</td>
+                                    <td className="text-xs text-sky-700">{r.collaboratore || "-"}</td>
+                                    <td className="text-xs">{r.ramo || "-"}</td>
+                                    <td className="num text-right text-slate-600">{r.lordo ? fmtEur(r.lordo) : "-"}</td>
+                                    <td className="num text-right text-slate-600">{r.provvigioni ? fmtEur(r.provvigioni) : "-"}</td>
+                                    <td className="num text-right">{r.dare ? fmtEur(r.dare) : "-"}</td>
+                                    <td className="num text-right">{r.avere ? fmtEur(r.avere) : "-"}</td>
+                                </tr>
+                            ))}
                         </tbody>
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
-                                <td colSpan="9" className="text-right">TOTALI</td>
-                                <td className="num text-right">{fmtEur(data.totale_dare)}</td>
-                                <td className="num text-right">{fmtEur(data.totale_avere)}</td>
-                                <td></td>
+                                <td colSpan="9" className="text-right">TOTALI ATTIVI</td>
+                                <td className="num text-right">{fmtEur(daVersare.reduce((s, r) => s + (r.dare || 0), 0))}</td>
+                                <td className="num text-right">{fmtEur(pagamenti.reduce((s, r) => s + (r.avere || 0), 0))}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -368,6 +384,7 @@ function StoricoRimesseCompagnia({ compagniaId }) {
                                 <th className="text-right">N. titoli</th>
                                 <th className="text-right">Importo</th>
                                 <th className="text-center">Allegati</th>
+                                <th className="text-center">Stampa</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -402,10 +419,22 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
                         onChange={onChange}
                     />
                 </td>
+                <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                    <a
+                        href={`${API_BASE}/stampa/rimessa/${r.id}`}
+                        target="_blank" rel="noreferrer"
+                        title="Stampa estratto conto compagnia"
+                        data-testid={`ec-stor-stampa-${r.id}`}
+                    >
+                        <Button size="sm" variant="outline" className="h-7 px-2">
+                            <Printer size={12} />
+                        </Button>
+                    </a>
+                </td>
             </tr>
             {expanded && (
                 <tr className="bg-slate-50">
-                    <td colSpan={6} className="p-3">
+                    <td colSpan={7} className="p-3">
                         <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
                             Titoli versati ({r.titoli?.length || 0})
                         </div>
