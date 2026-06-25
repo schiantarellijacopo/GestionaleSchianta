@@ -1,0 +1,38 @@
+{
+  "summary": "Iter8 - Verified the new 'Dati Compagnie' module under Contabilità. Backend: 15/15 pytest PASS - endpoint returns correct shape (periodo/compagnie/totali), all required row fields, rows sorted by abs(saldo_attuale) DESC, zero-only compagnie skipped, incassi_netti math correct (lordi-provv when trattiene=true else lordi), Allianz row matches spec (lordi=620, provv=35, netti=585), totali equal sum of rows, period filter affects incassi/provv/rimesse but saldo_attuale stays cumulative (verified with 1900-01 window: incassi=0 but saldo>0), PDF /stampa returns HTTP 200 application/pdf with %PDF prefix (both with and without period), permissions enforced (admin/collab/dipendente allowed, cliente 403, anonymous 401). Frontend: Dati Compagnie tab visible alongside Brogliaccio/Movimenti/Estratto, all data-testids present (tab-dati-compagnie, dati-compagnie-tab, dc-dal, dc-al, dc-reset, dc-print, dc-{id}), 5 compagnie rows rendered (Generali 2255, GEN 1596.84, TEST_Compagnia QA 600, Allianz 585, UnipolSai 480), Allianz row shows 620/585/35 matching spec, table headers correct (7 columns), period filter reloads table (1900 filter zeros all incassi/provv/rimesse but saldo stays cumulative), 'Tutto il periodo' reset clears both date inputs and re-renders 5 rows. Saldo color check: all current saldi are positive and correctly render text-rose-700 (matches spec: >0 rose-700).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter8_dati_compagnie.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "dati_compagnie() correctly implements the cumulative saldo_attuale: a separate aggregation pipeline with data_movimento <= today is used independent of the dal/al filter applied to the periodic columns. Verified by API: with dal=1900-01-01..1900-01-02 the incassi/provv/rimesse are 0 but saldo_attuale remains identical to the no-filter request.",
+    "incassi_netti formula is implemented exactly per spec: (lordi - provv) when trattiene_provvigioni else lordi. Verified across all 5 active compagnie including Allianz (trattiene=true, 620-35=585).",
+    "Sort by abs(saldo_attuale) DESC works correctly. Returned ordering matches manual sort of values [2255, 1596.84, 600, 585, 480].",
+    "Zero-only compagnia rows are skipped (line 3025-3026): if abs(incassi_lordi) < 0.01 and abs(rimesse_periodo) < 0.01 and abs(saldo_attuale) < 0.01: continue. Correctly noted - this means a compagnia that has only cumulative balance still shows up even when period filter zeros its incassi (verified with 1900 window).",
+    "stampa_dati_compagnie reuses the dati_compagnie() payload (DRY) and appends a TOTALE row to the PDF body. Returns proper application/pdf with %PDF magic bytes.",
+    "DatiCompagnieTab.jsx uses API_BASE for the print URL (which includes /api prefix) and opens in a new tab via <a target=_blank>. Same-origin session cookie will be sent in real browsers. Note: in headless Playwright, popups may be blocked - but the backend endpoint is reachable via the constructed URL and was verified independently.",
+    "Saldo color logic in JSX is correct: c.saldo_attuale > 0 → text-rose-700, < 0 → text-emerald-700, 0 → text-slate-500. All 5 current values are positive so only rose-700 was visually verified. Recommend creating a seed scenario with a negative saldo to manually verify emerald rendering in future iterations.",
+    "Tab order in Contabilita.jsx: Brogliaccio / Movimenti / Dati Compagnie / Estratto - matches the user's request ('sibling tab of Brogliaccio/Movimenti/Estratto conto cliente').",
+    "Minor: the trattiene_provvigioni default in dati_compagnie() is True (line 2977: c.get('trattiene_provvigioni', True)). Make sure this default matches the model default; otherwise compagnie missing this field will appear as 'Tratteniamo' even if business intent is otherwise."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter8_dati_compagnie.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (tab, table, filters, reset, color, math all verified; PDF popup not captured in headless but backend endpoint verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! ; cliente@assicura.it / Cliente123! ; dipendente@assicura.it / Dipendente123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Used existing seeded data: 5 active compagnie with movimenti (Generali, GEN, TEST_Compagnia QA, Allianz, UnipolSai).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The 'Dati Compagnie' module is fully integrated. Endpoints: GET /api/contabilita/dati-compagnie (with optional dal/al) and GET /api/contabilita/dati-compagnie/stampa (PDF). All 5 current compagnie have positive saldo_attuale (rose-700). To validate the emerald-700 color path, a future test could seed a compagnia where rimesse_pagate cumulative > incassi_netti cumulative. The PDF download in playwright headless does not capture the popup; verify by directly hitting /api/contabilita/dati-compagnie/stampa with the admin session cookie.",
+  "rca of the issue": "No issues found."
+}

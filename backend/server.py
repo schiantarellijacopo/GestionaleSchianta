@@ -2952,7 +2952,125 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
     return out
 
 
-@api.get("/contabilita/statistiche")
+@api.get("/contabilita/dati-compagnie")
+async def dati_compagnie(
+    dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Modulo Dati Compagnie: per ogni compagnia incassi lordi/netti, provvigioni,
+    rimesse pagate, saldo attuale (cumulativo).
+
+    Se dal/al sono passati, gli importi lordi/netti/provv/rimesse sono filtrati per
+    quel periodo; il saldo attuale rimane sempre cumulativo (fino a oggi)."""
+    pol_filter = {}
+    # data ranges per movimenti
+    cond_mov = {}
+    if dal: cond_mov["$gte"] = dal
+    if al: cond_mov["$lte"] = al
+
+    compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
+    rows = []
+    today = _now_iso()[:10]
+
+    for c in compagnie:
+        cid = c["id"]
+        trattiene = c.get("trattiene_provvigioni", True)
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"compagnia_id": cid, **pol_filter}, {"_id": 0, "id": 1}
+        )]
+        # incassi del periodo
+        match_inc = {"polizza_id": {"$in": pol_ids}, "tipo": "entrata",
+                     "categoria": "incasso_premio"} if pol_ids else None
+        incassi_lordi = 0.0; provv_periodo = 0.0
+        if match_inc:
+            if cond_mov:
+                match_inc["data_movimento"] = cond_mov
+            agg = await db.movimenti.aggregate([
+                {"$match": match_inc},
+                {"$group": {"_id": None,
+                            "lordo": {"$sum": "$importo"},
+                            "provv": {"$sum": "$provvigioni"}}},
+            ]).to_list(1)
+            if agg:
+                incassi_lordi = agg[0]["lordo"] or 0
+                provv_periodo = agg[0]["provv"] or 0
+        netto_dovuto_periodo = (incassi_lordi - provv_periodo) if trattiene else incassi_lordi
+        # rimesse periodo
+        rim_match = {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia"}
+        if cond_mov: rim_match["data_movimento"] = cond_mov
+        rim_agg = await db.movimenti.aggregate([
+            {"$match": rim_match}, {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        rimesse_periodo = rim_agg[0]["tot"] if rim_agg else 0
+
+        # saldo attuale cumulativo (fino a oggi)
+        saldo_attuale = 0.0
+        if pol_ids:
+            agg_cum = await db.movimenti.aggregate([
+                {"$match": {"polizza_id": {"$in": pol_ids}, "tipo": "entrata",
+                            "categoria": "incasso_premio", "data_movimento": {"$lte": today}}},
+                {"$group": {"_id": None, "lordo": {"$sum": "$importo"}, "provv": {"$sum": "$provvigioni"}}},
+            ]).to_list(1)
+            if agg_cum:
+                cum_lordo = agg_cum[0]["lordo"] or 0
+                cum_provv = agg_cum[0]["provv"] or 0
+                saldo_attuale = (cum_lordo - cum_provv) if trattiene else cum_lordo
+        rim_cum_agg = await db.movimenti.aggregate([
+            {"$match": {"compagnia_id": cid, "tipo": "uscita", "categoria": "pagamento_compagnia",
+                        "data_movimento": {"$lte": today}}},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        saldo_attuale -= (rim_cum_agg[0]["tot"] if rim_cum_agg else 0)
+
+        if abs(incassi_lordi) < 0.01 and abs(rimesse_periodo) < 0.01 and abs(saldo_attuale) < 0.01:
+            continue  # skip compagnie senza nulla
+
+        rows.append({
+            "compagnia_id": cid,
+            "compagnia": c["ragione_sociale"],
+            "trattiene_provvigioni": trattiene,
+            "incassi_lordi": round(incassi_lordi, 2),
+            "incassi_netti": round(netto_dovuto_periodo, 2),
+            "provvigioni": round(provv_periodo, 2),
+            "rimesse_pagate": round(rimesse_periodo, 2),
+            "saldo_attuale": round(saldo_attuale, 2),
+        })
+    rows.sort(key=lambda x: abs(x["saldo_attuale"]), reverse=True)
+    totali = {
+        "incassi_lordi": round(sum(r["incassi_lordi"] for r in rows), 2),
+        "incassi_netti": round(sum(r["incassi_netti"] for r in rows), 2),
+        "provvigioni": round(sum(r["provvigioni"] for r in rows), 2),
+        "rimesse_pagate": round(sum(r["rimesse_pagate"] for r in rows), 2),
+        "saldo_attuale": round(sum(r["saldo_attuale"] for r in rows), 2),
+    }
+    return {"periodo": {"dal": dal, "al": al}, "compagnie": rows, "totali": totali}
+
+
+@api.get("/contabilita/dati-compagnie/stampa")
+async def stampa_dati_compagnie(
+    dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    payload = await dati_compagnie(dal=dal, al=al, user=user)
+    headers = ["Compagnia", "Regime", "Incassi lordi €", "Incassi netti €",
+               "Provvigioni €", "Rimesse pagate €", "Saldo attuale €"]
+    rows = [[r["compagnia"],
+             "Tratteniamo" if r["trattiene_provvigioni"] else "No trattenute",
+             r["incassi_lordi"], r["incassi_netti"],
+             r["provvigioni"], r["rimesse_pagate"], r["saldo_attuale"]]
+            for r in payload["compagnie"]]
+    t = payload["totali"]
+    rows.append(["TOTALE", "", t["incassi_lordi"], t["incassi_netti"],
+                 t["provvigioni"], t["rimesse_pagate"], t["saldo_attuale"]])
+    pdf = pdf_report.stampa_elenco(
+        "Dati Compagnie", f"Periodo: {dal or '-'} → {al or '-'}", headers, rows,
+        col_widths_mm=[55, 25, 25, 25, 25, 28, 28],
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, "dati_compagnie.pdf")
+
+
+
 async def statistiche_contabilita(
     dal: Optional[str] = None, al: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
