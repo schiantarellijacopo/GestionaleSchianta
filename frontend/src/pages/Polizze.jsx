@@ -326,6 +326,7 @@ function NuovaPolizzaDialog({ onClose }) {
     const [comp, setComp] = useState([]);
     const [rami, setRami] = useState([]);
     const [prodotti, setProdotti] = useState([]);
+    const [collaboratori, setCollaboratori] = useState([]);
     const [contraenteQuery, setContraenteQuery] = useState("");
     const [showContraenteList, setShowContraenteList] = useState(false);
     const [ocrLoading, setOcrLoading] = useState(false);
@@ -336,11 +337,15 @@ function NuovaPolizzaDialog({ onClose }) {
         ramo: "", prodotto: "", effetto: "", scadenza: "",
         premio_lordo: 0, premio_netto: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
+        collaboratore_id: "",
     });
     useEffect(() => {
         api.get("/anagrafiche").then((r) => setAna(r.data));
         api.get("/compagnie").then((r) => setComp(r.data));
         api.get("/librerie/rami").then((r) => setRami(r.data || []));
+        api.get("/auth/users", { params: { role: "collaboratore" } })
+            .then((r) => setCollaboratori(r.data || []))
+            .catch(() => setCollaboratori([]));
     }, []);
 
     // Carica prodotti filtrati per ramo
@@ -354,13 +359,13 @@ function NuovaPolizzaDialog({ onClose }) {
     // Anagrafica selezionata (per mostrare nome nel campo di ricerca)
     const contraenteSelezionato = ana.find((a) => a.id === f.contraente_id);
 
-    // Filtro live anagrafiche
+    // Filtro live anagrafiche - cerca TUTTI i token della query nel testo, in qualsiasi ordine.
+    // Permette di trovare "JACOPO SCHIANTARELLI" cercando "schiantarelli jacopo" (e viceversa)
     const anaFiltrate = contraenteQuery.trim()
         ? ana.filter((a) => {
-            const q = contraenteQuery.toLowerCase();
-            return (a.ragione_sociale || "").toLowerCase().includes(q)
-                || (a.codice_fiscale || "").toLowerCase().includes(q)
-                || (a.partita_iva || "").toLowerCase().includes(q);
+            const hay = `${a.ragione_sociale || ""} ${a.codice_fiscale || ""} ${a.partita_iva || ""} ${a.email || ""}`.toLowerCase();
+            const tokens = contraenteQuery.toLowerCase().split(/\s+/).filter(Boolean);
+            return tokens.every((t) => hay.includes(t));
         }).slice(0, 12)
         : ana.slice(0, 12);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -562,7 +567,55 @@ function NuovaPolizzaDialog({ onClose }) {
                 <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} /></div>
                 <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => set("premio_netto", e.target.value)} /></div>
                 <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni} onChange={(e) => set("provvigioni", e.target.value)} /></div>
-                <div><Label>Targa (se RCA)</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} /></div>
+                <div>
+                    <Label>Targa (se RCA)</Label>
+                    <Input
+                        value={f.targa}
+                        onChange={(e) => set("targa", e.target.value.toUpperCase())}
+                        onBlur={async (e) => {
+                            const t = e.target.value.trim().toUpperCase();
+                            if (!t || t.length < 4) return;
+                            try {
+                                const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t } });
+                                if (r.data && r.data.trovata) {
+                                    setF((prev) => ({
+                                        ...prev,
+                                        targa: t,
+                                        // auto-popola veicolo solo se i campi sono vuoti
+                                        marca: prev.marca || r.data.marca || "",
+                                        modello: prev.modello || r.data.modello || "",
+                                        veicolo_tipo: prev.veicolo_tipo || r.data.veicolo_tipo || "",
+                                        veicolo_alimentazione: prev.veicolo_alimentazione || r.data.veicolo_alimentazione || "",
+                                        veicolo_kw: prev.veicolo_kw || r.data.veicolo_kw || "",
+                                        veicolo_cv_fiscali: prev.veicolo_cv_fiscali || r.data.veicolo_cv_fiscali || "",
+                                        veicolo_cilindrata: prev.veicolo_cilindrata || r.data.veicolo_cilindrata || "",
+                                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || r.data.veicolo_data_immatricolazione || "",
+                                        telaio: prev.telaio || r.data.telaio || "",
+                                    }));
+                                    toast.success(`Veicolo trovato: ${r.data.marca || ""} ${r.data.modello || ""} (${r.data.n_polizze} polizze precedenti)`);
+                                }
+                            } catch (err) {
+                                console.warn("targa lookup", err?.message);
+                            }
+                        }}
+                        data-testid="pol-targa-input"
+                    />
+                </div>
+                <div className="col-span-2">
+                    <Label>Collaboratore (Operatore)</Label>
+                    <Select
+                        value={f.collaboratore_id || "__none__"}
+                        onValueChange={(v) => set("collaboratore_id", v === "__none__" ? "" : v)}
+                    >
+                        <SelectTrigger data-testid="pol-collab-select"><SelectValue placeholder="Nessun collaboratore" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__none__">— Nessuno —</SelectItem>
+                            {collaboratori.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
             <DialogFooter>
                 <Button data-testid="pol-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">Crea polizza</Button>

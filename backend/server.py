@@ -2061,6 +2061,106 @@ async def ocr_carta_identita(
     return data
 
 
+@api.post("/ocr/libretto")
+async def ocr_libretto_endpoint(
+    file: UploadFile = File(...),
+    polizza_id: Optional[str] = Form(None),
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """OCR libretto di circolazione veicolo. Salva il file come allegato della polizza
+    e restituisce {dati, allegato_id, confidence}.
+    """
+    import ocr_libretto as ocr_lib
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 20 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    file_for_ocr = contents
+    ct_for_ocr = ct
+    if ct == "application/pdf":
+        try:
+            import pdfplumber
+            from io import BytesIO
+            with pdfplumber.open(BytesIO(contents)) as pdf:
+                if not pdf.pages:
+                    raise HTTPException(400, "PDF vuoto")
+                img = pdf.pages[0].to_image(resolution=200).original
+                out = BytesIO()
+                img.save(out, format="JPEG", quality=85)
+                file_for_ocr = out.getvalue()
+                ct_for_ocr = "image/jpeg"
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Errore conversione PDF: {e}")
+    elif not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
+
+    try:
+        dati = await ocr_lib.estrai_dati_libretto(file_for_ocr, ct_for_ocr)
+    except Exception as e:
+        raise HTTPException(503, f"Errore OCR libretto: {e}")
+
+    allegato_id = None
+    if polizza_id:
+        ext = (file.filename or "libretto.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/polizze/{polizza_id}/libretto_{_uid()}.{ext}"
+        try:
+            result = obj_storage.put_object(path, contents, ct)
+            alleg = Allegato(
+                entita_tipo="polizza", entita_id=polizza_id,
+                nome_file=file.filename or "libretto",
+                storage_path=result["path"],
+                content_type=ct, size=result.get("size", len(contents)),
+                descrizione="OCR libretto di circolazione",
+                autore_id=user.get("id"),
+            )
+            await db.allegati.insert_one(alleg.model_dump())
+            allegato_id = alleg.id
+        except Exception as exc:
+            logging.warning("Errore upload libretto: %s", exc)
+
+    await log_attivita(user, "ocr", "polizza", polizza_id, "OCR libretto eseguito")
+    return {"dati": dati, "allegato_id": allegato_id, "confidence": None}
+
+
+@api.post("/ocr/libretto/apply")
+async def ocr_libretto_apply(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Applica i campi estratti alla polizza. body = {polizza_id, dati, allegato_id, campi: [str]}."""
+    polizza_id = body.get("polizza_id")
+    dati = body.get("dati") or {}
+    campi = body.get("campi") or []
+    if not polizza_id:
+        raise HTTPException(400, "polizza_id richiesto")
+    pol = await db.polizze.find_one({"id": polizza_id}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+
+    update = {}
+    # Mappatura: campi OCR → campi polizza
+    field_map = {
+        "targa": "targa",
+        "telaio": "telaio",
+        "marca": "marca",
+        "modello": "modello",
+        "tipo_veicolo": "tipo_veicolo",
+        "alimentazione": "alimentazione",
+        "kw": "kw",
+        "cv": "cv",
+        "cilindrata": "cilindrata",
+        "data_immatricolazione": "data_immatricolazione",
+    }
+    for k in campi:
+        if k in field_map and dati.get(k) not in (None, ""):
+            update[field_map[k]] = dati[k]
+    if not update:
+        return {"updated": 0}
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.polizze.update_one({"id": polizza_id}, {"$set": update})
+    await log_attivita(user, "ocr_applica", "polizza", polizza_id, f"Campi applicati: {list(update.keys())}")
+    return {"updated": len(update), "campi": list(update.keys())}
+
+
 @api.post("/utility/ocr-visura-camerale")
 async def ocr_visura_camerale(
     file: UploadFile = File(...),
@@ -2070,8 +2170,7 @@ async def ocr_visura_camerale(
     """OCR di una visura camerale. Estrae dati ditta + amministratori.
 
     Se anagrafica_id è fornito, salva il file come documento 'visura_camerale'.
-    Gli amministratori vengono restituiti per importazione anagrafiche legate
-    (decisione lato frontend).
+    Gli amministratori vengono restituiti per importazione anagrafiche legate.
     """
     import ocr_visura
     contents = await file.read()
@@ -2125,6 +2224,51 @@ async def ocr_visura_camerale(
     await log_attivita(user, "ocr", "visura_camerale", anagrafica_id,
                        f"OCR visura: {data.get('ragione_sociale')} - {len(data.get('amministratori') or [])} amministratori")
     return data
+
+
+@api.get("/anagrafiche/kpi-custom")
+async def list_kpi_custom(user=Depends(current_user)):
+    """Lista KPI custom dell'utente corrente."""
+    if user["role"] == "cliente":
+        return []
+    items = await db.kpi_anagrafiche_custom.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).sort("ordine", 1).to_list(50)
+    return items
+
+
+@api.post("/anagrafiche/kpi-custom", status_code=201)
+async def crea_kpi_custom(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Crea una KPI custom basata su tag.
+    body = {label, tag, color (sky|emerald|amber|violet|rose|pink|orange), icon}
+    """
+    label = (body.get("label") or "").strip()
+    tag = (body.get("tag") or "").strip().lower()
+    if not label or not tag:
+        raise HTTPException(400, "label e tag richiesti")
+    color = body.get("color") or "sky"
+    icon = body.get("icon") or "Star"
+    doc = {
+        "id": _uid(),
+        "user_id": user["id"],
+        "label": label,
+        "tag": tag,
+        "color": color,
+        "icon": icon,
+        "ordine": int(body.get("ordine") or 99),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.kpi_anagrafiche_custom.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.delete("/anagrafiche/kpi-custom/{kid}")
+async def rimuovi_kpi_custom(kid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    res = await db.kpi_anagrafiche_custom.delete_one({"id": kid, "user_id": user["id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Non trovata")
+    return {"ok": True}
 
 
 @api.get("/anagrafiche/tags")
@@ -2859,6 +3003,43 @@ async def list_polizze(
         it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
         it["collaboratore_nome"] = collabs.get(it.get("collaboratore_id", ""), {}).get("name")
     return items
+
+
+@api.get("/polizze/veicolo-by-targa")
+async def veicolo_by_targa(
+    targa: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Cerca l'ultima polizza con la stessa targa e restituisce i dati veicolo
+    per auto-popolare il form 'Nuova polizza'. Restituisce {trovata: bool, ...campi}.
+    """
+    t = (targa or "").strip().upper().replace(" ", "")
+    if not t or len(t) < 4:
+        return {"trovata": False}
+    # Trova polizze con targa che combacia (case-insensitive su forma normalizzata)
+    polizze = await db.polizze.find(
+        {"targa": {"$regex": f"^{t}$", "$options": "i"}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(20)
+    if not polizze:
+        return {"trovata": False}
+    last = polizze[0]
+    return {
+        "trovata": True,
+        "n_polizze": len(polizze),
+        "marca": last.get("marca") or last.get("veicolo_marca"),
+        "modello": last.get("modello") or last.get("veicolo_modello"),
+        "veicolo_tipo": last.get("veicolo_tipo") or last.get("tipo_veicolo"),
+        "veicolo_alimentazione": last.get("veicolo_alimentazione") or last.get("alimentazione"),
+        "veicolo_kw": last.get("veicolo_kw") or last.get("kw"),
+        "veicolo_cv_fiscali": last.get("veicolo_cv_fiscali") or last.get("cv"),
+        "veicolo_cilindrata": last.get("veicolo_cilindrata") or last.get("cilindrata"),
+        "veicolo_data_immatricolazione": last.get("veicolo_data_immatricolazione") or last.get("data_immatricolazione"),
+        "telaio": last.get("telaio"),
+        "ultima_polizza_id": last.get("id"),
+        "ultima_compagnia_id": last.get("compagnia_id"),
+        "ultimo_contraente_id": last.get("contraente_id"),
+    }
 
 
 @api.get("/polizze/{pid}")

@@ -519,6 +519,7 @@ class ProdottoLibreria(BaseDoc):
     descrizione: Optional[str] = None
     termini_mora_giorni: int = 15  # default 15gg; per Vita usare 30gg (vedi DEFAULT_MORA_BY_RAMO)
     is_libro_matricola: bool = False  # se True (solo per RC_AUTO/flotte) → polizza con applicazioni veicoli
+    mostra_sezione_veicolo: bool = False  # se True, mostra la sezione "Dati veicolo" nelle polizze di questo prodotto (RCAuto è sempre attivo)
     attivo: bool = True
 
 

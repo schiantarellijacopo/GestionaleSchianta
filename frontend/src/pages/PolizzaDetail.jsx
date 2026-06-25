@@ -497,10 +497,13 @@ export default function PolizzaDetail() {
 function EditPolizzaDialog({ pol, onClose, onSaved }) {
     const { mezzi } = useMezziPagamento();
     const [collaboratori, setCollaboratori] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [prodotti, setProdotti] = useState([]);
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori(r.data || []))
             .catch(() => setCollaboratori([]));
+        api.get("/librerie/rami").then((r) => setRami(r.data || []));
     }, []);
     const [f, setF] = useState({
         numero_polizza: pol.numero_polizza || "",
@@ -559,6 +562,14 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         }
     };
 
+    // Carica prodotti quando cambia il ramo
+    useEffect(() => {
+        if (!f.ramo) { setProdotti([]); return; }
+        api.get("/librerie/prodotti", { params: { ramo: f.ramo, attivi: true } })
+            .then((r) => setProdotti(r.data || []))
+            .catch(() => setProdotti([]));
+    }, [f.ramo]);
+
     const isRCA = (f.ramo || "").toUpperCase().includes("RCA");
 
     return (
@@ -585,8 +596,34 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div><Label>Ramo</Label><Input value={f.ramo} onChange={(e) => set("ramo", e.target.value)} /></div>
-                            <div><Label>Prodotto</Label><Input value={f.prodotto} onChange={(e) => set("prodotto", e.target.value)} /></div>
+                            <div>
+                                <Label>Ramo</Label>
+                                <Select value={f.ramo || ""} onValueChange={(v) => { set("ramo", v); set("prodotto", ""); }}>
+                                    <SelectTrigger data-testid="edit-pol-ramo"><SelectValue placeholder="Seleziona ramo" /></SelectTrigger>
+                                    <SelectContent>
+                                        {rami.map((r) => (
+                                            <SelectItem key={r.id || r.nome} value={r.nome}>{r.nome}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label>Prodotto</Label>
+                                <Select
+                                    value={f.prodotto || ""}
+                                    onValueChange={(v) => set("prodotto", v)}
+                                    disabled={!f.ramo}
+                                >
+                                    <SelectTrigger data-testid="edit-pol-prodotto">
+                                        <SelectValue placeholder={f.ramo ? (prodotti.length ? "Seleziona prodotto" : "Nessun prodotto per questo ramo") : "Scegli prima un ramo"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {prodotti.map((p) => (
+                                            <SelectItem key={p.id || p.nome} value={p.nome}>{p.nome}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <div>
                                 <Label>Collaboratore (Operatore)</Label>
                                 <Select

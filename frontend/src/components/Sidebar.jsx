@@ -21,7 +21,7 @@ const ALL_MENU_ITEMS = [
     { id: "pipeline", path: "/pipeline", icon: "Kanban", label: "Pipeline", section: "main", roles: null },
     { id: "anagrafiche", path: "/anagrafiche", icon: "Users", label: "Clienti", section: "anagrafiche", roles: null },
     { id: "mappa", path: "/mappa", icon: "Map", label: "Mappa clienti", section: "anagrafiche", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "polizze", path: "/polizze", icon: "FileText", label: "Polizze", section: "assicurazione", roles: null },
+    { id: "polizze", path: "/polizze", icon: "FileText", label: "Portafoglio", section: "assicurazione", roles: null },
     { id: "titoli", path: "/titoli", icon: "Receipt", label: "Titoli", section: "assicurazione", roles: null },
     { id: "sinistri", path: "/sinistri", icon: "AlertTriangle", label: "Sinistri", section: "assicurazione", roles: null },
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },

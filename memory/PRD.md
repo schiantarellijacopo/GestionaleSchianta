@@ -3,69 +3,41 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze.
 
-## Personas
-- Admin / Collaboratore / Dipendente / Cliente
+## Latest Session (Iter 20-22)
 
-## Latest Sessions (Feb 2026)
+### Done
+- ✅ Fix "Sospesi (da incassare)" preset Titoli: ora richiede `stato=da_incassare` AND `titolo_coperto=true` AND `data_copertura` valorizzata (backend param `titolo_coperto` aggiunto)
+- ✅ Chat con allegati: bottone Paperclip, anteprima file, upload max 25MB, immagini inline, PDF/doc come bottone download
+- ✅ Notifiche chat: badge nel Bell della topbar (sistema preesistente con `/notifiche/sommario` arricchito)
+- ✅ OCR Libretto via Gemini 3 Flash: endpoint `/api/ocr/libretto` + `/api/ocr/libretto/apply`, `ocr_libretto.py` con prompt strutturato, EMERGENT_LLM_KEY configurato. Frontend già pronto in `DocumentiPolizzaTab.jsx` (era già implementato ma chiamava endpoint mancante)
+- ✅ KPI Anagrafiche custom per Tag: endpoint `/api/anagrafiche/kpi-custom` (CRUD per utente)
+- ✅ Sidebar "Polizze" rinominata in "Portafoglio"
+- ✅ Cascata Ramo→Prodotto in PolizzaDetail (EditDialog): dropdown Ramo carica `/librerie/rami`, cambio ramo → reset prodotto + fetch `/librerie/prodotti?ramo=X`
+- ✅ Spunta "Mostra sezione Dati veicolo" nel prodotto Libreria (campo `mostra_sezione_veicolo` nel ProdottoLibreria)
 
-### Iter 16: Mappa, Indirizzi, Network (DONE)
-- ✅ `<AddressAutocomplete>` (Nominatim, gratis) usato in NuovaAnagrafica + AnagraficaDetail
-- ✅ Pagina Mappa clienti potenziata (cluster, layer Standard/Consumatore/Satellitare, toggle Clienti/Prospect, ricerca, tag)
-- ✅ Relazioni network bidirezionali (genitore/figlio/coniuge/... + legale_rappresentante/rappresenta/socio/dipendente_di/datore_lavoro_di)
-- ✅ `GET /anagrafiche/{aid}/network` con totali aggregati premi/provvigioni
-- ✅ NetworkPositionCard in AnagraficaDetail Tab Albero
+### Frontend lib aggiunte
+- `/app/frontend/src/lib/phone.js` — formattazione `+39 347 000 9438`
+- `/app/frontend/src/components/AddressAutocomplete.jsx`
+- `/app/frontend/src/components/TagsEditor.jsx`
+- `/app/frontend/src/pages/Chat.jsx` — riscritto con allegati
 
-### Iter 17: Dashboard Tasks + Filtri + KPI (DONE)
-- ✅ Dashboard "Da fare": 8 task azionabili con conteggio + click-to-filter (Compleanni oggi/7gg, Documenti scaduti/in scadenza, Sospesi >5gg, Sinistri >30gg, Polizze in scadenza, Provvigioni da liquidare)
-- ✅ Filtri URL ?compleanno=oggi|settimana ?doc=scaduti|in_scadenza ?gg_min=N — la pagina destinazione mostra banner "Filtro attivo" + "Rimuovi filtro"
-- ✅ 4 KPI Anagrafiche (Privati/Aziende/Condomini/Parrocchie) con bordo sx colorato
-- ✅ Sezione TAG nella scheda Anagrafica (TagsEditor con autocomplete su /api/anagrafiche/tags)
+### Backend aggiunto
+- `/app/backend/ocr_libretto.py`
+- Endpoints: `/api/geo/suggest`, `/api/anagrafiche/stats`, `/api/anagrafiche/{aid}/network`, `/api/anagrafiche/tags`, `/api/dashboard/tasks`, `/api/ocr/libretto`, `/api/ocr/libretto/apply`, `/api/anagrafiche/kpi-custom` (CRUD), `/api/stampa/titoli/sospesi`
+- Backend param `titolo_coperto` su `GET /titoli`
 
-### Iter 18: UX Anagrafiche + LR (DONE)
-- ✅ Email cliccabile (mailto:) + Telefono cliccabile (tel:)
-- ✅ Formattazione automatica numero "+39 347 000 9438" (helper /app/frontend/src/lib/phone.js)
-- ✅ Colonna "Collaboratore" sostituisce "Preventivi" nella lista
-- ✅ Pulsante shortcut "Collega azienda (come LR)" nel Tab Albero (con guida flusso)
-- ✅ Pulsanti "Modifica" e "Rimuovi" relazione più visibili (bordi + icone)
-
-### Iter 19: Titoli + Sidebar personalizzabile (DONE)
-- ✅ Rimosso preset "Storico incassati" e "Coperti non pagati" dai tab Titoli
-- ✅ Rinominato "In scadenza 15gg" → "Scadute da 15gg" (logica corretta: titoli scaduti)
-- ✅ Link sidebar "Titoli storici" continua a funzionare via ?preset=storico
-- ✅ Sidebar personalizzabile: drag-drop ordinamento + hide/show per voce (Eye/EyeOff) + reset predefinito
-
-## Endpoints (selezione recente)
-- GET /api/geo/suggest?q=
-- GET /api/anagrafiche/stats — 4 KPI categorie
-- GET /api/anagrafiche/{aid}/network
-- GET /api/anagrafiche/tags
-- GET /api/dashboard/tasks — 8 task azionabili
-- GET /api/stampa/titoli/sospesi — PDF con data odierna
-
-## Backlog / Roadmap
+## Backlog
 ### P1
-- Personalizzazione KPI Anagrafiche basata su TAG dell'agenzia (card custom)
-- OCR Libretto/Fatture con Gemini 3 Flash su Documenti polizza
-- Piramide Soluzioni Redesign (Release B)
+- UI "Personalizza KPI" (dialog + bottone ⚙️) per usare la API kpi-custom — backend pronto
+- Sezione "Dati veicolo" completa visibile in PolizzaDetail quando: ramo=RCAuto OR targa esiste OR prodotto.mostra_sezione_veicolo=true — tutti i campi già nel modello (veicolo_*, tipo_tariffa, bm_*, valore_*, guida_*, rinuncia_rivalsa, intestatario, massimali)
+- Replicare cascata Ramo→Prodotto anche in altri form di creazione polizza
+- Personalizzazione KPI Anagrafiche custom basata sui TAG (UI frontend)
 
 ### P2
-- Integrazioni Google Calendar / Microsoft 365 / WhatsApp / SMS
-- Refactor server.py (>9700 righe) in /backend/routes/
+- Refactor server.py (>10000 righe) in /backend/routes/
 - Risoluzione import circolare in auth.py
-
-## File chiave creati / modificati
-- /app/backend/server.py — endpoint stats/network/tags/dashboard-tasks/geo-suggest
-- /app/backend/geocoder.py — cerca_suggerimenti()
-- /app/frontend/src/components/AddressAutocomplete.jsx — NEW
-- /app/frontend/src/components/TagsEditor.jsx — NEW
-- /app/frontend/src/lib/phone.js — NEW (formattazione +39)
-- /app/frontend/src/pages/MappaClienti.jsx — rewrite (cluster + layer)
-- /app/frontend/src/pages/Anagrafiche.jsx — KPI + RigaAnagrafica espandibile + filtri URL
-- /app/frontend/src/pages/AnagraficaDetail.jsx — Tab Albero esteso (LR/aziende) + NetworkPositionCard + Tag editor
-- /app/frontend/src/pages/Dashboard.jsx — DashboardTasks (8 task)
-- /app/frontend/src/pages/Titoli.jsx — preset rinominati
-- /app/frontend/src/pages/TitoliSospesi.jsx — filtro gg_min + telefono cliccabile
-- /app/frontend/src/components/Sidebar.jsx — hide/show + drag-drop
+- Piramide Soluzioni — Release B
+- Integrazioni Google Calendar / Microsoft 365 / WhatsApp / SMS
 
 ## Credenziali test
-Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!)
+admin@assicura.it / Admin123!

@@ -664,10 +664,24 @@ function ProdottoForm({ section, editing, onClose }) {
                                 <span className="text-sm font-medium text-amber-900">È Libro Matricola?</span>
                             </label>
                             <div className="text-[10px] text-amber-700 mt-1">
-                                Solo per polizze RCA flotta: le polizze con questo prodotto avranno una tab "Libro Matricola" con applicazioni per veicolo.
+                                Solo per polizze RCA flotta: le polizze con questo prodotto avranno una tab &quot;Libro Matricola&quot; con applicazioni per veicolo.
                             </div>
                         </div>
                     )}
+                    <div className="bg-sky-50 border border-sky-200 rounded p-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!f.mostra_sezione_veicolo}
+                                onChange={(e) => set("mostra_sezione_veicolo", e.target.checked)}
+                                data-testid="prodotto-mostra-veicolo"
+                            />
+                            <span className="text-sm font-medium text-sky-900">Mostra sezione &quot;Dati veicolo&quot;?</span>
+                        </label>
+                        <div className="text-[10px] text-sky-700 mt-1">
+                            Spunta per prodotti che gestiscono un veicolo (es. RCA, Kasko, ARD, infortuni conducente). Per ramo <b>RCAuto</b> la sezione viene mostrata sempre, anche se non spuntato.
+                        </div>
+                    </div>
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
             </>
