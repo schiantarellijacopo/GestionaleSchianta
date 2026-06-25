@@ -1,0 +1,42 @@
+{
+  "summary": "Iter13 - Verifica modello contabile ridefinito (Brogliaccio) + Rappel + Voci ricorsive collab + DELETE giroconto/chiusura. Pytest: 16/18 PASS (89%). 2 BUG BACKEND CONFERMATI: (1) Giroconto USCITA appare in TOTALE column con -importo (violazione regola utente 'giroconto NON in TOTALE'); (2) DELETE di un movimento giroconto NON cancella la coppia (orphan entry rimane in DB). Frontend verificato visivamente su /contabilita (data 2026-03-15): righe rimessa/paga-provvigioni/rappel correttamente vuote in TOTALE, ma riga giroconto uscita mostra '-100,00 €' (bug confermato). Storico Prima Nota tab funziona con filtri Anno/Carica/Cerca + 2 chiusure 2026 listate. Pagina /rappel renderizza con archivio 2026 (5 mov, 3500€) + filtri compagnia/anno + 5 rows con allegati/stampa/incassa/storna/edit/delete. Dashboard 'dash-links' testid presente. Librerie 'Voci ricorsive collab' tab visibile. brog-edit-{id} / brog-del-{id} testids presenti su tutte le 16 righe.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/contabilita/brogliaccio", "issue": "Giroconto USCITA (cat='giroconto', tipo='uscita') riceve totale=-importo invece di 0. Viola la regola utente: 'Giroconto (cat=giroconto) → solo nelle colonne banca corrispondenti (NO TOTALE)'. Causa: in server.py _compute_brogliaccio (linea 4540-4560), solo il ramo `is_entrata and cat=='giroconto'` setta c_totale=0; il ramo USCITA cade nel catch-all `else` che applica c_totale=-importo e c_spese=importo. Fix: aggiungere `elif (not is_entrata) and cat == 'giroconto': c_totale = 0.0` prima del catch-all uscite.", "priority": "HIGH"},
+      {"endpoint": "DELETE /api/contabilita/movimenti/{mid}", "issue": "Per movimenti giroconto, la cancellazione NON elimina la riga gemella. Causa root: in POST /contabilita/giroconto (linea 4276-4288) il pair_id viene memorizzato SOLO dentro la stringa `note` (es: 'note=giroconto_pair_id=GR-...;') e NON come campo top-level. Quindi DELETE (linea 4323) `cur.get('pair_id') or cur.get('giroconto_pair_id')` ritorna sempre None, il branch del pair non scatta, e viene cancellata solo la singola riga lasciando un orphan in DB. Fix: salvare pair_id come campo dedicato sul model MovimentoContabile su entrambe le righe del giroconto.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BrogliaccioTab (riga giroconto uscita)", "issue": "Mostra -100,00€ nella colonna TOTALE per movimenti giroconto uscita. Conseguenza diretta del bug backend #1.", "selector": "table tbody tr (riga categoria giroconto tipo uscita)", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_brogliaccio_model.py",
+    "/app/test_reports/pytest/iter13_results.xml"
+  ],
+  "action_items": [
+    "Backend FIX 1: In server.py linea ~4540-4560 (_compute_brogliaccio), aggiungere ramo `elif (not is_entrata) and cat == 'giroconto': c_totale = 0.0` (non aggiunge c_spese) prima del catch-all `else` delle uscite, in modo che il giroconto uscita NON finisca in TOTALE/Spese ma solo in per_conto/banca.",
+    "Backend FIX 2: In POST /contabilita/giroconto (linea ~4278-4290), aggiungere `pair_id=pair_id` come campo top-level su entrambe le MovimentoContabile (richiede aggiungere il campo al modello, oppure usare `extra='allow'`). In alternativa, aggiornare il DELETE per estrarre pair_id dalla stringa note via regex `giroconto_pair_id=([^;\\s]+)` come fallback."
+  ],
+  "critical_code_review_comments": [
+    "BrogliaccioTab: il TOTALE column non rispetta la regola utente per giroconto uscita - verificare visivamente dopo fix backend.",
+    "Il pair_id del giroconto è memorizzato in formato string-encoded dentro `note`, fragile e non queryable. Stesso pattern usato per `verso_conto_id` e `da_conto_id`. Consigliato refactor con campi tipizzati.",
+    "VoceRicorsivaBody.collaboratore_id accetta '__all__' come valore speciale - sarebbe meglio un campo booleano dedicato `tutti_collaboratori: bool` per chiarezza e validazione.",
+    "Endpoint /librerie/conti-cassa (path con prefisso /librerie) è inconsistente con /compagnie/saldi-cassa (no prefix). Standardizzare il routing dei conti cassa.",
+    "_compute_brogliaccio (~166 righe) e funzioni saldi sono in un file da 9368 righe - candidato per splittare in moduli (contabilita_service.py)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_brogliaccio_model.py (NEW)"
+  ],
+  "success_rate": {"backend": "89% (16/18)", "frontend": "100% (tutti i flussi UI visibili senza errori, eccetto il rendering del bug backend #1)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Su giornata 2026-03-15 (3x esecuzioni durante test): polizza TEST_iter13_<ts> + titolo da 500€ incassato + movimento rimessa 200€ + paga-provvigioni 30€ + stipendio 1000€ + giroconto 100€ + rappel 80€. Pulizia parziale (DELETE rappel) ma rimangono movimenti TEST_ in DB. Anche giornata 2026-03-16 (giroconto delete test) e 2026-03-17 (chiusura test, ripulita).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter13_brogliaccio_model.py contiene fixture module-scoped che crea movimenti su data 2026-03-15. Per evitare pollution rieseguendo, considerare cleanup esplicito dei movimenti TEST_iter13 a fine modulo. Endpoint cassa: /api/librerie/conti-cassa (NON /api/conti-cassa). Struttura /api/contabilita/dati-compagnie ha chiave 'compagnie' (non 'righe'). Per validare i 2 fix backend: ri-eseguire `pytest backend/tests/test_iter13_brogliaccio_model.py::TestBrogliaccioRighe::test_giroconto_no_totale backend/tests/test_iter13_brogliaccio_model.py::TestDeleteMovimenti::test_delete_giroconto_elimina_pair -v` - devono passare entrambi.",
+  "rca of the issue": "BUG 1 (Giroconto in TOTALE): root cause è incompletezza del branch logic in _compute_brogliaccio. Il branch ENTRATA gestisce esplicitamente cat='giroconto' (linea 4531), ma il branch USCITE (linea 4540+) NON ha un caso dedicato per cat='giroconto', e cade nel catch-all che lo tratta come 'spesa generica'. Riproduzione: crea giroconto via POST /api/contabilita/giroconto, GET /api/contabilita/brogliaccio?data=X → la riga tipo='uscita' cat='giroconto' avrà totale=-importo. Mitigazione: branching esplicito (vedi action item). BUG 2 (DELETE pair giroconto): root cause: il pair_id è stato implementato come stringa serializzata dentro il campo libero `note` invece che come campo strutturato. Il DELETE legge un campo che non esiste. Riproduzione: crea giroconto, DELETE uno dei due movimenti, GET dell'altro → esiste ancora. Mitigazione: aggiungere field `pair_id: Optional[str] = None` al model MovimentoContabile e settarlo in POST /giroconto; il DELETE already-coded funzionerà."
+}

@@ -4528,19 +4528,33 @@ async def _compute_brogliaccio(data_giorno: str):
             c_totale = 0.0
             c_provv = importo
             c_saldo = -importo
+        elif is_entrata and cat == "giroconto":
+            # Giroconto IN-side: NON in Entrate (è solo un trasferimento interno).
+            # Il movimento di banca è già contabilizzato nella colonna conto specifico.
+            c_totale = 0.0
         elif is_entrata:
-            # altre entrate generiche (es. sconto positivo, rimborso)
-            c_totale = importo
+            # Altre entrate generiche (rimborsi, voci manuali, sconti positivi):
+            # NON contano in Entrate (la regola è: ENTRATE = solo polizze/titoli/appendici).
+            # Mostriamo l'importo come informativo ma c_totale resta 0.
+            c_totale = 0.0
         else:
             # USCITE
-            c_totale = -importo  # mostra in rosso
             if cat in CATS_RIMESSE:
+                # Versamento compagnia: NON va in TOTALE, solo in Rimesse + Banca uscita.
+                # Riduce il saldo da versare alla compagnia (gestito da _compagnia_estratto_data).
+                c_totale = 0.0
                 c_rimesse = importo
             elif cat in CATS_ANTICIPI:
-                # anticipo che esce dalla cassa (rimborso anticipo) → scarica credito
+                c_totale = -importo  # anticipo restituito (vera uscita)
                 c_crediti = -importo
+            elif cat == "provvigioni":
+                # Pagamento provvigioni a collaboratore: NON va in TOTALE.
+                # Solo in Spese + Banca uscita.
+                c_totale = 0.0
+                c_spese = importo
             else:
-                # provvigioni collaboratori, sconti, spese generali, stipendi, altro
+                # spese generali, sconti, stipendi, altro - vera uscita di cassa
+                c_totale = -importo  # mostra in rosso
                 c_spese = importo
                 if cat in CATS_SCONTI:
                     c_sconti = importo
