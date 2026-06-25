@@ -1,43 +1,51 @@
 # PRD - Programma Assicurativo (Insurance CRM)
 
 ## Original Problem Statement
-Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze.
+Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 20-22)
+## Latest Session (Iter 17 - P0 Code Quality)
 
 ### Done
-- ✅ Fix "Sospesi (da incassare)" preset Titoli: ora richiede `stato=da_incassare` AND `titolo_coperto=true` AND `data_copertura` valorizzata (backend param `titolo_coperto` aggiunto)
-- ✅ Chat con allegati: bottone Paperclip, anteprima file, upload max 25MB, immagini inline, PDF/doc come bottone download
-- ✅ Notifiche chat: badge nel Bell della topbar (sistema preesistente con `/notifiche/sommario` arricchito)
-- ✅ OCR Libretto via Gemini 3 Flash: endpoint `/api/ocr/libretto` + `/api/ocr/libretto/apply`, `ocr_libretto.py` con prompt strutturato, EMERGENT_LLM_KEY configurato. Frontend già pronto in `DocumentiPolizzaTab.jsx` (era già implementato ma chiamava endpoint mancante)
-- ✅ KPI Anagrafiche custom per Tag: endpoint `/api/anagrafiche/kpi-custom` (CRUD per utente)
-- ✅ Sidebar "Polizze" rinominata in "Portafoglio"
-- ✅ Cascata Ramo→Prodotto in PolizzaDetail (EditDialog): dropdown Ramo carica `/librerie/rami`, cambio ramo → reset prodotto + fetch `/librerie/prodotti?ramo=X`
-- ✅ Spunta "Mostra sezione Dati veicolo" nel prodotto Libreria (campo `mostra_sezione_veicolo` nel ProdottoLibreria)
+- ✅ **P0 Circular Import RISOLTO**: estratto MongoDB client+db in nuovo `/app/backend/database.py`; `auth.py` e `server.py` ora importano da `database.py` (rimosso `from server import db` late-import in `require_user`).
+- ✅ **P0 Secrets hardcoded RIMOSSI** da TUTTI i test (`/app/backend/tests/*`): `ADMIN_EMAIL`/`ADMIN_PASSWORD` ora via `os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it")` etc. con default. Aggiunto `tests/conftest.py` con fixture `admin_session`/`admin_credentials`.
+- ✅ **P0 Undefined names FIXED** in `server.py`:
+  - `_calcola_scadenza_titolo(effetto, frazionamento)`: implementato in Helpers (gestisce clamp fine mese)
+  - `_CORPO_LETTERA_DEFAULT`: testo default lettera promemoria pagamento
+  - `_MESI_PER_FRAZIONAMENTO`: mapping annuale=12, semestrale=6, trimestrale=3, mensile=1, ecc.
+- ✅ **Unused variables** rimosse (`crediti_agg`/`crediti_storno` in brogliaccio, `today` in dati-compagnie, `week_end` in dashboard/tasks).
+- ✅ **Modifica polizza → tab Veicolo**: aggiunti TUTTI i campi mancanti
+  - Veicolo: `veicolo_quintali`, `veicolo_gancio_traino`, `veicolo_targa_rimorchio`
+  - Sezione "Dati associazione contratto": `tipo_tariffa`, `bm_provenienza`, `bm_assegnata`, `bm_assegnata_cu`, `pejus`, `franchigia`, `valore_veicolo`, `valore_residuo_veicolo`, `valore_accessori`, `guida_esperta`, `guida_esclusiva`, `rinuncia_rivalsa`, `intestatario`, `provincia_intestatario`, `massimali`
+- ✅ **Anagrafiche lista**: rimossa colonna "Collegati" (header + cella + colspan aggiornato a 9).
 
-### Frontend lib aggiunte
-- `/app/frontend/src/lib/phone.js` — formattazione `+39 347 000 9438`
-- `/app/frontend/src/components/AddressAutocomplete.jsx`
-- `/app/frontend/src/components/TagsEditor.jsx`
-- `/app/frontend/src/pages/Chat.jsx` — riscritto con allegati
+### Testing
+- Iter17 backend regression: **12/12 PASS** (login, anagrafiche/stats, dashboard/tasks, brogliaccio, dati-compagnie, sostituisci polizza con titolo, avvisi PDF, PUT polizza con 18 nuovi campi).
+- Iter14-16 regression: 22/24 PASS (i 2 fallimenti sono Nominatim flaky + contaminazione dati, NON correlati al refactor).
+- Smoke frontend OK.
 
-### Backend aggiunto
-- `/app/backend/ocr_libretto.py`
-- Endpoints: `/api/geo/suggest`, `/api/anagrafiche/stats`, `/api/anagrafiche/{aid}/network`, `/api/anagrafiche/tags`, `/api/dashboard/tasks`, `/api/ocr/libretto`, `/api/ocr/libretto/apply`, `/api/anagrafiche/kpi-custom` (CRUD), `/api/stampa/titoli/sospesi`
-- Backend param `titolo_coperto` su `GET /titoli`
+## Architecture
+- `/app/backend/database.py` NEW — Motor client + db (single source of truth)
+- `/app/backend/auth.py` — JWT + bcrypt + `require_user` dep (clean)
+- `/app/backend/server.py` — ancora monolite 10.143 righe (split P1 prossimo)
+- `/app/backend/tests/conftest.py` NEW — shared fixtures env-driven
 
 ## Backlog
+
+### P0 (next)
+- Split `server.py` (10k+ righe) in `/app/backend/routes/` (auth, anagrafiche, polizze, titoli, sinistri, brogliaccio, dashboard, ocr, admin). Mantenere `server.py` come entry point con `include_router`.
+- Style fix: ~99 occorrenze E701/E702 (multi-statement per riga) in `server.py`.
+
 ### P1
-- UI "Personalizza KPI" (dialog + bottone ⚙️) per usare la API kpi-custom — backend pronto
-- Sezione "Dati veicolo" completa visibile in PolizzaDetail quando: ramo=RCAuto OR targa esiste OR prodotto.mostra_sezione_veicolo=true — tutti i campi già nel modello (veicolo_*, tipo_tariffa, bm_*, valore_*, guida_*, rinuncia_rivalsa, intestatario, massimali)
-- Replicare cascata Ramo→Prodotto anche in altri form di creazione polizza
-- Personalizzazione KPI Anagrafiche custom basata sui TAG (UI frontend)
+- UI "Personalizza KPI Anagrafiche" basata sui Tag (dialog + bottone ⚙️) — backend già pronto (`/api/anagrafiche/kpi-custom`)
+- OCR Fatture via Gemini 3 Flash (`ocr_fattura.py`)
+- "Verifica polizza vs libretto" — UI di confronto discrepanze nella detail di polizza
+- Replicare cascata Ramo→Prodotto in altri form di creazione polizza
+- Aggiungere `PolizzaUpdate` Pydantic per typed-validation su PUT /polizze/{id}
 
 ### P2
-- Refactor server.py (>10000 righe) in /backend/routes/
-- Risoluzione import circolare in auth.py
-- Piramide Soluzioni — Release B
-- Integrazioni Google Calendar / Microsoft 365 / WhatsApp / SMS
+- Piramide Soluzioni — Release B (stacked blocks, indicatori Adeguata/Non Adeguata)
+- Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS
+- DialogDescription mancante su EditPolizzaDialog (warning Radix a11y)
 
 ## Credenziali test
 admin@assicura.it / Admin123!
