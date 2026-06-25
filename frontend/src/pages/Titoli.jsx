@@ -110,9 +110,11 @@ export default function Titoli() {
     const totali = useMemo(() => {
         const src = list || [];
         const t_lordo = src.reduce((s, t) => s + (t.importo_lordo || 0), 0);
+        const t_netto = src.reduce((s, t) => s + (t.importo_netto || 0), 0);
         const t_provv = src.reduce((s, t) => s + (t.provvigioni || 0), 0);
         const da_pagare = src.filter((t) => t.stato !== "incassato").reduce((s, t) => s + (t.importo_lordo || 0), 0);
-        return { t_lordo, t_provv, da_pagare };
+        const incassato = src.filter((t) => t.stato === "incassato").reduce((s, t) => s + (t.importo_pagato ?? t.importo_lordo ?? 0), 0);
+        return { t_lordo, t_netto, t_provv, da_pagare, incassato };
     }, [list]);
 
     const toggle = (id) => setSelected((p) => {
@@ -352,45 +354,41 @@ export default function Titoli() {
             </div>
 
             {/* Footer azione bulk + totali */}
-            <div className="sticky bottom-0 mt-4 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3" data-testid="bulk-footer">
-                <button onClick={() => setSelected(new Set(displayed.map((t) => t.id)))} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded text-xs font-semibold" data-testid="select-all-btn">
-                    SELEZIONA TUTTI
-                </button>
-                <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-semibold">
-                    DESELEZIONA TUTTI
-                </button>
-                <span className="text-xs text-slate-400">
-                    {selected.size > 0 ? `${selected.size} selezionati` : ""}
-                </span>
-                <button
-                    disabled={selected.size === 0}
-                    onClick={() => setBulkOpen("incassa")}
-                    data-testid="bulk-incassa-btn"
-                    className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
-                >
-                    <Wallet size={14} /> INCASSA
-                </button>
-                <button
-                    disabled={selected.size === 0}
-                    onClick={() => setBulkOpen("copertura")}
-                    data-testid="bulk-copertura-btn"
-                    className="px-4 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:bg-slate-700 disabled:text-slate-500 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
-                >
-                    <Shield size={14} /> COPERTURA
-                </button>
-                <div className="ml-auto flex gap-6">
-                    <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Rata totale</div>
-                        <div className="text-base font-semibold num">{fmtEur(totali.t_lordo)}</div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Provvigioni</div>
-                        <div className="text-base font-semibold num">{fmtEur(totali.t_provv)}</div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-widest text-amber-300">Da pagare</div>
-                        <div className="text-base font-semibold num text-amber-300">{fmtEur(totali.da_pagare)}</div>
-                    </div>
+            <div className="sticky bottom-0 mt-4 bg-white border-t-2 border-slate-900 shadow-lg rounded-t-md px-4 py-3" data-testid="bulk-footer">
+                <div className="flex flex-wrap items-center gap-3">
+                    <button onClick={() => setSelected(new Set(displayed.map((t) => t.id)))} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded text-xs font-semibold" data-testid="select-all-btn">
+                        SELEZIONA TUTTI
+                    </button>
+                    <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-xs font-semibold">
+                        DESELEZIONA TUTTI
+                    </button>
+                    <span className="text-xs text-slate-500">
+                        {selected.size > 0 ? `${selected.size} selezionati` : ""}
+                    </span>
+                    <button
+                        disabled={selected.size === 0}
+                        onClick={() => setBulkOpen("incassa")}
+                        data-testid="bulk-incassa-btn"
+                        className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
+                    >
+                        <Wallet size={14} /> INCASSA
+                    </button>
+                    <button
+                        disabled={selected.size === 0}
+                        onClick={() => setBulkOpen("copertura")}
+                        data-testid="bulk-copertura-btn"
+                        className="px-4 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:bg-slate-200 disabled:text-slate-400 text-white disabled:cursor-not-allowed rounded text-xs font-semibold inline-flex items-center gap-1"
+                    >
+                        <Shield size={14} /> COPERTURA
+                    </button>
+                </div>
+                {/* KPI cards in stile pannello laterale Brogliaccio */}
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2" data-testid="titoli-kpi-grid">
+                    <KpiBar label="Rata totale" value={totali.t_lordo} accent="slate" testid="kpi-lordo" />
+                    <KpiBar label="Totale netto" value={totali.t_netto} accent="indigo" testid="kpi-netto" />
+                    <KpiBar label="Provvigioni" value={totali.t_provv} accent="sky" testid="kpi-provv" />
+                    <KpiBar label="Da pagare" value={totali.da_pagare} accent="amber" testid="kpi-dapagare" highlight />
+                    <KpiBar label="Incassato" value={totali.incassato} accent="emerald" testid="kpi-incassato" />
                 </div>
             </div>
 
@@ -631,3 +629,27 @@ function EditTitoloDialog({ titolo, conti, onClose }) {
         </Dialog>
     );
 }
+
+function KpiBar({ label, value, accent = "slate", testid, highlight = false }) {
+    const colors = {
+        emerald: "border-l-emerald-500",
+        sky: "border-l-sky-500",
+        amber: "border-l-amber-500",
+        violet: "border-l-violet-500",
+        indigo: "border-l-indigo-500",
+        rose: "border-l-rose-500",
+        slate: "border-l-slate-700",
+    };
+    return (
+        <div
+            className={`bg-white border border-slate-200 border-l-4 ${colors[accent] || colors.slate} rounded px-3 py-2 ${highlight ? "bg-amber-50" : ""}`}
+            data-testid={testid}
+        >
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+            <div className={`num font-semibold ${highlight ? "text-amber-800" : "text-slate-900"} text-base`}>
+                {fmtEur(value || 0)}
+            </div>
+        </div>
+    );
+}
+
