@@ -9,9 +9,12 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Loading } from "@/components/Shared";
-import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle } from "lucide-react";
+import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
+import {
+    Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from "@/components/ui/select";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -30,11 +33,29 @@ export default function BrogliaccioTab() {
     const [riapriMotivo, setRiapriMotivo] = useState("");
     const [storicoOpen, setStoricoOpen] = useState(false);
     const [storico, setStorico] = useState([]);
+    const [editMov, setEditMov] = useState(null);  // movimento aperto in modifica
+    const [contiCassa, setContiCassa] = useState([]);
 
     const load = () => {
         api.get("/contabilita/brogliaccio", { params: { data } }).then((r) => setB(r.data));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [data]);
+    useEffect(() => {
+        api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setContiCassa(r.data || []));
+    }, []);
+
+    const elimina = async (mov) => {
+        const isGiro = mov.descrizione?.startsWith("Giroconto") || mov.tipo === "giroconto";
+        const msg = isGiro
+            ? `Eliminare il giroconto "${mov.contraente || mov.descrizione}"?\nVerranno cancellati entrambi i movimenti collegati.`
+            : `Eliminare il movimento "${mov.contraente || mov.descrizione}" di ${fmtEur(mov.totale)}?`;
+        if (!window.confirm(msg)) return;
+        try {
+            await api.delete(`/contabilita/movimenti/${mov.id}`);
+            toast.success("Movimento eliminato");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
 
     const stampa = () => openPdf("/contabilita/brogliaccio/stampa", { data });
 
@@ -181,7 +202,8 @@ export default function BrogliaccioTab() {
                                         {c.nome}
                                     </th>
                                 ))}
-                                <th className="w-10 text-center px-2 py-2"></th>
+                                <th className="w-10 text-center px-2 py-2 border-r-2 border-slate-500">All.</th>
+                                <th className="w-20 text-center px-2 py-2">Azioni</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -212,7 +234,7 @@ export default function BrogliaccioTab() {
                                             </td>
                                         );
                                     })}
-                                    <td className="text-center px-2">
+                                    <td className="text-center px-2 border-r-2 border-slate-200">
                                         <AllegatiCell
                                             entita_tipo="movimento"
                                             entita_id={r.id}
@@ -221,6 +243,28 @@ export default function BrogliaccioTab() {
                                             hint="Allega ricevuta / fattura"
                                             onChange={load}
                                         />
+                                    </td>
+                                    <td className="text-center px-2 whitespace-nowrap">
+                                        {!b.chiusa && (
+                                            <>
+                                                <button
+                                                    onClick={() => setEditMov(r)}
+                                                    className="inline-flex items-center justify-center h-6 w-6 rounded border border-slate-200 hover:bg-sky-50 hover:border-sky-300 mr-1"
+                                                    title="Modifica movimento"
+                                                    data-testid={`brog-edit-${r.id}`}
+                                                >
+                                                    <Pencil size={11} className="text-slate-600" />
+                                                </button>
+                                                <button
+                                                    onClick={() => elimina(r)}
+                                                    className="inline-flex items-center justify-center h-6 w-6 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                                                    title="Elimina movimento"
+                                                    data-testid={`brog-del-${r.id}`}
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            </>
+                                        )}
                                     </td>
                                 </tr>
                             );})}
@@ -238,6 +282,7 @@ export default function BrogliaccioTab() {
                                             {fmt(b.totali_giornata.per_conto?.[c.id], true)}
                                         </td>
                                     ))}
+                                    <td className="border-t-2 border-t-slate-900"></td>
                                     <td className="border-t-2 border-t-slate-900"></td>
                                 </tr>
                             )}
@@ -435,7 +480,150 @@ export default function BrogliaccioTab() {
                     </div>
                 </DialogContent>
             </Dialog>
+
+            {/* Modifica movimento */}
+            {editMov && (
+                <EditMovimentoDialog
+                    movimento={editMov}
+                    conti={contiCassa}
+                    onClose={(refresh) => { setEditMov(null); if (refresh) load(); }}
+                />
+            )}
         </div>
+    );
+}
+
+function EditMovimentoDialog({ movimento, conti, onClose }) {
+    const [f, setF] = useState({
+        data_movimento: movimento.data || new Date().toISOString().slice(0, 10),
+        tipo: movimento.tipo === "uscita" ? "uscita" : "entrata",
+        categoria: movimento.categoria || "altro",
+        importo: Math.abs(movimento.totale || 0) || Math.abs(movimento.lordo || 0) || 0,
+        descrizione: movimento.descrizione || movimento.contraente || "",
+        conto_cassa_id: movimento.conto_cassa_id || "",
+        numero_documento: movimento.numero_documento || "",
+    });
+    const [saving, setSaving] = useState(false);
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        if (!f.descrizione) { toast.error("Descrizione obbligatoria"); return; }
+        const imp = parseFloat(f.importo);
+        if (!imp || imp <= 0) { toast.error("Importo deve essere positivo"); return; }
+        setSaving(true);
+        try {
+            await api.put(`/contabilita/movimenti/${movimento.id}`, {
+                data_movimento: f.data_movimento,
+                tipo: f.tipo,
+                categoria: f.categoria,
+                importo: imp,
+                descrizione: f.descrizione,
+                conto_cassa_id: f.conto_cassa_id || null,
+                numero_documento: f.numero_documento || null,
+            });
+            toast.success("Movimento aggiornato");
+            onClose(true);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setSaving(false); }
+    };
+
+    const isGiroconto = movimento.descrizione?.startsWith("Giroconto");
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-xl" data-testid="brog-edit-dialog">
+                <DialogHeader>
+                    <DialogTitle>Modifica movimento</DialogTitle>
+                </DialogHeader>
+                {isGiroconto && (
+                    <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 mb-2 text-amber-800">
+                        ⚠️ Questo è un movimento di giroconto. Modifica solo descrizione/data
+                        per evitare incoerenze sulla coppia.
+                    </div>
+                )}
+                <div className="grid grid-cols-2 gap-3 py-2">
+                    <div>
+                        <Label>Data *</Label>
+                        <Input
+                            type="date" value={f.data_movimento}
+                            onChange={(e) => set("data_movimento", e.target.value)}
+                            data-testid="brog-edit-data"
+                        />
+                    </div>
+                    <div>
+                        <Label>Tipo *</Label>
+                        <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
+                            <SelectTrigger data-testid="brog-edit-tipo"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="entrata">Entrata</SelectItem>
+                                <SelectItem value="uscita">Uscita</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Categoria</Label>
+                        <Select value={f.categoria} onValueChange={(v) => set("categoria", v)}>
+                            <SelectTrigger data-testid="brog-edit-cat"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="incasso_premio">Incasso premio</SelectItem>
+                                <SelectItem value="pagamento_compagnia">Pagamento compagnia (rimessa)</SelectItem>
+                                <SelectItem value="provvigioni">Provvigioni</SelectItem>
+                                <SelectItem value="rimborso_cliente">Rimborso cliente</SelectItem>
+                                <SelectItem value="sconto_cliente">Sconto cliente</SelectItem>
+                                <SelectItem value="spese_amministrative">Spese amministrative</SelectItem>
+                                <SelectItem value="anticipo">Anticipo / Sospeso</SelectItem>
+                                <SelectItem value="giroconto">Giroconto</SelectItem>
+                                <SelectItem value="altro">Altro</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>Importo € *</Label>
+                        <Input
+                            type="number" step="0.01" min="0"
+                            value={f.importo}
+                            onChange={(e) => set("importo", e.target.value)}
+                            data-testid="brog-edit-imp"
+                        />
+                    </div>
+                    <div className="col-span-2">
+                        <Label>Descrizione *</Label>
+                        <Input
+                            value={f.descrizione}
+                            onChange={(e) => set("descrizione", e.target.value)}
+                            data-testid="brog-edit-desc"
+                        />
+                    </div>
+                    <div>
+                        <Label>Conto / Banca</Label>
+                        <Select value={f.conto_cassa_id || "__none__"} onValueChange={(v) => set("conto_cassa_id", v === "__none__" ? "" : v)}>
+                            <SelectTrigger data-testid="brog-edit-conto"><SelectValue placeholder="—" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__none__">— nessuno —</SelectItem>
+                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>N. documento</Label>
+                        <Input
+                            value={f.numero_documento}
+                            onChange={(e) => set("numero_documento", e.target.value)}
+                        />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
+                    <Button
+                        onClick={save} disabled={saving}
+                        className="bg-sky-700 hover:bg-sky-800"
+                        data-testid="brog-edit-save"
+                    >
+                        {saving ? "Salvataggio…" : "Aggiorna"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
