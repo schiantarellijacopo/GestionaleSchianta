@@ -3,49 +3,71 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 17 - P0 Code Quality)
+## Latest Session (Iter 18 - Cyclomatic Complexity Refactor)
 
-### Done
-- ✅ **P0 Circular Import RISOLTO**: estratto MongoDB client+db in nuovo `/app/backend/database.py`; `auth.py` e `server.py` ora importano da `database.py` (rimosso `from server import db` late-import in `require_user`).
-- ✅ **P0 Secrets hardcoded RIMOSSI** da TUTTI i test (`/app/backend/tests/*`): `ADMIN_EMAIL`/`ADMIN_PASSWORD` ora via `os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it")` etc. con default. Aggiunto `tests/conftest.py` con fixture `admin_session`/`admin_credentials`.
-- ✅ **P0 Undefined names FIXED** in `server.py`:
-  - `_calcola_scadenza_titolo(effetto, frazionamento)`: implementato in Helpers (gestisce clamp fine mese)
-  - `_CORPO_LETTERA_DEFAULT`: testo default lettera promemoria pagamento
-  - `_MESI_PER_FRAZIONAMENTO`: mapping annuale=12, semestrale=6, trimestrale=3, mensile=1, ecc.
-- ✅ **Unused variables** rimosse (`crediti_agg`/`crediti_storno` in brogliaccio, `today` in dati-compagnie, `week_end` in dashboard/tasks).
-- ✅ **Modifica polizza → tab Veicolo**: aggiunti TUTTI i campi mancanti
-  - Veicolo: `veicolo_quintali`, `veicolo_gancio_traino`, `veicolo_targa_rimorchio`
-  - Sezione "Dati associazione contratto": `tipo_tariffa`, `bm_provenienza`, `bm_assegnata`, `bm_assegnata_cu`, `pejus`, `franchigia`, `valore_veicolo`, `valore_residuo_veicolo`, `valore_accessori`, `guida_esperta`, `guida_esclusiva`, `rinuncia_rivalsa`, `intestatario`, `provincia_intestatario`, `massimali`
-- ✅ **Anagrafiche lista**: rimossa colonna "Collegati" (header + cella + colspan aggiornato a 9).
+### Done in iter 18 (Code Quality Critical + Important)
+- ✅ **`brogliaccio.py`** — `genera_brogliaccio_pdf` (150 righe, CC=36) → 7 helper:
+  `_load_movimenti_arricchiti`, `_classifica_movimento`, `_descrizione_movimento`,
+  `_celle_conti_cassa`, `_build_righe_dettaglio`, `_calcola_col_widths`,
+  `_build_tabella_principale`, `_build_tabella_riepilogo`. CC ridotta a ~6.
+- ✅ **`avvisi_scadenze.py`** — `cerca_scadenze` (113 righe, CC=17) → 7 helper
+  (`_query_polizze_in_scadenza`, `_query_titoli_arretrati`, `_carica_anagrafiche`,
+  `_carica_compagnie`, `_format_polizza_record`, `_format_titolo_record`, `_giorni_da_oggi`).
+  `esegui_job_scadenze` → `_build_log_entry`, `_resolve_destinatario`, `_persist_log`, `_invia_email`.
+- ✅ **`geocoder.py`** — `cerca_suggerimenti` (55 righe, CC=24) → `_nominatim_get`,
+  `_estrai_comune`, `_estrai_indirizzo`, `_parse_item`. CC a ~8.
+- ✅ **`inps_calculator.py`** — `calcola_pensione` (93 righe, CC=14) →
+  `_calcola_invalidita`, `_calcola_inabilita`, `_calcola_superstite`, `_aliquota_superstite`.
+- ✅ **`ania_importer.py`** — `importa_zip` (391 righe, CC=157) → 11 processori:
+  `_extract_zip_contents`, `_get_or_create_compagnia`, `_processa_anagrafiche`,
+  `_processa_polizze`, `_processa_dettagli_veicolo`, `_processa_garanzie`,
+  `_processa_titoli`, `_processa_sinistri`, `_conta_record_residui`,
+  `_build_anagrafica_payload`, `_build_dettagli_veicolo`. CC a ~10. Idempotenza preservata.
+- ✅ **Unused variables (F841)** rimosse: `smaller` in pdf_brogliaccio, `nucleo` in
+  pdf_diagnosi, `s` in pdf_privacy, `body` in test_iter11, `comp` in test_iter13.
+- ✅ `is True` → `== True` nel solo test che usava antipattern.
 
-### Testing
-- Iter17 backend regression: **12/12 PASS** (login, anagrafiche/stats, dashboard/tasks, brogliaccio, dati-compagnie, sostituisci polizza con titolo, avvisi PDF, PUT polizza con 18 nuovi campi).
-- Iter14-16 regression: 22/24 PASS (i 2 fallimenti sono Nominatim flaky + contaminazione dati, NON correlati al refactor).
-- Smoke frontend OK.
+### Testing iter 18
+- **Backend: 52/52 PASS** (24 nuovi iter18 + 28 regression iter4/5/15/17).
+- ANIA import end-to-end verificato: stessi counts del pre-refactor.
+- Lint: 0 errori sui 5 moduli refactored.
+
+## Sessioni precedenti
+- Iter 17 (P0 Code Quality): circular import auth↔server risolto via `database.py`;
+  secrets test hardcoded sostituiti con env vars; undefined `_calcola_scadenza_titolo` /
+  `_CORPO_LETTERA_DEFAULT` implementati; tab Veicolo "Modifica polizza" con 18 nuovi
+  campi (Dati associazione contratto); rimossa colonna "Collegati" da Anagrafiche.
 
 ## Architecture
-- `/app/backend/database.py` NEW — Motor client + db (single source of truth)
-- `/app/backend/auth.py` — JWT + bcrypt + `require_user` dep (clean)
-- `/app/backend/server.py` — ancora monolite 10.143 righe (split P1 prossimo)
-- `/app/backend/tests/conftest.py` NEW — shared fixtures env-driven
+- `/app/backend/database.py` — Motor client + db (single source of truth)
+- `/app/backend/auth.py` — JWT + bcrypt + `require_user` dep
+- `/app/backend/server.py` — monolite 10.143 righe (split P0 prossimo)
+- `/app/backend/brogliaccio.py` — PDF (refactored, modulare)
+- `/app/backend/avvisi_scadenze.py` — job scadenze (refactored, modulare)
+- `/app/backend/ania_importer.py` — import ANIA (refactored, 11 processori)
+- `/app/backend/inps_calculator.py` — calcoli pensione (refactored, branch per tipo)
+- `/app/backend/geocoder.py` — Nominatim wrapper (refactored)
+- `/app/backend/tests/conftest.py` — shared fixtures + env-driven creds
 
 ## Backlog
 
 ### P0 (next)
-- Split `server.py` (10k+ righe) in `/app/backend/routes/` (auth, anagrafiche, polizze, titoli, sinistri, brogliaccio, dashboard, ocr, admin). Mantenere `server.py` come entry point con `include_router`.
-- Style fix: ~99 occorrenze E701/E702 (multi-statement per riga) in `server.py`.
+- **Split `server.py` (10.143 righe)** in `/app/backend/routes/`:
+  auth, anagrafiche, polizze, titoli, sinistri, brogliaccio, dashboard,
+  ocr, admin, librerie, importazioni. Mantenere `server.py` come entry point.
+- Style fix: ~99 E701/E702 (multi-statement per riga) in `server.py`.
 
 ### P1
-- UI "Personalizza KPI Anagrafiche" basata sui Tag (dialog + bottone ⚙️) — backend già pronto (`/api/anagrafiche/kpi-custom`)
-- OCR Fatture via Gemini 3 Flash (`ocr_fattura.py`)
-- "Verifica polizza vs libretto" — UI di confronto discrepanze nella detail di polizza
-- Replicare cascata Ramo→Prodotto in altri form di creazione polizza
-- Aggiungere `PolizzaUpdate` Pydantic per typed-validation su PUT /polizze/{id}
+- UI "Personalizza KPI Anagrafiche" basata sui Tag.
+- OCR Fatture via Gemini 3 Flash (`ocr_fattura.py`).
+- "Verifica polizza vs libretto" — UI di confronto discrepanze.
+- `PolizzaUpdate` Pydantic per typed-validation su PUT.
 
 ### P2
-- Piramide Soluzioni — Release B (stacked blocks, indicatori Adeguata/Non Adeguata)
-- Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS
-- DialogDescription mancante su EditPolizzaDialog (warning Radix a11y)
+- Piramide Soluzioni Release B (stacked blocks, Adeguata/Non Adeguata).
+- Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS.
+- Type hint coverage 45% → 80% (almeno sui moduli core).
+- `DialogDescription` mancante su EditPolizzaDialog (warning Radix a11y).
 
 ## Credenziali test
 admin@assicura.it / Admin123!
