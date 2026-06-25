@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ const CAT_BADGE = {
 
 export default function Anagrafiche() {
     const { user } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [list, setList] = useState(null);
     const [q, setQ] = useState("");
     const [open, setOpen] = useState(false);
@@ -31,6 +32,9 @@ export default function Anagrafiche() {
     const [stats, setStats] = useState(null);
     const [expanded, setExpanded] = useState({});
     const [networks, setNetworks] = useState({});
+    // filtri da URL (dashboard task)
+    const compleannoFilter = searchParams.get("compleanno"); // "oggi" | "settimana" | "mese"
+    const docFilter = searchParams.get("doc"); // "scaduti" | "in_scadenza"
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
 
     const load = useCallback(() => {
@@ -62,9 +66,55 @@ export default function Anagrafiche() {
 
     const filtered = useMemo(() => {
         if (!list) return [];
-        if (catFilter === "all") return list;
-        return list.filter((a) => a.categoria_ui === catFilter);
-    }, [list, catFilter]);
+        let out = list;
+        if (catFilter !== "all") out = out.filter((a) => a.categoria_ui === catFilter);
+
+        // FILTRO COMPLEANNO (?compleanno=oggi|settimana|mese)
+        if (compleannoFilter) {
+            const today = new Date();
+            const md = (d) => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            const todayMd = md(today);
+            const weekSet = new Set();
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(today); d.setDate(today.getDate() + i); weekSet.add(md(d));
+            }
+            const monthMd = String(today.getMonth() + 1).padStart(2, "0");
+            out = out.filter((a) => {
+                const dn = (a.data_nascita || "");
+                if (dn.length < 10) return false;
+                const m = dn.substring(5, 10);
+                if (compleannoFilter === "oggi") return m === todayMd;
+                if (compleannoFilter === "settimana") return weekSet.has(m);
+                if (compleannoFilter === "mese") return dn.substring(5, 7) === monthMd;
+                return true;
+            });
+        }
+
+        // FILTRO DOCUMENTI (?doc=scaduti|in_scadenza)
+        if (docFilter) {
+            const todayIso = new Date().toISOString().slice(0, 10);
+            const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+            const in30Iso = in30.toISOString().slice(0, 10);
+            out = out.filter((a) => {
+                const docs = a.documenti || {};
+                if (docFilter === "scaduti") {
+                    return Object.values(docs).some((d) => d && d.scadenza && d.scadenza < todayIso);
+                }
+                if (docFilter === "in_scadenza") {
+                    return Object.values(docs).some((d) => d && d.scadenza && d.scadenza >= todayIso && d.scadenza <= in30Iso);
+                }
+                return true;
+            });
+        }
+        return out;
+    }, [list, catFilter, compleannoFilter, docFilter]);
+
+    const clearTaskFilter = () => {
+        const p = new URLSearchParams(searchParams);
+        p.delete("compleanno");
+        p.delete("doc");
+        setSearchParams(p);
+    };
 
     const counts = useMemo(() => {
         if (!list) return { con: 0, senza: 0, cond: 0 };
@@ -137,6 +187,26 @@ export default function Anagrafiche() {
                     {list ? `${filtered.length} risultati` : ""}
                 </span>
             </div>
+
+            {(compleannoFilter || docFilter) && (
+                <div
+                    className="flex items-center justify-between gap-3 mb-3 px-4 py-2 rounded-md border border-amber-300 bg-amber-50"
+                    data-testid="anag-active-task-filter"
+                >
+                    <div className="flex items-center gap-2 text-sm text-amber-900">
+                        <span className="font-semibold">Filtro attivo:</span>
+                        {compleannoFilter === "oggi" && <span>Compleanni di oggi</span>}
+                        {compleannoFilter === "settimana" && <span>Compleanni nei prossimi 7 giorni</span>}
+                        {compleannoFilter === "mese" && <span>Compleanni nel mese in corso</span>}
+                        {docFilter === "scaduti" && <span>Documenti di riconoscimento scaduti</span>}
+                        {docFilter === "in_scadenza" && <span>Documenti in scadenza (30gg)</span>}
+                        <span className="text-amber-700 num">— {filtered.length} risultati</span>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={clearTaskFilter} data-testid="anag-clear-task-filter">
+                        <X size={14} className="mr-1" /> Rimuovi filtro
+                    </Button>
+                </div>
+            )}
 
             {/* Chips filtri categoria */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -216,30 +286,29 @@ export default function Anagrafiche() {
 
 function KpiCard({ icon, color, label, n, premio, testid }) {
     const palettes = {
-        sky: "bg-sky-50 border-sky-200 text-sky-700",
-        emerald: "bg-emerald-50 border-emerald-200 text-emerald-700",
-        amber: "bg-amber-50 border-amber-200 text-amber-700",
-        violet: "bg-violet-50 border-violet-200 text-violet-700",
+        sky:     { bg: "bg-white",  border: "border-l-4 border-l-sky-500 border border-slate-200",     ic: "text-sky-600",     hint: "text-sky-700" },
+        emerald: { bg: "bg-white",  border: "border-l-4 border-l-emerald-500 border border-slate-200", ic: "text-emerald-600", hint: "text-emerald-700" },
+        amber:   { bg: "bg-white",  border: "border-l-4 border-l-amber-500 border border-slate-200",   ic: "text-amber-600",   hint: "text-amber-700" },
+        violet:  { bg: "bg-white",  border: "border-l-4 border-l-violet-500 border border-slate-200",  ic: "text-violet-600",  hint: "text-violet-700" },
     };
+    const p = palettes[color] || palettes.sky;
     return (
-        <Link
-            to={`/anagrafiche?cat=${(label || "").toLowerCase()}`}
-            className={`block border rounded-lg p-4 hover:shadow-md transition-shadow ${palettes[color]}`}
+        <div
+            className={`${p.bg} ${p.border} rounded-md p-4 hover:shadow-md transition-shadow`}
             data-testid={testid}
-            onClick={(e) => e.preventDefault()}
         >
             <div className="flex items-start justify-between">
-                <div className="text-[10px] uppercase tracking-widest font-semibold opacity-80">{label}</div>
-                <div className="opacity-60">{icon}</div>
+                <div className="text-[10px] uppercase tracking-widest font-semibold text-slate-500">{label}</div>
+                <div className={p.ic}>{icon}</div>
             </div>
             <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-3xl font-bold num text-slate-900">{n}</span>
-                <span className="text-[10px] uppercase tracking-wider opacity-60">tot.</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400">tot.</span>
             </div>
-            <div className="mt-1 text-xs opacity-80">
-                Premi: <span className="font-semibold num text-slate-800">{fmtEur(premio || 0)}</span>
+            <div className="mt-1 text-xs text-slate-600">
+                Premi: <span className={`font-semibold num ${p.hint}`}>{fmtEur(premio || 0)}</span>
             </div>
-        </Link>
+        </div>
     );
 }
 

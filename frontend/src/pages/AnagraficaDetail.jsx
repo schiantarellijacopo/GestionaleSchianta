@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import AnalisiClienteTab from "@/components/AnalisiClienteTab";
 import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
+import TagsEditor from "@/components/TagsEditor";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 
 export default function AnagraficaDetail() {
@@ -228,6 +229,23 @@ function DatiTab({ ana, canEdit, onReload }) {
                         <div className="text-sm text-slate-700 whitespace-pre-line">{ana.note}</div>
                     </div>
                 )}
+                <div className="mt-5 pt-4 border-t border-slate-100">
+                    <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Tag</div>
+                    {(ana.tags || []).length === 0 ? (
+                        <div className="text-xs text-slate-400 italic">Nessun tag. Premi &quot;Modifica&quot; per aggiungerne.</div>
+                    ) : (
+                        <div className="flex flex-wrap gap-1.5" data-testid="anag-tags-view">
+                            {ana.tags.map((t) => (
+                                <span
+                                    key={t}
+                                    className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200"
+                                >
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </Card>
         );
     }
@@ -347,6 +365,13 @@ function DatiTab({ ana, canEdit, onReload }) {
             <div className="mt-4">
                 <Label>Note</Label>
                 <Textarea rows={3} value={f.note || ""} onChange={(e) => set("note", e.target.value)} />
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-100">
+                <Label>Tag (puoi crearne di nuovi premendo Invio o virgola)</Label>
+                <TagsEditor
+                    value={f.tags || []}
+                    onChange={(tags) => set("tags", tags)}
+                />
             </div>
             <div className="mt-4 flex justify-end gap-2">
                 <Button variant="outline" onClick={() => { setEditing(false); setF({ ...ana }); }}>Annulla</Button>

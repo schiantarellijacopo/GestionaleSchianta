@@ -2127,6 +2127,15 @@ async def ocr_visura_camerale(
     return data
 
 
+@api.get("/anagrafiche/tags")
+async def list_tags(user=Depends(current_user)):
+    """Restituisce la lista di tutti i tag univoci usati nelle anagrafiche."""
+    if user["role"] == "cliente":
+        return []
+    tags = await db.anagrafiche.distinct("tags")
+    return sorted([t for t in tags if t])
+
+
 @api.get("/anagrafiche/stats")
 async def anagrafiche_stats(user=Depends(current_user)):
     """KPI aggregati anagrafiche.
@@ -9524,6 +9533,163 @@ class DashboardLinkBody(BaseModel):
     icon: Optional[str] = None
     color: Optional[str] = None
     ordine: int = 0
+
+
+@api.get("/dashboard/tasks")
+async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Task azionabili sulla dashboard. Ogni task ritorna un conteggio + una URL
+    di destinazione che già filtra automaticamente i record.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+    today_iso = today.isoformat()
+    week_end = (today + timedelta(days=7)).isoformat()
+    in_30 = (today + timedelta(days=30)).isoformat()
+    days_5_ago = (today - timedelta(days=5)).isoformat()
+
+    # 1) COMPLEANNI di oggi (mese-giorno match)
+    md_today = today.strftime("%m-%d")
+    n_comp_oggi = 0
+    n_comp_settimana = 0
+    week_md = [(today + timedelta(days=i)).strftime("%m-%d") for i in range(0, 7)]
+    async for a in db.anagrafiche.find(
+        {"data_nascita": {"$ne": None}}, {"_id": 0, "data_nascita": 1}
+    ):
+        dn = (a.get("data_nascita") or "")
+        if len(dn) >= 10:
+            md = dn[5:10]  # MM-DD
+            if md == md_today:
+                n_comp_oggi += 1
+            if md in week_md:
+                n_comp_settimana += 1
+
+    # 2) DOCUMENTI SCADUTI o IN SCADENZA (carta_identita, patente, passaporto)
+    n_doc_scaduti = 0
+    n_doc_scadenza = 0
+    async for a in db.anagrafiche.find(
+        {"documenti": {"$exists": True, "$ne": {}}},
+        {"_id": 0, "documenti": 1},
+    ):
+        for doc in (a.get("documenti") or {}).values():
+            if not isinstance(doc, dict):
+                continue
+            sc = doc.get("scadenza")
+            if not sc:
+                continue
+            if sc < today_iso:
+                n_doc_scaduti += 1
+                break
+        else:
+            # documento in scadenza nei prossimi 30 giorni
+            for doc in (a.get("documenti") or {}).values():
+                if not isinstance(doc, dict):
+                    continue
+                sc = doc.get("scadenza")
+                if sc and today_iso <= sc <= in_30:
+                    n_doc_scadenza += 1
+                    break
+
+    # 3) TITOLI SOSPESI da > 5 giorni (anticipo agenzia)
+    n_sospesi_old = await db.titoli.count_documents({
+        "titolo_coperto": True,
+        "stato": {"$in": ["da_incassare", "insoluto"]},
+        "data_copertura": {"$lt": days_5_ago},
+    })
+
+    # 4) SINISTRI APERTI da > 30 giorni
+    cutoff_30 = (today - timedelta(days=30)).isoformat()
+    n_sin_old = await db.sinistri.count_documents({
+        "stato": {"$in": ["aperto", "in_lavorazione", "denunciato"]},
+        "data_sinistro": {"$lt": cutoff_30},
+    })
+
+    # 5) POLIZZE in scadenza prossimi 30 giorni
+    n_pol_scadenza = await db.polizze.count_documents({
+        "stato": {"$in": ["attiva", "in_emissione"]},
+        "scadenza": {"$gte": today_iso, "$lte": in_30},
+    })
+
+    # 6) PROVVIGIONI da pagare ai collaboratori
+    n_provv = await db.titoli.count_documents({
+        "stato": {"$in": ["incassato"]},
+        "provvigione_pagata": {"$ne": True},
+        "collaboratore_id": {"$ne": None},
+    })
+
+    return [
+        {
+            "key": "compleanno_oggi",
+            "label": "Compleanni di oggi",
+            "icon": "Cake",
+            "color": "rose",
+            "count": n_comp_oggi,
+            "url": "/anagrafiche?compleanno=oggi",
+            "descrizione": "Clienti che compiono gli anni oggi",
+        },
+        {
+            "key": "compleanno_settimana",
+            "label": "Compleanni nei prossimi 7 giorni",
+            "icon": "Gift",
+            "color": "pink",
+            "count": n_comp_settimana,
+            "url": "/anagrafiche?compleanno=settimana",
+            "descrizione": "Da contattare per gli auguri",
+        },
+        {
+            "key": "documenti_scaduti",
+            "label": "Documenti di riconoscimento scaduti",
+            "icon": "FileWarning",
+            "color": "red",
+            "count": n_doc_scaduti,
+            "url": "/anagrafiche?doc=scaduti",
+            "descrizione": "CI / patente / passaporto da rinnovare",
+        },
+        {
+            "key": "documenti_scadenza",
+            "label": "Documenti in scadenza (30gg)",
+            "icon": "FileClock",
+            "color": "amber",
+            "count": n_doc_scadenza,
+            "url": "/anagrafiche?doc=in_scadenza",
+            "descrizione": "Da aggiornare nei prossimi 30 giorni",
+        },
+        {
+            "key": "titoli_sospesi_old",
+            "label": "Titoli sospesi da oltre 5 giorni",
+            "icon": "AlertTriangle",
+            "color": "orange",
+            "count": n_sospesi_old,
+            "url": "/sospesi?gg_min=5",
+            "descrizione": "Anticipati dall'agenzia, da incassare",
+        },
+        {
+            "key": "polizze_in_scadenza_30",
+            "label": "Polizze in scadenza (30gg)",
+            "icon": "CalendarClock",
+            "color": "blue",
+            "count": n_pol_scadenza,
+            "url": "/avvisi",
+            "descrizione": "Prossime al rinnovo",
+        },
+        {
+            "key": "sinistri_aperti_old",
+            "label": "Sinistri aperti da oltre 30 giorni",
+            "icon": "AlertOctagon",
+            "color": "red",
+            "count": n_sin_old,
+            "url": "/sinistri?stato=aperto&gg_min=30",
+            "descrizione": "Da sollecitare alla compagnia",
+        },
+        {
+            "key": "provvigioni_da_pagare",
+            "label": "Provvigioni da liquidare",
+            "icon": "Wallet",
+            "color": "emerald",
+            "count": n_provv,
+            "url": "/provvigioni",
+            "descrizione": "Collaboratori in attesa",
+        },
+    ]
 
 
 @api.get("/dashboard/links")

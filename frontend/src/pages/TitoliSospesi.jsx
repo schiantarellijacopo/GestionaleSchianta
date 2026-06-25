@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -11,6 +11,8 @@ import DialogIncasso from "@/components/DialogIncasso";
 import { Coins, Clock, AlertTriangle, CheckCircle, Printer } from "lucide-react";
 
 export default function TitoliSospesi() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const ggMin = parseInt(searchParams.get("gg_min") || "0", 10);
     const [items, setItems] = useState(null);
     const [collab, setCollab] = useState([]);
     const [filtroCollab, setFiltroCollab] = useState("all");
@@ -28,6 +30,19 @@ export default function TitoliSospesi() {
         api.get("/librerie/conti-cassa").then((r) => setConti(r.data));
     }, []);
     useEffect(() => { load(); }, [load]);
+
+    // Filtro derivato da URL ?gg_min=N
+    const visibleItems = useMemo(() => {
+        if (!items) return null;
+        if (!ggMin) return items;
+        return items.filter((t) => (t.giorni_anticipo || 0) >= ggMin);
+    }, [items, ggMin]);
+
+    const clearGgMin = () => {
+        const p = new URLSearchParams(searchParams);
+        p.delete("gg_min");
+        setSearchParams(p);
+    };
 
     const totali = useMemo(() => {
         const arr = items || [];
@@ -134,10 +149,24 @@ export default function TitoliSospesi() {
             )}
 
             <Card className="border-slate-200 overflow-hidden">
-                {items === null ? <Loading /> : items.length === 0 ? (
+                {ggMin > 0 && (
+                    <div
+                        className="flex items-center justify-between gap-3 px-4 py-2 border-b border-amber-300 bg-amber-50"
+                        data-testid="sospesi-active-filter"
+                    >
+                        <div className="text-sm text-amber-900">
+                            <span className="font-semibold">Filtro attivo:</span> Sospesi da oltre {ggMin} giorni
+                            <span className="text-amber-700 num ml-2">— {(visibleItems || []).length} risultati</span>
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={clearGgMin} data-testid="sospesi-clear-filter">
+                            Rimuovi filtro
+                        </Button>
+                    </div>
+                )}
+                {visibleItems === null ? <Loading /> : visibleItems.length === 0 ? (
                     <div className="text-center py-16 text-slate-500">
                         <CheckCircle size={32} className="mx-auto mb-2 text-emerald-500" />
-                        Nessun titolo sospeso — tutti i clienti hanno pagato.
+                        {ggMin > 0 ? `Nessun titolo sospeso da oltre ${ggMin} giorni.` : "Nessun titolo sospeso — tutti i clienti hanno pagato."}
                     </div>
                 ) : (
                     <table className="tbl w-full">
@@ -156,7 +185,7 @@ export default function TitoliSospesi() {
                             </tr>
                         </thead>
                         <tbody>
-                            {items.map((t) => {
+                            {visibleItems.map((t) => {
                                 const old = (t.giorni_anticipo || 0) > 30;
                                 return (
                                     <tr key={t.id} data-testid={`sospeso-${t.id}`}>

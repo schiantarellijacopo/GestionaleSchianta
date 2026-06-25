@@ -8,7 +8,7 @@ import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
     PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink } from "lucide-react";
+import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,8 @@ export default function Dashboard() {
                     <Stat label="Crescita" value="+12%" hint="vs anno scorso" icon={<TrendingUp size={18} />} testid="stat-crescita" to="/contabilita" />
                 )}
             </div>
+
+            {!isClient && <DashboardTasks />}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <ChartCard to="/contabilita" className="lg:col-span-2" testid="dash-chart-incassi">
@@ -191,6 +193,75 @@ export default function Dashboard() {
                 </div>
             )}
         </div>
+    );
+}
+
+
+function DashboardTasks() {
+    const [tasks, setTasks] = useState(null);
+    useEffect(() => { api.get("/dashboard/tasks").then((r) => setTasks(r.data)); }, []);
+    if (!tasks) return null;
+
+    const iconMap = {
+        Cake, Gift, FileWarning, FileClock, AlertTriangle, CalendarClock, AlertOctagon, Wallet,
+    };
+    const palette = {
+        rose: "bg-rose-50 border-rose-200 text-rose-700",
+        pink: "bg-pink-50 border-pink-200 text-pink-700",
+        red: "bg-red-50 border-red-200 text-red-700",
+        amber: "bg-amber-50 border-amber-200 text-amber-700",
+        orange: "bg-orange-50 border-orange-200 text-orange-700",
+        blue: "bg-sky-50 border-sky-200 text-sky-700",
+        emerald: "bg-emerald-50 border-emerald-200 text-emerald-700",
+    };
+
+    // Mostra prima i task con count > 0, poi gli altri (consente comunque navigazione)
+    const sorted = [...tasks].sort((a, b) => (b.count > 0) - (a.count > 0));
+    const conLavoro = sorted.filter((t) => t.count > 0);
+    const senzaLavoro = sorted.filter((t) => t.count === 0);
+
+    return (
+        <Card className="p-5 border-slate-200 mb-6" data-testid="dashboard-tasks">
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium text-slate-900 flex items-center gap-2">
+                    <CheckCircle2 size={18} className="text-emerald-600" /> Da fare
+                </h3>
+                <span className="text-xs text-slate-500 num">
+                    {conLavoro.length} task con attività · {senzaLavoro.length} a posto
+                </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {sorted.map((t) => {
+                    const Icon = iconMap[t.icon] || AlertTriangle;
+                    const active = t.count > 0;
+                    return (
+                        <Link
+                            key={t.key}
+                            to={t.url}
+                            className={`block border rounded-lg p-3 hover:shadow-md transition-all ${
+                                active ? palette[t.color] || "bg-slate-50 border-slate-200" : "bg-slate-50 border-slate-200 text-slate-400 opacity-70"
+                            }`}
+                            data-testid={`task-${t.key}`}
+                        >
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-[10px] uppercase tracking-widest font-semibold opacity-80 mb-1">
+                                        {t.label}
+                                    </div>
+                                    <div className="text-2xl font-bold num text-slate-900 leading-tight">
+                                        {t.count}
+                                    </div>
+                                    <div className="text-[11px] opacity-70 mt-1 truncate">
+                                        {t.descrizione}
+                                    </div>
+                                </div>
+                                <Icon size={20} className={`shrink-0 opacity-80 ${active ? "" : "text-slate-300"}`} />
+                            </div>
+                        </Link>
+                    );
+                })}
+            </div>
+        </Card>
     );
 }
 
