@@ -27,7 +27,7 @@ export default function PolizzaDetail() {
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
     useEffect(() => {
-        api.get("/contabilita/conti-cassa").then((r) => setConti(r.data || [])).catch(() => {});
+        api.get("/librerie/conti-cassa").then((r) => setConti(r.data || [])).catch(() => {});
     }, []);
     if (!pol) return <Loading />;
 

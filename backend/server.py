@@ -2728,6 +2728,61 @@ async def create_movimento(body: dict, user=Depends(require_user("admin", "colla
     return obj.model_dump()
 
 
+@api.post("/contabilita/giroconto", status_code=201)
+async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Trasferimento tra due conti cassa.
+
+    body: {data_movimento, conto_da_id, conto_a_id, importo, descrizione?}
+    Crea due movimenti gemelli:
+      - uscita dal conto 'da'
+      - entrata sul conto 'a'
+    Entrambi categoria='giroconto', con `giroconto_pair_id` per accoppiarli.
+    """
+    da_id = body.get("conto_da_id")
+    a_id = body.get("conto_a_id")
+    importo = float(body.get("importo") or 0)
+    data_mov = body.get("data_movimento") or _now_iso()[:10]
+    if not da_id or not a_id:
+        raise HTTPException(400, "Indicare conto sorgente e destinazione")
+    if da_id == a_id:
+        raise HTTPException(400, "I conti devono essere diversi")
+    if importo <= 0:
+        raise HTTPException(400, "Importo non valido")
+
+    conto_da = await db.conti_cassa.find_one({"id": da_id}, {"_id": 0, "nome": 1})
+    conto_a = await db.conti_cassa.find_one({"id": a_id}, {"_id": 0, "nome": 1})
+    if not conto_da or not conto_a:
+        raise HTTPException(404, "Conto non trovato")
+
+    nota = body.get("descrizione") or ""
+    base_desc = (f"Giroconto: {conto_da['nome']} → {conto_a['nome']}"
+                 + (f" — {nota}" if nota else ""))
+    pair_id = f"GR-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S%f')}"
+
+    mov_out = MovimentoContabile(
+        data_movimento=data_mov, tipo="uscita", categoria="giroconto",
+        importo=importo, descrizione=base_desc, conto_cassa_id=da_id,
+        mezzo_pagamento="giroconto",
+        note=f"giroconto_pair_id={pair_id}; verso_conto_id={a_id}",
+    )
+    mov_in = MovimentoContabile(
+        data_movimento=data_mov, tipo="entrata", categoria="giroconto",
+        importo=importo, descrizione=base_desc, conto_cassa_id=a_id,
+        mezzo_pagamento="giroconto",
+        note=f"giroconto_pair_id={pair_id}; da_conto_id={da_id}",
+    )
+    await db.movimenti.insert_many([mov_out.model_dump(), mov_in.model_dump()])
+    await log_attivita(user, "giroconto", "movimento", pair_id,
+                       f"€{importo:.2f}: {conto_da['nome']} → {conto_a['nome']}")
+    return {
+        "ok": True,
+        "pair_id": pair_id,
+        "movimento_uscita_id": mov_out.id,
+        "movimento_entrata_id": mov_in.id,
+        "descrizione_breve": f"{conto_da['nome']} → {conto_a['nome']} {importo:.2f} €",
+    }
+
+
 @api.put("/contabilita/movimenti/{mid}")
 async def update_movimento(mid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     cur = await db.movimenti.find_one({"id": mid}, {"_id": 0, "chiusura_id": 1})
