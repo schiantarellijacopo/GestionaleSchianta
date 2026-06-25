@@ -4314,9 +4314,24 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
 
 @api.delete("/contabilita/movimenti/{mid}")
 async def delete_movimento(mid: str, user=Depends(require_user("admin", "collaboratore"))):
-    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0, "chiusura_id": 1})
-    if cur and cur.get("chiusura_id"):
+    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0})
+    if not cur:
+        raise HTTPException(404, "Movimento non trovato")
+    if cur.get("chiusura_id"):
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per eliminare")
+    # se è un giroconto, cancella anche la coppia
+    pair_id = cur.get("pair_id") or cur.get("giroconto_pair_id")
+    if pair_id:
+        await db.movimenti.delete_many({"$or": [{"pair_id": pair_id}, {"giroconto_pair_id": pair_id}]})
+        await log_attivita(user, "delete", "giroconto", pair_id)
+        return {"ok": True, "deleted_pair": True}
+    # se collegato a un rappel, blocca eliminazione
+    if cur.get("rappel_id") or cur.get("is_rappel"):
+        raise HTTPException(400, "Movimento collegato a un Rappel: usa 'Annulla incasso' dalla pagina Rappel")
+    # se è un pagamento collaboratore, blocca eliminazione
+    if cur.get("categoria") == "provvigioni" and cur.get("tipo") == "uscita":
+        if cur.get("pagamento_provvigioni_id"):
+            raise HTTPException(400, "Movimento collegato a Pagamento Provvigioni: elimina dal modulo Provvigioni")
     res = await db.movimenti.delete_one({"id": mid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Movimento non trovato")
@@ -5259,11 +5274,56 @@ async def riapri_chiusura_giorno(
 
 @api.get("/contabilita/chiusure-giorno")
 async def list_chiusure_giorno(
-    limit: int = 60,
+    limit: int = 500,
+    anno: Optional[int] = None,
+    q: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    items = await db.chiusure_giorno.find({}, {"_id": 0}).sort("data", -1).to_list(limit)
+    """Storico chiusure giornaliere (Prima Nota chiuse).
+
+    Parametri:
+      - anno: filtra per anno (es. 2026). Quando omesso ritorna tutto.
+      - q: cerca per data o ID
+    """
+    flt: dict = {}
+    if anno:
+        flt["data"] = {"$gte": f"{anno}-01-01", "$lte": f"{anno}-12-31"}
+    if q:
+        flt["$or"] = [{"data": {"$regex": q, "$options": "i"}}, {"id": {"$regex": q, "$options": "i"}}]
+    items = await db.chiusure_giorno.find(flt, {"_id": 0}).sort("data", -1).to_list(limit)
+    # arricchisci con n_movimenti e progressivo
+    for i, it in enumerate(items):
+        it["progressivo"] = i + 1
+        if not it.get("riepilogo"):
+            it["riepilogo"] = {}
     return items
+
+
+@api.delete("/contabilita/chiusura-giorno/{chiusura_id}")
+async def delete_chiusura_giorno(
+    chiusura_id: str, user=Depends(require_user("admin")),
+):
+    """Elimina definitivamente una chiusura giornaliera (admin only).
+    NOTA: i movimenti sottostanti restano nel DB ma vengono rimarcati come riaperti.
+    """
+    ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Chiusura non trovata")
+    # rimuovi PDF dallo storage (best-effort)
+    try:
+        if ch.get("pdf_storage_path"):
+            obj_storage.delete_object(ch["pdf_storage_path"])
+    except Exception:
+        pass
+    # riapri i movimenti
+    await db.movimenti.update_many(
+        {"chiusura_id": chiusura_id},
+        {"$set": {"chiusura_id": None, "updated_at": _now_iso()}},
+    )
+    await db.chiusure_giorno.delete_one({"id": chiusura_id})
+    await log_attivita(user, "delete", "chiusura_giorno", chiusura_id,
+                       f"Eliminata chiusura del {ch['data']}")
+    return {"ok": True}
 
 
 @api.get("/contabilita/chiusura-giorno/{chiusura_id}/pdf")

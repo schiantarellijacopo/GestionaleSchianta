@@ -10,11 +10,12 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Calendar, ArrowLeftRight } from "lucide-react";
+import { Plus, Calendar, ArrowLeftRight, Printer, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
 import DatiCompagnieTab from "@/components/DatiCompagnieTab";
+import { API_BASE } from "@/lib/api";
 
 export default function Contabilita() {
     const [dal, setDal] = useState("");
@@ -73,6 +74,7 @@ export default function Contabilita() {
             <Tabs defaultValue="brogliaccio">
                 <TabsList className="bg-slate-100">
                     <TabsTrigger value="brogliaccio" data-testid="tab-brogliaccio">Brogliaccio (Prima nota)</TabsTrigger>
+                    <TabsTrigger value="storico" data-testid="tab-storico-pn">Storico Prima Nota</TabsTrigger>
                     <TabsTrigger value="prima-nota" data-testid="tab-prima-nota">Movimenti (elenco)</TabsTrigger>
                     <TabsTrigger value="dati-compagnie" data-testid="tab-dati-compagnie">Dati Compagnie</TabsTrigger>
                     <TabsTrigger value="estratti" data-testid="tab-estratti">Estratto conto cliente</TabsTrigger>
@@ -80,6 +82,10 @@ export default function Contabilita() {
 
                 <TabsContent value="brogliaccio">
                     <BrogliaccioTab />
+                </TabsContent>
+
+                <TabsContent value="storico">
+                    <StoricoPrimaNotaTab />
                 </TabsContent>
 
                 <TabsContent value="dati-compagnie">
@@ -426,6 +432,178 @@ function GirocontoDialog({ conti, onClose }) {
                 <Button onClick={save} className="bg-violet-700 hover:bg-violet-800" data-testid="giro-save">Registra giroconto</Button>
             </DialogFooter>
         </DialogContent>
+    );
+}
+
+
+function StoricoPrimaNotaTab() {
+    const oggi = new Date();
+    const [anno, setAnno] = useState(String(oggi.getFullYear()));
+    const [q, setQ] = useState("");
+    const [items, setItems] = useState(null);
+    const [pageSize, setPageSize] = useState(50);
+
+    const load = () => {
+        setItems(null);
+        const params = { limit: 1000 };
+        if (anno && anno !== "__all__") params.anno = parseInt(anno, 10);
+        if (q) params.q = q;
+        api.get("/contabilita/chiusure-giorno", { params }).then((r) => setItems(r.data || []));
+    };
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+    const elimina = async (it) => {
+        if (!window.confirm(
+            `Eliminare la chiusura del ${it.data}?\nI movimenti del giorno verranno riaperti (sarai in grado di modificarli nel Brogliaccio).`,
+        )) return;
+        try {
+            await api.delete(`/contabilita/chiusura-giorno/${it.id}`);
+            toast.success("Chiusura eliminata · giornata riaperta");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const visibili = items ? items.slice(0, pageSize) : null;
+    const annoOptions = [];
+    for (let y = oggi.getFullYear() + 1; y >= 2018; y--) annoOptions.push(y);
+
+    return (
+        <div className="mt-4" data-testid="storico-prima-nota">
+            {/* Header filtri */}
+            <Card className="p-4 border-slate-200 mb-3">
+                <div className="flex items-end gap-3 flex-wrap">
+                    <div>
+                        <Label className="text-xs">Anno</Label>
+                        <Select value={anno} onValueChange={setAnno}>
+                            <SelectTrigger className="w-32" data-testid="storico-anno">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__all__">Tutti</SelectItem>
+                                {annoOptions.map((y) => (
+                                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <Button onClick={load} className="bg-sky-700 hover:bg-sky-800" data-testid="storico-carica">
+                        Carica
+                    </Button>
+                    <div className="ml-auto flex items-end gap-3">
+                        <div>
+                            <Label className="text-xs">Visualizza</Label>
+                            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v, 10))}>
+                                <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="25">25</SelectItem>
+                                    <SelectItem value="50">50</SelectItem>
+                                    <SelectItem value="100">100</SelectItem>
+                                    <SelectItem value="1000">Tutti</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label className="text-xs">Cerca</Label>
+                            <div className="relative">
+                                <Search size={12} className="absolute left-2 top-2.5 text-slate-400" />
+                                <Input
+                                    value={q}
+                                    onChange={(e) => setQ(e.target.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && load()}
+                                    className="pl-7 w-56"
+                                    placeholder="data, ID..."
+                                    data-testid="storico-cerca"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </Card>
+
+            {/* Tabella storico */}
+            <Card className="border-slate-200 overflow-hidden">
+                {items === null ? <Loading /> : items.length === 0 ? (
+                    <Empty message="Nessuna chiusura presente per l'anno selezionato" />
+                ) : (
+                    <table className="tbl w-full">
+                        <thead className="bg-slate-900 text-white">
+                            <tr>
+                                <th className="text-left px-3 py-2 w-24">ID</th>
+                                <th className="text-left px-3 py-2">Data</th>
+                                <th className="text-left px-3 py-2">N. movimenti</th>
+                                <th className="text-left px-3 py-2">Chiusa da</th>
+                                <th className="text-right px-3 py-2">Entrate €</th>
+                                <th className="text-right px-3 py-2">Provv €</th>
+                                <th className="text-right px-3 py-2">Spese €</th>
+                                <th className="text-center px-3 py-2 w-40">Azioni</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {visibili.map((it) => {
+                                const k = it.riepilogo?.riepilogo_kpi || {};
+                                return (
+                                    <StoricoRow
+                                        key={it.id}
+                                        it={it}
+                                        k={k}
+                                        onDelete={() => elimina(it)}
+                                    />
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                )}
+                {items && items.length > pageSize && (
+                    <div className="p-3 text-center text-xs text-slate-500 border-t border-slate-200">
+                        Visualizzati {visibili.length} di {items.length} · Aumenta "Visualizza" per vederne di più
+                    </div>
+                )}
+            </Card>
+        </div>
+    );
+}
+
+function StoricoRow({ it, k, onDelete }) {
+    const [vista, setVista] = useState("prima_nota"); // o "brogliaccio"
+    return (
+        <tr className="hover:bg-slate-50" data-testid={`storico-row-${it.id}`}>
+            <td className="px-3 py-2 font-mono text-xs text-slate-600">{it.id.slice(0, 8)}</td>
+            <td className="px-3 py-2 font-medium">{fmtDate(it.data)}</td>
+            <td className="px-3 py-2 num text-sm">{it.riepilogo?.n_movimenti || 0}</td>
+            <td className="px-3 py-2 text-xs text-slate-500">{it.closed_by_name || "—"}</td>
+            <td className="px-3 py-2 num text-right text-emerald-700">{fmtEur(k.entrate || 0)}</td>
+            <td className="px-3 py-2 num text-right text-sky-700">{fmtEur(k.provvigioni || 0)}</td>
+            <td className="px-3 py-2 num text-right text-rose-600">{fmtEur(k.spese || 0)}</td>
+            <td className="px-3 py-2">
+                <div className="flex items-center justify-center gap-1">
+                    <Select value={vista} onValueChange={setVista}>
+                        <SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="prima_nota">Prima Nota</SelectItem>
+                            <SelectItem value="brogliaccio">Brogliaccio</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <a
+                        href={`${API_BASE}/contabilita/chiusura-giorno/${it.id}/pdf`}
+                        target="_blank" rel="noreferrer"
+                        title={vista === "prima_nota" ? "Stampa Prima Nota" : "Stampa Brogliaccio"}
+                        data-testid={`storico-stampa-${it.id}`}
+                    >
+                        <button className="inline-flex items-center justify-center h-7 w-7 rounded border border-slate-200 hover:bg-slate-100">
+                            <Printer size={12} />
+                        </button>
+                    </a>
+                    <button
+                        onClick={onDelete}
+                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                        title="Elimina chiusura (riapre la giornata)"
+                        data-testid={`storico-del-${it.id}`}
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                </div>
+            </td>
+        </tr>
     );
 }
 

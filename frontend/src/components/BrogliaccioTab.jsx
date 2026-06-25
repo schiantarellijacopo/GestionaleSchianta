@@ -167,17 +167,17 @@ export default function BrogliaccioTab() {
                         Nessun movimento registrato per il {data}
                     </div>
                 ) : (
-                    <table className="tbl w-full text-xs min-w-[1200px]" data-testid="brogliaccio-tbl">
+                    <table className="tbl w-full text-xs min-w-[1200px] border-separate border-spacing-0" data-testid="brogliaccio-tbl">
                         <thead>
                             <tr className="bg-slate-900 text-white">
-                                <th className="text-left px-2 py-2">Descrizione</th>
-                                <th className="text-right px-2 py-2">Totale</th>
-                                <th className="text-right px-2 py-2">Provv</th>
-                                <th className="text-right px-2 py-2">Saldo</th>
-                                <th className="text-right px-2 py-2">Sospesi</th>
-                                <th className="text-right px-2 py-2">Spese</th>
+                                <th className="text-left px-2 py-2 sticky left-0 z-20 bg-slate-900 border-r-2 border-slate-500 min-w-[220px] w-[220px]">Descrizione</th>
+                                <th className="text-right px-2 py-2 sticky left-[220px] z-20 bg-slate-900 border-r-2 border-slate-500 min-w-[110px] w-[110px]">Totale</th>
+                                <th className="text-right px-2 py-2 sticky left-[330px] z-20 bg-slate-900 border-r-4 border-amber-400 min-w-[100px] w-[100px]">Provv</th>
+                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Saldo</th>
+                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Sospesi</th>
+                                <th className="text-right px-2 py-2 border-r-2 border-slate-500">Spese</th>
                                 {conti.map((c) => (
-                                    <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap" title={c.nome}>
+                                    <th key={c.id} className="text-right px-2 py-2 whitespace-nowrap border-r-2 border-slate-500" title={c.nome}>
                                         {c.nome}
                                     </th>
                                 ))}
@@ -185,9 +185,11 @@ export default function BrogliaccioTab() {
                             </tr>
                         </thead>
                         <tbody>
-                            {b.righe.map((r) => (
-                                <tr key={r.id} className="hover:bg-slate-50" data-testid={`brog-row-${r.id}`}>
-                                    <td className="px-2 py-1.5">
+                            {b.righe.map((r, idx) => {
+                                const bgRow = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
+                                return (
+                                <tr key={r.id} className={`${bgRow} hover:bg-sky-50/60`} data-testid={`brog-row-${r.id}`}>
+                                    <td className={`px-2 py-1.5 sticky left-0 z-10 ${bgRow} border-r-2 border-slate-300`}>
                                         <div className="font-medium text-slate-800">
                                             {r.contraente || r.descrizione || "—"}
                                         </div>
@@ -197,15 +199,15 @@ export default function BrogliaccioTab() {
                                             {!r.numero_polizza && !r.compagnia && r.contraente && r.descrizione && <span>{r.descrizione}</span>}
                                         </div>
                                     </td>
-                                    <td className={`num text-right px-2 ${r.totale >= 0 ? "text-emerald-700" : "text-rose-700"} font-medium`}>{fmt(r.totale)}</td>
-                                    <td className="num text-right px-2 text-sky-700">{fmt(r.provv)}</td>
-                                    <td className={`num text-right px-2 font-medium ${r.saldo < 0 ? "text-rose-700" : ""}`}>{fmt(r.saldo)}</td>
-                                    <td className={`num text-right px-2 ${r.crediti > 0 ? "text-amber-700" : r.crediti < 0 ? "text-emerald-700" : ""}`}>{fmt(r.crediti)}</td>
-                                    <td className="num text-right px-2 text-rose-600">{fmt(r.spese)}</td>
+                                    <td className={`num text-right px-2 sticky left-[220px] z-10 ${bgRow} border-r-2 border-slate-300 ${r.totale >= 0 ? "text-emerald-700" : "text-rose-700"} font-medium`}>{fmt(r.totale)}</td>
+                                    <td className={`num text-right px-2 sticky left-[330px] z-10 ${bgRow} border-r-4 border-amber-400 text-sky-700`}>{fmt(r.provv)}</td>
+                                    <td className={`num text-right px-2 border-r-2 border-slate-200 font-medium ${r.saldo < 0 ? "text-rose-700" : ""}`}>{fmt(r.saldo)}</td>
+                                    <td className={`num text-right px-2 border-r-2 border-slate-200 ${r.crediti > 0 ? "text-amber-700" : r.crediti < 0 ? "text-emerald-700" : ""}`}>{fmt(r.crediti)}</td>
+                                    <td className="num text-right px-2 border-r-2 border-slate-200 text-rose-600">{fmt(r.spese)}</td>
                                     {conti.map((c) => {
                                         const v = r.per_conto?.[c.id];
                                         return (
-                                            <td key={c.id} className={`num text-right px-2 ${v > 0 ? "text-emerald-600" : v < 0 ? "text-rose-600" : "text-slate-300"}`}>
+                                            <td key={c.id} className={`num text-right px-2 border-r-2 border-slate-200 ${v > 0 ? "text-emerald-600" : v < 0 ? "text-rose-600" : "text-slate-300"}`}>
                                                 {fmt(v)}
                                             </td>
                                         );
@@ -221,22 +223,22 @@ export default function BrogliaccioTab() {
                                         />
                                     </td>
                                 </tr>
-                            ))}
+                            );})}
                             {/* TOTALE GIORNATA */}
                             {b.totali_giornata && (
                                 <tr className="bg-amber-100 font-bold border-t-2 border-slate-900">
-                                    <td className="px-2 py-2">TOTALE GIORNATA</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.totale, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.provv, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.saldo, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.crediti, true)}</td>
-                                    <td className="num text-right px-2">{fmt(b.totali_giornata.spese, true)}</td>
+                                    <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">TOTALE GIORNATA</td>
+                                    <td className="num text-right px-2 sticky left-[220px] z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.totale, true)}</td>
+                                    <td className="num text-right px-2 sticky left-[330px] z-10 bg-amber-100 border-r-4 border-amber-500 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.provv, true)}</td>
+                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.saldo, true)}</td>
+                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.crediti, true)}</td>
+                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.spese, true)}</td>
                                     {conti.map((c) => (
-                                        <td key={c.id} className="num text-right px-2">
+                                        <td key={c.id} className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">
                                             {fmt(b.totali_giornata.per_conto?.[c.id], true)}
                                         </td>
                                     ))}
-                                    <td></td>
+                                    <td className="border-t-2 border-t-slate-900"></td>
                                 </tr>
                             )}
                         </tbody>
