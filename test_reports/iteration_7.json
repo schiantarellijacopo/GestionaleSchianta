@@ -1,0 +1,35 @@
+{
+  "summary": "Iter7 - Verified the re-added KPI grid and Liquidita cards inside the Brogliaccio tab (Prima Nota). Backend: 6/6 pytest PASS confirming the brogliaccio response now exposes both 'riepilogo_kpi' (7 fields) and 'liquidita' (5 fields) with correct cumulative math. Frontend: both data-testids 'brog-kpi' and 'brog-liquidita' render inside the Brogliaccio tab with all 7 KPI cards (Crediti label renamed to Sospesi) and both Liquidita cards (Disponibile + Postera). Saldo Cassa per Compagnia panel still shows the 3 expected columns. No separate Statistiche tab present.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter7_brogliaccio_liquidita.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_compute_brogliaccio correctly computes the 'liquidita' object cumulatively up to and including the requested data_giorno (uses {'$lte': data_giorno} in aggregates).",
+    "liquidita.saldo_cassa_compagnie is the SUM of saldi_compagnie[].saldo_cassa (verified). Note: riepilogo_kpi.saldo_cassa is a DIFFERENT value (per-day saldo of the giornata) - this is intentional. The frontend KPI card 'Saldo Cassa Cmp.' correctly binds to b.liquidita.saldo_cassa_compagnie (not riepilogo_kpi.saldo_cassa) - confirmed in BrogliaccioTab.jsx:287.",
+    "liquidita math validated against returned values: liquidita_disponibile == sum_conti - sospesi_attivi - saldo_cassa_compagnie; liquidita_postera == sum_conti - saldo_cassa_compagnie. Tested for both today and -30 days.",
+    "BrogliaccioTab.jsx renders KPI grid (data-testid='brog-kpi') and Liquidita grid (data-testid='brog-liquidita') guarded by truthy checks (b.riepilogo_kpi && / b.liquidita &&) - safe rendering.",
+    "Frontend uses b.riepilogo_kpi.crediti as the value for the renamed 'Sospesi' KPI label - that is consistent with the existing backend field name (crediti) so no backend rename was needed. Good non-breaking change.",
+    "StatisticheTab.jsx file still exists in /app/frontend/src/components but is no longer imported/routed (verified Statistiche tab count = 0 in Contabilita). Harmless dead code; could be cleaned up later."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter7_brogliaccio_liquidita.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (all required testids and labels verified)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None - tests are read-only GETs against existing seeded data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Brogliaccio response shape: { data, conti_cassa, righe, totali_giornata, conti_riepilogo, saldi_compagnie, riepilogo_kpi:{entrate,provvigioni,crediti,rimesse,sconti,spese,saldo_cassa}, liquidita:{sum_conti,sospesi_attivi,saldo_cassa_compagnie,liquidita_disponibile,liquidita_postera}, chiusura, chiusa }. IMPORTANT: riepilogo_kpi.saldo_cassa (per-day) is different from liquidita.saldo_cassa_compagnie (cumulative). The frontend's 7th KPI card 'Saldo Cassa Cmp.' binds to liquidita.saldo_cassa_compagnie, not riepilogo_kpi.saldo_cassa. The 'Sospesi' KPI label is mapped to riepilogo_kpi.crediti (no backend field rename).",
+  "rca of the issue": "User reported 'pirma nota mancano tutti i quasti' (Prima Nota missing all KPIs). Issue was caused by accidental removal in iter6 of the KPI grid + Liquidita cards from BrogliaccioTab.jsx. Main agent re-added them with 'Crediti' label renamed to 'Sospesi' and a new 'liquidita' object in the backend brogliaccio response. Fix verified end-to-end: backend math correct, frontend renders all required testids/labels, Saldo Cassa per Compagnia panel preserved, no separate Statistiche tab."
+}

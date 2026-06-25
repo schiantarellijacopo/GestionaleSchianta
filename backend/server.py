@@ -2840,6 +2840,39 @@ async def _compute_brogliaccio(data_giorno: str):
         "saldo_cassa": round(tot["saldo"], 2),  # del giorno
     }
 
+    # 5b) Liquidità cumulative (fino al giorno corrente compreso)
+    saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_compagnie), 2)
+    conti_attivi = await db.conti_cassa.find({"attivo": True}, {"_id": 0}).to_list(200)
+    sum_conti = 0.0
+    for c in conti_attivi:
+        agg = await db.movimenti.aggregate([
+            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno}}},
+            {"$group": {"_id": None,
+                        "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+        ]).to_list(1)
+        in_tot = agg[0]["in"] if agg else 0
+        out_tot = agg[0]["out"] if agg else 0
+        sum_conti += float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
+
+    crediti_agg = await db.movimenti.aggregate([
+        {"$match": {"categoria": "anticipo", "tipo": "entrata", "data_movimento": {"$lte": data_giorno}}},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+    ]).to_list(1)
+    crediti_storno = await db.movimenti.aggregate([
+        {"$match": {"categoria": "anticipo", "tipo": "uscita", "data_movimento": {"$lte": data_giorno}}},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+    ]).to_list(1)
+    sospesi_attivi = (crediti_agg[0]["tot"] if crediti_agg else 0) - (crediti_storno[0]["tot"] if crediti_storno else 0)
+
+    liquidita_box = {
+        "sum_conti": round(sum_conti, 2),
+        "sospesi_attivi": round(sospesi_attivi, 2),
+        "saldo_cassa_compagnie": saldo_cassa_compagnie_tot,
+        "liquidita_disponibile": round(sum_conti - sospesi_attivi - saldo_cassa_compagnie_tot, 2),
+        "liquidita_postera": round(sum_conti - saldo_cassa_compagnie_tot, 2),
+    }
+
     # 6) Chiusura?
     chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
 
@@ -2851,6 +2884,7 @@ async def _compute_brogliaccio(data_giorno: str):
         "conti_riepilogo": conti_riepilogo,
         "saldi_compagnie": saldi_compagnie,
         "riepilogo_kpi": riepilogo_kpi,
+        "liquidita": liquidita_box,
         "chiusura": chiusura,
         "chiusa": bool(chiusura and not chiusura.get("riaperta_at")),
     }

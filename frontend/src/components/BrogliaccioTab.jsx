@@ -275,6 +275,39 @@ export default function BrogliaccioTab() {
                 </table>
             </Card>
 
+            {/* KPI cards */}
+            {b.riepilogo_kpi && (
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2" data-testid="brog-kpi">
+                    <KPI label="Entrate" v={b.riepilogo_kpi.entrate} accent="emerald" />
+                    <KPI label="Provvigioni" v={b.riepilogo_kpi.provvigioni} accent="sky" />
+                    <KPI label="Sospesi" v={b.riepilogo_kpi.crediti} accent="amber" />
+                    <KPI label="Rimesse" v={b.riepilogo_kpi.rimesse} accent="violet" />
+                    <KPI label="Sconti" v={b.riepilogo_kpi.sconti} accent="orange" />
+                    <KPI label="Spese" v={b.riepilogo_kpi.spese} accent="rose" />
+                    <KPI label="Saldo Cassa Cmp." v={b.liquidita?.saldo_cassa_compagnie ?? 0} accent="slate" bold />
+                </div>
+            )}
+
+            {/* Liquidità */}
+            {b.liquidita && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="brog-liquidita">
+                    <Card className="p-5 border-emerald-200 border-l-4 border-l-emerald-500 bg-emerald-50/30">
+                        <div className="text-xs uppercase tracking-wider text-emerald-800 mb-1">Liquidità Disponibile</div>
+                        <div className="text-3xl font-bold text-emerald-700 num">{fmt(b.liquidita.liquidita_disponibile, true)}</div>
+                        <div className="text-[11px] text-slate-500 mt-2">
+                            {fmt(b.liquidita.sum_conti, true)} (conti) − {fmt(b.liquidita.sospesi_attivi, true)} (sospesi/anticipi) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
+                        </div>
+                    </Card>
+                    <Card className="p-5 border-sky-200 border-l-4 border-l-sky-500 bg-sky-50/30">
+                        <div className="text-xs uppercase tracking-wider text-sky-800 mb-1">Liquidità Postera</div>
+                        <div className="text-3xl font-bold text-sky-700 num">{fmt(b.liquidita.liquidita_postera, true)}</div>
+                        <div className="text-[11px] text-slate-500 mt-2">
+                            {fmt(b.liquidita.sum_conti, true)} (conti) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
+                        </div>
+                    </Card>
+                </div>
+            )}
+
             {/* Saldi per compagnia (cumulativo periodo) */}
             {(b.saldi_compagnie || []).length > 0 && (
                 <Card className="border-slate-200">
