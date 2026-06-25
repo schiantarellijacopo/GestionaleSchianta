@@ -2486,6 +2486,15 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         nota_residuo = f" (era €{lordo:.2f}, sconto €{residuo:.2f})"
     else:
         nota_residuo = ""
+    # Movimento entrata = importo effettivamente pagato dal cliente (cash netto in cassa).
+    # Lo sconto viene memorizzato come quota_sconto SULLA STESSA RIGA: nel brogliaccio
+    # mostreremo Totale=lordo, Spese=quota_sconto, conto cassa=importo (pagato).
+    if residuo > 0 and tipo_chiusura == "sospeso":
+        nota_residuo = f" (era €{lordo:.2f}, residuo €{residuo:.2f} a sospeso)"
+    elif residuo > 0:
+        nota_residuo = f" (premio lordo €{lordo:.2f}, sconto €{residuo:.2f})"
+    else:
+        nota_residuo = ""
     mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
@@ -2499,6 +2508,9 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         conto_cassa_id=conto_id,
         mezzo_pagamento=mezzo,
         provvigioni=titolo.get("provvigioni", 0.0),
+        quota_sconto=sconto_applicato,
+        note=(f"Sconto applicato: €{sconto_applicato:.2f}"
+              + (f" — {motivo_sconto}" if motivo_sconto else "")) if sconto_applicato > 0 else None,
     )
     await db.movimenti.insert_one(mov_in.model_dump())
 
@@ -2513,27 +2525,10 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             }},
         )
 
-    # Movimento uscita sconto OPPURE creazione titolo residuo a sospeso
-    mov_sconto_id = None
+    # NOTA: per tipo_chiusura=sconto NON creiamo più un movimento uscita separato.
+    # Lo sconto viaggia sulla stessa riga entrata via mov_in.quota_sconto.
     residuo_titolo_id = None
-    if residuo > 0 and tipo_chiusura == "sconto":
-        mov_sconto = MovimentoContabile(
-            data_movimento=data_incasso,
-            tipo="uscita",
-            categoria="sconto_cliente",
-            importo=residuo,
-            descrizione=(f"Sconto applicato su titolo {pol['numero_polizza'] if pol else ''}"
-                         + (f" — {motivo_sconto}" if motivo_sconto else "")),
-            polizza_id=titolo["polizza_id"],
-            titolo_id=tid,
-            anagrafica_id=pol.get("contraente_id") if pol else None,
-            compagnia_id=pol.get("compagnia_id") if pol else None,
-            conto_cassa_id=conto_id,
-            mezzo_pagamento=mezzo,
-        )
-        await db.movimenti.insert_one(mov_sconto.model_dump())
-        mov_sconto_id = mov_sconto.id
-    elif residuo > 0 and tipo_chiusura == "sospeso":
+    if residuo > 0 and tipo_chiusura == "sospeso":
         # Crea nuovo titolo residuo a sospeso (anticipato dall'agenzia se l'originale lo era)
         base_num = titolo.get("numero_titolo") or (pol.get("numero_polizza") if pol else None)
         residuo_titolo = Titolo(
@@ -2554,6 +2549,15 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         )
         await db.titoli.insert_one(residuo_titolo.model_dump())
         residuo_titolo_id = residuo_titolo.id
+        # Mostra il residuo a sospeso anche nella colonna 'Sospesi' del Brogliaccio:
+        # lo salviamo come quota_credito sul movimento entrata appena creato.
+        await db.movimenti.update_one(
+            {"id": mov_in.id},
+            {"$set": {"quota_credito": residuo, "note": (
+                f"Residuo €{residuo:.2f} lasciato a sospeso "
+                f"(titolo {residuo_titolo.id[:8]})"
+            )}},
+        )
 
     # Audit nel diario cliente per tracciabilità storica
     if pol and pol.get("contraente_id"):
@@ -2586,7 +2590,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         "tipo_chiusura": tipo_chiusura,
         "sconto_applicato": sconto_applicato,
         "movimento_entrata_id": mov_in.id,
-        "movimento_sconto_id": mov_sconto_id,
+        "movimento_sconto_id": None,  # legacy: sconto ora vive sulla stessa riga entrata
         "titolo_residuo_id": residuo_titolo_id,
     }
 
@@ -2871,8 +2875,14 @@ async def _compute_brogliaccio(data_giorno: str):
             # Premio lordo polizza
             provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
             trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
-            c_totale = importo
+            # Lo sconto eventualmente applicato è memorizzato sulla STESSA riga via
+            # quota_sconto (l'agenzia ha incassato meno per uno sconto cliente).
+            quota_sc = float(m.get("quota_sconto") or 0)
+            lordo_riga = importo + quota_sc
+            c_totale = lordo_riga                  # mostra il PREMIO LORDO
             c_provv = provv_riga
+            c_spese = quota_sc                     # sconto in colonna Spese
+            c_sconti = quota_sc
             if trattiene:
                 # Caso A: incasso il premio, devo versare (premio - provv) alla compagnia
                 # → saldo = premio - provv (positivo = debito verso compagnia)
@@ -2882,6 +2892,10 @@ async def _compute_brogliaccio(data_giorno: str):
                 # alla compagnia. La compagnia ha già il premio. Devo solo registrare la
                 # provvigione che mi spetta → saldo = -provv (negativo = compagnia mi deve)
                 c_saldo = -provv_riga
+            # Se l'incasso era parziale con residuo lasciato a sospeso, mostralo qui.
+            quota_cred = float(m.get("quota_credito") or 0)
+            if quota_cred > 0:
+                c_crediti = quota_cred
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
@@ -6953,6 +6967,56 @@ async def elimina_evento(eid: str, user=Depends(require_user("admin", "collabora
     return {"ok": True}
 
 
+# ============================================================
+# MIGRAZIONE — Unifica sconto su singola riga del Brogliaccio
+# ============================================================
+async def _migrate_unify_sconti() -> dict:
+    """One-shot: prende ogni uscita sconto_cliente legata a un titolo, trova la
+    corrispondente entrata incasso_premio sullo stesso titolo+data e:
+      1) somma l'importo dello sconto in quota_sconto dell'entrata
+      2) cancella la riga uscita (non serve più: il dato vive sulla stessa riga)
+    Idempotente. Salva un flag in db.migrazioni quando completata.
+    """
+    flag = await db.migrazioni.find_one({"id": "unify_sconti_on_row_v1"})
+    if flag:
+        return {"ok": True, "already_done": True}
+
+    sconti = await db.movimenti.find(
+        {"tipo": "uscita", "categoria": "sconto_cliente", "titolo_id": {"$ne": None}},
+        {"_id": 0},
+    ).to_list(100000)
+    merged = 0
+    for s in sconti:
+        entrata = await db.movimenti.find_one({
+            "tipo": "entrata",
+            "categoria": "incasso_premio",
+            "titolo_id": s["titolo_id"],
+            "data_movimento": s["data_movimento"],
+        }, {"_id": 0})
+        if not entrata:
+            continue
+        new_qs = float(entrata.get("quota_sconto") or 0) + float(s.get("importo") or 0)
+        await db.movimenti.update_one(
+            {"id": entrata["id"]},
+            {"$set": {"quota_sconto": round(new_qs, 2)}},
+        )
+        await db.movimenti.delete_one({"id": s["id"]})
+        merged += 1
+    await db.migrazioni.insert_one({
+        "id": "unify_sconti_on_row_v1",
+        "eseguita_at": _now_iso(),
+        "merged": merged,
+        "totale_sconti": len(sconti),
+    })
+    return {"ok": True, "merged": merged, "totale_sconti": len(sconti)}
+
+
+@api.post("/contabilita/migra-sconti")
+async def migra_sconti(user=Depends(require_user("admin"))):
+    """Endpoint admin per re-eseguire la migrazione (dopo aver pulito il flag)."""
+    return await _migrate_unify_sconti()
+
+
 # ----- Mount -----
 app.include_router(api)
 
@@ -7057,6 +7121,14 @@ async def startup():
         avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
     except Exception as e:
         logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
+
+    # One-shot: unifica vecchi sconti su singola riga del brogliaccio
+    try:
+        res = await _migrate_unify_sconti()
+        if res.get("merged"):
+            logger.info("Migrazione unify_sconti: %s sconti uniti su riga incasso", res["merged"])
+    except Exception as e:
+        logger.warning("Migrazione unify_sconti fallita (non bloccante): %s", e)
 
 
 @app.on_event("shutdown")
