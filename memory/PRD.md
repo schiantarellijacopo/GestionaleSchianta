@@ -17,6 +17,10 @@ CRM full-stack per agenzie assicurative italiane: anagrafica clienti, polizze, t
 - `/app/frontend/src/components/DialogIncassoCopertura.jsx` — flusso unificato per Titoli (replica facsimile)
 
 ## Cosa è stato implementato
+### 2026-06-25 (parte 6 — Bug fix Rimesse + UX)
+- 🐛 **Fix visualizzazione Rimesse in Prima Nota**: i pagamenti alla compagnia (categoria `pagamento_compagnia`) ora appaiono in una **colonna dedicata "Rimessa"** (violet) e NON più nella colonna "Uscita". Badge cambia in `rimessa` (info).
+- ✅ La logica backend era già corretta: le rimesse aggiornano `saldo_cassa_compagnie_tot` e diminuiscono il saldo cassa generale. La separazione era solo grafica.
+
 ### 2026-06-25 (parte 5 — Titolo sostituzione + EC Compagnie con pagamento)
 - 🆕 Tipo titolo **"sostituzione"** aggiunto al modello Titolo. Quando una polizza viene sostituita, viene **creato automaticamente** un titolo di tipo "sostituzione" con tutti i premi inseriti (Netto/Lordo/SSN/Imposte/Provvigioni)
 - 🆕 **Tab "Titoli" di una polizza ora mostra anche i titoli delle polizze sostituite** (catena storica) con etichetta "polizza prec. {numero}" e sfondo amber

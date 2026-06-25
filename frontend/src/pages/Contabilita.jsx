@@ -125,39 +125,46 @@ export default function Contabilita() {
                                         <th>Documento</th>
                                         <th className="text-right">Entrata</th>
                                         <th className="text-right">Uscita</th>
+                                        <th className="text-right">Rimessa</th>
                                         <th className="w-12 text-center">Allegati</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {primaNota.movimenti.map((m) => (
-                                        <tr key={m.id}>
-                                            <td className="num">{fmtDate(m.data_movimento)}</td>
-                                            <td>
-                                                <span className={`badge ${m.tipo === "entrata" ? "badge-success" : "badge-danger"}`}>
-                                                    {m.tipo}
-                                                </span>
-                                            </td>
-                                            <td className="text-xs text-slate-600">{m.categoria}</td>
-                                            <td>{m.descrizione}</td>
-                                            <td className="text-xs text-slate-500">{m.mezzo_pagamento}</td>
-                                            <td className="text-xs text-slate-500 num">{m.numero_documento}</td>
-                                            <td className="num text-right text-emerald-700 font-medium">
-                                                {m.tipo === "entrata" ? fmtEur(m.importo) : ""}
-                                            </td>
-                                            <td className="num text-right text-rose-700 font-medium">
-                                                {m.tipo === "uscita" ? fmtEur(m.importo) : ""}
-                                            </td>
-                                            <td className="text-center">
-                                                <AllegatiCell
-                                                    entita_tipo="movimento"
-                                                    entita_id={m.id}
-                                                    count={m.allegati_count}
-                                                    hint={m.tipo === "entrata" ? "Allega ricevuta / assegno" : "Allega fattura / busta paga"}
-                                                    onChange={load}
-                                                />
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {primaNota.movimenti.map((m) => {
+                                        const isRimessa = m.categoria === "pagamento_compagnia";
+                                        return (
+                                            <tr key={m.id}>
+                                                <td className="num">{fmtDate(m.data_movimento)}</td>
+                                                <td>
+                                                    <span className={`badge ${m.tipo === "entrata" ? "badge-success" : isRimessa ? "badge-info" : "badge-danger"}`}>
+                                                        {isRimessa ? "rimessa" : m.tipo}
+                                                    </span>
+                                                </td>
+                                                <td className="text-xs text-slate-600">{m.categoria}</td>
+                                                <td>{m.descrizione}</td>
+                                                <td className="text-xs text-slate-500">{m.mezzo_pagamento}</td>
+                                                <td className="text-xs text-slate-500 num">{m.numero_documento}</td>
+                                                <td className="num text-right text-emerald-700 font-medium">
+                                                    {m.tipo === "entrata" ? fmtEur(m.importo) : ""}
+                                                </td>
+                                                <td className="num text-right text-rose-700 font-medium">
+                                                    {m.tipo === "uscita" && !isRimessa ? fmtEur(m.importo) : ""}
+                                                </td>
+                                                <td className="num text-right text-violet-700 font-medium">
+                                                    {isRimessa ? fmtEur(m.importo) : ""}
+                                                </td>
+                                                <td className="text-center">
+                                                    <AllegatiCell
+                                                        entita_tipo="movimento"
+                                                        entita_id={m.id}
+                                                        count={m.allegati_count}
+                                                        hint={m.tipo === "entrata" ? "Allega ricevuta / assegno" : "Allega fattura / busta paga"}
+                                                        onChange={load}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         )}
