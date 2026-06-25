@@ -1,0 +1,49 @@
+{
+  "summary": "Iter19 - Validato split parziale di server.py + KPI Anagrafiche custom (P1). Backend: tutti gli 8 endpoint dichiarati nella review rispondono 200 (auth/me, anagrafiche/stats, dashboard/tasks, dashboard/links, polizze, titoli, contabilita/brogliaccio, avvisi-scadenze/preview + kpi-custom). Nuovo router dashboard.py: GET /api/dashboard/tasks ritorna esattamente 8 task con tutte le 8 keys attese, CRUD /api/dashboard/links (POST/GET/PUT/DELETE) funzionante. Nuovo router ocr.py: routes registrate correttamente (POST /api/ocr/libretto risponde 503 con Gemini key mancante - atteso; POST /api/ocr/libretto/apply ritorna 404 su polizza_id inesistente). KPI custom CRUD (POST/GET/DELETE /api/anagrafiche/kpi-custom) funziona. Validation 400 su label/tag vuoti. Frontend (data-testid): btn-personalizza-kpi apre dialog-personalizza-kpi che contiene input-kpi-label, input-kpi-tag, select-kpi-color, select-kpi-icon, btn-add-kpi tutti presenti; creazione KPI mostra toast 'KPI aggiunta' e l'elemento appare nella sezione 'KPI ATTIVE' con icona delete. CRITICO TROVATO: durante lo split server.py 'async def _intestazione_pdf' (helper usato da 15 endpoint PDF) era stato rimosso → tutte le route stampa PDF tornavano 500 (NameError). Reinserito (vedi updated_files). Suite regressione iter4/iter5/iter15/iter17/iter18: 67/68 PASS dopo il fix. Unico FAIL bloccante restante: /api/anagrafiche/stats NON include 'custom' array come richiesto dalla review (manca implementazione nel backend) — di conseguenza il frontend non rende le KPI custom come card cliccabili sotto le 4 standard.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/anagrafiche/stats", "issue": "Manca campo 'custom' nella risposta. La review richiede {custom: [{id,label,tag,color,icon,n,premio_totale}]}. Attualmente l'endpoint ritorna solo privati/aziende/condomini/parrocchie/totale. Senza questo array il frontend non può renderizzare le KPI custom come card cliccabili sotto le 4 standard (parte del P1 KPI Anagrafiche personalizzate).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "/api/dashboard/stampa-titoli-sospesi (e altri 14 endpoint PDF)", "issue": "REGRESSIONE INTRODOTTA DAL SPLIT: helper async def _intestazione_pdf() era stato rimosso da server.py. 15 route che fanno '**(await _intestazione_pdf())' andavano in NameError -> 500. FIXATO da T1 reinserendo l'helper a server.py riga 78-89 (chiamata pdf_report.get_intestazione_azienda(db) con try/except)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "KPI custom rendering come card", "issue": "Dopo creazione di una KPI custom via dialog, la KPI compare nella lista 'KPI ATTIVE' DENTRO il dialog ma NON come card aggiuntiva nel grid della pagina /anagrafiche accanto alle 4 standard (privati/aziende/condomini/parrocchie). Selettori [data-testid^='kpi-card-'] non trovati (0 elementi). La causa root è l'assenza del campo 'custom' nella response di /api/anagrafiche/stats.", "affected_selectors": ["[data-testid^='kpi-card-']"]}
+    ],
+    "design_issues": [
+      {"screen": "Dialog Personalizza KPI", "issues": ["Radix warning ripetuto: Missing Description or aria-describedby for {DialogContent} (accessibility, non bloccante)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter19_split_kpi.py",
+    "/app/test_reports/pytest/iter19_results.xml",
+    "/app/test_reports/pytest/iter19_full.xml"
+  ],
+  "action_items": [
+    "P0 (per completare P1 review): modificare GET /api/anagrafiche/stats in server.py riga 2079 per includere campo 'custom' = lista delle KPI custom dell'utente, con per ciascuna {id,label,tag,color,icon,n,premio_totale} dove n = count anagrafiche con quel tag e premio_totale = somma premio polizze attive dei contraenti taggati. Senza questo, il frontend non rende le KPI come card.",
+    "Aggiungere DialogDescription o aria-describedby al DialogContent di PersonalizzaKpiDialog per silenziare il warning Radix accessibility (consistente con segnalazione iter17).",
+    "Considerare il completamento dello split di server.py: rimangono 9700 righe e 15 endpoint PDF dipendono ancora da helper interno _intestazione_pdf (vedi RCA); in futuro spostare anche questo in shared.py / pdf_helpers.py per evitare regressioni simili."
+  ],
+  "critical_code_review_comments": [
+    "Split parziale ben strutturato: shared.py centralizza helper puri (calcola_scadenza_titolo, strip_mongo_id, log_attivita, log_diario_cliente, resolve_conto_cassa, visibility_filter, costanti). routes/dashboard.py 225 righe e routes/ocr.py 144 righe sono auto-contenuti e includono APIRouter() con prefisso /dashboard e /ocr correttamente registrati in server.py riga 9550-9551 PRIMA di app.include_router(api).",
+    "BUG INTRODOTTO E FIXATO: _intestazione_pdf eliminato durante il refactor. Lezione: il refactor avrebbe dovuto essere accompagnato da grep esaustivo delle reference + run di tutta la suite di regressione (test_iter15_dashboard_brogliaccio_sospesipdf intercetta esattamente questo). Riga 145 dell'old commit e0958a aveva la definizione corretta.",
+    "OCR router import: 'import storage as obj_storage' è importato lazy/local in routes/ocr.py (riga 18); funziona perché esiste /app/backend/storage.py. NB: il log iniziale mostrava una vecchia eccezione 'No module named obj_storage' che era stata risolta prima di iter19 (probabilmente un nome variabile precedente). Non più riproducibile.",
+    "/api/anagrafiche/stats incompleto rispetto alla review (manca 'custom'). Codice presente alla riga 2079-2121: itera anagrafiche solo per categorizzare in 4 bucket standard, non legge collezione kpi_anagrafiche_custom. Implementazione attesa: dopo il calcolo dei 4 bucket, leggere `await db.kpi_anagrafiche_custom.find({'user_id': user['id']}, {'_id': 0}).to_list(50)`, per ciascuna fare `await db.anagrafiche.count_documents({'tags': kpi['tag']})` e aggregate del premio totale sulle polizze attive dei matching IDs.",
+    "Validation /api/anagrafiche/kpi-custom POST: usa dict generico anziché Pydantic. Per coerenza con dashboard.py (DashboardLinkBody Pydantic) considerare KpiCustomBody Pydantic con costraint sui color (sky|emerald|amber|violet|rose|pink|orange) e ordine int.",
+    "DELETE /api/dashboard/links/{lid}: usa correttamente 404 in caso di non-trovato (consistente con DELETE /api/anagrafiche/kpi-custom/{kid})."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (riga 78-89 INSERT: re-aggiunto async def _intestazione_pdf() che era stato rimosso durante lo split → fixa 500 NameError su 15 endpoint PDF)",
+    "/app/backend/tests/test_iter19_split_kpi.py (NEW - 16 test: 9 endpoint smoke + 2 dashboard router + 2 ocr router + 3 KPI custom CRUD/validation/stats)"
+  ],
+  "success_rate": {"backend": "98.5% (67/68 PASS = 15/16 iter19 + 52/52 regression iter4/iter5/iter15/iter17/iter18; unico FAIL = /api/anagrafiche/stats senza campo 'custom')", "frontend": "90% (dialog KPI funzionante, tutti i testid presenti, creazione OK, rendering toast OK; manca rendering card custom nel grid - dipende dal backend stats)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Nessuno persistente. test_dashboard_links_crud crea+aggiorna+elimina TEST_iter19. test_kpi_custom_crud crea+elimina TEST_KPI_iter19. test_anagrafiche_stats_has_custom_array crea+elimina TEST_STATS_KPI in finally. UI test: KPI TEST_UI_KPI/test_ui_kpi_tag creata via dialog, eliminata manualmente via DELETE /api/anagrafiche/kpi-custom/{id} dopo i test. Nessun residuo.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter19 ha validato 7/8 dei sotto-task della review. Bug critico FIXATO da T1: _intestazione_pdf reinserito a server.py riga 78. Bug pendente per main agent: /api/anagrafiche/stats deve includere 'custom' array (vedi action_items #1, codice review comment #4). Per ri-test rapido dopo fix main agent: `pytest backend/tests/test_iter19_split_kpi.py::test_anagrafiche_stats_has_custom_array -v`. shared.py / routes/dashboard.py / routes/ocr.py funzionano come router modulari indipendenti, il pattern è replicabile per i prossimi split (auth, anagrafiche, polizze, ecc.). Test file iter19 è regression-ready: include TUTTI gli endpoint chiave della review + smoke 200 + CRUD dashboard links + OCR route presence + KPI custom CRUD/validation/stats. Suite regressione (iter4/iter5/iter15/iter17/iter18) ora 100% green dopo il fix _intestazione_pdf.",
+  "rca of the issue": "Durante lo split di server.py (iter19) E1 ha estratto correttamente in shared.py i 6 helper (calcola_scadenza_titolo, strip_mongo_id, log_attivita, log_diario_cliente, resolve_conto_cassa, visibility_filter) MA ha dimenticato di estrarre/preservare 'async def _intestazione_pdf()' che era a riga 145 del commit precedente (e095a88). L'helper era usato da 15 endpoint PDF in server.py (righe 784, 1395, 1422, 1479, 1531, 1612, 1639, 5161, 9145, 9187, 9227, 9286, 9312, 9338, 9375). Reproduce: chiamare POST /api/dashboard/stampa-titoli-sospesi (richiede admin auth) → 500 con stack trace 'NameError: name _intestazione_pdf is not defined'. Mitigation applicata da T1: re-insert dell'helper a server.py riga 78-89 con identica firma e implementazione (try/except → pdf_report.get_intestazione_azienda(db)). Bug separato (NON fixato): /api/anagrafiche/stats non legge db.kpi_anagrafiche_custom né calcola n/premio per le custom; main agent deve aggiungere la logica come descritto in critical_code_review_comments #4."
+}

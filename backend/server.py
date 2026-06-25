@@ -20,6 +20,17 @@ from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 from database import client, db
+from shared import (
+    _MESI_PER_FRAZIONAMENTO,  # noqa: F401  (re-export)
+    _MEZZO_TO_TIPO,           # noqa: F401  (re-export)
+    _CORPO_LETTERA_DEFAULT,   # noqa: F401  (re-export)
+    log_attivita,
+    log_diario_cliente,
+    strip_mongo_id,
+    visibility_filter,
+    calcola_scadenza_titolo as _calcola_scadenza_titolo,
+    resolve_conto_cassa as _resolve_conto_cassa,
+)
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_token_from_request, require_user, current_user, can_see_all,
@@ -63,174 +74,23 @@ app = FastAPI(title="Programma Assicurativo")
 api = APIRouter(prefix="/api")
 
 
-# ---------- Helpers ----------
-# Mesi per frazionamento (usato per il calcolo delle scadenze titolo).
-_MESI_PER_FRAZIONAMENTO = {
-    "annuale": 12,
-    "semestrale": 6,
-    "quadrimestrale": 4,
-    "trimestrale": 3,
-    "mensile": 1,
-    "unica": 12,
-}
 
-# Testo di default per le lettere di promemoria pagamento titoli.
-_CORPO_LETTERA_DEFAULT = (
-    "Gentile {cliente},\n\n"
-    "le ricordiamo che il/i seguente/i titolo/i risulta/risultano in scadenza e in attesa di pagamento.\n"
-    "La invitiamo a regolarizzare la posizione il prima possibile presso i nostri uffici "
-    "oppure tramite i mezzi di pagamento da Lei abituali.\n\n"
-    "Per qualsiasi informazione, restiamo a Sua completa disposizione.\n\n"
-    "Cordiali saluti,\n"
-    "{agenzia}"
-)
-
-
-def _calcola_scadenza_titolo(effetto: Optional[str], frazionamento: str) -> Optional[str]:
-    """Calcola la scadenza del titolo aggiungendo all'effetto i mesi del frazionamento.
-
-    Args:
-        effetto: data effetto in formato YYYY-MM-DD.
-        frazionamento: uno dei valori in _MESI_PER_FRAZIONAMENTO.
-
-    Returns:
-        Stringa YYYY-MM-DD, oppure None se effetto è vuoto.
-    """
-    if not effetto:
-        return None
-    try:
-        d = datetime.strptime(effetto, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
-        return None
-    mesi = _MESI_PER_FRAZIONAMENTO.get(frazionamento, 12)
-    nuovo_anno = d.year + (d.month - 1 + mesi) // 12
-    nuovo_mese = (d.month - 1 + mesi) % 12 + 1
-    # gestione fine mese (es. 31 gennaio -> 28/29 febbraio)
-    import calendar as _cal
-    giorno = min(d.day, _cal.monthrange(nuovo_anno, nuovo_mese)[1])
-    return f"{nuovo_anno:04d}-{nuovo_mese:02d}-{giorno:02d}"
-
-
-async def log_attivita(utente: dict, azione: str, entita: str,
-                       entita_id: str | None = None, descrizione: str | None = None,
-                       payload: dict | None = None):
-    log = AttivitaLog(
-        utente_id=utente.get("id") if utente else None,
-        utente_email=utente.get("email") if utente else None,
-        azione=azione, entita=entita, entita_id=entita_id,
-        descrizione=descrizione, payload=payload,
-    )
-    await db.attivita_log.insert_one(log.model_dump())
-
-
-async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
-                             descrizione: str | None = None, autore: dict | None = None):
-    """Crea automaticamente una voce di diario sull'anagrafica cliente.
-
-    Usato per email inviate, messaggi chat, documenti caricati ecc.
-    Idempotente per scelta progettuale.
-    """
-    if not anagrafica_id:
-        return
-    voce = DiarioVoce(
-        anagrafica_id=anagrafica_id,
-        data_evento=_now_iso()[:10],
-        tipo=tipo, titolo=titolo, descrizione=descrizione,
-        autore_id=autore.get("id") if autore else None,
-        autore_nome=autore.get("name") if autore else "Sistema",
-    )
-    await db.diario.insert_one(voce.model_dump())
-
-
+# ---------- PDF helpers ----------
+# NOTE(iter19): re-aggiunto dopo lo split parziale di server.py: era stato
+# inavvertitamente rimosso durante il refactor e tutte le route /pdf/* andavano
+# in NameError (es. POST /api/dashboard/stampa-titoli-sospesi). Vedi iter19
+# bug report.
 async def _intestazione_pdf() -> dict:
-    """Ritorna kwargs (ragione_sociale, logo_bytes, indirizzo, contatti, note_footer) per stampa_elenco."""
+    """Ritorna kwargs (ragione_sociale, logo_bytes, indirizzo, contatti, note_footer)
+    per pdf_report.stampa_elenco."""
     try:
         return await pdf_report.get_intestazione_azienda(db)
     except Exception:
         return {}
 
 
-def strip_mongo_id(doc: dict | None) -> dict | None:
-    if doc is None:
-        return None
-    doc.pop("_id", None)
-    return doc
 
-
-# Mapping mezzo_pagamento -> tipo ContoCassa
-_MEZZO_TO_TIPO = {
-    "contanti": "cassa",
-    "bonifico": "banca",
-    "assegno": "banca",
-    "pos": "carta",
-    "carta": "carta",
-    "rid": "rid",
-    "online": "online",
-    "altro": "altro",
-}
-
-
-async def _resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> str | None:
-    """Risolve un conto_cassa_id a partire dal mezzo di pagamento.
-
-    Strategia:
-    1. Cerca il mezzo nella libreria `mezzi_pagamento` (codice match).
-       - Se ha `conto_default_id` → usa quello.
-       - Altrimenti usa il `tipo_conto` per cercare un ContoCassa attivo.
-    2. Fallback alla mappatura statica `_MEZZO_TO_TIPO` per compatibilità.
-    3. Se ancora niente e `fallback_any=True`, primo conto attivo.
-    """
-    if mezzo:
-        m_low = mezzo.lower()
-        # 1) Libreria mezzi_pagamento
-        mz = await db.mezzi_pagamento.find_one(
-            {"codice": m_low, "attivo": True}, {"_id": 0},
-        )
-        if mz:
-            if mz.get("conto_default_id"):
-                c = await db.conti_cassa.find_one(
-                    {"id": mz["conto_default_id"], "attivo": True}, {"_id": 0, "id": 1},
-                )
-                if c:
-                    return c["id"]
-            tipo = mz.get("tipo_conto")
-            if tipo:
-                c = await db.conti_cassa.find_one(
-                    {"tipo": tipo, "attivo": True}, {"_id": 0, "id": 1},
-                    sort=[("ordine", 1)],
-                )
-                if c:
-                    return c["id"]
-        # 2) fallback mappatura statica
-        tipo = _MEZZO_TO_TIPO.get(m_low)
-        if tipo:
-            c = await db.conti_cassa.find_one(
-                {"tipo": tipo, "attivo": True}, {"_id": 0, "id": 1},
-                sort=[("ordine", 1)],
-            )
-            if c:
-                return c["id"]
-    # 3) fallback any
-    if fallback_any:
-        c = await db.conti_cassa.find_one(
-            {"attivo": True}, {"_id": 0, "id": 1}, sort=[("ordine", 1)],
-        )
-        if c:
-            return c["id"]
-    return None
-
-
-async def visibility_filter(user: dict, base_filter: dict | None = None) -> dict:
-    """Applica filtro per ruolo:
-    - admin/collaboratore: vede tutto
-    - dipendente: vede tutto (ma alcune azioni saranno bloccate)
-    - cliente: vede solo le proprie polizze/anagrafica
-    """
-    base_filter = dict(base_filter or {})
-    if user["role"] == "cliente" and user.get("anagrafica_id"):
-        base_filter["contraente_id"] = user["anagrafica_id"]
-    return base_filter
-
+# ---------- Helpers (extracted to shared.py) ----------
 
 # ============================================================
 # AUTH
@@ -2109,105 +1969,8 @@ async def ocr_carta_identita(
     return data
 
 
-@api.post("/ocr/libretto")
-async def ocr_libretto_endpoint(
-    file: UploadFile = File(...),
-    polizza_id: Optional[str] = Form(None),
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
-):
-    """OCR libretto di circolazione veicolo. Salva il file come allegato della polizza
-    e restituisce {dati, allegato_id, confidence}.
-    """
-    import ocr_libretto as ocr_lib
-    contents = await file.read()
-    if len(contents) > 20 * 1024 * 1024:
-        raise HTTPException(400, "File troppo grande (max 20 MB)")
-    ct = file.content_type or obj_storage.mime_for(file.filename or "")
-    file_for_ocr = contents
-    ct_for_ocr = ct
-    if ct == "application/pdf":
-        try:
-            import pdfplumber
-            from io import BytesIO
-            with pdfplumber.open(BytesIO(contents)) as pdf:
-                if not pdf.pages:
-                    raise HTTPException(400, "PDF vuoto")
-                img = pdf.pages[0].to_image(resolution=200).original
-                out = BytesIO()
-                img.save(out, format="JPEG", quality=85)
-                file_for_ocr = out.getvalue()
-                ct_for_ocr = "image/jpeg"
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(400, f"Errore conversione PDF: {e}")
-    elif not ct.startswith("image/"):
-        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG)")
-
-    try:
-        dati = await ocr_lib.estrai_dati_libretto(file_for_ocr, ct_for_ocr)
-    except Exception as e:
-        raise HTTPException(503, f"Errore OCR libretto: {e}")
-
-    allegato_id = None
-    if polizza_id:
-        ext = (file.filename or "libretto.pdf").rsplit(".", 1)[-1].lower() or "pdf"
-        path = f"{os.environ.get('APP_NAME', 'assicura')}/polizze/{polizza_id}/libretto_{_uid()}.{ext}"
-        try:
-            result = obj_storage.put_object(path, contents, ct)
-            alleg = Allegato(
-                entita_tipo="polizza", entita_id=polizza_id,
-                nome_file=file.filename or "libretto",
-                storage_path=result["path"],
-                content_type=ct, size=result.get("size", len(contents)),
-                descrizione="OCR libretto di circolazione",
-                autore_id=user.get("id"),
-            )
-            await db.allegati.insert_one(alleg.model_dump())
-            allegato_id = alleg.id
-        except Exception as exc:
-            logging.warning("Errore upload libretto: %s", exc)
-
-    await log_attivita(user, "ocr", "polizza", polizza_id, "OCR libretto eseguito")
-    return {"dati": dati, "allegato_id": allegato_id, "confidence": None}
 
 
-@api.post("/ocr/libretto/apply")
-async def ocr_libretto_apply(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Applica i campi estratti alla polizza. body = {polizza_id, dati, allegato_id, campi: [str]}."""
-    polizza_id = body.get("polizza_id")
-    dati = body.get("dati") or {}
-    campi = body.get("campi") or []
-    if not polizza_id:
-        raise HTTPException(400, "polizza_id richiesto")
-    pol = await db.polizze.find_one({"id": polizza_id}, {"_id": 0})
-    if not pol:
-        raise HTTPException(404, "Polizza non trovata")
-
-    update = {}
-    # Mappatura: campi OCR (chiavi semplici) -> campi polizza (con prefix veicolo_*).
-    # Allineato alle convenzioni del modello Polizza in db_models.py.
-    field_map = {
-        "targa": "targa",
-        "telaio": "telaio",
-        "marca": "veicolo_marca",
-        "modello": "veicolo_modello",
-        "tipo_veicolo": "veicolo_tipo",
-        "alimentazione": "veicolo_alimentazione",
-        "kw": "veicolo_kw",
-        "cv": "veicolo_cv_fiscali",
-        "cilindrata": "veicolo_cilindrata",
-        "data_immatricolazione": "veicolo_data_immatricolazione",
-    }
-    for k in campi:
-        if k in field_map and dati.get(k) not in (None, ""):
-            update[field_map[k]] = dati[k]
-    if not update:
-        return {"updated": 0}
-    update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.polizze.update_one({"id": polizza_id}, {"$set": update})
-    await log_attivita(user, "ocr_applica", "polizza", polizza_id, f"Campi applicati: {list(update.keys())}")
-    return {"updated": len(update), "campi": list(update.keys())}
 
 
 @api.post("/utility/ocr-visura-camerale")
@@ -9787,224 +9550,23 @@ async def migra_sconti(user=Depends(require_user("admin"))):
 
 
 # ====================== DASHBOARD LINKS (link utili rapidi) ======================
-class DashboardLinkBody(BaseModel):
-    label: str
-    url: str
-    icon: Optional[str] = None
-    color: Optional[str] = None
-    ordine: int = 0
 
 
-@api.get("/dashboard/tasks")
-async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Task azionabili sulla dashboard. Ogni task ritorna un conteggio + una URL
-    di destinazione che già filtra automaticamente i record.
-    """
-    from datetime import date, timedelta
-    today = date.today()
-    today_iso = today.isoformat()
-    in_30 = (today + timedelta(days=30)).isoformat()
-    days_5_ago = (today - timedelta(days=5)).isoformat()
-
-    # 1) COMPLEANNI di oggi (mese-giorno match)
-    md_today = today.strftime("%m-%d")
-    n_comp_oggi = 0
-    n_comp_settimana = 0
-    week_md = [(today + timedelta(days=i)).strftime("%m-%d") for i in range(0, 7)]
-    async for a in db.anagrafiche.find(
-        {"data_nascita": {"$ne": None}}, {"_id": 0, "data_nascita": 1}
-    ):
-        dn = (a.get("data_nascita") or "")
-        if len(dn) >= 10:
-            md = dn[5:10]  # MM-DD
-            if md == md_today:
-                n_comp_oggi += 1
-            if md in week_md:
-                n_comp_settimana += 1
-
-    # 2) DOCUMENTI SCADUTI o IN SCADENZA (carta_identita, patente, passaporto)
-    n_doc_scaduti = 0
-    n_doc_scadenza = 0
-    async for a in db.anagrafiche.find(
-        {"documenti": {"$exists": True, "$ne": {}}},
-        {"_id": 0, "documenti": 1},
-    ):
-        for doc in (a.get("documenti") or {}).values():
-            if not isinstance(doc, dict):
-                continue
-            sc = doc.get("scadenza")
-            if not sc:
-                continue
-            if sc < today_iso:
-                n_doc_scaduti += 1
-                break
-        else:
-            # documento in scadenza nei prossimi 30 giorni
-            for doc in (a.get("documenti") or {}).values():
-                if not isinstance(doc, dict):
-                    continue
-                sc = doc.get("scadenza")
-                if sc and today_iso <= sc <= in_30:
-                    n_doc_scadenza += 1
-                    break
-
-    # 3) TITOLI SOSPESI da > 5 giorni (anticipo agenzia)
-    n_sospesi_old = await db.titoli.count_documents({
-        "titolo_coperto": True,
-        "stato": {"$in": ["da_incassare", "insoluto"]},
-        "data_copertura": {"$lt": days_5_ago},
-    })
-
-    # 4) SINISTRI APERTI da > 30 giorni
-    cutoff_30 = (today - timedelta(days=30)).isoformat()
-    n_sin_old = await db.sinistri.count_documents({
-        "stato": {"$in": ["aperto", "in_lavorazione", "denunciato"]},
-        "data_sinistro": {"$lt": cutoff_30},
-    })
-
-    # 5) POLIZZE in scadenza prossimi 30 giorni
-    n_pol_scadenza = await db.polizze.count_documents({
-        "stato": {"$in": ["attiva", "in_emissione"]},
-        "scadenza": {"$gte": today_iso, "$lte": in_30},
-    })
-
-    # 6) PROVVIGIONI da pagare ai collaboratori
-    n_provv = await db.titoli.count_documents({
-        "stato": {"$in": ["incassato"]},
-        "provvigione_pagata": {"$ne": True},
-        "collaboratore_id": {"$ne": None},
-    })
-
-    return [
-        {
-            "key": "compleanno_oggi",
-            "label": "Compleanni di oggi",
-            "icon": "Cake",
-            "color": "rose",
-            "count": n_comp_oggi,
-            "url": "/anagrafiche?compleanno=oggi",
-            "descrizione": "Clienti che compiono gli anni oggi",
-        },
-        {
-            "key": "compleanno_settimana",
-            "label": "Compleanni nei prossimi 7 giorni",
-            "icon": "Gift",
-            "color": "pink",
-            "count": n_comp_settimana,
-            "url": "/anagrafiche?compleanno=settimana",
-            "descrizione": "Da contattare per gli auguri",
-        },
-        {
-            "key": "documenti_scaduti",
-            "label": "Documenti di riconoscimento scaduti",
-            "icon": "FileWarning",
-            "color": "red",
-            "count": n_doc_scaduti,
-            "url": "/anagrafiche?doc=scaduti",
-            "descrizione": "CI / patente / passaporto da rinnovare",
-        },
-        {
-            "key": "documenti_scadenza",
-            "label": "Documenti in scadenza (30gg)",
-            "icon": "FileClock",
-            "color": "amber",
-            "count": n_doc_scadenza,
-            "url": "/anagrafiche?doc=in_scadenza",
-            "descrizione": "Da aggiornare nei prossimi 30 giorni",
-        },
-        {
-            "key": "titoli_sospesi_old",
-            "label": "Titoli sospesi da oltre 5 giorni",
-            "icon": "AlertTriangle",
-            "color": "orange",
-            "count": n_sospesi_old,
-            "url": "/sospesi?gg_min=5",
-            "descrizione": "Anticipati dall'agenzia, da incassare",
-        },
-        {
-            "key": "polizze_in_scadenza_30",
-            "label": "Polizze in scadenza (30gg)",
-            "icon": "CalendarClock",
-            "color": "blue",
-            "count": n_pol_scadenza,
-            "url": "/avvisi",
-            "descrizione": "Prossime al rinnovo",
-        },
-        {
-            "key": "sinistri_aperti_old",
-            "label": "Sinistri aperti da oltre 30 giorni",
-            "icon": "AlertOctagon",
-            "color": "red",
-            "count": n_sin_old,
-            "url": "/sinistri?stato=aperto&gg_min=30",
-            "descrizione": "Da sollecitare alla compagnia",
-        },
-        {
-            "key": "provvigioni_da_pagare",
-            "label": "Provvigioni da liquidare",
-            "icon": "Wallet",
-            "color": "emerald",
-            "count": n_provv,
-            "url": "/provvigioni",
-            "descrizione": "Collaboratori in attesa",
-        },
-    ]
 
 
-@api.get("/dashboard/links")
-async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Link rapidi mostrati sulla dashboard."""
-    items = await db.dashboard_links.find({}, {"_id": 0}).sort([("ordine", 1), ("created_at", -1)]).to_list(200)
-    return items
 
 
-@api.post("/dashboard/links", status_code=201)
-async def create_dashboard_link(body: DashboardLinkBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    if not body.label or not body.url:
-        raise HTTPException(400, "Label e URL obbligatori")
-    url = body.url.strip()
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    item = {
-        "id": _uid(),
-        "label": body.label.strip(),
-        "url": url,
-        "icon": body.icon,
-        "color": body.color,
-        "ordine": body.ordine or 0,
-        "created_at": _now_iso(),
-        "created_by": user.get("id"),
-    }
-    await db.dashboard_links.insert_one(item)
-    item.pop("_id", None)
-    return item
 
 
-@api.put("/dashboard/links/{lid}")
-async def update_dashboard_link(lid: str, body: DashboardLinkBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    existing = await db.dashboard_links.find_one({"id": lid}, {"_id": 0})
-    if not existing:
-        raise HTTPException(404, "Link non trovato")
-    url = body.url.strip()
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    upd = {
-        "label": body.label.strip(), "url": url,
-        "icon": body.icon, "color": body.color,
-        "ordine": body.ordine or 0,
-        "updated_at": _now_iso(),
-    }
-    await db.dashboard_links.update_one({"id": lid}, {"$set": upd})
-    return {**existing, **upd}
 
 
-@api.delete("/dashboard/links/{lid}")
-async def delete_dashboard_link(lid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    res = await db.dashboard_links.delete_one({"id": lid})
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Link non trovato")
-    return {"ok": True}
 
+
+# Modular routers (extracted from server.py)
+from routes import dashboard as _dash_router  # noqa: E402
+from routes import ocr as _ocr_router  # noqa: E402
+api.include_router(_dash_router.router)
+api.include_router(_ocr_router.router)
 
 app.include_router(api)
 

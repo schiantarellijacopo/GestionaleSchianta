@@ -10,7 +10,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
@@ -33,6 +33,7 @@ export default function Anagrafiche() {
     const [stats, setStats] = useState(null);
     const [expanded, setExpanded] = useState({});
     const [networks, setNetworks] = useState({});
+    const [kpiDialogOpen, setKpiDialogOpen] = useState(false);
     // filtri da URL (dashboard task)
     const compleannoFilter = searchParams.get("compleanno"); // "oggi" | "settimana" | "mese"
     const docFilter = searchParams.get("doc"); // "scaduti" | "in_scadenza"
@@ -145,8 +146,8 @@ export default function Anagrafiche() {
                 }
             />
 
-            {/* 4 KPI per categoria — formato come da richiesta */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            {/* 4 KPI per categoria + KPI custom */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-2">
                 <KpiCard
                     icon={<Users size={18} />} color="sky"
                     label="Clienti privati" testid="kpi-privati"
@@ -171,7 +172,30 @@ export default function Anagrafiche() {
                     n={stats?.parrocchie?.n ?? "—"}
                     premio={stats?.parrocchie?.premio_totale}
                 />
+                {(stats?.custom || []).map((k) => (
+                    <KpiCard
+                        key={k.id}
+                        icon={<CustomKpiIcon name={k.icon} />}
+                        color={k.color || "sky"}
+                        label={k.label} testid={`kpi-custom-${k.id}`}
+                        n={k.n}
+                        premio={k.premio_totale}
+                        onClick={() => setTagFilter(k.tag)}
+                    />
+                ))}
             </div>
+            {canCreate && (
+                <div className="flex justify-end mb-4">
+                    <Button
+                        variant="outline" size="sm"
+                        data-testid="btn-personalizza-kpi"
+                        onClick={() => setKpiDialogOpen(true)}
+                        className="text-xs"
+                    >
+                        <Settings size={14} className="mr-1" /> Personalizza KPI
+                    </Button>
+                </div>
+            )}
 
             <div className="flex items-center gap-2 mb-3">
                 <div className="relative flex-1 max-w-md">
@@ -280,21 +304,34 @@ export default function Anagrafiche() {
                     </table>
                 )}
             </div>
+
+            <PersonalizzaKpiDialog
+                open={kpiDialogOpen}
+                onOpenChange={setKpiDialogOpen}
+                onChanged={() => api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {})}
+            />
         </div>
     );
 }
 
-function KpiCard({ icon, color, label, n, premio, testid }) {
+function KpiCard({ icon, color, label, n, premio, testid, onClick }) {
     const palettes = {
         sky:     { bg: "bg-white",  border: "border-l-4 border-l-sky-500 border border-slate-200",     ic: "text-sky-600",     hint: "text-sky-700" },
         emerald: { bg: "bg-white",  border: "border-l-4 border-l-emerald-500 border border-slate-200", ic: "text-emerald-600", hint: "text-emerald-700" },
         amber:   { bg: "bg-white",  border: "border-l-4 border-l-amber-500 border border-slate-200",   ic: "text-amber-600",   hint: "text-amber-700" },
         violet:  { bg: "bg-white",  border: "border-l-4 border-l-violet-500 border border-slate-200",  ic: "text-violet-600",  hint: "text-violet-700" },
+        rose:    { bg: "bg-white",  border: "border-l-4 border-l-rose-500 border border-slate-200",    ic: "text-rose-600",    hint: "text-rose-700" },
+        pink:    { bg: "bg-white",  border: "border-l-4 border-l-pink-500 border border-slate-200",    ic: "text-pink-600",    hint: "text-pink-700" },
+        orange:  { bg: "bg-white",  border: "border-l-4 border-l-orange-500 border border-slate-200",  ic: "text-orange-600",  hint: "text-orange-700" },
+        slate:   { bg: "bg-white",  border: "border-l-4 border-l-slate-500 border border-slate-200",   ic: "text-slate-600",   hint: "text-slate-700" },
     };
     const p = palettes[color] || palettes.sky;
+    const isClickable = typeof onClick === "function";
     return (
         <div
-            className={`${p.bg} ${p.border} rounded-md p-4 hover:shadow-md transition-shadow`}
+            className={`${p.bg} ${p.border} rounded-md p-4 hover:shadow-md transition-shadow ${isClickable ? "cursor-pointer" : ""}`}
+            onClick={onClick}
+            role={isClickable ? "button" : undefined}
             data-testid={testid}
         >
             <div className="flex items-start justify-between">
@@ -309,6 +346,183 @@ function KpiCard({ icon, color, label, n, premio, testid }) {
                 Premi: <span className={`font-semibold num ${p.hint}`}>{fmtEur(premio || 0)}</span>
             </div>
         </div>
+    );
+}
+
+const KPI_ICON_OPTS = {
+    Star: Star, Heart: Heart, Flag: Flag, Award: Award, Target: Target,
+    Bookmark: Bookmark, Tag: TagIcon, Zap: Zap, Users: Users,
+    Briefcase: Briefcase, Home: Home, Church: Church,
+};
+const KPI_COLOR_OPTS = ["sky", "emerald", "amber", "violet", "rose", "pink", "orange", "slate"];
+
+function CustomKpiIcon({ name }) {
+    const Cmp = KPI_ICON_OPTS[name] || Star;
+    return <Cmp size={18} />;
+}
+
+function PersonalizzaKpiDialog({ open, onOpenChange, onChanged }) {
+    const [items, setItems] = useState([]);
+    const [tagsAvailable, setTagsAvailable] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [draft, setDraft] = useState({ label: "", tag: "", color: "sky", icon: "Star" });
+
+    const load = useCallback(async () => {
+        const [r1, r2] = await Promise.all([
+            api.get("/anagrafiche/kpi-custom"),
+            api.get("/anagrafiche/tags"),
+        ]);
+        setItems(r1.data || []);
+        setTagsAvailable(r2.data || []);
+    }, []);
+
+    useEffect(() => { if (open) load(); }, [open, load]);
+
+    const handleAdd = async () => {
+        if (!draft.label.trim() || !draft.tag.trim()) {
+            toast.error("Inserisci etichetta e tag");
+            return;
+        }
+        if (items.length >= 8) {
+            toast.error("Massimo 8 KPI custom");
+            return;
+        }
+        setLoading(true);
+        try {
+            await api.post("/anagrafiche/kpi-custom", draft);
+            setDraft({ label: "", tag: "", color: "sky", icon: "Star" });
+            await load();
+            onChanged?.();
+            toast.success("KPI aggiunta");
+        } catch (e) {
+            toast.error("Errore: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRemove = async (kid) => {
+        if (!window.confirm("Rimuovere questa KPI?")) return;
+        setLoading(true);
+        try {
+            await api.delete(`/anagrafiche/kpi-custom/${kid}`);
+            await load();
+            onChanged?.();
+            toast.success("KPI rimossa");
+        } catch {
+            toast.error("Errore");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-2xl" data-testid="dialog-personalizza-kpi">
+                <DialogHeader>
+                    <DialogTitle>Personalizza KPI Anagrafiche</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                    <div className="text-xs text-slate-500">
+                        Crea KPI personalizzate basate sui <b>tag</b> delle anagrafiche.
+                        Vengono mostrate accanto alle 4 KPI standard. Max 8.
+                    </div>
+
+                    {/* Lista esistenti */}
+                    {items.length > 0 && (
+                        <div className="space-y-2">
+                            <Label className="text-xs uppercase tracking-wider text-slate-500">KPI attive</Label>
+                            <div className="border rounded-md divide-y">
+                                {items.map((k) => {
+                                    const Icon = KPI_ICON_OPTS[k.icon] || Star;
+                                    return (
+                                        <div key={k.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`kpi-row-${k.id}`}>
+                                            <div className="flex items-center gap-3">
+                                                <Icon size={16} className={`text-${k.color}-600`} />
+                                                <div>
+                                                    <div className="font-medium">{k.label}</div>
+                                                    <div className="text-xs text-slate-500">tag: <span className="font-mono">{k.tag}</span></div>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                size="sm" variant="ghost"
+                                                onClick={() => handleRemove(k.id)}
+                                                disabled={loading}
+                                                data-testid={`btn-remove-kpi-${k.id}`}
+                                            >
+                                                <Trash2 size={14} className="text-red-500" />
+                                            </Button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Form nuova KPI */}
+                    <div className="border-t pt-3 space-y-3">
+                        <Label className="text-xs uppercase tracking-wider text-slate-500">Aggiungi nuova KPI</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label className="text-xs">Etichetta</Label>
+                                <Input
+                                    value={draft.label}
+                                    onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
+                                    placeholder="Es. Clienti Premium"
+                                    data-testid="input-kpi-label"
+                                />
+                            </div>
+                            <div>
+                                <Label className="text-xs">Tag (dovrà esistere su anagrafiche)</Label>
+                                <Input
+                                    list="kpi-tags-datalist"
+                                    value={draft.tag}
+                                    onChange={(e) => setDraft((d) => ({ ...d, tag: e.target.value.toLowerCase().trim() }))}
+                                    placeholder="es. vip, partner, fornitore..."
+                                    data-testid="input-kpi-tag"
+                                />
+                                <datalist id="kpi-tags-datalist">
+                                    {tagsAvailable.map((t) => <option key={t} value={t} />)}
+                                </datalist>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Colore</Label>
+                                <Select value={draft.color} onValueChange={(v) => setDraft((d) => ({ ...d, color: v }))}>
+                                    <SelectTrigger data-testid="select-kpi-color"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {KPI_COLOR_OPTS.map((c) => (
+                                            <SelectItem key={c} value={c}>
+                                                <span className="flex items-center gap-2">
+                                                    <span className={`inline-block w-3 h-3 rounded-full bg-${c}-500`} />
+                                                    {c}
+                                                </span>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Icona</Label>
+                                <Select value={draft.icon} onValueChange={(v) => setDraft((d) => ({ ...d, icon: v }))}>
+                                    <SelectTrigger data-testid="select-kpi-icon"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {Object.keys(KPI_ICON_OPTS).map((ic) => (
+                                            <SelectItem key={ic} value={ic}>{ic}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <Button onClick={handleAdd} disabled={loading} data-testid="btn-add-kpi" className="w-full">
+                            <Plus size={14} className="mr-1" /> Aggiungi KPI
+                        </Button>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
