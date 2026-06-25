@@ -88,6 +88,17 @@ h1, h2, h3, h4, h5 {
 .tbl tbody tr:hover { @apply bg-slate-50; }
 .tbl tbody tr:nth-child(even) { background-color: #fbfcfe; }
 
+/* Tables ultra-compact (per liste larghe come Titoli) */
+.tbl-compact { table-layout: auto; border-collapse: separate; border-spacing: 0; }
+.tbl-compact thead th {
+    @apply text-[10px] uppercase tracking-[0.06em] font-semibold text-slate-500 text-left px-2 py-1.5 border-b border-slate-200 bg-slate-50;
+}
+.tbl-compact tbody td {
+    @apply px-2 py-1.5 border-b border-slate-100 text-xs text-slate-800 align-middle;
+}
+.tbl-compact tbody tr:hover { @apply bg-slate-50; }
+.tbl-compact tbody tr:nth-child(even) { background-color: #fbfcfe; }
+
 /* Stat label */
 .stat-label {
     @apply text-[11px] uppercase tracking-[0.14em] font-semibold text-slate-500;

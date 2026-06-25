@@ -250,10 +250,10 @@ export default function Titoli() {
             {/* Tabella */}
             <div className="bg-white border border-slate-200 rounded-md overflow-x-auto pb-2">
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full min-w-[1200px]">
+                    <table className="tbl-compact w-full text-xs">
                         <thead>
                             <tr>
-                                <th className="w-10 text-center">
+                                <th className="w-8 text-center">
                                     <input
                                         type="checkbox"
                                         data-testid="select-all-checkbox"
@@ -261,19 +261,19 @@ export default function Titoli() {
                                         onChange={toggleAll}
                                     />
                                 </th>
-                                <th>Contratto / Targa</th>
+                                <th className="w-[140px]">Contratto / Targa</th>
                                 <th>Contraente</th>
-                                <th>Compagnia</th>
-                                <th>Collaboratore</th>
-                                <th className="text-right">Premio €</th>
-                                <th className="text-right">Provv.</th>
-                                <th>Scadenza</th>
-                                <th>Copertura</th>
-                                <th>Stato</th>
-                                <th className="text-right">Da pagare</th>
-                                <th className="w-12 text-center">Allegati</th>
-                                <th className="w-24 text-center">Azione</th>
-                                <th></th>
+                                <th className="w-[120px]">Compagnia</th>
+                                <th className="w-[100px]">Collaboratore</th>
+                                <th className="text-right w-[80px]">Premio €</th>
+                                <th className="text-right w-[70px]">Provv.</th>
+                                <th className="w-[80px] whitespace-nowrap">Scadenza</th>
+                                <th className="w-[80px] whitespace-nowrap">Copertura</th>
+                                <th className="w-[90px]">Stato</th>
+                                <th className="text-right w-[80px]">Da pagare</th>
+                                <th className="w-[44px] text-center">All.</th>
+                                <th className="w-[110px] text-center">Azione</th>
+                                <th className="w-[36px]"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -303,8 +303,8 @@ export default function Titoli() {
                                         <td className="text-xs text-slate-700">{t.collaboratore_nome || "-"}</td>
                                         <td className="num text-right font-medium" data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</td>
                                         <td className="num text-right text-slate-600">{fmtEur(t.provvigioni)}</td>
-                                        <td className="num text-xs">{fmtDate(t.scadenza)}</td>
-                                        <td className="num text-xs text-emerald-700">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
+                                        <td className="num text-xs whitespace-nowrap">{fmtDate(t.scadenza)}</td>
+                                        <td className="num text-xs text-emerald-700 whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
                                         <td><StatusBadge stato={t.stato} /></td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
