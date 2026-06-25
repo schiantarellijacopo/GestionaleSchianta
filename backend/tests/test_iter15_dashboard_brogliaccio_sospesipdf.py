@@ -21,8 +21,8 @@ load_dotenv("/app/frontend/.env")
 load_dotenv("/app/backend/.env")
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-ADMIN_EMAIL = "admin@assicura.it"
-ADMIN_PWD = "Admin123!"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it")
+ADMIN_PWD = os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!")
 
 
 @pytest.fixture(scope="module")

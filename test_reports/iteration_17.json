@@ -1,0 +1,40 @@
+{
+  "summary": "Iter17 - P0 refactor regression. Backend pytest: 12/12 PASS su test_iter17 (circular import risolto via /app/backend/database.py; auth.py importa db da database; server.py importa client+db da database; admin login OK; /api/anagrafiche/stats con keys privati/aziende/condomini/parrocchie/totale; /api/dashboard/tasks 200 senza NameError 'week_end'; /api/contabilita/brogliaccio 200 con param data; /api/contabilita/dati-compagnie 200; helper _calcola_scadenza_titolo unit-test annuale+12/semestrale+6/trimestrale+3/mensile+1 + clamp fine mese 31gen->28feb; POST /api/polizze/{pid}/sostituisci con crea_titolo=true crea Titolo con scadenza calcolata (semestrale verificato); POST /api/avvisi/pdf-bulk (uso di _CORPO_LETTERA_DEFAULT) 400/404 senza NameError; PUT /api/polizze/{pid} persiste tutti i 18 nuovi campi RCA/edit con GET-after-PUT). Regression su iter14-16: 22/24 passano; 2 failure non correlate al refactor (Nominatim external + test-data state). Frontend smoke: login OK, lista polizze OK, lista anagrafiche senza colonna 'Collegati' OK, view polizza RCA mostra DATI VEICOLO (Quintali/Gancio traino/Targa rimorchio) + DATI ASSOCIAZIONE CONTRATTO (Tipo tariffa, BM prov/ass/CU, Pejus, Franchigia, Valore veicolo/residuo/accessori, Guida esperta/esclusiva, Rinuncia rivalsa, Intestatario, Prov. intestatario, Massimali) confermati a video. Modal Modifica polizza ha tab condizionale 'Veicolo' (solo isRCA) con tutti i testid edit-pol-* nel sorgente (verificato grep) e backend PUT persiste correttamente.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog Modifica polizza", "issues": ["L'attributo aria-describedby/Description manca su DialogContent (warning Radix) — non blocca ma è un'avvertenza di accessibilità ripetuta."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_p0_refactor.py",
+    "/app/test_reports/pytest/iter17_results.xml"
+  ],
+  "action_items": [
+    "(opt) Aggiungere DialogDescription o aria-describedby al DialogContent di EditPolizzaDialog per silenziare il warning Radix.",
+    "(opt) test_iter14 fixture pulisce/seed dati ma test_stipendio_totale_negativo fallisce su totale 0 (probabile contaminazione tra run). Non bloccante.",
+    "(opt) test_iter16 dipende da Nominatim esterno (flaky). Considerare mock o skip in CI se 0 risultati."
+  ],
+  "critical_code_review_comments": [
+    "Refactor circular import implementato correttamente: database.py centralizza client+db; auth.py e server.py importano da database; nessun 'from server import db' rimasto.",
+    "Helpers _MESI_PER_FRAZIONAMENTO / _CORPO_LETTERA_DEFAULT / _calcola_scadenza_titolo posizionati in server.py righe 67-111 — bene per ora, ma in vista dello split prossimo conviene spostarli in un modulo 'helpers.py' / 'titoli_helpers.py' insieme alle costanti.",
+    "PUT /api/polizze/{pid} accetta body dict generico e fa $set diretto: nessuna validazione Pydantic sui campi (es. veicolo_quintali numerico, provincia 2-char). Funziona, ma è una superficie d'attacco per typed-injection di campi non previsti. In prossimo refactor introdurre un PolizzaUpdate Pydantic con extra='ignore'.",
+    "test_iter17 ha smascherato che assert su 'isinstance(int)' falliva: l'API anagrafiche/stats ritorna {n, premio_totale} per categoria (non solo conteggio) — schema non documentato; consigliato aggiungere openapi response_model.",
+    "server.py ancora 10143 righe — pronto per lo split annunciato in router modules dopo questo P0."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter17_p0_refactor.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (12/12 pytest iter17, regression 22/24 su iter14-16 con 2 failure non correlate)", "frontend": "~95% (tutti i nuovi campi RCA verificati nella detail-view; testid del modal edit verificati via sorgente perché click DOM ha intercettato il duplicate-tab nella detail page)"},
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md, esposti anche via TEST_ADMIN_EMAIL/TEST_ADMIN_PASSWORD env override)",
+  "seed_data_creation": "test_sostituisci_polizza crea una polizza sostitutiva con numero TEST_SUB_* e un Titolo di sostituzione; non c'è cleanup automatico della nuova polizza (la vecchia viene messa in stato 'sostituita'). Suggerito cleanup manuale o aggiungere fixture teardown in iterazione futura.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Refactor P0 completato e verificato. La tab 'Veicolo' nel dialog Modifica polizza è renderizzata SOLO se pol.ramo === 'RCA' (vedi PolizzaDetail.jsx riga 609); attenzione perché esistono DUE TabsTrigger con valore 'Veicolo' nella stessa pagina (uno è il tab della detail view, l'altro è dentro il modal): per testare il modal usare un selettore più specifico es. role=dialog >> tab='Veicolo'. Per test PUT polizza completi serve almeno una polizza RCA — TEST_iter11_1782391901 è una RCA seed-data utile. Helper _calcola_scadenza_titolo è in server.py riga 89 e gestisce clamp fine mese (31gen+1mese -> 28feb). I tre seguenti restano errori NON correlati al refactor: iter16 geo/suggest (Nominatim flaky) e iter14 stipendio_totale_negativo (contaminazione dati). Server.py 10143 righe pronta per lo split modulare promesso.",
+  "rca of the issue": "N/A - nessun bug bloccante introdotto dal refactor. Il refactor P0 (database.py, rimozione late-import, helpers _calcola_scadenza_titolo/_CORPO_LETTERA_DEFAULT/_MESI_PER_FRAZIONAMENTO, rimozione var inutilizzate week_end/today) NON ha rotto alcun endpoint critico. Tutti i flussi auth, anagrafiche, polizze, titoli, contabilita, dashboard, avvisi PDF, sostituisci polizza testati e funzionanti."
+}

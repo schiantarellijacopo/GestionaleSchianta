@@ -14,7 +14,7 @@ BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL")
             or open("/app/frontend/.env").read().split("REACT_APP_BACKEND_URL=")[1].split("\n")[0].strip())
 BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN = ("admin@assicura.it", "Admin123!")
+ADMIN = (os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it"), os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!"))
 TEST_DAY = "2025-12-30"  # day with no seeded data
 
 def _login(email, pw):

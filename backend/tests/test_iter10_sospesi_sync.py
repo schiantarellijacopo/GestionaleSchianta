@@ -34,7 +34,7 @@ API = f"{BASE_URL}/api"
 def session():
     s = requests.Session()
     r = s.post(f"{API}/auth/login",
-               json={"email": "admin@assicura.it", "password": "Admin123!"},
+               json={"email": os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it"), "password": os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!")},
                timeout=20)
     assert r.status_code == 200, f"Login failed: {r.status_code} {r.text}"
     return s

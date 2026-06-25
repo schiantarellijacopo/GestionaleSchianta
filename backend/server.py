@@ -17,9 +17,9 @@ from typing import Optional, List, Literal
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.cors import CORSMiddleware
 
+from database import client, db
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_token_from_request, require_user, current_user, can_see_all,
@@ -52,9 +52,9 @@ from fastapi.responses import StreamingResponse
 import io as _io
 
 # ---------- DB ----------
+# Shared MongoDB connection lives in database.py (imported above).
+# Local aliases kept for backward-compat with the rest of this module.
 mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -64,6 +64,53 @@ api = APIRouter(prefix="/api")
 
 
 # ---------- Helpers ----------
+# Mesi per frazionamento (usato per il calcolo delle scadenze titolo).
+_MESI_PER_FRAZIONAMENTO = {
+    "annuale": 12,
+    "semestrale": 6,
+    "quadrimestrale": 4,
+    "trimestrale": 3,
+    "mensile": 1,
+    "unica": 12,
+}
+
+# Testo di default per le lettere di promemoria pagamento titoli.
+_CORPO_LETTERA_DEFAULT = (
+    "Gentile {cliente},\n\n"
+    "le ricordiamo che il/i seguente/i titolo/i risulta/risultano in scadenza e in attesa di pagamento.\n"
+    "La invitiamo a regolarizzare la posizione il prima possibile presso i nostri uffici "
+    "oppure tramite i mezzi di pagamento da Lei abituali.\n\n"
+    "Per qualsiasi informazione, restiamo a Sua completa disposizione.\n\n"
+    "Cordiali saluti,\n"
+    "{agenzia}"
+)
+
+
+def _calcola_scadenza_titolo(effetto: Optional[str], frazionamento: str) -> Optional[str]:
+    """Calcola la scadenza del titolo aggiungendo all'effetto i mesi del frazionamento.
+
+    Args:
+        effetto: data effetto in formato YYYY-MM-DD.
+        frazionamento: uno dei valori in _MESI_PER_FRAZIONAMENTO.
+
+    Returns:
+        Stringa YYYY-MM-DD, oppure None se effetto è vuoto.
+    """
+    if not effetto:
+        return None
+    try:
+        d = datetime.strptime(effetto, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    mesi = _MESI_PER_FRAZIONAMENTO.get(frazionamento, 12)
+    nuovo_anno = d.year + (d.month - 1 + mesi) // 12
+    nuovo_mese = (d.month - 1 + mesi) % 12 + 1
+    # gestione fine mese (es. 31 gennaio -> 28/29 febbraio)
+    import calendar as _cal
+    giorno = min(d.day, _cal.monthrange(nuovo_anno, nuovo_mese)[1])
+    return f"{nuovo_anno:04d}-{nuovo_mese:02d}-{giorno:02d}"
+
+
 async def log_attivita(utente: dict, azione: str, entita: str,
                        entita_id: str | None = None, descrizione: str | None = None,
                        payload: dict | None = None):
@@ -5129,14 +5176,6 @@ async def _compute_brogliaccio(data_giorno: str):
         out_tot = agg[0]["out"] if agg else 0
         sum_conti += float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
 
-    crediti_agg = await db.movimenti.aggregate([
-        {"$match": {"categoria": "anticipo", "tipo": "entrata", "data_movimento": {"$lte": data_giorno}}},
-        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
-    ]).to_list(1)
-    crediti_storno = await db.movimenti.aggregate([
-        {"$match": {"categoria": "anticipo", "tipo": "uscita", "data_movimento": {"$lte": data_giorno}}},
-        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
-    ]).to_list(1)
     sospesi_attivi = sospesi_titoli_tot
 
     liquidita_box = {
@@ -5247,7 +5286,6 @@ async def dati_compagnie(
 
     Se dal/al sono passati, gli importi sono filtrati per il periodo;
     il saldo attuale rimane sempre cumulativo (fino a oggi)."""
-    today = _now_iso()[:10]
     compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
     rows = []
 
@@ -9765,7 +9803,6 @@ async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "d
     from datetime import date, timedelta
     today = date.today()
     today_iso = today.isoformat()
-    week_end = (today + timedelta(days=7)).isoformat()
     in_30 = (today + timedelta(days=30)).isoformat()
     days_5_ago = (today - timedelta(days=5)).isoformat()
 

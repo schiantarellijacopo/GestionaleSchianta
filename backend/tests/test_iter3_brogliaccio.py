@@ -21,7 +21,7 @@ BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL")
 BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN = ("admin@assicura.it", "Admin123!")
+ADMIN = (os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it"), os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!"))
 
 # Unique test day - avoid clashing with seeded movimenti
 TEST_DAY = "2025-12-29"

@@ -12,7 +12,7 @@ import uuid
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 assert BASE_URL, "REACT_APP_BACKEND_URL missing"
 
-ADMIN = {"email": "admin@assicura.it", "password": "Admin123!"}
+ADMIN = {"email": os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it"), "password": os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!")}
 
 
 @pytest.fixture(scope="session")

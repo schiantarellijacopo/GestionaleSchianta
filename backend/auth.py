@@ -5,6 +5,8 @@ import jwt
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException, Request, Depends
 
+from database import db
+
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = 60 * 8  # 8 ore lavorative
 REFRESH_TOKEN_DAYS = 7
@@ -68,7 +70,6 @@ def require_user(*allowed_roles):
     """
 
     async def _dep(request: Request) -> dict:
-        from server import db  # late import to avoid cycle
         token = get_token_from_request(request)
         if not token:
             raise HTTPException(status_code=401, detail="Non autenticato")

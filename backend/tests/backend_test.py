@@ -10,10 +10,10 @@ BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
 CREDS = {
-    "admin": ("admin@assicura.it", "Admin123!"),
-    "collaboratore": ("collaboratore@assicura.it", "Collab123!"),
-    "dipendente": ("dipendente@assicura.it", "Dipendente123!"),
-    "cliente": ("cliente@assicura.it", "Cliente123!"),
+    "admin": (os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it"), os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!")),
+    "collaboratore": (os.environ.get("TEST_COLLAB_EMAIL", "collaboratore@assicura.it"), os.environ.get("TEST_COLLAB_PASSWORD", "Collab123!")),
+    "dipendente": (os.environ.get("TEST_DIP_EMAIL", "dipendente@assicura.it"), os.environ.get("TEST_DIP_PASSWORD", "Dipendente123!")),
+    "cliente": (os.environ.get("TEST_CLIENT_EMAIL", "cliente@assicura.it"), os.environ.get("TEST_CLIENT_PASSWORD", "Cliente123!")),
 }
 
 
