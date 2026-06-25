@@ -3,57 +3,55 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 19 — Split server.py partial + E701/E702 + KPI Anagrafiche custom UI)
+## Latest Session (Iter 20 — Code Quality complexity refactor)
 
-### Done in iter 19
-- ✅ **E701/E702 (100 occorrenze)** sistemate in server.py via autopep8 automatico.
-- ✅ **shared.py creato** (164 righe): helpers comuni estratti da server.py — `log_attivita`, `log_diario_cliente`, `strip_mongo_id`, `visibility_filter`, `calcola_scadenza_titolo`, `resolve_conto_cassa`, costanti `_MESI_PER_FRAZIONAMENTO` / `_MEZZO_TO_TIPO` / `_CORPO_LETTERA_DEFAULT`.
-- ✅ **routes/dashboard.py** (225 righe): estratti 5 endpoint (GET /tasks, GET/POST/PUT/DELETE /links) + `DashboardLinkBody` Pydantic. Refactor `dashboard_tasks` con sotto-helper `_conta_compleanni`, `_conta_documenti`, `_build_task_list`.
-- ✅ **routes/ocr.py** (144 righe): estratti 2 endpoint OCR libretto + helpers `_convert_pdf_to_jpeg`, `_salva_allegato_libretto`, `_FIELD_MAP`.
-- ✅ **server.py**: ridotto da 10.142 → 9.688 righe (-454, ~4.5%). I router modulari sono inclusi via `api.include_router(...)` PRIMA di `app.include_router(api)`.
-- ✅ **KPI Anagrafiche custom (P1)** completata:
-  - Backend: GET `/api/anagrafiche/stats` ora include `custom: [{id,label,tag,color,icon,n,premio_totale}]` (lettura `db.kpi_anagrafiche_custom`, count `db.anagrafiche` per tag, somma `premio_lordo` polizze attive).
-  - Frontend: bottone "Personalizza KPI" sulla pagina /anagrafiche apre dialog `PersonalizzaKpiDialog` con form Etichetta/Tag (datalist con tags esistenti)/Colore (8 opzioni)/Icona (12 opzioni). Lista KPI attive con eliminazione. Max 8.
-  - Le KPI create appaiono come card aggiuntive accanto alle 4 standard (privati/aziende/condomini/parrocchie), cliccabili per filtrare la lista per quel tag.
-- ✅ **DialogDescription** aggiunto per a11y Radix.
+### Done (93/93 PASS)
+- ✅ **`parse_estratto_conto_inps`** (was CC=57, 276 righe, 33 local vars) refactored in `inps_calculator.py` con orchestrator + 7 helpers specializzati (`_parse_anagrafica`, `_parse_periodi_formato_inps`, `_parse_periodi_parasubordinati`, `_parse_periodi_satorcrm`, `_parse_periodi_fallback_date`, `_parse_storico_redditi_tabella`, `_consolida_totali`) + `_EstrattoState` class che incapsula lo stato condiviso. CC stimato ~5-8.
+- ✅ **`_processa_polizze`** (was CC=28, 63 righe, 8 params) refactored in `ania_importer.py` con `_resolve_operatore_codice`, `_build_polizza_payload`, `_upsert_polizza`.
+- ✅ **`_build_dettagli_veicolo`** (was CC=25) refactored in 4 sezioni: `_campi_veicolo_base`, `_campi_tariffa_bm`, `_campi_valori`, `_campi_guida`.
+- ✅ **`genera_pdf_avvisi`** (was CC=25, 112 righe) rewritten in `pdf_avvisi.py` con 8 helpers (Builder pattern).
+- ✅ **`stampa_brogliaccio`** (was CC=24) rewritten in `pdf_brogliaccio.py` con 10 helpers estratti.
+- ✅ **Anti-pattern `is True/is False`**: ~30 occorrenze sostituite con `== True/== False` in tutti `test_iter*.py`. `is None`/`is not None` preservato (16 file - idiomatic Python).
+- ✅ **Lint**: 0 errori sui 5 moduli refactored.
 
-### Regression Bug Trovato e Fixato (durante iter19)
-- ⚠️ `async def _intestazione_pdf()` era stato erroneamente rimosso durante l'estrazione degli helper → 15 endpoint PDF in 500. Testing agent T1 ha re-inserito l'helper in server.py righe 78-89 (chiamata `pdf_report.get_intestazione_azienda(db)` con try/except).
-
-### Testing iter 19
-- **Backend: 67/68 PASS** (15/16 iter19 nuovi + 52/52 regression iter4/5/15/17/18). L'unico FAIL iniziale era il campo `custom` mancante in `/api/anagrafiche/stats` — risolto in questo turno (verificato manualmente: stats ora ritorna `keys: [privati, aziende, condomini, parrocchie, totale, custom]` con counts e premi corretti).
-- Frontend: dialog Personalizza KPI funzionante, tutti i data-testid presenti, creazione mostra toast, eliminazione OK.
+### Testing iter 20
+- **93/93 PASS** (25 nuovi + 68 regression iter4/5/15/17/18/19).
+- PDF endpoint manuale: `/api/contabilita/brogliaccio/stampa?data=YYYY-MM-DD` ritorna 4932 byte PDF.
+- INPS parser su testo realistico: estrae cognome/nome/CF/sesso/comune_nascita/data_nascita/residenza/periodi/storico/montante_stimato corretti.
+- Smoke 8 endpoint: tutti 200.
 
 ## Sessioni precedenti
-- Iter 18: refactor cyclomatic complexity di 5 moduli (brogliaccio, avvisi_scadenze, geocoder, inps_calculator, ania_importer). CC riduzione da 157→10 per ania_importer.importa_zip.
-- Iter 17: P0 circular import auth↔server risolto via database.py; secrets test eliminati; tab Veicolo polizza con 18 nuovi campi; rimossa colonna "Collegati" da Anagrafiche.
+- Iter 19: split parziale di server.py in routes/ (dashboard + ocr), shared.py creato, E701/E702 fixati, UI Personalizza KPI Anagrafiche.
+- Iter 18: refactor cyclomatic di 5 moduli (brogliaccio, avvisi_scadenze, geocoder, inps_calculator.calcola_pensione, ania_importer.importa_zip).
+- Iter 17: P0 circular import auth↔server risolto via database.py; secrets test eliminati; tab Veicolo polizza con 18 nuovi campi; rimossa colonna "Collegati".
 
-## Architecture
+## Architecture (state of art)
 - `/app/backend/database.py` — Motor client + db (single source of truth)
 - `/app/backend/auth.py` — JWT + bcrypt + `require_user` dep
-- `/app/backend/shared.py` **NEW** — helpers comuni cross-module
-- `/app/backend/routes/dashboard.py` **NEW** — 5 endpoint dashboard
-- `/app/backend/routes/ocr.py` **NEW** — 2 endpoint OCR libretto
-- `/app/backend/routes/__init__.py` **NEW**
-- `/app/backend/server.py` — 9.688 righe (ridotto da 10.142). Restano da estrarre: auth (~12 endpoint), anagrafiche (44), librerie (38), polizze (15), titoli (vari), brogliaccio/stampa (15), sinistri, admin.
-- `/app/backend/brogliaccio.py` `avvisi_scadenze.py` `geocoder.py` `inps_calculator.py` `ania_importer.py` — tutti refactored (iter18).
+- `/app/backend/shared.py` — helpers cross-module (log_attivita, log_diario_cliente, strip_mongo_id, calcola_scadenza_titolo, resolve_conto_cassa, visibility_filter, costanti)
+- `/app/backend/routes/dashboard.py` — 5 endpoint dashboard (tasks, links CRUD)
+- `/app/backend/routes/ocr.py` — 2 endpoint OCR libretto Gemini
+- `/app/backend/server.py` — ~9.700 righe (was 10.142). Restano da estrarre: auth, anagrafiche, librerie, polizze, titoli, sinistri, brogliaccio (routes), admin.
+- `/app/backend/brogliaccio.py` `avvisi_scadenze.py` `geocoder.py` `inps_calculator.py` `ania_importer.py` `pdf_avvisi.py` `pdf_brogliaccio.py` — tutti refactored, CC sotto soglia 10.
+- `/app/backend/tests/test_iter*.py` — 93 test passing al 100%, anti-pattern free.
 
 ## Backlog
 
 ### P0 (next session)
-- **Continuare lo split server.py**: estrarre `routes/auth.py`, `routes/librerie.py` (38 endpoint, isolato), `routes/anagrafiche.py` (44 endpoint), `routes/polizze.py`, `routes/titoli.py`, `routes/brogliaccio.py`, `routes/sinistri.py`, `routes/admin.py`, `routes/stampa.py`.
-- Spostare `_intestazione_pdf` in shared (è usato da 15 endpoint).
+- **Continuare split server.py**: estrarre `routes/librerie.py` (38 endpoint, isolato), `routes/auth.py`, `routes/anagrafiche.py` (44 endpoint), `routes/polizze.py`, `routes/titoli.py`, `routes/sinistri.py`, `routes/admin.py`, `routes/stampa.py`.
+- Spostare `_intestazione_pdf` in `shared.py` (usato da 15 endpoint PDF, ancora in server.py).
 
 ### P1
 - OCR Fatture via Gemini 3 Flash (`ocr_fattura.py`).
 - "Verifica polizza vs libretto" — UI di confronto discrepanze.
-- `PolizzaUpdate` Pydantic per typed-validation su PUT.
-- `KpiCustomBody` Pydantic per POST `/anagrafiche/kpi-custom` (oggi accetta dict generico).
+- `PolizzaUpdate`, `KpiCustomBody` Pydantic per typed-validation.
+- Type hints più stringenti su `_campi_*` (oggi `dict -> dict`).
 
 ### P2
-- Piramide Soluzioni Release B (stacked blocks, Adeguata/Non Adeguata).
+- Piramide Soluzioni Release B.
 - Integrazioni: Google Calendar / Microsoft 365 / WhatsApp / SMS.
-- Type hint coverage 45% → 80%.
+- Type hint coverage 46% → 80% (mypy in CI).
+- Email templates a Jinja2 esterni.
 
 ## Credenziali test
 admin@assicura.it / Admin123!
