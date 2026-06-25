@@ -2138,18 +2138,19 @@ async def ocr_libretto_apply(body: dict, user=Depends(require_user("admin", "col
         raise HTTPException(404, "Polizza non trovata")
 
     update = {}
-    # Mappatura: campi OCR → campi polizza
+    # Mappatura: campi OCR (chiavi semplici) -> campi polizza (con prefix veicolo_*).
+    # Allineato alle convenzioni del modello Polizza in db_models.py.
     field_map = {
         "targa": "targa",
         "telaio": "telaio",
-        "marca": "marca",
-        "modello": "modello",
-        "tipo_veicolo": "tipo_veicolo",
-        "alimentazione": "alimentazione",
-        "kw": "kw",
-        "cv": "cv",
-        "cilindrata": "cilindrata",
-        "data_immatricolazione": "data_immatricolazione",
+        "marca": "veicolo_marca",
+        "modello": "veicolo_modello",
+        "tipo_veicolo": "veicolo_tipo",
+        "alimentazione": "veicolo_alimentazione",
+        "kw": "veicolo_kw",
+        "cv": "veicolo_cv_fiscali",
+        "cilindrata": "veicolo_cilindrata",
+        "data_immatricolazione": "veicolo_data_immatricolazione",
     }
     for k in campi:
         if k in field_map and dati.get(k) not in (None, ""):
