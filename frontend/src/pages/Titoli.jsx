@@ -23,30 +23,46 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
-const PRESETS = [
-    { key: "tutti", label: "Tutti" },
+const PRESETS_CORRENTI = [
     { key: "sospesi", label: "Sospesi (da incassare)" },
-    { key: "scad15", label: "Scadute da 15gg" },
-    { key: "scad_oltre15", label: "Oltre 15gg" },
     { key: "scadute_oggi", label: "Scadute oggi" },
     { key: "scad_5g", label: "Scadute da 5gg" },
     { key: "scad_10g", label: "Scadute da 10gg" },
+    { key: "scad15", label: "Scadute da 15gg" },
+    { key: "scad_oltre15", label: "Oltre 15gg" },
+    { key: "tutti_aperti", label: "Tutti (da incassare)" },
 ];
+
+const PRESETS_STORICO = [
+    { key: "storico", label: "Tutti incassati" },
+    { key: "storico_anno", label: "Anno corrente" },
+    { key: "storico_mese", label: "Mese corrente" },
+];
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const firstOfYearISO = () => `${new Date().getFullYear()}-01-01`;
+const firstOfMonthISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+};
 
 const presetParams = (key) => {
     switch (key) {
         case "sospesi": return { stato: "da_incassare", titolo_coperto: true };
-        case "storico": return { stato: "incassato" };  // usato dal link "Titoli storici" in sidebar
+        case "tutti_aperti": return { stato_not: "incassato,stornato" };
+        case "storico": return { stato: "incassato" };
+        case "storico_anno": return { stato: "incassato", dal: firstOfYearISO(), al: todayISO() };
+        case "storico_mese": return { stato: "incassato", dal: firstOfMonthISO(), al: todayISO() };
         case "scad15": return { scadute_da_min: 15 };
         case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
         case "scadute_oggi": return { scadute_oggi: true };
         case "scad_5g": return { scadute_da_min: 5 };
         case "scad_10g": return { scadute_da_min: 10 };
-        default: return {};
+        default: return { stato_not: "incassato,stornato" };
     }
 };
 
-export default function Titoli() {
+export default function Titoli({ storicoMode = false } = {}) {
     const { user } = useAuth();
     const [searchParams] = useSearchParams();
     const urlPreset = searchParams.get("preset");
@@ -59,23 +75,26 @@ export default function Titoli() {
     const [showFilters, setShowFilters] = useState(false);
     const [pageSize, setPageSize] = useState(50);
 
-    // Lista preset accettati anche tramite URL (anche quelli non visibili come tab)
-    const ACCEPTED_PRESETS = ["tutti", "sospesi", "storico", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
+    const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
+    const ACCEPTED_PRESETS = storicoMode
+        ? ["storico", "storico_anno", "storico_mese"]
+        : ["sospesi", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
+
+    const defaultPreset = storicoMode ? "storico" : "sospesi";
 
     const [filters, setFilters] = useState({
-        preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : "sospesi",
+        preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : defaultPreset,
         q: "",
         stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
         dal: "", al: "",
     });
 
-    // Allineamento preset dall'URL (es. /titoli?preset=storico)
+    // Allineamento preset dall'URL (es. /titoli?preset=sospesi)
     useEffect(() => {
         if (urlPreset && ACCEPTED_PRESETS.includes(urlPreset)) {
             setFilters((p) => ({ ...p, preset: urlPreset }));
         }
-        // eslint-disable-next-line
     }, [urlPreset]);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
 
@@ -89,7 +108,7 @@ export default function Titoli() {
     const buildParams = () => {
         const p = { ...presetParams(filters.preset) };
         if (filters.q) p.q = filters.q;
-        if (filters.stato !== "all" && filters.preset === "tutti") p.stato = filters.stato;
+        if (filters.stato !== "all" && (filters.preset === "tutti_aperti" || filters.preset === "storico")) p.stato = filters.stato;
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
@@ -106,7 +125,7 @@ export default function Titoli() {
         api.get("/titoli", { params: buildParams() }).then((r) => setList(r.data));
     };
 
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
+    useEffect(() => { load(); }, [filters]);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie"), api.get("/librerie/rami"),
@@ -151,10 +170,13 @@ export default function Titoli() {
     const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
 
     return (
-        <div data-testid="titoli-page">
+        <div data-testid={storicoMode ? "titoli-storici-page" : "titoli-page"}>
             <PageHeader
-                title="Titoli"
-                subtitle="Sospesi · in scadenza · coperti non pagati · esportazioni e stampa"
+                title={storicoMode ? "Titoli storici" : "Titoli"}
+                subtitle={storicoMode
+                    ? "Archivio titoli incassati · filtri per periodo · allegati e quietanze"
+                    : "Sospesi · in scadenza · coperti non pagati · esportazioni e stampa"
+                }
             />
 
             {/* Preset rapidi */}
@@ -286,7 +308,7 @@ export default function Titoli() {
                                 <th className="text-right w-[70px]" title="Margine agenzia">Margine</th>
                                 <th className="w-[80px] whitespace-nowrap">Scadenza</th>
                                 <th className="w-[80px] whitespace-nowrap">Copertura</th>
-                                {filters.preset === "storico" && (
+                                {(storicoMode || filters.preset === "storico" || filters.preset === "storico_anno" || filters.preset === "storico_mese") && (
                                     <>
                                         <th className="w-[80px] whitespace-nowrap" data-testid="th-incassato-il">Incassato il</th>
                                         <th className="w-[90px]" data-testid="th-mezzo-pag">Pagato con</th>
@@ -339,7 +361,7 @@ export default function Titoli() {
                                         <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
                                         <td className="num text-xs whitespace-nowrap">{fmtDate(t.scadenza)}</td>
                                         <td className="num text-xs text-emerald-700 whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
-                                        {filters.preset === "storico" && (
+                                        {(storicoMode || filters.preset === "storico" || filters.preset === "storico_anno" || filters.preset === "storico_mese") && (
                                             <>
                                                 <td className="num text-xs whitespace-nowrap text-emerald-700" data-testid={`titolo-incassato-il-${t.id}`}>{t.data_incasso ? fmtDate(t.data_incasso) : "—"}</td>
                                                 <td className="text-xs text-slate-700" data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</td>

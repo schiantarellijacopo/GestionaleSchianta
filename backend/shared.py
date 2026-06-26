@@ -176,3 +176,39 @@ async def visibility_filter(user: dict, base_filter: dict | None = None) -> dict
     if user["role"] == "cliente" and user.get("anagrafica_id"):
         base_filter["contraente_id"] = user["anagrafica_id"]
     return base_filter
+
+
+# ---------------------------------------------------------------------------
+# Prima Nota — lock su giornata chiusa
+# ---------------------------------------------------------------------------
+async def giornata_chiusa(data: str | None) -> dict | None:
+    """Ritorna la ChiusuraGiorno ATTIVA (riaperta_at == None) per la data indicata,
+    oppure None se la giornata è aperta / dato non valido.
+
+    `data` può essere YYYY-MM-DD (tipicamente data_movimento, data_incasso, ecc.).
+    """
+    if not data:
+        return None
+    # accetta anche datetime ISO con timezone — prendo i primi 10 caratteri
+    giorno = str(data)[:10]
+    if len(giorno) != 10 or giorno[4] != "-" or giorno[7] != "-":
+        return None
+    return await db.chiusure_giorno.find_one(
+        {"data": giorno, "riaperta_at": None}, {"_id": 0, "id": 1, "data": 1},
+    )
+
+
+async def assert_giornata_aperta(data: str | None, azione: str = "modificare") -> None:
+    """Solleva HTTPException 400 se la prima nota del giorno è chiusa.
+
+    Da chiamare PRIMA di update/delete su entità che impattano la Prima Nota:
+    movimenti, titoli (per data_incasso), rappel, voci_manuali_collab,
+    pagamenti_provvigioni, ecc.
+    """
+    from fastapi import HTTPException
+    ch = await giornata_chiusa(data)
+    if ch:
+        raise HTTPException(
+            400,
+            f"Prima Nota del {ch['data']} chiusa — riaprire la chiusura per {azione}.",
+        )

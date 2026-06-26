@@ -10,6 +10,7 @@ import AnagraficaDetail from "@/pages/AnagraficaDetail";
 import Polizze from "@/pages/Polizze";
 import PolizzaDetail from "@/pages/PolizzaDetail";
 import Titoli from "@/pages/Titoli";
+import TitoliStorici from "@/pages/TitoliStorici";
 import Sinistri from "@/pages/Sinistri";
 import Contabilita from "@/pages/Contabilita";
 import Compagnie from "@/pages/Compagnie";
@@ -52,6 +53,7 @@ function App() {
                             <Route path="/polizze" element={<Polizze />} />
                             <Route path="/polizze/:id" element={<PolizzaDetail />} />
                             <Route path="/titoli" element={<Titoli />} />
+                            <Route path="/titoli-storici" element={<TitoliStorici />} />
                             <Route path="/sinistri" element={<Sinistri />} />
                             <Route
                                 path="/avvisi"

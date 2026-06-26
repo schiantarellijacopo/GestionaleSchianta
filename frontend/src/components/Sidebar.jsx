@@ -26,7 +26,7 @@ const ALL_MENU_ITEMS = [
     { id: "sinistri", path: "/sinistri", icon: "AlertTriangle", label: "Sinistri", section: "assicurazione", roles: null },
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "primanota", path: "/contabilita", icon: "BookOpen", label: "Prima nota", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "titoli_storici", path: "/titoli?preset=storico", icon: "Receipt", label: "Titoli storici", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "titoli_storici", path: "/titoli-storici", icon: "Receipt", label: "Titoli storici", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "sospesi", path: "/sospesi", icon: "TimerReset", label: "Sospesi (anticipati)", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },

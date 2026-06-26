@@ -3,19 +3,38 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 23 — Mypy CI gate ATTIVATO)
+## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Documenti Titoli)
 
-### Done
-- ✅ **Mypy CI gate `scripts/check_mypy.sh`** attivato sui core modules (shared, database, storage, db_models, routes/*) — `Success: no issues found in 8 source files`.
-- ✅ Risolti gli ultimi 6 errori mypy residui:
-  - `storage.py` (2x): `key: Optional[str]` dopo retry 403 → guardia esplicita `raise RuntimeError` se None.
-  - `db_models.py`: campo `professione` duplicato (linee 169 vs 206) → rimosso il secondo.
-  - `routes/librerie.py` (3x): annotato `flt: dict`, `candidati: list[dict]`, sostituito `(u or {}).get()` con `u: dict = ... or {}`.
-- ✅ **Bug fix demo seed**: `seed_demo` ora chiama `_seed_demo_users` sempre (anche se compagnie demo già presenti). Riallinea idempotentemente password+ruolo+email degli account demo (collaboratore/dipendente/cliente) anche se il record esistente è stato modificato.
-- ✅ Auth/login per tutti i ruoli (admin/collaboratore/dipendente/cliente) verificata via pytest (`5/5 PASS`).
+### Done — Estrazione `routes/anagrafiche.py` (P0)
+- ✅ Estratto blocco 1 (25 endpoint, ~727 righe): KPI custom, tags, stats, CRUD, network, relazioni, documenti, privacy GDPR, firma digitale, INPS auto, interviste.
+- ✅ `server.py`: 9.164 → **8.437 righe** (-727).
+- ✅ Helper `_normalize_upper`, `_auto_geocode`, `UPPER_FIELDS`, `ANAGRAFICA_DOC_TIPI` migrati al nuovo router.
+- ✅ Smoke test verde su `/anagrafiche`, `/anagrafiche/stats`, `/anagrafiche/tags`.
 
-### Note testing
-- Test suite globale: 285 PASS / 9 FAIL (pre-esistenti, NON regressioni introdotte — verificato con `git stash`). Le failure riguardano test data drift (ragione_sociale uppercase, brogliaccio state da run precedenti, statistiche endpoint cambiato). Issue P2 da chiudere in sessione successiva.
+### Done — Lock Prima Nota chiusa (P1 — bug critico)
+- ✅ Helper `shared.assert_giornata_aperta(data)` introdotto.
+- ✅ Check applicato in: `PUT/DELETE /titoli/{tid}`, `PUT/DELETE /rappel/{rid}`, `DELETE /collaboratori/.../voci-manuali/{vid}`.
+- ✅ Movimenti già coperti via `chiusura_id`. Sospesi sono Titoli (coperti dal check titoli). Estratti conto sono view aggregati (no lock necessario).
+- ✅ Test live: tentativo modifica/delete titolo in giornata chiusa → 400 "Prima Nota del 2026-06-23 chiusa — riaprire la chiusura per modificare il titolo."
+
+### Done — Documenti multipli sui Titoli (P1)
+- ✅ Fix bug `bulk-azione-allegato`: l'allegato veniva linkato solo a "anagrafica" — ora viene creato un record `Allegato(entita_tipo="titolo", entita_id=tid)` per OGNI titolo selezionato + 1 sulla anagrafica per visibilità diario.
+- ✅ `GET /polizze/{pid}` ora include `allegati_count` per ogni titolo (visibile in PolizzaDetail → tab Titoli).
+- ✅ Frontend: aggiunta colonna "Allegati" con `AllegatiCell` in PolizzaDetail tab Titoli. `Titoli.jsx` già usa AllegatiCell.
+- ✅ Allegati supportano upload multipli (più chiamate a `/allegati POST` con stesso `entita_id`).
+
+### Done — Titoli vs Titoli Storici (UX split)
+- ✅ **Pagina Titoli** (`/titoli`): solo titoli **da incassare / sospesi**. Preset: Sospesi, Scadute oggi/5gg/10gg/15gg/Oltre 15gg, Tutti (da incassare). Default escluso `incassato/stornato`.
+- ✅ **Pagina Titoli Storici** (`/titoli-storici` — nuova route): solo titoli **incassati**. Preset: Tutti incassati, Anno corrente, Mese corrente. Colonne extra "Incassato il" + "Pagato con".
+- ✅ Backend: nuovo param `stato_not` su `GET /titoli` (CSV di stati esclusi).
+- ✅ Sidebar aggiornata: "Titoli" sotto Assicurazione, "Titoli storici" sotto Contabilità.
+- ✅ Wrapper `TitoliStorici.jsx` = `<Titoli storicoMode />` (zero duplicazione codice).
+
+### Mypy gate
+- ✅ Continua a passare (9 file core type-safe). `routes.anagrafiche` con relaxed rules pending Pydantic response models (P2).
+- ✅ Script CI: `/app/backend/scripts/check_mypy.sh`.
+
+
 
 ## Latest Session (Iter 21+22 — Debito tecnico residuo SMALTITO)
 

@@ -20,6 +20,7 @@ import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
+import AllegatiCell from "@/components/AllegatiCell";
 
 export default function PolizzaDetail() {
     const { id } = useParams();
@@ -307,7 +308,7 @@ export default function PolizzaDetail() {
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
                             <table className="tbl w-full">
-                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th className="text-center w-40">Azioni</th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th className="text-center">Allegati</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
                                         <tr key={t.id}
@@ -336,6 +337,15 @@ export default function PolizzaDetail() {
                                             <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
                                             <td className="num text-xs text-emerald-700" data-testid={`titolo-coperto-${t.id}`}>{t.data_copertura ? fmtDate(t.data_copertura) : (t.coperto_fino_a ? fmtDate(t.coperto_fino_a) : "—")}</td>
                                             <td className="num text-xs" data-testid={`titolo-pagato-${t.id}`}>{t.stato === "incassato" ? fmtDate(t.data_incasso) : "—"}</td>
+                                            <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                                                <AllegatiCell
+                                                    entita_tipo="titolo"
+                                                    entita_id={t.id}
+                                                    count={t.allegati_count}
+                                                    hint={t.data_incasso ? "Allega ricevuta bonifico / assegno" : "Allega documento"}
+                                                    onChange={load}
+                                                />
+                                            </td>
                                             <td className="text-center">
                                                 <div className="flex gap-1 justify-center">
                                                     {t.stato !== "incassato" && t.stato !== "stornato" && (
