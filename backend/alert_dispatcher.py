@@ -1,0 +1,338 @@
+"""Alert dispatcher — invia notifiche multi-canale (inapp/email/sms/whatsapp).
+
+Canali:
+- inapp:    sempre attivo, scrive Notification per ogni destinatario.
+- email:    via SMTP. Config: SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_FROM.
+            Pensato per Google Workspace (smtp.gmail.com:587, app password).
+- sms:      PREDISPOSTO. Adapter Twilio (richiede TWILIO_ACCOUNT_SID +
+            TWILIO_AUTH_TOKEN + TWILIO_SMS_FROM). Se mancano → status=skipped.
+- whatsapp: PREDISPOSTO. Adapter Twilio WhatsApp (TWILIO_WA_FROM con prefisso
+            "whatsapp:+...") oppure Meta Cloud API (META_WA_TOKEN +
+            META_WA_PHONE_ID). Se mancano → status=skipped.
+
+Tutti i tentativi vengono loggati in AlertEvent (storico).
+"""
+from __future__ import annotations
+import logging
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Optional, Awaitable, Callable
+
+from database import db
+from alert_models import AlertEvent, Notification
+from db_models import _now_iso
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# TEMPLATE — placeholder substitution
+# ============================================================
+def render_template(tpl: str, context: dict) -> str:
+    """Sostituisce {placeholder} con i valori del context. Sicuro (no eval)."""
+    if not tpl:
+        return ""
+    out = tpl
+    for k, v in (context or {}).items():
+        out = out.replace("{" + str(k) + "}", str(v) if v is not None else "")
+    return out
+
+
+# ============================================================
+# RESOLVE DESTINATARI
+# ============================================================
+async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
+    """Risolve i destinatari della regola in base al payload dell'evento.
+
+    Output: lista di {tipo, user_id?, anagrafica_id?, label, email?, cellulare?, whatsapp?}
+    """
+    out: list[dict] = []
+    dest_tipi = rule.get("destinatari") or []
+    for dt in dest_tipi:
+        if dt == "cliente":
+            anag_id = payload.get("anagrafica_id") or payload.get("contraente_id")
+            if not anag_id:
+                continue
+            ana = await db.anagrafiche.find_one({"id": anag_id}, {"_id": 0})
+            if not ana:
+                continue
+            out.append({
+                "tipo": "cliente", "anagrafica_id": anag_id,
+                "label": ana.get("ragione_sociale"),
+                "email": ana.get("email"),
+                "cellulare": ana.get("cellulare") or ana.get("telefono"),
+                "whatsapp": ana.get("whatsapp") or ana.get("cellulare"),
+            })
+        elif dt == "collaboratore":
+            coll_id = payload.get("collaboratore_id")
+            if not coll_id:
+                # ricava da polizza se presente
+                pol_id = payload.get("polizza_id")
+                if pol_id:
+                    pol = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "collaboratore_id": 1})
+                    coll_id = pol.get("collaboratore_id") if pol else None
+            if coll_id:
+                u = await db.users.find_one({"id": coll_id}, {"_id": 0})
+                if u:
+                    out.append({
+                        "tipo": "collaboratore", "user_id": coll_id,
+                        "label": u.get("name"), "email": u.get("email"),
+                        "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
+                    })
+        elif dt == "collaboratore_sinistri":
+            async for u in db.users.find({"gestisce_sinistri": True}, {"_id": 0}):
+                out.append({
+                    "tipo": "collaboratore_sinistri", "user_id": u["id"],
+                    "label": u.get("name"), "email": u.get("email"),
+                    "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
+                })
+        elif dt == "admin":
+            async for u in db.users.find({"role": "admin"}, {"_id": 0}):
+                out.append({
+                    "tipo": "admin", "user_id": u["id"],
+                    "label": u.get("name"), "email": u.get("email"),
+                    "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
+                })
+        elif dt == "utente_specifico":
+            for uid in (rule.get("destinatari_user_ids") or []):
+                u = await db.users.find_one({"id": uid}, {"_id": 0})
+                if u:
+                    out.append({
+                        "tipo": "utente_specifico", "user_id": uid,
+                        "label": u.get("name"), "email": u.get("email"),
+                        "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
+                    })
+    # dedupe per (tipo, indirizzo principale)
+    seen = set()
+    unique = []
+    for d in out:
+        key = (d.get("tipo"), d.get("user_id") or d.get("anagrafica_id") or d.get("email") or d.get("cellulare"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+    return unique
+
+
+# ============================================================
+# CHANNEL ADAPTERS
+# ============================================================
+async def send_inapp(rule: dict, dest: dict, ctx: dict) -> dict:
+    """Crea un record Notification per l'utente."""
+    user_id = dest.get("user_id")
+    if not user_id:
+        return {"status": "skipped", "error": "in-app richiede user_id"}
+    n = Notification(
+        user_id=user_id,
+        titolo=ctx.get("oggetto") or rule.get("nome") or "Notifica",
+        messaggio=ctx.get("corpo") or "",
+        tipo=rule.get("livello") or "info",
+        icona=rule.get("icona") or "Bell",
+        link=ctx.get("link"),
+        rule_id=rule.get("id"),
+        entita_tipo=ctx.get("entita_tipo"),
+        entita_id=ctx.get("entita_id"),
+    )
+    await db.notifications.insert_one(n.model_dump())
+    return {"status": "ok"}
+
+
+async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
+    """Invia email via SMTP. Config richiesta in env."""
+    to_email = dest.get("email")
+    if not to_email:
+        return {"status": "skipped", "error": "email destinatario assente"}
+    host = os.environ.get("SMTP_HOST")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER")
+    pwd = os.environ.get("SMTP_PASSWORD")
+    sender = os.environ.get("SMTP_FROM") or user
+    if not (host and user and pwd and sender):
+        return {"status": "skipped", "error": "SMTP non configurato (vedi SMTP_HOST/USER/PASSWORD)"}
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = ctx.get("oggetto") or rule.get("nome") or "Notifica"
+        msg["From"] = sender
+        msg["To"] = to_email
+        body = ctx.get("corpo") or ""
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        # versione HTML semplice (auto wrap)
+        html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        with smtplib.SMTP(host, port, timeout=20) as srv:
+            srv.starttls()
+            srv.login(user, pwd)
+            srv.sendmail(sender, [to_email], msg.as_string())
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "errore", "error": str(e)}
+
+
+async def send_sms(rule: dict, dest: dict, ctx: dict) -> dict:
+    """PREDISPOSTO. Twilio SMS."""
+    to_num = dest.get("cellulare")
+    if not to_num:
+        return {"status": "skipped", "error": "cellulare destinatario assente"}
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    tok = os.environ.get("TWILIO_AUTH_TOKEN")
+    from_num = os.environ.get("TWILIO_SMS_FROM")
+    if not (sid and tok and from_num):
+        return {"status": "skipped", "error": "Twilio SMS non configurato (vedi TWILIO_ACCOUNT_SID/AUTH_TOKEN/SMS_FROM)"}
+    try:
+        # import lazy per non richiedere il pacchetto se non usato
+        from twilio.rest import Client  # type: ignore
+        client = Client(sid, tok)
+        msg = client.messages.create(
+            from_=from_num, to=to_num,
+            body=(ctx.get("corpo") or "")[:480],
+        )
+        return {"status": "ok", "provider_id": msg.sid}
+    except Exception as e:
+        return {"status": "errore", "error": str(e)}
+
+
+async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
+    """PREDISPOSTO. Twilio WhatsApp Business API."""
+    to_num = dest.get("whatsapp") or dest.get("cellulare")
+    if not to_num:
+        return {"status": "skipped", "error": "WhatsApp destinatario assente"}
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    tok = os.environ.get("TWILIO_AUTH_TOKEN")
+    from_wa = os.environ.get("TWILIO_WA_FROM")    # es. "whatsapp:+14155238886"
+    if not (sid and tok and from_wa):
+        return {"status": "skipped", "error": "Twilio WhatsApp non configurato (vedi TWILIO_WA_FROM)"}
+    try:
+        from twilio.rest import Client  # type: ignore
+        client = Client(sid, tok)
+        normalized = to_num if to_num.startswith("whatsapp:") else f"whatsapp:{to_num}"
+        msg = client.messages.create(
+            from_=from_wa, to=normalized,
+            body=(ctx.get("corpo") or "")[:1500],
+        )
+        return {"status": "ok", "provider_id": msg.sid}
+    except Exception as e:
+        return {"status": "errore", "error": str(e)}
+
+
+CHANNEL_ADAPTERS: dict[str, Callable[[dict, dict, dict], Awaitable[dict]]] = {
+    "inapp": send_inapp,
+    "email": send_email,
+    "sms": send_sms,
+    "whatsapp": send_whatsapp,
+}
+
+
+# ============================================================
+# DISPATCH
+# ============================================================
+async def dispatch_rule(rule: dict, payload: dict) -> dict:
+    """Esegue UNA regola con il payload dato.
+
+    Returns: {sent: N, errors: N, skipped: N, events: [event_id, ...]}
+    """
+    stats: dict = {"sent": 0, "errors": 0, "skipped": 0, "events": []}
+    if not rule.get("attivo"):
+        return stats
+    destinatari = await resolve_destinatari(rule, payload)
+    if not destinatari:
+        return stats
+
+    # context per template
+    base_ctx = dict(payload)
+    canali = rule.get("canali") or []
+    for dest in destinatari:
+        ctx_dest = dict(base_ctx)
+        ctx_dest["nome"] = dest.get("label") or ""
+        oggetto = render_template(rule.get("template_oggetto") or rule.get("nome") or "", ctx_dest)
+        corpo = render_template(rule.get("template_corpo") or "", ctx_dest)
+        ctx_dest["oggetto"] = oggetto
+        ctx_dest["corpo"] = corpo
+        ctx_dest["link"] = payload.get("link")
+        ctx_dest["entita_tipo"] = payload.get("entita_tipo")
+        ctx_dest["entita_id"] = payload.get("entita_id")
+
+        for canale in canali:
+            adapter = CHANNEL_ADAPTERS.get(canale)
+            indirizzo = {
+                "inapp": dest.get("user_id"),
+                "email": dest.get("email"),
+                "sms": dest.get("cellulare"),
+                "whatsapp": dest.get("whatsapp") or dest.get("cellulare"),
+            }.get(canale)
+            ev = AlertEvent(
+                rule_id=rule["id"], rule_nome=rule.get("nome") or "",
+                canale=canale,
+                destinatario_tipo=dest.get("tipo") or "",
+                destinatario_user_id=dest.get("user_id"),
+                destinatario_anagrafica_id=dest.get("anagrafica_id"),
+                destinatario_label=dest.get("label"),
+                destinatario_indirizzo=indirizzo,
+                oggetto=oggetto, corpo=corpo,
+                entita_tipo=payload.get("entita_tipo"),
+                entita_id=payload.get("entita_id"),
+                payload=payload,
+            )
+            if not adapter:
+                ev.status = "skipped"
+                ev.error_message = f"canale '{canale}' non riconosciuto"
+            else:
+                try:
+                    res = await adapter(rule, dest, ctx_dest)
+                    ev.status = res.get("status") or "errore"
+                    ev.error_message = res.get("error")
+                    if ev.status == "ok":
+                        ev.sent_at = _now_iso()
+                except Exception as e:
+                    ev.status = "errore"
+                    ev.error_message = str(e)
+            await db.alert_events.insert_one(ev.model_dump())
+            stats["events"].append(ev.id)
+            if ev.status == "ok":
+                stats["sent"] += 1
+            elif ev.status == "skipped":
+                stats["skipped"] += 1
+            else:
+                stats["errors"] += 1
+    # aggiorna contatori rule
+    await db.alert_rules.update_one({"id": rule["id"]}, {"$set": {
+        "last_event_at": _now_iso(), "updated_at": _now_iso(),
+    }, "$inc": {"invii_totali": stats["sent"], "errori_totali": stats["errors"]}})
+    return stats
+
+
+async def dispatch_evento(evento: str, payload: dict) -> dict:
+    """Trova tutte le regole attive per `evento` e le esegue.
+
+    `evento`: es. "sinistro.aperto", "polizza.emessa", ...
+    `payload`: dict con almeno {entita_tipo, entita_id, ...campi specifici}
+    """
+    agg: dict = {"matched": 0, "sent": 0, "errors": 0, "skipped": 0}
+    async for rule in db.alert_rules.find({"attivo": True, "tipo": "evento", "evento": evento}, {"_id": 0}):
+        agg["matched"] += 1
+        s = await dispatch_rule(rule, payload)
+        agg["sent"] += s["sent"]
+        agg["errors"] += s["errors"]
+        agg["skipped"] += s["skipped"]
+    return agg
+
+
+# ============================================================
+# SAFE WRAPPER — never crash caller
+# ============================================================
+async def safe_dispatch(evento: str, payload: dict) -> None:
+    """Wrapper non-throw da chiamare dai service backend.
+
+    Esempio:
+        from alert_dispatcher import safe_dispatch
+        await safe_dispatch("sinistro.aperto", {
+            "entita_tipo": "sinistro", "entita_id": s.id,
+            "anagrafica_id": s.assicurato_id, "polizza_id": s.polizza_id,
+            "numero_sinistro": s.numero_sinistro, ...
+        })
+    """
+    try:
+        await dispatch_evento(evento, payload)
+    except Exception as e:
+        logger.error("Alert dispatch failed for evento=%s: %s", evento, e)

@@ -2305,6 +2305,20 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
     obj = Polizza(**body)
     await db.polizze.insert_one(obj.model_dump())
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
+    # Alert: polizza emessa
+    from alert_dispatcher import safe_dispatch
+    await safe_dispatch("polizza.emessa", {
+        "entita_tipo": "polizza", "entita_id": obj.id,
+        "anagrafica_id": obj.contraente_id,
+        "polizza_id": obj.id,
+        "collaboratore_id": obj.collaboratore_id,
+        "numero_polizza": obj.numero_polizza,
+        "ramo": obj.ramo,
+        "data_effetto": obj.effetto,
+        "scadenza": obj.scadenza,
+        "premio_totale": obj.premio_totale,
+        "link": f"/polizze/{obj.id}",
+    })
     return obj.model_dump()
 
 
@@ -3330,17 +3344,53 @@ async def create_sinistro(body: dict, user=Depends(require_user("admin", "collab
     obj = Sinistro(**body)
     await db.sinistri.insert_one(obj.model_dump())
     await log_attivita(user, "create", "sinistro", obj.id, f"Sinistro {obj.numero_sinistro}")
+    # Alert: sinistro aperto
+    pol = await db.polizze.find_one({"id": obj.polizza_id}, {"_id": 0, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "collaboratore_id": 1}) if obj.polizza_id else None
+    from alert_dispatcher import safe_dispatch
+    await safe_dispatch("sinistro.aperto", {
+        "entita_tipo": "sinistro", "entita_id": obj.id,
+        "anagrafica_id": (pol or {}).get("contraente_id"),
+        "polizza_id": obj.polizza_id,
+        "collaboratore_id": (pol or {}).get("collaboratore_id"),
+        "numero_sinistro": obj.numero_sinistro,
+        "numero_polizza": (pol or {}).get("numero_polizza"),
+        "ramo": (pol or {}).get("ramo"),
+        "link": f"/sinistri/{obj.id}",
+    })
     return obj.model_dump()
 
 
 @api.put("/sinistri/{sid}")
 async def update_sinistro(sid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    body["updated_at"] = _now_iso()
-    res = await db.sinistri.update_one({"id": sid}, {"$set": body})
-    if res.matched_count == 0:
+    prev = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    if not prev:
         raise HTTPException(404, "Non trovato")
+    body["updated_at"] = _now_iso()
+    await db.sinistri.update_one({"id": sid}, {"$set": body})
     await log_attivita(user, "update", "sinistro", sid)
-    return strip_mongo_id(await db.sinistri.find_one({"id": sid}, {"_id": 0}))
+    new = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    # Alert: stato cambiato a chiuso o pagato
+    new_stato = (new or {}).get("stato")
+    prev_stato = prev.get("stato")
+    if new_stato != prev_stato and new_stato in ("chiuso", "liquidato", "pagato"):
+        pol = await db.polizze.find_one(
+            {"id": new.get("polizza_id")},
+            {"_id": 0, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "collaboratore_id": 1},
+        ) if new.get("polizza_id") else None
+        from alert_dispatcher import safe_dispatch
+        evento = "sinistro.pagato" if new_stato in ("liquidato", "pagato") else "sinistro.chiuso"
+        await safe_dispatch(evento, {
+            "entita_tipo": "sinistro", "entita_id": sid,
+            "anagrafica_id": (pol or {}).get("contraente_id"),
+            "polizza_id": new.get("polizza_id"),
+            "collaboratore_id": (pol or {}).get("collaboratore_id"),
+            "numero_sinistro": new.get("numero_sinistro"),
+            "numero_polizza": (pol or {}).get("numero_polizza"),
+            "importo_liquidato": new.get("importo_liquidato"),
+            "ramo": (pol or {}).get("ramo"),
+            "link": f"/sinistri/{sid}",
+        })
+    return strip_mongo_id(new)
 
 
 @api.delete("/sinistri/{sid}")
@@ -8416,9 +8466,11 @@ async def migra_sconti(user=Depends(require_user("admin"))):
 from routes import dashboard as _dash_router  # noqa: E402
 from routes import ocr as _ocr_router  # noqa: E402
 from routes import anagrafiche as _anag_router  # noqa: E402
+from routes import alert as _alert_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
+api.include_router(_alert_router.router)
 
 app.include_router(api)
 
@@ -8466,6 +8518,10 @@ async def startup():
     # demo users (dipendente + cliente collegato a anagrafica demo)
     from seed_demo import seed_demo
     await seed_demo(db)
+
+    # Seed alert preset rules (idempotent)
+    from alert_presets import seed_alert_presets
+    await seed_alert_presets()
 
     # Seed mezzi pagamento (libreria unica) — idempotente
     await _seed_mezzi_pagamento()

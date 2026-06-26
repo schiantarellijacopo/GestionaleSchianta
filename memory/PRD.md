@@ -3,7 +3,25 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Banner UX + Documenti Titoli)
+## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Banner UX + Documenti Titoli + Alert & Automazioni)
+
+### Done — Alert & Automazioni (NUOVA SEZIONE)
+- ✅ **Modelli backend** (`alert_models.py`): `AlertRule`, `AlertEvent`, `Notification`.
+- ✅ **Dispatcher multi-canale** (`alert_dispatcher.py`): adapter in-app (attivo), email SMTP (attivo se configurato), SMS Twilio (predisposto), WhatsApp Twilio (predisposto). Template con placeholder `{nome}`, `{numero_polizza}`, `{importo}`, ecc. Lookup destinatari (cliente/collaboratore/collaboratore_sinistri/admin).
+- ✅ **Catalogo 11 regole preset** (`alert_presets.py`) seedate idempotenti: sinistro aperto/chiuso/pagato, sinistro importato ANIA, polizza emessa, compleanno cliente, documento ID scaduto, titolo scaduto >5gg, sospesi/arretrati settimanali al collaboratore, polizza in scadenza senza rinnovo.
+- ✅ **Router** `routes/alert.py`: CRUD regole, toggle, test (invia a me), storico eventi, centro notifiche utente (`/notifications/me`, unread-count, mark-read, archivia).
+- ✅ **Hook eventi**: `POST /polizze` → `polizza.emessa`. `POST /sinistri` → `sinistro.aperto`. `PUT /sinistri` (cambio stato chiuso/pagato) → `sinistro.chiuso` o `sinistro.pagato`.
+- ✅ **Frontend** pagina `/alert` (`Alert.jsx`): tabella regole + filtri tipo + toggle + editor template (canali, destinatari, soglia, oggetto/corpo) + tab storico invii.
+- ✅ **Campanella notifiche in TopBar** (`NotificheBell.jsx`): badge counter unread, polling 30s, dropdown ultime 20 notifiche, "Segna tutte come lette", archiviazione singola, click → naviga al link entità.
+- ✅ Sidebar: nuova voce "Alert & Automazioni" sotto Assicurazione.
+- ✅ Test live: regola "Sinistro aperto" attivata → test invia notifica in-app all'admin, badge campanella → 1, dropdown mostra notifica.
+
+### Configurazione canali (env vars opzionali)
+- Email Gmail: `SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_USER=tuomail@domain SMTP_PASSWORD=app_password SMTP_FROM=tuomail@domain`
+- Twilio SMS: `TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_SMS_FROM`
+- Twilio WhatsApp: `TWILIO_WA_FROM=whatsapp:+...`
+
+
 
 ### Done — Estrazione `routes/anagrafiche.py` (P0)
 - ✅ Estratto blocco 1 (25 endpoint, ~727 righe): KPI custom, tags, stats, CRUD, network, relazioni, documenti, privacy GDPR, firma digitale, INPS auto, interviste.

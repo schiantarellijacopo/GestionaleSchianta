@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, Bell, X } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import NotificheBell from "./NotificheBell";
 
 export default function TopBar() {
     const { user } = useAuth();
     const [q, setQ] = useState("");
     const [results, setResults] = useState(null);
     const [open, setOpen] = useState(false);
-    const [notif, setNotif] = useState({ totale: 0 });
     const ref = useRef();
     const nav = useNavigate();
 
@@ -21,14 +21,6 @@ export default function TopBar() {
         }, 250);
         return () => clearTimeout(t);
     }, [q]);
-
-    // notifiche polling
-    useEffect(() => {
-        const load = () => api.get("/notifiche/sommario").then((r) => setNotif(r.data)).catch(() => {});
-        load();
-        const t = setInterval(load, 30000);
-        return () => clearInterval(t);
-    }, []);
 
     // chiudi su click esterno
     useEffect(() => {
@@ -127,19 +119,7 @@ export default function TopBar() {
                 )}
             </div>
 
-            <button
-                data-testid="notif-bell"
-                onClick={() => nav("/chat")}
-                className="relative p-2 rounded-full hover:bg-slate-100 text-slate-600"
-                title={notif.totale > 0 ? `${notif.totale} notifiche` : "Nessuna notifica"}
-            >
-                <Bell size={18} />
-                {notif.totale > 0 && (
-                    <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 bg-rose-600 text-white text-[9px] rounded-full flex items-center justify-center px-1 font-semibold">
-                        {notif.totale > 99 ? "99+" : notif.totale}
-                    </span>
-                )}
-            </button>
+            <NotificheBell />
             <div className="text-sm text-slate-600 hidden md:block">
                 <span className="font-medium">{user?.name}</span>
                 <span className="text-xs text-slate-400 ml-1">({user?.role})</span>
