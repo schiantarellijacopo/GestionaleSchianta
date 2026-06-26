@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import {
     Search, Plus, ScanLine, Filter, X, Printer, FileSpreadsheet, FileText,
-    ChevronDown, ChevronUp,
+    ChevronDown, ChevronUp, Car,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -326,6 +326,9 @@ function NuovaPolizzaDialog({ onClose }) {
     const [ocrLoading, setOcrLoading] = useState(false);
     const ocrRef = useRef(null);
     const [polizzaFile, setPolizzaFile] = useState(null);
+    // Suggerimenti targa per autocomplete live (search nei veicoli del libro matricola)
+    const [targheSuggest, setTargheSuggest] = useState([]);
+    const [veicoloInfo, setVeicoloInfo] = useState(null);  // {fonte: "libro_matricola"|"polizza", polizze_collegate: [...]}
     const [f, setF] = useState({
         numero_polizza: "", compagnia_id: "", contraente_id: "",
         ramo: "", prodotto: "", effetto: "", scadenza: "",
@@ -416,13 +419,18 @@ function NuovaPolizzaDialog({ onClose }) {
             return;
         }
         try {
-            const created = await api.post("/polizze", {
+            const payload = {
                 ...f,
                 premio_lordo: parseFloat(f.premio_lordo) || 0,
                 premio_netto: parseFloat(f.premio_netto) || 0,
                 provvigioni: parseFloat(f.provvigioni) || 0,
                 assicurato_ids: [f.contraente_id],
-            });
+            };
+            // Se la targa è stata associata a un veicolo del libro matricola, lo collego
+            if (f.veicolo_id) {
+                payload.veicoli_ids = [f.veicolo_id];
+            }
+            const created = await api.post("/polizze", payload);
             if (polizzaFile && created.data?.id) {
                 const fd = new FormData();
                 fd.append("file", polizzaFile);
@@ -569,17 +577,66 @@ function NuovaPolizzaDialog({ onClose }) {
                     <Label>Targa (se RCA)</Label>
                     <Input
                         value={f.targa}
-                        onChange={(e) => set("targa", e.target.value.toUpperCase())}
+                        list="targhe-suggest"
+                        autoComplete="off"
+                        onChange={async (e) => {
+                            const t = e.target.value.toUpperCase();
+                            set("targa", t);
+                            setVeicoloInfo(null);
+                            // Live search nei veicoli (>= 2 caratteri)
+                            if (t.length >= 2) {
+                                try {
+                                    const r = await api.get("/veicoli", { params: { q: t, limit: 10 } });
+                                    setTargheSuggest(r.data || []);
+                                } catch { /* silenzio */ }
+                            } else {
+                                setTargheSuggest([]);
+                            }
+                        }}
                         onBlur={async (e) => {
                             const t = e.target.value.trim().toUpperCase();
                             if (!t || t.length < 4) return;
+                            // 1) Prima cerca nel Libro Matricola (sorgente "ufficiale" / più completa)
+                            try {
+                                const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
+                                const v = r.data?.veicolo;
+                                if (v) {
+                                    setF((prev) => ({
+                                        ...prev,
+                                        targa: t,
+                                        veicolo_marca: prev.veicolo_marca || v.marca || "",
+                                        veicolo_modello: prev.veicolo_modello || v.modello || "",
+                                        veicolo_alimentazione: prev.veicolo_alimentazione || v.alimentazione || "",
+                                        veicolo_kw: prev.veicolo_kw || v.kw || "",
+                                        veicolo_cilindrata: prev.veicolo_cilindrata || v.cilindrata || "",
+                                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || v.data_immatricolazione || "",
+                                        veicolo_uso: prev.veicolo_uso || v.uso || "",
+                                        veicolo_posti: prev.veicolo_posti || v.posti || "",
+                                        veicolo_quintali: prev.veicolo_quintali || v.quintali || "",
+                                        veicolo_settore: prev.veicolo_settore || v.settore || "",
+                                        telaio: prev.telaio || v.telaio || "",
+                                        veicolo_id: v.id,  // collegamento esplicito
+                                    }));
+                                    setVeicoloInfo({
+                                        fonte: "libro_matricola",
+                                        veicolo: v,
+                                        polizze_collegate: r.data?.polizze_collegate || [],
+                                    });
+                                    const npol = (r.data?.polizze_collegate || []).length;
+                                    toast.success(
+                                        `Veicolo dal Libro Matricola: ${v.marca || ""} ${v.modello || ""} `
+                                        + `${npol ? `(${npol} polizz${npol === 1 ? "a" : "e"} già collegat${npol === 1 ? "a" : "e"})` : ""}`
+                                    );
+                                    return;
+                                }
+                            } catch { /* not found, fallback */ }
+                            // 2) Fallback: lookup nelle polizze precedenti (vecchio endpoint)
                             try {
                                 const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t } });
                                 if (r.data && r.data.trovata) {
                                     setF((prev) => ({
                                         ...prev,
                                         targa: t,
-                                        // auto-popola veicolo solo se i campi sono vuoti — USA i nomi backend corretti veicolo_*
                                         veicolo_marca: prev.veicolo_marca || r.data.veicolo_marca || "",
                                         veicolo_modello: prev.veicolo_modello || r.data.veicolo_modello || "",
                                         veicolo_tipo: prev.veicolo_tipo || r.data.veicolo_tipo || "",
@@ -592,7 +649,11 @@ function NuovaPolizzaDialog({ onClose }) {
                                         veicolo_posti: prev.veicolo_posti || r.data.veicolo_posti || "",
                                         telaio: prev.telaio || r.data.telaio || "",
                                     }));
-                                    toast.success(`Veicolo trovato: ${r.data.veicolo_marca || ""} ${r.data.veicolo_modello || ""} (${r.data.n_polizze} polizze precedenti)`);
+                                    setVeicoloInfo({ fonte: "polizza", n_polizze: r.data.n_polizze });
+                                    toast.success(
+                                        `Veicolo trovato in polizza precedente: ${r.data.veicolo_marca || ""} `
+                                        + `${r.data.veicolo_modello || ""} (${r.data.n_polizze} polizze)`
+                                    );
                                 }
                             } catch (err) {
                                 console.warn("targa lookup", err?.message);
@@ -600,6 +661,45 @@ function NuovaPolizzaDialog({ onClose }) {
                         }}
                         data-testid="pol-targa-input"
                     />
+                    {/* Datalist suggerimenti live mentre digita */}
+                    <datalist id="targhe-suggest">
+                        {targheSuggest.map((v) => (
+                            <option key={v.id} value={v.targa}>
+                                {[v.marca, v.modello, v.proprietario].filter(Boolean).join(" · ")}
+                            </option>
+                        ))}
+                    </datalist>
+                    {/* Info box veicolo trovato + polizze collegate */}
+                    {veicoloInfo && (
+                        <div className="mt-2 p-2 bg-sky-50 border border-sky-200 rounded text-xs" data-testid="veicolo-info-box">
+                            <div className="flex items-center gap-1.5 font-medium text-sky-900">
+                                <Car size={12} />
+                                {veicoloInfo.fonte === "libro_matricola"
+                                    ? "Dati dal Libro Matricola"
+                                    : "Dati da polizza precedente"}
+                            </div>
+                            {veicoloInfo.veicolo && (
+                                <div className="text-slate-700 mt-0.5">
+                                    {veicoloInfo.veicolo.marca} {veicoloInfo.veicolo.modello}
+                                    {veicoloInfo.veicolo.proprietario && <> · <span className="text-slate-500">Proprietario: {veicoloInfo.veicolo.proprietario}</span></>}
+                                </div>
+                            )}
+                            {(veicoloInfo.polizze_collegate || []).length > 0 && (
+                                <div className="mt-1.5">
+                                    <div className="font-medium text-slate-600 text-[11px]">Polizze già su questa targa:</div>
+                                    <ul className="list-disc pl-4 mt-0.5">
+                                        {(veicoloInfo.polizze_collegate || []).map((p) => (
+                                            <li key={p.id} className="text-[11px]">
+                                                <span className="font-mono">{p.numero_polizza}</span>
+                                                {p.ramo && <> · {p.ramo}</>}
+                                                {p.stato && <span className="ml-1 text-slate-500">[{p.stato}]</span>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <div className="col-span-2">
                     <Label>Collaboratore (Operatore)</Label>

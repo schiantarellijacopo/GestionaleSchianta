@@ -646,12 +646,16 @@ function Storico({ onOpenWizard }) {
 // ============================================================
 // IMPORT TARGHE / LIBRI MATRICOLA
 // ============================================================
-function ImportTargheStub() {
+export function ImportTargheStub({ polizzaPreselezionata = null, onImportComplete = null }) {
     const [file, setFile] = useState(null);
     const [preview, setPreview] = useState(null);
-    const [mapping, setMapping] = useState({});  // { header: field }
+    const [mapping, setMapping] = useState({});
     const [importing, setImporting] = useState(false);
     const [result, setResult] = useState(null);
+    const [polizzaId, setPolizzaId] = useState(polizzaPreselezionata?.id || "");
+    const [polizzaQuery, setPolizzaQuery] = useState(polizzaPreselezionata?.numero_polizza || "");
+    const [polizzeMatch, setPolizzeMatch] = useState([]);
+    const [polizzaSel, setPolizzaSel] = useState(polizzaPreselezionata || null);
     const inputRef = useRef(null);
 
     const onSelectFile = (f) => {
@@ -660,6 +664,22 @@ function ImportTargheStub() {
         setResult(null);
         setMapping({});
     };
+
+    // Live search polizze per numero/contraente (debounce semplice via lunghezza min)
+    useEffect(() => {
+        if (polizzaPreselezionata || !polizzaQuery || polizzaQuery.length < 2 || polizzaSel) {
+            setPolizzeMatch([]);
+            return;
+        }
+        const tid = setTimeout(async () => {
+            try {
+                const r = await api.get("/polizze", { params: { q: polizzaQuery, limit: 8 } });
+                const items = Array.isArray(r.data) ? r.data : (r.data?.items || []);
+                setPolizzeMatch(items);
+            } catch { setPolizzeMatch([]); }
+        }, 250);
+        return () => clearTimeout(tid);
+    }, [polizzaQuery, polizzaSel, polizzaPreselezionata]);
 
     const doPreview = async () => {
         if (!file) { toast.error("Seleziona prima un file"); return; }
@@ -679,7 +699,6 @@ function ImportTargheStub() {
 
     const doCommit = async () => {
         if (!file || !preview) return;
-        // Check required
         const requiredFields = (preview.campi_target || []).filter((c) => c.required).map((c) => c.field);
         const mappedFields = new Set(Object.values(mapping).filter(Boolean));
         const missingReq = requiredFields.filter((f) => !mappedFields.has(f));
@@ -692,12 +711,15 @@ function ImportTargheStub() {
             const fd = new FormData();
             fd.append("file", file);
             fd.append("mapping", JSON.stringify(mapping));
+            if (polizzaId) fd.append("polizza_id", polizzaId);
             const res = await api.post("/import/libro-matricola/commit", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setResult(res.data);
             const s = res.data;
-            toast.success(`Importati ${s.creati + s.aggiornati} veicoli (${s.creati} nuovi, ${s.aggiornati} aggiornati)`);
+            const linkInfo = polizzaSel ? ` e collegati a polizza ${polizzaSel.numero_polizza}` : "";
+            toast.success(`Importati ${s.creati + s.aggiornati} veicoli${linkInfo}`);
+            if (onImportComplete) onImportComplete(res.data);
         } catch (e) {
             toast.error("Errore import: " + (e.response?.data?.detail || e.message));
         } finally {
@@ -705,9 +727,7 @@ function ImportTargheStub() {
         }
     };
 
-    const setHeaderMapping = (header, field) => {
-        setMapping((m) => ({ ...m, [header]: field }));
-    };
+    const setHeaderMapping = (header, field) => setMapping((m) => ({ ...m, [header]: field }));
 
     const requiredFields = (preview?.campi_target || []).filter((c) => c.required).map((c) => c.field);
     const mappedFields = new Set(Object.values(mapping).filter(Boolean));
@@ -715,18 +735,84 @@ function ImportTargheStub() {
 
     return (
         <div className="space-y-4" data-testid="targhe-importer">
-            {/* Step 1: upload */}
+            {/* Step 1: upload + selettore polizza */}
             <Card className="p-6" data-testid="lm-upload-card">
                 <div className="flex items-center gap-3 mb-3">
                     <Car size={22} className="text-sky-700" />
                     <div>
                         <h3 className="font-medium text-slate-800">Import Libro Matricola / Stato di Rischio</h3>
                         <p className="text-xs text-slate-500">
-                            Carica un Excel/CSV. Scegli quali colonne importare: <strong>Targa</strong>, <strong>Data Inizio</strong> e <strong>Proprietario</strong> sono obbligatori, gli altri sono opzionali.
+                            Carica Excel/CSV. <strong>Targa</strong>, <strong>Data Inizio</strong> e <strong>Proprietario</strong> obbligatori. Gli altri campi sono opzionali.
                         </p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+
+                {/* Selettore polizza */}
+                {polizzaPreselezionata ? (
+                    <div className="mb-3 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs flex items-center gap-2" data-testid="lm-polizza-locked">
+                        <CheckCircle2 size={14} className="text-emerald-600" />
+                        <span className="text-emerald-900">
+                            I veicoli verranno collegati alla polizza <strong>{polizzaPreselezionata.numero_polizza}</strong>
+                        </span>
+                    </div>
+                ) : (
+                    <div className="mb-3 relative">
+                        <label className="text-xs text-slate-600 mb-1 block">
+                            Collega a polizza esistente <span className="text-slate-400">(opzionale)</span>
+                        </label>
+                        {polizzaSel ? (
+                            <div className="flex items-center gap-2 text-sm bg-sky-50 border border-sky-200 rounded px-2 py-1.5" data-testid="lm-polizza-selected">
+                                <Car size={13} className="text-sky-700" />
+                                <span className="font-mono text-sky-900">{polizzaSel.numero_polizza}</span>
+                                <span className="text-slate-600 text-xs">{polizzaSel.ramo}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => { setPolizzaSel(null); setPolizzaId(""); setPolizzaQuery(""); }}
+                                    className="ml-auto text-rose-600 hover:text-rose-800"
+                                    data-testid="lm-polizza-clear"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <input
+                                    type="text"
+                                    value={polizzaQuery}
+                                    onChange={(e) => setPolizzaQuery(e.target.value)}
+                                    placeholder="Cerca per numero polizza o contraente…"
+                                    className="w-full border rounded px-3 py-1.5 text-sm bg-white"
+                                    data-testid="lm-polizza-search"
+                                />
+                                {polizzeMatch.length > 0 && (
+                                    <div className="absolute z-10 mt-1 w-full bg-white border rounded shadow-lg max-h-60 overflow-y-auto">
+                                        {polizzeMatch.map((p) => (
+                                            <button
+                                                key={p.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setPolizzaSel(p);
+                                                    setPolizzaId(p.id);
+                                                    setPolizzaQuery(p.numero_polizza || "");
+                                                    setPolizzeMatch([]);
+                                                }}
+                                                className="block w-full text-left px-3 py-2 hover:bg-sky-50 text-xs border-b last:border-0"
+                                                data-testid={`lm-polizza-opt-${p.id}`}
+                                            >
+                                                <div className="font-mono text-slate-800">{p.numero_polizza}</div>
+                                                <div className="text-slate-500">
+                                                    {p.ramo} · {p.contraente?.ragione_sociale || p.contraente?.nome || ""}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
+
+                <div className="flex items-center gap-2 flex-wrap">
                     <input
                         ref={inputRef}
                         type="file"
@@ -739,12 +825,7 @@ function ImportTargheStub() {
                         <Upload size={14} className="mr-1" />
                         {file ? file.name : "Seleziona Excel/CSV"}
                     </Button>
-                    <Button
-                        onClick={doPreview}
-                        disabled={!file}
-                        className="bg-sky-700 hover:bg-sky-800"
-                        data-testid="lm-preview-btn"
-                    >
+                    <Button onClick={doPreview} disabled={!file} className="bg-sky-700 hover:bg-sky-800" data-testid="lm-preview-btn">
                         Anteprima & Mapping
                     </Button>
                 </div>
@@ -753,11 +834,12 @@ function ImportTargheStub() {
             {/* Step 2: mapping */}
             {preview && (
                 <Card className="p-5" data-testid="lm-mapping-card">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                         <div>
                             <h3 className="font-medium text-slate-800">Mappa le colonne del file</h3>
                             <p className="text-xs text-slate-500">
-                                {preview.total_rows} righe da importare · {preview.headers.length} colonne file
+                                {preview.total_rows} righe · {preview.headers.length} colonne
+                                {polizzaSel && <> · veicoli collegati a <strong>{polizzaSel.numero_polizza}</strong></>}
                             </p>
                         </div>
                         {missingRequired.length > 0 ? (
@@ -773,16 +855,11 @@ function ImportTargheStub() {
                     <div className="max-h-[420px] overflow-y-auto border rounded">
                         <table className="data-table w-full text-xs">
                             <thead className="sticky top-0 bg-slate-50">
-                                <tr>
-                                    <th>Colonna file</th>
-                                    <th>Esempio valore</th>
-                                    <th>Mappa a → campo</th>
-                                </tr>
+                                <tr><th>Colonna file</th><th>Esempio valore</th><th>Mappa a → campo</th></tr>
                             </thead>
                             <tbody>
                                 {preview.headers.map((h, i) => {
-                                    const example = (preview.preview_rows?.[0]?.[i] ?? "")
-                                        .toString().slice(0, 40);
+                                    const example = (preview.preview_rows?.[0]?.[i] ?? "").toString().slice(0, 40);
                                     return (
                                         <tr key={h + i} data-testid={`lm-row-${i}`}>
                                             <td className="font-medium text-slate-800">{h || `(col ${i + 1})`}</td>
@@ -809,16 +886,16 @@ function ImportTargheStub() {
                         </table>
                     </div>
                     <div className="flex items-center justify-end gap-2 mt-3">
-                        <Button variant="ghost" onClick={() => { setPreview(null); setFile(null); }}>
-                            Annulla
-                        </Button>
+                        <Button variant="ghost" onClick={() => { setPreview(null); setFile(null); }}>Annulla</Button>
                         <Button
                             onClick={doCommit}
                             disabled={importing || missingRequired.length > 0}
                             className="bg-sky-700 hover:bg-sky-800"
                             data-testid="lm-commit-btn"
                         >
-                            {importing ? "Importazione..." : `Importa ${preview.total_rows} veicoli`}
+                            {importing
+                                ? "Importazione..."
+                                : `Importa ${preview.total_rows} veicoli${polizzaSel ? " su polizza" : ""}`}
                         </Button>
                     </div>
                 </Card>
@@ -830,6 +907,11 @@ function ImportTargheStub() {
                     <div className="flex items-center gap-2 mb-3">
                         <CheckCircle2 size={18} className="text-emerald-600" />
                         <div className="font-medium text-slate-900">Import completato</div>
+                        {polizzaSel && (
+                            <div className="text-xs text-emerald-700 ml-auto">
+                                Collegati a polizza <strong>{polizzaSel.numero_polizza}</strong>
+                            </div>
+                        )}
                     </div>
                     <div className="grid grid-cols-4 gap-3 text-sm">
                         <Stat label="Totale" value={result.totale} />
@@ -839,15 +921,14 @@ function ImportTargheStub() {
                     </div>
                     {result.errori?.length > 0 && (
                         <div className="mt-3">
-                            <div className="text-xs font-semibold text-rose-700 mb-1">Errori (primi 20):</div>
+                            <div className="text-xs font-semibold text-rose-700 mb-1">Errori:</div>
                             <ul className="text-xs text-rose-800 list-disc pl-5 max-h-32 overflow-y-auto">
                                 {result.errori.slice(0, 20).map((e, i) => <li key={i}>{e}</li>)}
                             </ul>
                         </div>
                     )}
                     <p className="text-xs text-slate-500 mt-3">
-                        I veicoli sono ora disponibili: digitando la <strong>targa</strong> in una nuova polizza si potranno
-                        richiamare automaticamente tutti i dati (marca, modello, classe, valore, ecc.).
+                        Digitando la <strong>targa</strong> nelle nuove polizze si potranno richiamare automaticamente i dati.
                     </p>
                 </Card>
             )}

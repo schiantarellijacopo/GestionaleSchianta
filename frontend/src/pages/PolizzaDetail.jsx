@@ -397,7 +397,7 @@ export default function PolizzaDetail() {
 
                 {pol.is_libro_matricola && (
                     <TabsContent value="libro-matricola">
-                        <LibroMatricolaTab polizzaId={pol.id} />
+                        <LibroMatricolaTab polizzaId={pol.id} polizza={pol} />
                     </TabsContent>
                 )}
 

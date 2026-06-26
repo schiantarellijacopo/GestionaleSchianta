@@ -12,14 +12,16 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload } from "lucide-react";
+import { ImportTargheStub } from "@/pages/Importazione";
 
-export default function LibroMatricolaTab({ polizzaId }) {
+export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     const [list, setList] = useState([]);
     const [editing, setEditing] = useState(null);
     const [sostituendo, setSostituendo] = useState(null);
     const [q, setQ] = useState("");
     const [showStorico, setShowStorico] = useState(false);
+    const [showImport, setShowImport] = useState(false);
 
     const load = () => {
         const params = { includi_storico: showStorico };
@@ -79,6 +81,14 @@ export default function LibroMatricolaTab({ polizzaId }) {
                         <History size={14} className="mr-1" />Storico
                     </Button>
                     <Button
+                        size="sm" variant="outline"
+                        onClick={() => setShowImport(true)}
+                        data-testid="lm-import-btn"
+                        className="border-sky-300 text-sky-700 hover:bg-sky-50"
+                    >
+                        <Upload size={14} className="mr-1" /> Importa Excel/CSV
+                    </Button>
+                    <Button
                         size="sm" className="bg-sky-700 hover:bg-sky-800"
                         onClick={() => setEditing({ _new: true })}
                         data-testid="lm-new-btn"
@@ -87,6 +97,19 @@ export default function LibroMatricolaTab({ polizzaId }) {
                     </Button>
                 </div>
             </div>
+
+            {/* Dialog import libro matricola pre-collegato a questa polizza */}
+            <Dialog open={showImport} onOpenChange={setShowImport}>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="lm-import-dialog">
+                    <DialogHeader>
+                        <DialogTitle>Importa applicazioni veicoli (Libro Matricola)</DialogTitle>
+                    </DialogHeader>
+                    <ImportTargheStub
+                        polizzaPreselezionata={polizza || { id: polizzaId, numero_polizza: "questa polizza" }}
+                        onImportComplete={() => { load(); }}
+                    />
+                </DialogContent>
+            </Dialog>
 
             {list.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 text-sm" data-testid="lm-empty">
