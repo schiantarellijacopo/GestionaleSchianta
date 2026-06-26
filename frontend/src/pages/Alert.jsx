@@ -23,7 +23,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import {
     Bell, Mail, MessageCircle, Smartphone, Edit3, Send, Trash2, Plus, Library,
-    CheckCircle2, AlertTriangle, History, Zap, Calendar,
+    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -157,14 +157,16 @@ export default function Alert() {
 
             {/* Tabs */}
             <div className="flex gap-2 mb-4 border-b">
-                {["regole", "storico"].map((t) => (
+                {["regole", "storico", "configurazione"].map((t) => (
                     <button
                         key={t}
                         onClick={() => setTab(t)}
                         className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t ? "border-sky-600 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
                         data-testid={`alert-tab-${t}`}
                     >
-                        {t === "regole" ? "Regole" : <><History size={14} className="inline mr-1" /> Storico invii</>}
+                        {t === "regole" && "Regole"}
+                        {t === "storico" && <><History size={14} className="inline mr-1" /> Storico invii</>}
+                        {t === "configurazione" && <><Settings size={14} className="inline mr-1" /> Configurazione canali</>}
                     </button>
                 ))}
             </div>
@@ -294,9 +296,304 @@ export default function Alert() {
                 </Card>
             )}
 
+            {tab === "configurazione" && <ConfigurazioneCanali />}
+
             {editing && <RuleEditor rule={editing} onClose={() => { setEditing(null); loadRules(); }} />}
             {showCatalog && <CatalogDialog onClose={() => { setShowCatalog(false); loadRules(); }} />}
         </div>
+    );
+}
+
+
+// ============================================================
+// CONFIGURAZIONE CANALI (Email Google/Microsoft, WhatsApp Twilio)
+// ============================================================
+function ConfigurazioneCanali() {
+    return (
+        <div className="space-y-4">
+            <ProviderCard
+                tipo="email"
+                titolo="Email"
+                icona={Mail}
+                description="Invia notifiche via email da qualsiasi provider SMTP. Preset Google e Microsoft con un click."
+            />
+            <ProviderCard
+                tipo="whatsapp"
+                titolo="WhatsApp"
+                icona={MessageCircle}
+                description="Invia notifiche WhatsApp tramite Twilio (sandbox o numero verificato Meta Business)."
+            />
+            <ProviderCard
+                tipo="sms"
+                titolo="SMS"
+                icona={Smartphone}
+                description="Invia SMS tramite Twilio. Costo ~€0.05/sms."
+            />
+        </div>
+    );
+}
+
+
+function ProviderCard({ tipo, titolo, icona: Icon, description }) {
+    const [cfg, setCfg] = useState(null);
+    const [presets, setPresets] = useState(null);
+    const [testEmail, setTestEmail] = useState("");
+    const [testPhone, setTestPhone] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
+
+    const load = async () => {
+        try {
+            const [r1, r2] = await Promise.all([
+                api.get(`/alert-providers/${tipo}`),
+                api.get(`/alert-providers/presets`),
+            ]);
+            setCfg(r1.data);
+            setPresets(r2.data);
+        } catch (e) { /* swallow */ }
+    };
+
+    useEffect(() => { load(); }, []);
+
+    if (!cfg || !presets) return <Card className="p-4">Caricamento {titolo}…</Card>;
+
+    const setF = (k, v) => setCfg((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        setSaving(true);
+        try {
+            await api.put(`/alert-providers/${tipo}`, cfg);
+            toast.success(`${titolo} salvato`);
+            await load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        } finally { setSaving(false); }
+    };
+
+    const test = async () => {
+        setTesting(true);
+        try {
+            const r = await api.post(`/alert-providers/${tipo}/test`, {
+                to_email: testEmail || undefined,
+                to_phone: testPhone || undefined,
+            });
+            if (r.data?.status === "ok") {
+                toast.success(`Test ${titolo} inviato a ${r.data.sent_to}`);
+            } else {
+                toast.error(`Test fallito: ${r.data?.error || "errore sconosciuto"}`);
+            }
+            await load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore test");
+        } finally { setTesting(false); }
+    };
+
+    const isEmail = tipo === "email";
+    const isPhone = tipo === "sms" || tipo === "whatsapp";
+    const providers = isEmail ? presets.email : (tipo === "whatsapp" ? presets.whatsapp : { twilio: { label: "Twilio SMS", hint: "Account Twilio con numero SMS." } });
+    const providerInfo = providers?.[cfg.provider];
+
+    return (
+        <Card className="p-4" data-testid={`provider-${tipo}`}>
+            <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded bg-sky-100 flex items-center justify-center shrink-0">
+                    <Icon size={20} className="text-sky-700" />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-lg">{titolo}</h3>
+                        {cfg.enabled ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                <CheckCircle2 size={11} /> Attivo
+                            </span>
+                        ) : (
+                            <span className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded">Disattivato</span>
+                        )}
+                        {cfg.last_test_status === "ok" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded" title={cfg.last_test_at}>
+                                ✓ Test passato
+                            </span>
+                        )}
+                        {cfg.last_test_status === "errore" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-rose-700 bg-rose-50 px-2 py-0.5 rounded" title={cfg.last_test_error}>
+                                ✕ Test fallito
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-sm text-slate-600 mt-1">{description}</p>
+                </div>
+                <Switch
+                    checked={cfg.enabled}
+                    onCheckedChange={(v) => setF("enabled", v)}
+                    data-testid={`provider-${tipo}-enabled`}
+                />
+            </div>
+
+            <div className="mt-4 space-y-3">
+                {/* Selettore provider */}
+                <div>
+                    <Label>Provider</Label>
+                    <div className="flex gap-2 flex-wrap mt-1.5">
+                        {Object.entries(providers).map(([k, m]) => (
+                            <button
+                                key={k}
+                                onClick={() => setF("provider", k)}
+                                className={`px-3 py-2 text-sm border rounded transition-colors ${cfg.provider === k ? "bg-sky-50 border-sky-400 text-sky-800" : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+                                data-testid={`provider-${tipo}-${k}`}
+                            >
+                                {m.label}
+                            </button>
+                        ))}
+                    </div>
+                    {providerInfo?.hint && (
+                        <p className="text-[11px] text-slate-500 mt-1.5">{providerInfo.hint}</p>
+                    )}
+                </div>
+
+                {/* Campi specifici email */}
+                {isEmail && (
+                    <>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Indirizzo email <span className="text-rose-600">*</span></Label>
+                                <Input
+                                    type="email"
+                                    placeholder="tuamail@gmail.com"
+                                    value={cfg.smtp_user || ""}
+                                    onChange={(e) => setF("smtp_user", e.target.value)}
+                                    data-testid={`provider-email-user`}
+                                />
+                            </div>
+                            <div>
+                                <Label>
+                                    Password app <span className="text-rose-600">*</span>
+                                    {cfg.provider === "gmail" && (
+                                        <a
+                                            href="https://myaccount.google.com/apppasswords"
+                                            target="_blank" rel="noreferrer"
+                                            className="ml-2 text-[11px] text-sky-700 hover:underline inline-flex items-center gap-0.5"
+                                        >
+                                            crea su Google <ExternalLink size={10} />
+                                        </a>
+                                    )}
+                                </Label>
+                                <Input
+                                    type="password"
+                                    placeholder={cfg.smtp_password_set ? "•••• salvata" : "16 caratteri"}
+                                    value={cfg.smtp_password && cfg.smtp_password.startsWith("•") ? "" : (cfg.smtp_password || "")}
+                                    onChange={(e) => setF("smtp_password", e.target.value)}
+                                    data-testid={`provider-email-password`}
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Mittente (display name)</Label>
+                                <Input
+                                    placeholder="Es. Studio Rossi"
+                                    value={cfg.smtp_from_name || ""}
+                                    onChange={(e) => setF("smtp_from_name", e.target.value)}
+                                    data-testid={`provider-email-fromname`}
+                                />
+                            </div>
+                            {cfg.provider === "custom" && (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <Label>SMTP Host</Label>
+                                        <Input value={cfg.smtp_host || ""} onChange={(e) => setF("smtp_host", e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <Label>Porta</Label>
+                                        <Input type="number" value={cfg.smtp_port || 587} onChange={(e) => setF("smtp_port", parseInt(e.target.value))} />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </>
+                )}
+
+                {/* Campi Twilio */}
+                {isPhone && cfg.provider === "twilio" && (
+                    <>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Account SID <span className="text-rose-600">*</span></Label>
+                                <Input
+                                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                    value={cfg.twilio_sid || ""}
+                                    onChange={(e) => setF("twilio_sid", e.target.value)}
+                                    data-testid={`provider-${tipo}-sid`}
+                                />
+                            </div>
+                            <div>
+                                <Label>Auth Token <span className="text-rose-600">*</span></Label>
+                                <Input
+                                    type="password"
+                                    placeholder={cfg.twilio_token_set ? "•••• salvato" : "32 caratteri"}
+                                    value={cfg.twilio_token && cfg.twilio_token.startsWith("•") ? "" : (cfg.twilio_token || "")}
+                                    onChange={(e) => setF("twilio_token", e.target.value)}
+                                    data-testid={`provider-${tipo}-token`}
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <Label>
+                                Numero From {tipo === "whatsapp" ? "(formato whatsapp:+...)" : ""}<span className="text-rose-600">*</span>
+                            </Label>
+                            <Input
+                                placeholder={tipo === "whatsapp" ? "whatsapp:+14155238886" : "+393331234567"}
+                                value={cfg.twilio_from || ""}
+                                onChange={(e) => setF("twilio_from", e.target.value)}
+                                data-testid={`provider-${tipo}-from`}
+                            />
+                        </div>
+                    </>
+                )}
+
+                {/* Test send */}
+                <div className="border-t pt-3 mt-3">
+                    <Label>Test invio</Label>
+                    <div className="flex gap-2 mt-1.5">
+                        {isEmail && (
+                            <Input
+                                type="email"
+                                placeholder="Invia email di test a... (vuoto = tua email)"
+                                value={testEmail}
+                                onChange={(e) => setTestEmail(e.target.value)}
+                                className="flex-1"
+                                data-testid={`provider-${tipo}-test-to`}
+                            />
+                        )}
+                        {isPhone && (
+                            <Input
+                                placeholder="Invia a numero... (vuoto = tuo cellulare)"
+                                value={testPhone}
+                                onChange={(e) => setTestPhone(e.target.value)}
+                                className="flex-1"
+                                data-testid={`provider-${tipo}-test-to`}
+                            />
+                        )}
+                        <Button
+                            variant="outline"
+                            onClick={test}
+                            disabled={testing || !cfg.enabled}
+                            data-testid={`provider-${tipo}-test`}
+                        >
+                            <Send size={13} className="mr-1" /> {testing ? "Invio…" : "Invia test"}
+                        </Button>
+                    </div>
+                    {cfg.last_test_error && cfg.last_test_status === "errore" && (
+                        <p className="text-[11px] text-rose-700 mt-1">Ultimo errore: {cfg.last_test_error}</p>
+                    )}
+                </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+                <Button onClick={save} disabled={saving} className="bg-sky-700 hover:bg-sky-800" data-testid={`provider-${tipo}-save`}>
+                    {saving ? "Salvataggio…" : "Salva configurazione"}
+                </Button>
+            </div>
+        </Card>
     );
 }
 
