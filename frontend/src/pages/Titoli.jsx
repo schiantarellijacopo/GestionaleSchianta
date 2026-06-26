@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import AllegatiCell from "@/components/AllegatiCell";
+import ChiusuraPill from "@/components/ChiusuraPill";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import TitoloDialog from "@/components/TitoloDialog";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
@@ -367,7 +368,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                                                 <td className="text-xs text-slate-700" data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</td>
                                             </>
                                         )}
-                                        <td><StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} /></td>
+                                        <td>
+                                            <div className="flex items-center gap-1.5">
+                                                <StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} />
+                                                <ChiusuraPill data={t.data_incasso} />
+                                            </div>
+                                        </td>
                                         <td className="num text-right font-semibold text-rose-700">
                                             {daPagare > 0 ? fmtEur(daPagare) : "—"}
                                         </td>

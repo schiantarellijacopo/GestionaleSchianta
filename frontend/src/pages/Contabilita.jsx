@@ -16,6 +16,7 @@ import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
 import DatiCompagnieTab from "@/components/DatiCompagnieTab";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
+import ChiusuraPill from "@/components/ChiusuraPill";
 import { API_BASE } from "@/lib/api";
 
 export default function Contabilita() {
@@ -141,7 +142,12 @@ export default function Contabilita() {
                                         const isRimessa = m.categoria === "pagamento_compagnia";
                                         return (
                                             <tr key={m.id}>
-                                                <td className="num">{fmtDate(m.data_movimento)}</td>
+                                                <td className="num">
+                                                    <div className="flex items-center gap-1.5">
+                                                        {fmtDate(m.data_movimento)}
+                                                        <ChiusuraPill data={m.data_movimento} />
+                                                    </div>
+                                                </td>
                                                 <td>
                                                     <span className={`badge ${m.tipo === "entrata" ? "badge-success" : isRimessa ? "badge-info" : "badge-danger"}`}>
                                                         {isRimessa ? "rimessa" : m.tipo}
@@ -220,7 +226,12 @@ export default function Contabilita() {
                                         <tbody>
                                             {estratto.movimenti.map((m) => (
                                                 <tr key={m.id}>
-                                                    <td className="num">{fmtDate(m.data_movimento)}</td>
+                                                    <td className="num">
+                                                        <div className="flex items-center gap-1.5">
+                                                            {fmtDate(m.data_movimento)}
+                                                            <ChiusuraPill data={m.data_movimento} />
+                                                        </div>
+                                                    </td>
                                                     <td>{m.descrizione}</td>
                                                     <td className="num text-right text-emerald-700">{m.tipo === "entrata" ? fmtEur(m.importo) : ""}</td>
                                                     <td className="num text-right text-rose-700">{m.tipo === "uscita" ? fmtEur(m.importo) : ""}</td>
