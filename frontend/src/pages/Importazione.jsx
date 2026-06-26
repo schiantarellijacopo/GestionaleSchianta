@@ -302,7 +302,7 @@ function MappingWizardDialog({ open, onClose }) {
     const [data, setData] = useState(null);          // { compagnia: [...], prodotto: [...], candidates: {...} }
     const [edits, setEdits] = useState({});          // {mapping_id: entita_id | "" }
     const [active, setActive] = useState("compagnia");
-    const [showAll, setShowAll] = useState(false);   // mostra anche già mappate
+    const [showAll, setShowAll] = useState(true);   // default ON: mostra TUTTE per permettere sempre modifica
     const [saving, setSaving] = useState(false);
     const [applying, setApplying] = useState(false);
 
@@ -413,17 +413,22 @@ function MappingWizardDialog({ open, onClose }) {
                     </DialogDescription>
                 </DialogHeader>
 
-                {/* Toggle modalità */}
+                {/* Toggle filtro */}
                 <div className="flex items-center gap-3 text-xs border-b pb-2">
                     <label className="flex items-center gap-1.5 cursor-pointer" data-testid="wizard-toggle-showall">
                         <input
                             type="checkbox"
-                            checked={showAll}
-                            onChange={(e) => setShowAll(e.target.checked)}
+                            checked={!showAll}
+                            onChange={(e) => setShowAll(!e.target.checked)}
                             className="rounded"
                         />
-                        <span className="text-slate-700">Mostra anche entità già mappate (per modificare/rimuovere)</span>
+                        <span className="text-slate-700">Mostra solo entità ancora da mappare</span>
                     </label>
+                    {showAll && (
+                        <span className="text-[10px] text-slate-500">
+                            (le righe in verde sono già associate — modifica/rimuovi cliccando sul dropdown o la X)
+                        </span>
+                    )}
                 </div>
 
                 {!data ? <Loading /> : totalCount === 0 ? (
@@ -639,20 +644,213 @@ function Storico({ onOpenWizard }) {
 
 
 // ============================================================
-// IMPORT TARGHE / LIBRI MATRICOLA (skeleton fase 2)
+// IMPORT TARGHE / LIBRI MATRICOLA
 // ============================================================
 function ImportTargheStub() {
+    const [file, setFile] = useState(null);
+    const [preview, setPreview] = useState(null);
+    const [mapping, setMapping] = useState({});  // { header: field }
+    const [importing, setImporting] = useState(false);
+    const [result, setResult] = useState(null);
+    const inputRef = useRef(null);
+
+    const onSelectFile = (f) => {
+        setFile(f);
+        setPreview(null);
+        setResult(null);
+        setMapping({});
+    };
+
+    const doPreview = async () => {
+        if (!file) { toast.error("Seleziona prima un file"); return; }
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const res = await api.post("/import/libro-matricola/preview", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setPreview(res.data);
+            setMapping(res.data.suggested_mapping || {});
+            toast.success(`Letto file: ${res.data.total_rows} righe, ${res.data.headers.length} colonne`);
+        } catch (e) {
+            toast.error("Errore preview: " + (e.response?.data?.detail || e.message));
+        }
+    };
+
+    const doCommit = async () => {
+        if (!file || !preview) return;
+        // Check required
+        const requiredFields = (preview.campi_target || []).filter((c) => c.required).map((c) => c.field);
+        const mappedFields = new Set(Object.values(mapping).filter(Boolean));
+        const missingReq = requiredFields.filter((f) => !mappedFields.has(f));
+        if (missingReq.length) {
+            toast.error("Mappa i campi obbligatori: " + missingReq.join(", "));
+            return;
+        }
+        setImporting(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("mapping", JSON.stringify(mapping));
+            const res = await api.post("/import/libro-matricola/commit", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setResult(res.data);
+            const s = res.data;
+            toast.success(`Importati ${s.creati + s.aggiornati} veicoli (${s.creati} nuovi, ${s.aggiornati} aggiornati)`);
+        } catch (e) {
+            toast.error("Errore import: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setImporting(false);
+        }
+    };
+
+    const setHeaderMapping = (header, field) => {
+        setMapping((m) => ({ ...m, [header]: field }));
+    };
+
+    const requiredFields = (preview?.campi_target || []).filter((c) => c.required).map((c) => c.field);
+    const mappedFields = new Set(Object.values(mapping).filter(Boolean));
+    const missingRequired = requiredFields.filter((f) => !mappedFields.has(f));
+
     return (
-        <Card className="p-6 text-center" data-testid="targhe-stub">
-            <Car size={36} className="mx-auto text-slate-400 mb-3" />
-            <h3 className="font-medium text-slate-800 mb-2">Importazione Targhe / Libri Matricola</h3>
-            <p className="text-sm text-slate-600 max-w-lg mx-auto">
-                In arrivo — carica un CSV con qualsiasi struttura colonne (targa, libro matricola, polizza, scadenze, ecc.)
-                e mappa manualmente ciascuna colonna alle corrispondenti del programma.
-            </p>
-            <div className="mt-4 inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                <Clock size={11} /> Disponibile prossima release
-            </div>
-        </Card>
+        <div className="space-y-4" data-testid="targhe-importer">
+            {/* Step 1: upload */}
+            <Card className="p-6" data-testid="lm-upload-card">
+                <div className="flex items-center gap-3 mb-3">
+                    <Car size={22} className="text-sky-700" />
+                    <div>
+                        <h3 className="font-medium text-slate-800">Import Libro Matricola / Stato di Rischio</h3>
+                        <p className="text-xs text-slate-500">
+                            Carica un Excel/CSV. Scegli quali colonne importare: <strong>Targa</strong>, <strong>Data Inizio</strong> e <strong>Proprietario</strong> sono obbligatori, gli altri sono opzionali.
+                        </p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <input
+                        ref={inputRef}
+                        type="file"
+                        accept=".xlsx,.xlsm,.csv"
+                        className="hidden"
+                        onChange={(e) => onSelectFile(e.target.files?.[0] || null)}
+                        data-testid="lm-file-input"
+                    />
+                    <Button variant="outline" onClick={() => inputRef.current?.click()} data-testid="lm-select-btn">
+                        <Upload size={14} className="mr-1" />
+                        {file ? file.name : "Seleziona Excel/CSV"}
+                    </Button>
+                    <Button
+                        onClick={doPreview}
+                        disabled={!file}
+                        className="bg-sky-700 hover:bg-sky-800"
+                        data-testid="lm-preview-btn"
+                    >
+                        Anteprima & Mapping
+                    </Button>
+                </div>
+            </Card>
+
+            {/* Step 2: mapping */}
+            {preview && (
+                <Card className="p-5" data-testid="lm-mapping-card">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 className="font-medium text-slate-800">Mappa le colonne del file</h3>
+                            <p className="text-xs text-slate-500">
+                                {preview.total_rows} righe da importare · {preview.headers.length} colonne file
+                            </p>
+                        </div>
+                        {missingRequired.length > 0 ? (
+                            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded">
+                                Mancano obbligatori: {missingRequired.join(", ")}
+                            </div>
+                        ) : (
+                            <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">
+                                ✓ Tutti gli obbligatori mappati
+                            </div>
+                        )}
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto border rounded">
+                        <table className="data-table w-full text-xs">
+                            <thead className="sticky top-0 bg-slate-50">
+                                <tr>
+                                    <th>Colonna file</th>
+                                    <th>Esempio valore</th>
+                                    <th>Mappa a → campo</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {preview.headers.map((h, i) => {
+                                    const example = (preview.preview_rows?.[0]?.[i] ?? "")
+                                        .toString().slice(0, 40);
+                                    return (
+                                        <tr key={h + i} data-testid={`lm-row-${i}`}>
+                                            <td className="font-medium text-slate-800">{h || `(col ${i + 1})`}</td>
+                                            <td className="text-slate-500">{example || "—"}</td>
+                                            <td>
+                                                <select
+                                                    value={mapping[h] || ""}
+                                                    onChange={(e) => setHeaderMapping(h, e.target.value)}
+                                                    className="w-full border rounded px-2 py-1 bg-white text-xs"
+                                                    data-testid={`lm-select-${i}`}
+                                                >
+                                                    <option value="">— Ignora colonna —</option>
+                                                    {(preview.campi_target || []).map((c) => (
+                                                        <option key={c.field} value={c.field}>
+                                                            {c.label}{c.required ? " *" : ""}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 mt-3">
+                        <Button variant="ghost" onClick={() => { setPreview(null); setFile(null); }}>
+                            Annulla
+                        </Button>
+                        <Button
+                            onClick={doCommit}
+                            disabled={importing || missingRequired.length > 0}
+                            className="bg-sky-700 hover:bg-sky-800"
+                            data-testid="lm-commit-btn"
+                        >
+                            {importing ? "Importazione..." : `Importa ${preview.total_rows} veicoli`}
+                        </Button>
+                    </div>
+                </Card>
+            )}
+
+            {/* Step 3: result */}
+            {result && (
+                <Card className="p-5 border-l-4 border-l-emerald-500" data-testid="lm-result-card">
+                    <div className="flex items-center gap-2 mb-3">
+                        <CheckCircle2 size={18} className="text-emerald-600" />
+                        <div className="font-medium text-slate-900">Import completato</div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3 text-sm">
+                        <Stat label="Totale" value={result.totale} />
+                        <Stat label="Creati" value={result.creati} />
+                        <Stat label="Aggiornati" value={result.aggiornati} />
+                        <Stat label="Scartati" value={result.scartati} />
+                    </div>
+                    {result.errori?.length > 0 && (
+                        <div className="mt-3">
+                            <div className="text-xs font-semibold text-rose-700 mb-1">Errori (primi 20):</div>
+                            <ul className="text-xs text-rose-800 list-disc pl-5 max-h-32 overflow-y-auto">
+                                {result.errori.slice(0, 20).map((e, i) => <li key={i}>{e}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                    <p className="text-xs text-slate-500 mt-3">
+                        I veicoli sono ora disponibili: digitando la <strong>targa</strong> in una nuova polizza si potranno
+                        richiamare automaticamente tutti i dati (marca, modello, classe, valore, ecc.).
+                    </p>
+                </Card>
+            )}
+        </div>
     );
 }

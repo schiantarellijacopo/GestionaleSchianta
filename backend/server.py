@@ -5277,6 +5277,93 @@ async def import_storico(limit: int = 50, user=Depends(require_user("admin", "co
 
 
 # ============================================================
+# LIBRO MATRICOLA / STATO DI RISCHIO (Targhe)
+# ============================================================
+from libro_matricola import build_preview as _lm_preview, commit_import as _lm_commit  # type: ignore
+
+
+@api.post("/import/libro-matricola/preview")
+async def libro_matricola_preview(
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Upload XLSX/CSV libro matricola → ritorna header, preview rows, suggested mapping."""
+    content = await file.read()
+    try:
+        return _lm_preview(content, file.filename or "libro_matricola.xlsx")
+    except Exception as e:
+        raise HTTPException(400, f"Errore lettura file: {e}")
+
+
+@api.post("/import/libro-matricola/commit")
+async def libro_matricola_commit(
+    file: UploadFile = File(...),
+    mapping: str = Form(...),     # JSON string {header: field}
+    polizza_id: Optional[str] = Form(None),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Esegue l'import con il mapping confermato dall'utente."""
+    import json as _json
+    try:
+        mapping_dict = _json.loads(mapping)
+    except Exception:
+        raise HTTPException(400, "mapping non valido (atteso JSON)")
+    content = await file.read()
+    try:
+        stats = await _lm_commit(db, content, file.filename or "libro_matricola.xlsx",
+                                 mapping_dict, user, polizza_id=polizza_id)
+    except Exception as e:
+        raise HTTPException(400, f"Errore import: {e}")
+    return stats
+
+
+# ---- Veicoli: lista + lookup per targa (per riuso tra polizze) ----
+@api.get("/veicoli")
+async def list_veicoli(
+    targa: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 100,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    flt: dict = {}
+    if targa:
+        flt["targa"] = targa.upper().strip()
+    if q:
+        regex = {"$regex": q.upper().strip(), "$options": "i"}
+        flt["$or"] = [
+            {"targa": regex}, {"marca": regex}, {"modello": regex},
+            {"proprietario": regex}, {"telaio": regex},
+        ]
+    items = await db.veicoli.find(flt, {"_id": 0}).sort("targa", 1).to_list(limit)
+    return items
+
+
+@api.get("/veicoli/by-targa/{targa}")
+async def get_veicolo_by_targa(
+    targa: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Lookup rapido per pre-compilare i dati veicolo su una nuova polizza."""
+    v = await db.veicoli.find_one({"targa": targa.upper().strip()}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Veicolo non trovato")
+    # Polizze già associate a questa targa
+    pol = await db.polizze.find(
+        {"$or": [{"veicoli_ids": v["id"]}, {"targa": v["targa"]}]},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "stato": 1,
+         "compagnia_id": 1, "effetto": 1, "scadenza_originale": 1},
+    ).to_list(50)
+    return {"veicolo": v, "polizze_collegate": pol}
+
+
+@api.delete("/veicoli/{vid}")
+async def delete_veicolo(vid: str, user=Depends(require_user("admin"))):
+    await db.veicoli.delete_one({"id": vid})
+    await db.polizze.update_many({}, {"$pull": {"veicoli_ids": vid}})
+    return {"ok": True}
+
+
+# ============================================================
 # PENSIONI INPS
 # ============================================================
 class CalcoloRequest(BaseModel):
