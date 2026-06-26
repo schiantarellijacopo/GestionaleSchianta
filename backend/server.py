@@ -4864,6 +4864,50 @@ async def riapri_chiusura_giorno(
     return {"ok": True}
 
 
+@api.get("/contabilita/giornata-stato/{data}")
+async def giornata_stato(
+    data: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Stato Prima Nota per una data specifica. Usato dai banner UI.
+
+    Returns: { data, chiusa: bool, chiusura_id?, closed_by_name?, can_riapri? }
+    """
+    from shared import giornata_chiusa
+    ch = await giornata_chiusa(data)
+    if not ch:
+        return {"data": data, "chiusa": False}
+    full = await db.chiusure_giorno.find_one({"id": ch["id"]}, {"_id": 0})
+    return {
+        "data": data,
+        "chiusa": True,
+        "chiusura_id": full.get("id") if full else ch["id"],
+        "closed_by_name": (full or {}).get("closed_by_name"),
+        "closed_at": (full or {}).get("created_at"),
+        "can_riapri": user.get("role") == "admin",
+    }
+
+
+@api.get("/contabilita/giornate-chiuse")
+async def giornate_chiuse(
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> list[str]:
+    """Lista date (YYYY-MM-DD) con Prima Nota chiusa (no riaperture)."""
+    flt: dict = {"riaperta_at": None}
+    if dal or al:
+        flt["data"] = {}
+        if dal:
+            flt["data"]["$gte"] = dal
+        if al:
+            flt["data"]["$lte"] = al
+    out = []
+    async for ch in db.chiusure_giorno.find(flt, {"_id": 0, "data": 1}).sort("data", -1):
+        out.append(ch["data"])
+    return out
+
+
 @api.get("/contabilita/chiusure-giorno")
 async def list_chiusure_giorno(
     limit: int = 500,

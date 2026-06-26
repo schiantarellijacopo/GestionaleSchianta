@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 
 export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
     const { mezzi } = useMezziPagamento();
@@ -120,6 +121,7 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                 </div>
 
                 <div className="space-y-3 py-2">
+                    <ChiusuraGiornoBanner data={f.data_incasso} />
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <Label>Data incasso</Label>

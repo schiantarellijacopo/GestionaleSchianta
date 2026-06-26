@@ -3,7 +3,7 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Documenti Titoli)
+## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Banner UX + Documenti Titoli)
 
 ### Done — Estrazione `routes/anagrafiche.py` (P0)
 - ✅ Estratto blocco 1 (25 endpoint, ~727 righe): KPI custom, tags, stats, CRUD, network, relazioni, documenti, privacy GDPR, firma digitale, INPS auto, interviste.
@@ -29,6 +29,12 @@ Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, po
 - ✅ Backend: nuovo param `stato_not` su `GET /titoli` (CSV di stati esclusi).
 - ✅ Sidebar aggiornata: "Titoli" sotto Assicurazione, "Titoli storici" sotto Contabilità.
 - ✅ Wrapper `TitoliStorici.jsx` = `<Titoli storicoMode />` (zero duplicazione codice).
+
+### Done — Banner UX "Prima Nota chiusa"
+- ✅ Nuovo endpoint `GET /contabilita/giornata-stato/{data}` (compatto + `can_riapri` per admin).
+- ✅ Nuovo endpoint `GET /contabilita/giornate-chiuse?dal=&al=`.
+- ✅ Componente riusabile `<ChiusuraGiornoBanner data={...} />`: banner giallo con icona, messaggio + pulsante "Riapri Prima Nota" (solo admin) che linka direttamente a Contabilità → Storico.
+- ✅ Integrato in: `DialogIncasso` (data_incasso), `DialogIncassoCopertura` (incasso + copertura), `NuovoMovimentoDialog`, `GirocontoDialog`. Banner appare dinamicamente quando l'utente sceglie una data in giornata chiusa.
 
 ### Mypy gate
 - ✅ Continua a passare (9 file core type-safe). `routes.anagrafiche` con relaxed rules pending Pydantic response models (P2).

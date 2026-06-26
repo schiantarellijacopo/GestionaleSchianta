@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
 import DatiCompagnieTab from "@/components/DatiCompagnieTab";
+import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 import { API_BASE } from "@/lib/api";
 
 export default function Contabilita() {
@@ -274,6 +275,7 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
     return (
         <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle>Nuovo movimento contabile</DialogTitle></DialogHeader>
+            <ChiusuraGiornoBanner data={f.data_movimento} className="mb-2" />
             <div className="grid grid-cols-2 gap-3 py-2">
                 <div><Label>Data *</Label><Input type="date" value={f.data_movimento} onChange={(e) => set("data_movimento", e.target.value)} /></div>
                 <div>
@@ -376,6 +378,7 @@ function GirocontoDialog({ conti, onClose }) {
                 Genera due movimenti contabili gemelli: uscita dal conto di partenza, entrata sul conto di destinazione (giornata in pareggio).
             </div>
             <div className="space-y-3 py-2">
+                <ChiusuraGiornoBanner data={f.data} />
                 <div>
                     <Label>Data</Label>
                     <Input type="date" value={f.data} onChange={(e) => set("data", e.target.value)} data-testid="giro-data" />

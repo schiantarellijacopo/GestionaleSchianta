@@ -25,6 +25,7 @@ import {
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 
 const TIPO_TITOLO_OPTS = [
     { v: "quietanza", l: "Quietanza" },
@@ -313,6 +314,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                         </label>
                         {copertura && (
                             <div className="pl-8 mt-2 space-y-2" data-testid="copertura-options">
+                                <ChiusuraGiornoBanner data={f.effetto} />
                                 <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
                                     <Checkbox
                                         checked={emailOperatori}
@@ -361,6 +363,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
                         {incasso && (
                             <div className="pl-8 mt-3 space-y-3" data-testid="incasso-options">
+                                <ChiusuraGiornoBanner data={inc.data_incasso} />
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <div className="text-xs text-slate-600 mb-1">Data incasso</div>
