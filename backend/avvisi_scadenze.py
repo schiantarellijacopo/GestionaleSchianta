@@ -432,7 +432,7 @@ def start_scheduler(db: AsyncIOMotorDatabase, *, hour: int = 8, minute: int = 0)
 
     sched = AsyncIOScheduler(timezone=tz)
 
-    async def _job():
+    async def _job() -> None:
         try:
             await esegui_job_scadenze(db, manuale=False)
         except Exception:

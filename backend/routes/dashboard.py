@@ -116,7 +116,7 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
 
 
 @router.get("/dashboard/tasks")
-async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
     """Task azionabili sulla dashboard."""
     today = date.today()
     today_iso = today.isoformat()
@@ -165,7 +165,7 @@ def _normalize_url(raw_url: str) -> str:
 
 
 @router.get("/dashboard/links")
-async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
     """Link rapidi mostrati sulla dashboard."""
     return await db.dashboard_links.find({}, {"_id": 0}).sort(
         [("ordine", 1), ("created_at", -1)],
@@ -176,7 +176,7 @@ async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore
 async def create_dashboard_link(
     body: DashboardLinkBody,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
-):
+) -> dict:
     if not body.label or not body.url:
         raise HTTPException(400, "Label e URL obbligatori")
     item = {
@@ -198,7 +198,7 @@ async def create_dashboard_link(
 async def update_dashboard_link(
     lid: str, body: DashboardLinkBody,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
-):
+) -> dict:
     existing = await db.dashboard_links.find_one({"id": lid}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Link non trovato")
@@ -218,7 +218,7 @@ async def update_dashboard_link(
 async def delete_dashboard_link(
     lid: str,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
-):
+) -> dict:
     res = await db.dashboard_links.delete_one({"id": lid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Link non trovato")

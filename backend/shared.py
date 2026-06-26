@@ -80,7 +80,7 @@ def strip_mongo_id(doc: dict | None) -> dict | None:
 # ---------------------------------------------------------------------------
 async def log_attivita(utente: dict, azione: str, entita: str,
                        entita_id: str | None = None, descrizione: str | None = None,
-                       payload: dict | None = None):
+                       payload: dict | None = None) -> dict:
     log = AttivitaLog(
         utente_id=utente.get("id") if utente else None,
         utente_email=utente.get("email") if utente else None,
@@ -91,7 +91,7 @@ async def log_attivita(utente: dict, azione: str, entita: str,
 
 
 async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
-                             descrizione: str | None = None, autore: dict | None = None):
+                             descrizione: str | None = None, autore: dict | None = None) -> None:
     """Crea automaticamente una voce di diario sull'anagrafica cliente."""
     if not anagrafica_id:
         return
@@ -151,6 +151,20 @@ async def resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> s
         if c:
             return c["id"]
     return None
+
+
+# ---------------------------------------------------------------------------
+# PDF intestazione (azienda)
+# ---------------------------------------------------------------------------
+async def intestazione_pdf() -> dict:
+    """Ritorna kwargs (ragione_sociale, logo_bytes, indirizzo, contatti, note_footer)
+    per `pdf_report.stampa_elenco`. Ritorna {} se la config azienda non è disponibile.
+    """
+    try:
+        import pdf_report
+        return await pdf_report.get_intestazione_azienda(db)
+    except Exception:
+        return {}
 
 
 async def visibility_filter(user: dict, base_filter: dict | None = None) -> dict:

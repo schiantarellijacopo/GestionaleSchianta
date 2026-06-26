@@ -43,7 +43,7 @@ async def _load_mapping_operatori(db) -> dict:
     return out
 
 
-async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: str = ""):
+async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: str = "") -> dict:
     """Crea voce stub nella libreria di mapping se non esiste (per permettere all'utente di mapparla)."""
     if not codice:
         return

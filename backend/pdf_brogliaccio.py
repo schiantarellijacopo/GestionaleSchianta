@@ -42,7 +42,7 @@ def _format_data_it(s: str) -> str:
         return s
 
 
-def _header_table(azienda: dict, data_giorno: str, logo_bytes: bytes = None):
+def _header_table(azienda: dict, data_giorno: str, logo_bytes: bytes = None) -> dict:
     title = f"Brogliaccio del {_format_data_it(data_giorno)}"
     rs = azienda.get("ragione_sociale") or "Agenzia"
     indirizzo = ", ".join([

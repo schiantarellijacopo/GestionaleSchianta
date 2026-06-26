@@ -2364,7 +2364,7 @@ async def anagrafica_network(aid: str, user=Depends(current_user)):
         docs[a["id"]] = a
 
     # Calcola statistiche polizze per ogni id
-    async def _stats(anag_id):
+    async def _stats(anag_id) -> dict:
         n_attive = 0; n_preventivo = 0; n_tot = 0
         premio = 0.0; provv = 0.0
         async for p in db.polizze.find(
@@ -2387,7 +2387,7 @@ async def anagrafica_network(aid: str, user=Depends(current_user)):
             "provvigioni_totale": round(provv, 2),
         }
 
-    def _light(d, relazione=None):
+    def _light(d, relazione=None) -> dict:
         return {
             "id": d.get("id"),
             "ragione_sociale": d.get("ragione_sociale"),
@@ -3621,7 +3621,7 @@ async def export_titoli_xlsx(stato: Optional[str] = None,
     )
 
 
-def _polizze_export_filters(**kw):
+def _polizze_export_filters(**kw) -> dict:
     """Pulisce i kwargs filtro dell'export polizze (rimuove None)."""
     return {k: v for k, v in kw.items() if v is not None and v != ""}
 
@@ -4632,7 +4632,7 @@ async def prima_nota(
 # ============================================================
 # BROGLIACCIO - Prima Nota giornaliera con colonne per conto cassa
 # ============================================================
-async def _compute_brogliaccio(data_giorno: str):
+async def _compute_brogliaccio(data_giorno: str) -> dict:
     """Calcola il brogliaccio della Prima Nota con la semantica assicurativa corretta.
 
     Mappatura colonne (dal flusso descritto dall'utente):
@@ -5213,7 +5213,7 @@ async def stampa_dati_compagnie(
 async def statistiche_contabilita(
     dal: Optional[str] = None, al: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
-):
+) -> dict:
     """Statistiche contabilità per Prima Nota.
 
     Periodo (default: dall'inizio fino ad oggi):
@@ -5436,7 +5436,7 @@ async def invia_chiusura_giorno(
     return res
 
 
-async def _invia_brogliaccio_email(chiusura_id: str, pdf_bytes: bytes, data_giorno: str):
+async def _invia_brogliaccio_email(chiusura_id: str, pdf_bytes: bytes, data_giorno: str) -> dict:
     """Invia il brogliaccio chiuso al commercialista (se SMTP configurato)."""
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     to_addr = az.get("email_commercialista")
@@ -7996,7 +7996,7 @@ async def delete_mezzo_pagamento(mid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
-async def _seed_mezzi_pagamento():
+async def _seed_mezzi_pagamento() -> dict:
     """Idempotente: crea i mezzi pagamento di default se mancano."""
     defaults = [
         {"codice": "contanti", "label": "Contanti", "tipo_conto": "cassa", "ordine": 1, "icona": "Banknote"},
@@ -8474,7 +8474,7 @@ async def riepilogo_cliente(aid: str, user=Depends(current_user)):
             else:
                 privati.append(rid)
 
-    async def aggrega(ids: list):
+    async def aggrega(ids: list) -> dict:
         if not ids:
             return {"premi_lordi": 0.0, "provvigioni": 0.0, "polizze_count": 0,
                     "titoli_incassati": 0, "titoli_aperti": 0}

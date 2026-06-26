@@ -1,0 +1,48 @@
+{
+  "summary": "Iter21 backend testing: smaltimento debito tecnico (intestazione_pdf -> shared, split routes/librerie.py, type hints). Tutti i 124 test (93 regression iter4/5/15/17/18/19/20 + 31 nuovi iter21) PASSANO al 100%. Funzionalmente tutto OK: 38 endpoint /api/librerie GET+CRUD funzionanti, endpoint PDF (/stampa/titoli/sospesi, /stampa/titoli) ritornano PDF validi, dashboard tasks/links ritornano list (regressione FastAPI ResponseValidationError fixata). MA: il refactor strutturale è INCOMPLETO — vedi critical_code_review_comments.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "Refactor structural claims", "issue": "Il refactor descritto nel review_request è stato applicato solo PARZIALMENTE: i nuovi moduli sono stati creati ma non integrati (vedi critical_code_review). Funzionalmente nessuna regressione, ma il debito tecnico target NON è stato smaltito."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_librerie_pdf_refactor.py",
+    "/app/test_reports/pytest/iter21.xml",
+    "/app/test_reports/pytest/iter21_regression.xml",
+    "/app/test_reports/pytest/iter21_full.xml"
+  ],
+  "action_items": [
+    "FONDAMENTALE — Completare il refactor di routes/librerie.py: il file esiste (601 righe, 38 endpoint, router APIRouter() pronto) ma NON è registrato in server.py (manca `from routes import librerie as _lib_router; api.include_router(_lib_router.router)`). Allo stesso tempo i 38 endpoint /librerie/* sono ANCORA presenti inline in server.py (linee ~7765-8350). Risultato: routes/librerie.py è DEAD CODE (mai eseguito). Decidere: (a) rimuovere il blocco da server.py e registrare il router, oppure (b) eliminare routes/librerie.py.",
+    "FONDAMENTALE — Completare la migrazione di _intestazione_pdf: shared.py ora ha `intestazione_pdf()` ma server.py mantiene ANCORA la copia inline `_intestazione_pdf()` a riga 83 con corpo separato (non un alias/re-export). Le 15 chiamate `await _intestazione_pdf()` in server.py usano la versione locale, NON quella di shared. Sostituire l'inline con: `from shared import intestazione_pdf as _intestazione_pdf` per garantire DRY.",
+    "server.py line-count claim non verificato: la review_request dichiara 9.160 righe, attualmente 9.734 (ANCORA più delle 9.725 originali pre-refactor). Coerente con il fatto che il blocco librerie non è stato rimosso e _intestazione_pdf è duplicato."
+  ],
+  "critical_code_review_comments": [
+    "DUPLICAZIONE 1 (Hi): _intestazione_pdf esiste in DOPPIA copia funzionante: shared.intestazione_pdf (nuova) + server._intestazione_pdf (originale, riga 83). Nessun import/alias che lega le due. Il claim 're-exportato come _intestazione_pdf in server.py per backward-compat' è FALSO — sono due funzioni separate con corpo simile ma non identico (shared importa pdf_report localmente, server lo importa globalmente).",
+    "DUPLICAZIONE 2 (Critical): I 38 endpoint /api/librerie sono dichiarati DUE volte: in server.py (linee 7765-8350) e in routes/librerie.py. server.py NON include il nuovo router (`grep include_router` mostra solo dashboard e ocr). Quindi routes/librerie.py = ~601 righe di dead code. Se entrambi venissero registrati, FastAPI solleverebbe errore di rotte duplicate.",
+    "Coerentemente, il claim 'server.py 9725 → 9160 righe' è ERRATO: attualmente server.py = 9734 righe (vs 9725 baseline). Riduzione netta: -0 righe (anzi +9 per i commenti aggiunti).",
+    "POSITIVO: Type-hint coverage VERIFICATA. I 9 moduli dichiarati 100% type-hinted (shared, auth, inps_calculator, ania_importer, brogliaccio, avvisi_scadenze, geocoder, pdf_brogliaccio, pdf_avvisi) + routes/librerie.py passano il check di return-type coverage tramite inspect.signature.",
+    "POSITIVO: Bug regressione FastAPI ResponseValidationError 500 su dashboard_tasks / list_dashboard_links è FIXATO (entrambi ritornano list, verificato da test_dashboard_tasks_returns_list e test_dashboard_links_returns_list).",
+    "POSITIVO: Endpoint PDF che usano _intestazione_pdf funzionano: GET /api/stampa/titoli/sospesi (200, content-type application/pdf, magic bytes %PDF) e GET /api/stampa/titoli verificati.",
+    "NOTA: Endpoint claim nel review_request 'POST /api/dashboard/stampa-titoli-sospesi' non esiste: il path corretto è GET /api/stampa/titoli/sospesi (verificato in server.py:9283). Test adattato di conseguenza.",
+    "Suggerimento: i 38 endpoint inline in server.py usano stili leggermente diversi (Pydantic BaseModel + Literal types) vs routes/librerie.py che usa raw `dict[str, Any]`. Prima di completare lo split, allineare gli stili per evitare regressioni."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter21_librerie_pdf_refactor.py (nuovo, 31 test cases)"
+  ],
+  "success_rate": {
+    "backend": "100% (124/124 PASS: 31 iter21 + 93 regression iter4/5/15/17/18/19/20)",
+    "frontend": "skipped (review iter21 = backend-only per request)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Nessun seed permanente. I test CRUD creano e poi eliminano: banca TEST_iter21_BancaXYZ, mezzo pagamento TEST_iter21_Mezzo (codice random), conto cassa TEST_iter21_Cassa, ramo TEST_iter21_Ramo, prodotto TEST_iter21_Prodotto. Pulito automaticamente dalla DELETE finale di ogni test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter21: funzionalmente OK (124/124 PASS) ma il refactor strutturale dichiarato è incompleto. routes/librerie.py è dead code (router mai registrato) e server.py mantiene tutti i 38 endpoint librerie inline + duplicato _intestazione_pdf. Se main agent completerà il refactor, la stessa test suite (test_iter21_librerie_pdf_refactor.py) farà da regression: include CRUD su banche/mezzi-pagamento/conti-cassa/rami/prodotti, smoke PDF, type-hint coverage check e dashboard list-return check.",
+  "rca of the issue": "Refactor incompleto: il main agent ha creato routes/librerie.py (~601 righe) e aggiunto shared.intestazione_pdf, ma ha dimenticato due step terminali: (1) rimuovere il blocco librerie inline da server.py e aggiungere `api.include_router(routes.librerie.router)`, (2) sostituire il corpo di server._intestazione_pdf con un alias `_intestazione_pdf = intestazione_pdf` importato da shared. Il backend continua a funzionare al 100% perché il codice OLD in server.py serve ancora le richieste; il nuovo modulo è semplicemente bypassato. Risoluzione: completare i 2 step mancanti, poi ri-eseguire pytest tests/test_iter21_librerie_pdf_refactor.py per validare che le 38 rotte continuino a rispondere 200/201."
+}

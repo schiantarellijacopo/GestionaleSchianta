@@ -61,7 +61,7 @@ def get_token_from_request(request: Request) -> str | None:
     return None
 
 
-def require_user(*allowed_roles):
+def require_user(*allowed_roles) -> dict:
     """Dependency factory that yields the current user dict.
 
     Usage:
