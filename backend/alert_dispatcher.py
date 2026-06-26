@@ -139,30 +139,63 @@ async def send_inapp(rule: dict, dest: dict, ctx: dict) -> dict:
     return {"status": "ok"}
 
 
+async def _load_provider(tipo: str) -> dict:
+    """Carica la config provider dal DB (con fallback su env per email)."""
+    cfg = await db.alert_providers.find_one({"tipo": tipo, "enabled": True}, {"_id": 0})
+    if cfg:
+        return cfg
+    # Fallback su variabili d'ambiente (retrocompatibilità)
+    if tipo == "email":
+        host = os.environ.get("SMTP_HOST")
+        if host:
+            return {
+                "tipo": "email", "provider": "custom", "enabled": True,
+                "smtp_host": host,
+                "smtp_port": int(os.environ.get("SMTP_PORT", "587")),
+                "smtp_starttls": True,
+                "smtp_user": os.environ.get("SMTP_USER"),
+                "smtp_password": os.environ.get("SMTP_PASSWORD"),
+                "smtp_from": os.environ.get("SMTP_FROM") or os.environ.get("SMTP_USER"),
+            }
+    elif tipo in ("sms", "whatsapp"):
+        sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        if sid:
+            from_key = "TWILIO_SMS_FROM" if tipo == "sms" else "TWILIO_WA_FROM"
+            return {
+                "tipo": tipo, "provider": "twilio", "enabled": True,
+                "twilio_sid": sid,
+                "twilio_token": os.environ.get("TWILIO_AUTH_TOKEN"),
+                "twilio_from": os.environ.get(from_key),
+            }
+    return {}
+
+
 async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
-    """Invia email via SMTP. Config richiesta in env."""
+    """Invia email via SMTP. Provider config dal DB (preferenza) o env (fallback)."""
     to_email = dest.get("email")
     if not to_email:
         return {"status": "skipped", "error": "email destinatario assente"}
-    host = os.environ.get("SMTP_HOST")
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ.get("SMTP_USER")
-    pwd = os.environ.get("SMTP_PASSWORD")
-    sender = os.environ.get("SMTP_FROM") or user
+    cfg = await _load_provider("email")
+    host = cfg.get("smtp_host")
+    user = cfg.get("smtp_user")
+    pwd = cfg.get("smtp_password")
+    sender = cfg.get("smtp_from") or user
     if not (host and user and pwd and sender):
-        return {"status": "skipped", "error": "SMTP non configurato (vedi SMTP_HOST/USER/PASSWORD)"}
+        return {"status": "skipped", "error": "Provider Email non configurato — vai in /alert → tab Configurazione"}
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = ctx.get("oggetto") or rule.get("nome") or "Notifica"
-        msg["From"] = sender
+        from_name = cfg.get("smtp_from_name")
+        msg["From"] = f"{from_name} <{sender}>" if from_name else sender
         msg["To"] = to_email
         body = ctx.get("corpo") or ""
         msg.attach(MIMEText(body, "plain", "utf-8"))
-        # versione HTML semplice (auto wrap)
         html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
         msg.attach(MIMEText(html, "html", "utf-8"))
+        port = int(cfg.get("smtp_port") or 587)
         with smtplib.SMTP(host, port, timeout=20) as srv:
-            srv.starttls()
+            if cfg.get("smtp_starttls", True):
+                srv.starttls()
             srv.login(user, pwd)
             srv.sendmail(sender, [to_email], msg.as_string())
         return {"status": "ok"}
@@ -171,46 +204,43 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
 
 
 async def send_sms(rule: dict, dest: dict, ctx: dict) -> dict:
-    """PREDISPOSTO. Twilio SMS."""
+    """SMS via Twilio. Provider config dal DB o env."""
     to_num = dest.get("cellulare")
     if not to_num:
         return {"status": "skipped", "error": "cellulare destinatario assente"}
-    sid = os.environ.get("TWILIO_ACCOUNT_SID")
-    tok = os.environ.get("TWILIO_AUTH_TOKEN")
-    from_num = os.environ.get("TWILIO_SMS_FROM")
+    cfg = await _load_provider("sms")
+    sid = cfg.get("twilio_sid")
+    tok = cfg.get("twilio_token")
+    from_num = cfg.get("twilio_from")
     if not (sid and tok and from_num):
-        return {"status": "skipped", "error": "Twilio SMS non configurato (vedi TWILIO_ACCOUNT_SID/AUTH_TOKEN/SMS_FROM)"}
+        return {"status": "skipped", "error": "Provider SMS non configurato — vai in /alert → tab Configurazione"}
     try:
-        # import lazy per non richiedere il pacchetto se non usato
         from twilio.rest import Client  # type: ignore
         client = Client(sid, tok)
-        msg = client.messages.create(
-            from_=from_num, to=to_num,
-            body=(ctx.get("corpo") or "")[:480],
-        )
+        msg = client.messages.create(from_=from_num, to=to_num, body=(ctx.get("corpo") or "")[:480])
         return {"status": "ok", "provider_id": msg.sid}
     except Exception as e:
         return {"status": "errore", "error": str(e)}
 
 
 async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
-    """PREDISPOSTO. Twilio WhatsApp Business API."""
+    """WhatsApp via Twilio. Provider config dal DB o env."""
     to_num = dest.get("whatsapp") or dest.get("cellulare")
     if not to_num:
         return {"status": "skipped", "error": "WhatsApp destinatario assente"}
-    sid = os.environ.get("TWILIO_ACCOUNT_SID")
-    tok = os.environ.get("TWILIO_AUTH_TOKEN")
-    from_wa = os.environ.get("TWILIO_WA_FROM")    # es. "whatsapp:+14155238886"
+    cfg = await _load_provider("whatsapp")
+    sid = cfg.get("twilio_sid")
+    tok = cfg.get("twilio_token")
+    from_wa = cfg.get("twilio_from")
     if not (sid and tok and from_wa):
-        return {"status": "skipped", "error": "Twilio WhatsApp non configurato (vedi TWILIO_WA_FROM)"}
+        return {"status": "skipped", "error": "Provider WhatsApp non configurato — vai in /alert → tab Configurazione"}
     try:
         from twilio.rest import Client  # type: ignore
         client = Client(sid, tok)
         normalized = to_num if to_num.startswith("whatsapp:") else f"whatsapp:{to_num}"
-        msg = client.messages.create(
-            from_=from_wa, to=normalized,
-            body=(ctx.get("corpo") or "")[:1500],
-        )
+        if not from_wa.startswith("whatsapp:"):
+            from_wa = f"whatsapp:{from_wa}"
+        msg = client.messages.create(from_=from_wa, to=normalized, body=(ctx.get("corpo") or "")[:1500])
         return {"status": "ok", "provider_id": msg.sid}
     except Exception as e:
         return {"status": "errore", "error": str(e)}

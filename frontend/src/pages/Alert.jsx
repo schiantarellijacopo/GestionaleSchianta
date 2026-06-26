@@ -22,10 +22,13 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import {
-    Bell, Mail, MessageCircle, Smartphone, Edit3, Send,
+    Bell, Mail, MessageCircle, Smartphone, Edit3, Send, Trash2, Plus, Library,
     CheckCircle2, AlertTriangle, History, Zap, Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 const CANALI_META = {
     inapp: { label: "In-app", icon: Bell, color: "text-sky-700 bg-sky-50 border-sky-200" },
@@ -45,6 +48,7 @@ export default function Alert() {
     const [rules, setRules] = useState(null);
     const [events, setEvents] = useState([]);
     const [editing, setEditing] = useState(null);
+    const [showCatalog, setShowCatalog] = useState(false);
     const [filterTipo, setFilterTipo] = useState("tutti");
 
     const loadRules = async () => {
@@ -80,6 +84,35 @@ export default function Alert() {
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore test");
         }
+    };
+
+    const removeRule = async (rid) => {
+        if (!window.confirm("Eliminare questa regola? L'operazione è irreversibile.")) return;
+        try {
+            await api.delete(`/alert-rules/${rid}`);
+            setRules((rs) => rs.filter((x) => x.id !== rid));
+            toast.success("Regola eliminata");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        }
+    };
+
+    const createBlank = () => {
+        setEditing({
+            id: null,            // marker: creazione
+            nome: "Nuova regola",
+            descrizione: "",
+            tipo: "evento",
+            evento: "polizza.emessa",
+            schedule_kind: null,
+            cron: null,
+            soglia_giorni: null,
+            canali: ["inapp"],
+            destinatari: ["cliente"],
+            template_oggetto: "",
+            template_corpo: "",
+            attivo: false,
+        });
     };
 
     const filteredRules = useMemo(() => {
@@ -138,23 +171,33 @@ export default function Alert() {
 
             {tab === "regole" && (
                 <>
-                    {/* filtro tipo */}
-                    <div className="flex gap-2 mb-3">
-                        {[
-                            { v: "tutti", label: "Tutti" },
-                            { v: "evento", label: "Eventi" },
-                            { v: "schedule", label: "Schedule" },
-                            { v: "soglia", label: "Soglia" },
-                        ].map((f) => (
-                            <button
-                                key={f.v}
-                                onClick={() => setFilterTipo(f.v)}
-                                className={`text-xs px-3 py-1.5 rounded border transition-colors ${filterTipo === f.v ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
-                                data-testid={`filter-${f.v}`}
-                            >
-                                {f.label}
-                            </button>
-                        ))}
+                    {/* Toolbar: filtro tipo + actions */}
+                    <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                        <div className="flex gap-2">
+                            {[
+                                { v: "tutti", label: "Tutti" },
+                                { v: "evento", label: "Eventi" },
+                                { v: "schedule", label: "Schedule" },
+                                { v: "soglia", label: "Soglia" },
+                            ].map((f) => (
+                                <button
+                                    key={f.v}
+                                    onClick={() => setFilterTipo(f.v)}
+                                    className={`text-xs px-3 py-1.5 rounded border transition-colors ${filterTipo === f.v ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                                    data-testid={`filter-${f.v}`}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => setShowCatalog(true)} data-testid="open-catalog-btn">
+                                <Library size={14} className="mr-1" /> Galleria template
+                            </Button>
+                            <Button onClick={createBlank} className="bg-sky-700 hover:bg-sky-800" data-testid="new-rule-btn">
+                                <Plus size={14} className="mr-1" /> Nuova regola
+                            </Button>
+                        </div>
                     </div>
 
                     {filteredRules.length === 0 ? <Empty label="Nessuna regola" /> : (
@@ -204,6 +247,9 @@ export default function Alert() {
                                                     <Button size="sm" variant="outline" onClick={() => setEditing(r)} data-testid={`edit-${r.preset_key || r.id}`}>
                                                         <Edit3 size={13} />
                                                     </Button>
+                                                    <Button size="sm" variant="outline" onClick={() => removeRule(r.id)} className="text-rose-600 hover:bg-rose-50" data-testid={`delete-${r.id}`}>
+                                                        <Trash2 size={13} />
+                                                    </Button>
                                                 </div>
                                             </div>
                                         </div>
@@ -249,12 +295,94 @@ export default function Alert() {
             )}
 
             {editing && <RuleEditor rule={editing} onClose={() => { setEditing(null); loadRules(); }} />}
+            {showCatalog && <CatalogDialog onClose={() => { setShowCatalog(false); loadRules(); }} />}
         </div>
     );
 }
 
 
+const EVENTI_LABELS = {
+    "sinistro.aperto": "Sinistro aperto",
+    "sinistro.chiuso": "Sinistro chiuso",
+    "sinistro.pagato": "Sinistro liquidato",
+    "sinistro.importato_ania": "Sinistro importato (ANIA)",
+    "polizza.emessa": "Polizza emessa",
+    "polizza.rinnovata": "Polizza rinnovata",
+    "titolo.incassato": "Titolo incassato",
+    "pagamento.collaboratore": "Pagamento collaboratore",
+};
+const SCHEDULE_LABELS = {
+    "compleanno_cliente": "Compleanno cliente",
+    "documento_id_scaduto": "Documento ID in scadenza",
+    "titolo_scaduto_oltre": "Titolo scaduto oltre N giorni",
+    "sospesi_settimanali": "Digest sospesi settimanali",
+    "arretrati_settimanali": "Digest arretrati settimanali",
+    "polizza_in_scadenza": "Polizza in scadenza",
+};
+const CRON_PRESETS = [
+    { v: "0 8 * * *",  label: "Ogni giorno alle 08:00" },
+    { v: "0 9 * * *",  label: "Ogni giorno alle 09:00" },
+    { v: "0 8 * * 1",  label: "Ogni lunedì alle 08:00" },
+    { v: "0 8 * * 5",  label: "Ogni venerdì alle 08:00" },
+    { v: "0 8 1 * *",  label: "Il 1° del mese alle 08:00" },
+];
+
+
+function CatalogDialog({ onClose }) {
+    const [catalog, setCatalog] = useState([]);
+
+    useEffect(() => {
+        api.get("/alert-presets/catalog").then((r) => setCatalog(r.data || []));
+    }, []);
+
+    const importPreset = async (key) => {
+        try {
+            await api.post(`/alert-rules/from-preset/${key}`);
+            toast.success("Template importato come nuova regola. Aprilo per personalizzarlo.");
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                    <DialogTitle>Galleria template</DialogTitle>
+                    <p className="text-sm text-slate-600">
+                        Suggerimenti pronti. Importane uno per creare una nuova regola completamente personalizzabile.
+                    </p>
+                </DialogHeader>
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                    {catalog.map((t) => (
+                        <div key={t.preset_key} className="border rounded-md p-3 hover:bg-slate-50 flex items-start justify-between gap-3" data-testid={`catalog-${t.preset_key}`}>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${(TIPO_META[t.tipo] || TIPO_META.evento).color}`}>
+                                        {(TIPO_META[t.tipo] || TIPO_META.evento).label}
+                                    </span>
+                                    <h4 className="font-medium text-sm">{t.nome}</h4>
+                                </div>
+                                <p className="text-xs text-slate-600 mt-1">{t.descrizione}</p>
+                            </div>
+                            <Button size="sm" onClick={() => importPreset(t.preset_key)} data-testid={`import-${t.preset_key}`}>
+                                Importa
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
 function RuleEditor({ rule, onClose }) {
+    const isNew = !rule.id;
     const [f, setF] = useState({ ...rule });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const toggleCanale = (c) => {
@@ -268,14 +396,25 @@ function RuleEditor({ rule, onClose }) {
 
     const save = async () => {
         try {
-            await api.put(`/alert-rules/${rule.id}`, {
+            const payload = {
                 nome: f.nome,
                 descrizione: f.descrizione,
+                tipo: f.tipo,
+                evento: f.tipo === "evento" ? f.evento : null,
+                schedule_kind: f.tipo !== "evento" ? f.schedule_kind : null,
+                cron: f.tipo !== "evento" ? f.cron : null,
+                soglia_giorni: f.soglia_giorni ? parseInt(f.soglia_giorni) : null,
                 canali: f.canali, destinatari: f.destinatari,
-                template_oggetto: f.template_oggetto, template_corpo: f.template_corpo,
-                soglia_giorni: f.soglia_giorni ? parseInt(f.soglia_giorni) : undefined,
-            });
-            toast.success("Regola aggiornata");
+                template_oggetto: f.template_oggetto,
+                template_corpo: f.template_corpo,
+            };
+            if (isNew) {
+                await api.post(`/alert-rules`, payload);
+                toast.success("Regola creata");
+            } else {
+                await api.put(`/alert-rules/${rule.id}`, payload);
+                toast.success("Regola aggiornata");
+            }
             onClose();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
@@ -285,16 +424,83 @@ function RuleEditor({ rule, onClose }) {
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-2xl">
-                <DialogHeader><DialogTitle>Modifica regola: {rule.nome}</DialogTitle></DialogHeader>
+                <DialogHeader>
+                    <DialogTitle>{isNew ? "Nuova regola" : `Modifica regola: ${rule.nome}`}</DialogTitle>
+                </DialogHeader>
                 <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto pr-1">
-                    <div>
-                        <Label>Nome</Label>
-                        <Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} />
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Nome <span className="text-rose-600">*</span></Label>
+                            <Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="rule-nome" />
+                        </div>
+                        <div>
+                            <Label>Tipo</Label>
+                            <Select value={f.tipo || "evento"} onValueChange={(v) => set("tipo", v)}>
+                                <SelectTrigger data-testid="rule-tipo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="evento">Evento (immediato)</SelectItem>
+                                    <SelectItem value="schedule">Schedule (ricorrente)</SelectItem>
+                                    <SelectItem value="soglia">Soglia (controllo + soglia)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
+
                     <div>
                         <Label>Descrizione</Label>
                         <Textarea rows={2} value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} />
                     </div>
+
+                    {f.tipo === "evento" && (
+                        <div>
+                            <Label>Evento scatenante</Label>
+                            <Select value={f.evento || ""} onValueChange={(v) => set("evento", v)}>
+                                <SelectTrigger data-testid="rule-evento"><SelectValue placeholder="Seleziona evento..." /></SelectTrigger>
+                                <SelectContent>
+                                    {Object.entries(EVENTI_LABELS).map(([v, l]) => (
+                                        <SelectItem key={v} value={v}>{l}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-[10px] text-slate-500 mt-1">L&apos;alert scatta automaticamente quando si verifica questo evento.</p>
+                        </div>
+                    )}
+
+                    {(f.tipo === "schedule" || f.tipo === "soglia") && (
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label>Tipo schedule</Label>
+                                <Select value={f.schedule_kind || ""} onValueChange={(v) => set("schedule_kind", v)}>
+                                    <SelectTrigger data-testid="rule-schedule-kind"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                                    <SelectContent>
+                                        {Object.entries(SCHEDULE_LABELS).map(([v, l]) => (
+                                            <SelectItem key={v} value={v}>{l}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label>Frequenza (cron)</Label>
+                                <Select value={f.cron || ""} onValueChange={(v) => set("cron", v)}>
+                                    <SelectTrigger data-testid="rule-cron"><SelectValue placeholder="Quando..." /></SelectTrigger>
+                                    <SelectContent>
+                                        {CRON_PRESETS.map((p) => (
+                                            <SelectItem key={p.v} value={p.v}>{p.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    )}
+
+                    {(f.tipo === "soglia" || f.schedule_kind === "titolo_scaduto_oltre" || f.schedule_kind === "documento_id_scaduto" || f.schedule_kind === "polizza_in_scadenza") && (
+                        <div>
+                            <Label>Soglia giorni</Label>
+                            <Input type="number" value={f.soglia_giorni || ""} onChange={(e) => set("soglia_giorni", e.target.value)} className="w-32" data-testid="rule-soglia" />
+                            <p className="text-[10px] text-slate-500 mt-1">Numero di giorni che attiva la regola (es. 5 per &quot;scaduto da 5gg&quot;, 30 per &quot;in scadenza tra 30gg&quot;).</p>
+                        </div>
+                    )}
+
                     <div>
                         <Label>Canali di invio</Label>
                         <div className="flex gap-2 flex-wrap mt-2">
@@ -314,7 +520,7 @@ function RuleEditor({ rule, onClose }) {
                                 );
                             })}
                         </div>
-                        <p className="text-[10px] text-slate-500 mt-1">SMS/WhatsApp predisposti — richiedono provider Twilio configurato.</p>
+                        <p className="text-[10px] text-slate-500 mt-1">SMS/WhatsApp predisposti — configurare il provider in /alert/configurazione (in arrivo).</p>
                     </div>
                     <div>
                         <Label>Destinatari</Label>
@@ -335,24 +541,20 @@ function RuleEditor({ rule, onClose }) {
                             })}
                         </div>
                     </div>
-                    {(rule.tipo === "soglia" || rule.schedule_kind === "titolo_scaduto_oltre") && (
-                        <div>
-                            <Label>Soglia giorni</Label>
-                            <Input type="number" value={f.soglia_giorni || ""} onChange={(e) => set("soglia_giorni", e.target.value)} className="w-32" />
-                        </div>
-                    )}
                     <div>
                         <Label>Oggetto template <span className="text-[10px] text-slate-500">— placeholder: {"{nome}, {numero_polizza}, {numero_sinistro}, {importo_lordo}, {scadenza}, ..."}</span></Label>
-                        <Input value={f.template_oggetto || ""} onChange={(e) => set("template_oggetto", e.target.value)} />
+                        <Input value={f.template_oggetto || ""} onChange={(e) => set("template_oggetto", e.target.value)} data-testid="rule-oggetto" />
                     </div>
                     <div>
                         <Label>Corpo template</Label>
-                        <Textarea rows={6} value={f.template_corpo || ""} onChange={(e) => set("template_corpo", e.target.value)} />
+                        <Textarea rows={6} value={f.template_corpo || ""} onChange={(e) => set("template_corpo", e.target.value)} data-testid="rule-corpo" />
                     </div>
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="rule-save-btn">Salva</Button>
+                    <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="rule-save-btn">
+                        {isNew ? "Crea regola" : "Salva"}
+                    </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

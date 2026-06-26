@@ -130,3 +130,59 @@ class Notification(BaseDoc):
     letta_at: Optional[str] = None
     archiviata: bool = False
     created_at: str = Field(default_factory=_now_iso)
+
+
+# ============================================================
+# PROVIDER CONFIG — configurazione canali (email/sms/whatsapp)
+# ============================================================
+EMAIL_PRESETS = {
+    "gmail":      {"host": "smtp.gmail.com",      "port": 587, "starttls": True,
+                   "label": "Google (Gmail / Workspace)",
+                   "hint": "Email aziendale Google. Crea una App Password su myaccount.google.com → Security → 2-Step → App passwords."},
+    "microsoft":  {"host": "smtp.office365.com",  "port": 587, "starttls": True,
+                   "label": "Microsoft (Outlook / Office 365)",
+                   "hint": "Email Microsoft 365 o Outlook.com. Admin deve abilitare SMTP AUTH. Se 2FA attivo, crea App Password."},
+    "custom":     {"host": "",  "port": 587, "starttls": True,
+                   "label": "SMTP personalizzato",
+                   "hint": "Altri provider (Aruba, Register, ecc.). Inserisci manualmente host, porta, credenziali."},
+}
+
+WHATSAPP_PRESETS = {
+    "twilio":     {"label": "Twilio WhatsApp Business",
+                   "hint": "Account Twilio + sandbox o numero WhatsApp Business verificato. Servono: Account SID, Auth Token, numero From (whatsapp:+...)."},
+    "meta":       {"label": "Meta Cloud API (futuro)",
+                   "hint": "Meta WhatsApp Business Cloud API. Predisposto, integrazione in fase 2."},
+}
+
+
+class AlertProviderConfig(BaseDoc):
+    """Configurazione di un canale di invio (email, sms, whatsapp).
+
+    Un record per canale. `tipo` è la chiave univoca.
+    Le credenziali sensibili (password, token) sono salvate in chiaro nel DB
+    locale Mongo — assicurarsi che il backend non sia esposto in rete.
+    """
+    id: str = Field(default_factory=_uid)
+    tipo: Literal["email", "sms", "whatsapp"]
+    provider: str = "gmail"             # gmail | microsoft | custom | twilio | meta
+    # email: SMTP
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_starttls: bool = True
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: Optional[str] = None     # se None usa smtp_user
+    smtp_from_name: Optional[str] = None  # display name "Studio Rossi"
+    # sms/whatsapp: Twilio
+    twilio_sid: Optional[str] = None
+    twilio_token: Optional[str] = None
+    twilio_from: Optional[str] = None   # numero From (whatsapp:+ per WA)
+    # meta
+    meta_phone_id: Optional[str] = None
+    meta_token: Optional[str] = None
+    # stato
+    enabled: bool = False
+    last_test_at: Optional[str] = None
+    last_test_status: Optional[str] = None   # ok | errore
+    last_test_error: Optional[str] = None
+    updated_at: str = Field(default_factory=_now_iso)

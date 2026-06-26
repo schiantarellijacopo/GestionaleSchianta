@@ -127,19 +127,18 @@ PRESETS: list[dict] = [
 
 
 async def seed_alert_presets() -> None:
-    """Crea le regole preset mancanti. Idempotente."""
+    """Seed disabilitato: i preset sono ora un CATALOGO TEMPLATE (vedi
+    /alert-presets/catalog). L'utente li importa esplicitamente.
+
+    Per popolare automaticamente i preset come regole, settare
+    `ALERT_AUTO_SEED_PRESETS=1` nell'env.
+    """
+    import os
+    if os.environ.get("ALERT_AUTO_SEED_PRESETS") != "1":
+        return
     for p in PRESETS:
         existing = await db.alert_rules.find_one({"preset_key": p["preset_key"]}, {"_id": 0})
         if existing:
-            # aggiorna SOLO i campi descrittivi (nome/descrizione) — non toccare l'attivo/canali/template
-            await db.alert_rules.update_one(
-                {"id": existing["id"]},
-                {"$set": {
-                    "nome": p["nome"],
-                    "descrizione": p["descrizione"],
-                    "updated_at": _now_iso(),
-                }},
-            )
             continue
         rule = AlertRule(**p, is_preset=True, attivo=False)
         await db.alert_rules.insert_one(rule.model_dump())
