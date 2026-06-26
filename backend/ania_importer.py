@@ -508,20 +508,19 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
 # ---------------------------------------------------------------------------
 # Processor: rec21 (dettagli veicolo) — funzioni pure di mapping
 # ---------------------------------------------------------------------------
-def _campi_veicolo_base(row: dict) -> dict:
-    """Campi veicolo: anagrafica + caratteristiche tecniche.
-
-    Mappatura colonne reali tracciato rec21 (OWEB):
-      - X targa, Z marca, AA modello, AC bonus_malus_universale (classe merito),
-        AE tp_alimentazione_share, AF cavalli_fiscali, AG quintali, AH posti,
-        AI cilindrata, AK kw, AN massimale_sinistro, AX valore_veicolo,
-        N data_immatricolazione, P settore_rca_share.
-    """
+def _veicolo_anagrafica(row: dict) -> dict:
+    """Identificativi del veicolo: targa, marca, modello, settore, telaio."""
     return {
         "targa": (row.get("targa") or "").strip() or None,
         "veicolo_marca": (row.get("marca") or row.get("marca_veicolo") or "").upper().strip() or None,
         "veicolo_modello": (row.get("modello") or row.get("modello_veicolo") or "").upper().strip() or None,
         "veicolo_settore": (row.get("settore_rca_share") or row.get("tipo_veicolo") or "").strip() or None,
+    }
+
+
+def _veicolo_motorizzazione(row: dict) -> dict:
+    """Caratteristiche tecniche motore + corpo: alimentazione, uso, cilindrata, kw, ecc."""
+    return {
         "veicolo_alimentazione": (row.get("tp_alimentazione_share") or row.get("alimentazione") or "").strip() or None,
         "veicolo_uso": row.get("uso_rca_share") or row.get("uso_veicolo") or None,
         "veicolo_data_immatricolazione": _parse_date(row.get("data_immatricolazione", "")),
@@ -530,9 +529,20 @@ def _campi_veicolo_base(row: dict) -> dict:
         "veicolo_kw": _parse_float(row.get("kw", "")),
         "veicolo_quintali": _parse_float(row.get("quintali") or row.get("portata") or ""),
         "veicolo_posti": int(_parse_float(row.get("posti") or row.get("numero_posti", "")) or 0) or None,
+    }
+
+
+def _veicolo_accessori(row: dict) -> dict:
+    """Accessori: gancio traino, rimorchio."""
+    return {
         "veicolo_gancio_traino": _parse_flag_si(row.get("gancio_traino", "")),
         "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
     }
+
+
+def _campi_veicolo_base(row: dict) -> dict:
+    """Campi veicolo: anagrafica + motorizzazione + accessori (vedi rec21 OWEB)."""
+    return {**_veicolo_anagrafica(row), **_veicolo_motorizzazione(row), **_veicolo_accessori(row)}
 
 
 def _campi_tariffa_bm(row: dict) -> dict:
@@ -627,12 +637,62 @@ async def _processa_dettagli_veicolo(db, files_data: Dict[str, str],
 # ---------------------------------------------------------------------------
 # Processor: rec30 (garanzie)
 # ---------------------------------------------------------------------------
+def _estrai_codici_garanzia(row: dict) -> tuple[str, str, str]:
+    """Ritorna (codice, descrizione, key) della garanzia dalla riga rec30."""
+    codice = (row.get("codice_garanzia")
+              or row.get("cod_garanzia_cmp")
+              or row.get("codice_garanzia_art20")
+              or "").strip().upper()
+    descr = (row.get("descrizione_garanzia")
+             or row.get("descrizione_garanzia_cmp")
+             or row.get("descrizione_garanzia_art20")
+             or row.get("garanzia")
+             or codice or "").strip()
+    key = codice or descr.strip().upper()
+    return codice, descr, key
+
+
+def _risolvi_nome_garanzia(key: str, descr: str,
+                           import_mappings: Optional[dict],
+                           mapping_garanzie: dict) -> Optional[str]:
+    """Risolve il nome finale della garanzia: mappatura utente > nome legacy > descrizione."""
+    if import_mappings:
+        nome = (import_mappings.get("garanzia") or {}).get(key)
+        if nome:
+            return nome
+    return mapping_garanzie.get(key) or descr
+
+
+def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[str]) -> dict:
+    """Mappa una riga rec30 nel dict garanzia da salvare in polizza.garanzie[]."""
+    return {
+        "garanzia": nome_finale,
+        "garanzia_originale": descr,
+        "codice_ania": codice,
+        "netto": _parse_float(row.get("netto_garanzia") or row.get("netto", "")),
+        "accessori": _parse_float(row.get("accessori", "")),
+        "imposte": _parse_float(row.get("imposte") or row.get("tasse", "")),
+        "ssn": _parse_float(row.get("ssn", "")),
+        "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
+        "diritti": _parse_float(row.get("diritti", "")),
+        "provvigione": _parse_float(row.get("provvigione_garanzia")
+                                    or row.get("provvigioni_totali")
+                                    or row.get("provvigione", "")),
+    }
+
+
 async def _processa_garanzie(db, files_data: Dict[str, str],
                              polizza_id_map: Dict[str, str],
                              mapping_garanzie: dict,
                              counts: Dict[str, int],
                              tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                              import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    """Processa rec30 (garanzie di polizza). Per ogni riga:
+      - traccia compagnia se non mappata
+      - risolve la polizza (id_polizza_exp -> map; fallback numero_polizza_cmp)
+      - traccia la garanzia non mappata
+      - appende al gar_per_pol per la polizza, poi update bulk
+    """
     from collections import defaultdict as _dd
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec30":
@@ -640,51 +700,25 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
         rows = _read_csv_text(content)
         counts["rec30"] = counts.get("rec30", 0) + len(rows)
         gar_per_pol: dict[str, list[dict]] = _dd(list)
+
         for row in rows:
-            # Traccia compagnia (rec30 ha compagnia_exp in colonna G) anche se non c'è polizza
             if tracker is not None and import_mappings is not None:
                 await _track_compagnia_da_riga(db, row, tracker, import_mappings)
             pol_id = await _resolve_polizza_id(db, row, polizza_id_map)
             if not pol_id:
                 continue
-            # Tracciato OWEB rec30: cod_garanzia_cmp / descrizione_garanzia_cmp (con fallback art20)
-            codice = (row.get("codice_garanzia")
-                      or row.get("cod_garanzia_cmp")
-                      or row.get("codice_garanzia_art20")
-                      or "").strip().upper()
-            descr = (row.get("descrizione_garanzia")
-                     or row.get("descrizione_garanzia_cmp")
-                     or row.get("descrizione_garanzia_art20")
-                     or row.get("garanzia")
-                     or codice or "").strip()
-            key = codice or descr.strip().upper()
-            # Cerca nome personalizzato: prima in import_mappings (entita_id == nome custom)
-            nome_finale = None
-            if import_mappings:
-                nome_finale = import_mappings.get("garanzia", {}).get(key)
-            if not nome_finale:
-                nome_finale = mapping_garanzie.get(key) or descr
-            if key and key not in mapping_garanzie and not (import_mappings or {}).get("garanzia", {}).get(key):
+            codice, descr, key = _estrai_codici_garanzia(row)
+            nome_finale = _risolvi_nome_garanzia(key, descr, import_mappings, mapping_garanzie)
+            # Stub + tracking se la garanzia non è ancora mappata
+            already_mapped = (import_mappings or {}).get("garanzia", {}).get(key)
+            if key and key not in mapping_garanzie and not already_mapped:
                 await _ensure_stub_mapping(db, "mapping_garanzie", codice or key, descr)
                 if tracker is not None:
-                    await _track_unmapped(
-                        db, tracker, "garanzia", key,
-                        label=descr or key, import_mappings=import_mappings,
-                    )
-            gar_per_pol[pol_id].append({
-                "garanzia": nome_finale,
-                "garanzia_originale": descr,
-                "codice_ania": codice,
-                "netto": _parse_float(row.get("netto_garanzia") or row.get("netto", "")),
-                "accessori": _parse_float(row.get("accessori", "")),
-                "imposte": _parse_float(row.get("imposte") or row.get("tasse", "")),
-                "ssn": _parse_float(row.get("ssn", "")),
-                "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
-                "diritti": _parse_float(row.get("diritti", "")),
-                "provvigione": _parse_float(row.get("provvigione_garanzia")
-                                            or row.get("provvigioni_totali")
-                                            or row.get("provvigione", "")),
-            })
+                    await _track_unmapped(db, tracker, "garanzia", key,
+                                          label=descr or key, import_mappings=import_mappings)
+            gar_per_pol[pol_id].append(_row_a_garanzia(row, codice, descr, nome_finale))
+
+        # Bulk update per polizza
         for pol_id, garanzie in gar_per_pol.items():
             diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
             await db.polizze.update_one(

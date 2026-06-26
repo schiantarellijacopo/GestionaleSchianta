@@ -851,7 +851,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     comp = await db.compagnie.find_one({"id": compagnia_id}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
-    trattiene = comp.get("trattiene_provvigioni", True) is not False
+    trattiene = bool(comp.get("trattiene_provvigioni", True))
 
     pol_flt: dict = {"compagnia_id": compagnia_id}
     if collaboratore_id:
@@ -1085,7 +1085,7 @@ async def compagnia_paga_titoli(
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
-    trattiene = comp.get("trattiene_provvigioni", True) is not False
+    trattiene = bool(comp.get("trattiene_provvigioni", True))
 
     titoli = await db.titoli.find({"id": {"$in": titoli_ids}, "stato": "incassato"}, {"_id": 0}).to_list(5000)
     if not titoli:
@@ -1467,7 +1467,7 @@ async def stampa_compagnia_titoli_selezionati(
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
-    trattiene = comp.get("trattiene_provvigioni", True) is not False
+    trattiene = bool(comp.get("trattiene_provvigioni", True))
     titoli = await db.titoli.find({"id": {"$in": body.titoli_ids}}, {"_id": 0}).to_list(5000)
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
     pol_map = {}
@@ -4475,7 +4475,7 @@ async def dati_compagnie(
 
     for c in compagnie:
         cid = c["id"]
-        trattiene = c.get("trattiene_provvigioni", True) is not False
+        trattiene = bool(c.get("trattiene_provvigioni", True))
         pol_ids = [p["id"] async for p in db.polizze.find(
             {"compagnia_id": cid}, {"_id": 0, "id": 1}
         )]

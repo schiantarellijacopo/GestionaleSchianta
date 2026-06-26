@@ -41,79 +41,95 @@ def render_template(tpl: str, context: dict) -> str:
 
 
 # ============================================================
-# RESOLVE DESTINATARI
+# RESOLVE DESTINATARI — refactored (complessità 26 → ~5 per helper)
 # ============================================================
+def _user_to_destinatario(u: dict, tipo: str) -> dict:
+    """Mappa un documento user nel formato destinatario standard."""
+    return {
+        "tipo": tipo, "user_id": u["id"],
+        "label": u.get("name"), "email": u.get("email"),
+        "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
+    }
+
+
+async def _dest_cliente(payload: dict) -> list[dict]:
+    anag_id = payload.get("anagrafica_id") or payload.get("contraente_id")
+    if not anag_id:
+        return []
+    ana = await db.anagrafiche.find_one({"id": anag_id}, {"_id": 0})
+    if not ana:
+        return []
+    return [{
+        "tipo": "cliente", "anagrafica_id": anag_id,
+        "label": ana.get("ragione_sociale"),
+        "email": ana.get("email"),
+        "cellulare": ana.get("cellulare") or ana.get("telefono"),
+        "whatsapp": ana.get("whatsapp") or ana.get("cellulare"),
+    }]
+
+
+async def _dest_collaboratore_da_payload(payload: dict) -> list[dict]:
+    coll_id = payload.get("collaboratore_id")
+    if not coll_id:
+        pol_id = payload.get("polizza_id")
+        if pol_id:
+            pol = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "collaboratore_id": 1})
+            coll_id = pol.get("collaboratore_id") if pol else None
+    if not coll_id:
+        return []
+    u = await db.users.find_one({"id": coll_id}, {"_id": 0})
+    return [_user_to_destinatario(u, "collaboratore")] if u else []
+
+
+async def _dest_users_by_query(query: dict, tipo: str) -> list[dict]:
+    out: list[dict] = []
+    async for u in db.users.find(query, {"_id": 0}):
+        out.append(_user_to_destinatario(u, tipo))
+    return out
+
+
+async def _dest_utenti_specifici(user_ids: list[str]) -> list[dict]:
+    out: list[dict] = []
+    for uid in user_ids:
+        u = await db.users.find_one({"id": uid}, {"_id": 0})
+        if u:
+            out.append(_user_to_destinatario(u, "utente_specifico"))
+    return out
+
+
+def _dedupe_destinatari(items: list[dict]) -> list[dict]:
+    seen: set = set()
+    unique: list[dict] = []
+    for d in items:
+        key = (
+            d.get("tipo"),
+            d.get("user_id") or d.get("anagrafica_id") or d.get("email") or d.get("cellulare"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+    return unique
+
+
 async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
     """Risolve i destinatari della regola in base al payload dell'evento.
 
     Output: lista di {tipo, user_id?, anagrafica_id?, label, email?, cellulare?, whatsapp?}
     """
     out: list[dict] = []
-    dest_tipi = rule.get("destinatari") or []
-    for dt in dest_tipi:
+    for dt in rule.get("destinatari") or []:
         if dt == "cliente":
-            anag_id = payload.get("anagrafica_id") or payload.get("contraente_id")
-            if not anag_id:
-                continue
-            ana = await db.anagrafiche.find_one({"id": anag_id}, {"_id": 0})
-            if not ana:
-                continue
-            out.append({
-                "tipo": "cliente", "anagrafica_id": anag_id,
-                "label": ana.get("ragione_sociale"),
-                "email": ana.get("email"),
-                "cellulare": ana.get("cellulare") or ana.get("telefono"),
-                "whatsapp": ana.get("whatsapp") or ana.get("cellulare"),
-            })
+            out.extend(await _dest_cliente(payload))
         elif dt == "collaboratore":
-            coll_id = payload.get("collaboratore_id")
-            if not coll_id:
-                # ricava da polizza se presente
-                pol_id = payload.get("polizza_id")
-                if pol_id:
-                    pol = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "collaboratore_id": 1})
-                    coll_id = pol.get("collaboratore_id") if pol else None
-            if coll_id:
-                u = await db.users.find_one({"id": coll_id}, {"_id": 0})
-                if u:
-                    out.append({
-                        "tipo": "collaboratore", "user_id": coll_id,
-                        "label": u.get("name"), "email": u.get("email"),
-                        "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
-                    })
+            out.extend(await _dest_collaboratore_da_payload(payload))
         elif dt == "collaboratore_sinistri":
-            async for u in db.users.find({"gestisce_sinistri": True}, {"_id": 0}):
-                out.append({
-                    "tipo": "collaboratore_sinistri", "user_id": u["id"],
-                    "label": u.get("name"), "email": u.get("email"),
-                    "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
-                })
+            out.extend(await _dest_users_by_query({"gestisce_sinistri": True}, "collaboratore_sinistri"))
         elif dt == "admin":
-            async for u in db.users.find({"role": "admin"}, {"_id": 0}):
-                out.append({
-                    "tipo": "admin", "user_id": u["id"],
-                    "label": u.get("name"), "email": u.get("email"),
-                    "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
-                })
+            out.extend(await _dest_users_by_query({"role": "admin"}, "admin"))
         elif dt == "utente_specifico":
-            for uid in (rule.get("destinatari_user_ids") or []):
-                u = await db.users.find_one({"id": uid}, {"_id": 0})
-                if u:
-                    out.append({
-                        "tipo": "utente_specifico", "user_id": uid,
-                        "label": u.get("name"), "email": u.get("email"),
-                        "cellulare": u.get("cellulare"), "whatsapp": u.get("cellulare"),
-                    })
-    # dedupe per (tipo, indirizzo principale)
-    seen = set()
-    unique = []
-    for d in out:
-        key = (d.get("tipo"), d.get("user_id") or d.get("anagrafica_id") or d.get("email") or d.get("cellulare"))
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(d)
-    return unique
+            out.extend(await _dest_utenti_specifici(rule.get("destinatari_user_ids") or []))
+    return _dedupe_destinatari(out)
 
 
 # ============================================================
