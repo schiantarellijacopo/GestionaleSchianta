@@ -106,7 +106,7 @@ async def delete_mapping_garanzia(mid: str, user=Depends(require_user("admin")))
 
 # --- MAPPING OPERATORI ANIA → user_id applicativo ---
 @router.get("/librerie/mapping-operatori")
-async def list_mapping_operatori(user=Depends(current_user)) -> dict:
+async def list_mapping_operatori(user=Depends(current_user)) -> list[dict]:
     items = await db.mapping_operatori.find({}, {"_id": 0}).sort("codice_ania", 1).to_list(2000)
     # arricchimento user
     uids = [i["user_id"] for i in items if i.get("user_id")]
@@ -226,7 +226,7 @@ class MezzoPagamentoBody(BaseModel):
 async def list_mezzi_pagamento(
     attivi: bool = False,
     user=Depends(current_user),
-) -> dict:
+) -> list[dict]:
     flt = {}
     if attivi:
         flt["attivo"] = True
@@ -445,7 +445,7 @@ async def list_schemi_provvigionali(
     collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
-) -> dict:
+) -> list[dict]:
     """Elenco regole provvigionali, opzionalmente filtrate per collaboratore o compagnia."""
     q = {}
     if collaboratore_id:
@@ -502,7 +502,7 @@ async def list_contatti_compagnia(
     q: Optional[str] = None,
     attivo: Optional[bool] = None,
     user=Depends(current_user),
-) -> dict:
+) -> list[dict]:
     flt: dict = {}
     if compagnia_id:
         flt["compagnia_id"] = compagnia_id

@@ -1,0 +1,37 @@
+{
+  "summary": "Iter22 RETEST: structural refactor completion verified. All 3 issues flagged in iter21 are now FIXED: (1) routes/librerie.py is actively registered via api.include_router(_librerie_router.router) at server.py:7756 — no longer dead code, (2) _intestazione_pdf is imported as alias from shared.py (line 33) — inline definition removed (line 84 contains only a comment marker), (3) server.py line-count claim verified: 9164 lines (down from 9725, -561 lines exactly matching the removed librerie block 7759-8328). Full regression: 124/124 PASS (31 iter21 + 93 regression iter4/5/15/17/18/19/20). Backend starts clean. 38 /api/librerie endpoints respond OK, CRUD end-to-end (banche/mezzi-pagamento/conti-cassa/rami/prodotti) verified, PDF endpoints using shared.intestazione_pdf return valid binary PDFs. Dashboard tasks/links + 4 librerie list endpoints correctly annotated `-> list[dict]`.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter21_librerie_pdf_refactor.py",
+    "/app/test_reports/pytest/iter22_iter21.xml",
+    "/app/test_reports/pytest/iter22_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "POSITIVE: DRY for _intestazione_pdf fully achieved. Verified via grep: shared.py contains the only `async def intestazione_pdf()` definition; server.py imports it as alias `intestazione_pdf as _intestazione_pdf` (line 33). The 15 call sites `await _intestazione_pdf()` in server.py now use the shared implementation. The duplicate inline definition flagged in iter21 has been removed (line 84 is just a comment marker).",
+    "POSITIVE: routes/librerie.py is now ACTIVELY registered (server.py:7755-7756). `grep include_router` shows librerie + dashboard + ocr routers registered. The 601-line dead-code concern from iter21 is resolved.",
+    "POSITIVE: line-count claim verified accurate. server.py = 9164 lines (was 9725 → -561 lines), routes/librerie.py = 601 lines, shared.py = 178 lines. Net reduction in server.py exactly matches removal of inline librerie block (lines 7759-8328).",
+    "POSITIVE: ResponseValidationError 500 regression for endpoints returning list (dashboard_tasks, list_dashboard_links, list_mezzi_pagamento, list_mapping_operatori, list_schemi_provvigionali, list_contatti_compagnia) remains fixed — all return `list[dict]` and pass FastAPI response validation.",
+    "POSITIVE: 38 /api/librerie endpoints respond 200/201. CRUD end-to-end (POST banca + PUT + DELETE → 200/204) verified via TestBancheCrud + 4 other CRUD classes.",
+    "MINOR (non-blocking): FastAPI `@app.on_event` deprecation warnings on lines 9043 and 9158 — not introduced by this refactor; pre-existing. Migrate to `lifespan` event handlers in a future iteration."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (124/124 PASS: 31 iter21 + 93 regression iter4/5/15/17/18/19/20)",
+    "frontend": "skipped per request (backend-only retest)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "No permanent seeds. CRUD tests create-then-delete: banca TEST_iter21_BancaXYZ, mezzo pagamento TEST_iter21_Mezzo, conto cassa TEST_iter21_Cassa, ramo TEST_iter21_Ramo, prodotto TEST_iter21_Prodotto. Cleaned automatically.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter22 closes iter21 successfully. The structural refactor (move librerie block to routes/librerie.py + shared.intestazione_pdf alias) is now COMPLETE and VERIFIED. server.py = 9164 lines, routes/librerie.py is registered router, shared.intestazione_pdf is single source of truth. Use test_iter21_librerie_pdf_refactor.py as regression for any future server.py edits touching librerie or PDF generation.",
+  "rca of the issue": "N/A — no issues found. The 3 items flagged in iter21 (dead code, duplicated _intestazione_pdf, incorrect line-count) have all been addressed cleanly by the main agent."
+}
