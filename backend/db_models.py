@@ -754,6 +754,7 @@ class ContattoCompagnia(BaseDoc):
 class ImportLog(BaseDoc):
     utente_id: Optional[str] = None
     nome_file: str
+    flusso: str = "omnia"           # iter23: tipo flusso (omnia | targhe | libro_matricola | ...)
     record_types_processati: dict = Field(default_factory=dict)
     anagrafiche_create: int = 0
     anagrafiche_aggiornate: int = 0
@@ -762,8 +763,35 @@ class ImportLog(BaseDoc):
     titoli_creati: int = 0
     sinistri_creati: int = 0
     errori: List[str] = Field(default_factory=list)
+    # iter23: dettaglio record NON importati / parzialmente importati
+    record_skipped: List[dict] = Field(default_factory=list)
+    # iter23: entità presenti nel flusso ma NON mappate verso il catalogo programma
+    # struttura: {"compagnie": ["UCA", "..."], "rami": ["TutelAuto", ...],
+    #             "collaboratori": ["MARIO ROSSI"], "prodotti": [...]}
+    entita_non_mappate: dict = Field(default_factory=dict)
     durata_ms: int = 0
     stato: Literal["completato", "errore", "in_corso"] = "in_corso"
+
+
+class MappingFlusso(BaseDoc):
+    """Mappatura tra valori nel flusso esterno e entità del programma.
+
+    Esempi:
+      tipo='compagnia', flusso='omnia', valore_flusso='UCA',
+            entita_id='<compagnia_id>', label_programma='UCA Assicurazioni'
+      tipo='ramo',     flusso='omnia', valore_flusso='TutelAuto',
+            entita_id='Tutela Legale',  label_programma='Tutela Legale'
+      tipo='collaboratore', flusso='omnia', valore_flusso='SCHIANTARELLI',
+            entita_id='<user_id>',     label_programma='Schiantarelli Marco'
+    """
+    tipo: Literal["compagnia", "ramo", "prodotto", "collaboratore", "garanzia"]
+    flusso: str = "omnia"
+    valore_flusso: str               # come appare nel flusso (es. "UCA", "TutelAuto")
+    entita_id: Optional[str] = None  # id (compagnia/user) o valore normalizzato (ramo)
+    label_programma: Optional[str] = None
+    note: Optional[str] = None
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)
 
 
 # =============== CALENDARIO ===============

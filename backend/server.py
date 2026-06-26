@@ -5039,7 +5039,75 @@ async def import_ania(file: UploadFile = File(...),
     log = await ania_importer.importa_zip(db, contents, file.filename, user)
     await log_attivita(user, "import", "ania", log.id,
                        f"Import file {file.filename}", payload=log.record_types_processati)
+    # Alert: import ANIA completato → notifica collaboratori sinistri se ha creato sinistri
+    if log.sinistri_creati > 0:
+        from alert_dispatcher import safe_dispatch
+        await safe_dispatch("sinistro.importato_ania", {
+            "entita_tipo": "import", "entita_id": log.id,
+            "nome_file": file.filename,
+            "n_sinistri": log.sinistri_creati,
+            "n_polizze": log.polizze_create + log.polizze_aggiornate,
+            "link": "/importazioni",
+        })
     return log.model_dump()
+
+
+# Alias OMNIA (stesso endpoint, naming nuovo)
+@api.post("/import/omnia")
+async def import_omnia(file: UploadFile = File(...),
+                       user=Depends(require_user("admin", "collaboratore"))):
+    return await import_ania(file, user)
+
+
+# Mapping per flussi (compagnia/ramo/collaboratore/prodotto)
+@api.get("/import/mappings")
+async def list_mappings(
+    tipo: Optional[str] = None,
+    flusso: str = "omnia",
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    flt: dict = {"flusso": flusso}
+    if tipo:
+        flt["tipo"] = tipo
+    return await db.import_mappings.find(flt, {"_id": 0}).to_list(2000)
+
+
+@api.post("/import/mappings", status_code=201)
+async def save_mapping(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Crea o aggiorna una mappatura. Chiave univoca: (tipo, flusso, valore_flusso)."""
+    tipo = body.get("tipo")
+    flusso = body.get("flusso", "omnia")
+    valore_flusso = body.get("valore_flusso")
+    if not (tipo and valore_flusso):
+        raise HTTPException(400, "tipo e valore_flusso richiesti")
+    upd = {
+        "tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso,
+        "entita_id": body.get("entita_id"),
+        "label_programma": body.get("label_programma"),
+        "note": body.get("note"),
+        "updated_at": _now_iso(),
+    }
+    await db.import_mappings.update_one(
+        {"tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso},
+        {"$set": upd, "$setOnInsert": {"created_at": _now_iso()}},
+        upsert=True,
+    )
+    return upd
+
+
+@api.delete("/import/mappings/{mid}")
+async def delete_mapping(mid: str, user=Depends(require_user("admin"))):
+    await db.import_mappings.delete_one({"id": mid})
+    return {"ok": True}
+
+
+# Report dettagliato di un singolo import
+@api.get("/import/log/{lid}")
+async def get_import_log(lid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    log = await db.import_logs.find_one({"id": lid}, {"_id": 0})
+    if not log:
+        raise HTTPException(404, "Log non trovato")
+    return log
 
 
 @api.get("/import/storico")

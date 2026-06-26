@@ -635,6 +635,15 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                              compagnie_cache, counts)
     _conta_record_residui(files_data, counts)
 
+    # iter23: dedup entità "non mappate" da segnalare al wizard mapping
+    entita_non_mappate: dict = {
+        "compagnie": sorted({c for c in compagnie_cache if not compagnie_cache.get(c)}),
+        "rami": sorted({g.get("ramo_flusso") for g in mapping_garanzie.values() if isinstance(g, dict) and g.get("ramo_flusso")}),
+        "collaboratori": sorted({o for o in mapping_operatori if not mapping_operatori.get(o)}),
+    }
+    # filtra liste vuote
+    entita_non_mappate = {k: v for k, v in entita_non_mappate.items() if v}
+    log.entita_non_mappate = entita_non_mappate
     log.record_types_processati = counts
     log.errori = errors
     log.durata_ms = int((time.time() - start) * 1000)

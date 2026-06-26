@@ -40,7 +40,7 @@ const ALL_MENU_ITEMS = [
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
     { id: "rubrica_compagnie", path: "/rubrica-compagnie", icon: "BookUser", label: "Rubrica compagnie", section: "amministrazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "librerie", path: "/librerie", icon: "Library", label: "Librerie", section: "amministrazione", roles: ["admin", "collaboratore"] },
-    { id: "importazione", path: "/importazione", icon: "Upload", label: "Importazione ANIA", section: "amministrazione", roles: ["admin", "collaboratore"] },
+    { id: "importazioni", path: "/importazioni", icon: "Upload", label: "Importazioni Flussi", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "attivita", path: "/attivita", icon: "Activity", label: "Log attività", section: "amministrazione", roles: ["admin", "collaboratore"] },
 ];
 
