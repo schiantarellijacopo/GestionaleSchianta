@@ -5,30 +5,60 @@
  *  - OMNIA: ZIP ANIA giornaliero (anagrafiche, polizze, titoli, sinistri, garanzie)
  *  - Targhe / Libri Matricola: CSV con mapping manuale delle colonne
  *
- * UX changes (iter23):
- *  - Pulsante "Importa" esplicito (no auto-start dopo selezione file)
+ * UX (iter23):
+ *  - Pulsante "Importa" esplicito
  *  - Report dettagliato post-import: cosa è entrato + cosa è stato saltato
- *  - Avviso entità non mappate (compagnia/ramo/collaboratore nuove)
+ *  - Wizard interattivo mapping delle entità non mappate (compagnie/rami/operatori/prodotti/garanzie)
  */
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import {
     Upload, FileArchive, CheckCircle2, AlertCircle, Clock,
-    AlertTriangle, FileText, Car,
+    AlertTriangle, FileText, Car, Wand2, X, Save,
 } from "lucide-react";
 import { toast } from "sonner";
 
 
+const TIPO_LABEL = {
+    compagnia: "Compagnia",
+    ramo: "Ramo",
+    collaboratore: "Operatore / Collaboratore",
+    prodotto: "Prodotto",
+    garanzia: "Garanzia",
+};
+const TIPO_PLURAL = {
+    compagnie: "compagnia",
+    rami: "ramo",
+    collaboratori: "collaboratore",
+    prodotti: "prodotto",
+    garanzie: "garanzia",
+};
+
+
 export default function Importazioni() {
     const [tab, setTab] = useState("omnia");
+    const [showWizard, setShowWizard] = useState(false);
+
     return (
         <div data-testid="importazioni-page">
             <PageHeader
                 title="Importazioni Flussi"
-                subtitle="Carica i tracciati delle compagnie. Più flussi supportati: OMNIA (ZIP ANIA) + Targhe/Libri matricola (CSV con mapping)."
+                subtitle="Carica i tracciati delle compagnie. OMNIA (ZIP ANIA) + Targhe/Libri matricola (CSV con mapping)."
+                actions={
+                    <Button
+                        variant="outline"
+                        onClick={() => setShowWizard(true)}
+                        data-testid="wizard-mapping-btn"
+                    >
+                        <Wand2 size={14} className="mr-1.5" /> Wizard Mapping
+                    </Button>
+                }
             />
             <div className="flex gap-2 mb-4 border-b">
                 {[
@@ -46,9 +76,14 @@ export default function Importazioni() {
                     </button>
                 ))}
             </div>
-            {tab === "omnia" && <ImportOmnia />}
+            {tab === "omnia" && <ImportOmnia onOpenWizard={() => setShowWizard(true)} />}
             {tab === "targhe" && <ImportTargheStub />}
-            {tab === "storico" && <Storico />}
+            {tab === "storico" && <Storico onOpenWizard={() => setShowWizard(true)} />}
+
+            <MappingWizardDialog
+                open={showWizard}
+                onClose={() => setShowWizard(false)}
+            />
         </div>
     );
 }
@@ -57,7 +92,7 @@ export default function Importazioni() {
 // ============================================================
 // OMNIA — ZIP ANIA
 // ============================================================
-function ImportOmnia() {
+function ImportOmnia({ onOpenWizard }) {
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [lastLog, setLastLog] = useState(null);
@@ -122,7 +157,7 @@ function ImportOmnia() {
                     </Button>
                 </div>
             </Card>
-            {lastLog && <ImportReport log={lastLog} />}
+            {lastLog && <ImportReport log={lastLog} onOpenWizard={onOpenWizard} />}
         </div>
     );
 }
@@ -131,10 +166,10 @@ function ImportOmnia() {
 // ============================================================
 // REPORT DETTAGLIATO POST-IMPORT
 // ============================================================
-function ImportReport({ log }) {
+function ImportReport({ log, onOpenWizard }) {
     const skipped = log.record_skipped || [];
     const non_mappate = log.entita_non_mappate || {};
-    const ha_non_mappate = Object.keys(non_mappate).some((k) => (non_mappate[k] || []).length > 0);
+    const total_unmapped = Object.values(non_mappate).reduce((s, arr) => s + (arr?.length || 0), 0);
 
     return (
         <div className="space-y-4">
@@ -165,36 +200,50 @@ function ImportReport({ log }) {
                 </div>
             </Card>
 
-            {ha_non_mappate && (
+            {total_unmapped > 0 && (
                 <Card className="p-5 border-l-4 border-l-amber-500 bg-amber-50/40" data-testid="non-mappate-card">
                     <div className="flex items-center gap-2 mb-2">
                         <AlertTriangle size={18} className="text-amber-600" />
-                        <div className="font-medium text-amber-900">Entità non mappate ({sumLen(non_mappate)})</div>
+                        <div className="font-medium text-amber-900">Entità non mappate ({total_unmapped})</div>
+                        <Button
+                            size="sm"
+                            className="ml-auto bg-amber-600 hover:bg-amber-700"
+                            onClick={onOpenWizard}
+                            data-testid="apri-wizard-da-report-btn"
+                        >
+                            <Wand2 size={13} className="mr-1" /> Apri Wizard
+                        </Button>
                     </div>
                     <p className="text-sm text-amber-800 mb-3">
                         Le seguenti entità sono apparse nel flusso ma non sono ancora collegate
-                        a un'entità del programma. Mappa ciascuna alla corrispondente per averle
-                        gestite automaticamente al prossimo import.
+                        a un&apos;entità del programma. Mappa ciascuna per averle gestite automaticamente
+                        al prossimo import e applica il back-fill ai record già caricati.
                     </p>
-                    {["compagnie", "rami", "collaboratori", "prodotti"].map((tipo) => {
-                        const items = non_mappate[tipo] || [];
+                    {["compagnie", "rami", "collaboratori", "prodotti", "garanzie"].map((tipoP) => {
+                        const items = non_mappate[tipoP] || [];
                         if (!items.length) return null;
                         return (
-                            <div key={tipo} className="mb-3" data-testid={`non-mappate-${tipo}`}>
-                                <div className="text-xs uppercase font-semibold text-amber-700 mb-1.5">{tipo}</div>
+                            <div key={tipoP} className="mb-3" data-testid={`non-mappate-${tipoP}`}>
+                                <div className="text-xs uppercase font-semibold text-amber-700 mb-1.5">
+                                    {tipoP} ({items.length})
+                                </div>
                                 <div className="flex flex-wrap gap-1.5">
-                                    {items.map((v) => (
-                                        <span key={v} className="text-xs bg-white border border-amber-300 text-amber-900 px-2 py-1 rounded">
-                                            {v}
-                                        </span>
-                                    ))}
+                                    {items.slice(0, 50).map((v, i) => {
+                                        const label = typeof v === "string" ? v : (v.label || v.valore);
+                                        const count = typeof v === "object" ? v.count : null;
+                                        return (
+                                            <span key={i} className="text-xs bg-white border border-amber-300 text-amber-900 px-2 py-1 rounded">
+                                                {label}{count ? ` ×${count}` : ""}
+                                            </span>
+                                        );
+                                    })}
+                                    {items.length > 50 && (
+                                        <span className="text-[11px] text-amber-700">… e altri {items.length - 50}</span>
+                                    )}
                                 </div>
                             </div>
                         );
                     })}
-                    <p className="text-[11px] text-amber-700 mt-2">
-                        💡 Wizard mapping interattivo in arrivo — per ora puoi creare manualmente le entità mancanti in Compagnie / Anagrafiche / Librerie.
-                    </p>
                 </Card>
             )}
 
@@ -247,15 +296,233 @@ function Stat({ label, value }) {
     );
 }
 
-function sumLen(obj) {
-    return Object.values(obj || {}).reduce((s, arr) => s + (arr?.length || 0), 0);
+
+// ============================================================
+// WIZARD MAPPING — Dialog interattivo
+// ============================================================
+function MappingWizardDialog({ open, onClose }) {
+    const [data, setData] = useState(null);          // { compagnia: [...], ramo: [...], candidates: {...} }
+    const [edits, setEdits] = useState({});          // {mapping_id: entita_id}
+    const [active, setActive] = useState("compagnia");
+    const [saving, setSaving] = useState(false);
+    const [applying, setApplying] = useState(false);
+
+    const load = useCallback(async () => {
+        try {
+            const res = await api.get("/import/unmapped");
+            setData(res.data);
+            // Scegli il primo tipo con elementi
+            const first = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+                .find((t) => (res.data[t] || []).length > 0);
+            if (first) setActive(first);
+        } catch (e) {
+            toast.error("Errore caricamento mapping: " + (e.response?.data?.detail || e.message));
+        }
+    }, []);
+
+    useEffect(() => {
+        if (open) { setEdits({}); load(); }
+    }, [open, load]);
+
+    const saveAll = async (applyAfter = false) => {
+        const updates = Object.entries(edits).filter(([, v]) => v);
+        if (!updates.length) {
+            toast.info("Nessuna mappatura da salvare");
+            return;
+        }
+        setSaving(true);
+        try {
+            const items = data ? Object.values(data).flat().filter((x) => x?.id) : [];
+            const byId = Object.fromEntries(items.map((it) => [it.id, it]));
+            for (const [mid, entita_id] of updates) {
+                const it = byId[mid];
+                if (!it) continue;
+                // Trova il tipo cercando in quale array è
+                const tipo = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+                    .find((t) => (data[t] || []).some((x) => x.id === mid));
+                await api.post("/import/mappings", {
+                    tipo,
+                    flusso: "omnia",
+                    valore_flusso: it.valore_flusso,
+                    entita_id,
+                    label_programma: (data.candidates[tipo] || []).find((c) => c.id === entita_id)?.label || null,
+                });
+            }
+            toast.success(`Salvate ${updates.length} mappature`);
+            if (applyAfter) {
+                await applyMappings(false);
+            }
+            await load();
+        } catch (e) {
+            toast.error("Errore salvataggio: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const applyMappings = async (showToast = true) => {
+        setApplying(true);
+        try {
+            const res = await api.post("/import/mappings/apply");
+            const s = res.data;
+            const total = (s.polizze_collaboratore || 0)
+                + (s.polizze_ramo || 0)
+                + (s.polizze_prodotto || 0)
+                + (s.polizze_garanzia || 0)
+                + (s.polizze_compagnia || 0);
+            if (showToast) {
+                toast.success(`Back-fill completato: ${total} polizze aggiornate`);
+            }
+        } catch (e) {
+            toast.error("Errore back-fill: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setApplying(false);
+        }
+    };
+
+    if (!open) return null;
+
+    const tipi = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"];
+    const counts = data ? Object.fromEntries(tipi.map((t) => [t, (data[t] || []).length])) : {};
+    const totalCount = Object.values(counts).reduce((s, n) => s + n, 0);
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col" data-testid="wizard-mapping-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Wand2 size={18} className="text-sky-700" />
+                        Wizard Mapping Entità Importazione
+                    </DialogTitle>
+                    <DialogDescription>
+                        Collega le entità apparse nei flussi alle entità del programma. Le mappature verranno
+                        usate automaticamente nei prossimi import e (opzionalmente) applicate ai record esistenti.
+                    </DialogDescription>
+                </DialogHeader>
+
+                {!data ? <Loading /> : totalCount === 0 ? (
+                    <div className="py-12 text-center" data-testid="wizard-no-unmapped">
+                        <CheckCircle2 size={42} className="mx-auto text-emerald-500 mb-3" />
+                        <p className="text-sm text-slate-600">Tutte le entità sono mappate.</p>
+                        <p className="text-xs text-slate-500 mt-1">Puoi comunque eseguire il back-fill sui record esistenti.</p>
+                        <Button
+                            className="mt-4"
+                            variant="outline"
+                            disabled={applying}
+                            onClick={() => applyMappings(true)}
+                            data-testid="wizard-apply-only-btn"
+                        >
+                            {applying ? "Applicazione..." : "Applica back-fill ai record esistenti"}
+                        </Button>
+                    </div>
+                ) : (
+                    <>
+                        <div className="flex gap-1 border-b">
+                            {tipi.map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setActive(t)}
+                                    disabled={counts[t] === 0}
+                                    className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${active === t ? "border-sky-600 text-sky-700" : "border-transparent text-slate-500 hover:text-slate-700"} ${counts[t] === 0 ? "opacity-40 cursor-not-allowed" : ""}`}
+                                    data-testid={`wizard-tab-${t}`}
+                                >
+                                    {TIPO_LABEL[t]} {counts[t] > 0 && <span className="ml-1 text-amber-700">({counts[t]})</span>}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="overflow-y-auto flex-1 -mx-1 px-1 py-2" data-testid={`wizard-list-${active}`}>
+                            <MappingRows
+                                items={data[active] || []}
+                                candidates={data.candidates?.[active] || []}
+                                edits={edits}
+                                onChange={(id, v) => setEdits((s) => ({ ...s, [id]: v }))}
+                                tipo={active}
+                            />
+                        </div>
+                    </>
+                )}
+
+                <DialogFooter className="border-t pt-3 gap-2">
+                    <Button variant="ghost" onClick={onClose} data-testid="wizard-close-btn">
+                        <X size={14} className="mr-1" /> Chiudi
+                    </Button>
+                    {data && totalCount > 0 && (
+                        <>
+                            <Button
+                                variant="outline"
+                                disabled={saving}
+                                onClick={() => saveAll(false)}
+                                data-testid="wizard-save-btn"
+                            >
+                                <Save size={14} className="mr-1" /> {saving ? "Salvataggio..." : "Salva mappature"}
+                            </Button>
+                            <Button
+                                className="bg-sky-700 hover:bg-sky-800"
+                                disabled={saving || applying}
+                                onClick={() => saveAll(true)}
+                                data-testid="wizard-save-apply-btn"
+                            >
+                                <Wand2 size={14} className="mr-1" />
+                                {saving || applying ? "Elaborazione..." : "Salva e applica"}
+                            </Button>
+                        </>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+function MappingRows({ items, candidates, edits, onChange, tipo }) {
+    if (!items.length) {
+        return <p className="text-sm text-slate-500 py-4 text-center">Nessuna entità da mappare in questa categoria.</p>;
+    }
+    return (
+        <table className="data-table w-full text-sm">
+            <thead>
+                <tr>
+                    <th>Valore nel flusso</th>
+                    <th className="num">Occorrenze</th>
+                    <th>Mappa a → {TIPO_LABEL[tipo]} programma</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items.map((it) => (
+                    <tr key={it.id} data-testid={`wizard-row-${it.id}`}>
+                        <td>
+                            <div className="font-medium text-slate-800">{it.valore_flusso}</div>
+                            {it.label_flusso && it.label_flusso !== it.valore_flusso && (
+                                <div className="text-[11px] text-slate-500">{it.label_flusso}</div>
+                            )}
+                        </td>
+                        <td className="num">{it.occorrenze || 0}</td>
+                        <td>
+                            <select
+                                value={edits[it.id] ?? ""}
+                                onChange={(e) => onChange(it.id, e.target.value)}
+                                className="w-full text-xs border rounded px-2 py-1.5 bg-white"
+                                data-testid={`wizard-select-${it.id}`}
+                            >
+                                <option value="">— Seleziona —</option>
+                                {candidates.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.label}</option>
+                                ))}
+                            </select>
+                        </td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    );
 }
 
 
 // ============================================================
 // STORICO
 // ============================================================
-function Storico() {
+function Storico({ onOpenWizard }) {
     const [storico, setStorico] = useState(null);
     const [details, setDetails] = useState(null);
 
@@ -304,7 +571,7 @@ function Storico() {
             </Card>
             {details && (
                 <div className="mt-4">
-                    <ImportReport log={details} />
+                    <ImportReport log={details} onOpenWizard={onOpenWizard} />
                     <Button variant="outline" onClick={() => setDetails(null)} className="mt-3">Chiudi dettaglio</Button>
                 </div>
             )}

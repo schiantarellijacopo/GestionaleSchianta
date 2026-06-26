@@ -1,0 +1,26 @@
+{
+  "summary": "Iter22 - Wizard Mapping OMNIA: BE (6/6 pytest) + FE (E2E Playwright) all passing. Validated import tracking of unmapped entities, GET /import/unmapped grouping + candidates, POST /import/mappings persistence, POST /import/mappings/apply back-fill, ramo mapping applied during re-import, and full FE wizard dialog flow (tabs, rows, save/apply buttons, empty state).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_wizard_mapping_omnia.py",
+    "/app/test_reports/pytest/iter22_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is large (>8800 lines). Consider splitting the /api/import/* endpoints into a dedicated router module (e.g. routers/import_omnia.py) for maintainability.",
+    "apply_import_mappings: 'note' field accepted in save_mapping body but never validated; consider Pydantic model for body to enforce shape (tipo whitelist compagnia|ramo|collaboratore|prodotto|garanzia).",
+    "GET /import/unmapped returns ramo candidates from db.rami only — if the ramo library is empty users will see no candidates. Consider also surfacing distinct existing polizze.ramo values as fallback candidates.",
+    "_track_unmapped uses $inc occorrenze on every import; if the same flusso is imported repeatedly, occorrenze grows unbounded. Consider resetting per import or storing last_seen_at."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter22_wizard_mapping_omnia.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (all wizard flows verified)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Each backend test run creates a unique ZIP with markers TST<ts>/OP<ts>/RamoTest<ts>/ProdTest<ts>/TESTANA<ts>/TESTPOL<ts>. test_zz_cleanup deletes test mappings. FE test seeded FETESTANA/FETESTPOL/FECOMP/FEOP/FERamo/FEProd entities and were cleaned up post-test (1 anagrafica, 1 polizza, 4 import_mappings).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Wizard Mapping OMNIA fully working end-to-end on both BE and FE. Reusable backend test: /app/backend/tests/test_iter22_wizard_mapping_omnia.py. Auth uses cookie+bearer; admin login returns both access_token and httpOnly cookie. Dropdown candidates rely on existing data (compagnie/rami/prodotti/users) — if DB is fresh, some candidate lists may be empty (test handles fallback). FE wizard dialog correctly toggles between empty state (wizard-apply-only-btn) and tabs state (wizard-tab-{tipo} + wizard-row-{id} + wizard-save-btn/wizard-save-apply-btn).",
+  "rca of the issue": "N/A — no issues found"
+}

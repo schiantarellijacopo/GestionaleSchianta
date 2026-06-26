@@ -5072,6 +5072,74 @@ async def list_mappings(
     return await db.import_mappings.find(flt, {"_id": 0}).to_list(2000)
 
 
+@api.get("/import/unmapped")
+async def list_unmapped_entities(
+    flusso: str = "omnia",
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Ritorna le entità del flusso ancora da mappare a un'entità DB.
+
+    Struttura:
+      {
+        "compagnia":     [{"valore_flusso": "UCA", "label_flusso": "UCA", "occorrenze": 12}, ...],
+        "ramo":          [...],
+        "collaboratore": [...],
+        "prodotto":      [...],
+        "garanzia":      [...],
+        "candidates":    {           # entità DB selezionabili per ciascun tipo
+          "compagnia":     [{"id": "...", "label": "UCA Assicurazioni"}, ...],
+          "ramo":          [{"id": "RC Auto", "label": "RC Auto"}, ...],
+          "collaboratore": [{"id": "<user_id>", "label": "Mario Rossi"}, ...],
+          "prodotto":      [{"id": "...", "label": "Polizza Casa Plus"}, ...],
+          "garanzia":      [{"id": "<nome>", "label": "<nome>"}, ...],
+        }
+      }
+    """
+    by_tipo: dict[str, list[dict]] = {
+        "compagnia": [], "ramo": [], "prodotto": [], "collaboratore": [], "garanzia": [],
+    }
+    async for m in db.import_mappings.find(
+        {"flusso": flusso, "$or": [{"entita_id": None}, {"entita_id": ""}]},
+        {"_id": 0},
+    ):
+        tipo = m.get("tipo")
+        if tipo in by_tipo:
+            by_tipo[tipo].append({
+                "id": m.get("id"),
+                "valore_flusso": m.get("valore_flusso"),
+                "label_flusso": m.get("label_flusso") or m.get("valore_flusso"),
+                "occorrenze": m.get("occorrenze", 0),
+            })
+    # Candidati DB
+    candidates: dict[str, list[dict]] = {}
+    candidates["compagnia"] = [
+        {"id": c["id"], "label": c.get("ragione_sociale") or c.get("codice")}
+        async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1}).sort("ragione_sociale", 1)
+    ]
+    candidates["ramo"] = [
+        {"id": r.get("nome"), "label": r.get("nome")}
+        async for r in db.rami.find({}, {"_id": 0, "nome": 1}).sort("nome", 1)
+    ]
+    candidates["collaboratore"] = [
+        {"id": u["id"], "label": u.get("name") or u.get("email")}
+        async for u in db.users.find(
+            {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "email": 1},
+        ).sort("name", 1)
+    ]
+    candidates["prodotto"] = [
+        {"id": p["id"], "label": p.get("nome")}
+        async for p in db.prodotti.find({}, {"_id": 0, "id": 1, "nome": 1}).sort("nome", 1)
+    ]
+    # Garanzie: usa la libreria mapping_garanzie + lista distinct dalle polizze
+    gar_labels: set[str] = set()
+    async for g in db.mapping_garanzie.find({"nome_personalizzato": {"$ne": None}}, {"_id": 0, "nome_personalizzato": 1}):
+        if g.get("nome_personalizzato"):
+            gar_labels.add(g["nome_personalizzato"])
+    candidates["garanzia"] = [{"id": n, "label": n} for n in sorted(gar_labels)]
+    return {**by_tipo, "candidates": candidates}
+
+
 @api.post("/import/mappings", status_code=201)
 async def save_mapping(body: dict, user=Depends(require_user("admin", "collaboratore"))):
     """Crea o aggiorna una mappatura. Chiave univoca: (tipo, flusso, valore_flusso)."""
@@ -5099,6 +5167,99 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
 async def delete_mapping(mid: str, user=Depends(require_user("admin"))):
     await db.import_mappings.delete_one({"id": mid})
     return {"ok": True}
+
+
+@api.post("/import/mappings/apply")
+async def apply_import_mappings(
+    flusso: str = "omnia",
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Riapplica i mapping salvati ai record già importati.
+
+    Esegue back-fill per:
+      - compagnia → aggiorna `polizze.compagnia_id` e `sinistri.compagnia_id` quando matcha
+        un `valore_flusso` (es. codice compagnia exp) — usa un campo helper non disponibile,
+        quindi il back-fill compagnia è limitato a polizze con compagnia_id vuoto e
+        contraente con compagnia_exp == valore_flusso (best-effort).
+      - collaboratore → aggiorna `polizze.collaboratore_id` se `operatore_ania_codice` matcha
+      - ramo → aggiorna `polizze.ramo` su match esatto del ramo originale
+      - garanzia → rinomina garanzie nelle polizze (chiave su `codice_ania` o nome originale)
+      - prodotto → aggiorna `polizze.prodotto` su match esatto del valore originale
+    """
+    summary = {
+        "polizze_compagnia": 0,
+        "polizze_collaboratore": 0,
+        "polizze_ramo": 0,
+        "polizze_prodotto": 0,
+        "polizze_garanzia": 0,
+        "sinistri_compagnia": 0,
+    }
+    mappings = await db.import_mappings.find(
+        {"flusso": flusso, "entita_id": {"$ne": None}},
+        {"_id": 0},
+    ).to_list(5000)
+
+    gar_map: dict[str, str] = {}
+    for m in mappings:
+        tipo = m.get("tipo")
+        valore = (m.get("valore_flusso") or "").strip()
+        entita_id = m.get("entita_id")
+        if not (tipo and valore and entita_id):
+            continue
+
+        if tipo == "collaboratore":
+            r = await db.polizze.update_many(
+                {"operatore_ania_codice": valore},
+                {"$set": {"collaboratore_id": entita_id, "updated_at": _now_iso()}},
+            )
+            summary["polizze_collaboratore"] += r.modified_count
+
+        elif tipo == "compagnia":
+            # Back-fill preciso: match su compagnia_codice_exp salvato durante l'import
+            r1 = await db.polizze.update_many(
+                {"compagnia_codice_exp": valore},
+                {"$set": {"compagnia_id": entita_id, "updated_at": _now_iso()}},
+            )
+            summary["polizze_compagnia"] += r1.modified_count
+
+        elif tipo == "ramo":
+            r = await db.polizze.update_many(
+                {"$or": [{"ramo": valore}, {"ramo_originale": valore}]},
+                {"$set": {"ramo": entita_id, "updated_at": _now_iso()}},
+            )
+            summary["polizze_ramo"] += r.modified_count
+
+        elif tipo == "prodotto":
+            r = await db.polizze.update_many(
+                {"$or": [{"prodotto": valore}, {"prodotto_originale": valore}]},
+                {"$set": {"prodotto": entita_id, "updated_at": _now_iso()}},
+            )
+            summary["polizze_prodotto"] += r.modified_count
+
+        elif tipo == "garanzia":
+            gar_map[valore.upper()] = entita_id
+
+    if gar_map:
+        async for p in db.polizze.find(
+            {"garanzie": {"$exists": True, "$ne": []}},
+            {"_id": 0, "id": 1, "garanzie": 1},
+        ):
+            changed = False
+            for g in p.get("garanzie") or []:
+                code = (g.get("codice_ania") or g.get("garanzia_originale") or "").strip().upper()
+                if code in gar_map and g.get("garanzia") != gar_map[code]:
+                    g["garanzia"] = gar_map[code]
+                    changed = True
+            if changed:
+                await db.polizze.update_one(
+                    {"id": p["id"]},
+                    {"$set": {"garanzie": p["garanzie"], "updated_at": _now_iso()}},
+                )
+                summary["polizze_garanzia"] += 1
+
+    await log_attivita(user, "apply", "import_mappings", None,
+                       f"Applicate {len(mappings)} mappature", payload=summary)
+    return summary
 
 
 # Report dettagliato di un singolo import

@@ -130,6 +130,14 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            <Route
+                                path="/importazioni"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore"]}>
+                                        <Importazione />
+                                    </ProtectedRoute>
+                                }
+                            />
                             <Route path="/pensioni" element={<Pensioni />} />
                             <Route path="/provvigioni" element={
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>

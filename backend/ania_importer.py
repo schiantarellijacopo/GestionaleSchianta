@@ -43,8 +43,66 @@ async def _load_mapping_operatori(db) -> dict:
     return out
 
 
-async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: str = "") -> dict:
-    """Crea voce stub nella libreria di mapping se non esiste (per permettere all'utente di mapparla)."""
+async def _load_import_mappings(db, flusso: str = "omnia") -> Dict[str, Dict[str, Optional[str]]]:
+    """Carica i mapping unificati `import_mappings` raggruppati per tipo.
+
+    Ritorna: {tipo: {valore_flusso: entita_id}}.
+    """
+    out: Dict[str, Dict[str, Optional[str]]] = {
+        "compagnia": {}, "ramo": {}, "prodotto": {},
+        "collaboratore": {}, "garanzia": {},
+    }
+    async for m in db.import_mappings.find({"flusso": flusso}, {"_id": 0}):
+        tipo = m.get("tipo")
+        valore = (m.get("valore_flusso") or "").strip()
+        if tipo in out and valore:
+            out[tipo][valore] = m.get("entita_id")
+    return out
+
+
+async def _track_unmapped(db, tracker: Dict[str, Dict[str, dict]], tipo: str,
+                          valore: str, label: str = "",
+                          import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+                          flusso: str = "omnia") -> None:
+    """Registra un valore come "non mappato" se non presente in import_mappings.
+
+    `tracker` è un dict {tipo: {valore: {label, count}}} popolato durante l'import.
+    Crea uno stub in `import_mappings` con `entita_id=None` per renderlo visibile nel wizard.
+    """
+    if not valore:
+        return
+    valore = valore.strip()
+    if not valore:
+        return
+    mapped = (import_mappings or {}).get(tipo, {})
+    if mapped.get(valore):
+        return  # già mappato a un'entità
+    bucket = tracker.setdefault(tipo, {})
+    rec = bucket.setdefault(valore, {"label": label, "count": 0})
+    rec["count"] += 1
+    if label and not rec.get("label"):
+        rec["label"] = label
+    # Crea voce stub in import_mappings (idempotente) così appare nel wizard
+    await db.import_mappings.update_one(
+        {"tipo": tipo, "flusso": flusso, "valore_flusso": valore},
+        {
+            "$setOnInsert": {
+                "id": _uid(),
+                "tipo": tipo, "flusso": flusso, "valore_flusso": valore,
+                "entita_id": None,
+                "label_programma": None,
+                "label_flusso": label or valore,
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+            },
+            "$inc": {"occorrenze": 1},
+        },
+        upsert=True,
+    )
+
+
+async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: str = "") -> None:
+    """Crea voce stub nella libreria di mapping legacy se non esiste."""
     if not codice:
         return
     existing = await db[collection].find_one({"codice_ania": codice}, {"_id": 0, "id": 1})
@@ -129,23 +187,31 @@ def _extract_zip_contents(file_bytes: bytes, filename: str) -> Dict[str, str]:
 
 
 async def _get_or_create_compagnia(db, codice_exp: str, codice_ania: str,
-                                   cache: Dict[str, str]) -> str | None:
+                                   cache: Dict[str, str],
+                                   tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                                   import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> str | None:
     if not codice_exp:
         return None
     if codice_exp in cache:
         return cache[codice_exp]
+    # Prima: prova a risolvere via import_mappings
+    if import_mappings:
+        mapped_id = import_mappings.get("compagnia", {}).get(codice_exp)
+        if mapped_id:
+            cache[codice_exp] = mapped_id
+            return mapped_id
     existing = await db.compagnie.find_one({"codice": codice_exp})
     if existing:
         cache[codice_exp] = existing["id"]
         return existing["id"]
-    comp = Compagnia(
-        codice=codice_exp,
-        ragione_sociale=codice_exp or f"Compagnia {codice_ania}",
-        descrizione=f"Compagnia ANIA {codice_ania}" if codice_ania else None,
-    )
-    await db.compagnie.insert_one(comp.model_dump())
-    cache[codice_exp] = comp.id
-    return comp.id
+    # Non c'è ancora la compagnia: la traccio come "non mappata" (no auto-create)
+    if tracker is not None:
+        await _track_unmapped(
+            db, tracker, "compagnia", codice_exp,
+            label=codice_ania or codice_exp,
+            import_mappings=import_mappings,
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +242,9 @@ _MAP_STATO_SINISTRO = {
 # Processor: rec10 (anagrafiche)
 # ---------------------------------------------------------------------------
 async def _build_anagrafica_payload(db, row: dict,
-                                    compagnie_cache: Dict[str, str]) -> dict:
+                                    compagnie_cache: Dict[str, str],
+                                    tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                                    import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> dict:
     cf = row.get("codice_fiscale") or None
     tipo = "persona_giuridica" if row.get("partita_iva") and not cf else "persona_fisica"
     sesso_raw = (row.get("sesso_share") or "").upper()
@@ -202,6 +270,7 @@ async def _build_anagrafica_payload(db, row: dict,
         "data_consenso_privacy": _parse_date(row.get("data_consenso_privacy", "")),
         "compagnia_id": await _get_or_create_compagnia(
             db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+            tracker=tracker, import_mappings=import_mappings,
         ),
         "fonte": "import_ania",
         "updated_at": _now_iso(),
@@ -211,7 +280,9 @@ async def _build_anagrafica_payload(db, row: dict,
 async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
                                 ana_id_map: Dict[str, str],
                                 compagnie_cache: Dict[str, str],
-                                counts: Dict[str, int]) -> None:
+                                counts: Dict[str, int],
+                                tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                                import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec10":
             continue
@@ -221,7 +292,7 @@ async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
             id_exp = (row.get("id_anagrafica_exp")
                       or row.get("id_anag_inviante")
                       or _uid())
-            data = await _build_anagrafica_payload(db, row, compagnie_cache)
+            data = await _build_anagrafica_payload(db, row, compagnie_cache, tracker, import_mappings)
             data["ragione_sociale"] = data["ragione_sociale"] or f"Anagrafica {id_exp}"
             data["id_anagrafica_exp"] = id_exp
             cf = data["codice_fiscale"]
@@ -264,10 +335,13 @@ async def _risolvi_contraente(db, contraente_exp: str | None,
 
 
 async def _resolve_operatore_codice(db, row: dict,
-                                   mapping_operatori: dict) -> tuple[Optional[str], Optional[str]]:
+                                   mapping_operatori: dict,
+                                   tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                                   import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> tuple[Optional[str], Optional[str]]:
     """Estrae l'operatore_codice dalla riga e risolve il collaboratore_id.
 
-    Crea uno stub mapping se l'operatore è presente ma non ancora mappato.
+    Risolve sia via mapping_operatori (legacy) che via import_mappings (nuovo).
+    Traccia l'operatore come "non mappato" se non risolto.
     Ritorna (operatore_codice, collaboratore_id).
     """
     operatore_codice = (row.get("cod_operatore")
@@ -276,25 +350,42 @@ async def _resolve_operatore_codice(db, row: dict,
                         or "").strip() or None
     if not operatore_codice:
         return None, None
-    collaboratore_id = mapping_operatori.get(operatore_codice)
+    label = row.get("nome_operatore") or row.get("descrizione_operatore") or ""
+    # 1) prova import_mappings (nuovo sistema unificato)
+    collaboratore_id: Optional[str] = None
+    if import_mappings:
+        collaboratore_id = import_mappings.get("collaboratore", {}).get(operatore_codice)
+    # 2) fallback su mapping_operatori legacy
     if not collaboratore_id:
-        await _ensure_stub_mapping(
-            db, "mapping_operatori", operatore_codice,
-            row.get("nome_operatore") or row.get("descrizione_operatore") or "",
-        )
+        collaboratore_id = mapping_operatori.get(operatore_codice)
+    if not collaboratore_id:
+        # tracking + stub legacy per compatibilità con UI Librerie esistente
+        await _ensure_stub_mapping(db, "mapping_operatori", operatore_codice, label)
+        if tracker is not None:
+            await _track_unmapped(
+                db, tracker, "collaboratore", operatore_codice,
+                label=label, import_mappings=import_mappings,
+            )
     return operatore_codice, collaboratore_id
 
 
 def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
                            contraente_id: Optional[str], stato: str,
-                           operatore_codice: Optional[str], id_exp: str) -> dict:
+                           operatore_codice: Optional[str], id_exp: str,
+                           ramo_mapped: Optional[str] = None,
+                           prodotto_mapped: Optional[str] = None) -> dict:
     """Costruisce il dict di payload polizza da una riga rec20."""
+    ramo_raw = row.get("ramo_share") or row.get("ramo_cmp") or "VARIE"
+    prodotto_raw = row.get("prodotto_cmp") or None
     return {
         "numero_polizza": numero,
         "compagnia_id": comp_id or "",
+        "compagnia_codice_exp": (row.get("compagnia_exp") or "").strip() or None,
         "contraente_id": contraente_id or "",
-        "ramo": row.get("ramo_share") or row.get("ramo_cmp") or "VARIE",
-        "prodotto": row.get("prodotto_cmp") or None,
+        "ramo": ramo_mapped or ramo_raw,
+        "ramo_originale": ramo_raw if ramo_raw and ramo_raw != "VARIE" else None,
+        "prodotto": prodotto_mapped or prodotto_raw,
+        "prodotto_originale": prodotto_raw,
         "stato": stato,
         "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
         "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
@@ -331,7 +422,9 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                             polizza_id_map: Dict[str, str],
                             compagnie_cache: Dict[str, str],
                             mapping_operatori: dict,
-                            counts: Dict[str, int]) -> None:
+                            counts: Dict[str, int],
+                            tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                            import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec20":
             continue
@@ -345,14 +438,36 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             )
             comp_id = await _get_or_create_compagnia(
                 db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+                tracker=tracker, import_mappings=import_mappings,
             )
             stato = _MAP_STATO_POLIZZA.get((row.get("cod_stato_share") or "").lower(), "attiva")
             operatore_codice, collaboratore_id = await _resolve_operatore_codice(
-                db, row, mapping_operatori,
+                db, row, mapping_operatori, tracker=tracker, import_mappings=import_mappings,
             )
+            # Traccia ramo come non mappato se non riconducibile alla libreria
+            ramo_raw = (row.get("ramo_share") or row.get("ramo_cmp") or "").strip()
+            ramo_mapped = None
+            if ramo_raw:
+                ramo_mapped = (import_mappings or {}).get("ramo", {}).get(ramo_raw)
+                if not ramo_mapped and tracker is not None:
+                    await _track_unmapped(
+                        db, tracker, "ramo", ramo_raw,
+                        label=ramo_raw, import_mappings=import_mappings,
+                    )
+            # Traccia prodotto come non mappato
+            prodotto_raw = (row.get("prodotto_cmp") or "").strip()
+            prodotto_mapped = None
+            if prodotto_raw:
+                prodotto_mapped = (import_mappings or {}).get("prodotto", {}).get(prodotto_raw)
+                if not prodotto_mapped and tracker is not None:
+                    await _track_unmapped(
+                        db, tracker, "prodotto", prodotto_raw,
+                        label=prodotto_raw, import_mappings=import_mappings,
+                    )
             data = _build_polizza_payload(
                 row, numero=numero, comp_id=comp_id, contraente_id=contraente_id,
                 stato=stato, operatore_codice=operatore_codice, id_exp=id_exp,
+                ramo_mapped=ramo_mapped, prodotto_mapped=prodotto_mapped,
             )
             if collaboratore_id:
                 data["collaboratore_id"] = collaboratore_id
@@ -452,7 +567,9 @@ async def _processa_dettagli_veicolo(db, files_data: Dict[str, str],
 async def _processa_garanzie(db, files_data: Dict[str, str],
                              polizza_id_map: Dict[str, str],
                              mapping_garanzie: dict,
-                             counts: Dict[str, int]) -> None:
+                             counts: Dict[str, int],
+                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                             import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     from collections import defaultdict as _dd
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec30":
@@ -468,9 +585,19 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
             codice = (row.get("codice_garanzia") or "").strip().upper()
             descr = row.get("descrizione_garanzia") or row.get("garanzia") or codice or ""
             key = codice or descr.strip().upper()
-            nome_finale = mapping_garanzie.get(key) or descr
-            if key and key not in mapping_garanzie:
+            # Cerca nome personalizzato: prima in import_mappings (entita_id == nome custom)
+            nome_finale = None
+            if import_mappings:
+                nome_finale = import_mappings.get("garanzia", {}).get(key)
+            if not nome_finale:
+                nome_finale = mapping_garanzie.get(key) or descr
+            if key and key not in mapping_garanzie and not (import_mappings or {}).get("garanzia", {}).get(key):
                 await _ensure_stub_mapping(db, "mapping_garanzie", codice or key, descr)
+                if tracker is not None:
+                    await _track_unmapped(
+                        db, tracker, "garanzia", key,
+                        label=descr or key, import_mappings=import_mappings,
+                    )
             gar_per_pol[pol_id].append({
                 "garanzia": nome_finale,
                 "garanzia_originale": descr,
@@ -550,7 +677,9 @@ async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
                              polizza_id_map: Dict[str, str],
                              ana_id_map: Dict[str, str],
                              compagnie_cache: Dict[str, str],
-                             counts: Dict[str, int]) -> None:
+                             counts: Dict[str, int],
+                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                             import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec50":
             continue
@@ -566,6 +695,7 @@ async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
             contraente_id = ana_id_map.get(contraente_exp) if contraente_exp else None
             comp_id = await _get_or_create_compagnia(
                 db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""), compagnie_cache,
+                tracker=tracker, import_mappings=import_mappings,
             )
             stato = _MAP_STATO_SINISTRO.get((row.get("stato_sinistro") or "").lower(), "aperto")
             existing = await db.sinistri.find_one({"id_sinistro_exp": id_s})
@@ -617,32 +747,45 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
 
     mapping_garanzie = await _load_mapping_garanzie(db)
     mapping_operatori = await _load_mapping_operatori(db)
+    import_mappings = await _load_import_mappings(db, "omnia")
 
     files_data = _extract_zip_contents(file_bytes, filename)
     compagnie_cache: Dict[str, str] = {}
     ana_id_map: Dict[str, str] = {}
     polizza_id_map: Dict[str, str] = {}
+    # Tracker delle entità incontrate senza un mapping verso un'entità DB
+    tracker: Dict[str, Dict[str, dict]] = {}
 
     # Pipeline ordinata: l'ordine è significativo perché ogni step può
     # riferirsi alle entità create dagli step precedenti.
-    await _processa_anagrafiche(db, files_data, log, ana_id_map, compagnie_cache, counts)
+    await _processa_anagrafiche(db, files_data, log, ana_id_map, compagnie_cache, counts,
+                                tracker=tracker, import_mappings=import_mappings)
     await _processa_polizze(db, files_data, log, ana_id_map, polizza_id_map,
-                            compagnie_cache, mapping_operatori, counts)
+                            compagnie_cache, mapping_operatori, counts,
+                            tracker=tracker, import_mappings=import_mappings)
     await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
-    await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts)
+    await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
+                             tracker=tracker, import_mappings=import_mappings)
     await _processa_titoli(db, files_data, log, polizza_id_map, counts)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
-                             compagnie_cache, counts)
+                             compagnie_cache, counts,
+                             tracker=tracker, import_mappings=import_mappings)
     _conta_record_residui(files_data, counts)
 
-    # iter23: dedup entità "non mappate" da segnalare al wizard mapping
-    entita_non_mappate: dict = {
-        "compagnie": sorted({c for c in compagnie_cache if not compagnie_cache.get(c)}),
-        "rami": sorted({g.get("ramo_flusso") for g in mapping_garanzie.values() if isinstance(g, dict) and g.get("ramo_flusso")}),
-        "collaboratori": sorted({o for o in mapping_operatori if not mapping_operatori.get(o)}),
+    # iter23: entità non mappate raccolte durante l'import (compatibilità FE: usa nomi plurali)
+    plural = {
+        "compagnia": "compagnie", "ramo": "rami", "prodotto": "prodotti",
+        "collaboratore": "collaboratori", "garanzia": "garanzie",
     }
-    # filtra liste vuote
-    entita_non_mappate = {k: v for k, v in entita_non_mappate.items() if v}
+    entita_non_mappate: dict = {}
+    for tipo, items in tracker.items():
+        if not items:
+            continue
+        key = plural.get(tipo, tipo)
+        entita_non_mappate[key] = [
+            {"valore": v, "label": rec.get("label") or v, "count": rec.get("count", 0)}
+            for v, rec in sorted(items.items())
+        ]
     log.entita_non_mappate = entita_non_mappate
     log.record_types_processati = counts
     log.errori = errors
