@@ -27,14 +27,12 @@ import { toast } from "sonner";
 
 const TIPO_LABEL = {
     compagnia: "Compagnia",
-    ramo: "Ramo",
     collaboratore: "Operatore / Collaboratore",
     prodotto: "Prodotto",
     garanzia: "Garanzia",
 };
 const TIPO_PLURAL = {
     compagnie: "compagnia",
-    rami: "ramo",
     collaboratori: "collaboratore",
     prodotti: "prodotto",
     garanzie: "garanzia",
@@ -219,7 +217,7 @@ function ImportReport({ log, onOpenWizard }) {
                         a un&apos;entità del programma. Mappa ciascuna per averle gestite automaticamente
                         al prossimo import e applica il back-fill ai record già caricati.
                     </p>
-                    {["compagnie", "rami", "collaboratori", "prodotti", "garanzie"].map((tipoP) => {
+                    {["compagnie", "collaboratori", "prodotti", "garanzie"].map((tipoP) => {
                         const items = non_mappate[tipoP] || [];
                         if (!items.length) return null;
                         return (
@@ -312,7 +310,7 @@ function MappingWizardDialog({ open, onClose }) {
             const res = await api.get("/import/unmapped");
             setData(res.data);
             // Scegli il primo tipo con elementi
-            const first = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+            const first = ["compagnia", "collaboratore", "prodotto", "garanzia"]
                 .find((t) => (res.data[t] || []).length > 0);
             if (first) setActive(first);
         } catch (e) {
@@ -338,7 +336,7 @@ function MappingWizardDialog({ open, onClose }) {
                 const it = byId[mid];
                 if (!it) continue;
                 // Trova il tipo cercando in quale array è
-                const tipo = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+                const tipo = ["compagnia", "collaboratore", "prodotto", "garanzia"]
                     .find((t) => (data[t] || []).some((x) => x.id === mid));
                 await api.post("/import/mappings", {
                     tipo,
@@ -366,7 +364,6 @@ function MappingWizardDialog({ open, onClose }) {
             const res = await api.post("/import/mappings/apply");
             const s = res.data;
             const total = (s.polizze_collaboratore || 0)
-                + (s.polizze_ramo || 0)
                 + (s.polizze_prodotto || 0)
                 + (s.polizze_garanzia || 0)
                 + (s.polizze_compagnia || 0);
@@ -382,7 +379,7 @@ function MappingWizardDialog({ open, onClose }) {
 
     if (!open) return null;
 
-    const tipi = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"];
+    const tipi = ["compagnia", "collaboratore", "prodotto", "garanzia"];
     const counts = data ? Object.fromEntries(tipi.map((t) => [t, (data[t] || []).length])) : {};
     const totalCount = Object.values(counts).reduce((s, n) => s + n, 0);
 

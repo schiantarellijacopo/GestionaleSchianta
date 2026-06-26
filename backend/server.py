@@ -5096,10 +5096,12 @@ async def list_unmapped_entities(
       }
     """
     by_tipo: dict[str, list[dict]] = {
-        "compagnia": [], "ramo": [], "prodotto": [], "collaboratore": [], "garanzia": [],
+        "compagnia": [], "prodotto": [], "collaboratore": [], "garanzia": [],
     }
     async for m in db.import_mappings.find(
-        {"flusso": flusso, "$or": [{"entita_id": None}, {"entita_id": ""}]},
+        {"flusso": flusso,
+         "tipo": {"$in": ["compagnia", "prodotto", "collaboratore", "garanzia"]},
+         "$or": [{"entita_id": None}, {"entita_id": ""}]},
         {"_id": 0},
     ):
         tipo = m.get("tipo")
@@ -5110,15 +5112,11 @@ async def list_unmapped_entities(
                 "label_flusso": m.get("label_flusso") or m.get("valore_flusso"),
                 "occorrenze": m.get("occorrenze", 0),
             })
-    # Candidati DB
+    # Candidati DB (librerie esistenti — i Rami sono esclusi: gestiti manualmente)
     candidates: dict[str, list[dict]] = {}
     candidates["compagnia"] = [
         {"id": c["id"], "label": c.get("ragione_sociale") or c.get("codice")}
         async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1}).sort("ragione_sociale", 1)
-    ]
-    candidates["ramo"] = [
-        {"id": r.get("nome"), "label": r.get("nome")}
-        async for r in db.rami.find({}, {"_id": 0, "nome": 1}).sort("nome", 1)
     ]
     candidates["collaboratore"] = [
         {"id": u["id"], "label": u.get("name") or u.get("email")}
@@ -5189,7 +5187,6 @@ async def apply_import_mappings(
     summary = {
         "polizze_compagnia": 0,
         "polizze_collaboratore": 0,
-        "polizze_ramo": 0,
         "polizze_prodotto": 0,
         "polizze_garanzia": 0,
         "sinistri_compagnia": 0,
@@ -5221,13 +5218,6 @@ async def apply_import_mappings(
                 {"$set": {"compagnia_id": entita_id, "updated_at": _now_iso()}},
             )
             summary["polizze_compagnia"] += r1.modified_count
-
-        elif tipo == "ramo":
-            r = await db.polizze.update_many(
-                {"$or": [{"ramo": valore}, {"ramo_originale": valore}]},
-                {"$set": {"ramo": entita_id, "updated_at": _now_iso()}},
-            )
-            summary["polizze_ramo"] += r.modified_count
 
         elif tipo == "prodotto":
             r = await db.polizze.update_many(

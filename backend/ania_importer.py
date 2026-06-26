@@ -146,11 +146,15 @@ def _read_csv_text(text: str) -> List[Dict[str, str]]:
 
 
 def _detect_record_type(filename: str) -> str | None:
-    """Esempio: 'rec10oweb.csv' -> 'rec10'"""
+    """Esempio: 'rec10oweb.csv' -> 'rec10'. I prefissi più lunghi devono essere
+    controllati prima per evitare che 'rec10' matchi anche 'rec100' (idem rec20/rec21).
+    """
     name = filename.lower()
-    for prefix in ("rec00", "rec10", "rec20", "rec21", "rec24", "rec30",
-                   "rec40", "rec41", "rec42", "rec43", "rec50", "rec51",
-                   "rec52", "rec70", "rec100", "rec101"):
+    for prefix in ("rec100", "rec101",
+                   "rec00", "rec10", "rec21", "rec24", "rec20",
+                   "rec40", "rec41", "rec42", "rec43",
+                   "rec50", "rec51", "rec52", "rec70",
+                   "rec30"):
         if prefix in name:
             return prefix
     return None
@@ -444,17 +448,11 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             operatore_codice, collaboratore_id = await _resolve_operatore_codice(
                 db, row, mapping_operatori, tracker=tracker, import_mappings=import_mappings,
             )
-            # Traccia ramo come non mappato se non riconducibile alla libreria
-            ramo_raw = (row.get("ramo_share") or row.get("ramo_cmp") or "").strip()
+            # Ramo: NON viene tracciato come entità da mappare (richiesta utente — i rami
+            # vanno gestiti manualmente nella libreria Rami). Manteniamo solo il valore
+            # originale sulla polizza per riferimento.
             ramo_mapped = None
-            if ramo_raw:
-                ramo_mapped = (import_mappings or {}).get("ramo", {}).get(ramo_raw)
-                if not ramo_mapped and tracker is not None:
-                    await _track_unmapped(
-                        db, tracker, "ramo", ramo_raw,
-                        label=ramo_raw, import_mappings=import_mappings,
-                    )
-            # Traccia prodotto come non mappato
+            # Traccia prodotto come non mappato (verrà associato manualmente dalla libreria Prodotti)
             prodotto_raw = (row.get("prodotto_cmp") or "").strip()
             prodotto_mapped = None
             if prodotto_raw:
@@ -478,53 +476,65 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
 # Processor: rec21 (dettagli veicolo) — funzioni pure di mapping
 # ---------------------------------------------------------------------------
 def _campi_veicolo_base(row: dict) -> dict:
-    """Campi veicolo: anagrafica + caratteristiche tecniche."""
+    """Campi veicolo: anagrafica + caratteristiche tecniche.
+
+    Mappatura colonne reali tracciato rec21 (OWEB):
+      - X targa, Z marca, AA modello, AC bonus_malus_universale (classe merito),
+        AE tp_alimentazione_share, AF cavalli_fiscali, AG quintali, AH posti,
+        AI cilindrata, AK kw, AN massimale_sinistro, AX valore_veicolo,
+        N data_immatricolazione, P settore_rca_share.
+    """
     return {
-        "targa": row.get("targa") or None,
-        "veicolo_marca": (row.get("marca_veicolo") or "").upper() or None,
-        "veicolo_modello": (row.get("modello_veicolo") or "").upper() or None,
-        "veicolo_tipo": row.get("tipo_veicolo") or None,
-        "veicolo_alimentazione": row.get("alimentazione") or None,
-        "veicolo_uso": row.get("uso_veicolo") or None,
+        "targa": (row.get("targa") or "").strip() or None,
+        "veicolo_marca": (row.get("marca") or row.get("marca_veicolo") or "").upper().strip() or None,
+        "veicolo_modello": (row.get("modello") or row.get("modello_veicolo") or "").upper().strip() or None,
+        "veicolo_settore": (row.get("settore_rca_share") or row.get("tipo_veicolo") or "").strip() or None,
+        "veicolo_alimentazione": (row.get("tp_alimentazione_share") or row.get("alimentazione") or "").strip() or None,
+        "veicolo_uso": row.get("uso_rca_share") or row.get("uso_veicolo") or None,
         "veicolo_data_immatricolazione": _parse_date(row.get("data_immatricolazione", "")),
-        "veicolo_cilindrata": int(row.get("cilindrata") or 0) or None,
-        "veicolo_cv_fiscali": int(row.get("cv_fiscali") or 0) or None,
+        "veicolo_cilindrata": int(_parse_float(row.get("cilindrata", "")) or 0) or None,
+        "veicolo_cv_fiscali": int(_parse_float(row.get("cavalli_fiscali") or row.get("cv_fiscali", "")) or 0) or None,
         "veicolo_kw": _parse_float(row.get("kw", "")),
         "veicolo_quintali": _parse_float(row.get("quintali") or row.get("portata") or ""),
-        "veicolo_posti": int(row.get("numero_posti") or 0) or None,
+        "veicolo_posti": int(_parse_float(row.get("posti") or row.get("numero_posti", "")) or 0) or None,
         "veicolo_gancio_traino": _parse_flag_si(row.get("gancio_traino", "")),
         "veicolo_targa_rimorchio": row.get("targa_rimorchio") or None,
     }
 
 
 def _campi_tariffa_bm(row: dict) -> dict:
-    """Campi tariffa + bonus/malus."""
+    """Campi tariffa + bonus/malus (classe di merito)."""
     return {
-        "tipo_tariffa": row.get("tipo_tariffa") or None,
+        "tipo_tariffa": row.get("tipo_tariffa_rca_share") or row.get("tipo_tariffa") or None,
+        # AC bonus_malus_universale = classe di merito universale (1..18)
+        "bm_assegnata": row.get("bonus_malus_universale") or row.get("bm_assegnata") or None,
+        "bm_assegnata_cu": row.get("bonus_malus_interna") or row.get("bm_assegnata_cu") or None,
         "bm_provenienza": row.get("bm_provenienza") or None,
-        "bm_assegnata": row.get("bm_assegnata") or None,
-        "bm_assegnata_cu": row.get("bm_assegnata_cu") or None,
         "pejus": _parse_float(row.get("pejus", "")),
-        "franchigia": _parse_float(row.get("franchigia", "")),
+        "franchigia": _parse_float(row.get("franchigia_bm") or row.get("franchigia", "")),
     }
 
 
 def _campi_valori(row: dict) -> dict:
-    """Campi valori economici del veicolo."""
+    """Campi valori economici del veicolo + massimale."""
+    massimale = (_parse_float(row.get("massimale_unico", ""))
+                 or _parse_float(row.get("massimale_sinistro", ""))
+                 or _parse_float(row.get("massimale_persone", ""))
+                 or _parse_float(row.get("massimale_cose", "")))
     return {
         "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
         "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
         "valore_accessori": _parse_float(row.get("valore_accessori", "")),
+        "massimali": str(massimale) if massimale else (row.get("massimali") or None),
     }
 
 
 def _campi_guida(row: dict) -> dict:
-    """Campi modalità di guida + massimali."""
+    """Campi modalità di guida."""
     return {
         "guida_esperta": _parse_flag_si(row.get("guida_esperta", "")),
         "guida_esclusiva": _parse_flag_si(row.get("guida_esclusiva", "")),
         "rinuncia_rivalsa": _parse_flag_si(row.get("rinuncia_rivalsa", "")),
-        "massimali": row.get("massimali") or None,
     }
 
 
@@ -543,6 +553,27 @@ def _build_dettagli_veicolo(row: dict) -> dict:
     return {k: v for k, v in upd.items() if v not in (None, "", 0, 0.0) or k == "targa"}
 
 
+async def _resolve_polizza_id(db, row: dict, polizza_id_map: Dict[str, str]) -> Optional[str]:
+    """Risolve l'id polizza con fallback su numero_polizza_cmp.
+
+    Logica:
+      1. polizza_id_map[id_polizza_exp]  (match della stessa import)
+      2. db.polizze.find_one({"numero_polizza": numero_polizza_cmp})  (polizza già in DB)
+    """
+    pol_exp = (row.get("id_polizza_exp") or "").strip()
+    if pol_exp and polizza_id_map.get(pol_exp):
+        return polizza_id_map[pol_exp]
+    numero = (row.get("numero_polizza_cmp") or "").strip()
+    if numero:
+        pol = await db.polizze.find_one({"numero_polizza": numero}, {"_id": 0, "id": 1})
+        if pol:
+            # cache it per le righe successive
+            if pol_exp:
+                polizza_id_map[pol_exp] = pol["id"]
+            return pol["id"]
+    return None
+
+
 async def _processa_dettagli_veicolo(db, files_data: Dict[str, str],
                                      polizza_id_map: Dict[str, str],
                                      counts: Dict[str, int]) -> None:
@@ -552,8 +583,7 @@ async def _processa_dettagli_veicolo(db, files_data: Dict[str, str],
         rows = _read_csv_text(content)
         counts["rec21"] = counts.get("rec21", 0) + len(rows)
         for row in rows:
-            pol_exp = row.get("id_polizza_exp")
-            pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
+            pol_id = await _resolve_polizza_id(db, row, polizza_id_map)
             if not pol_id:
                 continue
             upd = _build_dettagli_veicolo(row)
@@ -578,12 +608,19 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
         counts["rec30"] = counts.get("rec30", 0) + len(rows)
         gar_per_pol: dict[str, list[dict]] = _dd(list)
         for row in rows:
-            pol_exp = row.get("id_polizza_exp")
-            pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
+            pol_id = await _resolve_polizza_id(db, row, polizza_id_map)
             if not pol_id:
                 continue
-            codice = (row.get("codice_garanzia") or "").strip().upper()
-            descr = row.get("descrizione_garanzia") or row.get("garanzia") or codice or ""
+            # Tracciato OWEB rec30: cod_garanzia_cmp / descrizione_garanzia_cmp (con fallback art20)
+            codice = (row.get("codice_garanzia")
+                      or row.get("cod_garanzia_cmp")
+                      or row.get("codice_garanzia_art20")
+                      or "").strip().upper()
+            descr = (row.get("descrizione_garanzia")
+                     or row.get("descrizione_garanzia_cmp")
+                     or row.get("descrizione_garanzia_art20")
+                     or row.get("garanzia")
+                     or codice or "").strip()
             key = codice or descr.strip().upper()
             # Cerca nome personalizzato: prima in import_mappings (entita_id == nome custom)
             nome_finale = None
@@ -602,13 +639,15 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
                 "garanzia": nome_finale,
                 "garanzia_originale": descr,
                 "codice_ania": codice,
-                "netto": _parse_float(row.get("netto_garanzia", "")),
+                "netto": _parse_float(row.get("netto_garanzia") or row.get("netto", "")),
                 "accessori": _parse_float(row.get("accessori", "")),
-                "imposte": _parse_float(row.get("imposte", "")),
+                "imposte": _parse_float(row.get("imposte") or row.get("tasse", "")),
                 "ssn": _parse_float(row.get("ssn", "")),
                 "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
                 "diritti": _parse_float(row.get("diritti", "")),
-                "provvigione": _parse_float(row.get("provvigione_garanzia") or row.get("provvigione", "")),
+                "provvigione": _parse_float(row.get("provvigione_garanzia")
+                                            or row.get("provvigioni_totali")
+                                            or row.get("provvigione", "")),
             })
         for pol_id, garanzie in gar_per_pol.items():
             diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
@@ -732,6 +771,73 @@ def _conta_record_residui(files_data: Dict[str, str], counts: Dict[str, int]) ->
 
 
 # ---------------------------------------------------------------------------
+# Processor: rec100 (dizionario prodotti) e rec101 (dizionario collaboratori)
+# ---------------------------------------------------------------------------
+async def _processa_prodotti(db, files_data: Dict[str, str],
+                             counts: Dict[str, int],
+                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                             import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    """Legge il dizionario prodotti (rec100) e traccia ciascun prodotto come "da
+    associare" alla libreria Prodotti del programma. NON crea entità Prodotto.
+    """
+    for fname, content in files_data.items():
+        if _detect_record_type(fname) != "rec100":
+            continue
+        rows = _read_csv_text(content)
+        counts["rec100"] = counts.get("rec100", 0) + len(rows)
+        if tracker is None:
+            continue
+        for row in rows:
+            codice = (row.get("codice_prodotto") or "").strip()
+            descr = (row.get("descrizione_prodotto") or "").strip()
+            if not (codice or descr):
+                continue
+            valore = codice or descr
+            # Label con compagnia se disponibile (es. "Guidamica - Veicoli Autovettura (GPM)")
+            comp = (row.get("compagnia_exp") or "").strip()
+            label = descr or codice
+            if comp and label:
+                label = f"{label} ({comp})"
+            await _track_unmapped(
+                db, tracker, "prodotto", valore,
+                label=label, import_mappings=import_mappings,
+            )
+
+
+async def _processa_collaboratori(db, files_data: Dict[str, str],
+                                  counts: Dict[str, int],
+                                  tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                                  import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    """Legge il dizionario collaboratori (rec101) e li traccia come "da
+    associare" alla libreria Collaboratori (utenti). NON crea utenti.
+    """
+    for fname, content in files_data.items():
+        if _detect_record_type(fname) != "rec101":
+            continue
+        rows = _read_csv_text(content)
+        counts["rec101"] = counts.get("rec101", 0) + len(rows)
+        if tracker is None:
+            continue
+        for row in rows:
+            codice = (row.get("codice_produttore") or "").strip()
+            if not codice:
+                continue
+            descr = (row.get("descrizione_collaboratore") or "").strip()
+            rui = (row.get("cod_rui") or "").strip()
+            cf = (row.get("codice_fiscale") or "").strip()
+            label_parts = [descr or codice]
+            if rui:
+                label_parts.append(f"RUI: {rui}")
+            if cf:
+                label_parts.append(f"CF: {cf}")
+            label = " · ".join(label_parts)
+            await _track_unmapped(
+                db, tracker, "collaboratore", codice,
+                label=label, import_mappings=import_mappings,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint pubblico
 # ---------------------------------------------------------------------------
 async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> ImportLog:
@@ -770,11 +876,17 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)
+    # Dizionari rec100 (prodotti) e rec101 (collaboratori): solo tracking come
+    # entità "da mappare" alle librerie esistenti del programma.
+    await _processa_prodotti(db, files_data, counts,
+                             tracker=tracker, import_mappings=import_mappings)
+    await _processa_collaboratori(db, files_data, counts,
+                                  tracker=tracker, import_mappings=import_mappings)
     _conta_record_residui(files_data, counts)
 
-    # iter23: entità non mappate raccolte durante l'import (compatibilità FE: usa nomi plurali)
+    # Entità non mappate raccolte durante l'import (NB: rami NON sono tracciati per scelta utente)
     plural = {
-        "compagnia": "compagnie", "ramo": "rami", "prodotto": "prodotti",
+        "compagnia": "compagnie", "prodotto": "prodotti",
         "collaboratore": "collaboratori", "garanzia": "garanzie",
     }
     entita_non_mappate: dict = {}

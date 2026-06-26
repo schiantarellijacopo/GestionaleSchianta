@@ -271,6 +271,7 @@ class Polizza(BaseDoc):
     veicolo_marca: Optional[str] = None
     veicolo_modello: Optional[str] = None
     veicolo_tipo: Optional[str] = None
+    veicolo_settore: Optional[str] = None   # settore RCA (es. autocarri, autovetture)
     veicolo_alimentazione: Optional[str] = None
     veicolo_uso: Optional[str] = None
     veicolo_data_immatricolazione: Optional[str] = None
