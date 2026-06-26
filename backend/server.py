@@ -609,6 +609,8 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     if not conto_id:
         conto_id = await _resolve_conto_cassa(mezzo_pag)
     data_pag = body.get("data_pagamento") or _now_iso()[:10]
+    # Lock: pagare provvigioni crea un movimento in Prima Nota.
+    await assert_giornata_aperta(data_pag, azione="pagare provvigioni nel giorno (Prima Nota chiusa)")
 
     titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000) if titoli_ids else []
     lordo = sum((t.get("provvigioni") or 0.0) for t in titoli)
@@ -1096,6 +1098,8 @@ async def compagnia_paga_titoli(
         totale += (lordo - provv) if trattiene else lordo
 
     data_mov = body.get("data_movimento") or _now_iso()[:10]
+    # Lock: pagare la compagnia crea un movimento in Prima Nota.
+    await assert_giornata_aperta(data_mov, azione="pagare la compagnia nel giorno (Prima Nota chiusa)")
     descrizione = body.get("descrizione") or f"Versamento {comp.get('ragione_sociale')} — {len(titoli)} titoli"
 
     mov = {
@@ -1337,6 +1341,8 @@ async def incassa_rappel(
         raise HTTPException(400, "Rappel già incassato")
     body = body or {}
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
+    # Lock: incassare un rappel crea un movimento in Prima Nota.
+    await assert_giornata_aperta(data_incasso, azione="incassare un rappel nel giorno")
     comp = await db.compagnie.find_one({"id": r["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
     importo = float(r.get("importo") or 0)
     # Crea movimento in Prima Nota — categoria "provvigioni" entrata fittizia
@@ -1376,6 +1382,8 @@ async def storna_rappel(
         raise HTTPException(404, "Rappel non trovato")
     if r.get("stato") != "incassato":
         raise HTTPException(400, "Rappel non incassato")
+    # Lock: lo storno cancella il movimento Prima Nota → se chiuso, blocca.
+    await assert_giornata_aperta(r.get("data_incasso") or r.get("data"), azione="stornare un rappel del giorno")
     if r.get("movimento_id"):
         await db.movimenti.delete_one({"id": r["movimento_id"]})
     await db.rappel.update_one({"id": rid}, {"$set": {
@@ -2739,6 +2747,8 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
     if not ids:
         raise HTTPException(400, "Nessun titolo selezionato")
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
+    # Lock: non si può incassare in una giornata di Prima Nota chiusa.
+    await assert_giornata_aperta(data_incasso, azione="incassare nel giorno (Prima Nota chiusa)")
     mezzo = body.get("mezzo_pagamento") or "bonifico"
     conto_id = body.get("conto_cassa_id")
     if not conto_id:
@@ -2783,6 +2793,8 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     if not ids:
         raise HTTPException(400, "ids richiesti")
     data_copertura = body.get("data_copertura") or _now_iso()[:10]
+    # Lock: la copertura è una scrittura su Prima Nota → blocco se giornata chiusa.
+    await assert_giornata_aperta(data_copertura, azione="coprire titoli nel giorno (Prima Nota chiusa)")
     note = body.get("note")
     set_fields = {
         "titolo_coperto": True,
@@ -3132,6 +3144,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     if not titolo:
         raise HTTPException(404, "Titolo non trovato")
     data_incasso = body.get("data_incasso") or _now_iso()[:10]
+    # Lock: non si può incassare in una giornata di Prima Nota chiusa.
+    await assert_giornata_aperta(data_incasso, azione="incassare nel giorno (Prima Nota chiusa)")
     mezzo = body.get("mezzo_pagamento") or "bonifico"
     conto_id = body.get("conto_cassa_id")
     if not conto_id:
@@ -3785,6 +3799,8 @@ async def delete_applicazione(pid: str, aid: str,
 
 @api.post("/contabilita/movimenti", status_code=201)
 async def create_movimento(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    # Lock: blocco inserimento in giornata di Prima Nota chiusa.
+    await assert_giornata_aperta(body.get("data_movimento"), azione="inserire un movimento nel giorno")
     obj = MovimentoContabile(**body)
     await db.movimenti.insert_one(obj.model_dump())
     await log_attivita(user, "create", "movimento", obj.id, f"€{obj.importo} {obj.descrizione}")
@@ -3805,6 +3821,8 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
     a_id = body.get("conto_a_id")
     importo = float(body.get("importo") or 0)
     data_mov = body.get("data_movimento") or _now_iso()[:10]
+    # Lock: blocco inserimento giroconto in giornata di Prima Nota chiusa.
+    await assert_giornata_aperta(data_mov, azione="creare un giroconto nel giorno")
     if not da_id or not a_id:
         raise HTTPException(400, "Indicare conto sorgente e destinazione")
     if da_id == a_id:
