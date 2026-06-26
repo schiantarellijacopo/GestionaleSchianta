@@ -64,7 +64,7 @@ async def _salva_allegato_libretto(polizza_id: str, file: UploadFile,
 async def ocr_libretto_endpoint(
     file: UploadFile = File(...),
     polizza_id: Optional[str] = Form(None),
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     """OCR libretto di circolazione veicolo. Salva il file come allegato della polizza
     e restituisce {dati, allegato_id, confidence}.
@@ -113,7 +113,7 @@ _FIELD_MAP = {
 @router.post("/ocr/libretto/apply")
 async def ocr_libretto_apply(
     body: dict,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     """Applica i campi estratti alla polizza.
 

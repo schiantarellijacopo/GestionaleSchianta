@@ -116,7 +116,7 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
 
 
 @router.get("/dashboard/tasks")
-async def dashboard_tasks(user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
+async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
     """Task azionabili sulla dashboard."""
     today = date.today()
     today_iso = today.isoformat()
@@ -165,7 +165,7 @@ def _normalize_url(raw_url: str) -> str:
 
 
 @router.get("/dashboard/links")
-async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
+async def list_dashboard_links(user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
     """Link rapidi mostrati sulla dashboard."""
     return await db.dashboard_links.find({}, {"_id": 0}).sort(
         [("ordine", 1), ("created_at", -1)],
@@ -175,7 +175,7 @@ async def list_dashboard_links(user=Depends(require_user("admin", "collaboratore
 @router.post("/dashboard/links", status_code=201)
 async def create_dashboard_link(
     body: DashboardLinkBody,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     if not body.label or not body.url:
         raise HTTPException(400, "Label e URL obbligatori")
@@ -197,7 +197,7 @@ async def create_dashboard_link(
 @router.put("/dashboard/links/{lid}")
 async def update_dashboard_link(
     lid: str, body: DashboardLinkBody,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     existing = await db.dashboard_links.find_one({"id": lid}, {"_id": 0})
     if not existing:
@@ -217,7 +217,7 @@ async def update_dashboard_link(
 @router.delete("/dashboard/links/{lid}")
 async def delete_dashboard_link(
     lid: str,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     res = await db.dashboard_links.delete_one({"id": lid})
     if res.deleted_count == 0:

@@ -61,7 +61,10 @@ def get_token_from_request(request: Request) -> str | None:
     return None
 
 
-def require_user(*allowed_roles) -> dict:
+from typing import Any, Awaitable, Callable
+
+
+def require_user(*allowed_roles: str) -> Callable[[Request], Awaitable[dict[str, Any]]]:
     """Dependency factory that yields the current user dict.
 
     Usage:
@@ -69,7 +72,7 @@ def require_user(*allowed_roles) -> dict:
         async def x(user=Depends(require_user("admin", "collaboratore"))): ...
     """
 
-    async def _dep(request: Request) -> dict:
+    async def _dep(request: Request) -> dict[str, Any]:
         token = get_token_from_request(request)
         if not token:
             raise HTTPException(status_code=401, detail="Non autenticato")
@@ -93,7 +96,7 @@ def require_user(*allowed_roles) -> dict:
 
 
 # common dependencies
-async def current_user(request: Request) -> dict:
+async def current_user(request: Request) -> dict[str, Any]:
     dep = require_user()
     return await dep(request)
 

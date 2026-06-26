@@ -26,19 +26,20 @@ import storage as obj_storage
 router = APIRouter()
 
 
-def _libreria_routes(coll_name: str, model_cls, ruoli_modifica=("admin", "collaboratore")) -> dict:
+def _libreria_routes(coll_name: str, model_cls: type, ruoli_modifica: tuple[str, ...] = ("admin", "collaboratore")) -> None:
     """Crea endpoint CRUD standard per una collezione di libreria."""
-    pass  # implementato direttamente sotto per ogni risorsa
+    # implementato direttamente sotto per ogni risorsa
+    return None
 
 
 # --- BANCHE ---
 @router.get("/librerie/banche")
-async def list_banche(user=Depends(current_user)) -> list[dict]:
+async def list_banche(user: dict = Depends(current_user)) -> list[dict]:
     return await db.banche.find({}, {"_id": 0}).sort("nome", 1).to_list(500)
 
 
 @router.post("/librerie/banche", status_code=201)
-async def create_banca(body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def create_banca(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     obj = Banca(**body)
     await db.banche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "banca", obj.id, obj.nome)
@@ -46,7 +47,7 @@ async def create_banca(body: dict, user=Depends(require_user("admin", "collabora
 
 
 @router.put("/librerie/banche/{bid}")
-async def update_banca(bid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def update_banca(bid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     body["updated_at"] = _now_iso()
     res = await db.banche.update_one({"id": bid}, {"$set": body})
     if res.matched_count == 0:
@@ -56,7 +57,7 @@ async def update_banca(bid: str, body: dict, user=Depends(require_user("admin", 
 
 
 @router.delete("/librerie/banche/{bid}")
-async def delete_banca(bid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_banca(bid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.banche.delete_one({"id": bid})
     await log_attivita(user, "delete", "banca", bid)
     return {"ok": True}
@@ -64,7 +65,7 @@ async def delete_banca(bid: str, user=Depends(require_user("admin"))) -> dict:
 
 # --- CONTI CASSA ---
 @router.get("/librerie/conti-cassa")
-async def list_conti(attivi: Optional[bool] = None, user=Depends(current_user)) -> list[dict]:
+async def list_conti(attivi: Optional[bool] = None, user: dict = Depends(current_user)) -> list[dict]:
     flt = {}
     if attivi is not None:
         flt["attivo"] = attivi
@@ -73,12 +74,12 @@ async def list_conti(attivi: Optional[bool] = None, user=Depends(current_user)) 
 
 # --- MAPPING GARANZIE ANIA → nome personalizzato ---
 @router.get("/librerie/mapping-garanzie")
-async def list_mapping_garanzie(user=Depends(current_user)) -> list[dict]:
+async def list_mapping_garanzie(user: dict = Depends(current_user)) -> list[dict]:
     return await db.mapping_garanzie.find({}, {"_id": 0}).sort("codice_ania", 1).to_list(2000)
 
 
 @router.post("/librerie/mapping-garanzie", status_code=201)
-async def create_mapping_garanzia(body: dict, user=Depends(require_user("admin"))) -> dict:
+async def create_mapping_garanzia(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     if not body.get("codice_ania"):
         raise HTTPException(400, "Codice ANIA obbligatorio")
     body["id"] = body.get("id") or _uid()
@@ -90,7 +91,7 @@ async def create_mapping_garanzia(body: dict, user=Depends(require_user("admin")
 
 
 @router.put("/librerie/mapping-garanzie/{mid}")
-async def update_mapping_garanzia(mid: str, body: dict, user=Depends(require_user("admin"))) -> dict:
+async def update_mapping_garanzia(mid: str, body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body["updated_at"] = _now_iso()
     r = await db.mapping_garanzie.update_one({"id": mid}, {"$set": body})
     if r.matched_count == 0:
@@ -99,14 +100,14 @@ async def update_mapping_garanzia(mid: str, body: dict, user=Depends(require_use
 
 
 @router.delete("/librerie/mapping-garanzie/{mid}")
-async def delete_mapping_garanzia(mid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_mapping_garanzia(mid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.mapping_garanzie.delete_one({"id": mid})
     return {"ok": True}
 
 
 # --- MAPPING OPERATORI ANIA → user_id applicativo ---
 @router.get("/librerie/mapping-operatori")
-async def list_mapping_operatori(user=Depends(current_user)) -> list[dict]:
+async def list_mapping_operatori(user: dict = Depends(current_user)) -> list[dict]:
     items = await db.mapping_operatori.find({}, {"_id": 0}).sort("codice_ania", 1).to_list(2000)
     # arricchimento user
     uids = [i["user_id"] for i in items if i.get("user_id")]
@@ -120,7 +121,7 @@ async def list_mapping_operatori(user=Depends(current_user)) -> list[dict]:
 
 
 @router.post("/librerie/mapping-operatori", status_code=201)
-async def create_mapping_operatore(body: dict, user=Depends(require_user("admin"))) -> dict:
+async def create_mapping_operatore(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     if not body.get("codice_ania"):
         raise HTTPException(400, "Codice operatore obbligatorio")
     body["id"] = body.get("id") or _uid()
@@ -132,7 +133,7 @@ async def create_mapping_operatore(body: dict, user=Depends(require_user("admin"
 
 
 @router.put("/librerie/mapping-operatori/{mid}")
-async def update_mapping_operatore(mid: str, body: dict, user=Depends(require_user("admin"))) -> dict:
+async def update_mapping_operatore(mid: str, body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body["updated_at"] = _now_iso()
     r = await db.mapping_operatori.update_one({"id": mid}, {"$set": body})
     if r.matched_count == 0:
@@ -141,13 +142,13 @@ async def update_mapping_operatore(mid: str, body: dict, user=Depends(require_us
 
 
 @router.delete("/librerie/mapping-operatori/{mid}")
-async def delete_mapping_operatore(mid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_mapping_operatore(mid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.mapping_operatori.delete_one({"id": mid})
     return {"ok": True}
 
 
 @router.post("/librerie/mapping-operatori/applica-a-polizze")
-async def applica_mapping_operatori(user=Depends(require_user("admin"))) -> dict:
+async def applica_mapping_operatori(user: dict = Depends(require_user("admin"))) -> dict:
     """Riapplica il mapping operatori a TUTTE le polizze esistenti (utile dopo aver mappato gli operatori)."""
     aggiornate = 0
     async for m in db.mapping_operatori.find({"user_id": {"$ne": None}}, {"_id": 0}):
@@ -162,7 +163,7 @@ async def applica_mapping_operatori(user=Depends(require_user("admin"))) -> dict
 
 
 @router.post("/librerie/mapping-garanzie/applica-a-polizze")
-async def applica_mapping_garanzie(user=Depends(require_user("admin"))) -> dict:
+async def applica_mapping_garanzie(user: dict = Depends(require_user("admin"))) -> dict:
     """Riapplica il mapping garanzie alle polizze esistenti (rinomina garanzia.garanzia con nome_personalizzato)."""
     aggiornate = 0
     map_dict = {}
@@ -186,7 +187,7 @@ async def applica_mapping_garanzie(user=Depends(require_user("admin"))) -> dict:
 
 
 @router.post("/librerie/conti-cassa", status_code=201)
-async def create_conto(body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def create_conto(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     obj = ContoCassa(**body)
     await db.conti_cassa.insert_one(obj.model_dump())
     await log_attivita(user, "create", "conto_cassa", obj.id, obj.nome)
@@ -194,7 +195,7 @@ async def create_conto(body: dict, user=Depends(require_user("admin", "collabora
 
 
 @router.put("/librerie/conti-cassa/{cid}")
-async def update_conto(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def update_conto(cid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     body["updated_at"] = _now_iso()
     res = await db.conti_cassa.update_one({"id": cid}, {"$set": body})
     if res.matched_count == 0:
@@ -204,7 +205,7 @@ async def update_conto(cid: str, body: dict, user=Depends(require_user("admin", 
 
 
 @router.delete("/librerie/conti-cassa/{cid}")
-async def delete_conto(cid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_conto(cid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.conti_cassa.delete_one({"id": cid})
     await log_attivita(user, "delete", "conto_cassa", cid)
     return {"ok": True}
@@ -225,7 +226,7 @@ class MezzoPagamentoBody(BaseModel):
 @router.get("/librerie/mezzi-pagamento")
 async def list_mezzi_pagamento(
     attivi: bool = False,
-    user=Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> list[dict]:
     flt = {}
     if attivi:
@@ -235,7 +236,7 @@ async def list_mezzi_pagamento(
 
 
 @router.post("/librerie/mezzi-pagamento", status_code=201)
-async def create_mezzo_pagamento(body: MezzoPagamentoBody, user=Depends(require_user("admin"))) -> dict:
+async def create_mezzo_pagamento(body: MezzoPagamentoBody, user: dict = Depends(require_user("admin"))) -> dict:
     codice = body.codice.strip().lower()
     if not codice or not body.label:
         raise HTTPException(400, "Codice e label obbligatori")
@@ -252,7 +253,7 @@ async def create_mezzo_pagamento(body: MezzoPagamentoBody, user=Depends(require_
 
 
 @router.put("/librerie/mezzi-pagamento/{mid}")
-async def update_mezzo_pagamento(mid: str, body: MezzoPagamentoBody, user=Depends(require_user("admin"))) -> dict:
+async def update_mezzo_pagamento(mid: str, body: MezzoPagamentoBody, user: dict = Depends(require_user("admin"))) -> dict:
     existing = await db.mezzi_pagamento.find_one({"id": mid}, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Mezzo non trovato")
@@ -263,14 +264,14 @@ async def update_mezzo_pagamento(mid: str, body: MezzoPagamentoBody, user=Depend
 
 
 @router.delete("/librerie/mezzi-pagamento/{mid}")
-async def delete_mezzo_pagamento(mid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_mezzo_pagamento(mid: str, user: dict = Depends(require_user("admin"))) -> dict:
     res = await db.mezzi_pagamento.delete_one({"id": mid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Mezzo non trovato")
     return {"ok": True}
 
 
-async def _seed_mezzi_pagamento() -> dict:
+async def _seed_mezzi_pagamento() -> None:
     """Idempotente: crea i mezzi pagamento di default se mancano."""
     defaults = [
         {"codice": "contanti", "label": "Contanti", "tipo_conto": "cassa", "ordine": 1, "icona": "Banknote"},
@@ -310,7 +311,7 @@ def _ramo_aliases(ramo: str) -> list[str]:
 async def list_prodotti(
     compagnia_id: Optional[str] = None,
     ramo: Optional[str] = None,
-    user=Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> list[dict]:
     flt = {}
     if compagnia_id:
@@ -323,7 +324,7 @@ async def list_prodotti(
 
 
 @router.post("/librerie/prodotti", status_code=201)
-async def create_prodotto(body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def create_prodotto(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     # Default termini_mora_giorni in base al ramo se non specificato
     if not body.get("termini_mora_giorni"):
         from db_models import default_mora_for_ramo
@@ -335,7 +336,7 @@ async def create_prodotto(body: dict, user=Depends(require_user("admin", "collab
 
 
 @router.put("/librerie/prodotti/{pid}")
-async def update_prodotto(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def update_prodotto(pid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     body["updated_at"] = _now_iso()
     res = await db.prodotti.update_one({"id": pid}, {"$set": body})
     if res.matched_count == 0:
@@ -345,7 +346,7 @@ async def update_prodotto(pid: str, body: dict, user=Depends(require_user("admin
 
 
 @router.delete("/librerie/prodotti/{pid}")
-async def delete_prodotto(pid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_prodotto(pid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.prodotti.delete_one({"id": pid})
     await log_attivita(user, "delete", "prodotto", pid)
     return {"ok": True}
@@ -353,12 +354,12 @@ async def delete_prodotto(pid: str, user=Depends(require_user("admin"))) -> dict
 
 # --- RAMI ---
 @router.get("/librerie/rami")
-async def list_rami(user=Depends(current_user)) -> list[dict]:
+async def list_rami(user: dict = Depends(current_user)) -> list[dict]:
     return await db.rami.find({}, {"_id": 0}).sort("nome", 1).to_list(200)
 
 
 @router.post("/librerie/rami", status_code=201)
-async def create_ramo(body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def create_ramo(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     obj = RamoLibreria(**body)
     await db.rami.insert_one(obj.model_dump())
     await log_attivita(user, "create", "ramo", obj.id, obj.nome)
@@ -366,7 +367,7 @@ async def create_ramo(body: dict, user=Depends(require_user("admin", "collaborat
 
 
 @router.put("/librerie/rami/{rid}")
-async def update_ramo(rid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def update_ramo(rid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     body["updated_at"] = _now_iso()
     res = await db.rami.update_one({"id": rid}, {"$set": body})
     if res.matched_count == 0:
@@ -375,7 +376,7 @@ async def update_ramo(rid: str, body: dict, user=Depends(require_user("admin", "
 
 
 @router.delete("/librerie/rami/{rid}")
-async def delete_ramo(rid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_ramo(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
     await db.rami.delete_one({"id": rid})
     return {"ok": True}
 
@@ -384,7 +385,7 @@ async def delete_ramo(rid: str, user=Depends(require_user("admin"))) -> dict:
 # LIBRERIE — AZIENDA (DATI INTESTAZIONE / STAMPE)
 # ============================================================
 @router.get("/librerie/azienda")
-async def get_azienda(user=Depends(current_user)) -> dict:
+async def get_azienda(user: dict = Depends(current_user)) -> dict:
     """Singleton: dati dell'agenzia (usati nelle stampe)."""
     doc = await db.azienda_config.find_one({}, {"_id": 0})
     if not doc:
@@ -396,7 +397,7 @@ async def get_azienda(user=Depends(current_user)) -> dict:
 
 
 @router.put("/librerie/azienda")
-async def update_azienda(body: dict, user=Depends(require_user("admin"))) -> dict:
+async def update_azienda(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body.pop("id", None)
     body["updated_at"] = _now_iso()
     existing = await db.azienda_config.find_one({})
@@ -412,7 +413,7 @@ async def update_azienda(body: dict, user=Depends(require_user("admin"))) -> dic
 
 @router.post("/librerie/azienda/logo")
 async def upload_logo_azienda(file: UploadFile = File(...),
-                               user=Depends(require_user("admin"))) -> dict:
+                               user: dict = Depends(require_user("admin"))) -> dict:
     """Carica/sostituisce il logo dell'agenzia (usato in tutte le stampe PDF)."""
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
@@ -444,7 +445,7 @@ async def upload_logo_azienda(file: UploadFile = File(...),
 async def list_schemi_provvigionali(
     collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> list[dict]:
     """Elenco regole provvigionali, opzionalmente filtrate per collaboratore o compagnia."""
     q = {}
@@ -465,7 +466,7 @@ async def list_schemi_provvigionali(
 
 
 @router.post("/librerie/schema-provvigionale", status_code=201)
-async def create_schema_provvigionale(body: dict, user=Depends(require_user("admin"))) -> dict:
+async def create_schema_provvigionale(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body = {k: (v if v != "" else None) for k, v in body.items()}
     obj = SchemaProvvigionale(**body)
     await db.schema_provvigionale.insert_one(obj.model_dump())
@@ -474,7 +475,7 @@ async def create_schema_provvigionale(body: dict, user=Depends(require_user("adm
 
 
 @router.put("/librerie/schema-provvigionale/{sid}")
-async def update_schema_provvigionale(sid: str, body: dict, user=Depends(require_user("admin"))) -> dict:
+async def update_schema_provvigionale(sid: str, body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body = {k: (v if v != "" else None) for k, v in body.items()}
     body.pop("id", None)
     body["updated_at"] = _now_iso()
@@ -486,7 +487,7 @@ async def update_schema_provvigionale(sid: str, body: dict, user=Depends(require
 
 
 @router.delete("/librerie/schema-provvigionale/{sid}")
-async def delete_schema_provvigionale(sid: str, user=Depends(require_user("admin"))) -> dict:
+async def delete_schema_provvigionale(sid: str, user: dict = Depends(require_user("admin"))) -> dict:
     res = await db.schema_provvigionale.delete_one({"id": sid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Schema non trovato")
@@ -501,7 +502,7 @@ async def list_contatti_compagnia(
     compagnia_id: Optional[str] = None,
     q: Optional[str] = None,
     attivo: Optional[bool] = None,
-    user=Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> list[dict]:
     flt: dict = {}
     if compagnia_id:
@@ -529,7 +530,7 @@ async def list_contatti_compagnia(
 
 
 @router.post("/contatti-compagnia", status_code=201)
-async def create_contatto_compagnia(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+async def create_contatto_compagnia(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
     if not body.get("compagnia_id") or not body.get("nome"):
         raise HTTPException(400, "compagnia_id e nome obbligatori")
     obj = ContattoCompagnia(**body)
@@ -542,7 +543,7 @@ async def create_contatto_compagnia(body: dict, user=Depends(require_user("admin
 @router.put("/contatti-compagnia/{cid}")
 async def update_contatto_compagnia(
     cid: str, body: dict,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     body.pop("id", None)
     body["updated_at"] = _now_iso()
@@ -554,7 +555,7 @@ async def update_contatto_compagnia(
 
 
 @router.delete("/contatti-compagnia/{cid}")
-async def delete_contatto_compagnia(cid: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+async def delete_contatto_compagnia(cid: str, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
     res = await db.contatti_compagnia.delete_one({"id": cid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Contatto non trovato")
@@ -596,7 +597,7 @@ async def api_risolvi_provvigione(
     collaboratore_id: str,
     compagnia_id: Optional[str] = None,
     ramo: Optional[str] = None,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     perc = await risolvi_provvigione_collaboratore(collaboratore_id, compagnia_id, ramo)
     return {"percentuale_collaboratore": perc}

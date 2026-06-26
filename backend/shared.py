@@ -80,7 +80,7 @@ def strip_mongo_id(doc: dict | None) -> dict | None:
 # ---------------------------------------------------------------------------
 async def log_attivita(utente: dict, azione: str, entita: str,
                        entita_id: str | None = None, descrizione: str | None = None,
-                       payload: dict | None = None) -> dict:
+                       payload: dict | None = None) -> None:
     log = AttivitaLog(
         utente_id=utente.get("id") if utente else None,
         utente_email=utente.get("email") if utente else None,
