@@ -5363,6 +5363,74 @@ async def delete_veicolo(vid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
+@api.get("/polizze/{pid}/libro-matricola/export")
+async def export_libro_matricola(
+    pid: str,
+    includi_storico: bool = False,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Esporta tutte le applicazioni libro matricola di una polizza in formato Excel."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io as _io
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    flt: dict = {"polizza_id": pid}
+    if not includi_storico:
+        flt["stato"] = {"$in": ["attiva", "sospesa"]}
+    apps = await db.applicazioni.find(flt, {"_id": 0}).sort("numero", 1).to_list(10000)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Libro Matricola"
+    headers = [
+        "N°", "Targa", "Stato", "Inclusione", "Esclusione",
+        "Marca", "Modello", "Tipo veicolo", "Alimentazione", "Uso",
+        "Data immatr.", "CV fiscali", "KW", "Cilindrata", "Quintali", "Posti",
+        "Classe BM", "BM provenienza", "Franchigia",
+        "Valore veicolo", "Valore accessori",
+        "Intestatario", "Provincia", "Massimali",
+        "Leasing", "Scad. leasing", "Note",
+    ]
+    ws.append(headers)
+    # Stile header
+    head_font = Font(bold=True, color="FFFFFF")
+    head_fill = PatternFill("solid", fgColor="1E40AF")
+    for col_idx, _ in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = head_font
+        cell.fill = head_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for a in apps:
+        ws.append([
+            a.get("numero"), a.get("targa"), a.get("stato"),
+            a.get("data_inclusione"), a.get("data_esclusione"),
+            a.get("marca"), a.get("modello"), a.get("tipo_veicolo"),
+            a.get("tipo_alimentazione"), a.get("tipo_uso"),
+            a.get("data_immatricolazione"), a.get("cv_fiscali"), a.get("kw"),
+            a.get("cilindrata"), a.get("quintali"), a.get("posti"),
+            a.get("bm_assegnata"), a.get("bm_provenienza"), a.get("franchigia"),
+            a.get("valore_veicolo"), a.get("valore_accessori"),
+            a.get("intestatario"), a.get("provincia_intestatario"), a.get("massimali"),
+            a.get("leasing"), a.get("scadenza_leasing"), a.get("note"),
+        ])
+    # Auto-width approssimativo
+    for col_idx, h in enumerate(headers, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = max(12, len(h) + 2)
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe_n = re.sub(r"[^A-Za-z0-9_-]", "_", str(pol.get("numero_polizza") or pid))
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="LibroMatricola_{safe_n}.xlsx"'},
+    )
+
+
 # ============================================================
 # PENSIONI INPS
 # ============================================================

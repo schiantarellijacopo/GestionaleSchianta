@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, X } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, X, Menu } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
 
 export default function TopBar() {
     const { user } = useAuth();
+    const { setMobileOpen = () => {} } = useSidebar() || {};
     const [q, setQ] = useState("");
     const [results, setResults] = useState(null);
     const [open, setOpen] = useState(false);
@@ -51,7 +53,17 @@ export default function TopBar() {
     const total = (results?.anagrafiche?.length || 0) + (results?.polizze?.length || 0) + (results?.sinistri?.length || 0);
 
     return (
-        <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-4" data-testid="topbar">
+        <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-3 sm:px-6 py-2.5 flex items-center gap-2 sm:gap-4" data-testid="topbar">
+            {/* Hamburger - solo mobile/tablet */}
+            <button
+                type="button"
+                onClick={() => setMobileOpen(true)}
+                className="lg:hidden text-slate-700 hover:text-slate-900 p-1"
+                aria-label="Apri menu"
+                data-testid="hamburger-btn"
+            >
+                <Menu size={22} />
+            </button>
             <div ref={ref} className="relative flex-1 max-w-xl mx-auto">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input

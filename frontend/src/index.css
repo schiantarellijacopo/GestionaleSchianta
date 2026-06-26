@@ -136,3 +136,49 @@ h1, h2, h3, h4, h5 {
 .tree-node {
     @apply bg-white border border-slate-200 rounded-md px-3 py-2 shadow-sm text-sm;
 }
+
+/* =====================================================================
+ *  Responsive helpers — mobile / tablet (iPhone, iPad)
+ * ===================================================================== */
+
+/* Wrap di sicurezza per tabelle larghe: scroll orizzontale su mobile */
+@media (max-width: 1023px) {
+    .data-table {
+        font-size: 0.75rem;
+    }
+    /* Tutti i wrap delle tabelle nei pannelli/Card scrollano in orizzontale */
+    .card-table-wrap,
+    .card > div:has(> table.data-table) {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Form grid: comprimi a 1 colonna su mobile per evitare overflow */
+    .form-grid-2 { grid-template-columns: 1fr !important; }
+    .form-grid-3 { grid-template-columns: 1fr !important; }
+    .form-grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
+
+    /* PageHeader: stack verticale su mobile */
+    .page-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }
+
+    /* Dialog: padding ridotto */
+    [role="dialog"] {
+        max-width: 95vw !important;
+    }
+
+    /* Tooltips, dropdowns: assicura visibilità */
+    .num { white-space: nowrap; }
+}
+
+/* iPhone portrait specifico: testo header tabella più stretto */
+@media (max-width: 640px) {
+    .data-table thead th { padding: 0.4rem 0.5rem; font-size: 0.65rem; }
+    .data-table tbody td { padding: 0.4rem 0.5rem; }
+    /* Bottoni nelle azioni in colonna su mobile */
+    .btn-toolbar { flex-wrap: wrap; gap: 0.25rem; }
+    .btn-toolbar > * { flex-shrink: 0; }
+}
+

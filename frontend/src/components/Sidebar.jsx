@@ -1,11 +1,12 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect, useState } from "react";
+import { useSidebar } from "./Layout";
 import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap,
+    GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -65,6 +66,7 @@ const HIDDEN_KEY = "assicura.sidebar.hidden";
 export default function Sidebar() {
     const { user, logout } = useAuth();
     const nav = useNavigate();
+    const { mobileOpen = false, setMobileOpen = () => {} } = useSidebar() || {};
     const role = user?.role;
     const [editMode, setEditMode] = useState(false);
     const [order, setOrder] = useState(() => {
@@ -176,6 +178,7 @@ export default function Sidebar() {
                 to={m.path}
                 end={m.path === "/"}
                 data-testid={`nav-${m.id}`}
+                onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
                     `flex items-center gap-2.5 px-3 py-1.5 rounded text-sm ${
                         isActive ? "bg-sky-700 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
@@ -189,7 +192,10 @@ export default function Sidebar() {
     };
 
     return (
-        <aside className="w-64 bg-slate-900 text-slate-100 flex flex-col min-h-screen" data-testid="sidebar">
+        <aside
+            className={`fixed lg:static inset-y-0 left-0 w-64 bg-slate-900 text-slate-100 flex flex-col min-h-screen z-40 transform transition-transform duration-200 ease-in-out lg:transform-none ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+            data-testid="sidebar"
+        >
             <div className="px-5 py-5 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Shield size={22} className="text-sky-400" />
@@ -198,6 +204,16 @@ export default function Sidebar() {
                         <div className="text-[11px] text-slate-400 -mt-0.5">Gestione Assicurazioni</div>
                     </div>
                 </div>
+                {/* Close button mobile */}
+                <button
+                    type="button"
+                    onClick={() => setMobileOpen(false)}
+                    className="lg:hidden text-slate-300 hover:text-white"
+                    aria-label="Chiudi menu"
+                    data-testid="sidebar-close-btn"
+                >
+                    <X size={18} />
+                </button>
                 <button
                     onClick={() => setEditMode(!editMode)}
                     className={`p-1.5 rounded transition-colors ${

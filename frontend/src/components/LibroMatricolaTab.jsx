@@ -12,8 +12,9 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download } from "lucide-react";
 import { ImportTargheStub } from "@/pages/Importazione";
+import { API_BASE } from "@/lib/api";
 
 export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     const [list, setList] = useState([]);
@@ -79,6 +80,30 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
                         className={showStorico ? "bg-amber-500 hover:bg-amber-600" : ""}
                     >
                         <History size={14} className="mr-1" />Storico
+                    </Button>
+                    <Button
+                        size="sm" variant="outline"
+                        onClick={async () => {
+                            try {
+                                const url = `${API_BASE}/polizze/${polizzaId}/libro-matricola/export`;
+                                const r = await fetch(url, {
+                                    headers: { "Authorization": `Bearer ${localStorage.getItem("token") || ""}` },
+                                });
+                                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                                const blob = await r.blob();
+                                const dl = document.createElement("a");
+                                dl.href = URL.createObjectURL(blob);
+                                dl.download = `LibroMatricola_${polizza?.numero_polizza || polizzaId}.xlsx`;
+                                dl.click();
+                                URL.revokeObjectURL(dl.href);
+                            } catch (e) {
+                                toast.error("Errore export: " + e.message);
+                            }
+                        }}
+                        data-testid="lm-export-btn"
+                        className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    >
+                        <Download size={14} className="mr-1" /> Esporta Excel
                     </Button>
                     <Button
                         size="sm" variant="outline"
