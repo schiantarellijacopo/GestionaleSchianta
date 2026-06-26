@@ -5075,35 +5075,24 @@ async def list_mappings(
 @api.get("/import/unmapped")
 async def list_unmapped_entities(
     flusso: str = "omnia",
+    include_mapped: bool = False,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Ritorna le entità del flusso ancora da mappare a un'entità DB.
 
-    Struttura:
-      {
-        "compagnia":     [{"valore_flusso": "UCA", "label_flusso": "UCA", "occorrenze": 12}, ...],
-        "ramo":          [...],
-        "collaboratore": [...],
-        "prodotto":      [...],
-        "garanzia":      [...],
-        "candidates":    {           # entità DB selezionabili per ciascun tipo
-          "compagnia":     [{"id": "...", "label": "UCA Assicurazioni"}, ...],
-          "ramo":          [{"id": "RC Auto", "label": "RC Auto"}, ...],
-          "collaboratore": [{"id": "<user_id>", "label": "Mario Rossi"}, ...],
-          "prodotto":      [{"id": "...", "label": "Polizza Casa Plus"}, ...],
-          "garanzia":      [{"id": "<nome>", "label": "<nome>"}, ...],
-        }
-      }
+    Se `include_mapped=true`, include anche quelle già associate (per permettere
+    la modifica/eliminazione del mapping dal wizard).
     """
     by_tipo: dict[str, list[dict]] = {
         "compagnia": [], "prodotto": [], "collaboratore": [], "garanzia": [],
     }
-    async for m in db.import_mappings.find(
-        {"flusso": flusso,
-         "tipo": {"$in": ["compagnia", "prodotto", "collaboratore", "garanzia"]},
-         "$or": [{"entita_id": None}, {"entita_id": ""}]},
-        {"_id": 0},
-    ):
+    flt: dict = {
+        "flusso": flusso,
+        "tipo": {"$in": ["compagnia", "prodotto", "collaboratore", "garanzia"]},
+    }
+    if not include_mapped:
+        flt["$or"] = [{"entita_id": None}, {"entita_id": ""}]
+    async for m in db.import_mappings.find(flt, {"_id": 0}):
         tipo = m.get("tipo")
         if tipo in by_tipo:
             by_tipo[tipo].append({
@@ -5111,6 +5100,8 @@ async def list_unmapped_entities(
                 "valore_flusso": m.get("valore_flusso"),
                 "label_flusso": m.get("label_flusso") or m.get("valore_flusso"),
                 "occorrenze": m.get("occorrenze", 0),
+                "entita_id": m.get("entita_id"),
+                "label_programma": m.get("label_programma"),
             })
     # Candidati DB (librerie esistenti — i Rami sono esclusi: gestiti manualmente)
     candidates: dict[str, list[dict]] = {}
@@ -5212,11 +5203,29 @@ async def apply_import_mappings(
             summary["polizze_collaboratore"] += r.modified_count
 
         elif tipo == "compagnia":
-            # Back-fill preciso: match su compagnia_codice_exp salvato durante l'import
+            # Back-fill: aggiorna le polizze con compagnia_codice_exp == valore_flusso
             r1 = await db.polizze.update_many(
                 {"compagnia_codice_exp": valore},
                 {"$set": {"compagnia_id": entita_id, "updated_at": _now_iso()}},
             )
+            # Inoltre, aggiorna le polizze "spurie" che puntano a una compagnia
+            # auto-creata con stesso codice (compatibilità con import legacy)
+            spuria = await db.compagnie.find_one(
+                {"codice": valore, "id": {"$ne": entita_id}},
+                {"_id": 0, "id": 1},
+            )
+            if spuria:
+                r2 = await db.polizze.update_many(
+                    {"compagnia_id": spuria["id"]},
+                    {"$set": {"compagnia_id": entita_id, "compagnia_codice_exp": valore, "updated_at": _now_iso()}},
+                )
+                # Aggiorna anche eventuali sinistri
+                rs = await db.sinistri.update_many(
+                    {"compagnia_id": spuria["id"]},
+                    {"$set": {"compagnia_id": entita_id, "updated_at": _now_iso()}},
+                )
+                summary["polizze_compagnia"] += r2.modified_count
+                summary["sinistri_compagnia"] += rs.modified_count
             summary["polizze_compagnia"] += r1.modified_count
 
         elif tipo == "prodotto":

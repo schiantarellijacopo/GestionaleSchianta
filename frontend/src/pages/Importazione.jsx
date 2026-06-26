@@ -299,54 +299,59 @@ function Stat({ label, value }) {
 // WIZARD MAPPING — Dialog interattivo
 // ============================================================
 function MappingWizardDialog({ open, onClose }) {
-    const [data, setData] = useState(null);          // { compagnia: [...], ramo: [...], candidates: {...} }
-    const [edits, setEdits] = useState({});          // {mapping_id: entita_id}
+    const [data, setData] = useState(null);          // { compagnia: [...], prodotto: [...], candidates: {...} }
+    const [edits, setEdits] = useState({});          // {mapping_id: entita_id | "" }
     const [active, setActive] = useState("compagnia");
+    const [showAll, setShowAll] = useState(false);   // mostra anche già mappate
     const [saving, setSaving] = useState(false);
     const [applying, setApplying] = useState(false);
 
     const load = useCallback(async () => {
         try {
-            const res = await api.get("/import/unmapped");
+            const res = await api.get(`/import/unmapped${showAll ? "?include_mapped=true" : ""}`);
             setData(res.data);
-            // Scegli il primo tipo con elementi
             const first = ["compagnia", "collaboratore", "prodotto", "garanzia"]
                 .find((t) => (res.data[t] || []).length > 0);
             if (first) setActive(first);
         } catch (e) {
             toast.error("Errore caricamento mapping: " + (e.response?.data?.detail || e.message));
         }
-    }, []);
+    }, [showAll]);
 
     useEffect(() => {
         if (open) { setEdits({}); load(); }
     }, [open, load]);
 
     const saveAll = async (applyAfter = false) => {
-        const updates = Object.entries(edits).filter(([, v]) => v);
+        const items = data ? Object.values(data).flat().filter((x) => x?.id) : [];
+        const byId = Object.fromEntries(items.map((it) => [it.id, it]));
+        // Considera "modificato" se edits[id] è diverso dal current entita_id (o "" per scollegare)
+        const updates = Object.entries(edits).filter(([mid, v]) => {
+            const cur = byId[mid]?.entita_id || "";
+            return v !== cur;  // ogni valore esplicitamente diverso (anche "" per scollegare)
+        });
         if (!updates.length) {
-            toast.info("Nessuna mappatura da salvare");
+            toast.info("Nessuna modifica da salvare");
             return;
         }
         setSaving(true);
         try {
-            const items = data ? Object.values(data).flat().filter((x) => x?.id) : [];
-            const byId = Object.fromEntries(items.map((it) => [it.id, it]));
             for (const [mid, entita_id] of updates) {
                 const it = byId[mid];
                 if (!it) continue;
-                // Trova il tipo cercando in quale array è
                 const tipo = ["compagnia", "collaboratore", "prodotto", "garanzia"]
                     .find((t) => (data[t] || []).some((x) => x.id === mid));
                 await api.post("/import/mappings", {
                     tipo,
                     flusso: "omnia",
                     valore_flusso: it.valore_flusso,
-                    entita_id,
-                    label_programma: (data.candidates[tipo] || []).find((c) => c.id === entita_id)?.label || null,
+                    entita_id: entita_id || null,
+                    label_programma: entita_id
+                        ? ((data.candidates[tipo] || []).find((c) => c.id === entita_id)?.label || null)
+                        : null,
                 });
             }
-            toast.success(`Salvate ${updates.length} mappature`);
+            toast.success(`Salvate ${updates.length} modifiche`);
             if (applyAfter) {
                 await applyMappings(false);
             }
@@ -355,6 +360,17 @@ function MappingWizardDialog({ open, onClose }) {
             toast.error("Errore salvataggio: " + (e.response?.data?.detail || e.message));
         } finally {
             setSaving(false);
+        }
+    };
+
+    const removeMapping = async (mid) => {
+        if (!window.confirm("Vuoi rimuovere completamente questa associazione?\nIl valore tornerà tra le entità da mappare.")) return;
+        try {
+            await api.delete(`/import/mappings/${mid}`);
+            toast.success("Associazione rimossa");
+            await load();
+        } catch (e) {
+            toast.error("Errore: " + (e.response?.data?.detail || e.message));
         }
     };
 
@@ -392,15 +408,32 @@ function MappingWizardDialog({ open, onClose }) {
                         Wizard Mapping Entità Importazione
                     </DialogTitle>
                     <DialogDescription>
-                        Collega le entità apparse nei flussi alle entità del programma. Le mappature verranno
-                        usate automaticamente nei prossimi import e (opzionalmente) applicate ai record esistenti.
+                        Collega le entità apparse nei flussi alle librerie del programma. Puoi anche
+                        modificare o rimuovere associazioni già effettuate.
                     </DialogDescription>
                 </DialogHeader>
+
+                {/* Toggle modalità */}
+                <div className="flex items-center gap-3 text-xs border-b pb-2">
+                    <label className="flex items-center gap-1.5 cursor-pointer" data-testid="wizard-toggle-showall">
+                        <input
+                            type="checkbox"
+                            checked={showAll}
+                            onChange={(e) => setShowAll(e.target.checked)}
+                            className="rounded"
+                        />
+                        <span className="text-slate-700">Mostra anche entità già mappate (per modificare/rimuovere)</span>
+                    </label>
+                </div>
 
                 {!data ? <Loading /> : totalCount === 0 ? (
                     <div className="py-12 text-center" data-testid="wizard-no-unmapped">
                         <CheckCircle2 size={42} className="mx-auto text-emerald-500 mb-3" />
-                        <p className="text-sm text-slate-600">Tutte le entità sono mappate.</p>
+                        <p className="text-sm text-slate-600">
+                            {showAll
+                                ? "Nessuna entità presente. Importa prima un flusso OMNIA."
+                                : "Tutte le entità sono mappate."}
+                        </p>
                         <p className="text-xs text-slate-500 mt-1">Puoi comunque eseguire il back-fill sui record esistenti.</p>
                         <Button
                             className="mt-4"
@@ -434,6 +467,7 @@ function MappingWizardDialog({ open, onClose }) {
                                 candidates={data.candidates?.[active] || []}
                                 edits={edits}
                                 onChange={(id, v) => setEdits((s) => ({ ...s, [id]: v }))}
+                                onRemove={removeMapping}
                                 tipo={active}
                             />
                         </div>
@@ -452,7 +486,7 @@ function MappingWizardDialog({ open, onClose }) {
                                 onClick={() => saveAll(false)}
                                 data-testid="wizard-save-btn"
                             >
-                                <Save size={14} className="mr-1" /> {saving ? "Salvataggio..." : "Salva mappature"}
+                                <Save size={14} className="mr-1" /> {saving ? "Salvataggio..." : "Salva modifiche"}
                             </Button>
                             <Button
                                 className="bg-sky-700 hover:bg-sky-800"
@@ -472,44 +506,71 @@ function MappingWizardDialog({ open, onClose }) {
 }
 
 
-function MappingRows({ items, candidates, edits, onChange, tipo }) {
+function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
     if (!items.length) {
-        return <p className="text-sm text-slate-500 py-4 text-center">Nessuna entità da mappare in questa categoria.</p>;
+        return <p className="text-sm text-slate-500 py-4 text-center">Nessuna entità in questa categoria.</p>;
     }
     return (
         <table className="data-table w-full text-sm">
             <thead>
                 <tr>
                     <th>Valore nel flusso</th>
-                    <th className="num">Occorrenze</th>
-                    <th>Mappa a → {TIPO_LABEL[tipo]} programma</th>
+                    <th className="num">Occ.</th>
+                    <th>Associazione → {TIPO_LABEL[tipo]} programma</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                {items.map((it) => (
-                    <tr key={it.id} data-testid={`wizard-row-${it.id}`}>
-                        <td>
-                            <div className="font-medium text-slate-800">{it.valore_flusso}</div>
-                            {it.label_flusso && it.label_flusso !== it.valore_flusso && (
-                                <div className="text-[11px] text-slate-500">{it.label_flusso}</div>
-                            )}
-                        </td>
-                        <td className="num">{it.occorrenze || 0}</td>
-                        <td>
-                            <select
-                                value={edits[it.id] ?? ""}
-                                onChange={(e) => onChange(it.id, e.target.value)}
-                                className="w-full text-xs border rounded px-2 py-1.5 bg-white"
-                                data-testid={`wizard-select-${it.id}`}
-                            >
-                                <option value="">— Seleziona —</option>
-                                {candidates.map((c) => (
-                                    <option key={c.id} value={c.id}>{c.label}</option>
-                                ))}
-                            </select>
-                        </td>
-                    </tr>
-                ))}
+                {items.map((it) => {
+                    // Se l'utente ha modificato il valore, usa quello; altrimenti il valore corrente
+                    const currentVal = edits[it.id] !== undefined ? edits[it.id] : (it.entita_id || "");
+                    const isMapped = !!it.entita_id;
+                    const hasLabel = it.label_flusso && it.label_flusso !== it.valore_flusso;
+                    return (
+                        <tr key={it.id} data-testid={`wizard-row-${it.id}`} className={isMapped ? "bg-emerald-50/40" : ""}>
+                            <td>
+                                {/* Il nome leggibile (descrizione) va in primo piano; il codice tecnico sotto */}
+                                <div className="font-medium text-slate-800">
+                                    {hasLabel ? it.label_flusso : it.valore_flusso}
+                                </div>
+                                {hasLabel && (
+                                    <div className="text-[11px] text-slate-500 font-mono">cod: {it.valore_flusso}</div>
+                                )}
+                                {isMapped && (
+                                    <div className="text-[10px] text-emerald-700 mt-0.5">
+                                        ✓ Attualmente: {it.label_programma || it.entita_id}
+                                    </div>
+                                )}
+                            </td>
+                            <td className="num">{it.occorrenze || 0}</td>
+                            <td>
+                                <select
+                                    value={currentVal}
+                                    onChange={(e) => onChange(it.id, e.target.value)}
+                                    className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""}`}
+                                    data-testid={`wizard-select-${it.id}`}
+                                >
+                                    <option value="">— Non associato —</option>
+                                    {candidates.map((c) => (
+                                        <option key={c.id} value={c.id}>{c.label}</option>
+                                    ))}
+                                </select>
+                            </td>
+                            <td>
+                                {isMapped && (
+                                    <button
+                                        onClick={() => onRemove(it.id)}
+                                        className="text-rose-600 hover:text-rose-800 p-1"
+                                        title="Elimina mapping"
+                                        data-testid={`wizard-remove-${it.id}`}
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </td>
+                        </tr>
+                    );
+                })}
             </tbody>
         </table>
     );

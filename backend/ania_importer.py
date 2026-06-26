@@ -68,6 +68,11 @@ async def _track_unmapped(db, tracker: Dict[str, Dict[str, dict]], tipo: str,
 
     `tracker` è un dict {tipo: {valore: {label, count}}} popolato durante l'import.
     Crea uno stub in `import_mappings` con `entita_id=None` per renderlo visibile nel wizard.
+
+    NB: se chiamato più volte con label diverse per lo stesso (tipo, valore), prevale la
+    label *più ricca* (più lunga di quella già registrata) per favorire descrizioni
+    estese trovate in flussi successivi (es. rec100 ha la descrizione completa del
+    prodotto, mentre rec20 ha solo il codice).
     """
     if not valore:
         return
@@ -80,9 +85,11 @@ async def _track_unmapped(db, tracker: Dict[str, Dict[str, dict]], tipo: str,
     bucket = tracker.setdefault(tipo, {})
     rec = bucket.setdefault(valore, {"label": label, "count": 0})
     rec["count"] += 1
-    if label and not rec.get("label"):
+    # Preferisci la label più lunga (descrizione completa > codice nudo)
+    if label and len(label) > len(rec.get("label") or ""):
         rec["label"] = label
-    # Crea voce stub in import_mappings (idempotente) così appare nel wizard
+    # Crea voce stub in import_mappings (idempotente) così appare nel wizard.
+    # Aggiorna label_flusso al valore più lungo finora.
     await db.import_mappings.update_one(
         {"tipo": tipo, "flusso": flusso, "valore_flusso": valore},
         {
@@ -91,8 +98,10 @@ async def _track_unmapped(db, tracker: Dict[str, Dict[str, dict]], tipo: str,
                 "tipo": tipo, "flusso": flusso, "valore_flusso": valore,
                 "entita_id": None,
                 "label_programma": None,
-                "label_flusso": label or valore,
                 "created_at": _now_iso(),
+            },
+            "$set": {
+                "label_flusso": rec["label"] or valore,
                 "updated_at": _now_iso(),
             },
             "$inc": {"occorrenze": 1},
@@ -188,6 +197,30 @@ def _extract_zip_contents(file_bytes: bytes, filename: str) -> Dict[str, str]:
             text = file_bytes.decode("latin-1")
         files_data[filename] = text
     return files_data
+
+
+async def _track_compagnia_da_riga(db, row: dict, tracker: Dict[str, Dict[str, dict]],
+                                   import_mappings: Dict[str, Dict[str, Optional[str]]]) -> None:
+    """Traccia la compagnia di una riga (rec20/30/50/100/101) se non già mappata
+    esplicitamente in import_mappings.
+
+    NB: non basta verificare la presenza in `db.compagnie` perché potrebbero esserci
+    compagnie "spurie" auto-create da import precedenti che non rappresentano la vera
+    libreria. Il vero criterio è "l'utente ha esplicitamente mappato questo codice?".
+    """
+    codice = (row.get("compagnia_exp") or "").strip()
+    if not codice:
+        return
+    # Salta SOLO se c'è già un mapping esplicito utente (entita_id valorizzato)
+    if (import_mappings or {}).get("compagnia", {}).get(codice):
+        return
+    ania = (row.get("compagnia_ania") or "").strip()
+    label = f"{codice} (ANIA {ania})" if ania else codice
+    await _track_unmapped(
+        db, tracker, "compagnia", codice,
+        label=label, import_mappings=import_mappings,
+    )
+
 
 
 async def _get_or_create_compagnia(db, codice_exp: str, codice_ania: str,
@@ -608,6 +641,9 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
         counts["rec30"] = counts.get("rec30", 0) + len(rows)
         gar_per_pol: dict[str, list[dict]] = _dd(list)
         for row in rows:
+            # Traccia compagnia (rec30 ha compagnia_exp in colonna G) anche se non c'è polizza
+            if tracker is not None and import_mappings is not None:
+                await _track_compagnia_da_riga(db, row, tracker, import_mappings)
             pol_id = await _resolve_polizza_id(db, row, polizza_id_map)
             if not pol_id:
                 continue
@@ -788,6 +824,9 @@ async def _processa_prodotti(db, files_data: Dict[str, str],
         if tracker is None:
             continue
         for row in rows:
+            # Traccia compagnia anche da rec100 (colonna B compagnia_exp)
+            if import_mappings is not None:
+                await _track_compagnia_da_riga(db, row, tracker, import_mappings)
             codice = (row.get("codice_prodotto") or "").strip()
             descr = (row.get("descrizione_prodotto") or "").strip()
             if not (codice or descr):
@@ -819,6 +858,9 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
         if tracker is None:
             continue
         for row in rows:
+            # Traccia compagnia anche da rec101 (colonna C compagnia_exp)
+            if import_mappings is not None:
+                await _track_compagnia_da_riga(db, row, tracker, import_mappings)
             codice = (row.get("codice_produttore") or "").strip()
             if not codice:
                 continue
@@ -864,6 +906,13 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
 
     # Pipeline ordinata: l'ordine è significativo perché ogni step può
     # riferirsi alle entità create dagli step precedenti.
+    # rec100/101 (dizionari) vengono processati PRIMA delle polizze in modo che,
+    # quando le polizze tracciano un codice prodotto/collaboratore, la descrizione
+    # completa sia già disponibile (rec100 colonna J descrizione_prodotto).
+    await _processa_prodotti(db, files_data, counts,
+                             tracker=tracker, import_mappings=import_mappings)
+    await _processa_collaboratori(db, files_data, counts,
+                                  tracker=tracker, import_mappings=import_mappings)
     await _processa_anagrafiche(db, files_data, log, ana_id_map, compagnie_cache, counts,
                                 tracker=tracker, import_mappings=import_mappings)
     await _processa_polizze(db, files_data, log, ana_id_map, polizza_id_map,
@@ -876,12 +925,6 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)
-    # Dizionari rec100 (prodotti) e rec101 (collaboratori): solo tracking come
-    # entità "da mappare" alle librerie esistenti del programma.
-    await _processa_prodotti(db, files_data, counts,
-                             tracker=tracker, import_mappings=import_mappings)
-    await _processa_collaboratori(db, files_data, counts,
-                                  tracker=tracker, import_mappings=import_mappings)
     _conta_record_residui(files_data, counts)
 
     # Entità non mappate raccolte durante l'import (NB: rami NON sono tracciati per scelta utente)

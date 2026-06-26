@@ -203,7 +203,7 @@ export default function PolizzaDetail() {
                                 <tbody>
                                     {pol.garanzie.map((g, i) => (
                                         <tr key={i}>
-                                            <td className="font-medium">{g.garanzia || "—"}</td>
+                                            <td className="font-medium">{g.garanzia || g.garanzia_originale || g.codice_ania || "—"}</td>
                                             <td className="num text-right">{fmtEur(g.netto)}</td>
                                             <td className="num text-right text-slate-600">{fmtEur(g.accessori)}</td>
                                             <td className="num text-right text-slate-600">{fmtEur(g.imposte)}</td>
