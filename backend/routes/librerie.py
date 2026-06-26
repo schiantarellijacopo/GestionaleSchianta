@@ -313,7 +313,7 @@ async def list_prodotti(
     ramo: Optional[str] = None,
     user: dict = Depends(current_user),
 ) -> list[dict]:
-    flt = {}
+    flt: dict = {}
     if compagnia_id:
         flt["compagnia_id"] = compagnia_id
     if ramo:
@@ -571,7 +571,7 @@ async def risolvi_provvigione_collaboratore(
     Cerca la regola più specifica (collaboratore+compagnia+ramo) e ricade su default agenzia / utente.
     """
     # 1) regole specifiche del collaboratore (ordine di specificità decrescente)
-    candidati = [
+    candidati: list[dict] = [
         {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": ramo},
         {"collaboratore_id": collaboratore_id, "compagnia_id": compagnia_id, "ramo": None},
         {"collaboratore_id": collaboratore_id, "compagnia_id": None, "ramo": ramo},
@@ -588,8 +588,8 @@ async def risolvi_provvigione_collaboratore(
         if doc:
             return float(doc.get("percentuale_collaboratore") or 0.0)
     # fallback: percentuale di default sull'utente
-    u = await db.users.find_one({"id": collaboratore_id}, {"_id": 0, "perc_provvigione_default": 1})
-    return float((u or {}).get("perc_provvigione_default") or 0.0)
+    u: dict = await db.users.find_one({"id": collaboratore_id}, {"_id": 0, "perc_provvigione_default": 1}) or {}
+    return float(u.get("perc_provvigione_default") or 0.0)
 
 
 @router.get("/librerie/schema-provvigionale/risolvi")

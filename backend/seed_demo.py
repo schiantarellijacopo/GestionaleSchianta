@@ -8,6 +8,10 @@ from auth import hash_password
 
 
 async def seed_demo(db):
+    # User demo: sempre idempotente (anche se i dati demo sono già presenti).
+    # Garantisce che gli account di test esistano e abbiano la password corretta.
+    await _seed_demo_users(db, anagrafica_cliente_id=None)
+
     # Salta se ci sono già compagnie demo
     if await db.compagnie.find_one({"codice": "DEMO-GEN"}):
         return
@@ -156,16 +160,37 @@ async def seed_demo(db):
     await db.sinistri.insert_one(sin2.model_dump())
 
     # Demo users: dipendente + cliente collegato a Marco Rossi
+    await _seed_demo_users(db, anagrafica_cliente_id=anagrafiche[0].id)
+
+
+async def _seed_demo_users(db, anagrafica_cliente_id):
+    """Crea/ripristina utenti demo. Idempotente.
+
+    Se `anagrafica_cliente_id` è None, il cliente verrà comunque creato
+    ma senza link all'anagrafica (verrà collegato al successivo run con
+    dati demo presenti).
+    """
     users_data = [
         {"email": "dipendente@assicura.it", "password": "Dipendente123!", "name": "Mario Dipendente",
          "role": "dipendente", "anagrafica_id": None},
         {"email": "collaboratore@assicura.it", "password": "Collab123!", "name": "Sara Collaboratrice",
          "role": "collaboratore", "anagrafica_id": None},
         {"email": "cliente@assicura.it", "password": "Cliente123!", "name": "Marco Rossi (Cliente)",
-         "role": "cliente", "anagrafica_id": anagrafiche[0].id},
+         "role": "cliente", "anagrafica_id": anagrafica_cliente_id},
     ]
     for u in users_data:
-        if await db.users.find_one({"email": u["email"]}):
+        existing = await db.users.find_one({"email": u["email"]})
+        if existing:
+            # Ripristina password e ruolo (idempotente, evita drift dei test)
+            updates = {
+                "password_hash": hash_password(u["password"]),
+                "role": u["role"],
+                "name": u["name"],
+                "email": u["email"],
+            }
+            if u["anagrafica_id"] and not existing.get("anagrafica_id"):
+                updates["anagrafica_id"] = u["anagrafica_id"]
+            await db.users.update_one({"_id": existing["_id"]}, {"$set": updates})
             continue
         doc = UserPublic(email=u["email"], name=u["name"], role=u["role"],
                          anagrafica_id=u["anagrafica_id"]).model_dump()

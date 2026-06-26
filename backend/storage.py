@@ -49,6 +49,8 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     if r.status_code == 403:
         _reset()
         key = init_storage()
+        if not key:
+            raise RuntimeError("Object storage non configurato")
         r = requests.put(
             f"{STORAGE_URL}/objects/{path}",
             headers={"X-Storage-Key": key, "Content-Type": content_type},
@@ -69,6 +71,8 @@ def get_object(path: str) -> tuple[bytes, str]:
     if r.status_code == 403:
         _reset()
         key = init_storage()
+        if not key:
+            raise RuntimeError("Object storage non configurato")
         r = requests.get(
             f"{STORAGE_URL}/objects/{path}",
             headers={"X-Storage-Key": key}, timeout=60,

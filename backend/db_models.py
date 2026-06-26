@@ -203,7 +203,6 @@ class Anagrafica(BaseDoc):
         "dipendente", "autonomo", "professionista", "imprenditore",
         "pensionato", "disoccupato", "studente", "casalinga", "altro"
     ]] = None
-    professione: Optional[str] = None
     datore_lavoro: Optional[str] = None
     # tag automatici/manuali per segmentazione e newsletter
     tags: List[str] = Field(default_factory=list)

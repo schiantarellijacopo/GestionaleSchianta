@@ -3,6 +3,20 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
+## Latest Session (Iter 23 — Mypy CI gate ATTIVATO)
+
+### Done
+- ✅ **Mypy CI gate `scripts/check_mypy.sh`** attivato sui core modules (shared, database, storage, db_models, routes/*) — `Success: no issues found in 8 source files`.
+- ✅ Risolti gli ultimi 6 errori mypy residui:
+  - `storage.py` (2x): `key: Optional[str]` dopo retry 403 → guardia esplicita `raise RuntimeError` se None.
+  - `db_models.py`: campo `professione` duplicato (linee 169 vs 206) → rimosso il secondo.
+  - `routes/librerie.py` (3x): annotato `flt: dict`, `candidati: list[dict]`, sostituito `(u or {}).get()` con `u: dict = ... or {}`.
+- ✅ **Bug fix demo seed**: `seed_demo` ora chiama `_seed_demo_users` sempre (anche se compagnie demo già presenti). Riallinea idempotentemente password+ruolo+email degli account demo (collaboratore/dipendente/cliente) anche se il record esistente è stato modificato.
+- ✅ Auth/login per tutti i ruoli (admin/collaboratore/dipendente/cliente) verificata via pytest (`5/5 PASS`).
+
+### Note testing
+- Test suite globale: 285 PASS / 9 FAIL (pre-esistenti, NON regressioni introdotte — verificato con `git stash`). Le failure riguardano test data drift (ragione_sociale uppercase, brogliaccio state da run precedenti, statistiche endpoint cambiato). Issue P2 da chiudere in sessione successiva.
+
 ## Latest Session (Iter 21+22 — Debito tecnico residuo SMALTITO)
 
 ### Done (124/124 PASS — iter22 RETEST)
@@ -52,7 +66,8 @@ Lo stato del codice è stabile, modulare, type-safe. Si può ripartire con featu
 - Integrazioni OAuth: Google Calendar / Microsoft 365 / WhatsApp / SMS.
 - Migrare `@app.on_event` a `lifespan` (deprecation FastAPI, righe 9043, 9158).
 - Email templates Jinja2 esterni.
-- mypy strict-mode in CI sui core modules.
+- mypy strict-mode in CI sui core modules. ✅ DONE in iter23
+- Test data drift fixes (9 test pre-esistenti falliscono per state DB / behaviour change su ragione_sociale uppercase, brogliaccio close_day, statistiche endpoint).
 
 ## Credenziali test
 admin@assicura.it / Admin123!
