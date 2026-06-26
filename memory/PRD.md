@@ -3,7 +3,30 @@
 ## Original Problem Statement
 Italian Insurance Agency CRM (FastAPI + React + MongoDB). Anagrafica clienti, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), avvisi scadenze, analisi cliente.
 
-## Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Banner UX + Documenti Titoli + Alert & Automazioni)
+## Latest Session (Iter 24 — Wizard Mapping OMNIA)
+
+### Done — Wizard Mapping Importazioni OMNIA (P0)
+- ✅ **Tracking unificato** (`ania_importer.py`): durante l'import ogni codice flusso (compagnia / ramo / collaboratore / prodotto / garanzia) non riconducibile a un'entità DB viene tracciato in `db.import_mappings` con stub `entita_id=None` e contatore `occorrenze`.
+- ✅ **Risoluzione automatica via mapping**: l'importatore ora carica `import_mappings` all'inizio e durante la creazione/aggiornamento delle polizze applica già il mapping ramo/prodotto/compagnia/operatore se presente (no back-fill necessario per i nuovi import).
+- ✅ **Campi tracking sulla polizza** (`db_models.py`): `compagnia_codice_exp`, `ramo_originale`, `prodotto_originale` — conservano il valore originale del flusso per back-fill preciso.
+- ✅ **Nuovi endpoint backend**:
+  - `GET /api/import/unmapped` — entità non mappate raggruppate per tipo + lista `candidates` (compagnie/rami/users/prodotti/garanzie DB).
+  - `POST /api/import/mappings/apply` — back-fill esegue update su `polizze.compagnia_id` (match `compagnia_codice_exp`), `polizze.ramo` (match `ramo_originale`), `polizze.prodotto` (match `prodotto_originale`), `polizze.collaboratore_id` (match `operatore_ania_codice`), e rinomina `garanzie[]` per codice ANIA. Ritorna summary numerico.
+- ✅ **Frontend Wizard Dialog** (`Importazione.jsx`):
+  - Bottone "Wizard Mapping" sempre disponibile in alto a destra.
+  - Dialog con tab per tipo (compagnia/ramo/collaboratore/prodotto/garanzia), contatore per tab, righe con select del candidato DB.
+  - Empty-state: "Tutte le entità sono mappate" + bottone "Applica back-fill" comunque disponibile.
+  - Footer con "Salva mappature" e "Salva e applica" (back-fill immediato sui record esistenti).
+  - Bottone "Apri Wizard" all'interno del report post-import quando `entita_non_mappate.length > 0`.
+- ✅ **Fix routing**: aggiunto alias `/importazioni` (la sidebar usava il plurale, la route esisteva solo al singolare `/importazione`).
+- ✅ **Test passati**: BE 6/6 pytest (`/app/backend/tests/test_iter22_wizard_mapping_omnia.py`), FE E2E Playwright (wizard dialog + tabs + righe + salvataggio + back-fill).
+
+### Pending / In progress
+- 🟡 **Targhe / Libri Matricola** (P0 — non avviato): tab UI stub presente, parser CSV generico con mapping colonne manuale da implementare (backend `/api/import/targhe/*` + dialog FE).
+- 🟡 Refactor `server.py` (continuazione estrazione `routes/`): polizze/titoli/brogliaccio/sinistri.
+- 🟡 Email/SMS/WhatsApp provider config (UI fatta, SMTP/Twilio da finalizzare).
+
+### Latest Session (Iter 23 — Estrazione anagrafiche + Lock Prima Nota + Banner UX + Documenti Titoli + Alert & Automazioni)
 
 ### Done — Alert & Automazioni (NUOVA SEZIONE)
 - ✅ **Modelli backend** (`alert_models.py`): `AlertRule`, `AlertEvent`, `Notification`.
