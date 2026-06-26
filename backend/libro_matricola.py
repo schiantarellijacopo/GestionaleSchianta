@@ -386,11 +386,73 @@ async def commit_import(db, file_bytes: bytes, filename: str,
         "created_at": _now_iso(),
     })
 
-    # Eventuale link a polizza esistente
+    # Eventuale link a polizza esistente: oltre a `polizze.veicoli_ids`, creiamo
+    # un'`applicazione` libro matricola per ogni veicolo importato così appare
+    # subito nel tab "Libro Matricola" della polizza.
     if polizza_id and veicoli_ids_da_aggiungere:
         await db.polizze.update_one(
             {"id": polizza_id},
-            {"$addToSet": {"veicoli_ids": {"$each": veicoli_ids_da_aggiungere}}},
+            {"$addToSet": {"veicoli_ids": {"$each": veicoli_ids_da_aggiungere}},
+             "$set": {"is_libro_matricola": True, "updated_at": _now_iso()}},
         )
+        # Numero progressivo applicazione: ultimo + 1
+        last = await db.applicazioni.find(
+            {"polizza_id": polizza_id}, {"_id": 0, "numero": 1},
+        ).sort("numero", -1).limit(1).to_list(1)
+        next_num = (last[0]["numero"] + 1) if last else 1
+        # Mappa veicoli per id -> doc
+        veicoli_docs = {}
+        async for v in db.veicoli.find(
+            {"id": {"$in": veicoli_ids_da_aggiungere}}, {"_id": 0},
+        ):
+            veicoli_docs[v["id"]] = v
+        # Crea applicazione per ciascun veicolo (skip se già esiste su questa polizza)
+        for vid in veicoli_ids_da_aggiungere:
+            v = veicoli_docs.get(vid)
+            if not v:
+                continue
+            existing_app = await db.applicazioni.find_one(
+                {"polizza_id": polizza_id, "targa": v["targa"]},
+                {"_id": 0, "id": 1},
+            )
+            app_data = {
+                "polizza_id": polizza_id,
+                "targa": v.get("targa") or "",
+                "stato": "attiva",
+                "data_inclusione": v.get("data_entrata") or _now_iso()[:10],
+                "data_esclusione": v.get("data_uscita"),
+                "marca": v.get("marca"),
+                "modello": v.get("modello"),
+                "tipo_veicolo": v.get("settore"),
+                "tipo_alimentazione": v.get("alimentazione"),
+                "tipo_uso": v.get("uso"),
+                "data_immatricolazione": v.get("data_immatricolazione"),
+                "cv_fiscali": v.get("cv_fiscali"),
+                "kw": v.get("kw"),
+                "quintali": v.get("quintali"),
+                "cilindrata": v.get("cilindrata"),
+                "posti": v.get("posti"),
+                "bm_assegnata": v.get("classe_cu"),
+                "franchigia": v.get("franchigia") or 0.0,
+                "valore_veicolo": v.get("valore_assicurato") or v.get("valore_veicolo") or 0.0,
+                "valore_accessori": v.get("valore_accessori") or 0.0,
+                "intestatario": v.get("proprietario"),
+                "provincia_intestatario": v.get("provincia"),
+                "massimali": str(v.get("massimale")) if v.get("massimale") else None,
+                "note": v.get("note"),
+                "veicolo_id": v["id"],
+                "updated_at": _now_iso(),
+            }
+            if existing_app:
+                await db.applicazioni.update_one(
+                    {"id": existing_app["id"]}, {"$set": app_data},
+                )
+            else:
+                app_data["id"] = _uid()
+                app_data["numero"] = next_num
+                next_num += 1
+                app_data["created_at"] = _now_iso()
+                await db.applicazioni.insert_one(app_data)
+                stats["applicazioni_create"] = stats.get("applicazioni_create", 0) + 1
 
     return stats
