@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 
 /**
  * Dialog di modifica titolo, condiviso tra pagina Titoli e PolizzaDetail.
@@ -19,7 +20,19 @@ import { toast } from "sonner";
  */
 export default function TitoloDialog({ titolo, onClose, onDelete }) {
     const [f, setF] = useState({ ...titolo });
+    const [giornataChiusa, setGiornataChiusa] = useState(false);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    // Controlla se la giornata della data_incasso è chiusa → disabilita Salva/Elimina
+    useEffect(() => {
+        const d = f.data_incasso;
+        if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) { setGiornataChiusa(false); return; }
+        let cancel = false;
+        api.get(`/contabilita/giornata-stato/${d}`)
+            .then((r) => { if (!cancel) setGiornataChiusa(!!r.data?.chiusa); })
+            .catch(() => { if (!cancel) setGiornataChiusa(false); });
+        return () => { cancel = true; };
+    }, [f.data_incasso]);
 
     // Opzioni metodo di pagamento (statiche, riallinaeabili con libreria)
     const MEZZI = [
@@ -69,6 +82,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         Lo stato del titolo si aggiorna automaticamente con incasso / copertura / storno.
                     </p>
                 </DialogHeader>
+                <ChiusuraGiornoBanner data={f.data_incasso} />
                 <div className="grid grid-cols-2 gap-3 py-2">
                     <div>
                         <Label>Tipo</Label>
@@ -125,15 +139,25 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         <Button
                             variant="outline"
                             onClick={elimina}
+                            disabled={giornataChiusa}
                             data-testid="titolo-delete-btn"
-                            className="text-rose-600 border-rose-200 hover:bg-rose-50"
+                            className="text-rose-600 border-rose-200 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={giornataChiusa ? "Prima Nota chiusa — riaprire per eliminare" : ""}
                         >
                             Elimina
                         </Button>
                     ) : <div />}
                     <div className="flex gap-2">
                         <Button variant="outline" onClick={onClose}>Annulla</Button>
-                        <Button onClick={save} data-testid="titolo-save-edit" className="bg-sky-700 hover:bg-sky-800">Salva</Button>
+                        <Button
+                            onClick={save}
+                            disabled={giornataChiusa}
+                            data-testid="titolo-save-edit"
+                            className="bg-sky-700 hover:bg-sky-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={giornataChiusa ? "Prima Nota chiusa — riaprire per modificare" : ""}
+                        >
+                            Salva
+                        </Button>
                     </div>
                 </DialogFooter>
             </DialogContent>
