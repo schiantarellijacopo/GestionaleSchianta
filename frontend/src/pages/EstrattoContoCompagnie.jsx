@@ -256,9 +256,9 @@ function DettaglioEstratto({ compagnia, onBack }) {
                 )}
             </Card>
 
-            <Card className="border-slate-200 overflow-x-auto">
+            <div className="tbl-scroll bg-white" style={{ "--c1-w": "40px", "--c2-w": "140px" }}>
                 {!data ? <Loading /> : righeAttive.length === 0 ? <Empty message="Nessun titolo da versare nel periodo (i titoli pagati sono nello Storico rimesse)" /> : (
-                    <table className="tbl w-full min-w-[1100px]">
+                    <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
                             <tr>
                                 <th className="w-10 text-center">
@@ -311,7 +311,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         </tfoot>
                     </table>
                 )}
-            </Card>
+            </div>
 
             {payOpen && (
                 <PagamentoDialog

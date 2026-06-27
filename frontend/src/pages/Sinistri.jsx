@@ -83,9 +83,9 @@ export default function Sinistri() {
                 </div>
             )}
 
-            <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+            <div className="tbl-scroll" style={{ "--c1-w": "100px", "--c2-w": "140px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full min-w-[900px]">
+                    <table className="tbl freeze-3 w-full min-w-[900px]">
                         <thead>
                             <tr>
                                 <th>Numero</th>

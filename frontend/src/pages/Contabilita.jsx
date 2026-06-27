@@ -120,9 +120,9 @@ export default function Contabilita() {
                         </div>
                     )}
 
-                    <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+                    <div className="tbl-scroll" style={{ "--c1-w": "100px", "--c2-w": "100px" }}>
                         {primaNota === null ? <Loading /> : primaNota.movimenti.length === 0 ? <Empty message="Nessun movimento nel periodo" /> : (
-                            <table className="tbl w-full min-w-[900px]">
+                            <table className="tbl freeze-3 w-full min-w-[900px]">
                                 <thead>
                                     <tr>
                                         <th>Data</th>

@@ -545,6 +545,21 @@ class TipoPagamento(BaseDoc):
     note: Optional[str] = None
 
 
+class DiarioNota(BaseDoc):
+    """Nota libera del diario personale di un collaboratore/dipendente.
+
+    Le voci automatiche (email/sms/whatsapp inviati, chat) NON usano questo
+    modello: vivono nella collezione `storico_avvisi` / `chat` e vengono
+    aggregate dall'endpoint `/api/diario` insieme alle note.
+    """
+    user_id: str
+    titolo: str
+    contenuto: Optional[str] = None
+    anagrafica_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+    tags: list[str] = []
+
+
 class LetteraAbbuono(BaseDoc):
     """Lettera di abbuono generata quando viene applicato uno sconto in incasso.
 
@@ -768,6 +783,11 @@ class AziendaConfig(BaseDoc):
     smtp_password: Optional[str] = None
     smtp_from: Optional[str] = None      # es. "Assicura <noreply@assicura.it>"
     smtp_use_tls: bool = True
+    # Twilio per SMS + WhatsApp Business (libreria comunicazioni unica)
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_sms_from: Optional[str] = None        # numero verificato es. +391234567890
+    twilio_whatsapp_from: Optional[str] = None   # numero WA Business es. whatsapp:+14155238886
     # Notifica scadenze giornaliera (cron 08:00)
     notifica_scadenze_attiva: bool = True
     notifica_scadenze_giorni: int = 15

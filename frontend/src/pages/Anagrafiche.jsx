@@ -267,9 +267,9 @@ export default function Anagrafiche() {
                 </div>
             )}
 
-            <div className="bg-white border border-slate-200 rounded-md overflow-hidden">
+            <div className="tbl-scroll bg-white" style={{ "--c1-w": "32px", "--c2-w": "260px" }}>
                 {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
-                    <table className="w-full text-sm">
+                    <table className="freeze-3 w-full text-sm">
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
                                 <th className="w-8 py-3"></th>

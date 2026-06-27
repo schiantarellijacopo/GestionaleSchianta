@@ -47,6 +47,7 @@ from db_models import (
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
     Rappel, VoceRicorsivaCollab, MezzoPagamento, TipoPagamento, LetteraAbbuono,
+    DiarioNota,
     _now_iso, _uid,
 )
 import ania_importer
@@ -7986,6 +7987,117 @@ async def upload_attestato_corso(
 async def elimina_corso_utente(uid: str, corso_id: str,
                                 user=Depends(require_user("admin"))):
     await db.users.update_one({"id": uid}, {"$pull": {"corsi": {"id": corso_id}}})
+    return {"ok": True}
+
+
+# ============================================================
+# DIARIO COLLABORATORE (note + aggregato comunicazioni inviate + chat)
+# ============================================================
+@api.get("/diario")
+async def list_diario(
+    user_id: Optional[str] = None,
+    tipo: Optional[str] = None,       # filtra: note|email|sms|whatsapp|chat
+    q: Optional[str] = None,
+    limit: int = 500,
+    user=Depends(current_user),
+):
+    """Restituisce il feed cronologico (desc) del diario personale dell'utente.
+
+    Aggrega 3 sorgenti:
+      • `db.diario_note`         → tipo='nota'
+      • `db.storico_avvisi`      → tipo='email'|'sms'|'whatsapp' (utente_id=user)
+      • `db.chat`                → tipo='chat' (mittente_id=user)
+
+    Solo admin può specificare `user_id` di un altro utente, altrimenti viene
+    forzato l'id dell'utente loggato.
+    """
+    uid = user_id if (user.get("role") == "admin" and user_id) else user["id"]
+    items: list[dict] = []
+
+    if not tipo or tipo == "nota":
+        flt: dict = {"user_id": uid}
+        if q:
+            flt["$or"] = [
+                {"titolo": {"$regex": q, "$options": "i"}},
+                {"contenuto": {"$regex": q, "$options": "i"}},
+            ]
+        async for n in db.diario_note.find(flt, {"_id": 0}).sort("created_at", -1):
+            items.append({
+                "id": n["id"], "tipo": "nota",
+                "at": n.get("created_at"),
+                "titolo": n.get("titolo"),
+                "contenuto": n.get("contenuto"),
+                "tags": n.get("tags") or [],
+                "anagrafica_id": n.get("anagrafica_id"),
+                "polizza_id": n.get("polizza_id"),
+            })
+
+    if not tipo or tipo in ("email", "sms", "whatsapp"):
+        flt_sa: dict = {"utente_id": uid}
+        if tipo in ("email", "sms", "whatsapp"):
+            flt_sa["canale"] = tipo
+        if q:
+            flt_sa["$or"] = [
+                {"soggetto": {"$regex": q, "$options": "i"}},
+                {"destinatario": {"$regex": q, "$options": "i"}},
+                {"contraente_nome": {"$regex": q, "$options": "i"}},
+            ]
+        async for r in db.storico_avvisi.find(flt_sa, {"_id": 0}).sort("sent_at", -1).limit(limit):
+            items.append({
+                "id": r["id"], "tipo": r.get("canale") or "email",
+                "at": r.get("sent_at"),
+                "titolo": r.get("soggetto") or f"Invio {r.get('canale')}",
+                "contenuto": (
+                    f"A: {r.get('destinatario')}"
+                    + (f" — {r.get('contraente_nome')}" if r.get('contraente_nome') else "")
+                ),
+                "stato": r.get("stato"),
+                "anagrafica_id": r.get("contraente_id"),
+                "polizza_id": r.get("polizza_id"),
+            })
+
+    if not tipo or tipo == "chat":
+        flt_ch: dict = {"mittente_id": uid}
+        if q:
+            flt_ch["testo"] = {"$regex": q, "$options": "i"}
+        async for c in db.chat.find(flt_ch, {"_id": 0}).sort("at", -1).limit(limit):
+            items.append({
+                "id": c["id"], "tipo": "chat",
+                "at": c.get("at"),
+                "titolo": f"Chat → {c.get('destinatario_nome') or c.get('destinatario_id') or '?'}",
+                "contenuto": c.get("testo"),
+            })
+
+    # ordina cronologicamente desc (string ISO confronto lessicografico OK)
+    items.sort(key=lambda x: x.get("at") or "", reverse=True)
+    return items[:limit]
+
+
+@api.post("/diario", status_code=201)
+async def crea_nota_diario(body: dict, user=Depends(current_user)):
+    titolo = (body.get("titolo") or "").strip()
+    if not titolo:
+        raise HTTPException(400, "Titolo obbligatorio")
+    nota = DiarioNota(
+        user_id=user["id"],
+        titolo=titolo,
+        contenuto=body.get("contenuto"),
+        anagrafica_id=body.get("anagrafica_id"),
+        polizza_id=body.get("polizza_id"),
+        tags=body.get("tags") or [],
+    )
+    await db.diario_note.insert_one(nota.model_dump())
+    return nota.model_dump()
+
+
+@api.delete("/diario/{nid}")
+async def elimina_nota_diario(nid: str, user=Depends(current_user)):
+    flt: dict = {"id": nid}
+    if user.get("role") != "admin":
+        flt["user_id"] = user["id"]  # un utente può eliminare solo le proprie
+    res = await db.diario_note.delete_one(flt)
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Nota non trovata")
     return {"ok": True}
 
 

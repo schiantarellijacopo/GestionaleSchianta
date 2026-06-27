@@ -1,12 +1,15 @@
 aiohappyeyeballs==2.6.2
 aiohttp==3.14.1
+aiohttp-retry==2.9.1
 aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.14.0
 APScheduler==3.11.2
 ast_serialize==0.5.0
+astroid==4.0.4
 attrs==26.1.0
+autopep8==2.3.2
 bcrypt==4.1.3
 black==26.5.1
 boto3==1.43.33
@@ -17,6 +20,7 @@ charset-normalizer==3.4.7
 click==8.4.1
 codicefiscale==0.9
 cryptography==49.0.0
+dill==0.4.1
 distro==1.9.0
 dnspython==2.8.0
 ecdsa==0.19.2
@@ -91,8 +95,10 @@ pydantic_core==2.46.4
 pyflakes==3.4.0
 Pygments==2.20.0
 PyJWT==2.13.0
+pylint==4.0.6
 pymongo==4.6.3
 pyparsing==3.3.2
+pypdf==6.14.2
 pypdfium2==5.10.1
 pytest==9.1.1
 python-codicefiscale==0.12.1
@@ -113,6 +119,7 @@ requests-oauthlib==2.0.0
 rich==15.0.0
 rpds-py==2026.5.1
 rsa==4.9.1
+ruff==0.15.20
 s3transfer==0.19.0
 s5cmd==0.2.0
 shellingham==1.5.4
@@ -124,7 +131,9 @@ tenacity==9.1.4
 text-unidecode==1.3
 tiktoken==0.13.0
 tokenizers==0.23.1
+tomlkit==0.15.0
 tqdm==4.68.3
+twilio==9.10.9
 typer==0.25.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0

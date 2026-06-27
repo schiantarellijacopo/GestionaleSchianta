@@ -280,7 +280,8 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                     <Send size={13} className="mr-1" />Invia avvisi ({selTitoli.size})
                 </Button>
             </div>
-            <table className="tbl w-full min-w-[1100px]">
+            <div className="tbl-scroll" style={{ "--c1-w": "40px", "--c2-w": "30px" }}>
+            <table className="tbl freeze-3 w-full min-w-[1100px]">
                 <thead>
                     <tr>
                         <th className="w-[40px] text-center"></th>
@@ -386,6 +387,7 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                     })}
                 </tbody>
             </table>
+            </div>
         </Card>
     );
 }

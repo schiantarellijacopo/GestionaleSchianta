@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -20,6 +20,7 @@ const SECTIONS = [
     { key: "conti-cassa", label: "Conti deposito", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
+    { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
@@ -47,6 +48,7 @@ export default function Librerie() {
                     <TabsContent key={s.key} value={s.key} className="mt-4">
                         {s.key === "azienda" ? <AziendaSezione />
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
+                            : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : <Sezione section={s} />}
                     </TabsContent>
                 ))}
@@ -1483,6 +1485,206 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
                 </table>
             )}
         </div>
+    );
+}
+
+
+function ComunicazioniSezione() {
+    const [f, setF] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [testCanale, setTestCanale] = useState("email");
+    const [testDest, setTestDest] = useState("");
+    const [testMsg, setTestMsg] = useState("");
+    const [testing, setTesting] = useState(false);
+
+    const load = async () => {
+        setLoading(true);
+        try {
+            const r = await api.get("/librerie/comunicazioni");
+            setF(r.data);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore caricamento");
+        }
+        setLoading(false);
+    };
+    useEffect(() => { load(); }, []);
+
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            const payload = { ...f };
+            // Non inviare placeholder mascherato (se non modificato)
+            if (payload.smtp_password === "••••••••") delete payload.smtp_password;
+            if (payload.twilio_auth_token === "••••••••") delete payload.twilio_auth_token;
+            const r = await api.put("/librerie/comunicazioni", payload);
+            setF(r.data);
+            toast.success("Configurazione salvata");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        }
+        setSaving(false);
+    };
+
+    const inviaTest = async () => {
+        if (!testDest) { toast.error("Destinatario obbligatorio"); return; }
+        setTesting(true);
+        try {
+            const r = await api.post("/librerie/comunicazioni/test", {
+                canale: testCanale, destinatario: testDest, messaggio: testMsg || undefined,
+            });
+            toast.success(`Test ${r.data.canale} inviato a ${r.data.destinatario}`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio test");
+        }
+        setTesting(false);
+    };
+
+    if (loading || !f) {
+        return <Card className="p-6 border-slate-200">Caricamento…</Card>;
+    }
+    return (
+        <Card className="p-5 border-slate-200 space-y-6" data-testid="lib-comunicazioni">
+            <div className="border-b border-slate-200 pb-2">
+                <h3 className="text-base font-semibold text-slate-900">Configurazione comunicazioni</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                    Configurazione unica per <strong>Email (SMTP)</strong>, <strong>SMS</strong> e <strong>WhatsApp</strong>.
+                    Sarà usata da: Avvisi scadenze, Marketing, Notifiche, Sollecitazioni, Pipeline Email.
+                </p>
+            </div>
+
+            {/* EMAIL */}
+            <section data-testid="lib-com-email">
+                <div className="flex items-center gap-2 mb-3">
+                    <Mail size={16} className="text-sky-700" />
+                    <h4 className="text-sm font-semibold text-slate-800">Email — SMTP</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <Label>Server SMTP *</Label>
+                        <Input placeholder="smtp.gmail.com" value={f.smtp_host || ""}
+                            onChange={(e) => set("smtp_host", e.target.value)}
+                            data-testid="com-smtp-host" />
+                    </div>
+                    <div>
+                        <Label>Porta</Label>
+                        <Input type="number" placeholder="587"
+                            value={f.smtp_port ?? ""}
+                            onChange={(e) => set("smtp_port", parseInt(e.target.value, 10) || null)}
+                            data-testid="com-smtp-port" />
+                    </div>
+                    <div>
+                        <Label>Utente / Email mittente *</Label>
+                        <Input placeholder="account@dominio.it" value={f.smtp_user || ""}
+                            onChange={(e) => set("smtp_user", e.target.value)}
+                            data-testid="com-smtp-user" />
+                    </div>
+                    <div>
+                        <Label>Password / App Password</Label>
+                        <Input type="password" placeholder={f.smtp_password_set ? "Password salvata (modifica per cambiare)" : "Password"}
+                            value={f.smtp_password || ""}
+                            onChange={(e) => set("smtp_password", e.target.value)}
+                            data-testid="com-smtp-pass" />
+                    </div>
+                    <div>
+                        <Label>Mittente "Da" (opzionale)</Label>
+                        <Input placeholder='Assicura <noreply@assicura.it>' value={f.smtp_from || ""}
+                            onChange={(e) => set("smtp_from", e.target.value)}
+                            data-testid="com-smtp-from" />
+                    </div>
+                    <div className="flex items-end">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input type="checkbox"
+                                checked={!!f.smtp_use_tls}
+                                onChange={(e) => set("smtp_use_tls", e.target.checked)}
+                                data-testid="com-smtp-tls" />
+                            Usa STARTTLS (consigliato)
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            {/* TWILIO SMS + WHATSAPP */}
+            <section data-testid="lib-com-twilio">
+                <div className="flex items-center gap-2 mb-3">
+                    <Building2 size={16} className="text-rose-600" />
+                    <h4 className="text-sm font-semibold text-slate-800">SMS &amp; WhatsApp — Twilio</h4>
+                </div>
+                <div className="text-[11px] text-slate-500 mb-3">
+                    Provider consigliato per SMS + WhatsApp Business.
+                    {" "}<a href="https://console.twilio.com/" target="_blank" rel="noreferrer"
+                        className="text-sky-700 underline">Apri console Twilio</a>{" "}
+                    per ottenere SID/Token e i numeri verificati.
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <Label>Account SID</Label>
+                        <Input placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                            value={f.twilio_account_sid || ""}
+                            onChange={(e) => set("twilio_account_sid", e.target.value)}
+                            data-testid="com-twilio-sid" />
+                    </div>
+                    <div>
+                        <Label>Auth Token</Label>
+                        <Input type="password"
+                            placeholder={f.twilio_auth_token_set ? "Token salvato (modifica per cambiare)" : "Token"}
+                            value={f.twilio_auth_token || ""}
+                            onChange={(e) => set("twilio_auth_token", e.target.value)}
+                            data-testid="com-twilio-token" />
+                    </div>
+                    <div>
+                        <Label>Numero SMS mittente</Label>
+                        <Input placeholder="+39…"
+                            value={f.twilio_sms_from || ""}
+                            onChange={(e) => set("twilio_sms_from", e.target.value)}
+                            data-testid="com-twilio-sms" />
+                    </div>
+                    <div>
+                        <Label>Numero WhatsApp Business</Label>
+                        <Input placeholder="whatsapp:+14155238886"
+                            value={f.twilio_whatsapp_from || ""}
+                            onChange={(e) => set("twilio_whatsapp_from", e.target.value)}
+                            data-testid="com-twilio-wa" />
+                    </div>
+                </div>
+            </section>
+
+            {/* SAVE + TEST */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                <Button onClick={salva} disabled={saving}
+                    className="bg-sky-700 hover:bg-sky-800"
+                    data-testid="com-salva">
+                    {saving ? "Salvataggio…" : "Salva configurazione"}
+                </Button>
+            </div>
+
+            <section className="bg-slate-50 rounded-md p-3 border border-slate-200">
+                <h4 className="text-sm font-semibold text-slate-800 mb-2">Invio di prova</h4>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <Select value={testCanale} onValueChange={setTestCanale}>
+                        <SelectTrigger data-testid="com-test-canale"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="email">Email</SelectItem>
+                            <SelectItem value="sms">SMS</SelectItem>
+                            <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Input placeholder={testCanale === "email" ? "email@destinatario.it" : "+39…"}
+                        value={testDest} onChange={(e) => setTestDest(e.target.value)}
+                        data-testid="com-test-dest" />
+                    <Input placeholder="Messaggio (opzionale)"
+                        value={testMsg} onChange={(e) => setTestMsg(e.target.value)}
+                        data-testid="com-test-msg" />
+                    <Button onClick={inviaTest} disabled={testing}
+                        className="bg-emerald-600 hover:bg-emerald-700"
+                        data-testid="com-test-invia">
+                        {testing ? "Invio…" : "Invia test"}
+                    </Button>
+                </div>
+            </section>
+        </Card>
     );
 }
 

@@ -24,6 +24,7 @@ import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
+import Diario from "@/pages/Diario";
 import Corsi from "@/pages/Corsi";
 import Calendario from "@/pages/Calendario";
 import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
@@ -151,6 +152,7 @@ function App() {
                                 </ProtectedRoute>
                             } />
                             <Route path="/chat" element={<Chat />} />
+                            <Route path="/diario" element={<Diario />} />
                             <Route path="/corsi" element={<Corsi />} />
                             <Route path="/librerie" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}>

@@ -99,6 +99,78 @@ h1, h2, h3, h4, h5 {
 .tbl-compact tbody tr:hover { @apply bg-slate-50; }
 .tbl-compact tbody tr:nth-child(even) { background-color: #fbfcfe; }
 
+/* =====================================================================
+   STICKY tables (header in alto + prime N colonne a sinistra).
+   Wrappa la tabella in un div con class "tbl-scroll" per attivare lo scroll.
+   Le classi "freeze-1", "freeze-2", "freeze-3" sulla tabella bloccano
+   rispettivamente la 1ª, le prime 2, le prime 3 colonne.
+   ===================================================================== */
+.tbl-scroll {
+    @apply relative overflow-auto rounded-lg border border-slate-200 bg-white;
+    /* L'altezza è gestita dalla pagina; default: tutta la viewport meno l'header app */
+    max-height: calc(100vh - 220px);
+}
+.tbl-scroll .tbl,
+.tbl-scroll .tbl-compact { border-collapse: separate; border-spacing: 0; }
+
+/* Header sempre visibile durante scroll verticale */
+.tbl-scroll thead th {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background-color: #f8fafc; /* slate-50 — opaco, evita trasparenza */
+    box-shadow: inset 0 -1px 0 rgb(226 232 240); /* slate-200 */
+}
+
+/* Colonne congelate a sinistra durante scroll orizzontale.
+   Lo z-index è > delle altre celle ma < del thead "top-left" che combina i due. */
+.tbl-scroll .freeze-1 tbody td:nth-child(1),
+.tbl-scroll .freeze-1 thead th:nth-child(1),
+.tbl-scroll .freeze-2 tbody td:nth-child(-n+2),
+.tbl-scroll .freeze-2 thead th:nth-child(-n+2),
+.tbl-scroll .freeze-3 tbody td:nth-child(-n+3),
+.tbl-scroll .freeze-3 thead th:nth-child(-n+3) {
+    position: sticky;
+    background-color: #ffffff;
+    z-index: 5;
+    box-shadow: inset -1px 0 0 rgb(241 245 249); /* slate-100 verticale */
+}
+.tbl-scroll .freeze-1 tbody tr:nth-child(even) td:nth-child(1),
+.tbl-scroll .freeze-2 tbody tr:nth-child(even) td:nth-child(-n+2),
+.tbl-scroll .freeze-3 tbody tr:nth-child(even) td:nth-child(-n+3) {
+    background-color: #fbfcfe;
+}
+.tbl-scroll .freeze-1 tbody tr:hover td:nth-child(1),
+.tbl-scroll .freeze-2 tbody tr:hover td:nth-child(-n+2),
+.tbl-scroll .freeze-3 tbody tr:hover td:nth-child(-n+3) {
+    background-color: #f8fafc; /* slate-50 hover */
+}
+
+/* Posizioni left dinamiche: usare CSS vars --c1-w, --c2-w (px) sul wrapper
+   se servono offset precisi. Default fallback con valori comuni. */
+.tbl-scroll .freeze-1 thead th:nth-child(1),
+.tbl-scroll .freeze-1 tbody td:nth-child(1),
+.tbl-scroll .freeze-2 thead th:nth-child(1),
+.tbl-scroll .freeze-2 tbody td:nth-child(1),
+.tbl-scroll .freeze-3 thead th:nth-child(1),
+.tbl-scroll .freeze-3 tbody td:nth-child(1) { left: 0; }
+
+.tbl-scroll .freeze-2 thead th:nth-child(2),
+.tbl-scroll .freeze-2 tbody td:nth-child(2),
+.tbl-scroll .freeze-3 thead th:nth-child(2),
+.tbl-scroll .freeze-3 tbody td:nth-child(2) { left: var(--c1-w, 36px); }
+
+.tbl-scroll .freeze-3 thead th:nth-child(3),
+.tbl-scroll .freeze-3 tbody td:nth-child(3) { left: calc(var(--c1-w, 36px) + var(--c2-w, 140px)); }
+
+/* Header sticky + colonna sticky simultaneamente → z-index più alto */
+.tbl-scroll .freeze-1 thead th:nth-child(1),
+.tbl-scroll .freeze-2 thead th:nth-child(-n+2),
+.tbl-scroll .freeze-3 thead th:nth-child(-n+3) {
+    z-index: 25;
+    background-color: #f1f5f9; /* slate-100 — più scuro per distinguere */
+}
+
 /* Stat label */
 .stat-label {
     @apply text-[11px] uppercase tracking-[0.14em] font-semibold text-slate-500;

@@ -272,6 +272,132 @@ async def delete_mezzo_pagamento(mid: str, user: dict = Depends(require_user("ad
     return {"ok": True}
 
 
+# === COMUNICAZIONI (Email SMTP + Twilio SMS/WhatsApp) ===
+# Sottoinsieme di AziendaConfig esposto come endpoint dedicato per la nuova
+# tab "Configurazione comunicazioni" in Librerie. Mantiene piena compatibilità
+# con il flusso esistente che legge da `azienda_config`.
+
+class ComunicazioniBody(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: Optional[str] = None
+    smtp_use_tls: bool = True
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_sms_from: Optional[str] = None
+    twilio_whatsapp_from: Optional[str] = None
+
+
+_COMUNICAZIONI_FIELDS = [
+    "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_use_tls",
+    "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
+]
+
+
+@router.get("/librerie/comunicazioni")
+async def get_comunicazioni(user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    out = {k: az.get(k) for k in _COMUNICAZIONI_FIELDS}
+    if out.get("smtp_password"):
+        out["smtp_password_set"] = True
+        out["smtp_password"] = "••••••••"
+    else:
+        out["smtp_password_set"] = False
+    if out.get("twilio_auth_token"):
+        out["twilio_auth_token_set"] = True
+        out["twilio_auth_token"] = "••••••••"
+    else:
+        out["twilio_auth_token_set"] = False
+    return out
+
+
+@router.put("/librerie/comunicazioni")
+async def update_comunicazioni(body: ComunicazioniBody,
+                                user: dict = Depends(require_user("admin"))) -> dict:
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    upd: dict = {k: getattr(body, k) for k in _COMUNICAZIONI_FIELDS}
+    if upd.get("smtp_password") in (None, "", "••••••••"):
+        upd.pop("smtp_password", None)
+    if upd.get("twilio_auth_token") in (None, "", "••••••••"):
+        upd.pop("twilio_auth_token", None)
+    upd["updated_at"] = _now_iso()
+    if az:
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
+    else:
+        new_doc = AziendaConfig(**upd)
+        await db.azienda_config.insert_one(new_doc.model_dump())
+    await log_attivita(user, "update", "comunicazioni", "azienda")
+    return await get_comunicazioni(user)
+
+
+@router.post("/librerie/comunicazioni/test")
+async def test_comunicazioni(body: dict,
+                               user: dict = Depends(require_user("admin"))) -> dict:
+    """body: { canale: 'email'|'sms'|'whatsapp', destinatario: str, messaggio?: str }"""
+    canale = (body.get("canale") or "").lower()
+    dest = (body.get("destinatario") or "").strip()
+    msg = body.get("messaggio") or "Test di invio dalla configurazione Comunicazioni del programma Assicura."
+    if not dest:
+        raise HTTPException(400, "Destinatario obbligatorio")
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    if canale == "email":
+        if not (az.get("smtp_host") and az.get("smtp_user")):
+            raise HTTPException(400, "SMTP non configurato (host/user mancanti)")
+        import smtplib
+        from email.message import EmailMessage
+        em = EmailMessage()
+        em["Subject"] = "Test invio email — Assicura"
+        em["From"] = az.get("smtp_from") or az["smtp_user"]
+        em["To"] = dest
+        em.set_content(msg)
+        try:
+            port = int(az.get("smtp_port") or 587)
+            if port == 465:
+                srv = smtplib.SMTP_SSL(az["smtp_host"], port, timeout=30)
+            else:
+                srv = smtplib.SMTP(az["smtp_host"], port, timeout=30)
+                if az.get("smtp_use_tls", True):
+                    srv.starttls()
+            if az.get("smtp_password"):
+                srv.login(az["smtp_user"], az["smtp_password"])
+            srv.send_message(em)
+            srv.quit()
+        except Exception as e:
+            raise HTTPException(503, f"Errore invio email: {e}")
+        return {"ok": True, "canale": "email", "destinatario": dest}
+
+    if canale in ("sms", "whatsapp"):
+        if not (az.get("twilio_account_sid") and az.get("twilio_auth_token")):
+            raise HTTPException(400, "Twilio non configurato (SID/Token mancanti)")
+        try:
+            from twilio.rest import Client  # type: ignore[import-untyped]
+        except ImportError:
+            raise HTTPException(503, "Libreria Twilio non installata sul server. Installare 'twilio'.")
+        try:
+            client = Client(az["twilio_account_sid"], az["twilio_auth_token"])
+            if canale == "sms":
+                from_ = az.get("twilio_sms_from")
+                if not from_:
+                    raise HTTPException(400, "twilio_sms_from non configurato")
+                client.messages.create(body=msg, from_=from_, to=dest)
+            else:
+                from_ = az.get("twilio_whatsapp_from")
+                if not from_:
+                    raise HTTPException(400, "twilio_whatsapp_from non configurato")
+                to_ = dest if dest.startswith("whatsapp:") else f"whatsapp:{dest}"
+                client.messages.create(body=msg, from_=from_, to=to_)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(503, f"Errore invio {canale}: {e}")
+        return {"ok": True, "canale": canale, "destinatario": dest}
+
+    raise HTTPException(400, "Canale non valido: email|sms|whatsapp")
+
+
 async def _seed_mezzi_pagamento() -> None:
     """Idempotente: crea le MODALITÀ di pagamento di default se mancano.
 

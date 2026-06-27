@@ -242,9 +242,9 @@ export default function Polizze() {
                 )}
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+            <div className="tbl-scroll" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
-                    <table className="tbl w-full min-w-[1100px]">
+                    <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
                             <tr>
                                 <th>Numero polizza</th>
