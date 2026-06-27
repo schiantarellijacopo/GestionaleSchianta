@@ -2800,8 +2800,11 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
 async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """Marca i titoli come coperti dall'agenzia: l'agenzia ha anticipato i soldi al cliente.
 
-    body: {ids: [...], data_copertura?: 'YYYY-MM-DD' (default oggi), note?}
+    body: {ids: [...], data_copertura?: 'YYYY-MM-DD' (default oggi), note?, conto_cassa_id?}
     Il titolo resta DA INCASSARE finché il cliente non paga.
+
+    Crea anche un movimento contabile categoria "anticipo" (uscita) per ciascun
+    titolo coperto, così la copertura è visibile nel brogliaccio / Prima Nota.
     """
     ids = body.get("ids") or []
     if not ids:
@@ -2810,6 +2813,14 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     # Lock: la copertura è una scrittura su Prima Nota → blocco se giornata chiusa.
     await assert_giornata_aperta(data_copertura, azione="coprire titoli nel giorno (Prima Nota chiusa)")
     note = body.get("note")
+    conto_id = body.get("conto_cassa_id")
+    # Conto cassa di default (primo attivo) se non specificato
+    if not conto_id:
+        default_conto = await db.conti_cassa.find_one(
+            {"attivo": True}, {"_id": 0, "id": 1}, sort=[("ordine", 1)],
+        )
+        conto_id = default_conto["id"] if default_conto else None
+
     set_fields = {
         "titolo_coperto": True,
         "data_copertura": data_copertura,
@@ -2817,13 +2828,49 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     }
     if note:
         set_fields["note_copertura"] = note
+
+    # 1) Aggiorna i titoli
     res = await db.titoli.update_many(
         {"id": {"$in": ids}},
         {"$set": set_fields},
     )
+
+    # 2) Crea i movimenti "anticipo" in Prima Nota per ciascun titolo (idempotente:
+    #    skip se esiste già un movimento di copertura per quel titolo+data).
+    n_movimenti = 0
+    async for t in db.titoli.find({"id": {"$in": ids}}, {"_id": 0}):
+        # idempotenza: se esiste già un movimento di copertura per questo titolo, salta
+        existing = await db.movimenti.find_one(
+            {"titolo_id": t["id"], "categoria": "anticipo",
+             "data_movimento": data_copertura, "tipo": "uscita"},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            continue
+        pol = await db.polizze.find_one({"id": t.get("polizza_id")}, {"_id": 0}) or {}
+        importo = float(t.get("importo_lordo") or 0.0)
+        mov = MovimentoContabile(
+            data_movimento=data_copertura,
+            tipo="uscita", categoria="anticipo",
+            importo=importo,
+            descrizione=f"Copertura anticipata polizza {pol.get('numero_polizza') or t.get('polizza_id', '')}",
+            polizza_id=t.get("polizza_id"), titolo_id=t["id"],
+            anagrafica_id=pol.get("contraente_id"),
+            compagnia_id=pol.get("compagnia_id"),
+            conto_cassa_id=conto_id,
+            note=note,
+        )
+        await db.movimenti.insert_one(mov.model_dump())
+        n_movimenti += 1
+
     await log_attivita(user, "bulk_copertura", "titolo", None,
-                       f"{res.modified_count} titoli coperti dall'agenzia il {data_copertura}")
-    return {"aggiornati": res.modified_count, "data_copertura": data_copertura}
+                       f"{res.modified_count} titoli coperti dall'agenzia il {data_copertura} "
+                       f"({n_movimenti} movimenti Prima Nota creati)")
+    return {
+        "aggiornati": res.modified_count,
+        "data_copertura": data_copertura,
+        "movimenti_creati": n_movimenti,
+    }
 
 
 @api.post("/titoli/notifica-copertura")
