@@ -248,6 +248,7 @@ export default function Polizze() {
                         <thead>
                             <tr>
                                 <th>Numero polizza</th>
+                                <th>Targa</th>
                                 <th>Contraente</th>
                                 <th>Compagnia</th>
                                 <th>Collaboratore</th>
@@ -264,7 +265,9 @@ export default function Polizze() {
                                 <tr key={p.id} data-testid={`polizza-row-${p.id}`}>
                                     <td>
                                         <Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline font-medium">{p.numero_polizza}</Link>
-                                        {p.targa && <div className="text-xs text-sky-700 font-medium num mt-0.5">{p.targa}</div>}
+                                    </td>
+                                    <td className="text-xs text-sky-700 font-mono font-medium uppercase">
+                                        {p.targa || <span className="text-slate-300">—</span>}
                                     </td>
                                     <td className="text-xs">{p.contraente_nome || "—"}</td>
                                     <td className="text-xs text-slate-600">{p.compagnia_nome || "—"}</td>

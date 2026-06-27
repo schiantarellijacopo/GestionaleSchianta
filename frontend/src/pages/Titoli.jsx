@@ -291,7 +291,8 @@ export default function Titoli({ storicoMode = false } = {}) {
                                         onChange={toggleAll}
                                     />
                                 </th>
-                                <th className="w-[140px]">Contratto / Targa</th>
+                                <th className="w-[140px]">Contratto</th>
+                                <th className="w-[100px]">Targa</th>
                                 <th>Contraente</th>
                                 <th className="w-[120px]">Compagnia</th>
                                 <th className="w-[100px]">Collaboratore</th>
@@ -341,9 +342,9 @@ export default function Titoli({ storicoMode = false } = {}) {
                                                 {t.numero_polizza || "—"}
                                             </Link>
                                             <div className="text-[11px] text-slate-500">{t.prodotto || t.ramo}</div>
-                                            {t.targa && (
-                                                <div className="text-xs text-sky-700 font-medium num mt-0.5">{t.targa}</div>
-                                            )}
+                                        </td>
+                                        <td className="text-xs text-sky-700 font-mono font-medium uppercase">
+                                            {t.targa || <span className="text-slate-300">—</span>}
                                         </td>
                                         <td className="text-xs">{t.contraente_nome || "-"}</td>
                                         <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>

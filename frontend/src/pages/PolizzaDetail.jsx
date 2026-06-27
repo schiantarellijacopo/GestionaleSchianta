@@ -121,7 +121,7 @@ export default function PolizzaDetail() {
 
             <Tabs defaultValue="veicolo">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
-                    {pol.ramo === "RCA" && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
+                    {(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
                     <TabsTrigger value="provvigioni"><Banknote size={13} className="mr-1" />Provvigioni</TabsTrigger>
                     <TabsTrigger value="titoli"><FileText size={13} className="mr-1" />Titoli ({pol.titoli?.length || 0})</TabsTrigger>
@@ -142,7 +142,7 @@ export default function PolizzaDetail() {
                     </TabsTrigger>
                 </TabsList>
 
-                {pol.ramo === "RCA" && (
+                {(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) && (
                     <TabsContent value="veicolo">
                         <Card className="p-6 border-slate-200 mt-4">
                             <SezioneTitolo titolo="Dati veicolo" />
@@ -624,7 +624,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
             .catch(() => setProdotti([]));
     }, [f.ramo]);
 
-    const isRCA = (f.ramo || "").toUpperCase().includes("RCA");
+    const isRCA = (((f.ramo || "") + " " + (f.prodotto || "")).toUpperCase().includes("RCA"));
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -789,7 +789,36 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                         <TabsContent value="veicolo">
                             <div className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold pt-3 pb-1">Dati veicolo</div>
                             <div className="grid grid-cols-2 gap-3 pb-3">
-                                <div><Label>Targa</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="edit-pol-targa" /></div>
+                                <div><Label>Targa</Label><Input
+                                    value={f.targa}
+                                    onChange={(e) => set("targa", e.target.value.toUpperCase())}
+                                    onBlur={async (e) => {
+                                        const t = (e.target.value || "").trim().toUpperCase();
+                                        if (!t || t.length < 4) return;
+                                        try {
+                                            const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
+                                            const v = r.data?.veicolo;
+                                            if (v) {
+                                                setF((prev) => ({
+                                                    ...prev,
+                                                    veicolo_marca: prev.veicolo_marca || v.marca || "",
+                                                    veicolo_modello: prev.veicolo_modello || v.modello || "",
+                                                    veicolo_alimentazione: prev.veicolo_alimentazione || v.alimentazione || "",
+                                                    veicolo_kw: prev.veicolo_kw || v.kw || "",
+                                                    veicolo_cilindrata: prev.veicolo_cilindrata || v.cilindrata || "",
+                                                    veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || v.data_immatricolazione || "",
+                                                    veicolo_uso: prev.veicolo_uso || v.uso || "",
+                                                    veicolo_posti: prev.veicolo_posti || v.posti || "",
+                                                    veicolo_quintali: prev.veicolo_quintali || v.quintali || "",
+                                                    telaio: prev.telaio || v.telaio || "",
+                                                    veicolo_id: v.id,
+                                                }));
+                                                toast.success(`Veicolo trovato: ${v.marca || ""} ${v.modello || ""}`);
+                                            }
+                                        } catch { /* not found */ }
+                                    }}
+                                    data-testid="edit-pol-targa"
+                                /></div>
                                 <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} data-testid="edit-pol-marca" /></div>
                                 <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} data-testid="edit-pol-modello" /></div>
                                 <div><Label>Tipo veicolo</Label><Input value={f.veicolo_tipo} onChange={(e) => set("veicolo_tipo", e.target.value)} /></div>
