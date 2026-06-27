@@ -13,6 +13,7 @@ import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from 
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 
 export default function Provvigioni() {
     const [collabs, setCollabs] = useState([]);
@@ -478,19 +479,16 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                             <Input type="date" value={data_pag} onChange={(e) => setDataPag(e.target.value)} />
                         </div>
                         <div>
-                            <Label>Mezzo pagamento</Label>
-                            <Select value={mezzo} onValueChange={setMezzo}>
-                                <SelectTrigger data-testid="pay-mezzo"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {mezzi.map((m) => (
-                                        <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <Label>Tipo pagamento</Label>
+                            <SelectTipoPagamento
+                                value={mezzo}
+                                onChange={setMezzo}
+                                testid="pay-mezzo"
+                            />
                         </div>
                     </div>
                     <div className="text-[10px] text-slate-500 -mt-1">
-                        Il conto/banca da cui esce il pagamento è derivato automaticamente dal mezzo selezionato (Librerie → Conti cassa).
+                        Il conto/banca da cui esce il pagamento è derivato automaticamente dal tipo selezionato.
                     </div>
                     <div>
                         <Label>Note</Label>

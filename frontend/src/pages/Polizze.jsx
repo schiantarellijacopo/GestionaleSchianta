@@ -56,7 +56,6 @@ export default function Polizze() {
     const [utenti, setUtenti] = useState([]);
     const [open, setOpen] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
-    const [pageSize, setPageSize] = useState(50);
     const [filters, setFilters] = useState(INITIAL_FILTERS);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
@@ -89,7 +88,7 @@ export default function Polizze() {
         });
     }, []);
 
-    const displayed = useMemo(() => (list || []).slice(0, pageSize), [list, pageSize]);
+    const displayed = list || [];
 
     const totali = useMemo(() => {
         const src = list || [];
@@ -168,13 +167,6 @@ export default function Polizze() {
                             className="pl-9"
                         />
                     </div>
-                    <span className="text-xs text-slate-600 hidden md:block">Visualizza</span>
-                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v))}>
-                        <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            {[25, 50, 100, 250, 500].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
                     <Button variant="outline" onClick={() => setShowFilters((s) => !s)} data-testid="pol-toggle-filters">
                         <Filter size={14} className="mr-1" /> Filtri {showFilters ? <ChevronUp size={12} className="ml-1" /> : <ChevronDown size={12} className="ml-1" />}
                     </Button>
@@ -288,9 +280,9 @@ export default function Polizze() {
                         </tbody>
                     </table>
                 )}
-                {list && list.length > pageSize && (
+                {list && list.length >= 2000 && (
                     <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
-                        Visualizzate {pageSize} di {list.length} polizze - aumenta &quot;Visualizza&quot; per vederne di più
+                        Visualizzate tutte le {list.length} polizze
                     </div>
                 )}
             </div>

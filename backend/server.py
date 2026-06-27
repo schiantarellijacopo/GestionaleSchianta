@@ -46,7 +46,7 @@ from db_models import (
     AziendaConfig, SchemaProvvigionale, EventoCalendario, ContattoCompagnia,
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
-    Rappel, VoceRicorsivaCollab, MezzoPagamento,
+    Rappel, VoceRicorsivaCollab, MezzoPagamento, TipoPagamento, LetteraAbbuono,
     _now_iso, _uid,
 )
 import ania_importer
@@ -57,6 +57,7 @@ import storage as obj_storage
 import pdf_report
 import pdf_diagnosi
 import pdf_brogliaccio
+import pdf_lettera_abbuono
 import brogliaccio as brog
 import cf_calc
 import geocoder as geocoder_svc
@@ -2079,7 +2080,7 @@ async def list_polizze(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
-    limit: int = 2000,
+    limit: int = 50000,
     user=Depends(current_user),
 ):
     flt = await visibility_filter(user)
@@ -2365,7 +2366,7 @@ async def list_titoli(
     dal: Optional[str] = None,
     al: Optional[str] = None,
     q: Optional[str] = None,
-    limit: int = 2000,
+    limit: int = 50000,
     user=Depends(current_user),
 ):
     flt: dict = {}
@@ -3350,6 +3351,17 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         extra_label = f" residuo sospeso €{residuo:.2f}"
     await log_attivita(user, "incasso", "titolo", tid,
                        f"€{importo_pagato:.2f}{extra_label}".strip())
+    # Auto-genera Lettera di Abbuono se è stato applicato uno sconto
+    lettera_id = None
+    if sconto_applicato > 0:
+        try:
+            lettera_id = await _crea_lettera_abbuono_auto(
+                titolo=titolo, polizza=pol, importo_pagato=importo_pagato,
+                sconto=sconto_applicato, motivo=motivo_sconto, data_incasso=data_incasso,
+                user_id=user.get("id"),
+            )
+        except Exception as _e:
+            logger.warning("Auto-gen lettera abbuono fallita: %s", _e)
     return {
         "ok": True,
         "importo_pagato": importo_pagato,
@@ -3359,7 +3371,200 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         "movimento_entrata_id": mov_in.id,
         "movimento_sconto_id": None,  # legacy: sconto ora vive sulla stessa riga entrata
         "titolo_residuo_id": residuo_titolo_id,
+        "lettera_abbuono_id": lettera_id,
     }
+
+
+# ============================================================
+# LETTERA DI ABBUONO (sconto su titolo) + firma digitale
+# ============================================================
+async def _crea_lettera_abbuono_auto(
+    *, titolo: dict, polizza: Optional[dict], importo_pagato: float,
+    sconto: float, motivo: Optional[str], data_incasso: str, user_id: Optional[str],
+) -> str:
+    """Crea (idempotente) la lettera di abbuono per un titolo con sconto.
+
+    Restituisce sempre l'id della lettera (creata o esistente).
+    """
+    existing = await db.lettere_abbuono.find_one(
+        {"titolo_id": titolo["id"]}, {"_id": 0, "id": 1},
+    )
+    if existing:
+        return existing["id"]
+    lordo = float(titolo.get("importo_lordo") or 0.0)
+    rec = LetteraAbbuono(
+        titolo_id=titolo["id"],
+        polizza_id=titolo.get("polizza_id"),
+        anagrafica_id=(polizza or {}).get("contraente_id"),
+        compagnia_id=(polizza or {}).get("compagnia_id"),
+        importo_lordo=lordo,
+        importo_pagato=importo_pagato,
+        importo_sconto=sconto,
+        motivo_sconto=motivo,
+        data_incasso=data_incasso,
+        created_by=user_id,
+    )
+    await db.lettere_abbuono.insert_one(rec.model_dump())
+    return rec.id
+
+
+async def _build_lettera_abbuono_pdf(letid: str) -> tuple[bytes, dict]:
+    """Carica tutti i dati richiesti e renderizza il PDF della lettera."""
+    let = await db.lettere_abbuono.find_one({"id": letid}, {"_id": 0})
+    if not let:
+        raise HTTPException(404, "Lettera non trovata")
+    azienda = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    titolo = await db.titoli.find_one({"id": let["titolo_id"]}, {"_id": 0}) or {}
+    polizza = (await db.polizze.find_one({"id": let.get("polizza_id")}, {"_id": 0})
+               if let.get("polizza_id") else None) or {}
+    anagrafica = (await db.anagrafiche.find_one({"id": let.get("anagrafica_id")}, {"_id": 0})
+                  if let.get("anagrafica_id") else None) or {}
+    compagnia = (await db.compagnie.find_one({"id": let.get("compagnia_id")}, {"_id": 0})
+                 if let.get("compagnia_id") else None) or {}
+    operatore = (await db.users.find_one(
+        {"id": let.get("firma_operatore_user_id") or let.get("created_by")},
+        {"_id": 0, "password_hash": 0},
+    ) if (let.get("firma_operatore_user_id") or let.get("created_by")) else None) or {}
+    pdf = pdf_lettera_abbuono.generate_lettera_abbuono(
+        azienda=azienda, lettera=let, titolo=titolo, polizza=polizza,
+        anagrafica=anagrafica, compagnia=compagnia, operatore=operatore,
+    )
+    return pdf, let
+
+
+@api.post("/titoli/{tid}/lettera-abbuono", status_code=201)
+async def crea_lettera_abbuono_manuale(
+    tid: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Endpoint MANUALE: genera una lettera di abbuono per un titolo che ha
+    `sconto_applicato > 0`. Idempotente (restituisce quella esistente se presente).
+    """
+    titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not titolo:
+        raise HTTPException(404, "Titolo non trovato")
+    sconto = float(titolo.get("sconto_applicato") or 0.0)
+    if sconto <= 0:
+        raise HTTPException(400, "Nessuno sconto applicato a questo titolo")
+    pol = await db.polizze.find_one({"id": titolo.get("polizza_id")}, {"_id": 0})
+    importo_pagato = float(titolo.get("importo_pagato") or 0.0)
+    motivo = titolo.get("motivo_sconto")
+    data_incasso = titolo.get("data_incasso") or _now_iso()[:10]
+    lid = await _crea_lettera_abbuono_auto(
+        titolo=titolo, polizza=pol, importo_pagato=importo_pagato,
+        sconto=sconto, motivo=motivo, data_incasso=data_incasso,
+        user_id=user.get("id"),
+    )
+    rec = await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})
+    await log_attivita(user, "create", "lettera_abbuono", lid, f"Sconto €{sconto:.2f}")
+    return rec
+
+
+@api.get("/lettere-abbuono")
+async def list_lettere_abbuono(
+    titolo_id: Optional[str] = None,
+    polizza_id: Optional[str] = None,
+    anagrafica_id: Optional[str] = None,
+    user=Depends(current_user),
+):
+    flt: dict = {}
+    if titolo_id:
+        flt["titolo_id"] = titolo_id
+    if polizza_id:
+        flt["polizza_id"] = polizza_id
+    if anagrafica_id:
+        flt["anagrafica_id"] = anagrafica_id
+    items = await db.lettere_abbuono.find(flt, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return items
+
+
+@api.get("/lettere-abbuono/{lid}")
+async def get_lettera_abbuono(lid: str, user=Depends(current_user)):
+    rec = await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Lettera non trovata")
+    return rec
+
+
+@api.get("/lettere-abbuono/{lid}/pdf")
+async def get_lettera_abbuono_pdf(lid: str, user=Depends(current_user)):
+    pdf, let = await _build_lettera_abbuono_pdf(lid)
+    fname = f"lettera_abbuono_{lid[:8]}.pdf"
+    return StreamingResponse(
+        _io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
+
+
+@api.post("/lettere-abbuono/{lid}/firma")
+async def firma_lettera_abbuono(
+    lid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """body: { tipo: "operatore" | "cliente", b64: "data:image/png;base64,...",
+               nome?: str }
+    """
+    tipo = (body.get("tipo") or "").lower()
+    b64 = body.get("b64") or ""
+    nome = body.get("nome") or None
+    if tipo not in ("operatore", "cliente"):
+        raise HTTPException(400, "tipo deve essere 'operatore' o 'cliente'")
+    if not b64 or not b64.startswith("data:image"):
+        raise HTTPException(400, "Firma non valida (atteso PNG base64 data URL)")
+    rec = await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Lettera non trovata")
+    now = _now_iso()
+    upd: dict = {"updated_at": now}
+    if tipo == "operatore":
+        upd["firma_operatore_b64"] = b64
+        upd["firma_operatore_user_id"] = user.get("id")
+        upd["firma_operatore_nome"] = nome or user.get("name")
+        upd["firma_operatore_at"] = now
+    else:
+        upd["firma_cliente_b64"] = b64
+        upd["firma_cliente_nome"] = nome
+        upd["firma_cliente_at"] = now
+    await db.lettere_abbuono.update_one({"id": lid}, {"$set": upd})
+
+    # Se entrambe le firme presenti, rigenera e salva il PDF firmato su storage
+    updated = await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})
+    if updated and updated.get("firma_operatore_b64") and updated.get("firma_cliente_b64"):
+        try:
+            pdf, _ = await _build_lettera_abbuono_pdf(lid)
+            path = f"{os.environ.get('APP_NAME', 'assicura')}/lettere_abbuono/{lid}.pdf"
+            result = obj_storage.put_object(path, pdf, "application/pdf")
+            await db.lettere_abbuono.update_one(
+                {"id": lid},
+                {"$set": {"signed_pdf_storage_path": result["path"], "updated_at": _now_iso()}},
+            )
+            # crea anche un Allegato sul titolo per visibilità
+            try:
+                al = Allegato(
+                    entita_tipo="titolo", entita_id=updated["titolo_id"],
+                    nome_file=f"lettera_abbuono_{lid[:8]}.pdf",
+                    storage_path=result["path"], content_type="application/pdf",
+                    size=result.get("size", len(pdf)),
+                    descrizione="Lettera di abbuono firmata",
+                    autore_id=user.get("id"),
+                )
+                await db.allegati.insert_one(al.model_dump())
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Errore salvataggio PDF firmato: %s", e)
+
+    await log_attivita(user, "firma", "lettera_abbuono", lid, f"Firma {tipo}")
+    return await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})
+
+
+@api.delete("/lettere-abbuono/{lid}")
+async def delete_lettera_abbuono(lid: str, user=Depends(require_user("admin"))):
+    res = await db.lettere_abbuono.delete_one({"id": lid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Lettera non trovata")
+    return {"ok": True}
 
 
 # ============================================================
@@ -3369,7 +3574,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
 async def list_sinistri(
     stato: Optional[str] = None,
     polizza_id: Optional[str] = None,
-    limit: int = 500,
+    limit: int = 50000,
     user=Depends(current_user),
 ):
     flt = await visibility_filter(user)
@@ -3458,7 +3663,7 @@ async def list_movimenti(
     al: Optional[str] = None,
     tipo: Optional[str] = None,
     anagrafica_id: Optional[str] = None,
-    limit: int = 500,
+    limit: int = 50000,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     flt: dict = {}
@@ -7625,6 +7830,8 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
 from routes import librerie as _librerie_router  # noqa: E402
 api.include_router(_librerie_router.router)
 _seed_mezzi_pagamento = _librerie_router._seed_mezzi_pagamento  # backward-compat
+_seed_tipi_pagamento = _librerie_router._seed_tipi_pagamento
+_seed_conti_deposito_estesi = _librerie_router._seed_conti_deposito_estesi
 
 
 
@@ -8967,6 +9174,11 @@ async def startup():
             {"nome": "Pagamento Direzione", "tipo": "rid", "ordine": 6},
         ]):
             await db.conti_cassa.insert_one(ContoCassa(**c).model_dump())
+
+    # Seed conti deposito estesi (BPER VILLA, AGOS, ecc.) — idempotente
+    await _seed_conti_deposito_estesi()
+    # Seed tipi pagamento (combinazione modalità × conto) — solo se vuoto
+    await _seed_tipi_pagamento()
 
     # migrazione idempotente conti cassa: rinomina legacy + disattiva PayPal
     await db.conti_cassa.update_one(

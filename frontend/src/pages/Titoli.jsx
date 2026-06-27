@@ -74,14 +74,13 @@ export default function Titoli({ storicoMode = false } = {}) {
     const [utenti, setUtenti] = useState([]);
     const [editing, setEditing] = useState(null);
     const [showFilters, setShowFilters] = useState(false);
-    const [pageSize, setPageSize] = useState(50);
 
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
         ? ["storico", "storico_anno", "storico_mese"]
         : ["sospesi", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
 
-    const defaultPreset = storicoMode ? "storico" : "sospesi";
+    const defaultPreset = storicoMode ? "storico" : "tutti_aperti";
 
     const [filters, setFilters] = useState({
         preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : defaultPreset,
@@ -138,7 +137,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         });
     }, []);
 
-    const displayed = useMemo(() => (list || []).slice(0, pageSize), [list, pageSize]);
+    const displayed = list || [];
 
     // totali calcolati sui dati visualizzati
     const totali = useMemo(() => {
@@ -211,13 +210,6 @@ export default function Titoli({ storicoMode = false } = {}) {
                             className="pl-9"
                         />
                     </div>
-                    <span className="text-xs text-slate-600 hidden md:block">Visualizza</span>
-                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(parseInt(v))}>
-                        <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            {[25, 50, 100, 250, 500].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
                     <Button variant="outline" onClick={() => setShowFilters((s) => !s)} data-testid="toggle-filters">
                         <Filter size={14} className="mr-1" /> Filtri {showFilters ? <ChevronUp size={12} className="ml-1" /> : <ChevronDown size={12} className="ml-1" />}
                     </Button>
@@ -415,9 +407,9 @@ export default function Titoli({ storicoMode = false } = {}) {
                         </tbody>
                     </table>
                 )}
-                {list && list.length > pageSize && (
+                {list && list.length >= 2000 && (
                     <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
-                        Visualizzati {pageSize} di {list.length} risultati - aumenta &quot;Visualizza&quot; per vederne di più
+                        Visualizzati tutti i {list.length} risultati
                     </div>
                 )}
             </div>

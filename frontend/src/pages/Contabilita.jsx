@@ -259,23 +259,27 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
         descrizione: "",
         anagrafica_id: "",
         conto_cassa_id: "",
+        mezzo_pagamento: "",
         numero_documento: "",
     });
     const [conti, setConti] = useState([]);
+    const [tipiPag, setTipiPag] = useState([]);
     useEffect(() => {
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
+        api.get("/librerie/tipi-pagamento", { params: { attivi: true } }).then((r) => setTipiPag(r.data));
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const save = async () => {
         if (!f.descrizione || !f.importo) { toast.error("Compila descrizione e importo"); return; }
-        if (!f.conto_cassa_id) { toast.error("Seleziona il metodo di pagamento (Conto / Banca)"); return; }
+        if (!f.mezzo_pagamento) { toast.error("Seleziona il tipo di pagamento"); return; }
         try {
-            const conto = conti.find((c) => c.id === f.conto_cassa_id);
+            // Deriva conto_cassa_id dal tipo pagamento selezionato
+            const tp = tipiPag.find((t) => t.label === f.mezzo_pagamento);
             const payload = {
                 ...f,
                 importo: parseFloat(f.importo) || 0,
-                mezzo_pagamento: conto?.nome || "",  // mantiene compatibilità campo legacy
+                conto_cassa_id: tp?.conto_id || f.conto_cassa_id || null,
             };
             if (!payload.anagrafica_id) delete payload.anagrafica_id;
             await api.post("/contabilita/movimenti", payload);
@@ -327,11 +331,11 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                     </Select>
                 </div>
                 <div>
-                    <Label>Conto / Banca (Metodo di pagamento) *</Label>
-                    <Select value={f.conto_cassa_id} onValueChange={(v) => set("conto_cassa_id", v)}>
-                        <SelectTrigger data-testid="mov-conto-select"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
+                    <Label>Tipo pagamento *</Label>
+                    <Select value={f.mezzo_pagamento || ""} onValueChange={(v) => set("mezzo_pagamento", v)}>
+                        <SelectTrigger data-testid="mov-tipo-pagamento-select"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                         <SelectContent>
-                            {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                            {tipiPag.map((t) => <SelectItem key={t.id} value={t.label}>{t.label}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>

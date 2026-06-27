@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 
 export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
@@ -132,15 +133,12 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                             />
                         </div>
                         <div>
-                            <Label>Mezzo pagamento</Label>
-                            <Select value={f.mezzo_pagamento} onValueChange={(v) => set("mezzo_pagamento", v)}>
-                                <SelectTrigger data-testid="inc-mezzo"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {mezzi.map((m) => (
-                                        <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <Label>Tipo pagamento</Label>
+                            <SelectTipoPagamento
+                                value={f.mezzo_pagamento}
+                                onChange={(v) => set("mezzo_pagamento", v)}
+                                testid="inc-mezzo"
+                            />
                         </div>
                     </div>
                     <div className="text-[10px] text-slate-500 -mt-1">

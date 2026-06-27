@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye } from "lucide-react";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 
 export default function EstrattoContoCompagnie() {
     const [compagnie, setCompagnie] = useState([]);
@@ -475,10 +476,9 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
 }
 
 function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
-    const { mezzi } = useMezziPagamento();
     const [data, setData] = useState(new Date().toISOString().slice(0, 10));
     const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${titoliIds.length} titoli`);
-    const [mezzo, setMezzo] = useState("bonifico");
+    const [mezzo, setMezzo] = useState("");
     const [saving, setSaving] = useState(false);
 
     const conferma = async () => {
@@ -511,17 +511,14 @@ function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
                         <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
                     </div>
                     <div>
-                        <Label>Mezzo pagamento</Label>
-                        <Select value={mezzo} onValueChange={setMezzo}>
-                            <SelectTrigger data-testid="ec-pay-mezzo"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                {mezzi.map((m) => (
-                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <Label>Tipo pagamento</Label>
+                        <SelectTipoPagamento
+                            value={mezzo}
+                            onChange={setMezzo}
+                            testid="ec-pay-mezzo"
+                        />
                         <div className="text-[10px] text-slate-500 mt-1">
-                            Il conto/banca da cui esce il pagamento è derivato dal mezzo selezionato.
+                            Il conto/banca da cui esce il pagamento è derivato dal tipo selezionato.
                         </div>
                     </div>
                     <div>

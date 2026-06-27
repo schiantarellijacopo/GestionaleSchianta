@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 
 /**
  * Dialog di modifica titolo, condiviso tra pagina Titoli e PolizzaDetail.
@@ -96,15 +97,12 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         </Select>
                     </div>
                     <div>
-                        <Label>Mezzo di pagamento</Label>
-                        <Select value={f.mezzo_pagamento || ""} onValueChange={(v) => set("mezzo_pagamento", v)}>
-                            <SelectTrigger data-testid="mezzo-pagamento-select"><SelectValue placeholder="Seleziona…" /></SelectTrigger>
-                            <SelectContent>
-                                {MEZZI.map((m) => (
-                                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <Label>Tipo pagamento</Label>
+                        <SelectTipoPagamento
+                            value={f.mezzo_pagamento || ""}
+                            onChange={(v) => set("mezzo_pagamento", v)}
+                            testid="mezzo-pagamento-select"
+                        />
                     </div>
                     <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => set("effetto", e.target.value)} /></div>
                     <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} /></div>

@@ -17,7 +17,8 @@ from database import db
 from db_models import (
     _now_iso, _uid,
     AziendaConfig, Banca, ContattoCompagnia, ContoCassa, MezzoPagamento,
-    ProdottoLibreria, RamoLibreria, SchemaProvvigionale, default_mora_for_ramo,
+    ProdottoLibreria, RamoLibreria, SchemaProvvigionale, TipoPagamento,
+    default_mora_for_ramo,
 )
 from auth import current_user, require_user
 from shared import log_attivita, strip_mongo_id
@@ -272,13 +273,20 @@ async def delete_mezzo_pagamento(mid: str, user: dict = Depends(require_user("ad
 
 
 async def _seed_mezzi_pagamento() -> None:
-    """Idempotente: crea i mezzi pagamento di default se mancano."""
+    """Idempotente: crea le MODALITÀ di pagamento di default se mancano.
+
+    Nota: a partire dalla v2 della libreria pagamenti la collezione
+    `mezzi_pagamento` rappresenta la **modalità** (Bonifico, Assegno, Contanti,
+    POS, RID, ecc.). La combinazione modalità+conto è gestita da
+    `tipi_pagamento` (vedi `_seed_tipi_pagamento`).
+    """
     defaults = [
         {"codice": "contanti", "label": "Contanti", "tipo_conto": "cassa", "ordine": 1, "icona": "Banknote"},
         {"codice": "bonifico", "label": "Bonifico bancario", "tipo_conto": "banca", "ordine": 2, "icona": "Building2"},
         {"codice": "assegno", "label": "Assegno", "tipo_conto": "banca", "ordine": 3, "icona": "FileCheck"},
         {"codice": "pos", "label": "POS / Carta", "tipo_conto": "carta", "ordine": 4, "icona": "CreditCard"},
-        {"codice": "rid", "label": "RID / SDD", "tipo_conto": "rid", "ordine": 5, "icona": "Repeat"},
+        {"codice": "bancomat", "label": "Bancomat", "tipo_conto": "carta", "ordine": 5, "icona": "CreditCard"},
+        {"codice": "rid", "label": "RID / SDD", "tipo_conto": "rid", "ordine": 6, "icona": "Repeat"},
         {"codice": "altro", "label": "Altro", "tipo_conto": "altro", "ordine": 99, "icona": "MoreHorizontal"},
     ]
     for d in defaults:
@@ -287,6 +295,171 @@ async def _seed_mezzi_pagamento() -> None:
             continue
         item = MezzoPagamento(**d)
         await db.mezzi_pagamento.insert_one(item.model_dump())
+
+
+# --- TIPI PAGAMENTO (combinazione modalità + conto deposito) ---
+class TipoPagamentoBody(BaseModel):
+    label: str
+    modalita_codice: str
+    conto_id: Optional[str] = None
+    ordine: int = 0
+    attivo: bool = True
+    note: Optional[str] = None
+
+
+@router.get("/librerie/tipi-pagamento")
+async def list_tipi_pagamento(
+    attivi: bool = False,
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    flt: dict = {}
+    if attivi:
+        flt["attivo"] = True
+    items = await db.tipi_pagamento.find(flt, {"_id": 0}).sort([("ordine", 1), ("label", 1)]).to_list(500)
+    return items
+
+
+@router.post("/librerie/tipi-pagamento", status_code=201)
+async def create_tipo_pagamento(body: TipoPagamentoBody, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    label = (body.label or "").strip()
+    if not label or not body.modalita_codice:
+        raise HTTPException(400, "Label e modalità sono obbligatori")
+    existing = await db.tipi_pagamento.find_one({"label": label}, {"_id": 0, "id": 1})
+    if existing:
+        raise HTTPException(400, f"Tipo pagamento '{label}' già presente")
+    item = TipoPagamento(
+        label=label.upper(),
+        modalita_codice=body.modalita_codice.strip().lower(),
+        conto_id=body.conto_id or None,
+        ordine=body.ordine,
+        attivo=body.attivo,
+        note=body.note,
+    )
+    await db.tipi_pagamento.insert_one(item.model_dump())
+    await log_attivita(user, "create", "tipo_pagamento", item.id, item.label)
+    return item.model_dump()
+
+
+@router.put("/librerie/tipi-pagamento/{tid}")
+async def update_tipo_pagamento(tid: str, body: TipoPagamentoBody,
+                                 user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    existing = await db.tipi_pagamento.find_one({"id": tid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Tipo pagamento non trovato")
+    upd = {
+        "label": body.label.strip().upper(),
+        "modalita_codice": body.modalita_codice.strip().lower(),
+        "conto_id": body.conto_id or None,
+        "ordine": body.ordine,
+        "attivo": body.attivo,
+        "note": body.note,
+        "updated_at": _now_iso(),
+    }
+    await db.tipi_pagamento.update_one({"id": tid}, {"$set": upd})
+    await log_attivita(user, "update", "tipo_pagamento", tid)
+    return {**existing, **upd}
+
+
+@router.delete("/librerie/tipi-pagamento/{tid}")
+async def delete_tipo_pagamento(tid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    res = await db.tipi_pagamento.delete_one({"id": tid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Tipo pagamento non trovato")
+    await log_attivita(user, "delete", "tipo_pagamento", tid)
+    return {"ok": True}
+
+
+async def _seed_conti_deposito_estesi() -> None:
+    """Aggiunge conti deposito ESTESI alla `LibreriaConti` (idempotente).
+
+    Voci richieste dal cliente: BPER VILLA, INTESA, CREDIT AGRICOLE,
+    PRELIEVO SOCI, ASSEGNI, CONTANTI, PAGAMENTI IN DIREZIONE oltre alle banche.
+    """
+    voci = [
+        {"nome": "CONTANTI", "tipo": "cassa", "ordine": 10},
+        {"nome": "ASSEGNI", "tipo": "cassa", "ordine": 11},
+        {"nome": "BPER SONDRIO", "tipo": "banca", "ordine": 20},
+        {"nome": "BPER VILLA", "tipo": "banca", "ordine": 21},
+        {"nome": "INTESA SANPAOLO", "tipo": "banca", "ordine": 22},
+        {"nome": "CREDIT AGRICOLE", "tipo": "banca", "ordine": 23},
+        {"nome": "PAGAMENTI IN DIREZIONE", "tipo": "rid", "ordine": 30},
+        {"nome": "PRELIEVO SOCI", "tipo": "altro", "ordine": 40},
+        {"nome": "AGOS", "tipo": "altro", "ordine": 41},
+    ]
+    for v in voci:
+        existing = await db.conti_cassa.find_one(
+            {"nome": {"$regex": f"^{re.escape(v['nome'])}$", "$options": "i"}},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            continue
+        obj = ContoCassa(**v)
+        await db.conti_cassa.insert_one(obj.model_dump())
+
+
+async def _seed_tipi_pagamento() -> None:
+    """Idempotente: crea la libreria iniziale `tipi_pagamento` combinando
+    modalità × conti deposito (es. "BONIFICO BPER SONDRIO", "ASSEGNO BPER VILLA").
+
+    Eseguito DOPO `_seed_mezzi_pagamento` e `_seed_conti_deposito_estesi`.
+    """
+    # Se già presenti voci, skip (admin gestisce manualmente da qui in poi).
+    if await db.tipi_pagamento.count_documents({}) > 0:
+        return
+
+    modalita = {m["codice"]: m async for m in db.mezzi_pagamento.find({}, {"_id": 0})}
+    conti = await db.conti_cassa.find({"attivo": True}, {"_id": 0}).sort("ordine", 1).to_list(200)
+
+    # Mapping conti per nome upper-case
+    def _conto_per_nome(nome_re: str) -> Optional[dict]:
+        nome_re = nome_re.upper()
+        for c in conti:
+            if c["nome"].upper() == nome_re:
+                return c
+        return None
+
+    # Combinazioni rilevanti per le agenzie italiane
+    combinazioni: list[tuple[str, str, str]] = [
+        # (modalita_codice, conto_nome, label)
+        ("contanti", "CONTANTI", "CONTANTI"),
+        ("contanti", "BPER SONDRIO", "CONTANTI BPER SONDRIO"),
+        ("contanti", "CREDIT AGRICOLE", "CONTANTI CREDIT AGRICOLE"),
+        ("assegno", "ASSEGNI", "ASSEGNO BANCARIO"),
+        ("assegno", "BPER SONDRIO", "ASSEGNO BPER SONDRIO"),
+        ("assegno", "BPER VILLA", "ASSEGNO BPER VILLA"),
+        ("assegno", "CREDIT AGRICOLE", "ASSEGNO CREDIT AGRICOLE"),
+        ("bonifico", "BPER SONDRIO", "BONIFICO BPER SONDRIO"),
+        ("bonifico", "BPER VILLA", "BONIFICO BPER VILLA"),
+        ("bonifico", "INTESA SANPAOLO", "BONIFICO INTESA"),
+        ("bonifico", "CREDIT AGRICOLE", "BONIFICO CREDIT AGRICOLE"),
+        ("rid", "BPER SONDRIO", "RID BPER SONDRIO"),
+        ("rid", "PAGAMENTI IN DIREZIONE", "RID DIREZIONE"),
+        ("pos", "BPER SONDRIO", "POS BPER SONDRIO"),
+        ("bancomat", "BPER SONDRIO", "BANCOMAT"),
+        ("altro", "AGOS", "AGOS"),
+        ("altro", "PRELIEVO SOCI", "PRELIEVO SOCI"),
+        ("altro", "PAGAMENTI IN DIREZIONE", "PAGAMENTO IN DIREZIONE"),
+    ]
+    ord_n = 0
+    for mod_cod, conto_nome, label in combinazioni:
+        if mod_cod not in modalita:
+            continue
+        conto = _conto_per_nome(conto_nome)
+        # Se conto non esiste (es. caso "Altro" puro) skippiamo
+        item = TipoPagamento(
+            label=label,
+            modalita_codice=mod_cod,
+            conto_id=conto["id"] if conto else None,
+            ordine=ord_n,
+            attivo=True,
+        )
+        await db.tipi_pagamento.insert_one(item.model_dump())
+        ord_n += 1
+    # voce "Altro" universale
+    if "altro" in modalita:
+        await db.tipi_pagamento.insert_one(TipoPagamento(
+            label="ALTRO", modalita_codice="altro", ordine=ord_n + 1, attivo=True,
+        ).model_dump())
 
 
 # --- PRODOTTI ---

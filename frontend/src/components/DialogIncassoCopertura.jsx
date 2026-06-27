@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/dialog";
 import { X } from "lucide-react";
 import { toast } from "sonner";
-import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 
 const TIPO_TITOLO_OPTS = [
@@ -44,10 +45,10 @@ function addDays(iso, days) {
 }
 
 export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone }) {
-    const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const lordo = parseFloat(titolo.importo_lordo) || 0;
     const [pref, setPref] = useState(null);
+    const [showLettera, setShowLettera] = useState(null); // titolo_id quando aprire lettera abbuono
 
     useEffect(() => {
         if (titolo.contraente_id) {
@@ -146,8 +147,9 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             }
 
             // 3) INCASSO (se richiesto)
+            let letteraId = null;
             if (incasso && !giaIncassato) {
-                await api.post(`/titoli/${titolo.id}/incassa`, {
+                const r = await api.post(`/titoli/${titolo.id}/incassa`, {
                     data_incasso: inc.data_incasso,
                     mezzo_pagamento: inc.mezzo_pagamento,
                     conto_cassa_id: null,
@@ -158,6 +160,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                             ? (inc.motivo_sconto || "Sconto applicato")
                             : null,
                 });
+                letteraId = r.data?.lettera_abbuono_id || null;
             }
 
             const msg = [
@@ -171,6 +174,12 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     : null,
             ].filter(Boolean).join(" — ");
             toast.success(msg || "Salvato");
+            if (letteraId) {
+                // Auto-apri la lettera di abbuono per la doppia firma
+                setShowLettera(titolo.id);
+                if (onDone) onDone();
+                return;
+            }
             if (onDone) onDone();
             onClose();
         } catch (e) {
@@ -184,6 +193,13 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const cellValueEdit = "bg-cyan-50 px-2 py-1 align-middle border border-slate-200";
 
     return (
+        <>
+        {showLettera && (
+            <DialogLetteraAbbuono
+                titoloId={showLettera}
+                onClose={() => { setShowLettera(null); onClose(); }}
+            />
+        )}
         <Dialog open onOpenChange={onClose}>
             <DialogContent
                 className="max-w-2xl p-0 overflow-hidden bg-white"
@@ -374,18 +390,12 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                         />
                                     </div>
                                     <div>
-                                        <div className="text-xs text-slate-600 mb-1">Mezzo pagamento</div>
-                                        <Select
+                                        <div className="text-xs text-slate-600 mb-1">Tipo pagamento</div>
+                                        <SelectTipoPagamento
                                             value={inc.mezzo_pagamento}
-                                            onValueChange={(v) => setI("mezzo_pagamento", v)}
-                                        >
-                                            <SelectTrigger data-testid="ico-mezzo"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {mezzi.map((m) => (
-                                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                            onChange={(v) => setI("mezzo_pagamento", v)}
+                                            testid="ico-mezzo"
+                                        />
                                         {polizzaPreferito && (
                                             <div className="text-[10px] text-emerald-700 mt-1" data-testid="hint-mezzo-polizza">
                                                 ★ Preferito su questa polizza: <strong>{polizzaPreferito}</strong>
@@ -492,5 +502,6 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                 </div>
             </DialogContent>
         </Dialog>
+        </>
     );
 }

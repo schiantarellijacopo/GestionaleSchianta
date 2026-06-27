@@ -17,8 +17,9 @@ import { toast } from "sonner";
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "banche", label: "Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
-    { key: "conti-cassa", label: "Conti cassa / banche", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
-    { key: "mezzi-pagamento", label: "Mezzi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
+    { key: "conti-cassa", label: "Conti deposito", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
+    { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
+    { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
@@ -144,7 +145,7 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
     if (section.key === "conti-cassa") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>Tipo</th><th>IBAN</th><th className="text-right">Saldo iniz.</th><th>Attivo</th><th></th></tr></thead>
+                <thead><tr><th>Nome</th><th>Tipo</th><th>IBAN</th><th className="text-right">Saldo iniz.</th><th>Attivo</th><th title="Non mostrare in Prima Nota">PN</th><th title="Escludi da calcolo liquidità">Liq</th><th></th></tr></thead>
                 <tbody>
                     {list.map((c) => (
                         <tr key={c.id}>
@@ -153,8 +154,31 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                             <td className="num text-xs">{c.iban || "-"}</td>
                             <td className="num text-right">{Number(c.saldo_iniziale || 0).toFixed(2)}</td>
                             <td>{c.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td>{c.nascondi_prima_nota ? <span className="badge badge-warning">nascosto</span> : <span className="text-slate-400 text-xs">—</span>}</td>
+                            <td>{c.escludi_da_liquidita ? <span className="badge badge-warning">escluso</span> : <span className="text-slate-400 text-xs">—</span>}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="conto" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    if (section.key === "tipi-pagamento") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Label</th><th>Modalità</th><th>Conto deposito</th><th className="text-right">Ordine</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((t) => (
+                        <tr key={t.id}>
+                            <td className="font-semibold uppercase">{t.label}</td>
+                            <td className="text-xs"><span className="badge badge-neutral">{t.modalita_codice}</span></td>
+                            <td className="text-xs text-slate-600">{t.conto_id ? <span className="num font-mono text-[10px]">{t.conto_id.slice(0,8)}</span> : <span className="italic text-slate-400">—</span>}</td>
+                            <td className="num text-right">{t.ordine}</td>
+                            <td>{t.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} label="tipo pagamento" />
                             </td>
                         </tr>
                     ))}
@@ -357,6 +381,7 @@ const SECTION_FORMS = {
     "banche": BancaForm,
     "conti-cassa": ContoForm,
     "mezzi-pagamento": MezzoPagamentoForm,
+    "tipi-pagamento": TipoPagamentoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
     "compagnie": CompagniaForm,
@@ -469,7 +494,7 @@ function ContoForm({ section, editing, onClose }) {
     const [banche, setBanche] = useState([]);
     useEffect(() => { api.get("/librerie/banche").then((r) => setBanche(r.data)); }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", tipo: "banca", banca_id: "", iban: "", saldo_iniziale: 0, ordine: 0, attivo: true }}
+        defaults={{ nome: "", tipo: "banca", banca_id: "", iban: "", saldo_iniziale: 0, ordine: 0, attivo: true, nascondi_prima_nota: false, escludi_da_liquidita: false }}
         fields={(f, set) => (
             <>
                 <div><Label>Nome conto *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
@@ -503,8 +528,134 @@ function ContoForm({ section, editing, onClose }) {
                     <div><Label>Saldo iniziale €</Label><Input type="number" step="0.01" value={f.saldo_iniziale || 0} onChange={(e) => set("saldo_iniziale", parseFloat(e.target.value) || 0)} /></div>
                     <div><Label>Ordine</Label><Input type="number" value={f.ordine || 0} onChange={(e) => set("ordine", parseInt(e.target.value) || 0)} /></div>
                 </div>
+                <div className="border-t pt-3 mt-2 space-y-2">
+                    <div className="text-xs font-medium text-slate-600 uppercase">Opzioni operative</div>
+                    <label className="flex items-start gap-2 text-sm cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={!!f.nascondi_prima_nota}
+                            onChange={(e) => set("nascondi_prima_nota", e.target.checked)}
+                            data-testid="conto-flag-nascondi-pn"
+                            className="mt-0.5"
+                        />
+                        <span>
+                            <strong>Non mostrare più in Prima Nota</strong>
+                            <div className="text-[10px] text-slate-500">Utile per conti dismessi senza eliminarli.</div>
+                        </span>
+                    </label>
+                    <label className="flex items-start gap-2 text-sm cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={!!f.escludi_da_liquidita}
+                            onChange={(e) => set("escludi_da_liquidita", e.target.checked)}
+                            data-testid="conto-flag-escludi-liq"
+                            className="mt-0.5"
+                        />
+                        <span>
+                            <strong>Escludi dal calcolo della liquidità (anche postera)</strong>
+                            <div className="text-[10px] text-slate-500">Es. conti tecnici, prelievi soci, partite di giro.</div>
+                        </span>
+                    </label>
+                </div>
             </>
         )}
+    />;
+}
+
+function TipoPagamentoForm({ section, editing, onClose }) {
+    const [modalita, setModalita] = useState([]);
+    const [conti, setConti] = useState([]);
+    useEffect(() => {
+        api.get("/librerie/mezzi-pagamento").then((r) => setModalita(r.data || []));
+        api.get("/librerie/conti-cassa", { params: { attivi: true } })
+            .then((r) => setConti(r.data || []));
+    }, []);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{
+            label: "", modalita_codice: "", conto_id: "",
+            ordine: 0, attivo: true, note: "",
+        }}
+        fields={(f, set) => {
+            const autoLabel = () => {
+                const mod = modalita.find((m) => m.codice === f.modalita_codice);
+                const conto = conti.find((c) => c.id === f.conto_id);
+                const lbl = [mod?.label || mod?.codice || "", conto?.nome || ""]
+                    .filter(Boolean).join(" ").toUpperCase();
+                set("label", lbl);
+            };
+            return (
+                <>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Modalità *</Label>
+                            <select
+                                className="w-full border rounded h-9 px-2 text-sm"
+                                value={f.modalita_codice || ""}
+                                onChange={(e) => set("modalita_codice", e.target.value)}
+                                data-testid="tp-modalita"
+                            >
+                                <option value="">— seleziona —</option>
+                                {modalita.map((m) => (
+                                    <option key={m.codice} value={m.codice}>{m.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <Label>Conto deposito</Label>
+                            <select
+                                className="w-full border rounded h-9 px-2 text-sm"
+                                value={f.conto_id || ""}
+                                onChange={(e) => set("conto_id", e.target.value)}
+                                data-testid="tp-conto"
+                            >
+                                <option value="">— nessuno —</option>
+                                {conti.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.nome}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <div className="flex items-center justify-between mb-1">
+                            <Label>Label visualizzata *</Label>
+                            <button
+                                type="button" onClick={autoLabel}
+                                className="text-[10px] text-sky-700 hover:text-sky-900 underline"
+                                data-testid="tp-auto-label"
+                            >Auto-componi</button>
+                        </div>
+                        <Input
+                            placeholder="es. BONIFICO BPER SONDRIO"
+                            value={f.label || ""}
+                            onChange={(e) => set("label", e.target.value)}
+                            data-testid="tp-label"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Ordine</Label>
+                            <Input type="number" value={f.ordine || 0}
+                                onChange={(e) => set("ordine", parseInt(e.target.value, 10) || 0)}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={f.attivo !== false}
+                                    onChange={(e) => set("attivo", e.target.checked)}
+                                />
+                                Attivo
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Note</Label>
+                        <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} />
+                    </div>
+                </>
+            );
+        }}
     />;
 }
 
@@ -514,20 +665,13 @@ function MezzoPagamentoForm({ section, editing, onClose }) {
         api.get("/librerie/conti-cassa", { params: { attivi: true } })
             .then((r) => setConti(r.data || []));
     }, []);
-    return <CrudForm
-        section={section} editing={editing} onClose={onClose}
-        initial={{
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{
             codice: "", label: "",
             tipo_conto: "altro", conto_default_id: "",
             icona: "", ordine: 0, attivo: true,
         }}
-        normalize={(f) => ({
-            ...f,
-            codice: (f.codice || "").trim().toLowerCase(),
-            conto_default_id: f.conto_default_id || null,
-            ordine: parseInt(f.ordine, 10) || 0,
-        })}
-        render={({ f, set }) => (
+        fields={(f, set) => (
             <>
                 <div className="grid grid-cols-2 gap-3">
                     <div>

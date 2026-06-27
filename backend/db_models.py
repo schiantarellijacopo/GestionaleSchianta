@@ -504,7 +504,10 @@ class Banca(BaseDoc):
 
 
 class ContoCassa(BaseDoc):
-    """Conto cassa / canale incasso (es. CONTANTI, ASSEGNI, BPER SONDRIO, RID DIREZIONE)."""
+    """Conto cassa / canale incasso (es. CONTANTI, ASSEGNI, BPER SONDRIO, RID DIREZIONE).
+
+    Voci usate come "Conti Deposito" nella nuova architettura `TipoPagamento`.
+    """
     nome: str
     tipo: Literal["cassa", "banca", "carta", "rid", "online", "altro"] = "banca"
     banca_id: Optional[str] = None
@@ -513,6 +516,63 @@ class ContoCassa(BaseDoc):
     descrizione: Optional[str] = None
     attivo: bool = True
     ordine: int = 0
+    # Flag operativi richiesti dalla "libreriaconti deposito"
+    # - nascondi_prima_nota: se True il conto NON compare più nei dropdown della
+    #   Prima Nota (utile per conti dismessi senza eliminarli).
+    # - escludi_da_liquidita: se True il conto è ignorato nel calcolo della
+    #   liquidità (immediata e postera).
+    nascondi_prima_nota: bool = False
+    escludi_da_liquidita: bool = False
+
+
+class TipoPagamento(BaseDoc):
+    """Voce della libreria UNIFICATA "Tipi pagamento" — combinazione di una
+    `MezzoPagamento` (modalità: bonifico/assegno/contanti/POS/RID) con un
+    `ContoCassa` (conto deposito: banca specifica, cassa, direzione).
+
+    È l'UNICO dropdown mostrato in:
+    Titoli (Incasso/Copertura), Movimenti Prima Nota, Estratti Conto
+    Compagnie/Collaboratori, Giroconti.
+
+    `label` viene auto-generato dalla combinazione (es. "BONIFICO BPER SONDRIO")
+    ma è modificabile manualmente.
+    """
+    label: str                          # testo visualizzato nel dropdown
+    modalita_codice: str                # FK soft → MezzoPagamento.codice
+    conto_id: Optional[str] = None      # FK → ContoCassa.id (None per voci speciali tipo "AGOS", "Altro")
+    ordine: int = 0
+    attivo: bool = True
+    note: Optional[str] = None
+
+
+class LetteraAbbuono(BaseDoc):
+    """Lettera di abbuono generata quando viene applicato uno sconto in incasso.
+
+    Contiene PDF non firmato (creato al volo) + slot per firme digitali
+    (operatore + cliente). Quando entrambe le firme sono presenti, si rigenera
+    il PDF "signed" e lo si salva su storage.
+    """
+    titolo_id: str
+    polizza_id: Optional[str] = None
+    anagrafica_id: Optional[str] = None
+    compagnia_id: Optional[str] = None
+    importo_lordo: float = 0.0
+    importo_pagato: float = 0.0
+    importo_sconto: float = 0.0
+    motivo_sconto: Optional[str] = None
+    data_incasso: Optional[str] = None
+    # Storage paths
+    pdf_storage_path: Optional[str] = None         # PDF base (non firmato)
+    signed_pdf_storage_path: Optional[str] = None  # PDF con firme inserite
+    # Firme (PNG base64 → "data:image/png;base64,...")
+    firma_operatore_b64: Optional[str] = None
+    firma_operatore_user_id: Optional[str] = None
+    firma_operatore_nome: Optional[str] = None
+    firma_operatore_at: Optional[str] = None
+    firma_cliente_b64: Optional[str] = None
+    firma_cliente_nome: Optional[str] = None
+    firma_cliente_at: Optional[str] = None
+    created_by: Optional[str] = None
 
 
 class ProdottoLibreria(BaseDoc):

@@ -1,0 +1,38 @@
+{
+  "summary": "Iter23/24 — Lettera Abbuono + TipiPagamento + flag ContoCassa + rimozione paginazione. Backend pytest 10/10 PASS. Frontend Playwright: tutte le funzionalità UI nuove verificate (tab Tipi pagamento, seed entries, Nuovo dialog con Auto-componi uppercase, flag ContoCassa, no pagesize dropdown su Polizze/Titoli, preset di default corretti).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/polizze", "issue": "create_polizza alla riga 2320 dispatcha un alert con obj.premio_totale che NON esiste nel modello Polizza (premio_lordo/netto/tasse/imposte/ssn). Causa 500 Internal Server Error su ogni nuova polizza creata via API. Bug PRE-ESISTENTE non legato a iter23 ma rimane bloccante per la creazione polizze. Reproduce: POST /api/polizze {numero_polizza, contraente_id, compagnia_id, ramo, effetto, scadenza, premio_lordo} → 500 AttributeError 'Polizza' object has no attribute 'premio_totale'. Fix: usare obj.premio_lordo (o premio_lordo) al posto di obj.premio_totale in alert payload."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter23_lettera_abbuono_tipi_pagamento.py",
+    "/app/test_reports/pytest/iter23_results.xml"
+  ],
+  "action_items": [
+    "BUG PRE-ESISTENTE (non iter23): fix alert payload in server.py:2320 — obj.premio_totale non esiste; usare obj.premio_lordo. Causa 500 su POST /api/polizze (blocca creazione polizze API)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:2320 — AttributeError su obj.premio_totale (modello Polizza ha solo premio_lordo/netto/tasse/imposte/ssn). Blocca POST /api/polizze. PRIORITÀ ALTA.",
+    "_seed_tipi_pagamento: la 'voce ALTRO universale' viene sempre inserita anche se nelle combinazioni esiste già una voce 'altro' (es. AGOS) — duplicazioni potenziali se l'admin aggiunge altre voci 'altro'. Già protetto da count > 0 idempotente, ma può confondere.",
+    "/api/lettere-abbuono GET ritorna limit hardcoded 2000 documenti — coerente con politica 'no paginazione' del progetto, ok per ora.",
+    "firma_lettera_abbuono: il salvataggio del PDF firmato su object storage è in try/except silenzioso (log warning) — se storage non disponibile, signed_pdf_storage_path resta None senza segnalare errore al client. Considerare un campo signed_pdf_error per debug.",
+    "Polizze.jsx/Titoli.jsx hanno rimosso pageSize correttamente; verificato che non esiste più alcun <select> con valori 25/50/100 in pagina."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter23_lettera_abbuono_tipi_pagamento.py (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (tutte le verifiche UI passate)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Il test backend usa titoli esistenti non-incassati (no creazione polizze) a causa del bug POST /api/polizze. Crea/elimina tipi-pagamento e conti-cassa con prefisso TEST_. Crea una LetteraAbbuono associata a un titolo esistente (residuo viene marcato come sconto, lettera firmata + signed_pdf salvata su storage). Test_zz_cleanup elimina la lettera ma il titolo resta incassato (effetto collaterale: 1 titolo esistente viene 'consumato' a ogni run). Per ripristinare lo stato si può usare un titolo specifico di test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tutte le feature di iter23 funzionanti: (1) /api/librerie/tipi-pagamento CRUD + seed verificati con 6 entry seed (CONTANTI, BONIFICO BPER SONDRIO, ASSEGNO BPER VILLA, RID DIREZIONE, AGOS, BANCOMAT); (2) flag nascondi_prima_nota e escludi_da_liquidita su ContoCassa persistono correttamente; (3) incasso con sconto crea auto Lettera Abbuono (lettera_abbuono_id ritornato in response); (4) /api/lettere-abbuono GET/POST/firma/PDF funzionanti — PDF inizia con %PDF; (5) doppia firma operatore+cliente popola signed_pdf_storage_path; (6) /api/polizze e /api/titoli usano limit=50000 default, no pagesize select 25/50/100 in UI; (7) Polizze preset default 'attive', Titoli preset default 'Tutti (da incassare)'; (8) DialogIncassoCopertura usa SelectTipoPagamento con label maiuscolo (verificato indirettamente via backend test che salva mezzo_pagamento='BONIFICO BPER SONDRIO'). UNICO ISSUE: bug pre-esistente in create_polizza (premio_totale inesistente) - causa 500 e impedisce creazione polizze via API.",
+  "rca of the issue": "BUG create_polizza 500: server.py:2320 dentro safe_dispatch('polizza.emessa', {... 'premio_totale': obj.premio_totale ...}) — il modello Polizza non definisce premio_totale. Sostituire con obj.premio_lordo o calcolare somma componenti. Reproduce: POST /api/polizze con payload minimo. Impatto: nessuna polizza può essere creata via API; la UI probabilmente funziona perché chiama lo stesso endpoint quindi è bloccata anch'essa (da verificare in frontend)."
+}

@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
+import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
@@ -30,6 +31,7 @@ export default function PolizzaDetail() {
     const [editOpen, setEditOpen] = useState(false);
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);
+    const [letteraAbbuonoTitolo, setLetteraAbbuonoTitolo] = useState(null);
     const [titoloEditing, setTitoloEditing] = useState(null);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
@@ -364,6 +366,15 @@ export default function PolizzaDetail() {
                                                             title="Incasso/Copertura"
                                                         >€</Button>
                                                     )}
+                                                    {(t.sconto_applicato || 0) > 0 && (
+                                                        <Button
+                                                            size="sm"
+                                                            className="h-7 px-2 text-xs bg-amber-500 hover:bg-amber-600 text-white"
+                                                            onClick={() => setLetteraAbbuonoTitolo(t.id)}
+                                                            data-testid={`pol-titolo-abbuono-${t.id}`}
+                                                            title="Lettera di abbuono / firma"
+                                                        >📜</Button>
+                                                    )}
                                                     <Button
                                                         size="sm" variant="outline"
                                                         className="h-7 px-2 text-xs"
@@ -490,6 +501,13 @@ export default function PolizzaDetail() {
                     titolo={paying}
                     conti={conti}
                     onClose={() => { setPaying(null); load(); }}
+                    onDone={() => load()}
+                />
+            )}
+            {letteraAbbuonoTitolo && (
+                <DialogLetteraAbbuono
+                    titoloId={letteraAbbuonoTitolo}
+                    onClose={() => { setLetteraAbbuonoTitolo(null); load(); }}
                 />
             )}
             {titoloEditing && (
