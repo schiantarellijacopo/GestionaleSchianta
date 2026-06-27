@@ -3408,8 +3408,30 @@ async def _crea_lettera_abbuono_auto(
     return rec.id
 
 
+async def _user_firma_to_b64(firma_url: str) -> str:
+    """Scarica la firma del collaboratore (PNG/JPG) dallo storage e la
+    converte in data-URL base64 utilizzabile dalla lettera di abbuono
+    (e da QUALSIASI altro documento che richiede la firma operatore).
+
+    `firma_url` è nel formato `/api/storage/<path>` salvato in
+    `users.firma_digitale_url`.
+    """
+    prefix = "/api/storage/"
+    path = firma_url[len(prefix):] if firma_url.startswith(prefix) else firma_url
+    try:
+        data, _ct = obj_storage.get_object(path)
+    except Exception as e:
+        raise HTTPException(500, f"Impossibile leggere la firma: {e}")
+    if not data:
+        raise HTTPException(404, "Firma utente non trovata su storage")
+    ext = (path.rsplit(".", 1)[-1] or "png").lower()
+    mime = "image/png" if ext == "png" else (
+        "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+    )
+    return f"data:{mime};base64,{_b64lib.b64encode(data).decode('ascii')}"
+
+
 async def _build_lettera_abbuono_pdf(letid: str) -> tuple[bytes, dict]:
-    """Carica tutti i dati richiesti e renderizza il PDF della lettera."""
     let = await db.lettere_abbuono.find_one({"id": letid}, {"_id": 0})
     if not let:
         raise HTTPException(404, "Lettera non trovata")
@@ -3502,14 +3524,32 @@ async def firma_lettera_abbuono(
     lid: str, body: dict,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """body: { tipo: "operatore" | "cliente", b64: "data:image/png;base64,...",
-               nome?: str }
+    """body: {
+        tipo: "operatore" | "cliente",
+        b64: "data:image/png;base64,..." (richiesto se !from_user_profile),
+        nome?: str,
+        from_user_profile?: bool  (solo per tipo=operatore: pesca firma_digitale_url
+                                   dal profilo del collaboratore loggato)
+    }
     """
     tipo = (body.get("tipo") or "").lower()
-    b64 = body.get("b64") or ""
-    nome = body.get("nome") or None
     if tipo not in ("operatore", "cliente"):
         raise HTTPException(400, "tipo deve essere 'operatore' o 'cliente'")
+    b64 = body.get("b64") or ""
+    nome = body.get("nome") or None
+
+    # Pesca la firma dal profilo del collaboratore (firma_digitale_url su user)
+    if tipo == "operatore" and body.get("from_user_profile"):
+        u_doc = await db.users.find_one({"id": user.get("id")}, {"_id": 0})
+        if not u_doc or not u_doc.get("firma_digitale_url"):
+            raise HTTPException(
+                400,
+                "Nessuna firma digitale caricata sul tuo profilo. "
+                "Vai in Librerie → Utenti/Collaboratori → Documenti e carica la firma.",
+            )
+        b64 = await _user_firma_to_b64(u_doc["firma_digitale_url"])
+        nome = nome or u_doc.get("name") or u_doc.get("nome")
+
     if not b64 or not b64.startswith("data:image"):
         raise HTTPException(400, "Firma non valida (atteso PNG base64 data URL)")
     rec = await db.lettere_abbuono.find_one({"id": lid}, {"_id": 0})

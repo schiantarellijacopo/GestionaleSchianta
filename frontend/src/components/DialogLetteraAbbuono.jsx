@@ -9,14 +9,16 @@
  */
 import { useEffect, useState } from "react";
 import { api, API_BASE, fmtEur } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileText, X, CheckCircle2 } from "lucide-react";
+import { FileText, X, CheckCircle2, PenTool, Upload } from "lucide-react";
 import { toast } from "sonner";
 import SignaturePad from "@/components/SignaturePad";
 
 export default function DialogLetteraAbbuono({ titoloId, lettera: initialLettera = null, onClose, onSigned }) {
+    const { user: authUser } = useAuth();
     const [lettera, setLettera] = useState(initialLettera);
     const [loading, setLoading] = useState(!initialLettera);
     const [firmaOp, setFirmaOp] = useState(null);
@@ -24,6 +26,17 @@ export default function DialogLetteraAbbuono({ titoloId, lettera: initialLettera
     const [nomeCli, setNomeCli] = useState("");
     const [saving, setSaving] = useState(false);
     const [pdfTimestamp, setPdfTimestamp] = useState(Date.now());
+    const [opMode, setOpMode] = useState("profilo"); // "profilo" | "manuale"
+
+    // Profilo operatore corrente: pesca firma_digitale_url
+    const [myProfile, setMyProfile] = useState(null);
+    useEffect(() => {
+        if (!authUser?.id) return;
+        api.get(`/auth/users/${authUser.id}`)
+            .then((r) => setMyProfile(r.data))
+            .catch(() => setMyProfile(null));
+    }, [authUser?.id]);
+    const haFirmaProfilo = !!myProfile?.firma_digitale_url;
 
     const reload = async () => {
         if (!titoloId) return;
@@ -53,13 +66,17 @@ export default function DialogLetteraAbbuono({ titoloId, lettera: initialLettera
         ? `${API_BASE}/lettere-abbuono/${lettera.id}/pdf?t=${pdfTimestamp}`
         : null;
 
-    const inviaFirma = async (tipo, b64, nome) => {
+    const inviaFirma = async (tipo, b64, nome, opts = {}) => {
         if (!lettera) return;
         setSaving(true);
         try {
-            const r = await api.post(`/lettere-abbuono/${lettera.id}/firma`, {
-                tipo, b64, nome,
-            });
+            const payload = { tipo, nome };
+            if (opts.from_user_profile) {
+                payload.from_user_profile = true;
+            } else {
+                payload.b64 = b64;
+            }
+            const r = await api.post(`/lettere-abbuono/${lettera.id}/firma`, payload);
             setLettera(r.data);
             setPdfTimestamp(Date.now());
             toast.success(`Firma ${tipo} salvata`);
@@ -135,18 +152,71 @@ export default function DialogLetteraAbbuono({ titoloId, lettera: initialLettera
                             </div>
                             {!opFirmato ? (
                                 <>
-                                    <SignaturePad
-                                        testid="sig-operatore"
-                                        label="Firma del responsabile dell'agenzia"
-                                        onChange={setFirmaOp}
-                                    />
-                                    <Button
-                                        size="sm"
-                                        disabled={!firmaOp || saving}
-                                        onClick={() => inviaFirma("operatore", firmaOp, null)}
-                                        className="mt-2 bg-slate-800 hover:bg-slate-900"
-                                        data-testid="lab-salva-firma-op"
-                                    >Salva firma operatore</Button>
+                                    {haFirmaProfilo && opMode === "profilo" ? (
+                                        <div className="border border-sky-200 bg-sky-50 rounded p-3 space-y-2">
+                                            <div className="flex items-center gap-3">
+                                                <img
+                                                    src={`${API_BASE.replace(/\/api$/, '')}${myProfile.firma_digitale_url}`}
+                                                    alt="firma"
+                                                    className="bg-white border rounded p-1 max-h-16"
+                                                    data-testid="lab-firma-profilo-preview"
+                                                />
+                                                <div className="text-xs text-slate-700">
+                                                    <strong>{myProfile.name || authUser?.name}</strong>
+                                                    <div className="text-slate-500">Firma archiviata sul profilo collaboratore</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2 flex-wrap">
+                                                <Button
+                                                    size="sm"
+                                                    disabled={saving}
+                                                    onClick={() => inviaFirma("operatore", null, null, { from_user_profile: true })}
+                                                    className="bg-sky-700 hover:bg-sky-800"
+                                                    data-testid="lab-firma-da-profilo"
+                                                >
+                                                    <PenTool size={14} className="mr-1" />
+                                                    Conferma con la mia firma
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setOpMode("manuale")}
+                                                    data-testid="lab-firma-manuale-mode"
+                                                >Firma manualmente</Button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {!haFirmaProfilo && (
+                                                <div className="border border-amber-200 bg-amber-50 rounded p-2 mb-2 text-xs text-amber-900 flex items-start gap-2">
+                                                    <Upload size={14} className="flex-shrink-0 mt-0.5" />
+                                                    <div>
+                                                        Nessuna firma archiviata sul profilo. Vai in <strong>Librerie → Utenti / Collaboratori → Documenti → Firma digitale</strong> per caricarla e firmare con un click in futuro.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <SignaturePad
+                                                testid="sig-operatore"
+                                                label="Firma del responsabile dell'agenzia"
+                                                onChange={setFirmaOp}
+                                            />
+                                            <div className="flex gap-2 mt-2">
+                                                <Button
+                                                    size="sm"
+                                                    disabled={!firmaOp || saving}
+                                                    onClick={() => inviaFirma("operatore", firmaOp, null)}
+                                                    className="bg-slate-800 hover:bg-slate-900"
+                                                    data-testid="lab-salva-firma-op"
+                                                >Salva firma operatore</Button>
+                                                {haFirmaProfilo && (
+                                                    <Button
+                                                        size="sm" variant="ghost"
+                                                        onClick={() => setOpMode("profilo")}
+                                                    >← Usa firma dal profilo</Button>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
                                 </>
                             ) : (
                                 <div className="border border-emerald-200 bg-emerald-50 rounded p-3 flex items-center justify-between">

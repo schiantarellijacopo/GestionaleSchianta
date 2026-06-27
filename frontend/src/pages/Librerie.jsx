@@ -26,8 +26,6 @@ const SECTIONS = [
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
     { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },
-    { key: "mapping-garanzie", label: "Mapping Garanzie ANIA", icon: <Tags size={14} />, endpoint: "/librerie/mapping-garanzie" },
-    { key: "mapping-operatori", label: "Mapping Operatori ANIA", icon: <UserCog size={14} />, endpoint: "/librerie/mapping-operatori" },
 ];
 
 export default function Librerie() {
