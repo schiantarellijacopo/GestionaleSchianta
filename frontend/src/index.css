@@ -112,13 +112,16 @@ h1, h2, h3, h4, h5 {
 
 /* Limita la larghezza max delle colonne frozen per evitare che row con testi
    lunghi le facciano espandere in modo eccessivo. Il contenuto eccedente viene
-   troncato con ellipsi. Override con classe `td-wrap` o `wrap-cell` se serve. */
+   troncato con ellipsi. Override con classe `td-wrap` o `wrap-cell` se serve.
+   Se la <th> ha già un Tailwind w-[...] esplicito (var --c?-w settata dal
+   componente con quel valore), il max-width della var prevale ma con un
+   minimo intelligente: usiamo `clamp(..., var, ...)` per non esplodere. */
 .tbl-scroll .freeze-3 tbody td:nth-child(1),
 .tbl-scroll .freeze-3 thead th:nth-child(1) { max-width: var(--c1-w, 160px); }
 .tbl-scroll .freeze-3 tbody td:nth-child(2),
 .tbl-scroll .freeze-3 thead th:nth-child(2) { max-width: var(--c2-w, 140px); }
 .tbl-scroll .freeze-3 tbody td:nth-child(3),
-.tbl-scroll .freeze-3 thead th:nth-child(3) { max-width: var(--c3-w, 220px); }
+.tbl-scroll .freeze-3 thead th:nth-child(3) { max-width: var(--c3-w, 200px); }
 .tbl-scroll .freeze-2 tbody td:nth-child(1),
 .tbl-scroll .freeze-2 thead th:nth-child(1) { max-width: var(--c1-w, 160px); }
 .tbl-scroll .freeze-2 tbody td:nth-child(2),

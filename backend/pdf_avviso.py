@@ -21,8 +21,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether,
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image,
 )
 
 
@@ -130,9 +131,29 @@ def generate_avviso_pdf(
     # ===== HEADER =====
     nome_agenzia = azienda.get("ragione_sociale") or "Agenzia Assicurativa"
     motto = azienda.get("note_footer_stampe") or ""
-    head_left = [
-        Paragraph(f"<b>{nome_agenzia}</b>", st["h1"]),
-    ]
+
+    # Logo agenzia (a sinistra) - prova a scaricare il logo se è un URL HTTP
+    logo_flowable = None
+    logo_url = azienda.get("logo_url")
+    if logo_url:
+        try:
+            import urllib.request
+            if logo_url.startswith("http://") or logo_url.startswith("https://"):
+                req = urllib.request.Request(logo_url, headers={"User-Agent": "Assicura/1.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = resp.read()
+                logo_flowable = Image(io.BytesIO(data), width=28 * mm, height=28 * mm, kind="proportional")
+            elif logo_url.startswith("/"):
+                # path filesystem locale
+                logo_flowable = Image(logo_url, width=28 * mm, height=28 * mm, kind="proportional")
+        except Exception:
+            logo_flowable = None
+
+    head_left: list = []
+    if logo_flowable:
+        head_left.append(logo_flowable)
+        head_left.append(Spacer(1, 2 * mm))
+    head_left.append(Paragraph(f"<b>{nome_agenzia}</b>", st["h1"]))
     if motto:
         head_left.append(Paragraph(f"<i>{motto[:80]}</i>", st["small"]))
 
@@ -200,7 +221,7 @@ def generate_avviso_pdf(
         ])
     body.append(["", "", "", "Totale Complessivo", _fmt_eur(totale)])
 
-    tbl = Table(body, colWidths=[34 * mm, 50 * mm, 24 * mm, 28 * mm, 28 * mm], repeatRows=1)
+    tbl = Table(body, colWidths=[32 * mm, 56 * mm, 22 * mm, 26 * mm, 28 * mm], repeatRows=1)
     tbl.setStyle(TableStyle([
         # Header
         ("BACKGROUND", (0, 0), (-1, 0), BLUE),
@@ -213,12 +234,13 @@ def generate_avviso_pdf(
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEBELOW", (0, 0), (-1, -2), 0.3, LIGHT),
+        ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
         # Totale (ultima riga)
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ("BACKGROUND", (0, -1), (-1, -1), LIGHT),
         ("ALIGN", (3, -1), (3, -1), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))

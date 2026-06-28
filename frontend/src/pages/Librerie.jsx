@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -30,6 +30,18 @@ const SECTIONS = [
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
     { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },
 ];
+
+// Estrae sempre una STRINGA leggibile da un errore Axios (anche dai 422 Pydantic
+// che restituiscono detail come array di {type, loc, msg, input, url}).
+function errMsg(e, fallback = "Errore") {
+    const d = e?.response?.data?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+        return d.map((x) => x?.msg || x?.type || JSON.stringify(x)).join(" · ");
+    }
+    if (d && typeof d === "object") return d.msg || JSON.stringify(d);
+    return e?.message || fallback;
+}
 
 export default function Librerie() {
     return (
@@ -2014,15 +2026,24 @@ function ComunicazioniSezione() {
     const salva = async () => {
         setSaving(true);
         try {
-            const payload = { ...f };
-            // Non inviare placeholder mascherato (se non modificato)
-            if (payload.smtp_password === "••••••••") delete payload.smtp_password;
-            if (payload.twilio_auth_token === "••••••••") delete payload.twilio_auth_token;
+            // Costruisci payload escludendo campi computed (suffisso _set) e
+            // placeholder mascherati. Forza int sui port (input HTML restituisce string).
+            const payload = {};
+            for (const [k, v] of Object.entries(f)) {
+                if (k.endsWith("_set")) continue;
+                if (k === "updated_at" || k === "id") continue;
+                if ((k === "smtp_password" || k === "imap_password" || k === "twilio_auth_token" || k === "spoki_api_key") && v === "••••••••") continue;
+                if ((k === "smtp_port" || k === "imap_port") && v !== "" && v != null) {
+                    payload[k] = parseInt(v) || (k === "imap_port" ? 993 : 587);
+                    continue;
+                }
+                payload[k] = v;
+            }
             const r = await api.put("/librerie/comunicazioni", payload);
             setF(r.data);
             toast.success("Configurazione salvata");
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore salvataggio");
+            toast.error(errMsg(e, "Errore salvataggio"));
         }
         setSaving(false);
     };
@@ -2101,6 +2122,70 @@ function ComunicazioniSezione() {
                             value={f.twilio_whatsapp_from || ""}
                             onChange={(e) => set("twilio_whatsapp_from", e.target.value)}
                             data-testid="com-twilio-wa" />
+                    </div>
+                </div>
+            </section>
+
+            {/* SPOKI — WhatsApp BSP italiano */}
+            <section data-testid="lib-com-spoki" className="border border-emerald-200 rounded-lg p-4 bg-emerald-50/30">
+                <div className="flex items-start gap-3 mb-3">
+                    <div className="bg-emerald-100 text-emerald-700 p-2 rounded-md mt-0.5">
+                        <MessageCircle size={18} />
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-base font-semibold text-slate-800">WhatsApp — Spoki</h4>
+                            {f.spoki_api_key_set && (
+                                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Configurato
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                            Provider italiano BSP certificato Meta. Più semplice di Twilio (gestiscono loro la verifica).
+                            {" "}<a href="https://spoki.com/it/prezzi" target="_blank" rel="noreferrer"
+                                className="text-emerald-700 underline">spoki.com/it/prezzi</a> per piani e API key.
+                        </p>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <Label>API Key Spoki</Label>
+                        <Input type="password"
+                            placeholder={f.spoki_api_key_set ? "API key salvata (modifica per cambiare)" : "X-Spoki-Api-Key"}
+                            value={f.spoki_api_key || ""}
+                            onChange={(e) => set("spoki_api_key", e.target.value)}
+                            data-testid="com-spoki-key" />
+                    </div>
+                    <div>
+                        <Label>Nome mittente (opzionale)</Label>
+                        <Input placeholder="Assicurazioni Schiantarelli"
+                            value={f.spoki_sender_name || ""}
+                            onChange={(e) => set("spoki_sender_name", e.target.value)}
+                            data-testid="com-spoki-sender" />
+                    </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-emerald-200">
+                    <Label className="text-xs uppercase tracking-wide text-slate-600">
+                        Provider WhatsApp da usare per gli invii automatici
+                    </Label>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                        {[
+                            { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp per inviare manualmente" },
+                            { v: "twilio", label: "Twilio", desc: "Automatico (a pagamento)" },
+                            { v: "spoki", label: "Spoki", desc: "Automatico (italiano)" },
+                        ].map((p) => (
+                            <button
+                                key={p.v}
+                                type="button"
+                                onClick={() => set("whatsapp_provider", p.v)}
+                                className={`px-3 py-2 text-sm border rounded transition-colors text-left ${(f.whatsapp_provider || "wame") === p.v ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-emerald-300 hover:border-emerald-500"}`}
+                                data-testid={`wa-provider-${p.v}`}
+                            >
+                                <div className="font-medium">{p.label}</div>
+                                <div className={`text-[10px] mt-0.5 ${(f.whatsapp_provider || "wame") === p.v ? "text-emerald-50" : "text-slate-500"}`}>{p.desc}</div>
+                            </button>
+                        ))}
                     </div>
                 </div>
             </section>
@@ -2561,9 +2646,33 @@ const PLACEHOLDERS_DOC = [
     { k: "importo_abbuono", desc: "Importo abbuono (€)" },
 ];
 
+// Categorie raggruppate per chiarezza UI (tabs)
+const MODELLI_GRUPPI = [
+    {
+        key: "email", label: "Email", icon: "Mail", color: "sky",
+        descr: "Testi delle email (oggetto + corpo) inviate dal sistema.",
+        tipi: ["email"],
+    },
+    {
+        key: "whatsapp", label: "WhatsApp", icon: "MessageCircle", color: "emerald",
+        descr: "Messaggi WhatsApp (link wa.me o invio diretto via Twilio/Spoki).",
+        tipi: ["whatsapp"],
+    },
+    {
+        key: "sms", label: "SMS", icon: "Smartphone", color: "amber",
+        descr: "Messaggi SMS brevi inviati via Twilio (max ~160 caratteri).",
+        tipi: ["sms"],
+    },
+    {
+        key: "pdf", label: "PDF", icon: "FileText", color: "violet",
+        descr: "Documenti PDF (avvisi, lettere, brogliacci) generati dal sistema.",
+        tipi: ["pdf_avviso", "pdf_lettera_abbuono", "pdf_brogliaccio", "pdf_diagnosi", "pdf_prima_nota", "pdf_altro"],
+    },
+];
+
 function ModelliSezione() {
     const [items, setItems] = useState(null);
-    const [filtroTipo, setFiltroTipo] = useState("all");
+    const [activeTab, setActiveTab] = useState("email");
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState("");
@@ -2571,9 +2680,16 @@ function ModelliSezione() {
     const load = () => api.get("/librerie/modelli").then((r) => setItems(r.data || []));
     useEffect(() => { load(); }, []);
 
+    const gruppoCorrente = MODELLI_GRUPPI.find((g) => g.key === activeTab);
     const filtrati = (items || [])
-        .filter((m) => filtroTipo === "all" || m.tipo === filtroTipo)
+        .filter((m) => gruppoCorrente && gruppoCorrente.tipi.includes(m.tipo))
         .filter((m) => !q || (m.nome || "").toLowerCase().includes(q.toLowerCase()));
+
+    // conteggi per tab
+    const contatori = MODELLI_GRUPPI.reduce((acc, g) => {
+        acc[g.key] = (items || []).filter((m) => g.tipi.includes(m.tipo)).length;
+        return acc;
+    }, {});
 
     const elimina = async (m) => {
         if (!window.confirm(`Eliminare il modello "${m.nome}"?`)) return;
@@ -2583,89 +2699,141 @@ function ModelliSezione() {
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
+    const newPerTab = () => {
+        const defaultTipo = gruppoCorrente?.tipis?.[0] || gruppoCorrente?.tipi?.[0] || "email";
+        setEditing({ tipo: defaultTipo });
+        setOpen(true);
+    };
+
     return (
-        <Card className="p-4 border-slate-200" data-testid="lib-modelli">
-            <div className="flex flex-wrap items-center gap-3 mb-3">
-                <div>
-                    <h2 className="font-semibold text-slate-900 flex items-center gap-2">
-                        <FileText size={16} className="text-violet-700" />
-                        Gestioni Modelli
-                    </h2>
-                    <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-                        Personalizza il testo (HTML/markdown) usato per Email, WhatsApp, SMS e PDF.
-                        Usa <code>{"{placeholder}"}</code> per inserire dati dinamici.
-                    </p>
-                </div>
-                <div className="ml-auto flex items-center gap-2">
-                    <div className="relative">
-                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <Input placeholder="Cerca modello…" value={q}
-                            onChange={(e) => setQ(e.target.value)}
-                            className="pl-7 h-8 w-48 text-sm"
-                            data-testid="modelli-search" />
+        <Card className="p-0 border-slate-200 overflow-hidden" data-testid="lib-modelli">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-violet-50 to-white border-b border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                            <FileText size={18} className="text-violet-700" />
+                            Gestioni Modelli
+                        </h2>
+                        <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                            Personalizza i testi che il sistema invia ai clienti. Scegli il <strong>canale</strong> qui sotto,
+                            poi seleziona il modello da modificare. Usa <code className="bg-white px-1 rounded border border-slate-200">{"{placeholder}"}</code> per inserire dati dinamici (nome cliente, importo, ecc.).
+                        </p>
                     </div>
-                    <Select value={filtroTipo} onValueChange={setFiltroTipo}>
-                        <SelectTrigger className="w-48 h-8" data-testid="modelli-filter-tipo"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Tutti i tipi</SelectItem>
-                            {MODELLI_TIPI.map((t) => <SelectItem key={t.v} value={t.v}>{t.label}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                    <Button onClick={() => { setEditing(null); setOpen(true); }}
-                        className="bg-violet-700 hover:bg-violet-800" data-testid="modelli-new">
-                        <Plus size={14} className="mr-1" />Nuovo modello
-                    </Button>
                 </div>
             </div>
 
-            {items === null ? <Loading /> : filtrati.length === 0 ? (
-                <Empty message="Nessun modello. Creane uno per personalizzare le comunicazioni." />
-            ) : (
-                <table className="tbl w-full">
-                    <thead><tr>
-                        <th>Tipo</th><th>Nome</th><th>Categoria</th>
-                        <th className="text-center">Default</th><th className="text-center">Stato</th>
-                        <th>Placeholder</th><th className="w-24"></th>
-                    </tr></thead>
-                    <tbody>
+            {/* Tabs canale */}
+            <div className="flex flex-wrap border-b border-slate-200 bg-slate-50 px-3" data-testid="modelli-tabs">
+                {MODELLI_GRUPPI.map((g) => {
+                    const active = activeTab === g.key;
+                    const Icon = { Mail, MessageCircle, FileText }[g.icon] || ((p) => <span {...p}>•</span>);
+                    return (
+                        <button
+                            key={g.key}
+                            onClick={() => setActiveTab(g.key)}
+                            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${active ? `border-${g.color}-600 text-${g.color}-700 bg-white` : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-white/50"}`}
+                            data-testid={`modelli-tab-${g.key}`}
+                        >
+                            <Icon size={14} />
+                            {g.label}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? `bg-${g.color}-100 text-${g.color}-700` : "bg-slate-200 text-slate-600"}`}>
+                                {contatori[g.key] || 0}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* Body */}
+            <div className="p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-500 max-w-md">{gruppoCorrente?.descr}</p>
+                    <div className="flex items-center gap-2">
+                        <div className="relative">
+                            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <Input placeholder="Cerca per nome…" value={q}
+                                onChange={(e) => setQ(e.target.value)}
+                                className="pl-7 h-8 w-56 text-sm"
+                                data-testid="modelli-search" />
+                        </div>
+                        <Button onClick={newPerTab}
+                            className="bg-violet-700 hover:bg-violet-800 h-8" data-testid="modelli-new">
+                            <Plus size={14} className="mr-1" />Nuovo {gruppoCorrente?.label}
+                        </Button>
+                    </div>
+                </div>
+
+                {items === null ? <Loading /> : filtrati.length === 0 ? (
+                    <div className="text-center py-12 px-4 border-2 border-dashed border-slate-200 rounded-lg bg-slate-50/50">
+                        <FileText size={40} className="mx-auto text-slate-300 mb-2" />
+                        <p className="text-sm text-slate-600 font-medium">Nessun modello {gruppoCorrente?.label.toLowerCase()} ancora creato</p>
+                        <p className="text-xs text-slate-500 mt-1 mb-3">{gruppoCorrente?.descr}</p>
+                        <Button size="sm" onClick={newPerTab} className="bg-violet-700 hover:bg-violet-800" data-testid="modelli-empty-cta">
+                            <Plus size={12} className="mr-1" />Crea il primo modello
+                        </Button>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="modelli-grid">
                         {filtrati.map((m) => (
-                            <tr key={m.id} data-testid={`modello-row-${m.id}`}>
-                                <td className="text-xs"><span className="badge badge-info">{m.tipo}</span></td>
-                                <td className="font-medium">{m.nome}</td>
-                                <td className="text-xs text-slate-500">{m.categoria || "—"}</td>
-                                <td className="text-center">
-                                    {m.default && <span className="badge badge-success">✓ default</span>}
-                                </td>
-                                <td className="text-center">
-                                    {m.attivo
-                                        ? <span className="badge badge-success">attivo</span>
-                                        : <span className="badge badge-warning">disattivo</span>}
-                                </td>
-                                <td className="text-[10px] text-slate-500 font-mono">
-                                    {(m.placeholders || []).slice(0, 6).map((p) => `{${p}}`).join(" ")}
-                                    {(m.placeholders || []).length > 6 ? "…" : ""}
-                                </td>
-                                <td className="text-right">
-                                    <button onClick={() => { setEditing(m); setOpen(true); }}
-                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-slate-200 hover:bg-slate-100 mr-1"
-                                        title="Modifica" data-testid={`modello-edit-${m.id}`}>
-                                        <Pencil size={12} />
-                                    </button>
-                                    <button onClick={() => elimina(m)}
-                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
-                                        title="Elimina" data-testid={`modello-del-${m.id}`}>
+                            <div
+                                key={m.id}
+                                onClick={() => { setEditing(m); setOpen(true); }}
+                                className={`group relative p-3 bg-white border rounded-lg cursor-pointer transition-all hover:shadow-md hover:border-violet-400 ${m.default ? "border-violet-300 bg-violet-50/30" : "border-slate-200"}`}
+                                data-testid={`modello-card-${m.id}`}
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                            <h3 className="text-sm font-semibold text-slate-900 truncate">{m.nome}</h3>
+                                            {m.default && <span className="text-[9px] bg-violet-600 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wide">default</span>}
+                                            {!m.attivo && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded uppercase tracking-wide">off</span>}
+                                        </div>
+                                        {m.tipo.startsWith("pdf_") && (
+                                            <p className="text-[10px] text-violet-600 font-mono mb-1">{m.tipo.replace("pdf_", "PDF • ").replace("_", " ")}</p>
+                                        )}
+                                        {m.oggetto && (
+                                            <p className="text-[11px] text-slate-600 italic truncate mb-1">«{m.oggetto}»</p>
+                                        )}
+                                        <p className="text-xs text-slate-500 line-clamp-2 leading-snug">
+                                            {(m.corpo || "").slice(0, 140)}{(m.corpo || "").length > 140 ? "…" : ""}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); elimina(m); }}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-rose-50 text-rose-500"
+                                        title="Elimina"
+                                        data-testid={`modello-del-${m.id}`}
+                                    >
                                         <Trash2 size={12} />
                                     </button>
-                                </td>
-                            </tr>
+                                </div>
+                                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1 flex-wrap">
+                                    {(m.placeholders || []).slice(0, 4).map((p) => (
+                                        <span key={p} className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
+                                            {`{${p}}`}
+                                        </span>
+                                    ))}
+                                    {(m.placeholders || []).length > 4 && (
+                                        <span className="text-[9px] text-slate-400">+{(m.placeholders || []).length - 4}</span>
+                                    )}
+                                    {(m.placeholders || []).length === 0 && (
+                                        <span className="text-[9px] text-slate-400 italic">Nessun placeholder</span>
+                                    )}
+                                </div>
+                                <div className="absolute top-2 right-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Pencil size={11} className="text-slate-400" />
+                                </div>
+                            </div>
                         ))}
-                    </tbody>
-                </table>
-            )}
+                    </div>
+                )}
+            </div>
 
             {open && (
                 <ModelloFormDialog
                     editing={editing}
+                    suggestedTipo={gruppoCorrente?.tipi?.[0]}
                     onClose={(reload) => { setOpen(false); setEditing(null); if (reload) load(); }}
                 />
             )}
@@ -2673,9 +2841,9 @@ function ModelliSezione() {
     );
 }
 
-function ModelloFormDialog({ editing, onClose }) {
+function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     const [f, setF] = useState(editing || {
-        tipo: "email", nome: "", oggetto: "", corpo: "", sezioni: [],
+        tipo: suggestedTipo || "email", nome: "", oggetto: "", corpo: "", sezioni: [],
         categoria: "", default: false, attivo: true, note: "",
     });
     const [saving, setSaving] = useState(false);

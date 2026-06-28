@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, X, Menu } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, X, Menu, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
@@ -12,8 +12,14 @@ export default function TopBar() {
     const [q, setQ] = useState("");
     const [results, setResults] = useState(null);
     const [open, setOpen] = useState(false);
+    const [azienda, setAzienda] = useState(null);
     const ref = useRef();
     const nav = useNavigate();
+
+    // Carica config azienda per il logo (uno-shot)
+    useEffect(() => {
+        api.get("/librerie/azienda").then((r) => setAzienda(r.data)).catch(() => {});
+    }, []);
 
     // ricerca con debounce
     useEffect(() => {
@@ -64,6 +70,29 @@ export default function TopBar() {
             >
                 <Menu size={22} />
             </button>
+
+            {/* Utente loggato — avatar + nome (alto a sinistra, vicino al menu) */}
+            <button
+                type="button"
+                onClick={() => nav("/profilo")}
+                className="hidden md:flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-100 transition-colors"
+                data-testid="topbar-user-block"
+                title="Profilo utente"
+            >
+                {user?.avatar_url ? (
+                    <img src={user.avatar_url} alt={user.name}
+                        className="w-8 h-8 rounded-full object-cover border-2 border-slate-200" />
+                ) : (
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-violet-600 text-white flex items-center justify-center text-xs font-semibold">
+                        {(user?.name || user?.email || "?").trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                )}
+                <div className="text-left leading-tight">
+                    <div className="text-sm font-semibold text-slate-800">{user?.name || user?.email}</div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">{user?.role}</div>
+                </div>
+            </button>
+
             <div ref={ref} className="relative flex-1 max-w-xl mx-auto">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -132,10 +161,17 @@ export default function TopBar() {
             </div>
 
             <NotificheBell />
-            <div className="text-sm text-slate-600 hidden md:block">
-                <span className="font-medium">{user?.name}</span>
-                <span className="text-xs text-slate-400 ml-1">({user?.role})</span>
-            </div>
+
+            {/* Logo agenzia — alto a destra */}
+            {azienda?.logo_url && (
+                <img
+                    src={azienda.logo_url}
+                    alt={azienda.ragione_sociale || "Logo"}
+                    className="h-9 max-w-[140px] object-contain hidden md:block"
+                    title={azienda.ragione_sociale}
+                    data-testid="topbar-azienda-logo"
+                />
+            )}
         </div>
     );
 }

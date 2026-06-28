@@ -50,6 +50,8 @@ class UserPublic(BaseDoc):
     casellario_url: Optional[str] = None
     carichi_pendenti_url: Optional[str] = None
     documento_iban_url: Optional[str] = None
+    # Foto profilo (avatar) — mostrata in top bar e diario
+    avatar_url: Optional[str] = None
     # Alias email aziendali per smistamento posta in arrivo (es.
     # "alessia.balzarolo@schiantarelli.it"). Possono includere alias di
     # reparto condivisi (es. "sinistri@…" su più collaboratori).

@@ -371,28 +371,18 @@ async def test_comunicazioni(body: dict,
     if canale == "email":
         if not (az.get("smtp_host") and az.get("smtp_user")):
             raise HTTPException(400, "SMTP non configurato (host/user mancanti)")
-        import smtplib
-        from email.message import EmailMessage
-        em = EmailMessage()
-        em["Subject"] = "Test invio email — Assicura"
-        em["From"] = az.get("smtp_from") or az["smtp_user"]
-        em["To"] = dest
-        em.set_content(msg)
+        from email_utils import smtp_send
         try:
-            port = int(az.get("smtp_port") or 587)
-            if port == 465:
-                srv = smtplib.SMTP_SSL(az["smtp_host"], port, timeout=30)
-            else:
-                srv = smtplib.SMTP(az["smtp_host"], port, timeout=30)
-                if az.get("smtp_use_tls", True):
-                    srv.starttls()
-            if az.get("smtp_password"):
-                srv.login(az["smtp_user"], az["smtp_password"])
-            srv.send_message(em)
-            srv.quit()
+            smtp_send(
+                az, to_addrs=dest,
+                subject="Test invio email — Assicura",
+                text=msg,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         except Exception as e:
             raise HTTPException(503, f"Errore invio email: {e}")
-        return {"ok": True, "canale": "email", "destinatario": dest}
+        return {"ok": True, "canale": "email", "destinatario": dest, "from": az.get("smtp_user")}
 
     if canale in ("sms", "whatsapp"):
         if not (az.get("twilio_account_sid") and az.get("twilio_auth_token")):

@@ -2482,11 +2482,21 @@ async def list_titoli(
     collab_ids = list({p.get("collaboratore_id") for p in pols.values() if p.get("collaboratore_id")})
     collabs = {u["id"]: u async for u in db.users.find(
         {"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1})}
+    # Lookup nomi prodotti (Polizza.prodotto è un FK id verso db.prodotti)
+    prod_ids = list({p.get("prodotto") for p in pols.values() if p.get("prodotto")})
+    prodotti_map = {pr["id"]: (pr.get("nome") or pr.get("ramo") or "")
+                    async for pr in db.prodotti.find(
+                        {"id": {"$in": prod_ids}}, {"_id": 0, "id": 1, "nome": 1, "ramo": 1})}
     for t in items:
         p = pols.get(t.get("polizza_id"), {})
         t["numero_polizza"] = p.get("numero_polizza")
         t["ramo"] = p.get("ramo")
-        t["prodotto"] = p.get("prodotto")
+        prod_raw = p.get("prodotto") or ""
+        # Risolvi sempre il nome del prodotto, mai un UUID
+        t["prodotto"] = prodotti_map.get(prod_raw) or (
+            "" if (prod_raw and len(prod_raw) >= 32 and "-" in prod_raw and " " not in prod_raw)
+            else prod_raw
+        )
         t["targa"] = p.get("targa")
         t["contraente_id"] = p.get("contraente_id")
         t["contraente_nome"] = anas.get(p.get("contraente_id", ""), {}).get("ragione_sociale")
@@ -7505,9 +7515,6 @@ async def invia_bulk_avvisi_titoli(
     return {"ok": True, "contraenti_totali": len(bucket), "inviate": inviate, "skipped": skipped}
 
 
-@api.post("/email/avvisi-scadenze")
-
-
 def _render_avviso_titoli_email(*, ragione_sociale: str, corpo_lettera: str,
                                  titoli: list[dict], azienda: dict) -> tuple[str, str]:
     """Genera (text, html) per email avviso titoli aggregati per un contraente."""
@@ -8167,14 +8174,35 @@ async def avvisi_genera_pdf(body: dict, user=Depends(current_user)):
     ).to_list(500)
     pmap = {p["id"]: p for p in polizze}
 
+    # Lookup nomi prodotti (campo Polizza.prodotto è un FK id verso db.prodotti)
+    prodotti_ids = list({p.get("prodotto") for p in polizze if p.get("prodotto")})
+    prodotti_map: dict = {}
+    if prodotti_ids:
+        async for pr in db.prodotti.find(
+            {"id": {"$in": prodotti_ids}}, {"_id": 0, "id": 1, "nome": 1, "ramo": 1},
+        ):
+            prodotti_map[pr["id"]] = pr.get("nome") or pr.get("ramo") or ""
+
     righe = []
     for t in titoli:
         p = pmap.get(t.get("polizza_id"), {})
+        # Risolvi nome prodotto: prima da prodotti_map, poi fallback su ramo
+        prodotto_raw = p.get("prodotto") or ""
+        rischio = prodotti_map.get(prodotto_raw) or prodotto_raw or p.get("ramo") or ""
+        # Se ancora sembra un UUID, fallback finale su ramo
+        if rischio and len(rischio) >= 32 and "-" in rischio and " " not in rischio:
+            rischio = p.get("ramo") or ""
+        # Rata del = data scadenza del titolo (campo .scadenza in Titolo)
+        rata_del = (
+            t.get("scadenza")
+            or t.get("data_scadenza")
+            or t.get("data_decorrenza")
+        )
         righe.append({
             "numero_contratto": p.get("numero_polizza") or "",
-            "rischio": p.get("prodotto") or p.get("ramo") or "",
+            "rischio": rischio[:40],
             "targa": p.get("targa") or "",
-            "rata_del": t.get("data_scadenza") or t.get("data_decorrenza"),
+            "rata_del": rata_del,
             "importo": float(t.get("importo_lordo") or 0),
         })
 
