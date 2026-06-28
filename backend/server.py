@@ -8045,6 +8045,47 @@ ALLOWED_USER_DOCS = {
 }
 
 
+@api.post("/auth/users/{uid}/avatar")
+async def upload_avatar_utente(
+    uid: str,
+    file: UploadFile = File(...),
+    user=Depends(current_user),
+):
+    """Carica l'avatar (immagine profilo) di un utente.
+    Permesso: admin oppure l'utente stesso.
+    """
+    if user["role"] != "admin" and user.get("id") != uid:
+        raise HTTPException(403, "Permesso negato")
+    target = await db.users.find_one({"id": uid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    data = await file.read()
+    if len(data) > 4 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 4 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if not (ct or "").startswith("image/"):
+        raise HTTPException(400, "Formato non supportato (richiesto JPG/PNG/WEBP)")
+    ext = (file.filename or "avatar.jpg").rsplit(".", 1)[-1].lower() or "jpg"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/avatar_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    await db.users.update_one({"id": uid}, {"$set": {"avatar_url": url, "updated_at": _now_iso()}})
+    await log_attivita(user, "upload", "user_avatar", uid, "Avatar caricato")
+    return {"avatar_url": url}
+
+
+@api.delete("/auth/users/{uid}/avatar")
+async def delete_avatar_utente(uid: str, user=Depends(current_user)):
+    if user["role"] != "admin" and user.get("id") != uid:
+        raise HTTPException(403, "Permesso negato")
+    await db.users.update_one({"id": uid}, {"$set": {"avatar_url": None, "updated_at": _now_iso()}})
+    return {"ok": True}
+
+
+
 @api.post("/auth/users/{uid}/documenti/{doc_tipo}")
 async def upload_documento_utente(
     uid: str, doc_tipo: str,

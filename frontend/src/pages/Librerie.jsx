@@ -931,7 +931,7 @@ function UtenteForm({ section, editing, onClose }) {
             codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
             perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
             note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
-            profilo_permessi_id: null,
+            profilo_permessi_id: null, avatar_url: null,
         }}
         fields={(f, set) => (
             <Tabs defaultValue="anagrafica" className="w-full">
@@ -943,6 +943,9 @@ function UtenteForm({ section, editing, onClose }) {
                 </TabsList>
 
                 <TabsContent value="anagrafica" className="space-y-3 mt-4">
+                    {editing && f.role !== "cliente" && (
+                        <AvatarUploader userId={editing.id} avatarUrl={f.avatar_url} onChange={(url) => set("avatar_url", url)} />
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                         <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
                         <div><Label>Email *</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
@@ -1044,6 +1047,63 @@ function UtenteForm({ section, editing, onClose }) {
         )}
     />;
 }
+
+// =================== AVATAR UPLOADER (collaboratori) ===================
+function AvatarUploader({ userId, avatarUrl, onChange }) {
+    const [uploading, setUploading] = useState(false);
+    const upload = async (e) => {
+        const f = e.target.files?.[0]; if (!f) return;
+        if (f.size > 4 * 1024 * 1024) { toast.error("File troppo grande (max 4 MB)"); return; }
+        setUploading(true);
+        const fd = new FormData(); fd.append("file", f);
+        try {
+            const r = await api.post(`/auth/users/${userId}/avatar`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            onChange(r.data.avatar_url);
+            toast.success("Avatar aggiornato");
+        } catch (err) { toast.error(err.response?.data?.detail || "Errore upload"); }
+        finally { setUploading(false); e.target.value = ""; }
+    };
+    const remove = async () => {
+        if (!window.confirm("Rimuovere l'avatar?")) return;
+        try {
+            await api.delete(`/auth/users/${userId}/avatar`);
+            onChange(null); toast.success("Avatar rimosso");
+        } catch { toast.error("Errore"); }
+    };
+    const fullUrl = avatarUrl
+        ? (avatarUrl.startsWith("http") ? avatarUrl
+            : `${process.env.REACT_APP_BACKEND_URL || ""}${avatarUrl}`)
+        : null;
+    return (
+        <div className="flex items-center gap-4 p-3 bg-slate-50 border border-slate-200 rounded-md">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-sky-100 to-indigo-200 border-2 border-white shadow flex items-center justify-center overflow-hidden">
+                {fullUrl ? (
+                    <img src={fullUrl} alt="avatar" className="w-full h-full object-cover" data-testid="avatar-preview" />
+                ) : (
+                    <span className="text-2xl text-sky-700 font-bold">?</span>
+                )}
+            </div>
+            <div className="flex-1">
+                <div className="text-xs font-semibold text-slate-700 mb-1">Avatar profilo</div>
+                <div className="text-[11px] text-slate-500 mb-2">JPG/PNG/WEBP, max 4 MB. Mostrato in TopBar, Diario e Chat.</div>
+                <div className="flex gap-2">
+                    <label className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-sky-200 bg-white text-sky-700 text-xs font-medium cursor-pointer hover:bg-sky-50" data-testid="avatar-upload-btn">
+                        {uploading ? "Caricamento…" : (fullUrl ? "Cambia immagine" : "Carica immagine")}
+                        <input type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={upload} data-testid="avatar-upload-input" />
+                    </label>
+                    {fullUrl && (
+                        <button type="button" onClick={remove} className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded" data-testid="avatar-remove-btn">
+                            Rimuovi
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
 
 
 // =================== AZIENDA (Singleton) ===================

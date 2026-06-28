@@ -42,6 +42,10 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (28/06/2026 — pomeriggio)
+- **Avatar upload utenti**: aggiunto endpoint `POST /api/auth/users/{uid}/avatar` (admin oppure utente stesso, max 4 MB JPG/PNG/WEBP, salvataggio su object storage). Nuovo componente `AvatarUploader` nella tab Anagrafica del form Modifica utenti con preview, cambio e rimozione. Avatar disponibile per TopBar/Diario/Chat
+- Voce **Corsi** già presente in sidebar (`/corsi`); tab Corsi nel form utenti già funzionante per gestione attestati IVASS con upload PDF/IMG
+
 ## Changelog (28/06/2026)
 - **KPI cliccabili + dropdown filtro**: ogni KPI ora porta alla lista filtrata (es. "Auto privati" → /polizze?categoria=auto_priv). Il dialog "Personalizza KPI" ha "Valore filtro" come dropdown dinamico via `/api/kpi/options`. Aggiunto filtro `categoria` su `/api/polizze` (auto_priv, auto_az, altri_priv, altri_az, vita_inv, vita_prot)
 - **Fix KPI Polizze backend**: risolto `JSONDecodeError` (`$group does not support inclusion-style expressions`). Riscritta `_stats_polizze` con classificazione Python (tipo anagrafica via tag azienda/condominio override)
