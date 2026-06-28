@@ -848,6 +848,13 @@ class AziendaConfig(BaseDoc):
     notifica_scadenze_attiva: bool = True
     notifica_scadenze_giorni: int = 15
     notifica_scadenze_email_admin: Optional[str] = None  # se vuoto usa email_commercialista o admin
+    # IMAP Poller — abilitazione automatica all'avvio del backend
+    imap_poller_enabled: bool = False
+    imap_poller_minutes: int = 5            # frequenza polling in minuti
+    imap_poller_last_run: Optional[str] = None
+    imap_poller_last_uid: Optional[int] = None  # ultimo UID processato (per fetch incrementale)
+    # WhatsApp — provider di default scelto dal cliente: "wame" (link) | "twilio"
+    whatsapp_provider: str = "wame"
 
 
 # =============== SCHEMA / SISTEMA PROVVIGIONALE ===============
@@ -1167,3 +1174,40 @@ class MezzoPagamento(BaseDoc):
     icona: Optional[str] = None
     ordine: int = 0
     attivo: bool = True
+
+
+
+# =============== GESTIONI MODELLI (TEMPLATE) ===============
+ModelloTipo = Literal[
+    "email",            # corpo + oggetto per invio email
+    "whatsapp",         # testo per WhatsApp (wa.me link o Twilio)
+    "sms",              # testo per SMS
+    "pdf_avviso",       # PDF di sollecito scadenza
+    "pdf_lettera_abbuono",  # PDF Lettera di Abbuono
+    "pdf_brogliaccio",  # PDF Brogliaccio
+    "pdf_diagnosi",     # PDF Diagnosi assicurativa
+    "pdf_prima_nota",   # PDF Prima Nota
+    "pdf_altro",        # altri PDF custom
+]
+
+
+class TemplateModello(BaseDoc):
+    """Modello personalizzabile per comunicazioni e PDF.
+
+    Sostituisce/affianca i corpi di default hardcoded del sistema.
+    Supporta placeholder dinamici (es. ``{cliente_nome}``, ``{importo}``,
+    ``{scadenza}``, ``{numero_polizza}``) sostituiti al momento dell'invio.
+
+    Per i PDF, ``corpo`` può essere markdown o HTML (renderizzato in ReportLab
+    con Paragraph), oppure JSON strutturato per layout multi-sezione.
+    """
+    tipo: ModelloTipo
+    nome: str                                       # nome leggibile (es. "Sollecito titoli arretrati")
+    oggetto: Optional[str] = None                   # solo email
+    corpo: str = ""                                 # text / html / markdown
+    sezioni: List[dict] = Field(default_factory=list)  # per PDF multi-sezione (avvisi): [{titolo, contenuto, ordine, attiva}]
+    placeholders: List[str] = Field(default_factory=list)  # documentazione (auto-rilevati)
+    categoria: Optional[str] = None                 # raggruppamento UI (es. "scadenze", "marketing", "fiscale")
+    default: bool = False                           # marcato come modello predefinito per il tipo
+    attivo: bool = True
+    note: Optional[str] = None

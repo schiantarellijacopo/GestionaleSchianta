@@ -81,9 +81,12 @@ h1, h2, h3, h4, h5 {
 /* Tables dense */
 .tbl thead th {
     @apply text-[11px] uppercase tracking-[0.1em] font-semibold text-slate-500 text-left px-3 py-1.5 border-b border-slate-200 bg-slate-50;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 .tbl tbody td {
     @apply px-3 py-1.5 border-b border-slate-100 text-sm text-slate-800;
+    vertical-align: middle;
 }
 .tbl tbody tr:hover { @apply bg-slate-50; }
 .tbl tbody tr:nth-child(even) { background-color: #fbfcfe; }
@@ -92,12 +95,42 @@ h1, h2, h3, h4, h5 {
 .tbl-compact { table-layout: auto; border-collapse: separate; border-spacing: 0; }
 .tbl-compact thead th {
     @apply text-[10px] uppercase tracking-[0.06em] font-semibold text-slate-500 text-left px-2 py-1.5 border-b border-slate-200 bg-slate-50;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 .tbl-compact tbody td {
     @apply px-2 py-1.5 border-b border-slate-100 text-xs text-slate-800 align-middle;
+    vertical-align: middle;
 }
 .tbl-compact tbody tr:hover { @apply bg-slate-50; }
 .tbl-compact tbody tr:nth-child(even) { background-color: #fbfcfe; }
+
+/* Forza i contenitori a non eccedere la viewport (evita scrollbar duplicate) */
+.tbl-scroll table {
+    width: 100%;
+}
+
+/* Limita la larghezza max delle colonne frozen per evitare che row con testi
+   lunghi le facciano espandere in modo eccessivo. Il contenuto eccedente viene
+   troncato con ellipsi. Override con classe `td-wrap` o `wrap-cell` se serve. */
+.tbl-scroll .freeze-3 tbody td:nth-child(1),
+.tbl-scroll .freeze-3 thead th:nth-child(1) { max-width: var(--c1-w, 160px); }
+.tbl-scroll .freeze-3 tbody td:nth-child(2),
+.tbl-scroll .freeze-3 thead th:nth-child(2) { max-width: var(--c2-w, 140px); }
+.tbl-scroll .freeze-3 tbody td:nth-child(3),
+.tbl-scroll .freeze-3 thead th:nth-child(3) { max-width: var(--c3-w, 220px); }
+.tbl-scroll .freeze-2 tbody td:nth-child(1),
+.tbl-scroll .freeze-2 thead th:nth-child(1) { max-width: var(--c1-w, 160px); }
+.tbl-scroll .freeze-2 tbody td:nth-child(2),
+.tbl-scroll .freeze-2 thead th:nth-child(2) { max-width: var(--c2-w, 200px); }
+
+/* Truncate automatico nelle frozen cells, salvo override `wrap-cell` */
+.tbl-scroll .freeze-3 tbody td:nth-child(-n+3):not(.wrap-cell),
+.tbl-scroll .freeze-2 tbody td:nth-child(-n+2):not(.wrap-cell) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* =====================================================================
    STICKY tables (header in alto + prime N colonne a sinistra).

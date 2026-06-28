@@ -59,10 +59,12 @@ import pdf_report
 import pdf_diagnosi
 import pdf_brogliaccio
 import pdf_lettera_abbuono
+import pdf_avviso
 import brogliaccio as brog
 import cf_calc
 import geocoder as geocoder_svc
 import avvisi_scadenze
+import imap_poller
 from fastapi.responses import StreamingResponse
 import io as _io
 
@@ -8075,6 +8077,214 @@ async def email_inbox_mark_read(eid: str, user=Depends(current_user)):
 
 
 # ============================================================
+# IMAP POLLER — controlli scheduler + smistamento manuale
+# ============================================================
+@api.get("/email/poller/status")
+async def imap_poller_status(user=Depends(require_user("admin"))):
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "imap_poller_enabled": 1, "imap_poller_minutes": 1,
+             "imap_poller_last_run": 1, "imap_poller_last_uid": 1,
+             "imap_host": 1, "imap_user": 1},
+    ) or {}
+    return {
+        "running": imap_poller.is_running(),
+        "enabled": bool(az.get("imap_poller_enabled")),
+        "minutes": int(az.get("imap_poller_minutes") or 5),
+        "last_run": az.get("imap_poller_last_run"),
+        "last_uid": az.get("imap_poller_last_uid"),
+        "imap_host": az.get("imap_host"),
+        "imap_user": az.get("imap_user"),
+    }
+
+
+@api.post("/email/poller/start")
+async def imap_poller_start(
+    body: Optional[dict] = None, user=Depends(require_user("admin")),
+):
+    body = body or {}
+    minutes = int(body.get("minutes") or 5)
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    if not (az.get("imap_host") and az.get("imap_user") and az.get("imap_password")):
+        raise HTTPException(400, "IMAP non configurato (host/user/password)")
+    imap_poller.start_scheduler(db, minutes=minutes)
+    if az.get("id"):
+        await db.azienda_config.update_one(
+            {"id": az["id"]},
+            {"$set": {"imap_poller_enabled": True, "imap_poller_minutes": minutes}},
+        )
+    return {"ok": True, "running": True, "minutes": minutes}
+
+
+@api.post("/email/poller/stop")
+async def imap_poller_stop(user=Depends(require_user("admin"))):
+    imap_poller.stop_scheduler()
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1}) or {}
+    if az.get("id"):
+        await db.azienda_config.update_one(
+            {"id": az["id"]}, {"$set": {"imap_poller_enabled": False}},
+        )
+    return {"ok": True, "running": False}
+
+
+@api.post("/email/poller/run-now")
+async def imap_poller_run_now(user=Depends(require_user("admin"))):
+    """Esegue un singolo ciclo di polling on-demand (utile per test)."""
+    res = await imap_poller.poll_once(db)
+    return res
+
+
+# ============================================================
+# AVVISI — Generazione PDF (usa template "pdf_avviso" da Gestioni Modelli)
+# ============================================================
+@api.post("/avvisi/pdf")
+async def avvisi_genera_pdf(body: dict, user=Depends(current_user)):
+    """Genera il PDF avviso di scadenza per un contraente.
+
+    Body:
+      - ``contraente_id`` (str)
+      - ``titoli_ids`` (list[str]) — IDs dei titoli da includere
+      - ``template_id`` (str, opzionale) — usa il modello default se assente
+    """
+    contraente_id = body.get("contraente_id")
+    titoli_ids = body.get("titoli_ids") or []
+    template_id = body.get("template_id")
+    if not contraente_id or not titoli_ids:
+        raise HTTPException(400, "contraente_id e titoli_ids obbligatori")
+
+    contraente = await db.anagrafiche.find_one({"id": contraente_id}, {"_id": 0})
+    if not contraente:
+        raise HTTPException(404, "Contraente non trovato")
+
+    azienda = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    # Carica titoli + arricchisci con polizza
+    titoli = await db.titoli.find(
+        {"id": {"$in": titoli_ids}}, {"_id": 0},
+    ).to_list(500)
+    polizze_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    polizze = await db.polizze.find(
+        {"id": {"$in": polizze_ids}}, {"_id": 0},
+    ).to_list(500)
+    pmap = {p["id"]: p for p in polizze}
+
+    righe = []
+    for t in titoli:
+        p = pmap.get(t.get("polizza_id"), {})
+        righe.append({
+            "numero_contratto": p.get("numero_polizza") or "",
+            "rischio": p.get("prodotto") or p.get("ramo") or "",
+            "targa": p.get("targa") or "",
+            "rata_del": t.get("data_scadenza") or t.get("data_decorrenza"),
+            "importo": float(t.get("importo_lordo") or 0),
+        })
+
+    # Carica template
+    template: Optional[dict] = None
+    if template_id:
+        template = await db.template_modelli.find_one({"id": template_id}, {"_id": 0})
+    if not template:
+        from routes.modelli import get_default_template
+        template = await get_default_template("pdf_avviso")
+
+    dest = {
+        "ragione_sociale": contraente.get("ragione_sociale") or "",
+        "indirizzo": contraente.get("indirizzo") or "",
+        "cap": contraente.get("cap") or "",
+        "comune": contraente.get("comune") or "",
+        "provincia": contraente.get("provincia") or "",
+        "codice_fiscale": contraente.get("codice_fiscale") or "",
+    }
+
+    pdf_bytes = pdf_avviso.generate_avviso_pdf(
+        azienda=azienda, destinatario=dest, righe=righe, template=template,
+    )
+    nome_file = f"avviso_{(contraente.get('ragione_sociale') or 'cliente').replace(' ', '_')[:40]}.pdf"
+    return StreamingResponse(
+        _io.BytesIO(pdf_bytes), media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{nome_file}"'},
+    )
+
+
+# ============================================================
+# WHATSAPP DISPATCH — wa.me link OR Twilio (scelta provider azienda)
+# ============================================================
+@api.post("/comunicazioni/whatsapp/invia")
+async def whatsapp_invia(body: dict, user=Depends(current_user)):
+    """Invia messaggio WhatsApp.
+
+    Body: ``{numero, messaggio, anagrafica_id?, polizza_id?, provider?}``.
+    Provider: 'wame' (default, ritorna link da aprire), 'twilio' (invio diretto).
+    """
+    numero = (body.get("numero") or "").strip()
+    messaggio = (body.get("messaggio") or "").strip()
+    if not numero or not messaggio:
+        raise HTTPException(400, "numero e messaggio obbligatori")
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    provider = (body.get("provider") or az.get("whatsapp_provider") or "wame").lower()
+
+    cleaned = re.sub(r"[^\d+]", "", numero)
+    if cleaned.startswith("00"):
+        cleaned = "+" + cleaned[2:]
+    if not cleaned.startswith("+"):
+        # default Italia
+        cleaned = "+39" + cleaned
+
+    if provider == "wame":
+        from urllib.parse import quote
+        wa_number = cleaned.lstrip("+")
+        url = f"https://wa.me/{wa_number}?text={quote(messaggio)}"
+        # Log nel diario / storico
+        await db.storico_avvisi.insert_one({
+            "id": _uid_local(),
+            "canale": "whatsapp",
+            "provider": "wame",
+            "destinatario": cleaned,
+            "messaggio": messaggio[:2000],
+            "anagrafica_id": body.get("anagrafica_id"),
+            "polizza_id": body.get("polizza_id"),
+            "utente_id": user["id"],
+            "created_at": _now_iso(),
+        })
+        return {"ok": True, "provider": "wame", "url": url}
+
+    if provider == "twilio":
+        if not (az.get("twilio_account_sid") and az.get("twilio_auth_token")
+                and az.get("twilio_whatsapp_from")):
+            raise HTTPException(400, "Twilio WhatsApp non configurato in Librerie")
+        try:
+            from twilio.rest import Client  # type: ignore[import-untyped]
+        except ImportError:
+            raise HTTPException(503, "Libreria Twilio non installata")
+        try:
+            tw = Client(az["twilio_account_sid"], az["twilio_auth_token"])
+            tw.messages.create(
+                body=messaggio,
+                from_=az["twilio_whatsapp_from"],
+                to=f"whatsapp:{cleaned}",
+            )
+        except Exception as e:
+            raise HTTPException(503, f"Errore Twilio: {e}")
+        await db.storico_avvisi.insert_one({
+            "id": _uid_local(),
+            "canale": "whatsapp",
+            "provider": "twilio",
+            "destinatario": cleaned,
+            "messaggio": messaggio[:2000],
+            "anagrafica_id": body.get("anagrafica_id"),
+            "polizza_id": body.get("polizza_id"),
+            "utente_id": user["id"],
+            "created_at": _now_iso(),
+        })
+        return {"ok": True, "provider": "twilio"}
+
+    raise HTTPException(400, f"Provider non supportato: {provider}")
+
+
+def _uid_local() -> str:
+    return str(uuid.uuid4())
+
+
+# ============================================================
 # DIARIO COLLABORATORE (note + aggregato comunicazioni inviate + chat)
 # ============================================================
 @api.get("/diario")
@@ -9340,10 +9550,12 @@ from routes import dashboard as _dash_router  # noqa: E402
 from routes import ocr as _ocr_router  # noqa: E402
 from routes import anagrafiche as _anag_router  # noqa: E402
 from routes import alert as _alert_router  # noqa: E402
+from routes import modelli as _modelli_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
 api.include_router(_alert_router.router)
+api.include_router(_modelli_router.router)
 
 app.include_router(api)
 
@@ -9461,6 +9673,30 @@ async def startup():
     except Exception as e:
         logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
 
+    # Seed modelli di default (idempotente)
+    try:
+        from routes.modelli import seed_default_models
+        await seed_default_models()
+    except Exception as e:
+        logger.warning("Seed modelli fallito (non bloccante): %s", e)
+
+    # IMAP Poller — avviato automaticamente solo se abilitato in config
+    try:
+        az_cfg = await db.azienda_config.find_one(
+            {}, {"_id": 0, "imap_poller_enabled": 1, "imap_poller_minutes": 1,
+                 "imap_host": 1, "imap_user": 1, "imap_password": 1},
+        ) or {}
+        if (az_cfg.get("imap_poller_enabled")
+                and az_cfg.get("imap_host")
+                and az_cfg.get("imap_user")
+                and az_cfg.get("imap_password")):
+            imap_poller.start_scheduler(
+                db, minutes=int(az_cfg.get("imap_poller_minutes") or 5),
+            )
+            logger.info("IMAP poller auto-avviato all'avvio del backend")
+    except Exception as e:
+        logger.warning("IMAP poller non avviato: %s", e)
+
     # One-shot: unifica vecchi sconti su singola riga del brogliaccio
     try:
         res = await _migrate_unify_sconti()
@@ -9485,6 +9721,10 @@ async def startup():
 async def shutdown():
     try:
         avvisi_scadenze.stop_scheduler()
+    except Exception:
+        pass
+    try:
+        imap_poller.stop_scheduler()
     except Exception:
         pass
     client.close()

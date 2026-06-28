@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Bell, Mail, MessageCircle, Smartphone, FileText, Receipt,
-    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search,
+    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -370,6 +370,11 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                                     <MessageCircle size={12} className="text-emerald-600" />
                                                 </Button>
                                             )}
+                                            <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Genera PDF Avviso"
+                                                onClick={() => stampaPdfAvviso(g)}
+                                                data-testid={`btn-pdf-${k}`}>
+                                                <Printer size={12} className="text-violet-700" />
+                                            </Button>
                                             {hasCell && (
                                                 <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="SMS (Twilio fine progetto)"
                                                     onClick={() => toast.info("SMS via Twilio - in arrivo")}
@@ -427,6 +432,38 @@ function openWA(g) {
     window.open(`https://wa.me/${cell}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
+async function stampaPdfAvviso(g) {
+    try {
+        const r = await api.post("/avvisi/pdf", {
+            contraente_id: g.contraente_id,
+            titoli_ids: g.titoli.map((t) => t.id),
+        }, { responseType: "blob" });
+        const blob = new Blob([r.data], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank", "noopener");
+        toast.success("PDF avviso generato");
+    } catch (e) {
+        toast.error(e.response?.data?.detail || "Errore generazione PDF");
+    }
+}
+
+async function stampaPdfAvvisoPolizza(p) {
+    // Per polizze singole, generiamo l'avviso usando la polizza come "gruppo"
+    try {
+        // Trova il prossimo titolo non incassato (placeholder: usa titoli della polizza)
+        const titR = await api.get("/titoli", { params: { polizza_id: p.id, stato: "scaduto" } });
+        const titoli = (titR.data || []).filter((t) => t.polizza_id === p.id);
+        if (!titoli.length) { toast.info("Nessun titolo associato per il PDF"); return; }
+        const r = await api.post("/avvisi/pdf", {
+            contraente_id: p.contraente_id,
+            titoli_ids: titoli.map((t) => t.id),
+        }, { responseType: "blob" });
+        const blob = new Blob([r.data], { type: "application/pdf" });
+        window.open(URL.createObjectURL(blob), "_blank", "noopener");
+        toast.success("PDF avviso generato");
+    } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+}
+
 function PolizzeTable({ items, onEmail }) {
     if (!items.length) return <Card className="p-8 text-center text-slate-500 border-slate-200">Nessuna polizza in scadenza.</Card>;
     return (
@@ -468,6 +505,12 @@ function PolizzeTable({ items, onEmail }) {
                                             <MessageCircle size={12} className="text-emerald-600" />
                                         </Button>
                                     )}
+                                    <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                                        title="Genera PDF Avviso"
+                                        onClick={() => stampaPdfAvvisoPolizza(p)}
+                                        data-testid={`btn-pdf-pol-${p.id}`}>
+                                        <Printer size={12} className="text-violet-700" />
+                                    </Button>
                                 </div>
                             </td>
                         </tr>

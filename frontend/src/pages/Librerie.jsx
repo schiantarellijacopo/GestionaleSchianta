@@ -5,13 +5,14 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -21,6 +22,7 @@ const SECTIONS = [
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
+    { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
@@ -49,6 +51,7 @@ export default function Librerie() {
                         {s.key === "azienda" ? <AziendaSezione />
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
+                            : s.key === "modelli" ? <ModelliSezione />
                             : <Sezione section={s} />}
                     </TabsContent>
                 ))}
@@ -913,7 +916,7 @@ function UtenteForm({ section, editing, onClose }) {
             name: "", email: "", password: "", role: "dipendente", anagrafica_id: null,
             codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
             perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
-            note_fiscali: "", note_interne: "", attivo: true,
+            note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
         }}
         fields={(f, set) => (
             <Tabs defaultValue="anagrafica" className="w-full">
@@ -1861,6 +1864,9 @@ function ImapSection({ f, set, onSet }) {
                 </Button>
             </div>
 
+            {/* POLLER: avvio/stop scheduler smistamento email */}
+            <ImapPollerControl />
+
             {risultato?.error && (
                 <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-900">
                     <strong>Errore:</strong> {risultato.error}
@@ -1880,6 +1886,92 @@ function ImapSection({ f, set, onSet }) {
                 </div>
             )}
         </section>
+    );
+}
+
+
+function ImapPollerControl() {
+    const [s, setS] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [minutes, setMinutes] = useState(5);
+
+    const refresh = async () => {
+        try {
+            const r = await api.get("/email/poller/status");
+            setS(r.data);
+            if (r.data.minutes) setMinutes(r.data.minutes);
+        } catch (e) { /* admin only */ }
+    };
+    useEffect(() => { refresh(); const t = setInterval(refresh, 8000); return () => clearInterval(t); }, []);
+
+    const start = async () => {
+        setBusy(true);
+        try {
+            await api.post("/email/poller/start", { minutes });
+            toast.success(`Poller IMAP avviato (ogni ${minutes} min)`);
+            refresh();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        setBusy(false);
+    };
+    const stop = async () => {
+        setBusy(true);
+        try {
+            await api.post("/email/poller/stop");
+            toast.success("Poller IMAP fermato");
+            refresh();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        setBusy(false);
+    };
+    const runNow = async () => {
+        setBusy(true);
+        try {
+            const r = await api.post("/email/poller/run-now");
+            if (r.data.ok) {
+                toast.success(`Polling completato: ${r.data.nuovi || 0} nuove · ${r.data.saltati || 0} già presenti`);
+            } else {
+                toast.error(r.data.errore || "Errore polling");
+            }
+            refresh();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        setBusy(false);
+    };
+
+    if (!s) return null;
+    return (
+        <div className="mt-4 p-3 bg-violet-50/40 border border-violet-200 rounded-md" data-testid="imap-poller-ctrl">
+            <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${s.running ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
+                    <span className="text-sm font-semibold text-slate-800">
+                        Smistamento automatico email: {s.running ? "ATTIVO" : "FERMO"}
+                    </span>
+                </div>
+                <div className="flex items-center gap-1.5 ml-auto">
+                    <Label className="text-xs whitespace-nowrap">Frequenza</Label>
+                    <Input type="number" min={1} max={60} value={minutes}
+                        onChange={(e) => setMinutes(parseInt(e.target.value) || 5)}
+                        className="w-16 h-8 text-sm" data-testid="poller-minutes" />
+                    <span className="text-xs text-slate-500">min</span>
+                </div>
+                {!s.running ? (
+                    <Button size="sm" onClick={start} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700" data-testid="poller-start">
+                        ▶ Avvia
+                    </Button>
+                ) : (
+                    <Button size="sm" variant="outline" onClick={stop} disabled={busy} className="border-rose-300 text-rose-700 hover:bg-rose-50" data-testid="poller-stop">
+                        ⏸ Ferma
+                    </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={runNow} disabled={busy} data-testid="poller-run-now">
+                    ⚡ Esegui ora
+                </Button>
+            </div>
+            {s.last_run && (
+                <div className="text-[11px] text-slate-500 mt-2">
+                    Ultima esecuzione: {new Date(s.last_run).toLocaleString("it-IT")} · UID processato: {s.last_uid || "—"}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -2339,6 +2431,406 @@ function VoceRicorsivaDialog({ voce, collabs, onClose }) {
                         data-testid="vr-save"
                     >
                         {saving ? "Salvataggio…" : (voce ? "Aggiorna" : "Crea regola")}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+// ============================================================
+// EMAIL ALIASES — gestione lista alias per collaboratore (UtenteForm)
+// ============================================================
+function EmailAliasesEditor({ value, onChange }) {
+    const [newAlias, setNewAlias] = useState("");
+    const add = () => {
+        const a = newAlias.trim().toLowerCase();
+        if (!a) return;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a)) {
+            toast.error("Formato email non valido");
+            return;
+        }
+        if ((value || []).includes(a)) {
+            toast.info("Alias già presente");
+            return;
+        }
+        onChange([...(value || []), a]);
+        setNewAlias("");
+    };
+    const remove = (a) => onChange((value || []).filter((x) => x !== a));
+    return (
+        <div className="mt-2 p-3 bg-violet-50/40 border border-violet-200 rounded-md">
+            <Label className="text-xs font-semibold text-violet-900 uppercase tracking-wide">
+                Alias email (smistamento Posta in arrivo)
+            </Label>
+            <div className="text-[11px] text-slate-600 mt-1 mb-2">
+                Indirizzi a cui può essere indirizzata la posta. Le email destinate a uno di
+                questi alias verranno smistate automaticamente nella casella personale del
+                collaboratore. Più collaboratori possono condividere lo stesso alias (es. <code>sinistri@</code>).
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+                {(value || []).map((a) => (
+                    <span key={a} className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-white border border-violet-300 rounded-md text-xs">
+                        <Mail size={11} className="text-violet-700" />
+                        {a}
+                        <button type="button" onClick={() => remove(a)} className="text-rose-500 hover:text-rose-700 ml-1" data-testid={`alias-rm-${a}`}>
+                            <Trash2 size={11} />
+                        </button>
+                    </span>
+                ))}
+                {(value || []).length === 0 && (
+                    <span className="text-xs text-slate-400 italic">Nessun alias configurato</span>
+                )}
+            </div>
+            <div className="flex gap-1.5">
+                <Input
+                    type="email"
+                    placeholder="es. alessia.balzarolo@schiantarelli.it"
+                    value={newAlias}
+                    onChange={(e) => setNewAlias(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+                    className="h-8 text-sm"
+                    data-testid="alias-new-input"
+                />
+                <Button type="button" size="sm" onClick={add} className="bg-violet-700 hover:bg-violet-800" data-testid="alias-add-btn">
+                    <Plus size={12} className="mr-1" />Aggiungi
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+
+// ============================================================
+// GESTIONI MODELLI — libreria template editabili
+// ============================================================
+const MODELLI_TIPI = [
+    { v: "email", label: "Email" },
+    { v: "whatsapp", label: "WhatsApp" },
+    { v: "sms", label: "SMS" },
+    { v: "pdf_avviso", label: "PDF · Avviso scadenza" },
+    { v: "pdf_lettera_abbuono", label: "PDF · Lettera di Abbuono" },
+    { v: "pdf_brogliaccio", label: "PDF · Brogliaccio" },
+    { v: "pdf_diagnosi", label: "PDF · Diagnosi assicurativa" },
+    { v: "pdf_prima_nota", label: "PDF · Prima Nota" },
+    { v: "pdf_altro", label: "PDF · Altro" },
+];
+
+const PLACEHOLDERS_DOC = [
+    { k: "cliente_nome", desc: "Nome contraente" },
+    { k: "cliente_indirizzo", desc: "Indirizzo del cliente" },
+    { k: "cliente_comune", desc: "Comune" },
+    { k: "cliente_cap", desc: "CAP" },
+    { k: "cliente_provincia", desc: "Provincia" },
+    { k: "azienda_nome", desc: "Ragione sociale agenzia" },
+    { k: "azienda_iban", desc: "IBAN agenzia" },
+    { k: "azienda_telefono", desc: "Telefono agenzia" },
+    { k: "azienda_email", desc: "Email agenzia" },
+    { k: "totale", desc: "Importo totale (€)" },
+    { k: "numero_titoli", desc: "Numero titoli" },
+    { k: "data_oggi", desc: "Data odierna (gg-mm-aaaa)" },
+    { k: "numero_polizza", desc: "Numero polizza (singola)" },
+    { k: "numero_titolo", desc: "Numero titolo" },
+    { k: "scadenza", desc: "Data scadenza" },
+    { k: "importo_abbuono", desc: "Importo abbuono (€)" },
+];
+
+function ModelliSezione() {
+    const [items, setItems] = useState(null);
+    const [filtroTipo, setFiltroTipo] = useState("all");
+    const [editing, setEditing] = useState(null);
+    const [open, setOpen] = useState(false);
+    const [q, setQ] = useState("");
+
+    const load = () => api.get("/librerie/modelli").then((r) => setItems(r.data || []));
+    useEffect(() => { load(); }, []);
+
+    const filtrati = (items || [])
+        .filter((m) => filtroTipo === "all" || m.tipo === filtroTipo)
+        .filter((m) => !q || (m.nome || "").toLowerCase().includes(q.toLowerCase()));
+
+    const elimina = async (m) => {
+        if (!window.confirm(`Eliminare il modello "${m.nome}"?`)) return;
+        try {
+            await api.delete(`/librerie/modelli/${m.id}`);
+            toast.success("Modello eliminato"); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    return (
+        <Card className="p-4 border-slate-200" data-testid="lib-modelli">
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+                <div>
+                    <h2 className="font-semibold text-slate-900 flex items-center gap-2">
+                        <FileText size={16} className="text-violet-700" />
+                        Gestioni Modelli
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+                        Personalizza il testo (HTML/markdown) usato per Email, WhatsApp, SMS e PDF.
+                        Usa <code>{"{placeholder}"}</code> per inserire dati dinamici.
+                    </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                    <div className="relative">
+                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Input placeholder="Cerca modello…" value={q}
+                            onChange={(e) => setQ(e.target.value)}
+                            className="pl-7 h-8 w-48 text-sm"
+                            data-testid="modelli-search" />
+                    </div>
+                    <Select value={filtroTipo} onValueChange={setFiltroTipo}>
+                        <SelectTrigger className="w-48 h-8" data-testid="modelli-filter-tipo"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tutti i tipi</SelectItem>
+                            {MODELLI_TIPI.map((t) => <SelectItem key={t.v} value={t.v}>{t.label}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <Button onClick={() => { setEditing(null); setOpen(true); }}
+                        className="bg-violet-700 hover:bg-violet-800" data-testid="modelli-new">
+                        <Plus size={14} className="mr-1" />Nuovo modello
+                    </Button>
+                </div>
+            </div>
+
+            {items === null ? <Loading /> : filtrati.length === 0 ? (
+                <Empty message="Nessun modello. Creane uno per personalizzare le comunicazioni." />
+            ) : (
+                <table className="tbl w-full">
+                    <thead><tr>
+                        <th>Tipo</th><th>Nome</th><th>Categoria</th>
+                        <th className="text-center">Default</th><th className="text-center">Stato</th>
+                        <th>Placeholder</th><th className="w-24"></th>
+                    </tr></thead>
+                    <tbody>
+                        {filtrati.map((m) => (
+                            <tr key={m.id} data-testid={`modello-row-${m.id}`}>
+                                <td className="text-xs"><span className="badge badge-info">{m.tipo}</span></td>
+                                <td className="font-medium">{m.nome}</td>
+                                <td className="text-xs text-slate-500">{m.categoria || "—"}</td>
+                                <td className="text-center">
+                                    {m.default && <span className="badge badge-success">✓ default</span>}
+                                </td>
+                                <td className="text-center">
+                                    {m.attivo
+                                        ? <span className="badge badge-success">attivo</span>
+                                        : <span className="badge badge-warning">disattivo</span>}
+                                </td>
+                                <td className="text-[10px] text-slate-500 font-mono">
+                                    {(m.placeholders || []).slice(0, 6).map((p) => `{${p}}`).join(" ")}
+                                    {(m.placeholders || []).length > 6 ? "…" : ""}
+                                </td>
+                                <td className="text-right">
+                                    <button onClick={() => { setEditing(m); setOpen(true); }}
+                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-slate-200 hover:bg-slate-100 mr-1"
+                                        title="Modifica" data-testid={`modello-edit-${m.id}`}>
+                                        <Pencil size={12} />
+                                    </button>
+                                    <button onClick={() => elimina(m)}
+                                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                                        title="Elimina" data-testid={`modello-del-${m.id}`}>
+                                        <Trash2 size={12} />
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+
+            {open && (
+                <ModelloFormDialog
+                    editing={editing}
+                    onClose={(reload) => { setOpen(false); setEditing(null); if (reload) load(); }}
+                />
+            )}
+        </Card>
+    );
+}
+
+function ModelloFormDialog({ editing, onClose }) {
+    const [f, setF] = useState(editing || {
+        tipo: "email", nome: "", oggetto: "", corpo: "", sezioni: [],
+        categoria: "", default: false, attivo: true, note: "",
+    });
+    const [saving, setSaving] = useState(false);
+    const isPdf = (f.tipo || "").startsWith("pdf_");
+    const isEmail = f.tipo === "email";
+
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const insertPlaceholder = (ph) => {
+        set("corpo", (f.corpo || "") + `{${ph}}`);
+    };
+
+    const save = async () => {
+        if (!f.nome?.trim()) { toast.error("Nome obbligatorio"); return; }
+        setSaving(true);
+        try {
+            const payload = {
+                tipo: f.tipo, nome: f.nome.trim(),
+                oggetto: f.oggetto || null, corpo: f.corpo || "",
+                sezioni: f.sezioni || [],
+                categoria: f.categoria || null, default: !!f.default,
+                attivo: f.attivo !== false, note: f.note || null,
+            };
+            if (editing?.id) {
+                await api.put(`/librerie/modelli/${editing.id}`, payload);
+                toast.success("Modello aggiornato");
+            } else {
+                await api.post("/librerie/modelli", payload);
+                toast.success("Modello creato");
+            }
+            onClose(true);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        setSaving(false);
+    };
+
+    // Gestione sezioni dinamiche (per pdf_avviso e simili)
+    const addSezione = () => set("sezioni", [...(f.sezioni || []), {
+        ordine: (f.sezioni || []).length + 1, attiva: true, titolo: "", contenuto: "",
+    }]);
+    const updSezione = (i, k, v) => {
+        const arr = [...(f.sezioni || [])];
+        arr[i] = { ...arr[i], [k]: v };
+        set("sezioni", arr);
+    };
+    const delSezione = (i) => set("sezioni", (f.sezioni || []).filter((_, idx) => idx !== i));
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="modello-form">
+                <DialogHeader>
+                    <DialogTitle>{editing ? "Modifica modello" : "Nuovo modello"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Tipo *</Label>
+                            <Select value={f.tipo} onValueChange={(v) => set("tipo", v)} disabled={!!editing}>
+                                <SelectTrigger data-testid="modello-tipo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {MODELLI_TIPI.map((t) => <SelectItem key={t.v} value={t.v}>{t.label}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Nome *</Label>
+                            <Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="modello-nome" />
+                        </div>
+                        <div>
+                            <Label>Categoria</Label>
+                            <Input value={f.categoria || ""}
+                                placeholder="es. scadenze, marketing, fiscale"
+                                onChange={(e) => set("categoria", e.target.value)} data-testid="modello-cat" />
+                        </div>
+                        <div className="flex items-end gap-4">
+                            <label className="flex items-center gap-1.5 text-sm">
+                                <input type="checkbox" checked={f.default} onChange={(e) => set("default", e.target.checked)} data-testid="modello-default" />
+                                Default per questo tipo
+                            </label>
+                            <label className="flex items-center gap-1.5 text-sm">
+                                <input type="checkbox" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} data-testid="modello-attivo" />
+                                Attivo
+                            </label>
+                        </div>
+                    </div>
+
+                    {(isEmail || isPdf) && (
+                        <div>
+                            <Label>{isPdf ? "Saluto (es. 'Gentile Cliente,')" : "Oggetto email"}</Label>
+                            <Input value={f.oggetto || ""} onChange={(e) => set("oggetto", e.target.value)} data-testid="modello-oggetto" />
+                        </div>
+                    )}
+
+                    <div>
+                        <Label>Corpo del messaggio</Label>
+                        <Textarea
+                            value={f.corpo || ""} onChange={(e) => set("corpo", e.target.value)}
+                            rows={isPdf ? 8 : 6}
+                            className="font-mono text-xs"
+                            placeholder={isPdf ? "Testo introduttivo del PDF…" : "Testo del messaggio…"}
+                            data-testid="modello-corpo"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Usa <code className="bg-slate-100 px-1 rounded">{"{placeholder}"}</code> per dati dinamici (vedi pulsanti sotto).
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 rounded-md p-2">
+                        <Label className="text-[11px] uppercase tracking-wider text-slate-500">Inserisci placeholder</Label>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                            {PLACEHOLDERS_DOC.map((p) => (
+                                <button key={p.k} type="button" onClick={() => insertPlaceholder(p.k)}
+                                    title={p.desc}
+                                    className="text-[11px] px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-sky-50 hover:border-sky-300 font-mono"
+                                    data-testid={`ph-${p.k}`}>
+                                    {`{${p.k}}`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {isPdf && (
+                        <div className="bg-violet-50/40 border border-violet-200 rounded-md p-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <Label className="text-sm font-semibold text-violet-900">Sezioni dinamiche (callout / blocchi commerciali)</Label>
+                                <Button type="button" size="sm" variant="outline" onClick={addSezione} data-testid="sez-add">
+                                    <Plus size={12} className="mr-1" />Aggiungi sezione
+                                </Button>
+                            </div>
+                            {(f.sezioni || []).length === 0 && (
+                                <div className="text-xs text-slate-500 italic">Nessuna sezione. Aggiungi blocchi opzionali (es. promo Tutela Legale).</div>
+                            )}
+                            {(f.sezioni || []).map((sez, i) => (
+                                <div key={i} className="bg-white border border-violet-200 rounded p-2 mb-2" data-testid={`sez-${i}`}>
+                                    <div className="grid grid-cols-12 gap-2 items-start">
+                                        <div className="col-span-1">
+                                            <Label className="text-[10px]">Ord.</Label>
+                                            <Input type="number" value={sez.ordine || i + 1}
+                                                onChange={(e) => updSezione(i, "ordine", parseInt(e.target.value) || 0)}
+                                                className="h-8" />
+                                        </div>
+                                        <div className="col-span-9">
+                                            <Label className="text-[10px]">Titolo</Label>
+                                            <Input value={sez.titolo || ""}
+                                                onChange={(e) => updSezione(i, "titolo", e.target.value)}
+                                                className="h-8" />
+                                        </div>
+                                        <div className="col-span-1 flex items-end justify-center">
+                                            <label className="flex items-center gap-1 text-[10px] mt-2">
+                                                <input type="checkbox" checked={sez.attiva !== false}
+                                                    onChange={(e) => updSezione(i, "attiva", e.target.checked)} />
+                                                attiva
+                                            </label>
+                                        </div>
+                                        <div className="col-span-1 flex items-end justify-end">
+                                            <button type="button" onClick={() => delSezione(i)}
+                                                className="h-8 w-8 rounded border border-rose-200 hover:bg-rose-50 text-rose-600 flex items-center justify-center">
+                                                <Trash2 size={12} />
+                                            </button>
+                                        </div>
+                                        <div className="col-span-12">
+                                            <Label className="text-[10px]">Contenuto</Label>
+                                            <Textarea rows={3} value={sez.contenuto || ""}
+                                                onChange={(e) => updSezione(i, "contenuto", e.target.value)}
+                                                className="font-mono text-xs" />
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div>
+                        <Label>Note interne</Label>
+                        <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} placeholder="Promemoria d'uso interno" data-testid="modello-note" />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
+                    <Button onClick={save} disabled={saving} className="bg-violet-700 hover:bg-violet-800" data-testid="modello-save">
+                        {saving ? "Salvataggio…" : (editing ? "Aggiorna" : "Crea modello")}
                     </Button>
                 </DialogFooter>
             </DialogContent>
