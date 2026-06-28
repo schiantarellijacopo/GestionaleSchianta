@@ -8277,6 +8277,39 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
         })
         return {"ok": True, "provider": "twilio"}
 
+    if provider == "spoki":
+        api_key = az.get("spoki_api_key")
+        if not api_key:
+            raise HTTPException(400, "Spoki non configurato (manca API key in Librerie)")
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.post(
+                    "https://api.spoki.com/api/1/messages/send",
+                    headers={"X-Spoki-Api-Key": api_key, "Content-Type": "application/json"},
+                    json={"to": cleaned, "body": messaggio},
+                )
+            if resp.status_code >= 400:
+                raise HTTPException(503, f"Errore Spoki ({resp.status_code}): {resp.text[:200]}")
+            spoki_id = (resp.json() or {}).get("id")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(503, f"Errore Spoki: {e}")
+        await db.storico_avvisi.insert_one({
+            "id": _uid_local(),
+            "canale": "whatsapp",
+            "provider": "spoki",
+            "spoki_message_id": spoki_id,
+            "destinatario": cleaned,
+            "messaggio": messaggio[:2000],
+            "anagrafica_id": body.get("anagrafica_id"),
+            "polizza_id": body.get("polizza_id"),
+            "utente_id": user["id"],
+            "created_at": _now_iso(),
+        })
+        return {"ok": True, "provider": "spoki", "spoki_message_id": spoki_id}
+
     raise HTTPException(400, f"Provider non supportato: {provider}")
 
 

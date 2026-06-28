@@ -281,6 +281,7 @@ _COMUNICAZIONI_FIELDS = [
     "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_use_tls",
     "imap_host", "imap_port", "imap_user", "imap_password", "imap_use_ssl", "imap_folder",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
+    "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
 ]
 
 
@@ -301,6 +302,9 @@ class ComunicazioniBody(BaseModel):
     twilio_auth_token: Optional[str] = None
     twilio_sms_from: Optional[str] = None
     twilio_whatsapp_from: Optional[str] = None
+    spoki_api_key: Optional[str] = None
+    spoki_sender_name: Optional[str] = None
+    whatsapp_provider: Optional[str] = "wame"  # wame | twilio | spoki
 
 
 @router.get("/librerie/comunicazioni")
@@ -322,6 +326,11 @@ async def get_comunicazioni(user: dict = Depends(require_user("admin", "collabor
         out["twilio_auth_token"] = "••••••••"
     else:
         out["twilio_auth_token_set"] = False
+    if out.get("spoki_api_key"):
+        out["spoki_api_key_set"] = True
+        out["spoki_api_key"] = "••••••••"
+    else:
+        out["spoki_api_key_set"] = False
     return out
 
 
@@ -336,6 +345,8 @@ async def update_comunicazioni(body: ComunicazioniBody,
         upd.pop("imap_password", None)
     if upd.get("twilio_auth_token") in (None, "", "••••••••"):
         upd.pop("twilio_auth_token", None)
+    if upd.get("spoki_api_key") in (None, "", "••••••••"):
+        upd.pop("spoki_api_key", None)
     upd["updated_at"] = _now_iso()
     if az:
         await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})

@@ -1770,6 +1770,18 @@ function ImapSection({ f, set, onSet }) {
                                 ✓ Connesso ({risultato.messaggi_totali} msg)
                             </span>
                         )}
+                        {/* CTA: attiva subito IMAP usando stesso account SMTP */}
+                        {f.smtp_user && (f.smtp_user === f.imap_user || !f.imap_user) && !attivo && (
+                            <Button
+                                type="button"
+                                size="sm"
+                                onClick={copiaSMTP}
+                                className="ml-auto bg-emerald-600 hover:bg-emerald-700 text-white"
+                                data-testid="com-imap-attiva-smtp"
+                            >
+                                <Mail size={12} className="mr-1" />Attiva con email SMTP ({f.smtp_user})
+                            </Button>
+                        )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
                         Legge la cassetta condivisa <strong>assicurazioni@…</strong> e <strong>smista automaticamente</strong> ogni email in base all'alias destinatario: la posta inviata a un alias personale (es. <em>alessia.balzarolo@…</em>) sarà visibile solo a quel collaboratore.
@@ -2442,7 +2454,7 @@ function VoceRicorsivaDialog({ voce, collabs, onClose }) {
 // ============================================================
 // EMAIL ALIASES — gestione lista alias per collaboratore (UtenteForm)
 // ============================================================
-function EmailAliasesEditor({ value, onChange }) {
+function EmailAliasesEditor({ value, onChange, mainEmail }) {
     const [newAlias, setNewAlias] = useState("");
     const add = () => {
         const a = newAlias.trim().toLowerCase();
@@ -2459,6 +2471,14 @@ function EmailAliasesEditor({ value, onChange }) {
         setNewAlias("");
     };
     const remove = (a) => onChange((value || []).filter((x) => x !== a));
+    const usaMain = () => {
+        const e = (mainEmail || "").toLowerCase().trim();
+        if (!e) { toast.error("Email principale non impostata"); return; }
+        if ((value || []).includes(e)) { toast.info("Email principale già negli alias"); return; }
+        onChange([...(value || []), e]);
+        toast.success("Email principale aggiunta come alias");
+    };
+    const mainAlreadyAlias = mainEmail && (value || []).includes((mainEmail || "").toLowerCase().trim());
     return (
         <div className="mt-2 p-3 bg-violet-50/40 border border-violet-200 rounded-md">
             <Label className="text-xs font-semibold text-violet-900 uppercase tracking-wide">
@@ -2496,6 +2516,11 @@ function EmailAliasesEditor({ value, onChange }) {
                 <Button type="button" size="sm" onClick={add} className="bg-violet-700 hover:bg-violet-800" data-testid="alias-add-btn">
                     <Plus size={12} className="mr-1" />Aggiungi
                 </Button>
+                {mainEmail && !mainAlreadyAlias && (
+                    <Button type="button" size="sm" variant="outline" onClick={usaMain} title={`Usa ${mainEmail} come alias`} data-testid="alias-use-main">
+                        <Mail size={12} className="mr-1" />Usa email principale
+                    </Button>
+                )}
             </div>
         </div>
     );

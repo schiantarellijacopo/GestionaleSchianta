@@ -73,6 +73,7 @@ class AlertRulePatch(BaseModel):
     canali: Optional[list[str]] = None
     destinatari: Optional[list[str]] = None
     destinatari_user_ids: Optional[list[str]] = None
+    altri_collaboratori_user_ids: Optional[list[str]] = None
     template_oggetto: Optional[str] = None
     template_corpo: Optional[str] = None
     condizioni: Optional[dict] = None

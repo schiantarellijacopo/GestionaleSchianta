@@ -46,7 +46,7 @@ PRESETS: list[dict] = [
         "nome": "Sinistro importato da ANIA",
         "descrizione": "Quando un import ZIP/flusso ANIA carica nuovi sinistri, notifica il collaboratore sinistri.",
         "tipo": "evento", "evento": "sinistro.importato_ania",
-        "canali": ["inapp", "email"], "destinatari": ["collaboratore_sinistri", "collaboratore"],
+        "canali": ["inapp", "email"], "destinatari": ["altri_collaboratori", "collaboratore"],
         "template_oggetto": "Nuovo sinistro da ANIA: {numero_sinistro}",
         "template_corpo": "Importato automaticamente nuovo sinistro {numero_sinistro} polizza {numero_polizza}. Verifica e prendi in carico.",
     },

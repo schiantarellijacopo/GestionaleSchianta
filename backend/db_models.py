@@ -844,6 +844,10 @@ class AziendaConfig(BaseDoc):
     twilio_auth_token: Optional[str] = None
     twilio_sms_from: Optional[str] = None        # numero verificato es. +391234567890
     twilio_whatsapp_from: Optional[str] = None   # numero WA Business es. whatsapp:+14155238886
+    # Spoki — provider WhatsApp italiano (BSP Meta certificato)
+    # https://spoki.com/it/prezzi · API base https://api.spoki.com/api/1/
+    spoki_api_key: Optional[str] = None
+    spoki_sender_name: Optional[str] = None      # nome mittente registrato
     # Notifica scadenze giornaliera (cron 08:00)
     notifica_scadenze_attiva: bool = True
     notifica_scadenze_giorni: int = 15

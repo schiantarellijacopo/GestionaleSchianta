@@ -700,6 +700,14 @@ function CatalogDialog({ onClose }) {
 function RuleEditor({ rule, onClose }) {
     const isNew = !rule.id;
     const [f, setF] = useState({ ...rule });
+    const [collaboratori, setCollaboratori] = useState([]);
+    useEffect(() => {
+        api.get("/auth/users").then((r) => {
+            setCollaboratori((r.data || []).filter(
+                (u) => ["admin", "collaboratore", "dipendente"].includes(u.role) && u.attivo !== false,
+            ));
+        }).catch(() => {});
+    }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const toggleCanale = (c) => {
         const cur = f.canali || [];
@@ -708,6 +716,10 @@ function RuleEditor({ rule, onClose }) {
     const toggleDest = (d) => {
         const cur = f.destinatari || [];
         set("destinatari", cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]);
+    };
+    const toggleAltroCollab = (uid) => {
+        const cur = f.altri_collaboratori_user_ids || [];
+        set("altri_collaboratori_user_ids", cur.includes(uid) ? cur.filter((x) => x !== uid) : [...cur, uid]);
     };
 
     const save = async () => {
@@ -721,6 +733,7 @@ function RuleEditor({ rule, onClose }) {
                 cron: f.tipo !== "evento" ? f.cron : null,
                 soglia_giorni: f.soglia_giorni ? parseInt(f.soglia_giorni) : null,
                 canali: f.canali, destinatari: f.destinatari,
+                altri_collaboratori_user_ids: f.altri_collaboratori_user_ids || [],
                 template_oggetto: f.template_oggetto,
                 template_corpo: f.template_corpo,
             };
@@ -841,21 +854,64 @@ function RuleEditor({ rule, onClose }) {
                     <div>
                         <Label>Destinatari</Label>
                         <div className="flex gap-2 flex-wrap mt-2">
-                            {["cliente", "collaboratore", "collaboratore_sinistri", "admin"].map((d) => {
-                                const active = (f.destinatari || []).includes(d);
+                            {[
+                                { v: "cliente", label: "cliente" },
+                                { v: "collaboratore", label: "collaboratore" },
+                                { v: "altri_collaboratori", label: "altri collaboratori" },
+                                { v: "admin", label: "admin" },
+                            ].map((d) => {
+                                // legacy: il vecchio key "collaboratore_sinistri" viene mostrato come attivo
+                                // se la regola lo ha (backward-compat senza migrazione DB)
+                                const active = (f.destinatari || []).includes(d.v)
+                                    || (d.v === "altri_collaboratori" && (f.destinatari || []).includes("collaboratore_sinistri"));
                                 return (
                                     <button
-                                        key={d}
+                                        key={d.v}
                                         type="button"
-                                        onClick={() => toggleDest(d)}
+                                        onClick={() => toggleDest(d.v)}
                                         className={`px-3 py-1.5 text-sm border rounded transition-colors ${active ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-300"}`}
-                                        data-testid={`dest-toggle-${d}`}
+                                        data-testid={`dest-toggle-${d.v}`}
                                     >
-                                        {d.replace(/_/g, " ")}
+                                        {d.label}
                                     </button>
                                 );
                             })}
                         </div>
+                        {/* Selettore utenti per "altri collaboratori" */}
+                        {((f.destinatari || []).includes("altri_collaboratori")
+                            || (f.destinatari || []).includes("collaboratore_sinistri")) && (
+                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md" data-testid="altri-collab-picker">
+                                <Label className="text-xs uppercase tracking-wide text-amber-900 font-semibold">
+                                    Seleziona gli &quot;Altri collaboratori&quot; che riceveranno questa notifica
+                                </Label>
+                                <div className="text-[11px] text-amber-800 mt-1 mb-2">
+                                    Es. responsabile sinistri, back office, broker secondario. Sono utenti CRM specifici
+                                    a cui inoltrare l&apos;alert oltre al collaboratore principale.
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {collaboratori.length === 0 && (
+                                        <span className="text-xs text-slate-500 italic">Nessun collaboratore disponibile</span>
+                                    )}
+                                    {collaboratori.map((u) => {
+                                        const sel = (f.altri_collaboratori_user_ids || []).includes(u.id);
+                                        return (
+                                            <button
+                                                key={u.id}
+                                                type="button"
+                                                onClick={() => toggleAltroCollab(u.id)}
+                                                className={`px-2 py-1 text-xs border rounded transition-colors ${sel ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-700 border-amber-300 hover:border-amber-500"}`}
+                                                data-testid={`altro-collab-${u.id}`}
+                                            >
+                                                {sel ? "✓ " : ""}{u.name || u.email}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div className="text-[11px] text-amber-700 mt-2">
+                                    {(f.altri_collaboratori_user_ids || []).length} utenti selezionati
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <div>
                         <Label>Oggetto template <span className="text-[10px] text-slate-500">— placeholder: {"{nome}, {numero_polizza}, {numero_sinistro}, {importo_lordo}, {scadenza}, ..."}</span></Label>

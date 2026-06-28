@@ -112,6 +112,22 @@ def _dedupe_destinatari(items: list[dict]) -> list[dict]:
     return unique
 
 
+async def _dest_altri_collaboratori(rule: dict) -> list[dict]:
+    """Risolve il destinatario "altri_collaboratori".
+
+    Legge la lista ``altri_collaboratori_user_ids`` dalla regola stessa:
+    sono i collaboratori esplicitamente scelti per ricevere questa notifica
+    (es. il responsabile sinistri, il back-office, ecc.).
+    """
+    ids = rule.get("altri_collaboratori_user_ids") or []
+    out: list[dict] = []
+    for uid in ids:
+        u = await db.users.find_one({"id": uid}, {"_id": 0})
+        if u:
+            out.append(_user_to_destinatario(u, "altri_collaboratori"))
+    return out
+
+
 async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
     """Risolve i destinatari della regola in base al payload dell'evento.
 
@@ -123,8 +139,9 @@ async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
             out.extend(await _dest_cliente(payload))
         elif dt == "collaboratore":
             out.extend(await _dest_collaboratore_da_payload(payload))
-        elif dt == "collaboratore_sinistri":
-            out.extend(await _dest_users_by_query({"gestisce_sinistri": True}, "collaboratore_sinistri"))
+        elif dt in ("altri_collaboratori", "collaboratore_sinistri"):
+            # "collaboratore_sinistri" mantenuto per backward-compat (legacy data)
+            out.extend(await _dest_altri_collaboratori(rule))
         elif dt == "admin":
             out.extend(await _dest_users_by_query({"role": "admin"}, "admin"))
         elif dt == "utente_specifico":
@@ -136,23 +153,65 @@ async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
 # CHANNEL ADAPTERS
 # ============================================================
 async def send_inapp(rule: dict, dest: dict, ctx: dict) -> dict:
-    """Crea un record Notification per l'utente."""
+    """Crea un record Notification per l'utente.
+
+    In più, copia automaticamente la notifica in:
+      - ``db.diario_note`` se il destinatario è un collaboratore/admin
+        (visibile nel "Diario Collaboratore"),
+      - ``db.diario_cliente`` se il destinatario è il cliente
+        (visibile nello storico cliente).
+    """
     user_id = dest.get("user_id")
-    if not user_id:
-        return {"status": "skipped", "error": "in-app richiede user_id"}
-    n = Notification(
-        user_id=user_id,
-        titolo=ctx.get("oggetto") or rule.get("nome") or "Notifica",
-        messaggio=ctx.get("corpo") or "",
-        tipo=rule.get("livello") or "info",
-        icona=rule.get("icona") or "Bell",
-        link=ctx.get("link"),
-        rule_id=rule.get("id"),
-        entita_tipo=ctx.get("entita_tipo"),
-        entita_id=ctx.get("entita_id"),
-    )
-    await db.notifications.insert_one(n.model_dump())
-    return {"status": "ok"}
+    anag_id = dest.get("anagrafica_id")
+    titolo = ctx.get("oggetto") or rule.get("nome") or "Notifica"
+    messaggio = ctx.get("corpo") or ""
+
+    if user_id:
+        n = Notification(
+            user_id=user_id,
+            titolo=titolo,
+            messaggio=messaggio,
+            tipo=rule.get("livello") or "info",
+            icona=rule.get("icona") or "Bell",
+            link=ctx.get("link"),
+            rule_id=rule.get("id"),
+            entita_tipo=ctx.get("entita_tipo"),
+            entita_id=ctx.get("entita_id"),
+        )
+        await db.notifications.insert_one(n.model_dump())
+        # Aggrega nel Diario Collaboratore
+        try:
+            from db_models import DiarioNota
+            diary = DiarioNota(
+                user_id=user_id,
+                titolo=f"[Alert] {titolo}"[:200],
+                contenuto=messaggio[:2000],
+                anagrafica_id=ctx.get("anagrafica_id") or ctx.get("contraente_id"),
+                polizza_id=ctx.get("polizza_id"),
+                tags=["alert", rule.get("evento") or rule.get("schedule_kind") or "alert"],
+            ).model_dump()
+            await db.diario_note.insert_one(diary)
+        except Exception:
+            logger.exception("Errore log diario_note da alert in-app")
+        return {"status": "ok"}
+
+    if anag_id:
+        # cliente: nessun utente CRM → log solo nel diario cliente
+        try:
+            from db_models import DiarioCliente
+            diary = DiarioCliente(
+                anagrafica_id=anag_id,
+                tipo="nota",
+                titolo=f"[Alert in-app] {titolo}"[:200],
+                contenuto=messaggio[:2000],
+            ).model_dump()
+            await db.diario_cliente.insert_one(diary)
+            return {"status": "ok"}
+        except Exception:
+            logger.exception("Errore log diario_cliente da alert in-app")
+            return {"status": "error", "error": "diario_cliente log fallito"}
+
+    return {"status": "skipped", "error": "in-app richiede user_id o anagrafica_id"}
 
 
 async def _load_provider(tipo: str) -> dict:

@@ -48,7 +48,7 @@ ALERT_SCHEDULE_TYPES = [
 ]
 
 CANALI = ["inapp", "email", "sms", "whatsapp"]
-DESTINATARI = ["cliente", "collaboratore", "collaboratore_sinistri", "admin", "utente_specifico"]
+DESTINATARI = ["cliente", "collaboratore", "altri_collaboratori", "admin", "utente_specifico"]
 
 
 class AlertRule(BaseDoc):
@@ -68,6 +68,9 @@ class AlertRule(BaseDoc):
     canali: list[str] = Field(default_factory=lambda: ["inapp"])
     destinatari: list[str] = Field(default_factory=lambda: ["cliente"])
     destinatari_user_ids: list[str] = Field(default_factory=list)   # per "utente_specifico"
+    # User IDs dei collaboratori da notificare quando il destinatario è
+    # "altri_collaboratori" (es. gestore sinistri, back-office, ecc.).
+    altri_collaboratori_user_ids: list[str] = Field(default_factory=list)
     # template
     template_oggetto: Optional[str] = None
     template_corpo: Optional[str] = None
