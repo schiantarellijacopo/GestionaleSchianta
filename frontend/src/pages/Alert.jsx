@@ -888,22 +888,28 @@ function RuleEditor({ rule, onClose }) {
                                     Es. responsabile sinistri, back office, broker secondario. Sono utenti CRM specifici
                                     a cui inoltrare l&apos;alert oltre al collaboratore principale.
                                 </div>
-                                <div className="flex flex-wrap gap-1.5">
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
                                     {collaboratori.length === 0 && (
                                         <span className="text-xs text-slate-500 italic">Nessun collaboratore disponibile</span>
                                     )}
                                     {collaboratori.map((u) => {
                                         const sel = (f.altri_collaboratori_user_ids || []).includes(u.id);
                                         return (
-                                            <button
+                                            <label
                                                 key={u.id}
-                                                type="button"
-                                                onClick={() => toggleAltroCollab(u.id)}
-                                                className={`px-2 py-1 text-xs border rounded transition-colors ${sel ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-700 border-amber-300 hover:border-amber-500"}`}
+                                                className={`flex items-center gap-2 px-2 py-1.5 text-xs rounded border cursor-pointer transition-colors ${sel ? "bg-amber-100 border-amber-500 text-amber-900 font-medium" : "bg-white border-amber-200 text-slate-700 hover:bg-amber-50"}`}
                                                 data-testid={`altro-collab-${u.id}`}
                                             >
-                                                {sel ? "✓ " : ""}{u.name || u.email}
-                                            </button>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={sel}
+                                                    onChange={() => toggleAltroCollab(u.id)}
+                                                    className="w-3.5 h-3.5 accent-amber-600 cursor-pointer"
+                                                    data-testid={`altro-collab-cb-${u.id}`}
+                                                />
+                                                <span className="truncate">{u.name || u.email}</span>
+                                                <span className="ml-auto text-[9px] uppercase text-slate-400">{u.role}</span>
+                                            </label>
                                         );
                                     })}
                                 </div>
