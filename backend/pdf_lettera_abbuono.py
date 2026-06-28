@@ -102,10 +102,15 @@ def generate_lettera_abbuono(
     }
     flow: list = []
 
-    # Intestazione agenzia
-    ragione = (azienda or {}).get("ragione_sociale") or ""
-    if ragione:
-        flow.append(Paragraph(f"<b>{ragione}</b>", st["body"]))
+    # Intestazione agenzia con logo (branding condiviso)
+    try:
+        from pdf_branding import header_branding
+        flow.extend(header_branding(azienda or {}, with_motto=False))
+    except Exception:
+        # Fallback: testo semplice
+        ragione = (azienda or {}).get("ragione_sociale") or ""
+        if ragione:
+            flow.append(Paragraph(f"<b>{ragione}</b>", st["body"]))
     indirizzo = (azienda or {}).get("indirizzo") or ""
     if indirizzo:
         flow.append(Paragraph(indirizzo, st["small"]))

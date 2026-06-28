@@ -142,8 +142,12 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
 
 
 @api.get("/auth/users")
-async def list_users(user=Depends(require_user("admin", "collaboratore"))):
-    users = await db.users.find({}, {"password_hash": 0, "_id": 0}).to_list(500)
+async def list_users(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    # Visibility: solo admin vede tutti. Gli altri vedono solo se stessi.
+    flt: dict = {}
+    if user["role"] != "admin":
+        flt["id"] = user["id"]
+    users = await db.users.find(flt, {"password_hash": 0, "_id": 0}).to_list(500)
     return users
 
 
@@ -9671,12 +9675,14 @@ from routes import anagrafiche as _anag_router  # noqa: E402
 from routes import alert as _alert_router  # noqa: E402
 from routes import modelli as _modelli_router  # noqa: E402
 from routes import kpi as _kpi_router  # noqa: E402
+from routes import permessi as _perm_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
 api.include_router(_alert_router.router)
 api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)
+api.include_router(_perm_router.router)
 
 app.include_router(api)
 
@@ -9800,6 +9806,13 @@ async def startup():
         await seed_default_models()
     except Exception as e:
         logger.warning("Seed modelli fallito (non bloccante): %s", e)
+
+    # Seed profili permessi di default (Admin/Collaboratore/Sola lettura)
+    try:
+        from routes.permessi import seed_default_profili
+        await seed_default_profili()
+    except Exception as e:
+        logger.warning("Seed profili permessi fallito: %s", e)
 
     # IMAP Poller — avviato automaticamente solo se abilitato in config
     try:

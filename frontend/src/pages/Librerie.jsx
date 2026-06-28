@@ -23,6 +23,7 @@ const SECTIONS = [
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
+    { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
@@ -64,6 +65,7 @@ export default function Librerie() {
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
+                            : s.key === "permessi" ? <PermessiSezione />
                             : <Sezione section={s} />}
                     </TabsContent>
                 ))}
@@ -929,6 +931,7 @@ function UtenteForm({ section, editing, onClose }) {
             codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
             perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
             note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
+            profilo_permessi_id: null,
         }}
         fields={(f, set) => (
             <Tabs defaultValue="anagrafica" className="w-full">
@@ -982,6 +985,12 @@ function UtenteForm({ section, editing, onClose }) {
                             <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
                             <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value.toUpperCase())} /></div>
                         </div>
+                    )}
+                    {f.role !== "cliente" && (
+                        <EmailAliasesEditor value={f.email_aliases || []} mainEmail={f.email || ""} onChange={(v) => set("email_aliases", v)} />
+                    )}
+                    {f.role !== "cliente" && (
+                        <ProfiloPermessiSelector value={f.profilo_permessi_id} onChange={(v) => set("profilo_permessi_id", v)} />
                     )}
                 </TabsContent>
 
@@ -3024,6 +3033,298 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                     <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
                     <Button onClick={save} disabled={saving} className="bg-violet-700 hover:bg-violet-800" data-testid="modello-save">
                         {saving ? "Salvataggio…" : (editing ? "Aggiorna" : "Crea modello")}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+function ProfiloPermessiSelector({ value, onChange }) {
+    const [profili, setProfili] = useState([]);
+    useEffect(() => {
+        api.get("/permessi-profili").then((r) => setProfili(r.data || [])).catch(() => {});
+    }, []);
+    return (
+        <div className="mt-2 p-3 bg-violet-50/40 border border-violet-200 rounded-md">
+            <Label className="text-xs font-semibold text-violet-900 uppercase tracking-wide flex items-center gap-1.5">
+                <Shield size={12} /> Profilo permessi
+            </Label>
+            <div className="text-[11px] text-slate-600 mt-1 mb-2">
+                Determina cosa l&apos;utente può vedere/modificare nel CRM (override del ruolo base).
+            </div>
+            <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? null : v)}>
+                <SelectTrigger className="h-9" data-testid="profilo-permessi-select"><SelectValue placeholder="Nessuno (usa ruolo base)" /></SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="none">Nessuno (usa ruolo base)</SelectItem>
+                    {profili.filter((p) => p.attivo !== false).map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        </div>
+    );
+}
+
+
+
+// ============================================================
+// PERMESSI PROFILI — matrice granulare per area
+// ============================================================
+const PERMESSI_LIVELLI = [
+    { v: "none", label: "Non gestito", color: "slate" },
+    { v: "read", label: "Lettura", color: "sky" },
+    { v: "write", label: "Scrittura", color: "emerald" },
+];
+
+const AREA_LABELS = {
+    anagrafiche: "Anagrafiche",
+    polizze: "Portafoglio polizze",
+    titoli: "Titoli",
+    sinistri: "Sinistri",
+    avvisi: "Avvisi scadenze",
+    contabilita: "Contabilità (Prima nota)",
+    estratti_conto: "Estratti conto",
+    compagnie: "Compagnie",
+    prodotti: "Prodotti",
+    modelli: "Gestioni Modelli",
+    comunicazioni: "Comunicazioni",
+    alert: "Alert & Automazioni",
+    calendario: "Calendario",
+    posta: "Posta (IMAP)",
+    diario: "Diario",
+    dashboard: "Dashboard",
+    librerie: "Librerie",
+    importazioni: "Importazioni",
+    documenti: "Documenti",
+    marketing: "Marketing",
+    pipeline: "Pipeline",
+    corsi: "Corsi",
+};
+
+function PermessiSezione() {
+    const [profili, setProfili] = useState(null);
+    const [meta, setMeta] = useState(null);
+    const [editing, setEditing] = useState(null);
+
+    const load = async () => {
+        try {
+            const [pr, me] = await Promise.all([
+                api.get("/permessi-profili"),
+                api.get("/permessi-aree"),
+            ]);
+            setProfili(pr.data || []);
+            setMeta(me.data || { aree: [], livelli: [] });
+        } catch (e) { toast.error(errMsg(e, "Errore caricamento permessi")); }
+    };
+    useEffect(() => { load(); }, []);
+
+    const elimina = async (p) => {
+        if (!window.confirm(`Eliminare profilo "${p.nome}"?`)) return;
+        try {
+            await api.delete(`/permessi-profili/${p.id}`);
+            toast.success("Profilo eliminato"); load();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+
+    if (!profili || !meta) return <Loading />;
+
+    return (
+        <Card className="p-4 border-slate-200" data-testid="lib-permessi">
+            <div className="flex items-center justify-between mb-3">
+                <div>
+                    <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+                        <Shield size={18} className="text-violet-700" />
+                        Permessi Profili
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+                        Definisci profili di permesso granulari per ogni area del CRM.
+                        Ogni utente può essere associato a un profilo (Anagrafica → campo Profilo permessi).
+                    </p>
+                </div>
+                <Button onClick={() => setEditing({ nome: "", descrizione: "", area_levels: {}, attivo: true })}
+                    className="bg-violet-700 hover:bg-violet-800" data-testid="permessi-new">
+                    <Plus size={14} className="mr-1" />Nuovo profilo
+                </Button>
+            </div>
+
+            {profili.length === 0 ? (
+                <Empty message="Nessun profilo permessi creato." />
+            ) : (
+                <table className="tbl w-full">
+                    <thead><tr>
+                        <th>Nome profilo</th>
+                        <th>Descrizione</th>
+                        <th className="text-center">Aree gestite</th>
+                        <th className="text-center">Stato</th>
+                        <th className="w-24"></th>
+                    </tr></thead>
+                    <tbody>
+                        {profili.map((p) => {
+                            const counts = Object.values(p.area_levels || {}).reduce(
+                                (acc, l) => { acc[l] = (acc[l] || 0) + 1; return acc; }, {},
+                            );
+                            return (
+                                <tr key={p.id} data-testid={`profilo-row-${p.id}`}>
+                                    <td className="font-medium">{p.nome}</td>
+                                    <td className="text-xs text-slate-500">{p.descrizione || "—"}</td>
+                                    <td className="text-center text-[11px]">
+                                        <span className="text-emerald-700 font-semibold">{counts.write || 0}</span> scrittura · 
+                                        <span className="text-sky-700 font-semibold ml-1">{counts.read || 0}</span> lettura · 
+                                        <span className="text-slate-500 ml-1">{counts.none || 0}</span> non gestite
+                                    </td>
+                                    <td className="text-center">
+                                        {p.attivo
+                                            ? <span className="badge badge-success">attivo</span>
+                                            : <span className="badge badge-warning">off</span>}
+                                    </td>
+                                    <td className="text-right">
+                                        <button onClick={() => setEditing(p)}
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded border border-slate-200 hover:bg-slate-100 mr-1"
+                                            title="Modifica" data-testid={`profilo-edit-${p.id}`}>
+                                            <Pencil size={12} />
+                                        </button>
+                                        <button onClick={() => elimina(p)}
+                                            className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                                            title="Elimina" data-testid={`profilo-del-${p.id}`}>
+                                            <Trash2 size={12} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            )}
+
+            {editing && (
+                <PermessiMatrixDialog
+                    profilo={editing}
+                    aree={meta.aree}
+                    onClose={(reload) => { setEditing(null); if (reload) load(); }}
+                />
+            )}
+        </Card>
+    );
+}
+
+function PermessiMatrixDialog({ profilo, aree, onClose }) {
+    const [f, setF] = useState({
+        nome: profilo.nome || "",
+        descrizione: profilo.descrizione || "",
+        area_levels: { ...(profilo.area_levels || {}) },
+        attivo: profilo.attivo !== false,
+    });
+    const [saving, setSaving] = useState(false);
+
+    const setLevel = (area, level) => {
+        setF((p) => ({ ...p, area_levels: { ...p.area_levels, [area]: level } }));
+    };
+
+    const setAll = (level) => {
+        const obj = {};
+        aree.forEach((a) => { obj[a] = level; });
+        setF((p) => ({ ...p, area_levels: obj }));
+    };
+
+    const save = async () => {
+        if (!f.nome.trim()) { toast.error("Nome profilo obbligatorio"); return; }
+        setSaving(true);
+        try {
+            if (profilo.id) {
+                await api.put(`/permessi-profili/${profilo.id}`, f);
+                toast.success("Profilo aggiornato");
+            } else {
+                await api.post("/permessi-profili", f);
+                toast.success("Profilo creato");
+            }
+            onClose(true);
+        } catch (e) { toast.error(errMsg(e, "Errore salvataggio")); }
+        setSaving(false);
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="permessi-dialog">
+                <DialogHeader>
+                    <DialogTitle>{profilo.id ? `Modifica profilo "${profilo.nome}"` : "Nuovo profilo permessi"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Nome profilo *</Label>
+                            <Input value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })}
+                                placeholder="es. Back office sinistri" data-testid="profilo-nome" />
+                        </div>
+                        <div>
+                            <Label>Descrizione</Label>
+                            <Input value={f.descrizione} onChange={(e) => setF({ ...f, descrizione: e.target.value })}
+                                data-testid="profilo-desc" />
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded p-2">
+                        <span className="text-xs text-slate-600">Imposta tutte le aree a:</span>
+                        <div className="flex gap-1.5">
+                            {PERMESSI_LIVELLI.map((l) => (
+                                <button key={l.v} type="button" onClick={() => setAll(l.v)}
+                                    className={`text-xs px-2 py-1 border rounded border-${l.color}-300 text-${l.color}-700 hover:bg-${l.color}-50`}
+                                    data-testid={`set-all-${l.v}`}>
+                                    {l.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Matrice */}
+                    <div className="border border-slate-200 rounded overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-100 text-slate-600 text-xs">
+                                <tr>
+                                    <th className="text-left px-3 py-2 font-semibold">Area</th>
+                                    {PERMESSI_LIVELLI.map((l) => (
+                                        <th key={l.v} className="text-center px-3 py-2 font-semibold">{l.label}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {aree.map((a, idx) => {
+                                    const cur = f.area_levels[a] || "none";
+                                    return (
+                                        <tr key={a} className={idx % 2 === 1 ? "bg-slate-50/50" : "bg-white"}>
+                                            <td className="px-3 py-1.5 font-medium text-slate-700">
+                                                {AREA_LABELS[a] || a}
+                                            </td>
+                                            {PERMESSI_LIVELLI.map((l) => (
+                                                <td key={l.v} className="text-center px-3 py-1.5">
+                                                    <input
+                                                        type="radio"
+                                                        name={`area_${a}`}
+                                                        checked={cur === l.v}
+                                                        onChange={() => setLevel(a, l.v)}
+                                                        className={`w-4 h-4 cursor-pointer accent-${l.color}-600`}
+                                                        data-testid={`permesso-${a}-${l.v}`}
+                                                    />
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={f.attivo}
+                            onChange={(e) => setF({ ...f, attivo: e.target.checked })} />
+                        Profilo attivo
+                    </label>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
+                    <Button onClick={save} disabled={saving} className="bg-violet-700 hover:bg-violet-800" data-testid="profilo-save">
+                        {saving ? "Salvataggio…" : (profilo.id ? "Aggiorna" : "Crea profilo")}
                     </Button>
                 </DialogFooter>
             </DialogContent>

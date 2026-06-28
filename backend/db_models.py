@@ -52,6 +52,8 @@ class UserPublic(BaseDoc):
     documento_iban_url: Optional[str] = None
     # Foto profilo (avatar) — mostrata in top bar e diario
     avatar_url: Optional[str] = None
+    # Profilo permessi granulare (rinvia a collection profili_permessi)
+    profilo_permessi_id: Optional[str] = None
     # Alias email aziendali per smistamento posta in arrivo (es.
     # "alessia.balzarolo@schiantarelli.it"). Possono includere alias di
     # reparto condivisi (es. "sinistri@…" su più collaboratori).
