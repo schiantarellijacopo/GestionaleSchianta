@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -110,6 +111,17 @@ export default function Anagrafiche() {
         }
         return out;
     }, [list, catFilter, compleannoFilter, docFilter]);
+
+    const anagAccessors = useMemo(() => ({
+        ragione_sociale: (a) => (a.ragione_sociale || a.denominazione || `${a.cognome || ""} ${a.nome || ""}`).trim(),
+        num_polizze: (a) => (a.polizze_count ?? a.num_polizze ?? 0),
+        collaboratore_nome: (a) => a.collaboratore_nome || "",
+        premio_totale: (a) => Number(a.premio_totale || 0),
+        provvigioni: (a) => Number(a.provvigioni_totali || a.provvigioni || 0),
+    }), []);
+    const { sorted: sortedFiltered, sortKey, dir, toggle } = useTableSort(
+        filtered, "ragione_sociale", "asc", anagAccessors,
+    );
 
     const clearTaskFilter = () => {
         const p = new URLSearchParams(searchParams);
@@ -273,18 +285,18 @@ export default function Anagrafiche() {
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
                                 <th className="w-8 py-3"></th>
-                                <th className="text-left py-3 pr-3">Cliente</th>
-                                <th className="text-left py-3 pr-3">E-mail</th>
-                                <th className="text-left py-3 pr-3">Telefono</th>
-                                <th className="text-center py-3 pr-3 text-emerald-700">Polizze</th>
-                                <th className="text-left py-3 pr-3">Collaboratore</th>
-                                <th className="text-right py-3 pr-3">Premio totale</th>
-                                <th className="text-right py-3 pr-3 text-emerald-700">Provvigioni</th>
+                                <th className="text-left py-3 pr-3"><SortHeader k="ragione_sociale" sortKey={sortKey} dir={dir} toggle={toggle}>Cliente</SortHeader></th>
+                                <th className="text-left py-3 pr-3"><SortHeader k="email" sortKey={sortKey} dir={dir} toggle={toggle}>E-mail</SortHeader></th>
+                                <th className="text-left py-3 pr-3"><SortHeader k="telefono" sortKey={sortKey} dir={dir} toggle={toggle}>Telefono</SortHeader></th>
+                                <th className="text-center py-3 pr-3 text-emerald-700"><SortHeader k="num_polizze" sortKey={sortKey} dir={dir} toggle={toggle}>Polizze</SortHeader></th>
+                                <th className="text-left py-3 pr-3"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                                <th className="text-right py-3 pr-3"><SortHeader k="premio_totale" sortKey={sortKey} dir={dir} toggle={toggle}>Premio totale</SortHeader></th>
+                                <th className="text-right py-3 pr-3 text-emerald-700"><SortHeader k="provvigioni" sortKey={sortKey} dir={dir} toggle={toggle}>Provvigioni</SortHeader></th>
                                 <th className="text-left py-3 pr-3">Tag</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.map((a) => {
+                            {sortedFiltered.map((a) => {
                                 const cat = CAT_BADGE[a.categoria_ui] || CAT_BADGE.senza_polizze;
                                 const isOpen = !!expanded[a.id];
                                 const net = networks[a.id];

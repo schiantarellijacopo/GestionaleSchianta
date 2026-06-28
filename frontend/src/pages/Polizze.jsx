@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -88,7 +89,9 @@ export default function Polizze() {
         });
     }, []);
 
-    const displayed = list || [];
+    const baseList = list || [];
+    const { sorted, sortKey, dir, toggle } = useTableSort(baseList, "data_scadenza", "asc");
+    const displayed = sorted;
 
     const totali = useMemo(() => {
         const src = list || [];
@@ -247,17 +250,17 @@ export default function Polizze() {
                     <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
                             <tr>
-                                <th>Numero polizza</th>
-                                <th>Targa</th>
-                                <th>Contraente</th>
-                                <th>Compagnia</th>
-                                <th>Collaboratore</th>
-                                <th>Ramo</th>
-                                <th>Stato</th>
-                                <th>Effetto</th>
-                                <th>Scadenza</th>
-                                <th className="text-right">Premio lordo</th>
-                                <th className="text-right">Provvigioni</th>
+                                <th><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Numero polizza</SortHeader></th>
+                                <th><SortHeader k="targa" sortKey={sortKey} dir={dir} toggle={toggle}>Targa</SortHeader></th>
+                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Contraente</SortHeader></th>
+                                <th><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
+                                <th><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                                <th><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo</SortHeader></th>
+                                <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                                <th><SortHeader k="data_effetto" sortKey={sortKey} dir={dir} toggle={toggle}>Effetto</SortHeader></th>
+                                <th><SortHeader k="data_scadenza" sortKey={sortKey} dir={dir} toggle={toggle}>Scadenza</SortHeader></th>
+                                <th className="text-right"><SortHeader k="premio_lordo" sortKey={sortKey} dir={dir} toggle={toggle}>Premio lordo</SortHeader></th>
+                                <th className="text-right"><SortHeader k="provvigioni" sortKey={sortKey} dir={dir} toggle={toggle}>Provvigioni</SortHeader></th>
                             </tr>
                         </thead>
                         <tbody>

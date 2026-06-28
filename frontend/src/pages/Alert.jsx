@@ -10,6 +10,7 @@
  *  - Storico: log degli ultimi invii (alert_events)
  */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -157,7 +158,7 @@ export default function Alert() {
 
             {/* Tabs */}
             <div className="flex gap-2 mb-4 border-b">
-                {["regole", "storico", "configurazione"].map((t) => (
+                {["regole", "storico"].map((t) => (
                     <button
                         key={t}
                         onClick={() => setTab(t)}
@@ -166,9 +167,15 @@ export default function Alert() {
                     >
                         {t === "regole" && "Regole"}
                         {t === "storico" && <><History size={14} className="inline mr-1" /> Storico invii</>}
-                        {t === "configurazione" && <><Settings size={14} className="inline mr-1" /> Configurazione canali</>}
                     </button>
                 ))}
+                <Link
+                    to="/librerie?section=comunicazioni"
+                    className="ml-auto px-3 py-2 text-xs text-slate-500 hover:text-sky-700 inline-flex items-center gap-1"
+                    data-testid="alert-link-config"
+                >
+                    <Settings size={12} /> Configurazione canali → Librerie › Comunicazioni
+                </Link>
             </div>
 
             {tab === "regole" && (
@@ -296,7 +303,19 @@ export default function Alert() {
                 </Card>
             )}
 
-            {tab === "configurazione" && <ConfigurazioneCanali />}
+            {tab === "configurazione" && (
+                <div className="text-center py-12">
+                    <Settings className="mx-auto mb-3 text-slate-400" size={48} />
+                    <p className="text-sm text-slate-600 mb-3">
+                        La configurazione canali è stata spostata in <strong>Librerie › Comunicazioni</strong>.
+                    </p>
+                    <Link to="/librerie?section=comunicazioni"
+                        className="inline-block px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm rounded">
+                        Vai a Librerie › Comunicazioni →
+                    </Link>
+                </div>
+            )}
+            {tab === "configurazione_OLD" && <ConfigurazioneCanali />}
 
             {editing && <RuleEditor rule={editing} onClose={() => { setEditing(null); loadRules(); }} />}
             {showCatalog && <CatalogDialog onClose={() => { setShowCatalog(false); loadRules(); }} />}

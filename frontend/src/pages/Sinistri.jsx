@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,10 @@ export default function Sinistri() {
             }
         }
     }, [focusId, list]);
+
+    const { sorted: sortedList, sortKey, dir, toggle } = useTableSort(
+        list || [], "data_avvenimento", "desc",
+    );
 
     return (
         <div data-testid="sinistri-page">
@@ -88,19 +93,19 @@ export default function Sinistri() {
                     <table className="tbl freeze-3 w-full min-w-[900px]">
                         <thead>
                             <tr>
-                                <th>Numero</th>
-                                <th>Polizza</th>
-                                <th>Avvenimento</th>
-                                <th>Denuncia</th>
-                                <th>Luogo</th>
-                                <th>Ramo</th>
-                                <th>Stato</th>
-                                <th className="text-right">Riserva</th>
-                                <th className="text-right">Liquidazione</th>
+                                <th><SortHeader k="numero_sinistro" sortKey={sortKey} dir={dir} toggle={toggle}>Numero</SortHeader></th>
+                                <th><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Polizza</SortHeader></th>
+                                <th><SortHeader k="data_avvenimento" sortKey={sortKey} dir={dir} toggle={toggle}>Avvenimento</SortHeader></th>
+                                <th><SortHeader k="data_denuncia" sortKey={sortKey} dir={dir} toggle={toggle}>Denuncia</SortHeader></th>
+                                <th><SortHeader k="luogo" sortKey={sortKey} dir={dir} toggle={toggle}>Luogo</SortHeader></th>
+                                <th><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo</SortHeader></th>
+                                <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                                <th className="text-right"><SortHeader k="riserva" sortKey={sortKey} dir={dir} toggle={toggle}>Riserva</SortHeader></th>
+                                <th className="text-right"><SortHeader k="liquidazione" sortKey={sortKey} dir={dir} toggle={toggle}>Liquidazione</SortHeader></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {list.map((s) => (
+                            {sortedList.map((s) => (
                                 <tr key={s.id} data-testid={`sinistro-row-${s.id}`}>
                                     <td className="num font-medium">{s.numero_sinistro}</td>
                                     <td><Link to={`/polizze/${s.polizza_id}`} className="text-sky-700 hover:underline">{s.numero_polizza || s.polizza_id.slice(0, 8)}</Link></td>

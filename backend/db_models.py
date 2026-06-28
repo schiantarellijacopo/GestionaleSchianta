@@ -50,6 +50,10 @@ class UserPublic(BaseDoc):
     casellario_url: Optional[str] = None
     carichi_pendenti_url: Optional[str] = None
     documento_iban_url: Optional[str] = None
+    # Alias email aziendali per smistamento posta in arrivo (es.
+    # "alessia.balzarolo@schiantarelli.it"). Possono includere alias di
+    # reparto condivisi (es. "sinistri@…" su più collaboratori).
+    email_aliases: List[str] = Field(default_factory=list)
     # Corsi completati: [{titolo, ente, data_scadenza, url_attestato}]
     corsi: List[dict] = Field(default_factory=list)
     # Note interne (visibile solo admin)
@@ -545,13 +549,58 @@ class TipoPagamento(BaseDoc):
     note: Optional[str] = None
 
 
-class DiarioNota(BaseDoc):
-    """Nota libera del diario personale di un collaboratore/dipendente.
+class EmailInbox(BaseDoc):
+    """Email ricevute via IMAP (cassetta aziendale principale).
 
-    Le voci automatiche (email/sms/whatsapp inviati, chat) NON usano questo
-    modello: vivono nella collezione `storico_avvisi` / `chat` e vengono
-    aggregate dall'endpoint `/api/diario` insieme alle note.
+    Il poller le smista automaticamente in base agli alias dei collaboratori
+    (lista `User.email_aliases`):
+      - se almeno un alias di un collaboratore compare nei destinatari
+        (`To:` + `Cc:`) → categoria='personale', `smistato_a` contiene gli
+        id dei collaboratori interessati;
+      - se più collaboratori condividono uno stesso alias (es. `sinistri@`)
+        ricevono tutti la stessa email;
+      - se nessun alias matcha → categoria='condivisa', visibile a tutti.
+
+    Inoltre, se il mittente è registrato come anagrafica, viene popolato
+    `anagrafica_id` per visualizzazione nel diario cliente.
     """
+    message_id: Optional[str] = None
+    uid: Optional[str] = None
+    folder: str = "INBOX"
+    from_address: str
+    from_name: Optional[str] = None
+    to_addresses: list[str] = []
+    cc_addresses: list[str] = []
+    subject: Optional[str] = None
+    body_text: Optional[str] = None
+    body_html: Optional[str] = None
+    date: Optional[str] = None
+    has_attachments: bool = False
+    attachments: list[dict] = []   # [{filename, content_type, size, storage_path}]
+    # Smistamento
+    categoria: str = "condivisa"   # "condivisa" | "personale"
+    smistato_a: list[str] = []     # user_ids
+    letta_da: list[str] = []       # user_ids che hanno letto
+    # Collegamento anagrafica
+    anagrafica_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+
+
+class DiarioCliente(BaseDoc):
+    """Voce del diario CLIENTE (anagrafica). Già usata dal sistema per le
+    interazioni manuali; ora viene popolata anche automaticamente da:
+      • email ricevute via IMAP da indirizzi conosciuti
+      • email inviate (da storico_avvisi)
+    """
+    anagrafica_id: str
+    tipo: str = "nota"   # nota|email_in|email_out|sms|whatsapp|chiamata|incontro
+    titolo: str
+    contenuto: Optional[str] = None
+    autore_id: Optional[str] = None
+    email_inbox_id: Optional[str] = None
+
+
+class DiarioNota(BaseDoc):
     user_id: str
     titolo: str
     contenuto: Optional[str] = None

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -137,7 +138,9 @@ export default function Titoli({ storicoMode = false } = {}) {
         });
     }, []);
 
-    const displayed = list || [];
+    const baseList = list || [];
+    const { sorted, sortKey, dir, toggle: toggleSort } = useTableSort(baseList, "data_scadenza", "asc");
+    const displayed = sorted;
 
     // totali calcolati sui dati visualizzati
     const totali = useMemo(() => {
@@ -291,17 +294,17 @@ export default function Titoli({ storicoMode = false } = {}) {
                                         onChange={toggleAll}
                                     />
                                 </th>
-                                <th className="w-[140px]">Contratto</th>
-                                <th className="w-[100px]">Targa</th>
-                                <th>Contraente</th>
-                                <th className="w-[120px]">Compagnia</th>
-                                <th className="w-[100px]">Collaboratore</th>
-                                <th className="text-right w-[80px]">Premio €</th>
-                                <th className="text-right w-[70px]" title="Provvigione totale">Provv. tot.</th>
-                                <th className="text-right w-[70px]" title="Quota collaboratore">Collab.</th>
-                                <th className="text-right w-[70px]" title="Margine agenzia">Margine</th>
-                                <th className="w-[80px] whitespace-nowrap">Scadenza</th>
-                                <th className="w-[80px] whitespace-nowrap">Copertura</th>
+                                <th className="w-[140px]"><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Contratto</SortHeader></th>
+                                <th className="w-[100px]"><SortHeader k="targa" sortKey={sortKey} dir={dir} toggle={toggle}>Targa</SortHeader></th>
+                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Contraente</SortHeader></th>
+                                <th className="w-[120px]"><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
+                                <th className="w-[100px]"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                                <th className="text-right w-[80px]"><SortHeader k="importo_lordo" sortKey={sortKey} dir={dir} toggle={toggle}>Premio €</SortHeader></th>
+                                <th className="text-right w-[70px]" title="Provvigione totale"><SortHeader k="provv_totale" sortKey={sortKey} dir={dir} toggle={toggle}>Provv. tot.</SortHeader></th>
+                                <th className="text-right w-[70px]" title="Quota collaboratore"><SortHeader k="provv_collaboratore" sortKey={sortKey} dir={dir} toggle={toggle}>Collab.</SortHeader></th>
+                                <th className="text-right w-[70px]" title="Margine agenzia"><SortHeader k="margine_agenzia" sortKey={sortKey} dir={dir} toggle={toggle}>Margine</SortHeader></th>
+                                <th className="w-[80px] whitespace-nowrap"><SortHeader k="data_scadenza" sortKey={sortKey} dir={dir} toggle={toggle}>Scadenza</SortHeader></th>
+                                <th className="w-[80px] whitespace-nowrap"><SortHeader k="data_copertura" sortKey={sortKey} dir={dir} toggle={toggle}>Copertura</SortHeader></th>
                                 {(storicoMode || filters.preset === "storico" || filters.preset === "storico_anno" || filters.preset === "storico_mese") && (
                                     <>
                                         <th className="w-[80px] whitespace-nowrap" data-testid="th-incassato-il">Incassato il</th>
@@ -902,4 +905,3 @@ function KpiBar({ label, value, accent = "slate", testid, highlight = false }) {
         </div>
     );
 }
-
