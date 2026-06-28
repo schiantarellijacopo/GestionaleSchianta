@@ -12,6 +12,7 @@
  * L'utente può aggiungere/rimuovere KPI custom tramite "Personalizza KPI".
  */
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,13 +48,22 @@ const COLOR_CLASSES = {
     slate: "border-slate-400 text-slate-700",
 };
 
-function KpiCard({ k }) {
+function KpiCard({ k, onClick }) {
     const Ic = ICON_MAP[k.icon] || Star;
     const cls = COLOR_CLASSES[k.color] || COLOR_CLASSES.sky;
+    const clickable = Boolean(k.link || onClick);
     return (
         <Card
-            className={`p-3 border-l-4 ${cls} bg-white relative overflow-hidden flex-1 min-w-[150px]`}
+            className={`p-3 border-l-4 ${cls} bg-white relative overflow-hidden flex-1 min-w-[150px] ${
+                clickable ? "cursor-pointer hover:shadow-md hover:-translate-y-px transition-all" : ""
+            }`}
             data-testid={`kpi-${k.key}`}
+            onClick={clickable ? onClick : undefined}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onKeyDown={clickable ? (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); }
+            } : undefined}
         >
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -76,6 +86,7 @@ function KpiCard({ k }) {
 }
 
 export default function KpiBar({ sezione, title, description }) {
+    const navigate = useNavigate();
     const [data, setData] = useState(null);
     const [open, setOpen] = useState(false);
 
@@ -101,7 +112,13 @@ export default function KpiBar({ sezione, title, description }) {
                 </div>
             )}
             <div className="flex flex-wrap gap-2">
-                {allKpi.map((k) => <KpiCard key={k.key} k={k} />)}
+                {allKpi.map((k) => (
+                    <KpiCard
+                        key={k.key}
+                        k={k}
+                        onClick={k.link ? () => navigate(k.link) : undefined}
+                    />
+                ))}
                 <button
                     type="button"
                     onClick={() => setOpen(true)}
@@ -131,15 +148,28 @@ const FILTRO_KIND_BY_SEZIONE = {
     polizze: [
         { v: "tag", l: "Tag anagrafica" }, { v: "stato", l: "Stato polizza" },
         { v: "ramo", l: "Ramo" }, { v: "compagnia", l: "Compagnia" },
+        { v: "prodotto", l: "Prodotto" },
     ],
     titoli: [
         { v: "tag", l: "Tag anagrafica" }, { v: "stato", l: "Stato titolo" },
+        { v: "ramo", l: "Ramo" }, { v: "compagnia", l: "Compagnia" },
+        { v: "prodotto", l: "Prodotto" }, { v: "mezzo_pagamento", l: "Mezzo pagamento" },
+        { v: "conto_cassa", l: "Conto / Banca" },
     ],
     sinistri: [
         { v: "stato", l: "Stato sinistro" }, { v: "compagnia", l: "Compagnia" },
+        { v: "ramo", l: "Ramo" },
     ],
-    avvisi: [{ v: "stato", l: "Stato titolo" }],
-    prima_nota: [{ v: "tag", l: "Tag" }],
+    avvisi: [
+        { v: "stato", l: "Stato titolo" }, { v: "compagnia", l: "Compagnia" },
+        { v: "ramo", l: "Ramo" },
+    ],
+    prima_nota: [{ v: "tag", l: "Tag" }, { v: "conto_cassa", l: "Conto / Banca" }],
+};
+
+const FILTRO_KIND_TO_PARAM = {
+    tag: "tag", stato: "stato", ramo: "ramo", compagnia: "compagnia_id",
+    prodotto: "prodotto", mezzo_pagamento: "mezzo_pagamento", conto_cassa: "conto_cassa_id",
 };
 
 function KpiCustomizeDialog({ sezione, customs, onClose }) {
@@ -148,6 +178,19 @@ function KpiCustomizeDialog({ sezione, customs, onClose }) {
     const [form, setForm] = useState({
         label: "", color: "sky", icon: "Star", filtro_kind: "tag", filtro_params: {},
     });
+    const [options, setOptions] = useState([]);
+    const [loadingOpts, setLoadingOpts] = useState(false);
+
+    // Carica opzioni dinamiche quando cambia filtro_kind
+    useEffect(() => {
+        let cancelled = false;
+        setLoadingOpts(true);
+        api.get("/kpi/options", { params: { sezione, kind: form.filtro_kind } })
+            .then((r) => { if (!cancelled) setOptions(r.data || []); })
+            .catch(() => { if (!cancelled) setOptions([]); })
+            .finally(() => { if (!cancelled) setLoadingOpts(false); });
+        return () => { cancelled = true; };
+    }, [sezione, form.filtro_kind]);
 
     const remove = async (id) => {
         if (!window.confirm("Rimuovere questa KPI?")) return;
@@ -160,11 +203,14 @@ function KpiCustomizeDialog({ sezione, customs, onClose }) {
 
     const save = async () => {
         if (!form.label.trim()) { toast.error("Etichetta obbligatoria"); return; }
+        const paramKey = FILTRO_KIND_TO_PARAM[form.filtro_kind] || form.filtro_kind;
+        const paramVal = form.filtro_params[paramKey];
+        if (!paramVal) { toast.error("Seleziona un valore filtro"); return; }
         try {
             await api.post("/kpi/custom", {
                 sezione, label: form.label, color: form.color, icon: form.icon,
                 ordine: items.length, filtro_kind: form.filtro_kind,
-                filtro_params: form.filtro_params,
+                filtro_params: { [paramKey]: paramVal },
             });
             toast.success("KPI creata");
             onClose(true);
@@ -172,6 +218,7 @@ function KpiCustomizeDialog({ sezione, customs, onClose }) {
     };
 
     const kinds = FILTRO_KIND_BY_SEZIONE[sezione] || [{ v: "tag", l: "Tag" }];
+    const paramKey = FILTRO_KIND_TO_PARAM[form.filtro_kind] || form.filtro_kind;
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose(false)}>
@@ -247,20 +294,27 @@ function KpiCustomizeDialog({ sezione, customs, onClose }) {
                             </div>
                             <div>
                                 <Label>Valore filtro *</Label>
-                                <Input
-                                    placeholder={
-                                        form.filtro_kind === "tag" ? "es. RC_AUTO, AGRICOLO…"
-                                        : form.filtro_kind === "stato" ? "es. attiva, scaduto, aperto…"
-                                        : form.filtro_kind === "ramo" ? "es. RCAUTO, INFORTUNI…"
-                                        : "valore"
-                                    }
-                                    value={form.filtro_params[form.filtro_kind] || ""}
-                                    onChange={(e) => setForm({
+                                <Select
+                                    value={form.filtro_params[paramKey] || ""}
+                                    onValueChange={(v) => setForm({
                                         ...form,
-                                        filtro_params: { [form.filtro_kind]: e.target.value },
+                                        filtro_params: { [paramKey]: v },
                                     })}
-                                    data-testid="kpi-filter-value"
-                                />
+                                >
+                                    <SelectTrigger data-testid="kpi-filter-value">
+                                        <SelectValue placeholder={loadingOpts ? "Caricamento…" : "Seleziona valore"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {options.length === 0 && !loadingOpts && (
+                                            <div className="px-2 py-1.5 text-xs text-slate-500">
+                                                Nessuna opzione disponibile
+                                            </div>
+                                        )}
+                                        {options.map((o) => (
+                                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="flex justify-end gap-1.5">
                                 <Button variant="outline" size="sm" onClick={() => setAdding(false)}>Annulla</Button>

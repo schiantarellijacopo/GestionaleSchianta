@@ -13,6 +13,7 @@ import Titoli from "@/pages/Titoli";
 import TitoliStorici from "@/pages/TitoliStorici";
 import Alert from "@/pages/Alert";
 import Sinistri from "@/pages/Sinistri";
+import SinistroDetail from "@/pages/SinistroDetail";
 import Contabilita from "@/pages/Contabilita";
 import Compagnie from "@/pages/Compagnie";
 import Importazione from "@/pages/Importazione";
@@ -59,6 +60,7 @@ function App() {
                             <Route path="/titoli-storici" element={<TitoliStorici />} />
                             <Route path="/alert" element={<Alert />} />
                             <Route path="/sinistri" element={<Sinistri />} />
+                            <Route path="/sinistri/:id" element={<SinistroDetail />} />
                             <Route
                                 path="/avvisi"
                                 element={

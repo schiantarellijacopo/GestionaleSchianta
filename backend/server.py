@@ -2079,6 +2079,7 @@ async def list_polizze(
     contraente_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
+    categoria: Optional[str] = None,  # auto_priv|auto_az|altri_priv|altri_az|vita_inv|vita_prot
     # filtri periodo (su scadenza)
     dal: Optional[str] = None,
     al: Optional[str] = None,
@@ -2153,6 +2154,33 @@ async def list_polizze(
         it["contraente_nome"] = anas.get(it.get("contraente_id"), {}).get("ragione_sociale")
         it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
         it["collaboratore_nome"] = collabs.get(it.get("collaboratore_id", ""), {}).get("name")
+    # Filtro categoria business (post-processing — richiede tipo anagrafica)
+    if categoria:
+        anag_tipo = {a["id"]: (a.get("tipo") or "persona_fisica")
+                     async for a in db.anagrafiche.find(
+                         {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "tipo": 1, "tags": 1})}
+        # azienda override via tags
+        async for a in db.anagrafiche.find(
+                {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "tags": 1}):
+            tags = [t.lower() for t in (a.get("tags") or [])]
+            if "azienda" in tags or "condominio" in tags:
+                anag_tipo[a["id"]] = "persona_giuridica"
+
+        def _cat(p):
+            ramo_u = (p.get("ramo") or "").upper()
+            prod_u = (p.get("prodotto") or "").upper()
+            tipo = anag_tipo.get(p.get("contraente_id"), "persona_fisica")
+            is_priv = tipo == "persona_fisica"
+            is_vita = "VITA" in ramo_u or "VITA" in prod_u
+            is_auto = ("AUTO" in ramo_u and ("RC" in ramo_u or ramo_u.startswith("AUTO"))) \
+                      or ramo_u == "RCA" or "RCAUTO" in ramo_u
+            if is_vita:
+                return "vita_inv" if ("INVEST" in prod_u or "INVEST" in ramo_u) else "vita_prot"
+            if is_auto:
+                return "auto_priv" if is_priv else "auto_az"
+            return "altri_priv" if is_priv else "altri_az"
+
+        items = [p for p in items if _cat(p) == categoria]
     return items
 
 
@@ -3631,6 +3659,14 @@ async def delete_lettera_abbuono(lid: str, user=Depends(require_user("admin"))):
 async def list_sinistri(
     stato: Optional[str] = None,
     polizza_id: Optional[str] = None,
+    compagnia_id: Optional[str] = None,
+    contraente_id: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    tipologia: Optional[str] = None,
+    q: Optional[str] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
     limit: int = 50000,
     user=Depends(current_user),
 ):
@@ -3639,12 +3675,55 @@ async def list_sinistri(
         flt["stato"] = stato
     if polizza_id:
         flt["polizza_id"] = polizza_id
+    if compagnia_id:
+        flt["compagnia_id"] = compagnia_id
+    if contraente_id:
+        flt["contraente_id"] = contraente_id
+    if collaboratore_id:
+        flt["collaboratore_id"] = collaboratore_id
+    if ramo:
+        flt["ramo"] = ramo
+    if tipologia:
+        flt["tipologia_sinistro"] = {"$regex": tipologia, "$options": "i"}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        flt["data_avvenimento"] = cond
+    if q:
+        qrx = {"$regex": q, "$options": "i"}
+        flt["$or"] = [
+            {"numero_sinistro": qrx},
+            {"numero_interno": qrx},
+            {"luogo": qrx},
+            {"descrizione": qrx},
+            {"tipologia_sinistro": qrx},
+        ]
     items = await db.sinistri.find(flt, {"_id": 0}).sort("data_avvenimento", -1).to_list(limit)
+    # enrichment ottimizzato
     pol_ids = list({s["polizza_id"] for s in items if s.get("polizza_id")})
+    ana_ids = list({s["contraente_id"] for s in items if s.get("contraente_id")})
+    comp_ids = list({s["compagnia_id"] for s in items if s.get("compagnia_id")})
     pols = {p["id"]: p async for p in db.polizze.find(
-        {"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1})}
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "targa": 1, "ramo": 1, "prodotto": 1})}
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    comps = {c["id"]: c async for c in db.compagnie.find(
+        {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
     for s in items:
-        s["numero_polizza"] = pols.get(s.get("polizza_id"), {}).get("numero_polizza")
+        p = pols.get(s.get("polizza_id"), {})
+        s["numero_polizza"] = p.get("numero_polizza")
+        s["targa"] = p.get("targa") or s.get("targa")
+        a = anas.get(s.get("contraente_id"), {})
+        s["contraente_nome"] = a.get("ragione_sociale") or \
+            f"{a.get('cognome','')} {a.get('nome','')}".strip()
+        s["compagnia_nome"] = comps.get(s.get("compagnia_id"), {}).get("ragione_sociale")
+        # primo danneggiato come campo riassuntivo
+        if s.get("danneggiati"):
+            d0 = s["danneggiati"][0]
+            s["danneggiato_nome"] = d0.get("nome") or d0.get("ragione_sociale")
     return items
 
 
@@ -3700,6 +3779,71 @@ async def update_sinistro(sid: str, body: dict, user=Depends(require_user("admin
             "link": f"/sinistri/{sid}",
         })
     return strip_mongo_id(new)
+
+
+@api.get("/sinistri/{sid}")
+async def get_sinistro(sid: str, user=Depends(current_user)):
+    """Restituisce il singolo sinistro arricchito con dati polizza/contraente/compagnia."""
+    s = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Sinistro non trovato")
+    # arricchimento contestuale
+    if s.get("polizza_id"):
+        pol = await db.polizze.find_one(
+            {"id": s["polizza_id"]},
+            {"_id": 0, "numero_polizza": 1, "ramo": 1, "prodotto": 1, "targa": 1,
+             "compagnia_id": 1, "contraente_id": 1, "premio_lordo": 1, "decorrenza": 1,
+             "scadenza": 1, "veicolo": 1, "marca": 1, "modello": 1, "telaio": 1},
+        ) or {}
+        s["polizza"] = pol
+        s["numero_polizza"] = pol.get("numero_polizza")
+    if s.get("contraente_id"):
+        ana = await db.anagrafiche.find_one(
+            {"id": s["contraente_id"]},
+            {"_id": 0, "ragione_sociale": 1, "cognome": 1, "nome": 1, "codice_fiscale": 1,
+             "partita_iva": 1, "indirizzo": 1, "cap": 1, "comune": 1, "provincia": 1,
+             "telefono": 1, "email": 1, "tipo": 1},
+        ) or {}
+        s["contraente"] = ana
+        s["contraente_nome"] = ana.get("ragione_sociale") or \
+            f"{ana.get('cognome','')} {ana.get('nome','')}".strip()
+    if s.get("compagnia_id"):
+        c = await db.compagnie.find_one(
+            {"id": s["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1, "codice": 1},
+        ) or {}
+        s["compagnia"] = c
+        s["compagnia_nome"] = c.get("ragione_sociale")
+    if s.get("collaboratore_id"):
+        u = await db.users.find_one(
+            {"id": s["collaboratore_id"]}, {"_id": 0, "name": 1, "email": 1},
+        ) or {}
+        s["collaboratore_nome"] = u.get("name")
+    # documenti collegati (dal modulo storage)
+    docs = await db.storage_files.find(
+        {"$or": [{"sinistro_id": sid}, {"entity_id": sid, "entity_type": "sinistro"}]},
+        {"_id": 0},
+    ).sort("uploaded_at", -1).to_list(500)
+    s["documenti"] = docs
+    return s
+
+
+@api.put("/sinistri/{sid}/cid")
+async def update_costatazione_amichevole(
+    sid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Salva/aggiorna la Costatazione Amichevole (CID) di un sinistro RC Auto."""
+    s = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Sinistro non trovato")
+    cid = body or {}
+    cid["updated_at"] = _now_iso()
+    await db.sinistri.update_one(
+        {"id": sid},
+        {"$set": {"costatazione_amichevole": cid, "updated_at": _now_iso()}},
+    )
+    await log_attivita(user, "update_cid", "sinistro", sid)
+    return await db.sinistri.find_one({"id": sid}, {"_id": 0})
 
 
 @api.delete("/sinistri/{sid}")
@@ -9434,6 +9578,274 @@ async def stampa_sinistri(stato: Optional[str] = None,
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "sinistri.pdf")
+
+
+@api.get("/stampa/sinistro/{sid}")
+async def stampa_singolo_sinistro(sid: str, user=Depends(current_user)):
+    """PDF scheda singolo sinistro: dati generali + soggetti + anagrafiche + note + liquidazione."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from io import BytesIO
+    s = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Sinistro non trovato")
+    # arricchimento
+    pol = await db.polizze.find_one({"id": s.get("polizza_id")}, {"_id": 0}) or {}
+    ana = await db.anagrafiche.find_one({"id": s.get("contraente_id")}, {"_id": 0}) or {}
+    comp = await db.compagnie.find_one({"id": s.get("compagnia_id")}, {"_id": 0}) or {}
+    coll = await db.users.find_one({"id": s.get("collaboratore_id")}, {"_id": 0}) if s.get("collaboratore_id") else None
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    y = H - 18 * mm
+    intest = await _intestazione_pdf()
+    if intest.get("logo_path"):
+        try:
+            c.drawImage(intest["logo_path"], 15 * mm, y - 12 * mm, height=20 * mm, preserveAspectRatio=True, mask="auto")
+        except Exception:
+            pass
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(60 * mm, y, "SCHEDA SINISTRO")
+    c.setFont("Helvetica", 9)
+    c.drawString(60 * mm, y - 6 * mm, intest.get("intestazione", "") or "")
+    y -= 28 * mm
+
+    def line(label, value, dy=5.5):
+        nonlocal y
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(15 * mm, y, label + ":")
+        c.setFont("Helvetica", 9)
+        c.drawString(55 * mm, y, str(value or "—")[:120])
+        y -= dy * mm
+
+    c.setFillColor(colors.HexColor("#1e40af"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(15 * mm, y, f"Sinistro N. {s.get('numero_sinistro','—')}   ·   Stato: {s.get('stato','—').upper()}")
+    c.setFillColor(colors.black)
+    y -= 7 * mm
+
+    line("Numero interno", s.get("numero_interno"))
+    line("Anno / Tipologia", f"{s.get('anno') or ''}  ·  {s.get('tipologia_sinistro') or '—'}")
+    line("Polizza", f"{pol.get('numero_polizza','—')} · {pol.get('ramo','')} · {pol.get('prodotto','') or ''}")
+    line("Contraente", ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip())
+    line("Compagnia", comp.get("ragione_sociale"))
+    if coll:
+        line("Collaboratore", coll.get("name"))
+    line("Data avvenimento", s.get("data_avvenimento"))
+    line("Data denuncia", s.get("data_denuncia"))
+    line("Luogo", s.get("luogo"))
+    line("Targa", pol.get("targa") or s.get("targa"))
+    line("Riserva €", f"{float(s.get('riserva') or 0):,.2f}")
+    line("Liquidazione €", f"{float(s.get('liquidazione') or 0):,.2f}")
+
+    if s.get("descrizione"):
+        y -= 2 * mm
+        c.setFont("Helvetica-Bold", 9); c.drawString(15 * mm, y, "Descrizione:")
+        y -= 5 * mm
+        c.setFont("Helvetica", 8.5)
+        for chunk in [s["descrizione"][i:i + 110] for i in range(0, len(s["descrizione"]), 110)][:8]:
+            c.drawString(15 * mm, y, chunk); y -= 4 * mm
+
+    # Soggetti coinvolti
+    if s.get("soggetti_coinvolti"):
+        y -= 3 * mm
+        c.setFont("Helvetica-Bold", 10); c.drawString(15 * mm, y, "SOGGETTI COINVOLTI"); y -= 5 * mm
+        c.setFont("Helvetica", 8)
+        for sog in s["soggetti_coinvolti"][:10]:
+            c.drawString(15 * mm, y,
+                f"· {sog.get('soggetto','—')} ({sog.get('ruolo','—')}) · Polizza {sog.get('numero_polizza','—')} · "
+                f"Ris. € {sog.get('riserva',0):.2f}  Pag. € {sog.get('pagato',0):.2f}")
+            y -= 4.5 * mm
+
+    # Anagrafiche associate
+    if s.get("anagrafiche_associate"):
+        y -= 3 * mm
+        c.setFont("Helvetica-Bold", 10); c.drawString(15 * mm, y, "ANAGRAFICHE ASSOCIATE"); y -= 5 * mm
+        c.setFont("Helvetica", 8)
+        for ag in s["anagrafiche_associate"][:8]:
+            c.drawString(15 * mm, y,
+                f"· {ag.get('nome','—')} — {ag.get('tipo','—')} — {ag.get('telefono','') or ''} {ag.get('email','') or ''}")
+            y -= 4.5 * mm
+
+    # Note
+    if s.get("note"):
+        y -= 3 * mm
+        c.setFont("Helvetica-Bold", 10); c.drawString(15 * mm, y, "NOTE"); y -= 5 * mm
+        c.setFont("Helvetica", 8)
+        for n in s["note"][:8]:
+            c.drawString(15 * mm, y, f"[{n.get('data','—')}] {n.get('operatore','')}: {(n.get('descrizione') or '')[:110]}")
+            y -= 4.5 * mm
+
+    # Liquidazione dettaglio
+    ld = s.get("liquidazione_dettaglio") or {}
+    if ld:
+        y -= 3 * mm
+        c.setFont("Helvetica-Bold", 10); c.drawString(15 * mm, y, "LIQUIDAZIONE"); y -= 5 * mm
+        c.setFont("Helvetica", 8.5)
+        for k in ("tipo_definizione", "data_definizione", "franchigia", "scoperto",
+                  "importo_denunciato", "riserva_corrente", "data_riserva", "data_prescrizione"):
+            if ld.get(k) not in (None, "", 0):
+                c.drawString(15 * mm, y, f"{k.replace('_', ' ').capitalize()}: {ld[k]}")
+                y -= 4.5 * mm
+
+    c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.grey)
+    c.drawString(15 * mm, 15 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    c.showPage(); c.save()
+    return _pdf_response(buf.getvalue(), f"sinistro_{s.get('numero_sinistro','x')}.pdf")
+
+
+@api.get("/stampa/sinistro/{sid}/cid")
+async def stampa_cid(sid: str, user=Depends(current_user)):
+    """PDF della Costatazione Amichevole compilata (RC Auto)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from io import BytesIO
+    s = await db.sinistri.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Sinistro non trovato")
+    cid = s.get("costatazione_amichevole") or {}
+    pol = await db.polizze.find_one({"id": s.get("polizza_id")}, {"_id": 0}) or {}
+    ana = await db.anagrafiche.find_one({"id": s.get("contraente_id")}, {"_id": 0}) or {}
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    # Header
+    c.setFillColor(colors.HexColor("#0c4a6e"))
+    c.rect(0, H - 18 * mm, W, 18 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(15 * mm, H - 11 * mm, "Costatazione Amichevole di incidente — Denuncia di sinistro")
+    c.setFont("Helvetica", 7.5)
+    c.drawString(15 * mm, H - 15 * mm, "(art. 143 D.Lgs. n. 209 del 2005 - Codice delle assicurazioni private)")
+    c.setFillColor(colors.black)
+
+    y = H - 25 * mm
+
+    def fld(x, label, val, w=70):
+        c.setFont("Helvetica-Bold", 7); c.drawString(x * mm, y, label)
+        c.setFont("Helvetica", 8); c.drawString((x + 25) * mm, y, str(val or "—")[:w])
+
+    # Sezione 1-5: data, luogo, feriti, danni
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(15 * mm, y, "1. Data incidente:")
+    c.setFont("Helvetica", 9)
+    c.drawString(55 * mm, y, str(cid.get("data_incidente") or s.get("data_avvenimento") or "—"))
+    c.setFont("Helvetica-Bold", 9); c.drawString(100 * mm, y, "Ora:")
+    c.setFont("Helvetica", 9); c.drawString(115 * mm, y, str(cid.get("ora", "—")))
+    c.setFont("Helvetica-Bold", 9); c.drawString(140 * mm, y, "3. Feriti:")
+    c.setFont("Helvetica", 9); c.drawString(160 * mm, y, "SI" if cid.get("feriti") else "NO")
+    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 9); c.drawString(15 * mm, y, "2. Luogo:")
+    c.setFont("Helvetica", 9); c.drawString(35 * mm, y, str(cid.get("luogo") or s.get("luogo") or "—")[:90])
+    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 9); c.drawString(15 * mm, y, "4. Danni materiali ad altri veicoli:")
+    c.setFont("Helvetica", 9); c.drawString(80 * mm, y, "SI" if cid.get("danni_altri_veicoli") else "NO")
+    c.setFont("Helvetica-Bold", 9); c.drawString(110 * mm, y, "Oggetti diversi:")
+    c.setFont("Helvetica", 9); c.drawString(140 * mm, y, "SI" if cid.get("danni_oggetti_diversi") else "NO")
+    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 9); c.drawString(15 * mm, y, "5. Testimoni:")
+    c.setFont("Helvetica", 9); c.drawString(40 * mm, y, str(cid.get("testimoni") or "—")[:90])
+    y -= 8 * mm
+
+    # Veicoli A e B affiancati
+    veicolo_a = cid.get("veicolo_a") or {}
+    veicolo_b = cid.get("veicolo_b") or {}
+    # Precompila A da polizza/anagrafica se mancano
+    if not veicolo_a.get("contraente_cognome"):
+        veicolo_a["contraente_cognome"] = ana.get("cognome") or ana.get("ragione_sociale", "")
+        veicolo_a["contraente_nome"] = ana.get("nome", "")
+        veicolo_a["codice_fiscale"] = ana.get("codice_fiscale") or ana.get("partita_iva", "")
+        veicolo_a["indirizzo"] = ana.get("indirizzo", "")
+        veicolo_a["targa"] = pol.get("targa", "")
+        veicolo_a["compagnia"] = (await db.compagnie.find_one({"id": s.get("compagnia_id")}, {"_id": 0, "ragione_sociale": 1}) or {}).get("ragione_sociale", "")
+        veicolo_a["numero_polizza"] = pol.get("numero_polizza", "")
+
+    # Colonne A (sinistra) e B (destra)
+    col_a_x, col_b_x = 15, 110
+    c.setFillColor(colors.HexColor("#bae6fd"))
+    c.rect((col_a_x - 1) * mm, y - 2 * mm, 90 * mm, 6 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor("#fde68a"))
+    c.rect((col_b_x - 1) * mm, y - 2 * mm, 90 * mm, 6 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(col_a_x * mm, y, "VEICOLO A")
+    c.drawString(col_b_x * mm, y, "VEICOLO B")
+    y -= 8 * mm
+
+    def block(x, v):
+        nonlocal y
+        sy = y
+        c.setFont("Helvetica-Bold", 7.5)
+        rows = [
+            ("Cognome", v.get("contraente_cognome", "")),
+            ("Nome", v.get("contraente_nome", "")),
+            ("CF / P.IVA", v.get("codice_fiscale", "")),
+            ("Indirizzo", v.get("indirizzo", "")),
+            ("Telefono / Email", v.get("contatto", "")),
+            ("Marca/Tipo", v.get("marca_tipo", "")),
+            ("Targa", v.get("targa", "")),
+            ("Compagnia", v.get("compagnia", "")),
+            ("N. polizza", v.get("numero_polizza", "")),
+            ("Conducente", v.get("conducente_nome", "")),
+            ("Patente N.", v.get("patente", "")),
+            ("Punto urto", v.get("punto_urto", "")),
+            ("Danni visibili", v.get("danni_visibili", "")),
+            ("Osservazioni", v.get("osservazioni", "")),
+        ]
+        for label, val in rows:
+            c.setFont("Helvetica-Bold", 7); c.drawString(x * mm, sy, label + ":")
+            c.setFont("Helvetica", 7.5); c.drawString((x + 22) * mm, sy, str(val or "—")[:50])
+            sy -= 4.2 * mm
+        return sy
+    yA = block(col_a_x, veicolo_a)
+    yB = block(col_b_x, veicolo_b)
+    y = min(yA, yB) - 3 * mm
+
+    # Circostanze (17) — checkbox compatte
+    circ_labels = [
+        "in sosta / fermato", "ripartiva dopo sosta / aprendo portiera",
+        "stava parcheggiando", "usciva da parcheggio/luogo privato",
+        "entrava in parcheggio/luogo privato", "si immetteva in piazza/rotatoria",
+        "circolava in piazza/rotatoria", "tamponava nella stessa fila",
+        "procedeva stessa direzione su fila diversa", "cambiava fila",
+        "sorpassava", "girava a destra", "girava a sinistra",
+        "retrocedeva", "invadeva sede stradale opposta",
+        "proveniva da destra", "non osservava precedenza/semaforo rosso",
+    ]
+    circ_a = cid.get("circostanze_a") or []
+    circ_b = cid.get("circostanze_b") or []
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(15 * mm, y, "12. Circostanze dell'incidente (crocette utili)")
+    y -= 5 * mm
+    c.setFont("Helvetica", 7.5)
+    for i, lab in enumerate(circ_labels):
+        n = i + 1
+        ck_a = "X" if n in circ_a else " "
+        ck_b = "X" if n in circ_b else " "
+        c.drawString(15 * mm, y, f"[{ck_a}] {n}.  {lab}  [{ck_b}]")
+        y -= 4 * mm
+        if y < 25 * mm:
+            c.showPage(); y = H - 20 * mm
+
+    # Footer / firme
+    if y < 35 * mm:
+        c.showPage(); y = H - 25 * mm
+    y -= 4 * mm
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(15 * mm, y, "15. Firma del conducente A: ___________________________")
+    c.drawString(110 * mm, y, "Firma del conducente B: ___________________________")
+    y -= 8 * mm
+    c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.grey)
+    c.drawString(15 * mm, 12 * mm, f"Documento generato il {datetime.now().strftime('%d/%m/%Y %H:%M')} — Sinistro N. {s.get('numero_sinistro','')}")
+
+    c.showPage(); c.save()
+    return _pdf_response(buf.getvalue(), f"cid_{s.get('numero_sinistro','x')}.pdf")
 
 
 @api.get("/stampa/prima-nota")

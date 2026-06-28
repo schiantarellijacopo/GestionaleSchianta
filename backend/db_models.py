@@ -363,11 +363,15 @@ SinistroStato = Literal["aperto", "in_istruttoria", "liquidato", "chiuso_senza_s
 
 class Sinistro(BaseDoc):
     numero_sinistro: str
+    numero_interno: Optional[str] = None
     polizza_id: str
     compagnia_id: str
     contraente_id: str
     data_avvenimento: str
     data_denuncia: str
+    data_apertura: Optional[str] = None  # default = data_denuncia
+    anno: Optional[int] = None
+    tipologia_sinistro: Optional[str] = None  # es. "SINISTRI FENOMENO ELETTRICO"
     luogo: Optional[str] = None
     ramo: Optional[str] = None
     stato: SinistroStato = "aperto"
@@ -375,9 +379,22 @@ class Sinistro(BaseDoc):
     riserva: float = 0.0
     liquidazione: float = 0.0
     danneggiati: List[dict] = Field(default_factory=list)
-    collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
+    collaboratore_id: Optional[str] = None
     id_sinistro_exp: Optional[str] = None
     fonte: Literal["manuale", "import_ania"] = "manuale"
+    # === Estensioni Release C ===
+    garanzie_colpite: List[str] = Field(default_factory=list)
+    soggetti_coinvolti: List[dict] = Field(default_factory=list)
+    # ^ [{soggetto: "...", ruolo: "...", numero_polizza: "...", riserva: 0, pagato: 0, recuperato: 0}]
+    anagrafiche_associate: List[dict] = Field(default_factory=list)
+    # ^ [{anagrafica_id?, nome, tipo: "perito|legale|carrozzeria|...", indirizzo, telefono, fax, email, data_attribuzione}]
+    note: List[dict] = Field(default_factory=list)
+    # ^ [{id, data, scadenza?, operatore, descrizione, avvisa: bool}]
+    liquidazione_dettaglio: dict = Field(default_factory=dict)
+    # ^ {tipo_definizione, data_definizione, franchigia, scoperto, importo_denunciato,
+    #    riserva_corrente, data_riserva, data_prescrizione}
+    costatazione_amichevole: Optional[dict] = None
+    # ^ Solo per RC Auto. Struttura: vedi backend/routes/sinistri_cid.py
 
 
 # =============== CONTABILITA ===============

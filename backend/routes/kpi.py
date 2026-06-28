@@ -99,38 +99,98 @@ def _eur(v: float | int | None) -> float:
 
 
 async def _stats_polizze(scope_filter: dict) -> list[dict]:
-    """KPI predefinite Polizze: Attive · In emissione · Sostituite · Annullate · Scadute · Premio totale."""
-    pipeline = [
-        {"$match": scope_filter},
-        {"$group": {
-            "_id": "$stato",
-            "n": {"$sum": 1},
-            "premio": {"$sum": "$premio_lordo"},
-        }},
-    ]
-    res = {r["_id"]: r async for r in db.polizze.aggregate(pipeline)}
-    total_n = sum(r["n"] for r in res.values())
-    total_premio = sum(r["premio"] for r in res.values())
-    attive = res.get("attiva", {"n": 0, "premio": 0})
+    """KPI Polizze suddivise per business: Auto privati/aziende, Altri rami
+    privati/aziende, Vita Investimenti/Protezione + Totali stato.
+
+    Implementazione semplice in Python: fetch polizze + anagrafiche e
+    classifica per categoria. Adeguato per dimensioni tipiche di un'agenzia.
+    """
+    # Mappa anagrafiche → tipo (persona_fisica / persona_giuridica)
+    anag_map: dict[str, str] = {}
+    async for a in db.anagrafiche.find({}, {"id": 1, "tipo": 1, "tags": 1, "_id": 0}):
+        tipo = a.get("tipo") or "persona_fisica"
+        tags = [t.lower() for t in (a.get("tags") or [])]
+        if "azienda" in tags or "condominio" in tags:
+            tipo = "persona_giuridica"
+        anag_map[a.get("id")] = tipo
+
+    def _eur_fmt(v):
+        return f"€ {_eur(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    cat = {
+        "auto_priv": {"n": 0, "p": 0.0},
+        "auto_az": {"n": 0, "p": 0.0},
+        "altri_priv": {"n": 0, "p": 0.0},
+        "altri_az": {"n": 0, "p": 0.0},
+        "vita_inv": {"n": 0, "p": 0.0},
+        "vita_prot": {"n": 0, "p": 0.0},
+    }
+    state_cnt = {"attiva": {"n": 0, "p": 0.0}, "annullata": {"n": 0, "p": 0.0},
+                 "scaduta": {"n": 0, "p": 0.0}}
+
+    active_states = {"attiva", "in_emissione"}
+    async for p in db.polizze.find(scope_filter, {"_id": 0}):
+        stato = (p.get("stato") or "").lower()
+        premio = float(p.get("premio_lordo") or 0)
+        # totali per stato (su tutte le polizze nello scope)
+        if stato in state_cnt:
+            state_cnt[stato]["n"] += 1
+            state_cnt[stato]["p"] += premio
+
+        # categorizzazione business — solo polizze "attive"
+        if stato not in active_states:
+            continue
+        ramo = (p.get("ramo") or "").upper()
+        prodotto = (p.get("prodotto") or "").upper()
+        tipo_anag = anag_map.get(p.get("contraente_id"), "persona_fisica")
+        is_priv = tipo_anag == "persona_fisica"
+
+        is_vita = "VITA" in ramo or "VITA" in prodotto
+        is_auto = ("AUTO" in ramo and ("RC" in ramo or "RCA" in ramo or ramo.startswith("AUTO"))) \
+                  or ramo == "RCA" or "RCAUTO" in ramo
+        if is_vita:
+            is_invest = "INVEST" in prodotto or "INVEST" in ramo
+            key = "vita_inv" if is_invest else "vita_prot"
+        elif is_auto:
+            key = "auto_priv" if is_priv else "auto_az"
+        else:
+            key = "altri_priv" if is_priv else "altri_az"
+        cat[key]["n"] += 1
+        cat[key]["p"] += premio
+
+    attive = state_cnt["attiva"]
+    annullate = state_cnt["annullata"]
+    scadute = state_cnt["scaduta"]
+
     return [
-        {"key": "attive", "label": "Attive", "value": attive["n"],
-         "sub": f"€ {_eur(attive['premio']):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "emerald", "icon": "FileText"},
-        {"key": "in_emissione", "label": "In emissione",
-         "value": res.get("in_emissione", {}).get("n", 0),
-         "color": "sky", "icon": "Clock"},
-        {"key": "sostituite", "label": "Sostituite",
-         "value": res.get("sostituita", {}).get("n", 0),
-         "color": "indigo", "icon": "Replace"},
-        {"key": "annullate", "label": "Annullate",
-         "value": res.get("annullata", {}).get("n", 0),
-         "color": "rose", "icon": "XCircle"},
-        {"key": "scadute", "label": "Scadute",
-         "value": res.get("scaduta", {}).get("n", 0),
-         "color": "amber", "icon": "AlertTriangle"},
-        {"key": "totale", "label": "Totale", "value": total_n,
-         "sub": f"€ {_eur(total_premio):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "violet", "icon": "Layers"},
+        {"key": "auto_priv", "label": "Auto privati", "value": cat["auto_priv"]["n"],
+         "sub": _eur_fmt(cat["auto_priv"]["p"]), "color": "sky", "icon": "FileText",
+         "link": "/polizze?preset=attive&categoria=auto_priv"},
+        {"key": "auto_az", "label": "Auto aziende", "value": cat["auto_az"]["n"],
+         "sub": _eur_fmt(cat["auto_az"]["p"]), "color": "indigo", "icon": "Building",
+         "link": "/polizze?preset=attive&categoria=auto_az"},
+        {"key": "altri_priv", "label": "Altri rami privati", "value": cat["altri_priv"]["n"],
+         "sub": _eur_fmt(cat["altri_priv"]["p"]), "color": "emerald", "icon": "Shield",
+         "link": "/polizze?preset=attive&categoria=altri_priv"},
+        {"key": "altri_az", "label": "Altri rami aziende", "value": cat["altri_az"]["n"],
+         "sub": _eur_fmt(cat["altri_az"]["p"]), "color": "amber", "icon": "Building",
+         "link": "/polizze?preset=attive&categoria=altri_az"},
+        {"key": "vita_inv", "label": "Vita Investimenti", "value": cat["vita_inv"]["n"],
+         "sub": _eur_fmt(cat["vita_inv"]["p"]), "color": "violet", "icon": "TrendingUp",
+         "link": "/polizze?preset=attive&categoria=vita_inv"},
+        {"key": "vita_prot", "label": "Vita Protezione", "value": cat["vita_prot"]["n"],
+         "sub": _eur_fmt(cat["vita_prot"]["p"]), "color": "rose", "icon": "Shield",
+         "link": "/polizze?preset=attive&categoria=vita_prot"},
+        # === Totali stato (sempre in fondo) ===
+        {"key": "totale_attive", "label": "TOTALE Attive", "value": attive["n"],
+         "sub": _eur_fmt(attive["p"]), "color": "emerald", "icon": "CheckCircle",
+         "link": "/polizze?preset=attive"},
+        {"key": "totale_annullate", "label": "TOTALE Annullate", "value": annullate["n"],
+         "sub": _eur_fmt(annullate["p"]), "color": "rose", "icon": "XCircle",
+         "link": "/polizze?preset=annullate"},
+        {"key": "totale_scadute", "label": "TOTALE Scadute", "value": scadute["n"],
+         "sub": _eur_fmt(scadute["p"]), "color": "slate", "icon": "Archive",
+         "link": "/polizze?preset=scadute"},
     ]
 
 
@@ -148,21 +208,26 @@ async def _stats_titoli(scope_filter: dict) -> list[dict]:
         {"key": "da_incassare", "label": "Da incassare",
          "value": res.get("da_incassare", {}).get("n", 0),
          "sub": f"€ {_eur(res.get('da_incassare', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "amber", "icon": "Clock"},
+         "color": "amber", "icon": "Clock",
+         "link": "/titoli?preset=tutti_aperti"},
         {"key": "incassati", "label": "Incassati",
          "value": res.get("incassato", {}).get("n", 0),
          "sub": f"€ {_eur(res.get('incassato', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "emerald", "icon": "CheckCircle"},
+         "color": "emerald", "icon": "CheckCircle",
+         "link": "/titoli-storici?preset=storico_anno"},
         {"key": "scaduti", "label": "Scaduti",
          "value": res.get("scaduto", {}).get("n", 0),
          "sub": f"€ {_eur(res.get('scaduto', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "rose", "icon": "AlertTriangle"},
+         "color": "rose", "icon": "AlertTriangle",
+         "link": "/titoli?preset=scad_oltre15"},
         {"key": "sospesi", "label": "Sospesi",
          "value": res.get("sospeso", {}).get("n", 0),
-         "color": "indigo", "icon": "Pause"},
+         "color": "indigo", "icon": "Pause",
+         "link": "/titoli?preset=sospesi"},
         {"key": "totale", "label": "Totale", "value": total_n,
          "sub": f"€ {_eur(total_eur):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "violet", "icon": "Receipt"},
+         "color": "violet", "icon": "Receipt",
+         "link": "/titoli?preset=tutti_aperti"},
     ]
 
 
@@ -179,23 +244,23 @@ async def _stats_sinistri(scope_filter: dict) -> list[dict]:
         {"key": "aperti", "label": "Aperti",
          "value": res.get("aperto", {}).get("n", 0),
          "sub": f"Riserva € {_eur(res.get('aperto', {}).get('riserva', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "rose", "icon": "AlertTriangle"},
+         "color": "rose", "icon": "AlertTriangle", "link": "/sinistri?stato=aperto"},
         {"key": "in_istruttoria", "label": "In istruttoria",
          "value": res.get("in_istruttoria", {}).get("n", 0),
-         "color": "amber", "icon": "Clock"},
+         "color": "amber", "icon": "Clock", "link": "/sinistri?stato=in_istruttoria"},
         {"key": "liquidati", "label": "Liquidati",
          "value": res.get("liquidato", {}).get("n", 0),
          "sub": f"€ {_eur(res.get('liquidato', {}).get('liquidato', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "emerald", "icon": "CheckCircle"},
+         "color": "emerald", "icon": "CheckCircle", "link": "/sinistri?stato=liquidato"},
         {"key": "chiusi", "label": "Chiusi",
          "value": res.get("chiuso", {}).get("n", 0),
-         "color": "slate", "icon": "Archive"},
+         "color": "slate", "icon": "Archive", "link": "/sinistri?stato=chiuso"},
         {"key": "respinti", "label": "Respinti",
          "value": res.get("respinto", {}).get("n", 0),
-         "color": "indigo", "icon": "XCircle"},
+         "color": "indigo", "icon": "XCircle", "link": "/sinistri?stato=respinto"},
         {"key": "totale", "label": "Totale",
          "value": sum(r["n"] for r in res.values()),
-         "color": "violet", "icon": "Layers"},
+         "color": "violet", "icon": "Layers", "link": "/sinistri"},
     ]
 
 
@@ -217,16 +282,19 @@ async def _stats_avvisi(scope_filter: dict) -> list[dict]:
     inv_map = {r["_id"]: r["n"] for r in inv}
     return [
         {"key": "clienti", "label": "Clienti da contattare", "value": n_clienti,
-         "color": "amber", "icon": "Users"},
+         "color": "amber", "icon": "Users", "link": "/avvisi"},
         {"key": "titoli", "label": "Titoli scaduti", "value": n_titoli,
          "sub": f"€ {_eur(tot_eur):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "rose", "icon": "AlertTriangle"},
+         "color": "rose", "icon": "AlertTriangle", "link": "/avvisi"},
         {"key": "email_inviate", "label": "Email inviate",
-         "value": inv_map.get("email", 0), "color": "sky", "icon": "Mail"},
+         "value": inv_map.get("email", 0), "color": "sky", "icon": "Mail",
+         "link": "/avvisi?storico=email"},
         {"key": "wa_inviati", "label": "WhatsApp inviati",
-         "value": inv_map.get("whatsapp", 0), "color": "emerald", "icon": "MessageCircle"},
+         "value": inv_map.get("whatsapp", 0), "color": "emerald", "icon": "MessageCircle",
+         "link": "/avvisi?storico=whatsapp"},
         {"key": "sms_inviati", "label": "SMS inviati",
-         "value": inv_map.get("sms", 0), "color": "violet", "icon": "Smartphone"},
+         "value": inv_map.get("sms", 0), "color": "violet", "icon": "Smartphone",
+         "link": "/avvisi?storico=sms"},
     ]
 
 
@@ -249,16 +317,16 @@ async def _stats_prima_nota(scope_filter: dict) -> list[dict]:
     uscite = _eur(abs(r["uscite"]))
     return [
         {"key": "movimenti", "label": "Movimenti mese", "value": r["n"],
-         "color": "sky", "icon": "Receipt"},
+         "color": "sky", "icon": "Receipt", "link": "/contabilita"},
         {"key": "entrate", "label": "Entrate", "value": 0,
          "sub": f"€ {entrate:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "emerald", "icon": "TrendingUp"},
+         "color": "emerald", "icon": "TrendingUp", "link": "/contabilita?tipo=entrata"},
         {"key": "uscite", "label": "Uscite", "value": 0,
          "sub": f"€ {uscite:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "rose", "icon": "TrendingDown"},
+         "color": "rose", "icon": "TrendingDown", "link": "/contabilita?tipo=uscita"},
         {"key": "saldo", "label": "Saldo mese", "value": 0,
          "sub": f"€ {(entrate - uscite):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-         "color": "violet", "icon": "Wallet"},
+         "color": "violet", "icon": "Wallet", "link": "/contabilita"},
     ]
 
 
@@ -282,16 +350,30 @@ async def _resolve_custom_kpi(custom: dict) -> dict:
     }
     coll = collection_map.get(sezione)
     if coll is None:
-        return {"value": 0, "sub": None}
+        return {"value": 0, "sub": None, "link": None}
     flt: dict = {}
+    link_params: list[tuple[str, str]] = []
     if fk == "tag" and params.get("tag"):
         flt["tags"] = params["tag"]
+        link_params.append(("tag", params["tag"]))
     elif fk == "stato" and params.get("stato"):
         flt["stato"] = params["stato"]
+        link_params.append(("stato", params["stato"]))
     elif fk == "ramo" and params.get("ramo"):
         flt["ramo"] = params["ramo"]
+        link_params.append(("ramo", params["ramo"]))
     elif fk == "compagnia" and params.get("compagnia_id"):
         flt["compagnia_id"] = params["compagnia_id"]
+        link_params.append(("compagnia_id", params["compagnia_id"]))
+    elif fk == "prodotto" and params.get("prodotto"):
+        flt["prodotto"] = params["prodotto"]
+        link_params.append(("prodotto", params["prodotto"]))
+    elif fk == "mezzo_pagamento" and params.get("mezzo_pagamento"):
+        flt["mezzo_pagamento"] = params["mezzo_pagamento"]
+        link_params.append(("mezzo_pagamento", params["mezzo_pagamento"]))
+    elif fk == "conto_cassa" and params.get("conto_cassa_id"):
+        flt["conto_cassa_id"] = params["conto_cassa_id"]
+        link_params.append(("conto_cassa_id", params["conto_cassa_id"]))
     elif fk == "custom":
         flt = params.get("mongo_filter") or {}
     n = await coll.count_documents(flt)
@@ -301,6 +383,58 @@ async def _resolve_custom_kpi(custom: dict) -> dict:
         "sinistri": "importo_liquidato",
         "avvisi": "importo_lordo", "prima_nota": "importo",
     }.get(sezione)
+
+@router.get("/kpi/options")
+async def kpi_filter_options(
+    sezione: str,
+    kind: str,
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    """Opzioni a tendina per il campo "Valore filtro" del dialog KPI custom.
+
+    Restituisce ``[{value, label}]`` in base a ``kind``:
+      - tag → tutti i tag distinti delle anagrafiche
+      - stato → stati validi per la sezione
+      - ramo → codici/nomi rami dalla libreria
+      - compagnia → compagnie attive
+      - prodotto → prodotti distinti
+      - mezzo_pagamento → mezzi pagamento attivi
+      - conto_cassa → conti/banche
+    """
+    out: list[dict] = []
+    if kind == "tag":
+        tags = await db.anagrafiche.distinct("tags")
+        out = [{"value": t, "label": t} for t in sorted(t for t in tags if t)]
+    elif kind == "stato":
+        stati_map = {
+            "polizze": ["attiva", "in_emissione", "annullata", "scaduta", "sospesa"],
+            "titoli": ["da_incassare", "incassato", "scaduto", "stornato", "sospeso"],
+            "sinistri": ["aperto", "in_istruttoria", "liquidato", "chiuso", "respinto"],
+            "avvisi": ["scaduto", "sospeso"],
+            "prima_nota": [],
+        }
+        out = [{"value": s, "label": s.replace("_", " ").capitalize()}
+               for s in stati_map.get(sezione, [])]
+    elif kind == "ramo":
+        async for r in db.rami.find({}, {"_id": 0, "codice": 1, "nome": 1}).sort("nome", 1):
+            out.append({"value": r.get("codice") or r.get("nome"),
+                        "label": r.get("nome") or r.get("codice")})
+    elif kind == "compagnia":
+        async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}).sort("ragione_sociale", 1):
+            out.append({"value": c["id"], "label": c.get("ragione_sociale") or c["id"]})
+    elif kind == "prodotto":
+        async for p in db.prodotti.find({}, {"_id": 0, "nome": 1}).sort("nome", 1):
+            if p.get("nome"):
+                out.append({"value": p["nome"], "label": p["nome"]})
+    elif kind == "mezzo_pagamento":
+        async for m in db.mezzi_pagamento.find({"attivo": {"$ne": False}}, {"_id": 0}).sort("ordine", 1):
+            out.append({"value": m.get("codice"), "label": m.get("label") or m.get("codice")})
+    elif kind == "conto_cassa":
+        async for c in db.conti_cassa.find({}, {"_id": 0, "id": 1, "nome": 1}).sort("nome", 1):
+            out.append({"value": c["id"], "label": c.get("nome") or c["id"]})
+    return out
+
+
     sub = None
     if sum_field and n:
         agg = await coll.aggregate([
@@ -309,7 +443,14 @@ async def _resolve_custom_kpi(custom: dict) -> dict:
         if agg:
             t = _eur(agg[0]["t"])
             sub = f"€ {t:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return {"value": n, "sub": sub}
+    # costruisci link verso la pagina sezione con i filtri applicati
+    sezione_route = {
+        "polizze": "/polizze", "titoli": "/titoli", "sinistri": "/sinistri",
+        "avvisi": "/avvisi", "prima_nota": "/contabilita",
+    }.get(sezione, "/")
+    qs = "&".join(f"{k}={v}" for k, v in link_params)
+    link = f"{sezione_route}?{qs}" if qs else sezione_route
+    return {"value": n, "sub": sub, "link": link}
 
 
 @router.get("/kpi/{sezione}/stats")
@@ -336,6 +477,7 @@ async def kpi_stats(sezione: str, user: dict = Depends(current_user)) -> dict:
             "icon": c.get("icon", "Star"),
             "value": r["value"],
             "sub": r.get("sub"),
+            "link": r.get("link"),
             "custom_id": c["id"],
         })
     return {"default": base, "custom": custom_out}

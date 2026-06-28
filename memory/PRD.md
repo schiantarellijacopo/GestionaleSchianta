@@ -43,6 +43,31 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Dashboard "Stato integrazioni" per vendita modulare
 
 ## Changelog (28/06/2026)
+- **KPI cliccabili + dropdown filtro**: ogni KPI ora porta alla lista filtrata (es. "Auto privati" → /polizze?categoria=auto_priv). Il dialog "Personalizza KPI" ha "Valore filtro" come dropdown dinamico via `/api/kpi/options`. Aggiunto filtro `categoria` su `/api/polizze` (auto_priv, auto_az, altri_priv, altri_az, vita_inv, vita_prot)
+- **Fix KPI Polizze backend**: risolto `JSONDecodeError` (`$group does not support inclusion-style expressions`). Riscritta `_stats_polizze` con classificazione Python (tipo anagrafica via tag azienda/condominio override)
+- **Sinistri Release C**: modello esteso con `numero_interno`, `tipologia_sinistro`, `garanzie_colpite`, `soggetti_coinvolti`, `anagrafiche_associate`, `note`, `liquidazione_dettaglio`, `costatazione_amichevole`. Endpoint nuovi: `GET /api/sinistri/{id}` (singolo enriched), `PUT /api/sinistri/{id}/cid`, `GET /api/stampa/sinistro/{id}`, `GET /api/stampa/sinistro/{id}/cid`. Lista estesa con filtri `q/compagnia/ramo/tipologia/dal/al`
+- **SinistroDetail page nuova** con tabs (Dati Generali · Soggetti · Anagrafiche · Note · Liquidazione · Documenti · Costatazione Amichevole RC Auto). Layout ispirato a gestionali italiani: header con riepilogo + tabs in basso
+- **Costatazione Amichevole** (CID art. 143 D.Lgs. 209/2005): form compilabile con sezione data/luogo/feriti/danni, blocchi Veicolo A/B (precompilati da polizza/contraente), 17 circostanze checkbox, PDF stampabile a colori
+- **Sinistri list redesign**: 13 colonne (Num.Int / N.Sinistro / Contratto / Data / Contraente / Compagnia / Tipologia / Danneggiato / Targa / Collaboratore / Riserva / Liquidato / Stato), totali in footer, click riga → detail
+- **Fix MappaClienti**: la mappa Leaflet non si inizializzava perché l'effect partiva prima che il div `#anag-map` fosse nel DOM. Aggiunta dipendenza su `items` + `map.invalidateSize()` post-render
+
+## Backlog
+### P0
+- **Permessi granulari per area** (richiesto via screenshot): estendere `ProfiloPermessi.area_permissions` con flag specifici per area (es. `read/write/upload_docs/delete/export/send_email` etc). Mantenere quick preset "Non gestito/Lettura/Scrittura"
+
+### P1
+- Filtri Titoli: convertire `Prodotto` e `Mezzo pag.` da Input a Dropdown (rami/prodotti/mezzi_pagamento già esistenti backend)
+- Dashboard componibile per operatore (widget drag&drop) **per livello di visibilità/profilo**
+- Edit collaboratore inline sulla riga sinistro / azioni bulk
+- Visibility filter Librerie (collaboratore vede solo se stesso)
+
+### P2
+- Refactoring `server.py` (>9700 righe)
+- Dashboard "Stato integrazioni" per vendita modulare
+- Verifica polizza vs libretto
+- Migrazione retroattiva MovimentiContabili per Titoli coperti storici
+
+## Changelog (precedente)
 - IMAP Poller + CTA "Attiva con email SMTP"
 - Gestioni Modelli redesign (tabs canale + card visive)
 - PDF Avviso: logo agenzia + nome + fix placeholder `{cliente_nome}` + lookup nome prodotto (no più UUID) + colonna "Rata del" popolata correttamente

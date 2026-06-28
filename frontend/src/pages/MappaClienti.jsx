@@ -128,9 +128,10 @@ export default function MappaClienti() {
         });
     }, [items, showClienti, showProspect, query, tagFilter]);
 
-    // INIT mappa una sola volta
+    // INIT mappa una sola volta — riproviamo quando `items` arriva e crea il div nel DOM
     useEffect(() => {
         if (!ready || mapRef.current) return;
+        if (!items || items.length === 0) return;  // il div #anag-map non è ancora nel DOM
         const L = window.L;
         const el = document.getElementById("anag-map");
         if (!el) return;
@@ -156,7 +157,9 @@ export default function MappaClienti() {
         map.addLayer(clusterRef.current);
         iconsRef.current.cliente = makeIcon(L, "#0ea5e9");
         iconsRef.current.prospect = makeIcon(L, "#dc2626");
-    }, [ready, layer]);
+        // forza il resize della mappa dopo il primo render del container
+        setTimeout(() => map.invalidateSize(), 100);
+    }, [ready, layer, items]);
 
     // cambio layer di sfondo
     useEffect(() => {
