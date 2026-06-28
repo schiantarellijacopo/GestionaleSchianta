@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import CollaboratoreCell from "@/components/CollaboratoreCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -277,7 +278,7 @@ export default function Polizze() {
                                     </td>
                                     <td className="text-xs">{p.contraente_nome || "—"}</td>
                                     <td className="text-xs text-slate-600">{p.compagnia_nome || "—"}</td>
-                                    <td className="text-xs text-slate-600">{p.collaboratore_nome || "—"}</td>
+                                    <td className="text-xs text-slate-600">{p.collaboratore_nome ? <CollaboratoreCell nome={p.collaboratore_nome} avatarUrl={p.collaboratore_avatar_url} /> : "—"}</td>
                                     <td><span className="badge badge-neutral">{p.ramo}</span></td>
                                     <td><StatusBadge stato={p.stato} /></td>
                                     <td className="num text-xs">{fmtDate(p.effetto)}</td>

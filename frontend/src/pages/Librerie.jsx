@@ -3274,18 +3274,54 @@ function PermessiMatrixDialog({ profilo, aree, onClose }) {
         nome: profilo.nome || "",
         descrizione: profilo.descrizione || "",
         area_levels: { ...(profilo.area_levels || {}) },
+        area_permissions: { ...(profilo.area_permissions || {}) },
         attivo: profilo.attivo !== false,
     });
     const [saving, setSaving] = useState(false);
+    const [azioniPerArea, setAzioniPerArea] = useState({});
+    const [expanded, setExpanded] = useState({});  // area → bool (mostra flag avanzati)
+
+    useEffect(() => {
+        api.get("/permessi-aree").then((r) => setAzioniPerArea(r.data.azioni_per_area || {}));
+    }, []);
 
     const setLevel = (area, level) => {
-        setF((p) => ({ ...p, area_levels: { ...p.area_levels, [area]: level } }));
+        setF((p) => ({
+            ...p,
+            area_levels: { ...p.area_levels, [area]: level },
+            // reset override granulari di quell'area al cambio preset
+            area_permissions: { ...p.area_permissions, [area]: {} },
+        }));
     };
 
     const setAll = (level) => {
         const obj = {};
         aree.forEach((a) => { obj[a] = level; });
-        setF((p) => ({ ...p, area_levels: obj }));
+        setF((p) => ({ ...p, area_levels: obj, area_permissions: {} }));
+    };
+
+    const toggleFlag = (area, azione) => {
+        setF((p) => {
+            const areaPerm = { ...(p.area_permissions[area] || {}) };
+            // valore corrente: override > derivato da preset
+            const fromPreset = computeFromPreset(p.area_levels[area] || "none", azione);
+            const current = areaPerm[azione] !== undefined ? areaPerm[azione] : fromPreset;
+            areaPerm[azione] = !current;
+            return { ...p, area_permissions: { ...p.area_permissions, [area]: areaPerm } };
+        });
+    };
+
+    const computeFromPreset = (level, azione) => {
+        if (level === "none") return false;
+        if (level === "read") return azione === "read";
+        // write: tutto tranne azioni "pericolose"
+        return !["delete", "transfer", "liquida", "import"].includes(azione);
+    };
+
+    const isChecked = (area, azione) => {
+        const override = (f.area_permissions[area] || {})[azione];
+        if (override !== undefined) return override;
+        return computeFromPreset(f.area_levels[area] || "none", azione);
     };
 
     const save = async () => {
@@ -3306,7 +3342,7 @@ function PermessiMatrixDialog({ profilo, aree, onClose }) {
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose(false)}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="permessi-dialog">
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="permessi-dialog">
                 <DialogHeader>
                     <DialogTitle>{profilo.id ? `Modifica profilo "${profilo.nome}"` : "Nuovo profilo permessi"}</DialogTitle>
                 </DialogHeader>
@@ -3337,27 +3373,31 @@ function PermessiMatrixDialog({ profilo, aree, onClose }) {
                         </div>
                     </div>
 
-                    {/* Matrice */}
+                    {/* Matrice granulare */}
                     <div className="border border-slate-200 rounded overflow-hidden">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-100 text-slate-600 text-xs">
                                 <tr>
-                                    <th className="text-left px-3 py-2 font-semibold">Area</th>
+                                    <th className="text-left px-3 py-2 font-semibold w-[200px]">Area</th>
                                     {PERMESSI_LIVELLI.map((l) => (
-                                        <th key={l.v} className="text-center px-3 py-2 font-semibold">{l.label}</th>
+                                        <th key={l.v} className="text-center px-3 py-2 font-semibold w-[80px]">{l.label}</th>
                                     ))}
+                                    <th className="text-left px-3 py-2 font-semibold">Permessi specifici</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {aree.map((a, idx) => {
                                     const cur = f.area_levels[a] || "none";
+                                    const azioniBase = ["read", "write", "delete"];
+                                    const azioniArea = (azioniPerArea[a] || []).filter((x) => !azioniBase.includes(x));
+                                    const isExp = !!expanded[a];
                                     return (
                                         <tr key={a} className={idx % 2 === 1 ? "bg-slate-50/50" : "bg-white"}>
-                                            <td className="px-3 py-1.5 font-medium text-slate-700">
+                                            <td className="px-3 py-2 font-medium text-slate-700 align-top">
                                                 {AREA_LABELS[a] || a}
                                             </td>
                                             {PERMESSI_LIVELLI.map((l) => (
-                                                <td key={l.v} className="text-center px-3 py-1.5">
+                                                <td key={l.v} className="text-center px-3 py-2 align-top">
                                                     <input
                                                         type="radio"
                                                         name={`area_${a}`}
@@ -3368,6 +3408,31 @@ function PermessiMatrixDialog({ profilo, aree, onClose }) {
                                                     />
                                                 </td>
                                             ))}
+                                            <td className="px-3 py-2 align-top">
+                                                {azioniArea.length > 0 && (
+                                                    <>
+                                                        <button type="button" onClick={() => setExpanded({ ...expanded, [a]: !isExp })}
+                                                            className="text-xs text-violet-700 hover:underline mb-1"
+                                                            data-testid={`expand-${a}`}>
+                                                            {isExp ? "▾ Nascondi" : "▸ Avanzati"} ({azioniArea.length})
+                                                        </button>
+                                                        {isExp && (
+                                                            <div className="grid grid-cols-2 gap-1 mt-1">
+                                                                {azioniArea.map((az) => (
+                                                                    <label key={az} className="inline-flex items-center gap-1 text-[11px] cursor-pointer">
+                                                                        <input type="checkbox"
+                                                                            checked={isChecked(a, az)}
+                                                                            onChange={() => toggleFlag(a, az)}
+                                                                            data-testid={`flag-${a}-${az}`}
+                                                                            className="accent-violet-600" />
+                                                                        <span className="capitalize">{az.replace(/_/g, " ")}</span>
+                                                                    </label>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </td>
                                         </tr>
                                     );
                                 })}

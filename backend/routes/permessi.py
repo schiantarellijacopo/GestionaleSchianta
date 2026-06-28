@@ -1,17 +1,20 @@
-"""Permessi profilo — matrice granulare di permessi per area.
+"""Permessi profilo — matrice GRANULARE di permessi per area.
 
-Ogni utente ha un ``profilo_permessi_id`` che punta a un record
-``ProfiloPermessi`` con la mappa ``area → "none" | "read" | "write"``.
+Ogni profilo ha un dizionario ``area_permissions`` con flag specifici per ogni area:
+  - read, write, delete (base)
+  - upload_docs (poter caricare allegati anche se non scrittura)
+  - export (CSV/XLSX/PDF)
+  - print (stampe)
+  + flag specifici per area (es. sinistri.edit_cid, comunicazioni.send_email)
 
-Aree gestite (sezioni del CRM):
-  - anagrafiche, polizze, titoli, sinistri, avvisi, contabilita
-  - estratti_conto, compagnie, prodotti, modelli, comunicazioni
-  - alert, calendario, posta, diario, dashboard, librerie, importazioni
+Compatibilità: il campo ``area_levels`` (none/read/write) viene mantenuto come
+preset rapido di scrittura — la lettura derivata da ``area_permissions`` ha la
+precedenza quando presente.
 """
 from __future__ import annotations
 
-from typing import Optional
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -34,23 +37,88 @@ AREE = [
 
 LIVELLI = ["none", "read", "write"]
 
+# Mappa area → lista azioni granulari supportate. "read/write/delete" sono
+# sempre presenti; le altre dipendono dalla natura dell'area.
+AZIONI_PER_AREA: dict[str, list[str]] = {
+    "anagrafiche":    ["read", "write", "delete", "upload_docs", "export", "print", "send_email"],
+    "polizze":        ["read", "write", "delete", "upload_docs", "export", "print", "transfer"],
+    "titoli":         ["read", "write", "delete", "upload_docs", "incassa", "export", "print"],
+    "sinistri":       ["read", "write", "delete", "upload_docs", "edit_cid", "liquida", "print"],
+    "avvisi":         ["read", "send_email", "send_sms", "send_wa", "print"],
+    "contabilita":    ["read", "write", "delete", "chiusura_giorno", "export", "print"],
+    "estratti_conto": ["read", "export", "print"],
+    "compagnie":      ["read", "write", "delete"],
+    "prodotti":       ["read", "write", "delete"],
+    "modelli":        ["read", "write", "delete", "template_edit"],
+    "comunicazioni":  ["read", "send_email", "send_sms", "send_wa", "template_edit"],
+    "alert":          ["read", "write", "delete"],
+    "calendario":     ["read", "write", "delete"],
+    "posta":          ["read", "send_email", "delete"],
+    "diario":         ["read", "write", "delete"],
+    "dashboard":      ["read", "customize"],
+    "librerie":       ["read", "write", "delete"],
+    "importazioni":   ["read", "import"],
+    "documenti":      ["read", "upload_docs", "delete", "export"],
+    "marketing":      ["read", "write", "send_email", "send_sms", "send_wa"],
+    "pipeline":       ["read", "write", "delete"],
+    "corsi":          ["read", "write", "delete", "upload_docs"],
+}
+
 
 class ProfiloPermessiBody(BaseModel):
     nome: str
     descrizione: Optional[str] = None
-    area_levels: dict = Field(default_factory=dict)        # area → "none"|"read"|"write"
+    # Preset rapidi area→none/read/write (compatibilità)
+    area_levels: dict = Field(default_factory=dict)
+    # Flag granulari: {area: {azione: bool}}
+    area_permissions: dict = Field(default_factory=dict)
     attivo: bool = True
+
+
+def _expand_level_to_permissions(area: str, level: str) -> dict[str, bool]:
+    """Espande un livello preset (none/read/write) in flag granulari."""
+    azioni = AZIONI_PER_AREA.get(area, ["read", "write", "delete"])
+    if level == "none":
+        return {a: False for a in azioni}
+    if level == "read":
+        return {a: (a == "read") for a in azioni}
+    # write = tutto tranne delete e azioni "pericolose"
+    pericolose = {"delete", "transfer", "liquida", "import"}
+    return {a: (a not in pericolose) for a in azioni}
+
+
+def _merge_permissions(level_map: dict, perm_map: dict) -> dict[str, dict[str, bool]]:
+    """Combina ``area_levels`` (preset) e ``area_permissions`` (override puntuali).
+
+    Le ``area_permissions`` hanno la precedenza sulle ``area_levels``.
+    """
+    out: dict[str, dict[str, bool]] = {}
+    for area in AREE:
+        # base dal preset
+        level = (level_map or {}).get(area, "none")
+        base = _expand_level_to_permissions(area, level)
+        # override granulari
+        override = (perm_map or {}).get(area) or {}
+        merged = {**base, **{k: bool(v) for k, v in override.items()}}
+        out[area] = merged
+    return out
 
 
 @router.get("/permessi-profili")
 async def list_profili(user: dict = Depends(require_user("admin"))) -> list[dict]:
-    return await db.profili_permessi.find({}, {"_id": 0}).sort("nome", 1).to_list(100)
+    items = await db.profili_permessi.find({}, {"_id": 0}).sort("nome", 1).to_list(100)
+    # arricchisci con effective_permissions (utile al frontend)
+    for p in items:
+        p["effective_permissions"] = _merge_permissions(
+            p.get("area_levels") or {}, p.get("area_permissions") or {},
+        )
+    return items
 
 
 @router.get("/permessi-aree")
 async def list_aree(user: dict = Depends(require_user("admin"))) -> dict:
-    """Restituisce l'elenco delle aree disponibili e dei livelli supportati."""
-    return {"aree": AREE, "livelli": LIVELLI}
+    """Restituisce aree disponibili, livelli preset e azioni granulari per area."""
+    return {"aree": AREE, "livelli": LIVELLI, "azioni_per_area": AZIONI_PER_AREA}
 
 
 @router.post("/permessi-profili", status_code=201)
@@ -62,6 +130,9 @@ async def create_profilo(body: ProfiloPermessiBody,
         "created_at": _now_iso(),
     }
     await db.profili_permessi.insert_one(doc)
+    doc["effective_permissions"] = _merge_permissions(
+        doc.get("area_levels") or {}, doc.get("area_permissions") or {},
+    )
     return doc
 
 
@@ -73,7 +144,11 @@ async def update_profilo(pid: str, body: ProfiloPermessiBody,
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Profilo non trovato")
-    return await db.profili_permessi.find_one({"id": pid}, {"_id": 0})
+    doc = await db.profili_permessi.find_one({"id": pid}, {"_id": 0})
+    doc["effective_permissions"] = _merge_permissions(
+        doc.get("area_levels") or {}, doc.get("area_permissions") or {},
+    )
+    return doc
 
 
 @router.delete("/permessi-profili/{pid}")
@@ -88,7 +163,7 @@ async def delete_profilo(pid: str, user: dict = Depends(require_user("admin"))) 
 
 
 async def seed_default_profili() -> None:
-    """Crea i 3 profili di default se non esistono (idempotente)."""
+    """Crea i profili di default se non esistono (idempotente)."""
     if await db.profili_permessi.count_documents({}) > 0:
         return
     full = {a: "write" for a in AREE}
@@ -107,5 +182,5 @@ async def seed_default_profili() -> None:
     for d in defaults:
         await db.profili_permessi.insert_one({
             "id": str(uuid.uuid4()),
-            **d, "attivo": True, "created_at": _now_iso(),
+            **d, "area_permissions": {}, "attivo": True, "created_at": _now_iso(),
         })

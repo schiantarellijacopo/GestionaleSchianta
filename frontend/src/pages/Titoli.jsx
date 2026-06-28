@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import CollaboratoreCell from "@/components/CollaboratoreCell";
 import KpiBarSection from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,8 @@ export default function Titoli({ storicoMode = false } = {}) {
     const [rami, setRami] = useState([]);
     const [conti, setConti] = useState([]);
     const [utenti, setUtenti] = useState([]);
+    const [prodotti, setProdotti] = useState([]);
+    const { mezzi: mezziPagamento } = useMezziPagamento();
     const [editing, setEditing] = useState(null);
     const [showFilters, setShowFilters] = useState(false);
 
@@ -133,9 +136,11 @@ export default function Titoli({ storicoMode = false } = {}) {
             api.get("/compagnie"), api.get("/librerie/rami"),
             api.get("/librerie/conti-cassa"),
             api.get("/auth/users").catch(() => ({ data: [] })),
-        ]).then(([c, r, cc, u]) => {
+            api.get("/librerie/prodotti").catch(() => ({ data: [] })),
+        ]).then(([c, r, cc, u, p]) => {
             setCompagnie(c.data); setRami(r.data); setConti(cc.data);
             setUtenti((u.data || []).filter((x) => x.role !== "cliente"));
+            setProdotti(p.data || []);
         });
     }, []);
 
@@ -262,8 +267,20 @@ export default function Titoli({ storicoMode = false } = {}) {
                                 {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
                             </SelectContent>
                         </Select>
-                        <Input placeholder="Prodotto..." value={filters.prodotto} onChange={(e) => setF("prodotto", e.target.value)} />
-                        <Input placeholder="Mezzo pag." value={filters.mezzo_pagamento} onChange={(e) => setF("mezzo_pagamento", e.target.value)} />
+                        <Select value={filters.prodotto || "all"} onValueChange={(v) => setF("prodotto", v === "all" ? "" : v)}>
+                            <SelectTrigger data-testid="f-prodotto"><SelectValue placeholder="Prodotto" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti i prodotti</SelectItem>
+                                {prodotti.map((p) => <SelectItem key={p.id} value={p.nome}>{p.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.mezzo_pagamento || "all"} onValueChange={(v) => setF("mezzo_pagamento", v === "all" ? "" : v)}>
+                            <SelectTrigger data-testid="f-mezzo-pag"><SelectValue placeholder="Mezzo pag." /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti i mezzi</SelectItem>
+                                {mezziPagamento.map((m) => <SelectItem key={m.codice} value={m.codice}>{m.label || m.codice}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
                         <div>
                             <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
                             <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="f-dal" />
@@ -354,7 +371,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                                         </td>
                                         <td className="text-xs">{t.contraente_nome || "-"}</td>
                                         <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>
-                                        <td className="text-xs text-slate-700">{t.collaboratore_nome || "-"}</td>
+                                        <td className="text-xs text-slate-700">{t.collaboratore_nome ? <CollaboratoreCell nome={t.collaboratore_nome} avatarUrl={t.collaboratore_avatar_url} /> : "-"}</td>
                                         <td className="num text-right font-medium" data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</td>
                                         <td className="num text-right text-slate-700" data-testid={`titolo-provv-tot-${t.id}`}>{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</td>
                                         <td className="num text-right text-sky-700 font-medium" data-testid={`titolo-provv-collab-${t.id}`} title={t.provvigione_pct_collab > 0 ? `${t.provvigione_pct_collab}%` : "Nessuno schema"}>{fmtEur(t.provvigione_collaboratore || 0)}</td>

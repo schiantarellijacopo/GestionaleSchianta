@@ -42,6 +42,12 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (28/06/2026 — sera)
+- **Permessi granulari per area (P0)**: esteso `ProfiloPermessi` con `area_permissions: Dict[area, Dict[azione, bool]]` oltre ai preset `area_levels`. Aggiunte azioni granulari per area: Sinistri (read/write/delete/upload_docs/edit_cid/liquida/print), Comunicazioni (read/send_email/send_sms/send_wa/template_edit), Polizze (read/write/delete/upload_docs/export/print/transfer), Titoli (incassa), Contabilità (chiusura_giorno), Dashboard (customize), ecc. Endpoint `GET /api/permessi-aree` ora ritorna `azioni_per_area`. Endpoint profili ritornano `effective_permissions` calcolate
+- Dialog "Modifica profilo" rinnovato: matrice con preset rapido (3 radio Non gestito/Lettura/Scrittura) + colonna "Permessi specifici" con button espandibile per area che mostra checkbox per ogni azione granulare (es. "▸ Avanzati (4)" per Sinistri → Upload Docs · Edit Cid · Liquida · Print)
+- **Filtri Titoli dropdown (P1)**: `Prodotto` e `Mezzo pag.` ora sono Select con opzioni caricate da `/api/librerie/prodotti` e `useMezziPagamento`. Voci "Tutti i prodotti" / "Tutti i mezzi" per reset
+- **Avatar collaboratore nelle liste**: nuovo componente `<CollaboratoreCell />` con avatar tondo 20px + nome. Usato in Polizze, Titoli, Sinistri (colonna Collaboratore). Backend list arricchito con `collaboratore_avatar_url`. Fallback: iniziali del nome su gradiente sky→indigo
+
 ## Changelog (28/06/2026 — pomeriggio)
 - **Avatar upload utenti**: aggiunto endpoint `POST /api/auth/users/{uid}/avatar` (admin oppure utente stesso, max 4 MB JPG/PNG/WEBP, salvataggio su object storage). Nuovo componente `AvatarUploader` nella tab Anagrafica del form Modifica utenti con preview, cambio e rimozione. Avatar disponibile per TopBar/Diario/Chat
 - Voce **Corsi** già presente in sidebar (`/corsi`); tab Corsi nel form utenti già funzionante per gestione attestati IVASS con upload PDF/IMG

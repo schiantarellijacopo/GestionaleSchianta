@@ -10,6 +10,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import KpiBar from "@/components/KpiBar";
+import CollaboratoreCell from "@/components/CollaboratoreCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -251,7 +252,7 @@ export default function Sinistri() {
                                         <td className="truncate max-w-[150px]" title={s.tipologia_sinistro}>{s.tipologia_sinistro || "—"}</td>
                                         <td>{s.danneggiato_nome || "—"}</td>
                                         <td className="font-mono">{s.targa || "—"}</td>
-                                        <td>{s.collaboratore_nome || "—"}</td>
+                                        <td>{s.collaboratore_nome ? <CollaboratoreCell nome={s.collaboratore_nome} avatarUrl={s.collaboratore_avatar_url} /> : "—"}</td>
                                         <td className="num text-right">{fmtEur(s.riserva)}</td>
                                         <td className="num text-right">{fmtEur(s.liquidazione)}</td>
                                         <td>

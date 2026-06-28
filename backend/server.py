@@ -2149,11 +2149,13 @@ async def list_polizze(
     comps = {c["id"]: c async for c in db.compagnie.find({"id": {"$in": comp_ids}},
                                                          {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
     collabs = {u["id"]: u async for u in db.users.find({"id": {"$in": collab_ids}},
-                                                       {"_id": 0, "id": 1, "name": 1})}
+                                                       {"_id": 0, "id": 1, "name": 1, "avatar_url": 1})}
     for it in items:
         it["contraente_nome"] = anas.get(it.get("contraente_id"), {}).get("ragione_sociale")
         it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
-        it["collaboratore_nome"] = collabs.get(it.get("collaboratore_id", ""), {}).get("name")
+        _c = collabs.get(it.get("collaboratore_id", ""), {})
+        it["collaboratore_nome"] = _c.get("name")
+        it["collaboratore_avatar_url"] = _c.get("avatar_url")
     # Filtro categoria business (post-processing — richiede tipo anagrafica)
     if categoria:
         anag_tipo = {a["id"]: (a.get("tipo") or "persona_fisica")
@@ -3712,6 +3714,9 @@ async def list_sinistri(
         {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
     comps = {c["id"]: c async for c in db.compagnie.find(
         {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    collab_ids = list({s.get("collaboratore_id") for s in items if s.get("collaboratore_id")})
+    collabs = {u["id"]: u async for u in db.users.find(
+        {"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1, "avatar_url": 1})}
     for s in items:
         p = pols.get(s.get("polizza_id"), {})
         s["numero_polizza"] = p.get("numero_polizza")
@@ -3720,6 +3725,9 @@ async def list_sinistri(
         s["contraente_nome"] = a.get("ragione_sociale") or \
             f"{a.get('cognome','')} {a.get('nome','')}".strip()
         s["compagnia_nome"] = comps.get(s.get("compagnia_id"), {}).get("ragione_sociale")
+        _c = collabs.get(s.get("collaboratore_id", ""), {})
+        s["collaboratore_nome"] = _c.get("name")
+        s["collaboratore_avatar_url"] = _c.get("avatar_url")
         # primo danneggiato come campo riassuntivo
         if s.get("danneggiati"):
             d0 = s["danneggiati"][0]
