@@ -1489,6 +1489,217 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
 }
 
 
+function _detectEmailProvider(host) {
+    const h = (host || "").toLowerCase();
+    if (h.includes("gmail") || h.includes("google")) return "google";
+    if (h.includes("office365") || h.includes("outlook") || h.includes("microsoft")) return "microsoft";
+    if (h) return "smtp";
+    return "google";  // default
+}
+
+const EMAIL_PRESETS = {
+    google: { smtp_host: "smtp.gmail.com", smtp_port: 587, smtp_use_tls: true },
+    microsoft: { smtp_host: "smtp.office365.com", smtp_port: 587, smtp_use_tls: true },
+    smtp: {},
+};
+
+function EmailSection({ f, set, onSet }) {
+    const [provider, setProvider] = useState(_detectEmailProvider(f.smtp_host));
+    const [testDest, setTestDest] = useState("");
+    const [testing, setTesting] = useState(false);
+    const [testPassato, setTestPassato] = useState(false);
+    const attivo = !!(f.smtp_host && f.smtp_user && (f.smtp_password_set || f.smtp_password));
+
+    const cambiaProvider = (p) => {
+        setProvider(p);
+        const preset = EMAIL_PRESETS[p] || {};
+        onSet((prev) => ({ ...prev, ...preset }));
+    };
+
+    const inviaTest = async () => {
+        setTesting(true);
+        try {
+            const dest = (testDest || f.smtp_user || "").trim();
+            if (!dest) { toast.error("Inserisci un destinatario"); setTesting(false); return; }
+            // salva prima eventuali modifiche pendenti
+            const payload = { ...f };
+            if (payload.smtp_password === "••••••••") delete payload.smtp_password;
+            if (payload.twilio_auth_token === "••••••••") delete payload.twilio_auth_token;
+            await api.put("/librerie/comunicazioni", payload);
+            await api.post("/librerie/comunicazioni/test", {
+                canale: "email", destinatario: dest,
+            });
+            toast.success(`Email test inviata a ${dest}`);
+            setTestPassato(true);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio test");
+            setTestPassato(false);
+        }
+        setTesting(false);
+    };
+
+    return (
+        <section data-testid="lib-com-email" className="border border-slate-200 rounded-lg p-4 bg-white">
+            {/* Header con badge stato */}
+            <div className="flex items-start gap-3 mb-3">
+                <div className="bg-sky-100 text-sky-700 p-2 rounded-md mt-0.5">
+                    <Mail size={18} />
+                </div>
+                <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-base font-semibold text-slate-800">Email</h4>
+                        {attivo && (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200" data-testid="email-badge-attivo">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Attivo
+                            </span>
+                        )}
+                        {testPassato && (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                                ✓ Test passato
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Invia notifiche via email da qualsiasi provider SMTP. <strong>Preset Google e Microsoft con un click.</strong>
+                    </p>
+                </div>
+            </div>
+
+            {/* Provider selector */}
+            <div className="mb-4">
+                <Label className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Provider</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-1.5">
+                    {[
+                        { v: "google", l: "Google (Gmail / Workspace)" },
+                        { v: "microsoft", l: "Microsoft (Outlook / Office 365)" },
+                        { v: "smtp", l: "SMTP personalizzato" },
+                    ].map((p) => (
+                        <button
+                            key={p.v}
+                            type="button"
+                            onClick={() => cambiaProvider(p.v)}
+                            className={`px-3 py-2.5 text-sm rounded-md border transition-all ${
+                                provider === p.v
+                                    ? "border-sky-500 ring-2 ring-sky-200 bg-sky-50 text-sky-900 font-medium"
+                                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                            data-testid={`com-email-provider-${p.v}`}
+                        >
+                            {p.l}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">
+                    {provider === "google" && (
+                        <>Email aziendale Google. Crea una App Password su{" "}
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-sky-700 underline">
+                                myaccount.google.com → Security → 2-Step → App passwords
+                            </a>.
+                        </>
+                    )}
+                    {provider === "microsoft" && (
+                        <>Outlook/Office 365. Se hai 2FA attiva crea una{" "}
+                            <a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noreferrer" className="text-sky-700 underline">
+                                App Password
+                            </a>{" "}da account.live.com.
+                        </>
+                    )}
+                    {provider === "smtp" && (
+                        <>Inserisci manualmente host SMTP, porta e credenziali del tuo provider (es. Aruba, Register.it, OVH, mailbox.org, ecc.).</>
+                    )}
+                </p>
+            </div>
+
+            {/* Campi base (sempre visibili) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <Label>Indirizzo email <span className="text-rose-500">*</span></Label>
+                    <Input placeholder="nome@dominio.it" value={f.smtp_user || ""}
+                        onChange={(e) => set("smtp_user", e.target.value)}
+                        data-testid="com-smtp-user" />
+                </div>
+                <div>
+                    <Label>
+                        {provider === "smtp" ? "Password" : "Password app"} <span className="text-rose-500">*</span>
+                        {provider === "google" && (
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer"
+                                className="ml-2 text-[11px] text-sky-700 underline font-normal">crea su Google ↗</a>
+                        )}
+                        {provider === "microsoft" && (
+                            <a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noreferrer"
+                                className="ml-2 text-[11px] text-sky-700 underline font-normal">crea su Microsoft ↗</a>
+                        )}
+                    </Label>
+                    <Input type="password"
+                        placeholder={f.smtp_password_set ? "•••• salvata" : "Password"}
+                        value={f.smtp_password || ""}
+                        onChange={(e) => set("smtp_password", e.target.value)}
+                        data-testid="com-smtp-pass" />
+                </div>
+                <div className="md:col-span-2">
+                    <Label>Mittente (display name)</Label>
+                    <Input placeholder="Assicurazioni Schiantarelli"
+                        value={f.smtp_from || ""}
+                        onChange={(e) => set("smtp_from", e.target.value)}
+                        data-testid="com-smtp-from" />
+                </div>
+                {/* Campi avanzati solo per "SMTP personalizzato" */}
+                {provider === "smtp" && (
+                    <>
+                        <div>
+                            <Label>Server SMTP <span className="text-rose-500">*</span></Label>
+                            <Input placeholder="smtp.example.com"
+                                value={f.smtp_host || ""}
+                                onChange={(e) => set("smtp_host", e.target.value)}
+                                data-testid="com-smtp-host" />
+                        </div>
+                        <div>
+                            <Label>Porta</Label>
+                            <Input type="number" placeholder="587"
+                                value={f.smtp_port ?? ""}
+                                onChange={(e) => set("smtp_port", parseInt(e.target.value, 10) || null)}
+                                data-testid="com-smtp-port" />
+                        </div>
+                        <div className="md:col-span-2 flex items-center">
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                <input type="checkbox"
+                                    checked={!!f.smtp_use_tls}
+                                    onChange={(e) => set("smtp_use_tls", e.target.checked)}
+                                    data-testid="com-smtp-tls" />
+                                Usa STARTTLS (porta 587) — disabilita solo per SSL su porta 465
+                            </label>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Test invio inline */}
+            <div className="mt-5 pt-4 border-t border-slate-100">
+                <Label className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Test invio</Label>
+                <div className="flex flex-col sm:flex-row gap-2 mt-1.5">
+                    <Input
+                        placeholder={`Invia email di test a… (vuoto = ${f.smtp_user || "tua email"})`}
+                        value={testDest}
+                        onChange={(e) => setTestDest(e.target.value)}
+                        data-testid="com-test-dest"
+                        className="flex-1"
+                    />
+                    <Button
+                        onClick={inviaTest}
+                        disabled={testing}
+                        variant="outline"
+                        className="border-slate-300"
+                        data-testid="com-test-invia"
+                    >
+                        {testing ? "Invio…" : "✈ Invia test"}
+                    </Button>
+                </div>
+            </div>
+        </section>
+    );
+}
+
+
 function ComunicazioniSezione() {
     const [f, setF] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1555,56 +1766,8 @@ function ComunicazioniSezione() {
                 </p>
             </div>
 
-            {/* EMAIL */}
-            <section data-testid="lib-com-email">
-                <div className="flex items-center gap-2 mb-3">
-                    <Mail size={16} className="text-sky-700" />
-                    <h4 className="text-sm font-semibold text-slate-800">Email — SMTP</h4>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                        <Label>Server SMTP *</Label>
-                        <Input placeholder="smtp.gmail.com" value={f.smtp_host || ""}
-                            onChange={(e) => set("smtp_host", e.target.value)}
-                            data-testid="com-smtp-host" />
-                    </div>
-                    <div>
-                        <Label>Porta</Label>
-                        <Input type="number" placeholder="587"
-                            value={f.smtp_port ?? ""}
-                            onChange={(e) => set("smtp_port", parseInt(e.target.value, 10) || null)}
-                            data-testid="com-smtp-port" />
-                    </div>
-                    <div>
-                        <Label>Utente / Email mittente *</Label>
-                        <Input placeholder="account@dominio.it" value={f.smtp_user || ""}
-                            onChange={(e) => set("smtp_user", e.target.value)}
-                            data-testid="com-smtp-user" />
-                    </div>
-                    <div>
-                        <Label>Password / App Password</Label>
-                        <Input type="password" placeholder={f.smtp_password_set ? "Password salvata (modifica per cambiare)" : "Password"}
-                            value={f.smtp_password || ""}
-                            onChange={(e) => set("smtp_password", e.target.value)}
-                            data-testid="com-smtp-pass" />
-                    </div>
-                    <div>
-                        <Label>Mittente "Da" (opzionale)</Label>
-                        <Input placeholder='Assicura <noreply@assicura.it>' value={f.smtp_from || ""}
-                            onChange={(e) => set("smtp_from", e.target.value)}
-                            data-testid="com-smtp-from" />
-                    </div>
-                    <div className="flex items-end">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input type="checkbox"
-                                checked={!!f.smtp_use_tls}
-                                onChange={(e) => set("smtp_use_tls", e.target.checked)}
-                                data-testid="com-smtp-tls" />
-                            Usa STARTTLS (consigliato)
-                        </label>
-                    </div>
-                </div>
-            </section>
+            {/* EMAIL — Provider con preset (Google / Microsoft / SMTP personalizzato) */}
+            <EmailSection f={f} set={set} onSet={setF} />
 
             {/* TWILIO SMS + WHATSAPP */}
             <section data-testid="lib-com-twilio">
