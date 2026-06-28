@@ -157,7 +157,8 @@ def generate_avviso_pdf(
     story.append(Spacer(1, 6 * mm))
 
     # ===== INTRO =====
-    saluto = (template.get("oggetto") or "Gentile Cliente,").strip()
+    saluto_raw = (template.get("oggetto") or "Gentile Cliente,").strip()
+    saluto = _render_placeholders(saluto_raw, ctx)
     intro_raw = template.get("corpo") or (
         "riteniamo opportuno ricordarLe la scadenza delle rate di premio relative "
         "alle coperture assicurative i cui termini risultano sotto evidenziati.\n\n"
