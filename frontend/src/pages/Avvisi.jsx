@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Bell, Mail, MessageCircle, Smartphone, FileText, Receipt,
-    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter,
+    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +39,7 @@ export default function Avvisi() {
 
     // Filtri avanzati
     const [showFilters, setShowFilters] = useState(false);
+    const [qSearch, setQSearch] = useState("");
     const [filters, setFilters] = useState({
         dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all",
     });
@@ -86,9 +87,20 @@ export default function Avvisi() {
             cur.totale += t.importo_lordo || 0;
             m.set(k, cur);
         }
-        return Array.from(m.values()).sort((a, b) =>
+        const arr = Array.from(m.values()).sort((a, b) =>
             (a.contraente_nome || "").localeCompare(b.contraente_nome || ""));
-    }, [data]);
+        // Filtro testo libero "qSearch" (case-insensitive)
+        const q = (qSearch || "").trim().toLowerCase();
+        if (!q) return arr;
+        return arr.filter((g) => {
+            const haystack = [
+                g.contraente_nome, g.contraente_email, g.contraente_cellulare,
+                ...g.titoli.map((t) => t.numero_polizza),
+                ...g.titoli.map((t) => t.targa),
+            ].filter(Boolean).join(" ").toLowerCase();
+            return haystack.includes(q);
+        });
+    }, [data, qSearch]);
 
     const totali = useMemo(() => ({
         polizze: data?.polizze?.length || 0,
@@ -103,7 +115,17 @@ export default function Avvisi() {
                 title={<><Bell className="inline mr-2 -mt-1" size={20} />Avvisi di scadenza</>}
                 subtitle="Polizze in scadenza · titoli arretrati · invia notifiche al cliente"
                 actions={(
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative">
+                            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                placeholder="Cerca contraente, polizza, targa…"
+                                value={qSearch}
+                                onChange={(e) => setQSearch(e.target.value)}
+                                className="pl-7 h-9 w-64 text-sm"
+                                data-testid="avvisi-q"
+                            />
+                        </div>
                         <Button
                             variant={hasActiveFilters ? "default" : "outline"}
                             size="sm"

@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    NotebookPen,
+    NotebookPen, Inbox,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
@@ -38,6 +38,7 @@ const ALL_MENU_ITEMS = [
     { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "chat", path: "/chat", icon: "MessageCircle", label: "Chat", section: "strumenti", roles: null },
+    { id: "posta", path: "/posta", icon: "Inbox", label: "Posta", section: "strumenti", roles: null },
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
@@ -50,7 +51,7 @@ const ALL_MENU_ITEMS = [
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
-    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen,
+    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox,
 };
 
 const SECTION_LABELS = {

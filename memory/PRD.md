@@ -1,60 +1,63 @@
 # PRD — Programma Assicurativo (Italian Insurance CRM)
 
-## Problem Statement
-CRM full-stack su misura per agenzie assicurative italiane: gestione anagrafiche, polizze, titoli, sinistri, contabilità (Prima Nota / Brogliaccio), analisi cliente, avvisi scadenze, sistema provvigionale, mapping ANIA, importazione flussi (OMNIA, Libro Matricola).
-
 ## Stack
-- Frontend: React + Shadcn UI + Tailwind + lucide-react
-- Backend: FastAPI + Motor (Async MongoDB) + Pydantic
-- LLM: Gemini 3 Flash via Emergent LLM Key (OCR polizze)
-- Storage: object_storage interno (firma, allegati, PDF)
-- Comunicazioni: SMTP+IMAP (email), Twilio (SMS + WhatsApp Business)
+React + Shadcn UI + Tailwind | FastAPI + Motor (Async MongoDB) | Gemini 3 Flash (Emergent LLM) | Twilio (SMS/WhatsApp)
 
-## Implementato (al 28 Feb 2026)
-### Sessione corrente
-- ✅ Lettera di Abbuono con doppia firma digitale (auto-trigger su sconto, firma operatore dal profilo, PDF firmato come allegato)
-- ✅ Libreria 3-tier "Tipi pagamento" (Conti+Modalità+Tipi) con selettore unificato in tutti i dialoghi accounting
-- ✅ Configurazione Comunicazioni unica in Librerie (Email SMTP con preset Google/Microsoft, IMAP con preset, Twilio SMS+WhatsApp, test invio per ogni canale)
-- ✅ **IMAP backend**: endpoint `/api/librerie/comunicazioni/test-imap` connette + valida + ritorna ultime 5 email per anteprima. Preset Gmail/Workspace + Office365.
-- ✅ Diario personale collaboratore (`/diario`)
-- ✅ No pagination (Polizze=Attive default, Titoli=Tutti da incassare default)
-- ✅ Colonne Contratto/Targa separate in Titoli + Polizze
-- ✅ Sticky tables (header + prime 3 colonne) su Titoli/Polizze/Sinistri/Anagrafiche/EC Compagnie/Prima Nota/Avvisi
-- ✅ Modulo Veicolo dinamico per ramo/prodotto RCAUTO + lookup targa
-- ✅ Rimosse tab legacy Mapping ANIA
+## Implementato (28 Feb 2026 - sessione attuale)
 
-## Backlog priorità
+### Comunicazioni & Email
+- **Configurazione UNICA in Librerie → Comunicazioni**: SMTP con preset Google/Microsoft/Custom, IMAP con stessi preset + pulsante Test Connessione che ritorna anteprima ultime 5 email, Twilio (SMS+WhatsApp) + Test invio per ogni canale.
+- **Rimossa tab "Configurazione canali"** dalla pagina Alert (era duplicata): ora redirige a Librerie › Comunicazioni.
+- **Modelli backend pronti per IMAP smistamento**:
+  - `User.email_aliases: list[str]` (supporta sia alias personali che di reparto)
+  - `EmailInbox` (smistato_a, categoria, anagrafica_id, allegati, letta_da)
+  - `DiarioCliente` (collegamento auto email→cliente)
+- **Endpoint Posta**: `GET /api/email/inbox`, `GET /api/email/inbox/stats`, `GET /api/email/inbox/{id}`, `POST /api/email/inbox/{id}/leggi`
+- **Pagina /posta**: infografica con 4 KPI (Personali, Condivise, Non lette, Totale), 2 tab (Personale / Condivisa), ricerca testo, lista + dettaglio con allegati e link automatico a anagrafica. Banner "configura per attivare polling".
 
-### P0 — Email integrata (smistamento per alias)
-**Step 1** (alias send-as): aggiungere campo `email_alias` al profilo collaboratore. Quando l'operatore invia email dal programma, header `From:` = alias del collaboratore loggato + reply-to = stesso alias. SMTP rimane uno solo (assicurazioni@…).
+### UI/UX miglioramenti
+- **Sort cliccabile** sugli header di Titoli, Polizze, Sinistri, Anagrafiche (componente `<SortHeader />` riusabile)
+- **Sticky tables**: header in alto + prime 3 colonne congelate a sinistra su tutte le tabelle principali
+- **Righe compatte**: ridotto padding `.tbl tbody td` da 10px a 6px (recupero spazio verticale)
+- **Polizze default = "Attive"** preset; Titoli default = "Tutti da incassare"
+- **Colonne Contratto/Targa SEPARATE** in Titoli + Polizze
+- **Avvisi**: aggiunta barra di ricerca rapida (oltre pannello Filtri)
+- **Diario personale** `/diario` (note + storico avvisi + chat)
+- **Modulo Veicolo dinamico** per RCAUTO + lookup auto-targa
 
-**Step 2** (IMAP smistamento automatico):
-- Job APScheduler ogni 5 min legge la cassetta principale IMAP
-- Per ogni nuova email controlla `To:` + `Cc:`:
-  - se contiene un alias di un user → categoria=`personale`, `smistato_a=[user_id]`
-  - altrimenti → categoria=`condivisa`, visibile a tutti
-- Modello `EmailInbox` (db.email_inbox) con campi: from, to[], cc[], subject, body_text, body_html, date, attachments[], smistato_a[user_id], letta_da[user_id], categoria
-- Endpoint `/api/email/inbox`, `/api/email/inbox/{id}`, `/api/email/inbox/{id}/leggi`
-- Pagina `/posta` con 2 tab (Personale / Condivisa), lista + dettaglio + risposta + allegati
+### Funzionalità precedenti
+- Libreria 3-tier Pagamenti (Conti+Modalità+Tipi) con `<SelectTipoPagamento />` unificato
+- Lettera di Abbuono + doppia firma digitale (operatore dal profilo + cliente canvas)
+- No pagination (limite backend 50k record)
+- Mobile/tablet responsive sidebar drawer
+- OMNIA + Libro Matricola XLSX import
+
+## Backlog (priorità)
+
+### P0 — IMAP Polling Step 2 (modelli pronti, manca implementazione)
+- **UI campo `email_aliases`** nel form profilo collaboratore (Librerie → Utenti → tab Email)
+- **Job APScheduler 5 min** che legge IMAP, salva EmailInbox, applica smistamento:
+  - Match `To/Cc` con alias collaboratori → `smistato_a[user_id]` + `categoria=personale`
+  - Match `From` con anagrafica.email → `anagrafica_id` + voce in `DiarioCliente`
+  - Default → `categoria=condivisa`
+- **Endpoint POST `/api/email/sync`** (trigger manuale dal frontend)
+- **Send-as alias** in uscita: `From:` = alias del collaboratore loggato
 
 ### P1
-- Filtri/sort per colonna su table headers
+- Filtri per colonna (popover su click intestazione)
+- Sort + sticky sulle tabelle minori (Movimenti, EstrattoConto, Provvigioni, Marketing, Pipeline Email)
+- Hook automatici Diario per tutti i punti di invio email
 - OCR Fatture via Gemini 3 Flash
-- "Verifica polizza vs libretto" UI di confronto
+- "Verifica polizza vs libretto" UI
 
 ### P2
 - Redesign Piramide Soluzioni
+- Refactor server.py (~9400 righe) in moduli routes/
 - OAuth Google Calendar + M365
-- Refactor server.py (9300 righe) in moduli routes/
 
 ## File principali
-- `/app/backend/server.py` (~9400 righe)
-- `/app/backend/routes/librerie.py` (Comunicazioni SMTP+IMAP+Twilio, Tipi pagamento, Mezzi)
-- `/app/backend/pdf_lettera_abbuono.py`
-- `/app/backend/db_models.py` (TipoPagamento, LetteraAbbuono, DiarioNota, AziendaConfig esteso con IMAP)
-- `/app/frontend/src/pages/Librerie.jsx` (sezione Comunicazioni con preset Google/Microsoft per SMTP **e** IMAP)
-- `/app/frontend/src/pages/Diario.jsx`
-- `/app/frontend/src/components/DialogLetteraAbbuono.jsx`, `SignaturePad.jsx`, `SelectTipoPagamento.jsx`
+- Backend: `server.py` (~9500 righe), `routes/librerie.py`, `pdf_lettera_abbuono.py`, `db_models.py`
+- Frontend: `pages/Posta.jsx`, `Diario.jsx`, `Librerie.jsx`, `components/SortHeader.jsx`, `DialogLetteraAbbuono.jsx`, `SignaturePad.jsx`, `SelectTipoPagamento.jsx`
 
 ## Credenziali test
-Vedi `/app/memory/test_credentials.md`
+`/app/memory/test_credentials.md` (admin@assicura.it / Admin123!)

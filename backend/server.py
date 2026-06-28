@@ -47,7 +47,7 @@ from db_models import (
     PipelineCustom, PipelineColonna, PipelineCard,
     AnalisiCliente,
     Rappel, VoceRicorsivaCollab, MezzoPagamento, TipoPagamento, LetteraAbbuono,
-    DiarioNota,
+    DiarioNota, EmailInbox, DiarioCliente,
     _now_iso, _uid,
 )
 import ania_importer
@@ -7987,6 +7987,90 @@ async def upload_attestato_corso(
 async def elimina_corso_utente(uid: str, corso_id: str,
                                 user=Depends(require_user("admin"))):
     await db.users.update_one({"id": uid}, {"$pull": {"corsi": {"id": corso_id}}})
+    return {"ok": True}
+
+
+# ============================================================
+# POSTA — Inbox (popolata dal poller IMAP, in arrivo Step 2)
+# ============================================================
+@api.get("/email/inbox/stats")
+async def email_inbox_stats(user=Depends(current_user)):
+    """KPI per la pagina Posta dell'utente loggato."""
+    uid = user["id"]
+    is_admin = user.get("role") == "admin"
+    # personale: smistato_a contiene l'utente
+    pers_total = await db.email_inbox.count_documents({"smistato_a": uid})
+    pers_unread = await db.email_inbox.count_documents({
+        "smistato_a": uid, "letta_da": {"$nin": [uid]},
+    })
+    # condivisa: visibile a tutti (no smistamento)
+    cond_total = await db.email_inbox.count_documents({"categoria": "condivisa"})
+    cond_unread = await db.email_inbox.count_documents({
+        "categoria": "condivisa", "letta_da": {"$nin": [uid]},
+    })
+    # totale globale (admin only)
+    globale = await db.email_inbox.count_documents({}) if is_admin else None
+    return {
+        "personale": {"totale": pers_total, "non_lette": pers_unread},
+        "condivisa": {"totale": cond_total, "non_lette": cond_unread},
+        "globale": globale,
+    }
+
+
+@api.get("/email/inbox")
+async def email_inbox_list(
+    categoria: Optional[str] = None,  # "personale" | "condivisa"
+    q: Optional[str] = None,
+    limit: int = 500,
+    user=Depends(current_user),
+):
+    uid = user["id"]
+    flt: dict = {}
+    if categoria == "personale":
+        flt["smistato_a"] = uid
+    elif categoria == "condivisa":
+        flt["categoria"] = "condivisa"
+    else:
+        # default: tutte le email visibili all'utente
+        flt["$or"] = [{"smistato_a": uid}, {"categoria": "condivisa"}]
+    if q:
+        flt["$and"] = [{
+            "$or": [
+                {"subject": {"$regex": q, "$options": "i"}},
+                {"from_address": {"$regex": q, "$options": "i"}},
+                {"from_name": {"$regex": q, "$options": "i"}},
+            ],
+        }]
+    items = await db.email_inbox.find(flt, {"_id": 0, "body_html": 0}).sort("date", -1).limit(limit).to_list(limit)
+    # marca "non letta" per l'utente loggato
+    for it in items:
+        it["non_letta"] = uid not in (it.get("letta_da") or [])
+    return items
+
+
+@api.get("/email/inbox/{eid}")
+async def email_inbox_detail(eid: str, user=Depends(current_user)):
+    rec = await db.email_inbox.find_one({"id": eid}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "Email non trovata")
+    # autorizzazione: admin OR (smistato_a OR condivisa)
+    uid = user["id"]
+    if user.get("role") != "admin":
+        if uid not in (rec.get("smistato_a") or []) and rec.get("categoria") != "condivisa":
+            raise HTTPException(403, "Email non accessibile")
+    rec["non_letta"] = uid not in (rec.get("letta_da") or [])
+    return rec
+
+
+@api.post("/email/inbox/{eid}/leggi")
+async def email_inbox_mark_read(eid: str, user=Depends(current_user)):
+    rec = await db.email_inbox.find_one({"id": eid}, {"_id": 0, "letta_da": 1})
+    if not rec:
+        raise HTTPException(404, "Email non trovata")
+    await db.email_inbox.update_one(
+        {"id": eid},
+        {"$addToSet": {"letta_da": user["id"]}},
+    )
     return {"ok": True}
 
 

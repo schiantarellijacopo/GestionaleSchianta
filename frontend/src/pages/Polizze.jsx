@@ -43,7 +43,7 @@ const presetParams = (key) => {
 };
 
 const INITIAL_FILTERS = {
-    preset: "tutti", q: "",
+    preset: "attive", q: "",
     stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
     collaboratore_id: "all",
     dal: "", al: "",
