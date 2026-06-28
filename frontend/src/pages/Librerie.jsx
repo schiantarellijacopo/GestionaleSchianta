@@ -84,7 +84,7 @@ function Sezione({ section }) {
         try {
             await api.delete(`${section.endpoint}/${id}`);
             toast.success("Eliminato"); load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     const FormDialog = SECTION_FORMS[section.key];
@@ -97,7 +97,7 @@ function Sezione({ section }) {
                 : "/librerie/mapping-operatori/applica-a-polizze";
             const r = await api.post(url);
             toast.success(`${r.data.polizze_aggiornate} polizze aggiornate`);
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
@@ -471,7 +471,7 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
                 toast.success("Creato");
             }
             onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     return (
@@ -1061,7 +1061,7 @@ function AziendaSezione() {
             }
             toast.success("Dati azienda salvati");
             load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         finally { setSaving(false); }
     };
 
@@ -1374,7 +1374,7 @@ function DocumentiCollaboratore({ userId, user, onChange }) {
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange(r.data);
             toast.success("Documento caricato");
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
     const del = async (tipo) => {
         if (!window.confirm("Eliminare il documento?")) return;
@@ -1547,7 +1547,7 @@ function EmailSection({ f, set, onSet }) {
             toast.success(`Email test inviata a ${dest}`);
             setTestPassato(true);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore invio test");
+            toast.error(errMsg(e, "Errore invio test"));
             setTestPassato(false);
         }
         setTesting(false);
@@ -1934,7 +1934,7 @@ function ImapPollerControl() {
             await api.post("/email/poller/start", { minutes });
             toast.success(`Poller IMAP avviato (ogni ${minutes} min)`);
             refresh();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         setBusy(false);
     };
     const stop = async () => {
@@ -1943,7 +1943,7 @@ function ImapPollerControl() {
             await api.post("/email/poller/stop");
             toast.success("Poller IMAP fermato");
             refresh();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         setBusy(false);
     };
     const runNow = async () => {
@@ -1956,7 +1956,7 @@ function ImapPollerControl() {
                 toast.error(r.data.errore || "Errore polling");
             }
             refresh();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         setBusy(false);
     };
 
@@ -2015,7 +2015,7 @@ function ComunicazioniSezione() {
             const r = await api.get("/librerie/comunicazioni");
             setF(r.data);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore caricamento");
+            toast.error(errMsg(e, "Errore caricamento"));
         }
         setLoading(false);
     };
@@ -2057,7 +2057,7 @@ function ComunicazioniSezione() {
             });
             toast.success(`Test ${r.data.canale} inviato a ${r.data.destinatario}`);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore invio test");
+            toast.error(errMsg(e, "Errore invio test"));
         }
         setTesting(false);
     };
@@ -2254,7 +2254,7 @@ function VociRicorsiveSezione() {
             await api.delete(`/voci-ricorsive-collab/${r.id}`, { params: { elimina_voci_non_pagate: true } });
             toast.success("Regola eliminata");
             load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
     const apriEdit = (r) => { setEditing(r); setOpen(true); };
     const apriNuovo = () => { setEditing(null); setOpen(true); };
@@ -2409,7 +2409,7 @@ function VoceRicorsivaDialog({ voce, collabs, onClose }) {
                 toast.success(`Regola creata · ${r.data.voci_generate || 0} voci generate`);
             }
             onClose(true);
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         finally { setSaving(false); }
     };
 
@@ -2696,7 +2696,7 @@ function ModelliSezione() {
         try {
             await api.delete(`/librerie/modelli/${m.id}`);
             toast.success("Modello eliminato"); load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     const newPerTab = () => {
@@ -2875,7 +2875,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 toast.success("Modello creato");
             }
             onClose(true);
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
         setSaving(false);
     };
 

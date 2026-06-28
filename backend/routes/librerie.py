@@ -11,7 +11,7 @@ import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from database import db
 from db_models import (
@@ -286,6 +286,7 @@ _COMUNICAZIONI_FIELDS = [
 
 
 class ComunicazioniBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = 587
     smtp_user: Optional[str] = None
