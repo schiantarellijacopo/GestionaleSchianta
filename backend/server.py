@@ -8083,6 +8083,31 @@ async def email_inbox_mark_read(eid: str, user=Depends(current_user)):
     return {"ok": True}
 
 
+@api.delete("/email/inbox/{eid}")
+async def delete_email_inbox(eid: str, user=Depends(current_user)):
+    """Elimina un'email dall'inbox locale (non agisce su Gmail/IMAP).
+
+    Cancella anche gli allegati associati nello storage.
+    """
+    em = await db.email_inbox.find_one({"id": eid}, {"_id": 0})
+    if not em:
+        raise HTTPException(404, "Email non trovata")
+    # ACL: solo admin o destinatario personale
+    if user["role"] != "admin":
+        if user["id"] not in (em.get("smistato_a") or []):
+            raise HTTPException(403, "Permesso negato")
+    # rimuovi allegati dallo storage (best-effort)
+    for att in (em.get("attachments") or []):
+        sp = att.get("storage_path")
+        if sp:
+            try:
+                obj_storage.delete_object(sp)
+            except Exception:
+                pass
+    await db.email_inbox.delete_one({"id": eid})
+    return {"ok": True}
+
+
 # ============================================================
 # IMAP POLLER — controlli scheduler + smistamento manuale
 # ============================================================
@@ -8138,6 +8163,39 @@ async def imap_poller_run_now(user=Depends(require_user("admin"))):
     """Esegue un singolo ciclo di polling on-demand (utile per test)."""
     res = await imap_poller.poll_once(db)
     return res
+
+
+@api.post("/email/poller/backfill-diario")
+async def imap_backfill_diario(user=Depends(require_user("admin"))):
+    """Crea le voci di diario mancanti per le email già ricevute.
+
+    Itera su tutte le ``email_inbox`` con ``anagrafica_id`` valorizzato e
+    inserisce una voce di tipo ``email_in`` in ``db.diario`` se non esiste già.
+    Idempotente.
+    """
+    from shared import log_diario_cliente
+    cursor = db.email_inbox.find(
+        {"anagrafica_id": {"$ne": None}},
+        {"_id": 0, "id": 1, "anagrafica_id": 1, "from_address": 1,
+         "from_name": 1, "subject": 1, "body_text": 1, "date": 1},
+    )
+    creati = 0
+    saltati = 0
+    async for em in cursor:
+        titolo = f"Email ricevuta da {em.get('from_name') or em.get('from_address')}: {em.get('subject') or '(no subject)'}"[:200]
+        # idempotenza: salta se già presente una voce con stesso titolo+anag
+        already = await db.diario.find_one(
+            {"anagrafica_id": em["anagrafica_id"], "titolo": titolo}, {"_id": 0, "id": 1},
+        )
+        if already:
+            saltati += 1
+            continue
+        await log_diario_cliente(
+            em["anagrafica_id"], "email", titolo,
+            (em.get("body_text") or "")[:2000], autore=None,
+        )
+        creati += 1
+    return {"ok": True, "creati": creati, "saltati": saltati}
 
 
 # ============================================================

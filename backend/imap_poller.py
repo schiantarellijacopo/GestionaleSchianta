@@ -101,6 +101,55 @@ def _extract_body(msg) -> tuple[str, str]:
     return text.strip(), html.strip()
 
 
+def _extract_attachments(msg, *, uid: int) -> list[dict]:
+    """Estrae gli allegati dal messaggio MIME e li salva nello storage.
+
+    Restituisce lista di dict ``{filename, content_type, size, storage_path, url}``.
+    Storage path: ``email/<uid>/<index>_<filename_sanitized>``.
+    """
+    import re as _re
+    import storage as obj_storage
+    out: list[dict] = []
+    if not msg.is_multipart():
+        return out
+    idx = 0
+    for part in msg.walk():
+        disp = (part.get("Content-Disposition") or "").lower()
+        filename = part.get_filename()
+        if not (("attachment" in disp or "inline" in disp) and filename):
+            continue
+        try:
+            from email.header import decode_header as _dh
+            decoded = _dh(filename)
+            filename = "".join(
+                (p.decode(enc or "utf-8", errors="replace") if isinstance(p, bytes) else p)
+                for p, enc in decoded
+            )
+        except Exception:
+            pass
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        ctype = part.get_content_type() or "application/octet-stream"
+        # sanitize filename
+        safe = _re.sub(r"[^\w.\- ]+", "_", filename)[:120].strip() or f"file_{idx}"
+        path = f"email/{uid}/{idx}_{safe}"
+        try:
+            obj_storage.put_object(path, payload, ctype)
+        except Exception:
+            logger.exception("Errore upload allegato %s", filename)
+            continue
+        out.append({
+            "filename": filename,
+            "content_type": ctype,
+            "size": len(payload),
+            "storage_path": path,
+            "url": f"/api/storage/{path}",
+        })
+        idx += 1
+    return out
+
+
 def _parse_date_iso(raw: Optional[str]) -> str:
     if not raw:
         return _now_iso()
@@ -218,6 +267,9 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                 if len(body_html) > 80000:
                     body_html = body_html[:80000]
 
+                # Estrae e salva allegati nello storage
+                attachments = _extract_attachments(msg, uid=uid)
+
                 # Idempotenza per Message-Id
                 if msg_id:
                     existing_by_mid = await db.email_inbox.find_one(
@@ -260,10 +312,8 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                     body_text=body_text or None,
                     body_html=body_html or None,
                     date=date_iso,
-                    has_attachments=any(
-                        ("attachment" in (p.get("Content-Disposition") or "").lower())
-                        for p in (msg.walk() if msg.is_multipart() else [])
-                    ),
+                    has_attachments=bool(attachments),
+                    attachments=attachments,
                     categoria=categoria,
                     smistato_a=smistato_a,
                     anagrafica_id=anagrafica_id,
@@ -272,16 +322,19 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                 await db.email_inbox.insert_one(doc)
                 nuovi += 1
 
-                # Se mittente conosciuto → log diario cliente
+                # Se mittente conosciuto → log diario cliente (usa collection `db.diario`)
                 if anagrafica_id:
-                    diary = DiarioCliente(
-                        anagrafica_id=anagrafica_id,
-                        tipo="email_in",
-                        titolo=f"Email da {from_name or from_addr}: {subject or '(no subject)'}"[:200],
-                        contenuto=(body_text or "")[:2000],
-                        email_inbox_id=doc["id"],
-                    ).model_dump()
-                    await db.diario_cliente.insert_one(diary)
+                    try:
+                        from shared import log_diario_cliente
+                        await log_diario_cliente(
+                            anagrafica_id,
+                            "email",
+                            f"Email ricevuta da {from_name or from_addr}: {subject or '(no subject)'}"[:200],
+                            (body_text or "")[:2000],
+                            autore=None,  # System
+                        )
+                    except Exception:
+                        logger.exception("Errore log diario cliente per email %s", uid)
             except Exception:
                 logger.exception("Errore processing email UID=%s", uid_bytes)
                 errori += 1

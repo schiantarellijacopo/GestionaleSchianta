@@ -186,7 +186,7 @@ async def anagrafiche_stats(user: dict = Depends(current_user)):
         if ids:
             agg = await db.polizze.aggregate([
                 {"$match": {"contraente_id": {"$in": ids}, "stato": {"$in": ["attiva", "in_emissione"]}}},
-                {"$group": {"_id": None, "tot": {"$sum": "$premio_totale"}}},
+                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"}}},
             ]).to_list(1)
             premio = float(agg[0]["tot"]) if agg else 0.0
         out[k] = {"n": len(ids), "premio_totale": round(premio, 2)}

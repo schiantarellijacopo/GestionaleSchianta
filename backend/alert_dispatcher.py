@@ -198,14 +198,13 @@ async def send_inapp(rule: dict, dest: dict, ctx: dict) -> dict:
     if anag_id:
         # cliente: nessun utente CRM → log solo nel diario cliente
         try:
-            from db_models import DiarioCliente
-            diary = DiarioCliente(
-                anagrafica_id=anag_id,
-                tipo="nota",
-                titolo=f"[Alert in-app] {titolo}"[:200],
-                contenuto=messaggio[:2000],
-            ).model_dump()
-            await db.diario_cliente.insert_one(diary)
+            from shared import log_diario_cliente
+            await log_diario_cliente(
+                anag_id, "nota",
+                f"[Alert in-app] {titolo}"[:200],
+                messaggio[:2000],
+                autore=None,
+            )
             return {"status": "ok"}
         except Exception:
             logger.exception("Errore log diario_cliente da alert in-app")
