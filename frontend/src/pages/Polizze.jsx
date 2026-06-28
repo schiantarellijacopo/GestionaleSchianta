@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import KpiBar from "@/components/KpiBar";
 
 const PRESETS = [
     { key: "tutti", label: "Tutte" },
@@ -138,6 +139,8 @@ export default function Polizze() {
                     </Dialog>
                 )}
             />
+
+            <KpiBar sezione="polizze" />
 
             {/* Preset rapidi */}
             <div className="flex flex-wrap gap-2 mb-3">

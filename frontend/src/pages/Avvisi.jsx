@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { api, API_BASE, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
+import KpiBar from "@/components/KpiBar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -197,6 +198,8 @@ export default function Avvisi() {
                     </div>
                 </Card>
             )}
+
+            <KpiBar sezione="avvisi" />
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <KpiCard icon={<FileText size={16} />} label="Polizze in scadenza" value={totali.polizze} accent="sky" />

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import KpiBarSection from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,6 +182,8 @@ export default function Titoli({ storicoMode = false } = {}) {
                     : "Sospesi · in scadenza · coperti non pagati · esportazioni e stampa"
                 }
             />
+
+            <KpiBarSection sezione="titoli" />
 
             {/* Preset rapidi */}
             <div className="flex flex-wrap gap-2 mb-3">

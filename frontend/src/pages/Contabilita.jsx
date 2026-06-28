@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
+import KpiBar from "@/components/KpiBar";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,8 @@ export default function Contabilita() {
                     </div>
                 }
             />
+
+            <KpiBar sezione="prima_nota" />
 
             <Tabs defaultValue="brogliaccio">
                 <TabsList className="bg-slate-100">

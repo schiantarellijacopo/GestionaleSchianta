@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
+import KpiBar from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,8 @@ export default function Sinistri() {
                     </Dialog>
                 )}
             />
+
+            <KpiBar sezione="sinistri" />
 
             <div className="flex items-center gap-3 mb-4">
                 <Select value={stato} onValueChange={setStato}>
