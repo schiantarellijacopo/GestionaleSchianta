@@ -783,6 +783,13 @@ class AziendaConfig(BaseDoc):
     smtp_password: Optional[str] = None
     smtp_from: Optional[str] = None      # es. "Assicura <noreply@assicura.it>"
     smtp_use_tls: bool = True
+    # IMAP per lettura cassetta principale (smistamento automatico per alias)
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = 993
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_use_ssl: bool = True
+    imap_folder: str = "INBOX"
     # Twilio per SMS + WhatsApp Business (libreria comunicazioni unica)
     twilio_account_sid: Optional[str] = None
     twilio_auth_token: Optional[str] = None

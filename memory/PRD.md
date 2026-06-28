@@ -8,46 +8,53 @@ CRM full-stack su misura per agenzie assicurative italiane: gestione anagrafiche
 - Backend: FastAPI + Motor (Async MongoDB) + Pydantic
 - LLM: Gemini 3 Flash via Emergent LLM Key (OCR polizze)
 - Storage: object_storage interno (firma, allegati, PDF)
-- Comunicazioni: SMTP (email), Twilio (SMS + WhatsApp Business)
+- Comunicazioni: SMTP+IMAP (email), Twilio (SMS + WhatsApp Business)
 
-## Implementato (al 27 Feb 2026)
-### Recente sessione
-- ✅ **Lettera di Abbuono con doppia firma digitale**: auto-trigger su sconto, PDF generato con reportlab, firma operatore pescabile dal profilo collaboratore (`users.firma_digitale_url`) oppure via canvas; firma cliente sempre via canvas; PDF firmato salvato come allegato titolo.
-- ✅ **Libreria 3-tier "Tipi pagamento"**: ContoCassa (banche+contanti+assegni+direzione, con flag `nascondi_prima_nota` + `escludi_da_liquidita`) × ModalitàPagamento (bonifico/assegno/contanti/POS/RID/Bancomat) = TipoPagamento. Selettore unificato `<SelectTipoPagamento />` usato in TUTTI i dialoghi di incasso/uscita/giroconti.
-- ✅ **Configurazione Comunicazioni unica** (Librerie → tab "Comunicazioni"): SMTP + Twilio SMS + Twilio WhatsApp + pulsante "Test invio" per ogni canale.
-- ✅ **Diario personale collaboratore** (`/diario`): aggrega note libere + storico comunicazioni inviate (email/sms/whatsapp) + chat. Filtri per tipo, ricerca testo.
-- ✅ **No pagination ovunque**: Polizze/Titoli/Sinistri mostrano TUTTI gli elementi (limite backend bumpato a 50000). Default Polizze=Attive, Titoli=Tutti da incassare.
-- ✅ **Colonne tabellari**: "Contratto / Targa" SEPARATA in 2 colonne distinte in Titoli + Polizze.
-- ✅ **Sticky tables**: Header in alto + prime 3 colonne congelate a sinistra. Applicato a Titoli, Polizze, Sinistri, Anagrafiche, Estratto Conto Compagnie, Prima Nota, Avvisi.
-- ✅ **Modulo Veicolo dinamico**: tab "Veicolo" visibile per ramo=RCAUTO O prodotto contenente "RCA". Lookup automatico nel libro matricola digitando la targa (autocompila marca/modello/immatricolazione/ecc).
-- ✅ **Rimossi tab legacy** "Mapping Garanzie/Operatori ANIA" da Librerie (endpoints backend preservati per il wizard OMNIA).
+## Implementato (al 28 Feb 2026)
+### Sessione corrente
+- ✅ Lettera di Abbuono con doppia firma digitale (auto-trigger su sconto, firma operatore dal profilo, PDF firmato come allegato)
+- ✅ Libreria 3-tier "Tipi pagamento" (Conti+Modalità+Tipi) con selettore unificato in tutti i dialoghi accounting
+- ✅ Configurazione Comunicazioni unica in Librerie (Email SMTP con preset Google/Microsoft, IMAP con preset, Twilio SMS+WhatsApp, test invio per ogni canale)
+- ✅ **IMAP backend**: endpoint `/api/librerie/comunicazioni/test-imap` connette + valida + ritorna ultime 5 email per anteprima. Preset Gmail/Workspace + Office365.
+- ✅ Diario personale collaboratore (`/diario`)
+- ✅ No pagination (Polizze=Attive default, Titoli=Tutti da incassare default)
+- ✅ Colonne Contratto/Targa separate in Titoli + Polizze
+- ✅ Sticky tables (header + prime 3 colonne) su Titoli/Polizze/Sinistri/Anagrafiche/EC Compagnie/Prima Nota/Avvisi
+- ✅ Modulo Veicolo dinamico per ramo/prodotto RCAUTO + lookup targa
+- ✅ Rimosse tab legacy Mapping ANIA
 
-### Sessioni precedenti
-- OMNIA mapping wizard, Libro Matricola XLSX parser
-- Mobile/Tablet responsive sidebar drawer
-- Refactor cyclomatic complexity (ania_importer, alert_dispatcher)
-- Bug fix "Titoli in copertura" missing in Prima Nota (bulk_copertura ora genera MovimentoContabile)
+## Backlog priorità
 
-## File principali
-- `/app/backend/server.py` (~9300 righe — refactor in routes/ in corso)
-- `/app/backend/routes/librerie.py` (Tipi pagamento, Comunicazioni, Mezzi pagamento)
-- `/app/backend/pdf_lettera_abbuono.py` (PDF reportlab + embedding firme)
-- `/app/backend/db_models.py` (TipoPagamento, LetteraAbbuono, DiarioNota, flag ContoCassa)
-- `/app/frontend/src/components/DialogLetteraAbbuono.jsx`, `SignaturePad.jsx`, `SelectTipoPagamento.jsx`
-- `/app/frontend/src/pages/Diario.jsx`, `Librerie.jsx` (tab Comunicazioni + Tipi pagamento)
+### P0 — Email integrata (smistamento per alias)
+**Step 1** (alias send-as): aggiungere campo `email_alias` al profilo collaboratore. Quando l'operatore invia email dal programma, header `From:` = alias del collaboratore loggato + reply-to = stesso alias. SMTP rimane uno solo (assicurazioni@…).
 
-## Backlog (P1/P2)
+**Step 2** (IMAP smistamento automatico):
+- Job APScheduler ogni 5 min legge la cassetta principale IMAP
+- Per ogni nuova email controlla `To:` + `Cc:`:
+  - se contiene un alias di un user → categoria=`personale`, `smistato_a=[user_id]`
+  - altrimenti → categoria=`condivisa`, visibile a tutti
+- Modello `EmailInbox` (db.email_inbox) con campi: from, to[], cc[], subject, body_text, body_html, date, attachments[], smistato_a[user_id], letta_da[user_id], categoria
+- Endpoint `/api/email/inbox`, `/api/email/inbox/{id}`, `/api/email/inbox/{id}/leggi`
+- Pagina `/posta` con 2 tab (Personale / Condivisa), lista + dettaglio + risposta + allegati
+
 ### P1
-- **Email integrata IMAP** (rimandata su richiesta utente): mini-mailbox interna per leggere/inviare email del collaboratore.
-- **Filtri/sort per colonna** sui table headers (sort cliccabile su ogni colonna + filtri popover).
-- **OCR Fatture** via Gemini 3 Flash.
-- **Verifica polizza vs libretto** UI di confronto.
+- Filtri/sort per colonna su table headers
+- OCR Fatture via Gemini 3 Flash
+- "Verifica polizza vs libretto" UI di confronto
 
 ### P2
-- Configurazione Alert provider (Email/SMS/WhatsApp) — ora c'è la base in Comunicazioni
 - Redesign Piramide Soluzioni
-- Integrazioni 3rd party (Google Calendar, M365)
-- Refactor server.py in moduli routes/
+- OAuth Google Calendar + M365
+- Refactor server.py (9300 righe) in moduli routes/
+
+## File principali
+- `/app/backend/server.py` (~9400 righe)
+- `/app/backend/routes/librerie.py` (Comunicazioni SMTP+IMAP+Twilio, Tipi pagamento, Mezzi)
+- `/app/backend/pdf_lettera_abbuono.py`
+- `/app/backend/db_models.py` (TipoPagamento, LetteraAbbuono, DiarioNota, AziendaConfig esteso con IMAP)
+- `/app/frontend/src/pages/Librerie.jsx` (sezione Comunicazioni con preset Google/Microsoft per SMTP **e** IMAP)
+- `/app/frontend/src/pages/Diario.jsx`
+- `/app/frontend/src/components/DialogLetteraAbbuono.jsx`, `SignaturePad.jsx`, `SelectTipoPagamento.jsx`
 
 ## Credenziali test
 Vedi `/app/memory/test_credentials.md`

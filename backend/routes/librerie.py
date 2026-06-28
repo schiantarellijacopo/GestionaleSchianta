@@ -277,6 +277,13 @@ async def delete_mezzo_pagamento(mid: str, user: dict = Depends(require_user("ad
 # tab "Configurazione comunicazioni" in Librerie. Mantiene piena compatibilità
 # con il flusso esistente che legge da `azienda_config`.
 
+_COMUNICAZIONI_FIELDS = [
+    "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_use_tls",
+    "imap_host", "imap_port", "imap_user", "imap_password", "imap_use_ssl", "imap_folder",
+    "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
+]
+
+
 class ComunicazioniBody(BaseModel):
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = 587
@@ -284,16 +291,16 @@ class ComunicazioniBody(BaseModel):
     smtp_password: Optional[str] = None
     smtp_from: Optional[str] = None
     smtp_use_tls: bool = True
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = 993
+    imap_user: Optional[str] = None
+    imap_password: Optional[str] = None
+    imap_use_ssl: bool = True
+    imap_folder: str = "INBOX"
     twilio_account_sid: Optional[str] = None
     twilio_auth_token: Optional[str] = None
     twilio_sms_from: Optional[str] = None
     twilio_whatsapp_from: Optional[str] = None
-
-
-_COMUNICAZIONI_FIELDS = [
-    "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_use_tls",
-    "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
-]
 
 
 @router.get("/librerie/comunicazioni")
@@ -305,6 +312,11 @@ async def get_comunicazioni(user: dict = Depends(require_user("admin", "collabor
         out["smtp_password"] = "••••••••"
     else:
         out["smtp_password_set"] = False
+    if out.get("imap_password"):
+        out["imap_password_set"] = True
+        out["imap_password"] = "••••••••"
+    else:
+        out["imap_password_set"] = False
     if out.get("twilio_auth_token"):
         out["twilio_auth_token_set"] = True
         out["twilio_auth_token"] = "••••••••"
@@ -320,6 +332,8 @@ async def update_comunicazioni(body: ComunicazioniBody,
     upd: dict = {k: getattr(body, k) for k in _COMUNICAZIONI_FIELDS}
     if upd.get("smtp_password") in (None, "", "••••••••"):
         upd.pop("smtp_password", None)
+    if upd.get("imap_password") in (None, "", "••••••••"):
+        upd.pop("imap_password", None)
     if upd.get("twilio_auth_token") in (None, "", "••••••••"):
         upd.pop("twilio_auth_token", None)
     upd["updated_at"] = _now_iso()
@@ -396,6 +410,75 @@ async def test_comunicazioni(body: dict,
         return {"ok": True, "canale": canale, "destinatario": dest}
 
     raise HTTPException(400, "Canale non valido: email|sms|whatsapp")
+
+
+@router.post("/librerie/comunicazioni/test-imap")
+async def test_imap(user: dict = Depends(require_user("admin"))) -> dict:
+    """Verifica la connessione IMAP corrente:
+    - login con credenziali salvate
+    - apertura cartella INBOX
+    - conta messaggi totali + ultimi 5 (subject + From)
+    """
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    host = az.get("imap_host")
+    port = int(az.get("imap_port") or 993)
+    user_ = az.get("imap_user")
+    pwd = az.get("imap_password")
+    folder = az.get("imap_folder") or "INBOX"
+    if not (host and user_ and pwd):
+        raise HTTPException(400, "IMAP non configurato (host/user/password mancanti)")
+    import imaplib
+    import email as _emaillib
+    from email.header import decode_header
+    try:
+        if az.get("imap_use_ssl", True):
+            M = imaplib.IMAP4_SSL(host, port, timeout=20)
+        else:
+            M = imaplib.IMAP4(host, port, timeout=20)
+        M.login(user_, pwd)
+        typ, data = M.select(folder, readonly=True)
+        if typ != "OK":
+            M.logout()
+            raise HTTPException(400, f"Impossibile aprire cartella '{folder}'")
+        totale = int(data[0]) if data and data[0] else 0
+        # Ultime 5 email
+        typ, data = M.search(None, "ALL")
+        ids = data[0].split() if data and data[0] else []
+        last_ids = ids[-5:][::-1]
+        sample = []
+        for mid in last_ids:
+            try:
+                typ, msg_data = M.fetch(mid, "(RFC822.HEADER)")
+                raw = msg_data[0][1] if msg_data and msg_data[0] else b""
+                msg = _emaillib.message_from_bytes(raw)
+                def _dec(h):
+                    if not h:
+                        return ""
+                    parts = decode_header(h)
+                    return "".join(
+                        (p.decode(enc or "utf-8", errors="replace") if isinstance(p, bytes) else p)
+                        for p, enc in parts
+                    )
+                sample.append({
+                    "subject": _dec(msg.get("Subject"))[:120],
+                    "from": _dec(msg.get("From"))[:120],
+                    "date": msg.get("Date") or "",
+                    "to": _dec(msg.get("To"))[:120],
+                })
+            except Exception:
+                continue
+        M.close()
+        M.logout()
+        return {
+            "ok": True,
+            "host": host, "user": user_, "folder": folder,
+            "messaggi_totali": totale,
+            "ultimi": sample,
+        }
+    except imaplib.IMAP4.error as e:
+        raise HTTPException(401, f"Login IMAP fallito: {e}")
+    except Exception as e:
+        raise HTTPException(503, f"Errore connessione IMAP: {e}")
 
 
 async def _seed_mezzi_pagamento() -> None:

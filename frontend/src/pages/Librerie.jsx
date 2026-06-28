@@ -1700,6 +1700,190 @@ function EmailSection({ f, set, onSet }) {
 }
 
 
+const IMAP_PRESETS = {
+    google: { imap_host: "imap.gmail.com", imap_port: 993, imap_use_ssl: true },
+    microsoft: { imap_host: "outlook.office365.com", imap_port: 993, imap_use_ssl: true },
+    imap: {},
+};
+
+function ImapSection({ f, set, onSet }) {
+    const [provider, setProvider] = useState(_detectEmailProvider(f.imap_host || f.smtp_host));
+    const [testing, setTesting] = useState(false);
+    const [risultato, setRisultato] = useState(null);
+    const attivo = !!(f.imap_host && f.imap_user && (f.imap_password_set || f.imap_password));
+
+    const cambiaProvider = (p) => {
+        setProvider(p);
+        const preset = IMAP_PRESETS[p] || {};
+        onSet((prev) => ({ ...prev, ...preset }));
+    };
+
+    const copiaSMTP = () => {
+        // shortcut: usa email/password SMTP anche per IMAP (lo stesso account su Gmail/M365)
+        onSet((prev) => ({
+            ...prev,
+            imap_user: prev.smtp_user || prev.imap_user,
+            imap_password: prev.smtp_password === "••••••••" ? prev.imap_password : prev.smtp_password,
+        }));
+        toast.info("Account SMTP copiato in IMAP. Salva e poi testa.");
+    };
+
+    const testConnessione = async () => {
+        setTesting(true); setRisultato(null);
+        try {
+            // salva prima eventuali modifiche pendenti
+            const payload = { ...f };
+            if (payload.smtp_password === "••••••••") delete payload.smtp_password;
+            if (payload.imap_password === "••••••••") delete payload.imap_password;
+            if (payload.twilio_auth_token === "••••••••") delete payload.twilio_auth_token;
+            await api.put("/librerie/comunicazioni", payload);
+            const r = await api.post("/librerie/comunicazioni/test-imap");
+            setRisultato(r.data);
+            toast.success(`IMAP OK: ${r.data.messaggi_totali} messaggi totali nella cartella ${r.data.folder}`);
+        } catch (e) {
+            const msg = e.response?.data?.detail || "Errore connessione IMAP";
+            setRisultato({ error: msg });
+            toast.error(msg);
+        }
+        setTesting(false);
+    };
+
+    return (
+        <section data-testid="lib-com-imap" className="border border-slate-200 rounded-lg p-4 bg-white">
+            <div className="flex items-start gap-3 mb-3">
+                <div className="bg-violet-100 text-violet-700 p-2 rounded-md mt-0.5">
+                    <Mail size={18} />
+                </div>
+                <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-base font-semibold text-slate-800">Posta in arrivo — IMAP</h4>
+                        {attivo && (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Attivo
+                            </span>
+                        )}
+                        {risultato?.ok && (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                                ✓ Connesso ({risultato.messaggi_totali} msg)
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Legge la cassetta condivisa <strong>assicurazioni@…</strong> e <strong>smista automaticamente</strong> ogni email in base all'alias destinatario: la posta inviata a un alias personale (es. <em>alessia.balzarolo@…</em>) sarà visibile solo a quel collaboratore.
+                    </p>
+                </div>
+            </div>
+
+            <div className="mb-4">
+                <Label className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Provider</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-1.5">
+                    {[
+                        { v: "google", l: "Google (Gmail / Workspace)" },
+                        { v: "microsoft", l: "Microsoft (Outlook / Office 365)" },
+                        { v: "imap", l: "IMAP personalizzato" },
+                    ].map((p) => (
+                        <button
+                            key={p.v}
+                            type="button"
+                            onClick={() => cambiaProvider(p.v)}
+                            className={`px-3 py-2.5 text-sm rounded-md border transition-all ${
+                                provider === p.v
+                                    ? "border-violet-500 ring-2 ring-violet-200 bg-violet-50 text-violet-900 font-medium"
+                                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                            data-testid={`com-imap-provider-${p.v}`}
+                        >
+                            {p.l}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <Label>Indirizzo email (cassetta principale) <span className="text-rose-500">*</span></Label>
+                    <Input placeholder="assicurazioni@schiantarelli.it"
+                        value={f.imap_user || ""}
+                        onChange={(e) => set("imap_user", e.target.value)}
+                        data-testid="com-imap-user" />
+                </div>
+                <div>
+                    <Label>Password app <span className="text-rose-500">*</span></Label>
+                    <Input type="password"
+                        placeholder={f.imap_password_set ? "•••• salvata" : "App Password"}
+                        value={f.imap_password || ""}
+                        onChange={(e) => set("imap_password", e.target.value)}
+                        data-testid="com-imap-pass" />
+                </div>
+                <div>
+                    <Label>Cartella</Label>
+                    <Input placeholder="INBOX" value={f.imap_folder || "INBOX"}
+                        onChange={(e) => set("imap_folder", e.target.value || "INBOX")}
+                        data-testid="com-imap-folder" />
+                </div>
+                <div className="flex items-end">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox"
+                            checked={f.imap_use_ssl !== false}
+                            onChange={(e) => set("imap_use_ssl", e.target.checked)}
+                            data-testid="com-imap-ssl" />
+                        Usa SSL (porta 993, consigliato)
+                    </label>
+                </div>
+                {provider === "imap" && (
+                    <>
+                        <div>
+                            <Label>Server IMAP</Label>
+                            <Input placeholder="imap.example.com"
+                                value={f.imap_host || ""}
+                                onChange={(e) => set("imap_host", e.target.value)}
+                                data-testid="com-imap-host" />
+                        </div>
+                        <div>
+                            <Label>Porta</Label>
+                            <Input type="number" placeholder="993"
+                                value={f.imap_port ?? ""}
+                                onChange={(e) => set("imap_port", parseInt(e.target.value, 10) || null)}
+                                data-testid="com-imap-port" />
+                        </div>
+                    </>
+                )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                <Button onClick={testConnessione} disabled={testing}
+                    className="bg-violet-700 hover:bg-violet-800"
+                    data-testid="com-imap-test">
+                    {testing ? "Connessione…" : "🔌 Test connessione IMAP"}
+                </Button>
+                <Button onClick={copiaSMTP} variant="outline" size="sm" data-testid="com-imap-copia-smtp">
+                    Usa stesso account SMTP
+                </Button>
+            </div>
+
+            {risultato?.error && (
+                <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-900">
+                    <strong>Errore:</strong> {risultato.error}
+                </div>
+            )}
+            {risultato?.ok && risultato.ultimi?.length > 0 && (
+                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded text-xs">
+                    <div className="font-semibold text-slate-700 mb-2">Anteprima ultime {risultato.ultimi.length} email</div>
+                    <ul className="space-y-1.5">
+                        {risultato.ultimi.map((m, i) => (
+                            <li key={i} className="text-slate-700">
+                                <div className="font-medium truncate">{m.subject || "(senza oggetto)"}</div>
+                                <div className="text-[10px] text-slate-500">Da: {m.from} · A: {m.to} · {m.date}</div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </section>
+    );
+}
+
+
 function ComunicazioniSezione() {
     const [f, setF] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1768,6 +1952,9 @@ function ComunicazioniSezione() {
 
             {/* EMAIL — Provider con preset (Google / Microsoft / SMTP personalizzato) */}
             <EmailSection f={f} set={set} onSet={setF} />
+
+            {/* IMAP — Ricezione email + smistamento per alias */}
+            <ImapSection f={f} set={set} onSet={setF} />
 
             {/* TWILIO SMS + WHATSAPP */}
             <section data-testid="lib-com-twilio">
