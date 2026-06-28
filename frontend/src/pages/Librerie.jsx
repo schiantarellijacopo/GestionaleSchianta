@@ -1783,7 +1783,7 @@ function ImapSection({ f, set, onSet }) {
                             </span>
                         )}
                         {/* CTA: attiva subito IMAP usando stesso account SMTP */}
-                        {f.smtp_user && (f.smtp_user === f.imap_user || !f.imap_user) && !attivo && (
+                        {f.smtp_user && f.smtp_user !== f.imap_user && (
                             <Button
                                 type="button"
                                 size="sm"

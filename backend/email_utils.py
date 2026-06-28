@@ -43,22 +43,11 @@ def smtp_send(
     attachments: Optional[list[tuple[str, bytes, str, str]]] = None,
 ) -> None:
     """Invia un'email SMTP usando la config in ``az``.
-
-    Args:
-        az: AziendaConfig dict
-        to_addrs: lista o stringa singola di destinatari
-        subject: oggetto email
-        text: corpo plain text
-        html: corpo HTML (opzionale)
-        reply_to: indirizzo Reply-To (opzionale)
-        attachments: lista (filename, bytes, maintype, subtype)
-
-    Raises:
-        ValueError: se SMTP non configurato.
-        RuntimeError: se l'invio fallisce (auth, rete, destinatario rifiutato).
+    ... (vedi docstring originale)
     """
+    from credentials_utils import clean_password, clean_email
     host = az.get("smtp_host")
-    user = az.get("smtp_user")
+    user = clean_email(az.get("smtp_user"))
     if not (host and user):
         raise ValueError("SMTP non configurato (host/user mancanti)")
 
@@ -86,7 +75,7 @@ def smtp_send(
         em.add_attachment(payload, maintype=maintype, subtype=subtype, filename=fn)
 
     port = int(az.get("smtp_port") or 587)
-    pwd = az.get("smtp_password") or ""
+    pwd = clean_password(az.get("smtp_password"))
     try:
         if port == 465:
             srv = smtplib.SMTP_SSL(host, port, timeout=30)

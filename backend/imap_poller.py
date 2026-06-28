@@ -121,11 +121,12 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
 
     Restituisce statistiche: ``{ok, totali, nuovi, errore}``.
     """
+    from credentials_utils import clean_password, clean_email
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     host = az.get("imap_host")
     port = int(az.get("imap_port") or 993)
-    user_ = az.get("imap_user")
-    pwd = az.get("imap_password")
+    user_ = clean_email(az.get("imap_user"))
+    pwd = clean_password(az.get("imap_password"))
     folder = az.get("imap_folder") or "INBOX"
     last_uid = int(az.get("imap_poller_last_uid") or 0)
 

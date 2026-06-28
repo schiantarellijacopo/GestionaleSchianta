@@ -338,8 +338,18 @@ async def get_comunicazioni(user: dict = Depends(require_user("admin", "collabor
 @router.put("/librerie/comunicazioni")
 async def update_comunicazioni(body: ComunicazioniBody,
                                 user: dict = Depends(require_user("admin"))) -> dict:
+    from credentials_utils import clean_password, clean_email
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     upd: dict = {k: getattr(body, k) for k in _COMUNICAZIONI_FIELDS}
+    # Normalizza email e password (rimuove NBSP, doppia concatenazione, ecc.)
+    if upd.get("smtp_user"):
+        upd["smtp_user"] = clean_email(upd["smtp_user"])
+    if upd.get("imap_user"):
+        upd["imap_user"] = clean_email(upd["imap_user"])
+    if upd.get("smtp_password") and upd["smtp_password"] != "••••••••":
+        upd["smtp_password"] = clean_password(upd["smtp_password"])
+    if upd.get("imap_password") and upd["imap_password"] != "••••••••":
+        upd["imap_password"] = clean_password(upd["imap_password"])
     if upd.get("smtp_password") in (None, "", "••••••••"):
         upd.pop("smtp_password", None)
     if upd.get("imap_password") in (None, "", "••••••••"):
@@ -422,10 +432,11 @@ async def test_imap(user: dict = Depends(require_user("admin"))) -> dict:
     - conta messaggi totali + ultimi 5 (subject + From)
     """
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    from credentials_utils import clean_password, clean_email
     host = az.get("imap_host")
     port = int(az.get("imap_port") or 993)
-    user_ = az.get("imap_user")
-    pwd = az.get("imap_password")
+    user_ = clean_email(az.get("imap_user"))
+    pwd = clean_password(az.get("imap_password"))
     folder = az.get("imap_folder") or "INBOX"
     if not (host and user_ and pwd):
         raise HTTPException(400, "IMAP non configurato (host/user/password mancanti)")
