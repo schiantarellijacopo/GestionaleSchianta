@@ -1,159 +1,69 @@
 # Programma Assicurativo — PRD
 
-## Vision
-CRM full-stack in italiano per agenzie assicurative, vendibile come prodotto
-modulare. Ogni cliente accende solo i servizi che gli servono.
+## Problem statement
+CRM full-stack per agenzie assicurative italiane (Schiantarelli & affiliate).
+Stack: React + FastAPI + MongoDB + Emergent LLM key (Claude 4.5, Gemini 3 Flash).
 
-## Stack
-- Backend: FastAPI + MongoDB (Motor async) + APScheduler
-- Frontend: React + Shadcn/UI + Tailwind
-- PDF: ReportLab (con logo agenzia incluso)
-- LLM/OCR: Gemini 3 Flash (via Emergent LLM Key)
-- Comunicazioni: SMTP/IMAP, Twilio, wa.me, **Spoki** (BSP italiano)
+## Architettura backend modulare
+`/app/backend/`
+- `server.py` (~10k righe — refactor P3)
+- `routes/`:
+  - `anagrafiche.py` · `permessi.py` · `librerie.py` · `kpi.py` · `alert.py`
+  - `insights.py` (AI Assistente + Statistiche + ISA)
+  - `cervello.py` (P&L / costi annuali)
+  - `marketing_pro.py` (Voucher · Newsletter · Liste Lead · Import Excel)
+  - `commerciale.py` (Trattative · Ritenute collab · Ritenute Compagnia · Fatture Agenzia Partner)
+  - `agenzie.py` (Libreria agenzia principale + partner)
+  - `setup_scambio.py` (Setup iniziale + Scambio dati tra agenzie)
+  - `documenti_inbox.py` (OCR universale via Gemini + crop avatar)
+  - `ocr.py` (OCR libretto specifico)
 
-## Personas
-1. Admin agente — vede tutto, gestisce librerie
-2. Collaboratore — gestisce clienti propri
-3. Dipendente — opera senza eliminazioni
-4. Cliente — vede solo i propri dati
+## Modelli chiave aggiornati
+- `Compagnia`: `tipo_mandato` (diretto|collaborazione) + `agenzia_partner_id` (→ db.agenzie)
+- `Agenzia`: tipo (principale|partner) + `perc_ritenuta_acconto`
+- `RitenutaCompagnia`: importo positivo che AUMENTA il dare verso compagnia (solo mandato diretto)
+- `FatturaAgenziaPartner`: `compagnie_ids[]` (multi) + importo lordo + ritenuta auto da agenzia + netto
+- `DocumentiInbox`: tipo_documento auto-classificato + foto_volto_bbox per avatar
 
-## Moduli implementati
-- Anagrafiche / Mappa / Portafoglio polizze (Veicolo dinamico)
-- Titoli / Sospesi / Avvisi scadenze (con 🖨 PDF + logo)
-- Sinistri / Pipeline / Calendario / Chat / Corsi / **Diario** / **Posta**
-- Prima Nota / E/C Collaboratori / Compagnie / Rappel
-- **Gestioni Modelli** redesignato a tabs (Email/WhatsApp/SMS/PDF)
-- **Alert & Automazioni** con destinatari "altri collaboratori" checkbox
-- Notifiche in-app → diario automatico
-- **WhatsApp dispatch dual**: wa.me / Twilio / **Spoki**
-- IMAP Poller + CTA "Attiva con email SMTP" one-click
-- TopBar: avatar utente + nome (sx), logo agenzia (dx)
-- `email_utils.py` per invio SMTP robusto con `From` ben formattato
+## CHANGELOG · Feb 2026
 
-## Backlog
-### P1
-- Visibility filter Librerie (collaboratore vede solo se stesso)
-- Upload avatar in UtenteForm
-- Logo + ragione sociale in TUTTI gli altri PDF (lettera abbuono, brogliaccio, diagnosi, prima nota)
-- Dashboard componibile per operatore (widget drag&drop)
-- Google Contacts / MS 365 / 3CX (richiedono credenziali)
+### 29/06/2026 — Sessione massive features
+1. **FIX P0 Trattative**: rimosso router duplicato in insights.py, ora `/api/trattative` CRUD via `commerciale.py` (200 OK).
+2. **FIX P0 Voucher import**: aggiunto parser Excel/CSV `/api/lead-liste/import` con matching CF/Email/Tel + dispatch WhatsApp/Email simulato.
+3. **Tipo mandato compagnia**: aggiunto `tipo_mandato` (diretto/collaborazione) + libreria `Agenzie` separata. Logica saldo cassa differenziata: mandato diretto = premi-provv, collaborazione = premi puri.
+4. **Ritenute Compagnia**: nuovo modulo gemello negativo del Rappel. Va in estratto conto + crea movimento USCITA in Prima Nota al versamento. Solo mandato diretto. Dialog data registrazione.
+5. **Fatture Agenzia Partner**: dialog rinnovato 1) agenzia 2) compagnie multi-select 3) importo lordo + ritenuta % auto da agenzia + importo definitivo netto. Endpoint `/api/partite-agenzia-partner` per partite aperte.
+6. **Ritenute Hub**: pagina unica con 3 tab (Compagnia · Collaboratori · Agenzia Partner) → `/ritenute`.
+7. **Ritenute Collaboratori auto-genera**: quando si paga collaboratore con `perc_ritenuta`, il record di ritenuta viene auto-creato in `db.ritenute` (causale 1040).
+8. **Setup iniziale wizard**: `/setup-iniziale` admin-only. Saldi banche / compagnie (dare-avere) / sospesi manuali / voci pregresse facoltative. Idempotente, con reset.
+9. **Scambio dati agenzie**: `/scambio-dati` super-admin. Preview + esegui import anagrafiche/polizze/titoli/sinistri/allegati di un operatore da agenzia partner. Titoli importati = stato "da_pagare arretrato" senza metodo pagamento.
+10. **Indice ISA stimato**: `/api/statistiche/isa` calcola punteggio 1-10 da redditività/densità/diversificazione/continuità/crescita. Visualizzato in Statistiche con barra colorata e indicatori.
+11. **Documenti Inbox · OCR**: `/documenti-inbox` upload PDF/foto → Gemini 3 Flash classifica (CI/patente/CF/libretto/polizza/fattura) + estrae dati + bbox foto volto. Save: archivia allegato, applica campi su anagrafica/polizza, croppa foto e setta come avatar.
+12. **Avvisi scaduti**: aggiunti preset `polizza_scaduta_giorno`/5g/10g/14g/15g in `alert_presets.py`.
 
-### P2
-- Refactoring `server.py` (>9700 righe)
-- Dashboard "Stato integrazioni" per vendita modulare
-
-## Changelog (29/06/2026 — Marketing avanzato + Sidebar Search)
-- **Sezione Newsletter** (`/newsletter`): CRUD campagne marketing massive (email/SMS/WhatsApp). Targeting per tag, tipo cliente (privati/aziende), filtro consenso commerciale obbligatorio. Conteggio destinatari live + invio simulato che logga su Diario di ogni cliente
-- **Sezione Voucher Compagnia** (`/voucher`): gestione codici sconto forniti dalle compagnie. CRUD singolo + import massivo (paste lista codici). KPI: Disponibili / Assegnati (non usati) / Usati. Assegnazione manuale a cliente specifico. Filtri per stato cliccabili
-- **Backend `routes/marketing_pro.py`**: 11 endpoint nuovi (`/voucher` CRUD+assegna+bulk-import, `/newsletter` CRUD+invia, `/voucher/bulk-import`). Newsletter conta dinamicamente destinatari rispettando consenso_commerciale
-- **Barra di ricerca nella Sidebar**: input testuale sopra il menu che filtra in tempo reale le voci di navigazione. Ottimo per accesso rapido in app con 30+ sezioni
-- **Sidebar**: 2 nuove voci (Newsletter / Voucher Compagnia) con icone Mail/Ticket
-
-## Changelog (29/06/2026 — visibilità collaboratore + garanzie estese)
-- **Rilevamento garanzie speciali esteso**: `_detect_garanzie_speciali()` ora rileva 5 flag su ogni polizza: `catastrofale`, `check_up`, `inabilita_malattia`, `tutela_legale`, `infortuni_conducente`. Bulk update su 460 polizze totali. Endpoint compat retro-compatibile
-- **Badge multipli nella lista Polizze**: 🌊 CAT (catastrofale) · 🏥 CHK (check-up) · 🤒 INA (inabilità malattia) · ⚖️ TL (tutela legale) · 🚗 IC (infortuni conducente). Filtri backend: `?check_up=true` / `?inabilita_malattia=true` / `?tutela_legale=true` / `?infortuni_conducente=true`
-- **Visibility filter per collaboratore**: `visibility_filter()` ora restringe le query del ruolo `collaboratore` ai propri record (`collaboratore_id == user.id`) con `$or` per accettare anche record legacy senza il campo. Si applica a `polizze`, `sinistri`, `anagrafiche` (Anagrafica esteso con campo `collaboratore_id`)
-- **Auto-set collaboratore_id**: alla creazione di una nuova Anagrafica, viene impostato automaticamente al `user.id` corrente se non specificato → ogni anagrafica ha sempre un "owner" responsabile
-- **Filtro "Solo i miei clienti"** nell'Assistente Personale: toggle in alto a destra. Param `solo_miei=true` su `/api/cervello/suggerimenti` restringe la scansione alle polizze/sinistri del collaboratore loggato. Testato: admin senza polizze proprie ottiene 2 suggerimenti (vs 19 globali)
-
-## Changelog (29/06/2026 — nuove regole Assistente Personale)
-- **+4 regole automatiche** in `/api/cervello/suggerimenti`:
-  - **Cliente fedele ≥10 anni**: rileva anagrafiche con `created_at` ≥10 anni fa con polizza attiva → suggerisce sconto fedeltà / upgrade premium
-  - **Polizza ferma 5+ anni** (non-AUTO): polizze CASA/INFORTUNI/VITA/AZIENDA non aggiornate da oltre 5 anni → check-up urgente garanzie/massimali
-  - **Cliente alto rischio**: ≥3 sinistri nell'ultimo anno → rivedere franchigie/massimali o segmentare il rischio
-  - **Aumento premio AUTO >50€**: confronta la polizza corrente con la precedente (stesso contraente+targa) → avvisare cliente PRIMA del rinnovo per evitare disdetta
-- Frontend AssistentePersonale: aggiornato `TIPO_LABEL` per mostrare i nuovi badge ("Cliente fedele", "Polizza ferma 5+ anni", "Alto rischio", "Aumento premio")
-- Testato live: 19 suggerimenti generati, di cui 1 alto rischio (4 sinistri) + 1 aumento premio (+300€)
-
-## Changelog (29/06/2026 — Claude AI + Trattative + Catastrofale)
-- **Assistente Personale AI con Claude Sonnet 4.6**: nuovo endpoint `POST /api/assistente-personale/genera-consiglio` che usa Emergent LLM key per generare consigli narrativi personalizzati. Prende il profilo cliente (mesi cliente, polizze, sinistri, marketing, polizze ferme) e produce 3-5 frasi in italiano con azione consigliata, tempistica e canale. Risposta loggata automaticamente nel Diario cliente
-- **UI AI Panel**: pannello "Consiglio AI personalizzato" nella pagina Assistente Personale con search cliente (typeahead `/anagrafiche?q=`), contesto extra opzionale, pulsante "Genera consiglio AI". Output formattato con bordo violetto laterale
-- **Tag Catastrofale finalizzato**: bulk update eseguito su 460 polizze. Filtro `?catastrofale=true` su `/api/polizze`. Badge "🌊 CAT" visualizzato nella colonna Ramo della lista polizze
-- **Sezione Trattative** `/trattative`: nuova pagina + CRUD `/api/trattative` per gestire proposte commerciali e disdette clienti da altre compagnie. Campi: titolo, ramo, compagnia provenienza, scadenza concorrente, premio attuale vs proposto, risparmio calcolato, stato (aperta/proposta_inviata/in_attesa/vinta/persa), flag "visibile al cliente"
-- **Sidebar**: voce "Trattative" in sezione Assicurazione (icona Briefcase)
-- **Testato Claude live**: risposta reale di 80 parole formattata con header (Profilo cliente / Azione consigliata / Tempistica)
-
-## Changelog (29/06/2026 — Il Cervello come controllo di gestione)
-- **Riorganizzato modulo AI**:
-  - 🧠 **Il Cervello** = Controllo di gestione economico-finanziario (solo admin)
-  - 🤖 **Assistente Personale** = Suggerimenti AI sui clienti (era l'ex Cervello)
-- **Backend `routes/cervello.py`** con endpoint:
-  - `GET /api/cervello/costi/{anno}` · `PUT /api/cervello/costi/{anno}` — costi annuali con ripartizione % per comparto
-  - `GET /api/cervello/analisi-pl?anno=` — P&L per comparto Auto/Persone/Aziende/Vita: polizze, premi, provvigioni reali (dai movimenti) o stimati (5%/8%), incidenza %, resa/pezzo, costi ripartiti, utile netto/pezzo
-  - `GET /api/cervello/top-clienti?limit=100` — classifica Pareto 80/20 con soglia evidenziata
-  - `GET /api/cervello/segmentazione` — clienti mono/multi-comparto + tasso di multi-comparto
-  - `POST /api/cervello/bilancio/upload?anno=` — upload CSV/JSON bilancio con classificazione automatica voci → costi
-- **Frontend `Cervello.jsx`** rinnovato con 4 tabs:
-  - 📈 Conto Economico: KPI globali (polizze/provvigioni/costi/utile) + tabella P&L per comparto con colori
-  - 🏆 Top Clienti: Pareto 80/20 evidenziato in giallo, colonne provvigioni/incidenza/cumulata
-  - 🥧 Segmentazione: tasso multi-comparto + breakdown mono_auto/persone/aziende/vita e 2/3/4 comparti
-  - 💰 Costi & Bilancio: editor voci di costo + ripartizione % validata (somma=100) + upload bilancio CSV/JSON
-- **Sidebar**: "Il Cervello" (admin) + "Assistente personale" (tutti) con icone separate (Brain/Bot)
-- **Test reali su 441 polizze**: Auto 132 polizze · Persone 301 · Aziende 6 · Vita 2. Utile netto agenzia 2026: 11.372,51 € (senza costi configurati)
-
-## Changelog (29/06/2026 — completamento sezione strumenti AI)
-- **Libreria Tipologie Sinistri**: nuova collection `tipologie_sinistri` con seed di 39 tipologie standard italiane (RC Auto/ARD/Vita/Casa/Azienda/Infortuni/Malattie/Tutela/Viaggio). Ogni tipologia ha flag `richiede_cai`, `richiede_denuncia`, `categoria`, `attivo`. Sezione "Tipologie sinistri" in Librerie con CRUD completo. Form Sinistri (Nuova + Detail) ora usa Select dropdown con badge informativo "📌 Richiede CAI / modulo denuncia"
-- **Endpoint `/auth/me/permissions`**: ritorna `effective_permissions` dell'utente loggato + `is_full_admin` (per admin senza profilo) → il frontend può ora nascondere/disabilitare pulsanti in base ai reali permessi del profilo
-- **Tag Catastrofale auto-detect**: helper `_detect_catastrofale()` rileva garanzie catastrofali (terremoto/alluvione/inondazione/sisma/sovraccarico) da campi `garanzie` + `ramo` + `prodotto` + `note`. Endpoint `POST /api/polizze/check-catastrofale-bulk` aggiorna flag su tutte le polizze. `GET /polizze/{id}/check-catastrofale` per singola
-- **Customer Insights**: `GET /api/anagrafiche/{id}/insights` ritorna: cliente_da_mesi/giorni, sinistri (totali/ultimo anno/aperti), ultima interazione marketing+qualsiasi, polizze attive/ferme oltre 12 mesi, premio totale attivo, suggerimenti automatici (upsell, richiamo, check-up sanitario)
-- **Sezione Statistiche** (`/statistiche`): KPI globali agenzia (clienti privati/aziende, nuovi 30g, polizze attive/scadute/in scadenza, premio attivo totale, sinistri aperti/ultimo anno) + Top 5 compagnie per premio + Top 5 rami per premio
-- **Sezione Il Cervello** (`/cervello`): agente AI con regole automatiche → suggerimenti per: rinnovi imminenti (≤30g), sinistri fermi da oltre 90g, upsell catastrofale CASA privati, OBBLIGO LEGGE catastrofale aziende (D.Lgs ICAT). Filtro per priorità (Alta/Media), click su card naviga al record (polizza/sinistro/cliente)
-- **Sezione Ritenute** (`/ritenute`): CRUD ritenute d'acconto collaboratori con calcolo automatico imponibile×aliquota, totali per anno/collaboratore, flag versata + data versamento, causale F24
-- **Sidebar**: aggiunte 3 voci (Statistiche, Il Cervello, Ritenute) con icone Brain/Activity/Coins. Visibili a admin+collaboratore (Ritenute solo admin)
-
-## Changelog (28/06/2026 — sera)
-- **Permessi granulari per area (P0)**: esteso `ProfiloPermessi` con `area_permissions: Dict[area, Dict[azione, bool]]` oltre ai preset `area_levels`. Aggiunte azioni granulari per area: Sinistri (read/write/delete/upload_docs/edit_cid/liquida/print), Comunicazioni (read/send_email/send_sms/send_wa/template_edit), Polizze (read/write/delete/upload_docs/export/print/transfer), Titoli (incassa), Contabilità (chiusura_giorno), Dashboard (customize), ecc. Endpoint `GET /api/permessi-aree` ora ritorna `azioni_per_area`. Endpoint profili ritornano `effective_permissions` calcolate
-- Dialog "Modifica profilo" rinnovato: matrice con preset rapido (3 radio Non gestito/Lettura/Scrittura) + colonna "Permessi specifici" con button espandibile per area che mostra checkbox per ogni azione granulare (es. "▸ Avanzati (4)" per Sinistri → Upload Docs · Edit Cid · Liquida · Print)
-- **Filtri Titoli dropdown (P1)**: `Prodotto` e `Mezzo pag.` ora sono Select con opzioni caricate da `/api/librerie/prodotti` e `useMezziPagamento`. Voci "Tutti i prodotti" / "Tutti i mezzi" per reset
-- **Avatar collaboratore nelle liste**: nuovo componente `<CollaboratoreCell />` con avatar tondo 20px + nome. Usato in Polizze, Titoli, Sinistri (colonna Collaboratore). Backend list arricchito con `collaboratore_avatar_url`. Fallback: iniziali del nome su gradiente sky→indigo
-
-## Changelog (28/06/2026 — pomeriggio)
-- **Avatar upload utenti**: aggiunto endpoint `POST /api/auth/users/{uid}/avatar` (admin oppure utente stesso, max 4 MB JPG/PNG/WEBP, salvataggio su object storage). Nuovo componente `AvatarUploader` nella tab Anagrafica del form Modifica utenti con preview, cambio e rimozione. Avatar disponibile per TopBar/Diario/Chat
-- Voce **Corsi** già presente in sidebar (`/corsi`); tab Corsi nel form utenti già funzionante per gestione attestati IVASS con upload PDF/IMG
-
-## Changelog (28/06/2026)
-- **KPI cliccabili + dropdown filtro**: ogni KPI ora porta alla lista filtrata (es. "Auto privati" → /polizze?categoria=auto_priv). Il dialog "Personalizza KPI" ha "Valore filtro" come dropdown dinamico via `/api/kpi/options`. Aggiunto filtro `categoria` su `/api/polizze` (auto_priv, auto_az, altri_priv, altri_az, vita_inv, vita_prot)
-- **Fix KPI Polizze backend**: risolto `JSONDecodeError` (`$group does not support inclusion-style expressions`). Riscritta `_stats_polizze` con classificazione Python (tipo anagrafica via tag azienda/condominio override)
-- **Sinistri Release C**: modello esteso con `numero_interno`, `tipologia_sinistro`, `garanzie_colpite`, `soggetti_coinvolti`, `anagrafiche_associate`, `note`, `liquidazione_dettaglio`, `costatazione_amichevole`. Endpoint nuovi: `GET /api/sinistri/{id}` (singolo enriched), `PUT /api/sinistri/{id}/cid`, `GET /api/stampa/sinistro/{id}`, `GET /api/stampa/sinistro/{id}/cid`. Lista estesa con filtri `q/compagnia/ramo/tipologia/dal/al`
-- **SinistroDetail page nuova** con tabs (Dati Generali · Soggetti · Anagrafiche · Note · Liquidazione · Documenti · Costatazione Amichevole RC Auto). Layout ispirato a gestionali italiani: header con riepilogo + tabs in basso
-- **Costatazione Amichevole** (CID art. 143 D.Lgs. 209/2005): form compilabile con sezione data/luogo/feriti/danni, blocchi Veicolo A/B (precompilati da polizza/contraente), 17 circostanze checkbox, PDF stampabile a colori
-- **Sinistri list redesign**: 13 colonne (Num.Int / N.Sinistro / Contratto / Data / Contraente / Compagnia / Tipologia / Danneggiato / Targa / Collaboratore / Riserva / Liquidato / Stato), totali in footer, click riga → detail
-- **Fix MappaClienti**: la mappa Leaflet non si inizializzava perché l'effect partiva prima che il div `#anag-map` fosse nel DOM. Aggiunta dipendenza su `items` + `map.invalidateSize()` post-render
-
-## Backlog
-### P0
-- **Permessi granulari per area** (richiesto via screenshot): estendere `ProfiloPermessi.area_permissions` con flag specifici per area (es. `read/write/upload_docs/delete/export/send_email` etc). Mantenere quick preset "Non gestito/Lettura/Scrittura"
+## Backlog (P1-P3)
 
 ### P1
-- Filtri Titoli: convertire `Prodotto` e `Mezzo pag.` da Input a Dropdown (rami/prodotti/mezzi_pagamento già esistenti backend)
-- Dashboard componibile per operatore (widget drag&drop) **per livello di visibilità/profilo**
-- Edit collaboratore inline sulla riga sinistro / azioni bulk
-- Visibility filter Librerie (collaboratore vede solo se stesso)
+- Documenti visibili/non al cliente (dropzone doppia)
+- Documenti pre-impostati polizze per ramo (RC Auto: libretto/polizza/condizioni; altri: polizza/condizioni/foto)
+- Libro matricola con allegati per applicazione
+- Regolazione premio (flag + calcolo Fatturato/Mercedi/Addetti × Tasso)
+- OCR bilancio nel Cervello (autofill via AI)
+- Storico avvisi: spostare primo avviso inviato dalla sezione attiva → storico
 
 ### P2
-- Refactoring `server.py` (>9700 righe)
-- Dashboard "Stato integrazioni" per vendita modulare
-- Verifica polizza vs libretto
-- Migrazione retroattiva MovimentiContabili per Titoli coperti storici
+- OCR corsi + grafico 30h IVASS per collaboratore
+- Customer Insights widget in AnagraficaDetail
+- Dashboard componibile drag&drop
+- Grafico storico provvigioni/utile in Cervello
+- Spoki/Twilio real dispatch (richiede API key utente)
 
-## Changelog (precedente)
-- IMAP Poller + CTA "Attiva con email SMTP"
-- Gestioni Modelli redesign (tabs canale + card visive)
-- PDF Avviso: logo agenzia + nome + fix placeholder `{cliente_nome}` + lookup nome prodotto (no più UUID) + colonna "Rata del" popolata correttamente
-- WhatsApp dual-provider: wame / twilio / **spoki** (API `https://api.spoki.com/api/1/messages/send`)
-- Alert: `altri_collaboratori` con checkbox multi-select utenti
-- Notifiche in-app → loggate nel Diario
-- `email_utils.py`: helper centralizzato SMTP con `From` RFC-compliant
-- Bug fix: rimosso decoratore orfano `@api.post("/email/avvisi-scadenze")` che rompeva una route
-- TopBar redesign: avatar utente + ruolo (sx), logo agenzia (dx)
-- Error handler robusto: `errMsg()` evita crash React su detail Pydantic array
-- Fix CSS globale `tbl thead th { white-space: nowrap }` + frozen max-width
-- Aggiunto `User.avatar_url`
+### P3
+- Refactor server.py >10k righe in moduli
 
-## Credenziali test
-Vedi `/app/memory/test_credentials.md`.
+## Test credentials
+Admin: `admin@assicura.it` / `Admin123!`
 
-## Provider WhatsApp
-- **wame**: link gratis, click manuale
-- **twilio**: automatico ~€0.005/msg
-- **spoki**: italiano BSP, X-Spoki-Api-Key + REST API
+## Integrazioni
+- **Emergent LLM Key** (configured): Claude 4.5 (Assistente Personale), Gemini 3 Flash (OCR libretto + Documenti Inbox)
+- **Twilio/Spoki/SMTP**: dispatch lead-liste in MOCK (logga in `db.dispatch_log`). In attesa credenziali utente.

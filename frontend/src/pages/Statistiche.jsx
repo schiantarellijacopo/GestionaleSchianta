@@ -1,6 +1,7 @@
 /**
  * Statistiche — overview aggregata: KPI globali, top 5 compagnie, top 5 rami,
- * in scadenza, nuovi clienti. Read-only, accessibile a tutti i ruoli ≥ collaboratore.
+ * Indice ISA stimato (Indici Sintetici di Affidabilità fiscale).
+ * Read-only, accessibile a tutti i ruoli ≥ collaboratore.
  */
 import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
@@ -8,13 +9,15 @@ import { Card } from "@/components/ui/card";
 import { PageHeader, Loading } from "@/components/Shared";
 import {
     TrendingUp, Users, Building, FileText, AlertTriangle, Wallet,
-    Calendar, Trophy, PieChart,
+    Calendar, Trophy, PieChart, Gauge,
 } from "lucide-react";
 
 export default function Statistiche() {
     const [s, setS] = useState(null);
+    const [isa, setIsa] = useState(null);
     useEffect(() => {
         api.get("/statistiche/overview").then((r) => setS(r.data)).catch(() => setS({}));
+        api.get("/statistiche/isa").then((r) => setIsa(r.data)).catch(() => setIsa(null));
     }, []);
     if (!s) return <Loading />;
     return (
@@ -31,6 +34,9 @@ export default function Statistiche() {
                 <KCard color="slate" icon={AlertTriangle} label="Sinistri ultimo anno" value={s.sinistri_ultimo_anno} />
                 <KCard color="emerald" icon={Wallet} label="Premio attivo totale" value={fmtEur(s.premio_attivo_totale)} mono />
             </div>
+
+            {/* INDICE ISA */}
+            {isa && <IsaPanel isa={isa} />}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <Card className="p-4">
@@ -111,3 +117,68 @@ const KCard = ({ icon: Ic, label, value, color, mono }) => (
         </div>
     </Card>
 );
+
+function IsaPanel({ isa }) {
+    const colorMap = {
+        emerald: { bg: "from-emerald-50 to-emerald-100/40", text: "text-emerald-700", border: "border-emerald-400", fill: "bg-emerald-500" },
+        sky: { bg: "from-sky-50 to-sky-100/40", text: "text-sky-700", border: "border-sky-400", fill: "bg-sky-500" },
+        amber: { bg: "from-amber-50 to-amber-100/40", text: "text-amber-700", border: "border-amber-400", fill: "bg-amber-500" },
+        orange: { bg: "from-orange-50 to-orange-100/40", text: "text-orange-700", border: "border-orange-400", fill: "bg-orange-500" },
+        rose: { bg: "from-rose-50 to-rose-100/40", text: "text-rose-700", border: "border-rose-400", fill: "bg-rose-500" },
+    };
+    const c = colorMap[isa.colore] || colorMap.sky;
+    return (
+        <Card className={`p-5 bg-gradient-to-br ${c.bg} border-l-4 ${c.border}`} data-testid="isa-panel">
+            <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                    <Gauge size={32} className={c.text} />
+                    <div>
+                        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
+                            Indice ISA · {isa.anno} (stima operativa)
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                            <span className={`text-4xl font-bold ${c.text} font-mono`}>{isa.punteggio}</span>
+                            <span className="text-slate-500">/ 10</span>
+                        </div>
+                        <div className={`text-sm font-semibold ${c.text}`}>{isa.livello}</div>
+                    </div>
+                </div>
+                <div className="text-right text-xs">
+                    <div className="text-slate-500">Ricavi {isa.anno}</div>
+                    <div className="font-mono font-bold">{fmtEur(isa.dati_calcolo?.ricavi)}</div>
+                    <div className="text-slate-500 mt-1">Utile lordo</div>
+                    <div className={`font-mono font-bold ${(isa.dati_calcolo?.utile || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {fmtEur(isa.dati_calcolo?.utile)}
+                    </div>
+                </div>
+            </div>
+
+            {/* indicatori */}
+            <div className="space-y-3">
+                {(isa.indicatori || []).map((i) => (
+                    <div key={i.nome}>
+                        <div className="flex items-baseline justify-between text-xs mb-1">
+                            <div>
+                                <span className="font-semibold text-slate-800">{i.nome}</span>
+                                <span className="text-slate-500 ml-2">{i.descrizione}</span>
+                                <span className="text-[10px] text-slate-400 ml-2">(peso {i.peso}%)</span>
+                            </div>
+                            <div>
+                                <span className="font-mono text-slate-700">{i.valore} {i.unita}</span>
+                                <span className="text-slate-400 ml-2">→ <span className={`font-bold ${c.text}`}>{i.punteggio}</span>/10</span>
+                            </div>
+                        </div>
+                        <div className="h-1.5 bg-slate-200/60 rounded overflow-hidden">
+                            <div className={`h-full ${c.fill}`}
+                                style={{ width: `${Math.min(100, (i.punteggio / 10) * 100)}%` }} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="mt-4 text-[11px] text-slate-500 italic">
+                {isa.note}
+            </div>
+        </Card>
+    );
+}

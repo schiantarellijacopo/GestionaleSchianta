@@ -148,6 +148,15 @@ class Compagnia(BaseDoc):
     # - False: dobbiamo versare il premio intero alla compagnia, le provvigioni le
     #          riceveremo separatamente → saldo = premio intero
     trattiene_provvigioni: bool = True
+    # Tipo di mandato dell'agenzia verso questa compagnia:
+    # - "diretto" (default): rapporto diretto. Saldo cassa = premi - provv (se trattiene)
+    # - "collaborazione": passiamo per un'altra agenzia (mandato indiretto).
+    #   Saldo cassa = premi (non si scalano le provvigioni, le incasseremo
+    #   dalla agenzia partner via fattura)
+    tipo_mandato: Literal["diretto", "collaborazione"] = "diretto"
+    # Se tipo_mandato="collaborazione" → id dell'agenzia partner (libreria
+    # `agenzie`) con cui collaboriamo per questa compagnia.
+    agenzia_partner_id: Optional[str] = None
 
 
 # =============== ANAGRAFICHE ===============

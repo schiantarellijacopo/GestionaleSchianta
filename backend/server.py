@@ -674,6 +674,24 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
         note=body.get("note"),
     )
     await db.pagamenti_provvigioni.insert_one(pag.model_dump())
+    # AUTO-REGISTRA la ritenuta d'acconto in /api/ritenute se > 0
+    if ritenuta > 0:
+        await db.ritenute.insert_one({
+            "id": str(uuid.uuid4()),
+            "anno": int(data_pag[:4]),
+            "collaboratore_id": cid,
+            "imponibile": round(lordo, 2),
+            "aliquota": rit_perc,
+            "importo_ritenuta": ritenuta,
+            "causale": "1040",
+            "data": data_pag,
+            "descrizione": f"Ritenuta automatica da pagamento provvigioni periodo {periodo_dal}/{periodo_al}",
+            "versata": False,
+            "pagamento_id": pag.id,
+            "movimento_id": mov.id,
+            "auto_generata": True,
+            "created_at": _now_iso(),
+        })
     # Marca voci manuali come pagate
     if voci_ids:
         await db.voci_manuali_collab.update_many(
@@ -801,7 +819,7 @@ async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[s
     rows.append(["", "", "", "NETTO DA PAGARE", "", tot["netto_da_pagare"], ""])
     pdf = pdf_report.stampa_elenco(
         f"Estratto conto collaboratore - {collab.get('name')}",
-        f"Periodo: {dal or '—'} → {al or '—'}",
+        f"Periodo: {dal or '—'} -> {al or '—'}",
         headers, rows,
         col_widths_mm=[25, 35, 60, 25, 30, 30, 22], landscape_mode=False,
         filtri_attivi={"Dal": dal, "Al": al},
@@ -852,14 +870,19 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     """Aggrega dare/avere per una compagnia su un periodo.
 
     Logica:
-      - Titoli incassati nel periodo → DARE verso compagnia = (lordo - provvigioni se trattiene)
-      - Movimenti contabili categoria 'pagamento_compagnia' verso questa compagnia → AVERE
+      - Titoli incassati nel periodo -> DARE verso compagnia = (lordo - provvigioni se trattiene)
+      - Movimenti contabili categoria 'pagamento_compagnia' verso questa compagnia -> AVERE
       - Filtro opzionale collaboratore_id (polizze del collaboratore)
     """
     comp = await db.compagnie.find_one({"id": compagnia_id}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
     trattiene = bool(comp.get("trattiene_provvigioni", True))
+    tipo_mandato = comp.get("tipo_mandato", "diretto")
+    # Mandato collaborazione: saldo = premi puri (non scaliamo le provv,
+    # verranno fatturate dalla agenzia partner). Forziamo trattiene=False.
+    if tipo_mandato == "collaborazione":
+        trattiene = False
 
     pol_flt: dict = {"compagnia_id": compagnia_id}
     if collaboratore_id:
@@ -975,6 +998,68 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         totale_rappel += imp
     totale_avere += totale_rappel
     saldo -= totale_rappel
+
+    # ----- Ritenute compagnia: AUMENTANO il dare (sono provvigioni che la
+    # compagnia ci trattiene -> dobbiamo versarle nel saldo) — solo mandato diretto
+    totale_ritenute_comp = 0.0
+    if tipo_mandato == "diretto":
+        rit_flt: dict = {"compagnia_id": compagnia_id}
+        if dal or al:
+            cond = {}
+            if dal: cond["$gte"] = dal
+            if al: cond["$lte"] = al
+            rit_flt["data"] = cond
+        ritenute_c = await db.ritenute_compagnia.find(rit_flt, {"_id": 0}).sort("data", 1).to_list(5000)
+        for r in ritenute_c:
+            imp = float(r.get("importo") or 0)
+            righe.append({
+                "data": r.get("data"),
+                "tipo": "ritenuta_compagnia",
+                "polizza": None,
+                "contraente": None,
+                "ramo": None,
+                "dare": imp,  # aumenta il dare
+                "avere": 0.0,
+                "descrizione": f"Ritenuta {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
+                "_movimento_id": r.get("id"),
+                "is_ritenuta_compagnia": True,
+                "stato_ritenuta": r.get("stato"),
+            })
+            totale_ritenute_comp += imp
+        totale_dare += totale_ritenute_comp
+        saldo += totale_ritenute_comp
+
+    # ----- Fatture agenzia partner (solo mandato collaborazione) — sono
+    # provvigioni che ci pagherà la partner: AVERE che riduce dare verso la compagnia.
+    totale_fatture_partner = 0.0
+    if tipo_mandato == "collaborazione":
+        f_flt: dict = {"compagnia_id": compagnia_id}
+        if dal or al:
+            cond = {}
+            if dal: cond["$gte"] = dal
+            if al: cond["$lte"] = al
+            f_flt["data"] = cond
+        fatture = await db.fatture_agenzia_partner.find(f_flt, {"_id": 0}).sort("data", 1).to_list(2000)
+        for f in fatture:
+            imp = float(f.get("importo") or 0)
+            label = f"Fattura partner n. {f.get('numero_fattura') or '—'} ({f.get('stato')})"
+            righe.append({
+                "data": f.get("data"),
+                "tipo": "fattura_partner",
+                "polizza": None,
+                "contraente": None,
+                "ramo": None,
+                "dare": 0.0,
+                "avere": imp,
+                "descrizione": f"{label}: {f.get('descrizione') or ''}".strip(),
+                "_movimento_id": f.get("id"),
+                "is_fattura_partner": True,
+                "stato_fattura": f.get("stato"),
+            })
+            totale_fatture_partner += imp
+        totale_avere += totale_fatture_partner
+        saldo -= totale_fatture_partner
+
     righe.sort(key=lambda r: r["data"] or "")
     return {
         "compagnia": comp,
@@ -982,9 +1067,12 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         "totale_dare": round(totale_dare, 2),
         "totale_avere": round(totale_avere, 2),
         "totale_rappel": round(totale_rappel, 2),
+        "totale_ritenute_compagnia": round(totale_ritenute_comp, 2),
+        "totale_fatture_partner": round(totale_fatture_partner, 2),
         "saldo": round(saldo, 2),
         "periodo": {"dal": dal, "al": al},
         "trattiene_provvigioni": trattiene,
+        "tipo_mandato": tipo_mandato,
     }
 
 
@@ -1390,7 +1478,7 @@ async def storna_rappel(
         raise HTTPException(404, "Rappel non trovato")
     if r.get("stato") != "incassato":
         raise HTTPException(400, "Rappel non incassato")
-    # Lock: lo storno cancella il movimento Prima Nota → se chiuso, blocca.
+    # Lock: lo storno cancella il movimento Prima Nota -> se chiuso, blocca.
     await assert_giornata_aperta(r.get("data_incasso") or r.get("data"), azione="stornare un rappel del giorno")
     if r.get("movimento_id"):
         await db.movimenti.delete_one({"id": r["movimento_id"]})
@@ -1452,7 +1540,7 @@ async def stampa_compagnia_estratto(
     rows.append(["", "", "", "", "SALDO DA VERSARE", round(data["saldo"], 2), ""])
     pdf = pdf_report.stampa_elenco(
         f"Estratto conto compagnia - {comp.get('ragione_sociale')}",
-        f"Periodo: {dal or '—'} → {al or '—'} · Trattiene provv: {'SI' if data['trattiene_provvigioni'] else 'NO'}",
+        f"Periodo: {dal or '—'} -> {al or '—'} · Trattiene provv: {'SI' if data['trattiene_provvigioni'] else 'NO'}",
         headers, rows,
         col_widths_mm=[22, 22, 32, 60, 22, 28, 28], landscape_mode=False,
         **(await _intestazione_pdf()),
@@ -1633,7 +1721,7 @@ async def stampa_pagamento_provvigioni(
 
     sottotitolo = (
         f"Collaboratore: {nome_collab} · Data pagamento: {pag.get('data_pagamento')} "
-        f"· Periodo: {pag.get('periodo_dal')} → {pag.get('periodo_al')}"
+        f"· Periodo: {pag.get('periodo_dal')} -> {pag.get('periodo_al')}"
         f"\nLordo: € {pag.get('provvigioni_lorde', 0):,.2f}"
         f" · Ritenuta: € -{pag.get('ritenuta_acconto', 0):,.2f}"
         f" · Contributi: € -{pag.get('contributi', 0):,.2f}"
@@ -1849,7 +1937,7 @@ async def ocr_polizza_endpoint(
 ):
     """OCR di una polizza italiana. Estrae dati strutturati (contraente, veicolo, garanzie, premi).
 
-    Se polizza_id + salva_come_allegato → salva il file come allegato della polizza.
+    Se polizza_id + salva_come_allegato -> salva il file come allegato della polizza.
     """
     import ocr_polizza as ocr_pol
     contents = await file.read()
@@ -2257,7 +2345,7 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         )
         if u:
             doc["collaboratore_nome"] = u.get("name") or u.get("email")
-    # Breakdown provvigione (totale REALE polizza → collab + margine via schema)
+    # Breakdown provvigione (totale REALE polizza -> collab + margine via schema)
     bk = await _provv_breakdown(
         float(doc.get("provvigioni") or 0),
         doc.get("collaboratore_id"),
@@ -2554,7 +2642,7 @@ async def list_titoli(
         t["collaboratore_nome"] = collabs.get(p.get("collaboratore_id", ""), {}).get("name")
         t["mezzo_pagamento_preferito"] = p.get("mezzo_pagamento_preferito")
         t["ultimo_mezzo_pagamento"] = p.get("ultimo_mezzo_pagamento")
-        # Breakdown provvigione (totale REALE → quota collab + margine via schema)
+        # Breakdown provvigione (totale REALE -> quota collab + margine via schema)
         tbk = await _provv_breakdown(
             float(t.get("provvigioni") or 0),
             t.get("collaboratore_id"),
@@ -2647,7 +2735,7 @@ async def bulk_azione_allegato(
     email_create = 0
 
     # 4) salva l'allegato come record collegato a OGNI titolo selezionato
-    #    (iter23: prima era linkato solo alla prima anagrafica → bug)
+    #    (iter23: prima era linkato solo alla prima anagrafica -> bug)
     allegato_id = None
     allegati_ids: list[str] = []
     if allegato_meta and ids:
@@ -2861,19 +2949,14 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
 
 @api.post("/titoli/bulk-copertura")
 async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Marca i titoli come coperti dall'agenzia: l'agenzia ha anticipato i soldi al cliente.
-
-    body: {ids: [...], data_copertura?: 'YYYY-MM-DD' (default oggi), note?, conto_cassa_id?}
-    Il titolo resta DA INCASSARE finché il cliente non paga.
-
-    Crea anche un movimento contabile categoria "anticipo" (uscita) per ciascun
-    titolo coperto, così la copertura è visibile nel brogliaccio / Prima Nota.
+    """Marca i titoli come 'coperti' (anticipo provvigioni) creando il movimento
+    visibile nel brogliaccio / Prima Nota.
     """
     ids = body.get("ids") or []
     if not ids:
         raise HTTPException(400, "ids richiesti")
     data_copertura = body.get("data_copertura") or _now_iso()[:10]
-    # Lock: la copertura è una scrittura su Prima Nota → blocco se giornata chiusa.
+    # Lock: la copertura è una scrittura su Prima Nota -> blocco se giornata chiusa.
     await assert_giornata_aperta(data_copertura, azione="coprire titoli nel giorno (Prima Nota chiusa)")
     note = body.get("note")
     conto_id = body.get("conto_cassa_id")
@@ -2941,7 +3024,7 @@ async def notifica_copertura(body: dict, user=Depends(require_user("admin", "col
     """Invia email di notifica copertura titolo a operatori e/o contraenti.
 
     body: {id: titolo_id, a_operatori: bool, a_contraenti: bool}
-    Se SMTP non configurato → logga l'attività e ritorna ok=False con un avviso.
+    Se SMTP non configurato -> logga l'attività e ritorna ok=False con un avviso.
     """
     tid = body.get("id")
     if not tid:
@@ -3255,14 +3338,14 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     """Marca un titolo come incassato, crea movimento contabile entrata e gestisce la
     differenza eventuale (importo_pagato < lordo) in uno di due modi:
 
-      * ``tipo_chiusura="sconto"`` (default) → crea un movimento uscita 'sconto_cliente'
+      * ``tipo_chiusura="sconto"`` (default) -> crea un movimento uscita 'sconto_cliente'
         per il residuo (entra in Prima Nota spese).
-      * ``tipo_chiusura="sospeso"`` → genera un nuovo Titolo (tipo=regolazione) col residuo
+      * ``tipo_chiusura="sospeso"`` -> genera un nuovo Titolo (tipo=regolazione) col residuo
         in stato 'da_incassare', così resta visibile nei Sospesi.
 
     body: {data_incasso?, mezzo_pagamento?, conto_cassa_id?, importo_pagato?,
             tipo_chiusura?, motivo_sconto?}
-    Se importo_pagato è omesso → si assume pagamento completo del lordo (no residuo).
+    Se importo_pagato è omesso -> si assume pagamento completo del lordo (no residuo).
     """
     titolo = await db.titoli.find_one({"id": tid}, {"_id": 0})
     if not titolo:
@@ -3607,7 +3690,7 @@ async def firma_lettera_abbuono(
             raise HTTPException(
                 400,
                 "Nessuna firma digitale caricata sul tuo profilo. "
-                "Vai in Librerie → Utenti/Collaboratori → Documenti e carica la firma.",
+                "Vai in Librerie -> Utenti/Collaboratori -> Documenti e carica la firma.",
             )
         b64 = await _user_firma_to_b64(u_doc["firma_digitale_url"])
         nome = nome or u_doc.get("name") or u_doc.get("nome")
@@ -4133,7 +4216,7 @@ async def sostituisci_applicazione(
         }},
     )
     await log_attivita(user, "sostituisci", "applicazione", obj.id,
-                       f"Sostituita {old.get('targa')} → {obj.targa}")
+                       f"Sostituita {old.get('targa')} -> {obj.targa}")
     return {"nuova": obj.model_dump(), "sostituita_id": aid}
 
 
@@ -4292,7 +4375,7 @@ async def sostituisci_polizza(
         titolo_id = titolo_obj.id
 
     await log_attivita(user, "sostituisci", "polizza", obj.id,
-                       f"{old.get('numero_polizza')} → {obj.numero_polizza}"
+                       f"{old.get('numero_polizza')} -> {obj.numero_polizza}"
                        + (f" + titolo {titolo_id[:8]}" if titolo_id else ""))
     return {
         "ok": True,
@@ -4362,7 +4445,7 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
         raise HTTPException(404, "Conto non trovato")
 
     nota = body.get("descrizione") or ""
-    base_desc = (f"Giroconto: {conto_da['nome']} → {conto_a['nome']}"
+    base_desc = (f"Giroconto: {conto_da['nome']} -> {conto_a['nome']}"
                  + (f" — {nota}" if nota else ""))
     pair_id = f"GR-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S%f')}"
 
@@ -4383,13 +4466,13 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
     in_doc = {**mov_in.model_dump(), "pair_id": pair_id}
     await db.movimenti.insert_many([out_doc, in_doc])
     await log_attivita(user, "giroconto", "movimento", pair_id,
-                       f"€{importo:.2f}: {conto_da['nome']} → {conto_a['nome']}")
+                       f"€{importo:.2f}: {conto_da['nome']} -> {conto_a['nome']}")
     return {
         "ok": True,
         "pair_id": pair_id,
         "movimento_uscita_id": mov_out.id,
         "movimento_entrata_id": mov_in.id,
-        "descrizione_breve": f"{conto_da['nome']} → {conto_a['nome']} {importo:.2f} €",
+        "descrizione_breve": f"{conto_da['nome']} -> {conto_a['nome']} {importo:.2f} €",
     }
 
 
@@ -4522,7 +4605,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         {"attivo": True}, {"_id": 0}
     ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
 
-    # 2) Movimenti del giorno + arricchimento polizza→compagnia
+    # 2) Movimenti del giorno + arricchimento polizza->compagnia
     movs = await db.movimenti.find(
         {"data_movimento": data_giorno}, {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
@@ -4614,12 +4697,12 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             c_sconti = quota_sc
             if trattiene:
                 # Caso A: incasso il premio, devo versare (premio - provv) alla compagnia
-                # → saldo = premio - provv (positivo = debito verso compagnia)
+                # -> saldo = premio - provv (positivo = debito verso compagnia)
                 c_saldo = importo - provv_riga
             else:
                 # Caso B: pagamento Direzione/RID. Il cliente ha pagato direttamente
                 # alla compagnia. La compagnia ha già il premio. Devo solo registrare la
-                # provvigione che mi spetta → saldo = -provv (negativo = compagnia mi deve)
+                # provvigione che mi spetta -> saldo = -provv (negativo = compagnia mi deve)
                 c_saldo = -provv_riga
             # Se l'incasso era parziale con residuo lasciato a sospeso, mostralo qui.
             quota_cred = float(m.get("quota_credito") or 0)
@@ -4775,7 +4858,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
         # Regola contabile dell'utente:
         # ENTRATE = SOLO premi/titoli/appendici (incasso_premio)
-        # Rappel (entrata cat=provvigioni) → in PROVVIGIONI, non in Entrate
+        # Rappel (entrata cat=provvigioni) -> in PROVVIGIONI, non in Entrate
         # Tutte le altre entrate generiche NON contano in Entrate
         if is_e and cat == "incasso_premio":
             cum_entrate += importo
@@ -5069,7 +5152,7 @@ async def stampa_dati_compagnie(
     rows.append(["TOTALE", "", t["incassi_lordi"], t["incassi_netti"],
                  t["provvigioni"], t["rimesse_pagate"], t["saldo_attuale"]])
     pdf = pdf_report.stampa_elenco(
-        "Dati Compagnie", f"Periodo: {dal or '-'} → {al or '-'}", headers, rows,
+        "Dati Compagnie", f"Periodo: {dal or '-'} -> {al or '-'}", headers, rows,
         col_widths_mm=[55, 25, 25, 25, 25, 28, 28],
         **(await _intestazione_pdf()),
     )
@@ -5320,7 +5403,7 @@ async def _invia_brogliaccio_email(chiusura_id: str, pdf_bytes: bytes, data_gior
             {"$set": {"email_errore": "SMTP non configurato (host/user mancanti)",
                       "updated_at": _now_iso()}},
         )
-        return {"ok": False, "errore": "SMTP non configurato (Librerie/Azienda → SMTP)"}
+        return {"ok": False, "errore": "SMTP non configurato (Librerie/Azienda -> SMTP)"}
 
     import smtplib
     from email.message import EmailMessage
@@ -5515,7 +5598,7 @@ async def import_ania(file: UploadFile = File(...),
     log = await ania_importer.importa_zip(db, contents, file.filename, user)
     await log_attivita(user, "import", "ania", log.id,
                        f"Import file {file.filename}", payload=log.record_types_processati)
-    # Alert: import ANIA completato → notifica collaboratori sinistri se ha creato sinistri
+    # Alert: import ANIA completato -> notifica collaboratori sinistri se ha creato sinistri
     if log.sinistri_creati > 0:
         from alert_dispatcher import safe_dispatch
         await safe_dispatch("sinistro.importato_ania", {
@@ -5642,14 +5725,14 @@ async def apply_import_mappings(
     """Riapplica i mapping salvati ai record già importati.
 
     Esegue back-fill per:
-      - compagnia → aggiorna `polizze.compagnia_id` e `sinistri.compagnia_id` quando matcha
+      - compagnia -> aggiorna `polizze.compagnia_id` e `sinistri.compagnia_id` quando matcha
         un `valore_flusso` (es. codice compagnia exp) — usa un campo helper non disponibile,
         quindi il back-fill compagnia è limitato a polizze con compagnia_id vuoto e
         contraente con compagnia_exp == valore_flusso (best-effort).
-      - collaboratore → aggiorna `polizze.collaboratore_id` se `operatore_ania_codice` matcha
-      - ramo → aggiorna `polizze.ramo` su match esatto del ramo originale
-      - garanzia → rinomina garanzie nelle polizze (chiave su `codice_ania` o nome originale)
-      - prodotto → aggiorna `polizze.prodotto` su match esatto del valore originale
+      - collaboratore -> aggiorna `polizze.collaboratore_id` se `operatore_ania_codice` matcha
+      - ramo -> aggiorna `polizze.ramo` su match esatto del ramo originale
+      - garanzia -> rinomina garanzie nelle polizze (chiave su `codice_ania` o nome originale)
+      - prodotto -> aggiorna `polizze.prodotto` su match esatto del valore originale
     """
     summary = {
         "polizze_compagnia": 0,
@@ -5763,7 +5846,7 @@ async def libro_matricola_preview(
     file: UploadFile = File(...),
     user=Depends(require_user("admin", "collaboratore")),
 ):
-    """Upload XLSX/CSV libro matricola → ritorna header, preview rows, suggested mapping."""
+    """Upload XLSX/CSV libro matricola -> ritorna header, preview rows, suggested mapping."""
     content = await file.read()
     try:
         return _lm_preview(content, file.filename or "libro_matricola.xlsx")
@@ -7010,7 +7093,7 @@ async def pipeline_move(
         )
         if res.matched_count == 0:
             raise HTTPException(404, "Elemento non trovato")
-        await log_attivita(user, "move_pipeline", entita, eid, f"Stato → {nuovo}")
+        await log_attivita(user, "move_pipeline", entita, eid, f"Stato -> {nuovo}")
         return {"ok": True, "id": eid, "stato": nuovo}
     # Pipeline custom: entita = pipeline_id, eid = card_id
     return await move_card(entita, eid, {"colonna_key": nuovo}, user)
@@ -7406,7 +7489,7 @@ async def move_card(pid: str, card_id: str, body: dict, user=Depends(require_use
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Card non trovata")
-    await log_attivita(user, "move_card", "pipeline_card", card_id, f"→ {nuova_col}")
+    await log_attivita(user, "move_card", "pipeline_card", card_id, f"-> {nuova_col}")
     return {"ok": True}
 
 
@@ -8629,9 +8712,9 @@ async def list_diario(
     """Restituisce il feed cronologico (desc) del diario personale dell'utente.
 
     Aggrega 3 sorgenti:
-      • `db.diario_note`         → tipo='nota'
-      • `db.storico_avvisi`      → tipo='email'|'sms'|'whatsapp' (utente_id=user)
-      • `db.chat`                → tipo='chat' (mittente_id=user)
+      • `db.diario_note`         -> tipo='nota'
+      • `db.storico_avvisi`      -> tipo='email'|'sms'|'whatsapp' (utente_id=user)
+      • `db.chat`                -> tipo='chat' (mittente_id=user)
 
     Solo admin può specificare `user_id` di un altro utente, altrimenti viene
     forzato l'id dell'utente loggato.
@@ -8689,7 +8772,7 @@ async def list_diario(
             items.append({
                 "id": c["id"], "tipo": "chat",
                 "at": c.get("at"),
-                "titolo": f"Chat → {c.get('destinatario_nome') or c.get('destinatario_id') or '?'}",
+                "titolo": f"Chat -> {c.get('destinatario_nome') or c.get('destinatario_id') or '?'}",
                 "contenuto": c.get("testo"),
             })
 
@@ -9190,7 +9273,7 @@ async def chat_invia(
     elif user.get("role") == "cliente" and user.get("anagrafica_id"):
         cliente_user = user
     if cliente_user:
-        direction = "→" if user.get("role") != "cliente" else "←"
+        direction = "->" if user.get("role") != "cliente" else "←"
         titolo = f"💬 Chat {direction} {cliente_user.get('name')}"
         desc = txt[:300] + (" [+ allegato]" if allegato_nome else "")
         await log_diario_cliente(cliente_user["anagrafica_id"], "chat", titolo, desc, autore=user)
@@ -9929,7 +10012,7 @@ async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
                      (m.get("descrizione") or "")[:60], m.get("mezzo_pagamento") or "",
                      m["importo"] if m["tipo"] == "entrata" else "",
                      m["importo"] if m["tipo"] == "uscita" else ""])
-    sub = f"Periodo: {dal or '—'} → {al or '—'}"
+    sub = f"Periodo: {dal or '—'} -> {al or '—'}"
     pdf = pdf_report.stampa_elenco(
         "Prima Nota", sub, headers, rows,
         col_widths_mm=[25, 18, 35, 90, 35, 28, 28],
@@ -10155,6 +10238,10 @@ from routes import permessi as _perm_router  # noqa: E402
 from routes import insights as _insights_router  # noqa: E402
 from routes import cervello as _cervello_router  # noqa: E402
 from routes import marketing_pro as _mktp_router  # noqa: E402
+from routes import commerciale as _comm_router  # noqa: E402
+from routes import agenzie as _age_router  # noqa: E402
+from routes import setup_scambio as _setup_router  # noqa: E402
+from routes import documenti_inbox as _docinbox_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10165,6 +10252,10 @@ api.include_router(_perm_router.router)
 api.include_router(_insights_router.router)
 api.include_router(_cervello_router.router)
 api.include_router(_mktp_router.router)
+api.include_router(_comm_router.router)
+api.include_router(_age_router.router)
+api.include_router(_setup_router.router)
+api.include_router(_docinbox_router.router)
 
 app.include_router(api)
 

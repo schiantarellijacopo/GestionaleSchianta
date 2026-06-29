@@ -56,9 +56,14 @@ export default function RappelPage() {
     };
 
     const incassa = async (r) => {
-        if (!window.confirm(`Incassare il rappel di ${fmtEur(r.importo)} (${r.compagnia_nome})?\nVerrà registrato in Prima Nota come provvigione.`)) return;
+        const dataDefault = new Date().toISOString().slice(0, 10);
+        const dataIncasso = window.prompt(
+            `Incassare il rappel di ${fmtEur(r.importo)} (${r.compagnia_nome})?\nDigita la data di registrazione (YYYY-MM-DD).`,
+            dataDefault,
+        );
+        if (!dataIncasso) return;
         try {
-            await api.post(`/rappel/${r.id}/incassa`, {});
+            await api.post(`/rappel/${r.id}/incassa`, { data_incasso: dataIncasso });
             toast.success("Rappel incassato e registrato in Prima Nota");
             load();
         } catch (e) {

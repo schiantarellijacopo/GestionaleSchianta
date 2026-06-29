@@ -30,7 +30,11 @@ export default function Ritenute() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anno]);
     useEffect(() => {
-        api.get("/auth/users").then((r) => setCollabs((r.data || []).filter((x) => x.role !== "cliente")));
+        api.get("/auth/users").then((r) => {
+            // Mostra tutti gli utenti tranne i clienti (anche se role è vuoto)
+            const list = (r.data || []).filter((x) => (x.role || "") !== "cliente");
+            setCollabs(list);
+        }).catch(() => setCollabs([]));
     }, []);
 
     const totGen = useMemo(() => {

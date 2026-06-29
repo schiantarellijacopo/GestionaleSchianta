@@ -145,9 +145,12 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso");
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
-    // Solo non-pagati + pagamenti vengono mostrati nella tab "Movimenti & versamenti".
+    const altreVoci = (data?.righe || []).filter(
+        (r) => r.tipo === "rappel" || r.tipo === "ritenuta_compagnia" || r.tipo === "fattura_partner",
+    );
+    // Solo non-pagati + pagamenti + altre voci (rappel/ritenute/fatture partner) nella tab "Movimenti & versamenti".
     // I titoli già pagati sono visibili solo nello "Storico rimesse".
-    const righeAttive = [...daVersare, ...pagamenti].sort(
+    const righeAttive = [...daVersare, ...pagamenti, ...altreVoci].sort(
         (a, b) => (a.data || "").localeCompare(b.data || ""),
     );
     const importoSel = incassi
@@ -290,8 +293,14 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         )}
                                     </td>
                                     <td className="num text-xs">{fmtDate(r.data)}</td>
-                                    <td><span className={`badge ${r.tipo === "incasso" ? "badge-info" : "badge-success"}`}>{r.tipo}</span></td>
-                                    <td className="font-mono text-xs">{r.polizza || "-"}</td>
+                                    <td>
+                                        {r.tipo === "incasso" && <span className="badge badge-info">incasso</span>}
+                                        {r.tipo === "pagamento" && <span className="badge badge-success">pagamento</span>}
+                                        {r.tipo === "rappel" && <span className="badge bg-fuchsia-100 text-fuchsia-700">rappel</span>}
+                                        {r.tipo === "ritenuta_compagnia" && <span className="badge bg-rose-100 text-rose-700">ritenuta</span>}
+                                        {r.tipo === "fattura_partner" && <span className="badge bg-amber-100 text-amber-700">fattura partner</span>}
+                                    </td>
+                                    <td className="font-mono text-xs">{r.polizza || (r.descrizione ? <span className="text-slate-600">{r.descrizione}</span> : "-")}</td>
                                     <td className="text-xs">{r.contraente || "-"}</td>
                                     <td className="text-xs text-sky-700">{r.collaboratore || "-"}</td>
                                     <td className="text-xs">{r.ramo || "-"}</td>
@@ -305,8 +314,8 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
                                 <td colSpan="9" className="text-right">TOTALI ATTIVI</td>
-                                <td className="num text-right">{fmtEur(daVersare.reduce((s, r) => s + (r.dare || 0), 0))}</td>
-                                <td className="num text-right">{fmtEur(pagamenti.reduce((s, r) => s + (r.avere || 0), 0))}</td>
+                                <td className="num text-right">{fmtEur(righeAttive.reduce((s, r) => s + (r.dare || 0), 0))}</td>
+                                <td className="num text-right">{fmtEur(righeAttive.reduce((s, r) => s + (r.avere || 0), 0))}</td>
                             </tr>
                         </tfoot>
                     </table>

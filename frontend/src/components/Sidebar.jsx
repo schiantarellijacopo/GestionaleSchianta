@@ -6,7 +6,8 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search,
+    NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
+    Banknote, ArrowRightLeft, Sparkles,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
@@ -35,7 +36,7 @@ const ALL_MENU_ITEMS = [
     { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "ritenute", path: "/ritenute", icon: "Coins", label: "Ritenute", section: "contabilita", roles: ["admin"] },
+    { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "contabilita", roles: ["admin", "collaboratore"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "statistiche", path: "/statistiche", icon: "Activity", label: "Statistiche", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "cervello", path: "/cervello", icon: "Brain", label: "Il Cervello", section: "strumenti", roles: ["admin"] },
@@ -44,12 +45,17 @@ const ALL_MENU_ITEMS = [
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "newsletter", path: "/newsletter", icon: "Mail", label: "Newsletter", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "voucher", path: "/voucher", icon: "Ticket", label: "Voucher Compagnia", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "documenti_inbox", path: "/documenti-inbox", icon: "Sparkles", label: "Documenti Inbox · OCR", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "lead_liste", path: "/lead-liste", icon: "ListChecks", label: "Liste Lead", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "chat", path: "/chat", icon: "MessageCircle", label: "Chat", section: "strumenti", roles: null },
     { id: "posta", path: "/posta", icon: "Inbox", label: "Posta", section: "strumenti", roles: null },
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
     { id: "rubrica_compagnie", path: "/rubrica-compagnie", icon: "BookUser", label: "Rubrica compagnie", section: "amministrazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "agenzie", path: "/agenzie", icon: "Building2", label: "Agenzie (partner)", section: "amministrazione", roles: ["admin"] },
+    { id: "setup_iniziale", path: "/setup-iniziale", icon: "Banknote", label: "Setup iniziale", section: "amministrazione", roles: ["admin"] },
+    { id: "scambio_dati", path: "/scambio-dati", icon: "ArrowRightLeft", label: "Scambio dati agenzie", section: "amministrazione", roles: ["admin"] },
     { id: "librerie", path: "/librerie", icon: "Library", label: "Librerie", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "importazioni", path: "/importazioni", icon: "Upload", label: "Importazioni Flussi", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "attivita", path: "/attivita", icon: "Activity", label: "Log attività", section: "amministrazione", roles: ["admin", "collaboratore"] },
@@ -59,6 +65,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles,
 };
 
 const SECTION_LABELS = {

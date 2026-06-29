@@ -42,6 +42,14 @@ import Marketing from "@/pages/Marketing";
 import Avvisi from "@/pages/Avvisi";
 import RubricaCompagnie from "@/pages/RubricaCompagnie";
 import Rappel from "@/pages/Rappel";
+import Agenzie from "@/pages/Agenzie";
+import RitenuteCompagnia from "@/pages/RitenuteCompagnia";
+import FattureAgenziaPartner from "@/pages/FattureAgenziaPartner";
+import LeadListe from "@/pages/LeadListe";
+import RitenuteHub from "@/pages/RitenuteHub";
+import SetupIniziale from "@/pages/SetupIniziale";
+import ScambioDati from "@/pages/ScambioDati";
+import DocumentiInbox from "@/pages/DocumentiInbox";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -71,10 +79,36 @@ function App() {
                             <Route path="/statistiche" element={<Statistiche />} />
                             <Route path="/cervello" element={<Cervello />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
-                            <Route path="/ritenute" element={<Ritenute />} />
+                            <Route path="/ritenute" element={
+                                <ProtectedRoute roles={["admin", "collaboratore"]}><RitenuteHub /></ProtectedRoute>
+                            } />
+                            <Route path="/ritenute-collaboratori" element={
+                                <ProtectedRoute roles={["admin"]}><Ritenute /></ProtectedRoute>
+                            } />
+                            <Route path="/setup-iniziale" element={
+                                <ProtectedRoute roles={["admin"]}><SetupIniziale /></ProtectedRoute>
+                            } />
+                            <Route path="/scambio-dati" element={
+                                <ProtectedRoute roles={["admin"]}><ScambioDati /></ProtectedRoute>
+                            } />
+                            <Route path="/documenti-inbox" element={
+                                <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}><DocumentiInbox /></ProtectedRoute>
+                            } />
                             <Route path="/trattative" element={<Trattative />} />
                             <Route path="/newsletter" element={<Newsletter />} />
                             <Route path="/voucher" element={<Voucher />} />
+                            <Route path="/agenzie" element={
+                                <ProtectedRoute roles={["admin"]}><Agenzie /></ProtectedRoute>
+                            } />
+                            <Route path="/ritenute-compagnia" element={
+                                <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}><RitenuteCompagnia /></ProtectedRoute>
+                            } />
+                            <Route path="/fatture-agenzia-partner" element={
+                                <ProtectedRoute roles={["admin", "collaboratore"]}><FattureAgenziaPartner /></ProtectedRoute>
+                            } />
+                            <Route path="/lead-liste" element={
+                                <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}><LeadListe /></ProtectedRoute>
+                            } />
                             <Route
                                 path="/avvisi"
                                 element={

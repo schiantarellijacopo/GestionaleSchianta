@@ -412,23 +412,24 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
     const totVoci = (voci_sel || []).reduce((s, v) => s + (v.importo || 0), 0);
     const ritPerc = collab.perc_ritenuta_acconto || 0;
     const inpsPerc = collab.perc_inps_inarcassa || 0;
-    const [rit, setRit] = useState((lordo * ritPerc / 100).toFixed(2));
+    const [percRit, setPercRit] = useState(ritPerc);  // percentuale, override
     const [contr, setContr] = useState((lordo * inpsPerc / 100).toFixed(2));
     const [data_pag, setDataPag] = useState(today);
     const [mezzo, setMezzo] = useState("bonifico");
     const [note, setNote] = useState("");
 
-    const netto = lordo - parseFloat(rit || 0) - parseFloat(contr || 0) + totVoci;
+    const rit = Math.round(lordo * (parseFloat(percRit) || 0)) / 100;
+    const netto = lordo - rit - parseFloat(contr || 0) + totVoci;
 
     const submit = async () => {
         try {
             const r = await api.post(`/collaboratori/${collab.id}/paga-provvigioni`, {
                 titoli_ids, voci_manuali_ids: voci_ids,
                 data_pagamento: data_pag, mezzo_pagamento: mezzo, note,
-                override_ritenuta: parseFloat(rit) || 0,
+                perc_ritenuta: parseFloat(percRit) || 0,
                 override_contributi: parseFloat(contr) || 0,
             });
-            toast.success(`Pagamento di ${fmtEur(r.data.pagamento.netto_pagato)} registrato nel Brogliaccio`);
+            toast.success(`Pagamento di ${fmtEur(r.data.pagamento.netto_pagato)} registrato (ritenuta ${fmtEur(rit)} auto-salvata)`);
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
@@ -441,17 +442,22 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                     <div className="text-sm bg-sky-50 border border-sky-200 rounded p-3">
                         <div>{titoli_ids.length} titoli + {voci_ids.length} voci manuali</div>
                         <div className="text-xs text-sky-900 mt-1">
-                            Verrà creato un movimento contabile USCITA (categoria provvigioni) sul conto selezionato, visibile nel Brogliaccio.
+                            Verrà creato un movimento contabile USCITA + record automatico in <strong>Ritenute d'acconto</strong> (versamento F24).
                         </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-3">
                         <div>
                             <Label>Provvigioni lorde €</Label>
                             <Input value={lordo.toFixed(2)} disabled className="bg-slate-50 num font-medium" />
                         </div>
                         <div>
-                            <Label>Ritenuta acconto €</Label>
-                            <Input type="number" step="0.01" value={rit} onChange={(e) => setRit(e.target.value)} data-testid="pay-rit" />
+                            <Label>Ritenuta %</Label>
+                            <Input type="number" step="0.01" value={percRit} onChange={(e) => setPercRit(e.target.value)}
+                                data-testid="pay-rit-perc" />
+                        </div>
+                        <div>
+                            <Label>Ritenuta € (calc.)</Label>
+                            <Input value={rit.toFixed(2)} disabled className="bg-rose-50 num font-semibold text-rose-700" />
                         </div>
                         <div>
                             <Label>Contributi €</Label>

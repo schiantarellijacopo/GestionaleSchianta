@@ -323,6 +323,124 @@ async def statistiche_overview(user=Depends(current_user)) -> dict:
     }
 
 
+@router.get("/statistiche/isa")
+async def statistiche_isa(anno: int | None = None, user=Depends(current_user)) -> dict:
+    """Calcolo Indice ISA (Indici Sintetici di Affidabilità fiscale).
+
+    Per un'agenzia assicurativa il punteggio reale dipende dai dati fiscali
+    dell'Agenzia delle Entrate; qui calcoliamo una **stima** 1-10 basata sui
+    seguenti indicatori operativi:
+
+    - **Redditività**: utile lordo / ricavi (peso 30%)
+    - **Densità clienti**: polizze/clienti attivi (peso 20%)
+    - **Diversificazione**: numero rami coperti / 8 (peso 15%)
+    - **Continuità**: % polizze non scadute (peso 20%)
+    - **Crescita**: nuovi clienti 12 mesi / clienti totali (peso 15%)
+
+    Ogni indicatore è normalizzato 0-1 poi pesato e moltiplicato × 10.
+    """
+    now = datetime.now(timezone.utc)
+    if anno is None:
+        anno = now.year
+    inizio_anno = f"{anno}-01-01"
+    fine_anno = f"{anno}-12-31"
+
+    # Ricavi annuali (provvigioni dai movimenti contabili)
+    agg_prov = await db.movimenti.aggregate([
+        {"$match": {"tipo": "entrata", "data_movimento": {"$gte": inizio_anno, "$lte": fine_anno}}},
+        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+    ]).to_list(1)
+    ricavi = float(agg_prov[0]["tot"]) if agg_prov else 0
+
+    # Costi struttura (dal cervello)
+    costi_doc = await db.costi_annuali.find_one({"anno": anno}, {"_id": 0})
+    costi_totali = 0.0
+    if costi_doc:
+        for v in (costi_doc.get("voci") or []):
+            costi_totali += float(v.get("importo") or 0)
+
+    utile = ricavi - costi_totali
+    redditivita = (utile / ricavi) if ricavi > 0 else 0
+    redditivita_norm = max(0, min(1, redditivita / 0.30))  # 30% = top
+
+    # Clienti attivi e polizze attive
+    n_clienti_tot = await db.anagrafiche.count_documents({})
+    n_polizze_att = await db.polizze.count_documents({"stato": {"$in": ["attiva", "in_emissione"]}})
+    densita = (n_polizze_att / n_clienti_tot) if n_clienti_tot > 0 else 0
+    densita_norm = max(0, min(1, densita / 3.0))  # 3 polizze/cliente = top
+
+    # Diversificazione rami
+    rami_distinti = await db.polizze.distinct("ramo", {"stato": {"$in": ["attiva", "in_emissione"]}})
+    n_rami = len([r for r in rami_distinti if r])
+    diversif_norm = max(0, min(1, n_rami / 8.0))
+
+    # Continuità: % polizze non scadute
+    n_pol_tot = await db.polizze.count_documents({})
+    continuita = (n_polizze_att / n_pol_tot) if n_pol_tot > 0 else 0
+    continuita_norm = max(0, min(1, continuita))
+
+    # Crescita: nuovi clienti 12m / clienti totali
+    one_year_ago = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    nuovi_12m = await db.anagrafiche.count_documents({"created_at": {"$gte": one_year_ago}})
+    crescita = (nuovi_12m / n_clienti_tot) if n_clienti_tot > 0 else 0
+    crescita_norm = max(0, min(1, crescita / 0.20))  # 20% crescita = top
+
+    # Punteggio finale 1-10
+    score = (
+        redditivita_norm * 0.30
+        + densita_norm * 0.20
+        + diversif_norm * 0.15
+        + continuita_norm * 0.20
+        + crescita_norm * 0.15
+    ) * 10
+    score = round(max(1.0, score), 2)
+
+    # Livello descrittivo
+    if score >= 9: livello, colore = "Massima affidabilità", "emerald"
+    elif score >= 7: livello, colore = "Affidabile", "sky"
+    elif score >= 5: livello, colore = "Sufficiente", "amber"
+    elif score >= 3: livello, colore = "Inadeguato", "orange"
+    else: livello, colore = "Critico", "rose"
+
+    return {
+        "anno": anno,
+        "punteggio": score,
+        "livello": livello,
+        "colore": colore,
+        "indicatori": [
+            {"nome": "Redditività", "valore": round(redditivita * 100, 2),
+             "unita": "%", "punteggio": round(redditivita_norm * 10, 2),
+             "peso": 30, "soglia": 30, "descrizione": "Utile lordo / Ricavi"},
+            {"nome": "Densità clienti", "valore": round(densita, 2),
+             "unita": "polizze/cliente", "punteggio": round(densita_norm * 10, 2),
+             "peso": 20, "soglia": 3, "descrizione": "Polizze attive / Clienti"},
+            {"nome": "Diversificazione", "valore": n_rami,
+             "unita": "rami", "punteggio": round(diversif_norm * 10, 2),
+             "peso": 15, "soglia": 8, "descrizione": "Rami coperti"},
+            {"nome": "Continuità", "valore": round(continuita * 100, 2),
+             "unita": "%", "punteggio": round(continuita_norm * 10, 2),
+             "peso": 20, "soglia": 100, "descrizione": "% polizze non scadute"},
+            {"nome": "Crescita", "valore": round(crescita * 100, 2),
+             "unita": "%", "punteggio": round(crescita_norm * 10, 2),
+             "peso": 15, "soglia": 20, "descrizione": "Nuovi clienti / Totale (12m)"},
+        ],
+        "dati_calcolo": {
+            "ricavi": round(ricavi, 2),
+            "costi": round(costi_totali, 2),
+            "utile": round(utile, 2),
+            "n_clienti_tot": n_clienti_tot,
+            "n_polizze_attive": n_polizze_att,
+            "n_polizze_tot": n_pol_tot,
+            "nuovi_clienti_12m": nuovi_12m,
+        },
+        "note": (
+            "Stima operativa basata sui dati interni dell'agenzia. Il punteggio "
+            "ISA ufficiale viene calcolato dall'Agenzia delle Entrate sulla "
+            "dichiarazione fiscale."
+        ),
+    }
+
+
 # ---------------------------- IL CERVELLO (AI) ----------------------------
 @router.get("/cervello/suggerimenti")
 async def cervello_suggerimenti(
@@ -698,68 +816,4 @@ Contesto extra dell'operatore: {body.get('contesto_extra','')}"""
     return {"anagrafica_id": aid, "consiglio": testo, "contesto": ins}
 
 
-# ============= TRATTATIVE =============
-class TrattativaBody(BaseModel):
-    anagrafica_id: str
-    titolo: str
-    descrizione: Optional[str] = None
-    ramo: Optional[str] = None
-    compagnia_di_provenienza: Optional[str] = None
-    compagnia_target_id: Optional[str] = None
-    data_scadenza_corrente: Optional[str] = None  # scadenza polizza concorrente
-    premio_corrente: float = 0
-    premio_proposto: float = 0
-    stato: str = "aperta"  # aperta | proposta_inviata | in_attesa | vinta | persa
-    note: Optional[str] = None
-    visibili_cliente: bool = False
-    collaboratore_id: Optional[str] = None
-
-
-@router.get("/trattative")
-async def list_trattative(
-    stato: Optional[str] = None, anagrafica_id: Optional[str] = None,
-    user=Depends(current_user),
-) -> list[dict]:
-    flt: dict = {}
-    if stato: flt["stato"] = stato
-    if anagrafica_id: flt["anagrafica_id"] = anagrafica_id
-    items = await db.trattative.find(flt, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    ana_ids = list({t["anagrafica_id"] for t in items})
-    anas = {a["id"]: a async for a in db.anagrafiche.find(
-        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
-    for t in items:
-        a = anas.get(t["anagrafica_id"], {})
-        t["anagrafica_nome"] = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
-    return items
-
-
-@router.post("/trattative", status_code=201)
-async def create_trattativa(body: TrattativaBody,
-                            user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
-    doc = {
-        "id": str(uuid.uuid4()),
-        **body.model_dump(),
-        "collaboratore_id": body.collaboratore_id or user.get("id"),
-        "created_at": _now_iso(),
-    }
-    await db.trattative.insert_one(doc)
-    return doc
-
-
-@router.put("/trattative/{tid}")
-async def update_trattativa(tid: str, body: TrattativaBody,
-                            user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
-    data = body.model_dump()
-    data["updated_at"] = _now_iso()
-    res = await db.trattative.update_one({"id": tid}, {"$set": data})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Trattativa non trovata")
-    return await db.trattative.find_one({"id": tid}, {"_id": 0})
-
-
-@router.delete("/trattative/{tid}")
-async def delete_trattativa(tid: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
-    res = await db.trattative.delete_one({"id": tid})
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Trattativa non trovata")
-    return {"ok": True}
+# NOTE: trattative endpoints moved to routes/commerciale.py

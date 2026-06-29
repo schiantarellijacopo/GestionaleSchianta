@@ -45,6 +45,11 @@ ALERT_SCHEDULE_TYPES = [
     "sospesi_settimanali",          # digest collaboratore
     "arretrati_settimanali",        # digest collaboratore
     "polizza_in_scadenza",          # senza preventivo rinnovo
+    "polizza_scaduta_giorno",       # T+0
+    "polizza_scaduta_5g",           # T+5
+    "polizza_scaduta_10g",          # T+10
+    "polizza_scaduta_14g",          # T+14
+    "polizza_scaduta_15g",          # T+15
 ]
 
 CANALI = ["inapp", "email", "sms", "whatsapp"]
