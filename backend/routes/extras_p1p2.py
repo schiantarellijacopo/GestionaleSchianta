@@ -231,14 +231,19 @@ async def list_all_libro_matricola(
     """Lista globale di TUTTE le applicazioni di libro matricola (per pagina standalone).
     Arricchita con polizza_numero, contraente_nome, n_allegati."""
     flt: dict = {}
+    or_clauses: list = []
     if polizza_id: flt["polizza_id"] = polizza_id
     if stato == "cessato":
         flt["data_cessazione"] = {"$ne": None, "$exists": True}
     elif stato == "attivo":
-        flt["$or"] = [{"data_cessazione": None}, {"data_cessazione": {"$exists": False}}]
+        or_clauses.append([{"data_cessazione": None}, {"data_cessazione": {"$exists": False}}])
     if q and q.strip():
         rx = {"$regex": q.strip(), "$options": "i"}
-        flt["$or"] = [{"targa": rx}, {"descrizione_veicolo": rx}, {"telaio": rx}, {"matricola": rx}]
+        or_clauses.append([{"targa": rx}, {"descrizione_veicolo": rx}, {"telaio": rx}, {"matricola": rx}])
+    if len(or_clauses) == 1:
+        flt["$or"] = or_clauses[0]
+    elif len(or_clauses) > 1:
+        flt["$and"] = [{"$or": o} for o in or_clauses]
     items = await db.applicazioni_matricola.find(flt, {"_id": 0}).sort("data_inserimento", -1).limit(limit).to_list(limit)
     # enrich
     pol_ids = list({a.get("polizza_id") for a in items if a.get("polizza_id")})
