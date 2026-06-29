@@ -220,13 +220,21 @@ REGOLE: null se non leggibile, no commenti, no markdown."""
     ).with_model("gemini", "gemini-3-flash-preview")
     msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b64)])
     resp = ""
-    async for ev in chat.stream_message(msg):
-        if isinstance(ev, TextDelta): resp += ev.content
-        elif isinstance(ev, StreamDone): break
+    try:
+        async for ev in chat.stream_message(msg):
+            if isinstance(ev, TextDelta): resp += ev.content
+            elif isinstance(ev, StreamDone): break
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"OCR Gemini fallito: {e}")
     m = re.search(r"\{.*\}", resp, re.DOTALL)
     if not m:
         raise HTTPException(502, f"Risposta non JSON: {resp[:200]}")
-    return json.loads(m.group(0))
+    try:
+        return json.loads(m.group(0))
+    except json.JSONDecodeError as e:
+        raise HTTPException(502, f"JSON malformato: {e}")
 
 
 @router.post("/cervello/ocr-bilancio")
@@ -597,7 +605,7 @@ async def get_salute_fiscale(aid: str, user=Depends(current_user)) -> dict:
     ana = await db.anagrafiche.find_one(
         {"id": aid}, {"_id": 0, "salute_fiscale_dati": 1, "salute_fiscale_aggiornata_il": 1},
     )
-    if not ana:
+    if ana is None:
         raise HTTPException(404, "Anagrafica non trovata")
     return {
         "dati": ana.get("salute_fiscale_dati") or {},

@@ -1,69 +1,62 @@
 # Programma Assicurativo — PRD
 
-## Problem statement
-CRM full-stack per agenzie assicurative italiane. Stack React + FastAPI + MongoDB + Emergent LLM (Claude 4.5, Gemini 3 Flash).
+## Visione
+CRM completo per agenzie assicurative italiane. Gestisce anagrafiche, polizze, titoli, sinistri, P&L, marketing, AI insights, OCR documenti, ritenute compagnia/collaboratori/agenzie partner, calcoli pensione INPS.
 
-## Architettura backend
-`/app/backend/routes/`: anagrafiche, permessi, librerie, kpi, alert, insights (statistiche + ISA), cervello, marketing_pro, **commerciale** (Trattative · Ritenute · Fatture Partner), **agenzie**, **setup_scambio**, **documenti_inbox** (OCR), **extras_p1p2** (Documenti template ramo · Libro matricola · Regolazione premio · OCR bilancio · OCR corsi IVASS · Customer Insights widget · Storico avvisi).
+## Stack
+- **Backend**: FastAPI + MongoDB (Motor). Server.py >10.000 righe (refactor backlog).
+- **Frontend**: React + Tailwind + Shadcn UI.
+- **Integrazioni**: Emergent LLM Key (Claude 4.5 Sonnet text, Gemini 3 Flash OCR), IMAP/SMTP nativo, Twilio/Spoki (backlog), Stripe (backlog).
 
-## Modelli chiave aggiornati
-- `Compagnia`: tipo_mandato (diretto|collaborazione) + agenzia_partner_id
-- `Agenzia`: tipo (principale|partner) + **perc_ritenuta_acconto** (% auto-applicata su fatture)
-- `Allegato`: + **visibile_cliente**, **categoria**, **applicazione_matricola_id**
-- `Polizza`: + **regolazione_premio** (flag) + base/tasso/periodicità/minima/ultimo_calcolo/dovuto
-- `RitenutaCompagnia`: positiva → aumenta dare compagnia (solo mandato diretto)
-- `FatturaAgenziaPartner`: compagnie_ids[] + lordo + ritenuta auto + netto
-- `DocumentiInbox`: tipo_documento + foto_volto_bbox per avatar
-- `ApplicazioneMatricola`: targa/telaio/marca/modello + allegati
-- `RegolazioneStorico`: storico calcoli per polizza
+## Persona
+Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 
-## CHANGELOG · 29/06/2026
+## Implementato
 
-### Massive features sessione (22 features totali implementate)
-**P0 fix**:
-1. Trattative router duplicato (insights→commerciale)
-2. Voucher/Lead import parser + dispatch MOCKED
+### Sessioni precedenti
+- Anagrafiche multi-ruolo, Polizze, Titoli, Sinistri, Movimenti, Conti contabili.
+- ANIA import, scadenzario, P&L, dashboard collaboratori, statistiche con Indice ISA.
+- Trattative, Voucher, RitenuteHub (compagnia/collaboratori/agenzie partner).
+- Documenti Inbox OCR (Gemini) → auto-extract avatar carta d'identità.
+- Setup Iniziale, Scambio Dati, Documenti Inbox.
+- Alert automatici T+0 → T+15.
+- Backend P1/P2: Libro matricola, OCR bilancio, corsi IVASS, customer insights, dropzone visibile/nascosto, storico avvisi.
 
-**P0 nuovi**:
-3. Tipo mandato compagnia + libreria Agenzie partner
-4. Ritenute Compagnia (gemella Rappel negativa, in estratto conto + Prima Nota)
-5. Fatture Agenzia Partner (multi-compagnia + ritenuta auto da perc_ritenuta_acconto agenzia + netto)
-6. Ritenute Hub unificato (3 tab)
-7. Auto-ritenute collaboratori al pagamento
-8. Setup iniziale wizard + sospesi come titoli virtuali
-9. Scambio dati tra agenzie (super-admin)
-10. Indice ISA con filtri data_copertura/data_incasso
-11. Statistiche multi-modulo (tabs)
-12. Documenti Inbox OCR + crop foto → avatar
-13. Avvisi automatici T+0/+5/+10/+14/+15
-14. Collega compagnie ad agenzia partner (dialog multi-select)
-15. Campo perc_ritenuta_acconto nel form Agenzia (auto su fatture)
+### Sessione 29/06 (iter26)
+- ✅ **Search globale espansa**: ricerca per ramo, prodotto, telefono, email, cellulare, comune, indirizzo, professione, tags, targa, oggetto_assicurato, contraente. Aggiunte sezioni Titoli e Compagnie nei risultati.
+- ✅ **Voucher dual-assignment**: nuovo dialog (sostituisce `window.prompt`) per assegnare il voucher contemporaneamente a Collaboratore E Cliente. Backend `POST /api/voucher/{id}/assegna` accetta entrambi.
+- ✅ **Anagrafica · Raccolta Dati**: nuovo tab strutturato (motivazioni, appetito rischio, famiglia, lavoro, aziende, risparmi, immobili, hobby, bilancio familiare, obiettivi, gestione rischi). Schema dal PDF "RACCOLTA DATI".
+- ✅ **Anagrafica · 30 Potenti Domande**: tab onboarding con elenco numerato e progress %. Schema dal PDF "Le potenti domande del primo appuntamento".
+- ✅ **Anagrafica · Salute Fiscale** (solo aziende): OCR bilancio Gemini → KPI (ROE, ROS, leva, oneri/ricavi, pressione fiscale), score rischio default 0-10, cross-sell AI (D&O, Cyber, Key Man…).
+- ✅ **Customer Insights widget**: snapshot KPI cliente in cima al tab Anagrafica.
+- ✅ **Polizza · Regolazione Premio dialog**: calcolatore con storico per polizze con flag `regolazione_premio`.
+- ✅ **Cervello · OCR Bilancio**: pulsante caricamento PDF/JPG bilancio → estrazione automatica voci di costo.
+- ✅ **Avvisi · Storico registrazione**: WhatsApp/PDF/Email ora chiamano `/storico-avvisi/registra` e mostrano toast di conferma.
+- ✅ **Librerie · Modelli PDF placeholder**: tabella raggruppata per categoria (Cliente, Polizza, Veicolo, Compagnia, Titolo, Sinistro, Operatore, Agenzia, Totali, Sistema, Marketing) con +70 placeholder cliccabili.
+- ✅ **Lead Liste · Parser RHX**: supporto multi-foglio (AutoConvenienTe + DNA senza RCA), normalizzazione indirizzo `VIA X N-CAP-CITTA-PROV`, privacy S/N → boolean, alias colonna IDContatto, Profilo Cliente, Esito Direzionale, Stato Ultimo PUC, Aggiorna Attivazione.
+- ✅ **Documenti Inbox · Auto-archiviazione**: quando OCR ha confidenza alta + anagrafica trovata, il documento viene AUTOMATICAMENTE archiviato nella sezione corretta (carta_identita → documento_identita, libretto → libretto_circolazione, ecc.) senza intervento utente. Drag&drop attivo. Fallback a "Rivedi e archivia" se confidenza media/bassa.
+- ✅ **Bugfix**: salute-fiscale 404 errato con projection (fix `if ana is None`), Gemini OCR errors 500→502, React key warning in TitoliByContraente (Fragment con key), label "CARTA D&RSQUO;IDENTITÀ" → apostrofo corretto.
 
-**P1/P2 (questa sessione)**:
-16. **Documenti pre-impostati per ramo** (`/polizze/{id}/documenti-template`) — RC Auto: libretto+polizza+condizioni; default: polizza+condizioni+foto
-17. **Visibilità documenti** (campo `visibile_cliente` su Allegato + categoria)
-18. **Libro matricola applicazioni** CRUD con allegati per applicazione
-19. **Regolazione premio**: flag polizza + endpoint calcolo (`base × tasso% = dovuto`, min non rimborsabile) + storico
-20. **OCR Bilancio** nel Cervello (`/cervello/ocr-bilancio`) — autofill costi annuali via Gemini
-21. **OCR Corsi IVASS** + grafico 30h annuali per collaboratore
-22. **Customer Insights Widget** (`/anagrafiche/{id}/customer-insights-widget`) — KPI, cross-selling opportunità, rischio score
-23. **Storico avvisi** auto-move (`/storico-avvisi`)
+## Backlog priorità
 
-### Testing (Iter 25)
-- Backend: 17/18 PASS (1 skip atteso) — auto-fixato ObjectId leak in setup-iniziale
-- Frontend: 7/7 pagine OK
+### P0 — In valutazione utente
+- Test end-to-end auto-archiviazione Documenti Inbox con file reali.
 
-## Backlog rimanente
+### P1 — Prossime sessioni
+- **Twilio/Spoki**: integrazione SMS/WhatsApp reale (credenziali utente).
+- **Refactor `server.py`** (>10k righe) in router modulari per anagrafiche/polizze/titoli/sinistri/movimenti.
+- **Storico Avvisi UI**: tab dedicato nella sezione Avvisi (backend già pronto).
+- **Libro Matricola pagina standalone** (oltre al tab in PolizzaDetail).
 
-### P3
-- Refactor server.py (>10k righe) in moduli
-- UI frontend per: Regolazione premio dialog · Libro matricola applicazioni page · OCR Bilancio button · OCR Corsi IVASS upload · Customer Insights widget in AnagraficaDetail · Documenti dropzone doppia (visibile/nascosto)
-- Spoki/Twilio real dispatch (richiede API key utente)
-- Indice MongoDB su ritenute_compagnia.compagnia_id
+### P2 — Future
+- Stripe billing.
+- Dashboard collaboratore con report mensile auto.
+- Migrazione storica MovimentiContabili per "Titoli coperti".
+- Cron job notifica IVASS quando un collaboratore < 50% delle 30 ore annuali.
 
-## Test credentials
-Admin: `admin@assicura.it` / `Admin123!`
-
-## Integrazioni
-- **Emergent LLM Key**: Claude 4.5 (Assistente), Gemini 3 Flash (OCR libretto, Documenti Inbox, Bilancio, Corsi IVASS)
-- **Twilio/Spoki/SMTP**: dispatch lead-liste in MOCK (logga `db.dispatch_log`)
+## Credenziali test
+File: `/app/memory/test_credentials.md`
+- admin@assicura.it / Admin123!
+- collaboratore@assicura.it / Collab123!
+- dipendente@assicura.it / Dipendente123!
+- cliente@assicura.it / Cliente123!

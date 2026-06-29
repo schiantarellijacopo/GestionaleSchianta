@@ -21,7 +21,7 @@ import { Upload, FileText, Sparkles, CheckCircle2, X, Trash2, FileType2 } from "
 import { toast } from "sonner";
 
 const TIPO_BADGE = {
-    carta_identita: { l: "Carta d&rsquo;identità", c: "bg-sky-100 text-sky-700" },
+    carta_identita: { l: "Carta d'identità", c: "bg-sky-100 text-sky-700" },
     patente: { l: "Patente", c: "bg-violet-100 text-violet-700" },
     codice_fiscale: { l: "Codice fiscale", c: "bg-emerald-100 text-emerald-700" },
     libretto: { l: "Libretto", c: "bg-amber-100 text-amber-700" },
@@ -36,6 +36,7 @@ export default function DocumentiInbox() {
     const [items, setItems] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [reviewing, setReviewing] = useState(null);
+    const [dragActive, setDragActive] = useState(false);
 
     const load = () => api.get("/documenti-inbox").then((r) => setItems(r.data));
     useEffect(() => { load(); }, []);
@@ -43,16 +44,27 @@ export default function DocumentiInbox() {
     const upload = async (files) => {
         if (!files?.length) return;
         setUploading(true);
-        let ok = 0;
+        let okAuto = 0, okPending = 0;
         try {
             for (const file of files) {
                 const fd = new FormData(); fd.append("file", file);
                 try {
                     const r = await api.post("/documenti-inbox/analyze", fd, { headers: { "Content-Type": "multipart/form-data" } });
-                    ok++;
-                    toast.success(`${file.name} → ${TIPO_BADGE[r.data.tipo_documento]?.l || r.data.tipo_documento}`);
+                    const tipoLabel = TIPO_BADGE[r.data.tipo_documento]?.l || r.data.tipo_documento || "documento";
+                    if (r.data.auto_archiviato || r.data.stato === "salvato") {
+                        okAuto++;
+                        const tgt = r.data.salvato_in?.entita_tipo === "polizza"
+                            ? `polizza ${r.data.target_polizza?.numero_polizza || ""}`
+                            : `cliente ${r.data.target_anagrafica?.ragione_sociale || `${r.data.target_anagrafica?.cognome || ""} ${r.data.target_anagrafica?.nome || ""}`}`;
+                        toast.success(`✓ ${file.name} → ${tipoLabel} archiviato in ${tgt}`);
+                    } else {
+                        okPending++;
+                        toast.info(`${file.name} → ${tipoLabel} · da rivedere`);
+                    }
                 } catch (e) { toast.error(`${file.name}: ${e.response?.data?.detail || "Errore"}`); }
             }
+            if (okAuto > 0 && okPending === 0) toast.success(`🚀 Tutti i ${okAuto} documenti archiviati automaticamente!`);
+            else if (okAuto > 0 && okPending > 0) toast.info(`${okAuto} archiviati · ${okPending} da rivedere`);
             load();
         } finally { setUploading(false); }
     };
@@ -74,14 +86,25 @@ export default function DocumentiInbox() {
             />
 
             {/* DROPZONE */}
-            <Card className="p-6 border-2 border-dashed border-violet-300 bg-gradient-to-br from-violet-50/50 to-sky-50/30">
+            <Card className={`p-6 border-2 border-dashed transition-colors ${dragActive ? "border-violet-600 bg-violet-100" : "border-violet-300 bg-gradient-to-br from-violet-50/50 to-sky-50/30"}`}
+                onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+                onDragLeave={() => setDragActive(false)}
+                onDrop={(e) => {
+                    e.preventDefault(); setDragActive(false);
+                    const files = Array.from(e.dataTransfer.files || []);
+                    if (files.length) upload(files);
+                }}
+                data-testid="di-dropzone">
                 <div className="text-center">
                     <Upload size={32} className="text-violet-600 mx-auto mb-2" />
                     <p className="text-sm text-slate-700 font-medium mb-1">
-                        Trascina qui o carica documenti (Carta d&rsquo;identità, patente, CF, libretto, polizza, fattura...)
+                        Trascina qui o carica documenti (Carta d&apos;identità, patente, CF, libretto, polizza, fattura…)
                     </p>
-                    <p className="text-xs text-slate-500 mb-4">
+                    <p className="text-xs text-slate-500 mb-1">
                         Accetta più file contemporaneamente · PDF, JPG, PNG, WEBP
+                    </p>
+                    <p className="text-[11px] text-emerald-700 font-medium mb-4 inline-flex items-center gap-1">
+                        ⚡ Auto-archiviazione: i documenti con OCR ad alta confidenza vengono spostati AUTOMATICAMENTE nella sezione corretta del cliente
                     </p>
                     <input type="file" id="ifup" multiple accept="image/*,application/pdf" hidden
                         onChange={(e) => upload(Array.from(e.target.files || []))} />
@@ -212,7 +235,7 @@ function ReviewDialog({ item, onClose }) {
                 <div className="space-y-4 py-2">
                     {/* DATI ESTRATTI */}
                     <div>
-                        <Label className="text-xs uppercase tracking-wider text-slate-600">Dati estratti dall'OCR</Label>
+                        <Label className="text-xs uppercase tracking-wider text-slate-600">Dati estratti dall&apos;OCR</Label>
                         <div className="grid grid-cols-2 gap-1 mt-1">
                             {Object.entries(dati).filter(([_, v]) => v !== null && v !== "" && typeof v !== "object").map(([k, v]) => (
                                 <label key={k} className={`flex items-center gap-2 p-2 border rounded text-xs cursor-pointer
@@ -276,7 +299,7 @@ function ReviewDialog({ item, onClose }) {
                             <div className="bg-violet-50 border border-violet-200 rounded p-2">
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <Checkbox checked={salvaAvatar} onCheckedChange={(v) => setSalvaAvatar(!!v)} data-testid="di-avatar-chk" />
-                                    <span className="text-sm">📸 Salva la foto come avatar dell'anagrafica</span>
+                                    <span className="text-sm">📸 Salva la foto come avatar dell&apos;anagrafica</span>
                                 </label>
                                 <div className="text-[10px] text-slate-500 mt-1 ml-6">
                                     Verrà ritagliato il volto e impostato come avatar del cliente.

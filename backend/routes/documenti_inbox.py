@@ -128,10 +128,13 @@ async def _ocr_classifica(image_bytes: bytes, mime: str) -> dict:
 @router.post("/documenti-inbox/analyze")
 async def analizza_documento(
     file: UploadFile = File(...),
+    auto_archive: bool = Form(True),  # NEW: auto-salva se confidenza alta + match
     user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     """Analizza un documento appena caricato: classifica + estrae dati.
-    Non lo salva ancora — l'utente conferma via `/save`."""
+    Se confidenza == "alta" E è stata trovata un'anagrafica → AUTO-ARCHIVIA
+    nella sezione corretta (e applica i campi compatibili) senza intervento utente.
+    Altrimenti resta in stato 'pending' per revisione manuale."""
     contents = await file.read()
     if len(contents) > 20 * 1024 * 1024:
         raise HTTPException(400, "File troppo grande (max 20 MB)")
@@ -155,14 +158,34 @@ async def analizza_documento(
         )
         if anag:
             target_anagrafica = anag
+    # Fallback: cerca per cognome + nome se non trovato per CF
+    if not target_anagrafica and dati.get("cognome") and dati.get("nome"):
+        anag = await db.anagrafiche.find_one(
+            {"cognome": {"$regex": f"^{re.escape(dati['cognome'])}$", "$options": "i"},
+             "nome": {"$regex": f"^{re.escape(dati['nome'])}$", "$options": "i"}},
+            {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
+        )
+        if anag:
+            target_anagrafica = anag
 
-    # Polizza: ricerca per numero
+    # Polizza: ricerca per numero (numero_polizza o numero)
     target_polizza = None
     nump = (dati.get("numero_polizza") or "").strip()
     if nump:
-        pol = await db.polizze.find_one({"numero": nump}, {"_id": 0, "id": 1, "numero": 1})
+        pol = await db.polizze.find_one(
+            {"$or": [{"numero_polizza": nump}, {"numero": nump}]},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1},
+        )
         if pol:
             target_polizza = pol
+            # Se non c'è anagrafica ma la polizza ha un contraente, usa quello
+            if not target_anagrafica and pol.get("contraente_id"):
+                anag = await db.anagrafiche.find_one(
+                    {"id": pol["contraente_id"]},
+                    {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
+                )
+                if anag:
+                    target_anagrafica = anag
 
     # Salva temp nell'inbox (con il file binario in storage)
     inbox_id = str(uuid.uuid4())
@@ -192,6 +215,34 @@ async def analizza_documento(
     }
     await db.documenti_inbox.insert_one(doc_inbox)
     doc_inbox.pop("_id", None)
+
+    # === AUTO-ARCHIVE ===
+    # Se confidenza alta + tipo riconosciuto + target trovato → archivia automaticamente
+    confidenza_ok = (result.get("confidenza") == "alta")
+    tipo_ok = result.get("tipo_documento") and result.get("tipo_documento") != "altro"
+    has_target = bool(target_anagrafica or target_polizza)
+    if auto_archive and confidenza_ok and tipo_ok and has_target:
+        try:
+            # Tutti i campi disponibili vengono applicati
+            campi_auto = [k for k, v in (dati or {}).items() if v not in (None, "", [])]
+            auto_body = {
+                "anagrafica_id": (target_anagrafica or {}).get("id"),
+                "polizza_id": (target_polizza or {}).get("id"),
+                "campi_da_applicare": campi_auto,
+                "dati": dati,
+                "salva_avatar": True,
+            }
+            res = await _do_save(inbox_id, auto_body, user)
+            # Re-fetch the updated inbox doc to return the saved state
+            updated = await db.documenti_inbox.find_one({"id": inbox_id}, {"_id": 0})
+            if updated:
+                updated["auto_archiviato"] = True
+                updated["auto_archive_result"] = res
+                return updated
+        except Exception as e:
+            logging.warning("Auto-archive fallito per %s: %s", inbox_id, e)
+            # Lascia in pending: l'utente potrà rivedere manualmente
+
     return doc_inbox
 
 
@@ -220,6 +271,24 @@ async def salva_inbox(
         dati?: dict,                  # eventualmente sovrascrive i dati estratti
     }
     """
+    return await _do_save(iid, body, user)
+
+
+# Mappa tipo_documento → categoria documenti (per la "sezione" corretta)
+TIPO_DOC_TO_CATEGORIA = {
+    "carta_identita": "documento_identita",
+    "patente": "patente",
+    "codice_fiscale": "codice_fiscale",
+    "tessera_sanitaria": "codice_fiscale",
+    "passaporto": "documento_identita",
+    "libretto": "libretto_circolazione",
+    "polizza": "polizza",
+    "fattura": "fattura",
+    "altro": "altro",
+}
+
+
+async def _do_save(iid: str, body: dict, user: dict) -> dict:
     inb = await db.documenti_inbox.find_one({"id": iid}, {"_id": 0})
     if not inb:
         raise HTTPException(404, "Documento non trovato")
@@ -235,15 +304,25 @@ async def salva_inbox(
     campi = body.get("campi_da_applicare") or []
 
     # 1. Crea allegato copiando dal path inbox al path definitivo
-    entita_tipo = "polizza" if polizza_id else "anagrafica"
-    entita_id = polizza_id or anagrafica_id
+    # Se c'è una polizza E un'anagrafica → preferisci POLIZZA come entità per allegati polizza
+    tipo_doc = inb.get("tipo_documento") or "altro"
+    categoria = TIPO_DOC_TO_CATEGORIA.get(tipo_doc, "altro")
+    # Documenti d'identità vanno SEMPRE su anagrafica anche se è disponibile una polizza
+    if tipo_doc in ("carta_identita", "patente", "codice_fiscale", "tessera_sanitaria", "passaporto"):
+        entita_tipo = "anagrafica"
+        entita_id = anagrafica_id or polizza_id
+    else:
+        entita_tipo = "polizza" if polizza_id else "anagrafica"
+        entita_id = polizza_id or anagrafica_id
+
     alleg = Allegato(
         entita_tipo=entita_tipo, entita_id=entita_id,
         nome_file=inb.get("filename") or "documento",
         storage_path=inb.get("storage_path"),
         content_type=inb.get("content_type"),
         size=inb.get("size") or 0,
-        descrizione=f"Documenti inbox ({inb.get('tipo_documento')})",
+        descrizione=f"Documenti inbox ({tipo_doc})",
+        categoria=categoria,
         autore_id=user.get("id"),
     )
     await db.allegati.insert_one(alleg.model_dump())

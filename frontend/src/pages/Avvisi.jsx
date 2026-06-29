@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { api, API_BASE, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -331,8 +331,8 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                         const hasCell = !!cell;
                         const mezzi = [hasMail && "Email", hasCell && "WhatsApp"].filter(Boolean).join(" · ") || "—";
                         return (
-                            <>
-                                <tr key={k} className="bg-slate-50/40 hover:bg-sky-50/50" data-testid={`gruppo-${k}`}>
+                            <Fragment key={k}>
+                                <tr className="bg-slate-50/40 hover:bg-sky-50/50" data-testid={`gruppo-${k}`}>
                                     <td className="text-center">
                                         <input
                                             type="checkbox"
@@ -412,7 +412,7 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                         <td></td>
                                     </tr>
                                 ))}
-                            </>
+                            </Fragment>
                         );
                     })}
                 </tbody>
