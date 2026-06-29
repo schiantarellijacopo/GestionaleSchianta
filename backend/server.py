@@ -10138,6 +10138,7 @@ from routes import modelli as _modelli_router  # noqa: E402
 from routes import kpi as _kpi_router  # noqa: E402
 from routes import permessi as _perm_router  # noqa: E402
 from routes import insights as _insights_router  # noqa: E402
+from routes import cervello as _cervello_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10146,6 +10147,7 @@ api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)
 api.include_router(_perm_router.router)
 api.include_router(_insights_router.router)
+api.include_router(_cervello_router.router)
 
 app.include_router(api)
 

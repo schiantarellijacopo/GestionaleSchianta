@@ -16,6 +16,7 @@ import Sinistri from "@/pages/Sinistri";
 import SinistroDetail from "@/pages/SinistroDetail";
 import Statistiche from "@/pages/Statistiche";
 import Cervello from "@/pages/Cervello";
+import AssistentePersonale from "@/pages/AssistentePersonale";
 import Ritenute from "@/pages/Ritenute";
 import Contabilita from "@/pages/Contabilita";
 import Compagnie from "@/pages/Compagnie";
@@ -66,6 +67,7 @@ function App() {
                             <Route path="/sinistri/:id" element={<SinistroDetail />} />
                             <Route path="/statistiche" element={<Statistiche />} />
                             <Route path="/cervello" element={<Cervello />} />
+                            <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={<Ritenute />} />
                             <Route
                                 path="/avvisi"

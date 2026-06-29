@@ -42,6 +42,24 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (29/06/2026 — Il Cervello come controllo di gestione)
+- **Riorganizzato modulo AI**:
+  - 🧠 **Il Cervello** = Controllo di gestione economico-finanziario (solo admin)
+  - 🤖 **Assistente Personale** = Suggerimenti AI sui clienti (era l'ex Cervello)
+- **Backend `routes/cervello.py`** con endpoint:
+  - `GET /api/cervello/costi/{anno}` · `PUT /api/cervello/costi/{anno}` — costi annuali con ripartizione % per comparto
+  - `GET /api/cervello/analisi-pl?anno=` — P&L per comparto Auto/Persone/Aziende/Vita: polizze, premi, provvigioni reali (dai movimenti) o stimati (5%/8%), incidenza %, resa/pezzo, costi ripartiti, utile netto/pezzo
+  - `GET /api/cervello/top-clienti?limit=100` — classifica Pareto 80/20 con soglia evidenziata
+  - `GET /api/cervello/segmentazione` — clienti mono/multi-comparto + tasso di multi-comparto
+  - `POST /api/cervello/bilancio/upload?anno=` — upload CSV/JSON bilancio con classificazione automatica voci → costi
+- **Frontend `Cervello.jsx`** rinnovato con 4 tabs:
+  - 📈 Conto Economico: KPI globali (polizze/provvigioni/costi/utile) + tabella P&L per comparto con colori
+  - 🏆 Top Clienti: Pareto 80/20 evidenziato in giallo, colonne provvigioni/incidenza/cumulata
+  - 🥧 Segmentazione: tasso multi-comparto + breakdown mono_auto/persone/aziende/vita e 2/3/4 comparti
+  - 💰 Costi & Bilancio: editor voci di costo + ripartizione % validata (somma=100) + upload bilancio CSV/JSON
+- **Sidebar**: "Il Cervello" (admin) + "Assistente personale" (tutti) con icone separate (Brain/Bot)
+- **Test reali su 441 polizze**: Auto 132 polizze · Persone 301 · Aziende 6 · Vita 2. Utile netto agenzia 2026: 11.372,51 € (senza costi configurati)
+
 ## Changelog (29/06/2026 — completamento sezione strumenti AI)
 - **Libreria Tipologie Sinistri**: nuova collection `tipologie_sinistri` con seed di 39 tipologie standard italiane (RC Auto/ARD/Vita/Casa/Azienda/Infortuni/Malattie/Tutela/Viaggio). Ogni tipologia ha flag `richiede_cai`, `richiede_denuncia`, `categoria`, `attivo`. Sezione "Tipologie sinistri" in Librerie con CRUD completo. Form Sinistri (Nuova + Detail) ora usa Select dropdown con badge informativo "📌 Richiede CAI / modulo denuncia"
 - **Endpoint `/auth/me/permissions`**: ritorna `effective_permissions` dell'utente loggato + `is_full_admin` (per admin senza profilo) → il frontend può ora nascondere/disabilitare pulsanti in base ai reali permessi del profilo
