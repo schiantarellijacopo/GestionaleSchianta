@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    NotebookPen, Inbox, Brain, Bot,
+    NotebookPen, Inbox, Brain, Bot, Briefcase,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
@@ -27,6 +27,7 @@ const ALL_MENU_ITEMS = [
     { id: "titoli", path: "/titoli", icon: "Receipt", label: "Titoli", section: "assicurazione", roles: null },
     { id: "sinistri", path: "/sinistri", icon: "AlertTriangle", label: "Sinistri", section: "assicurazione", roles: null },
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "trattative", path: "/trattative", icon: "Briefcase", label: "Trattative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "alert", path: "/alert", icon: "Zap", label: "Alert & Automazioni", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "primanota", path: "/contabilita", icon: "BookOpen", label: "Prima nota", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "titoli_storici", path: "/titoli-storici", icon: "Receipt", label: "Titoli storici", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
@@ -55,7 +56,7 @@ const ALL_MENU_ITEMS = [
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
-    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot,
+    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase,
 };
 
 const SECTION_LABELS = {

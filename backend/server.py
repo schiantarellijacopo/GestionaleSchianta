@@ -2080,6 +2080,7 @@ async def list_polizze(
     compagnia_id: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
     categoria: Optional[str] = None,  # auto_priv|auto_az|altri_priv|altri_az|vita_inv|vita_prot
+    catastrofale: Optional[bool] = None,
     # filtri periodo (su scadenza)
     dal: Optional[str] = None,
     al: Optional[str] = None,
@@ -2157,6 +2158,11 @@ async def list_polizze(
         it["collaboratore_nome"] = _c.get("name")
         it["collaboratore_avatar_url"] = _c.get("avatar_url")
     # Filtro categoria business (post-processing — richiede tipo anagrafica)
+    if catastrofale is not None:
+        if catastrofale:
+            items = [p for p in items if p.get("catastrofale") is True]
+        else:
+            items = [p for p in items if not p.get("catastrofale")]
     if categoria:
         anag_tipo = {a["id"]: (a.get("tipo") or "persona_fisica")
                      async for a in db.anagrafiche.find(

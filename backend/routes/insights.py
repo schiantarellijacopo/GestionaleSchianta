@@ -469,3 +469,143 @@ async def delete_ritenuta(rid: str, user=Depends(require_user("admin"))) -> dict
     if res.deleted_count == 0:
         raise HTTPException(404, "Ritenuta non trovata")
     return {"ok": True}
+
+
+
+# ============= ASSISTENTE PERSONALE AI (Claude Sonnet 4.6) =============
+@router.post("/assistente-personale/genera-consiglio")
+async def genera_consiglio_ai(
+    body: dict, user=Depends(current_user),
+) -> dict:
+    """Genera un consiglio narrativo in italiano per un cliente specifico
+    usando Claude Sonnet 4.6 via Emergent LLM key.
+
+    Body: ``{anagrafica_id: str, contesto_extra?: str}``
+    """
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    aid = body.get("anagrafica_id")
+    if not aid:
+        raise HTTPException(400, "anagrafica_id obbligatorio")
+    # Carico insights del cliente (riusiamo la funzione esistente)
+    ins = await cliente_insights(aid, user)
+
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip()
+
+    # Mini contesto strutturato
+    prompt_ctx = f"""Cliente: {nome} ({ana.get('tipo','persona_fisica')})
+Cliente da: {ins['cliente_da_mesi']} mesi
+Polizze attive: {ins['polizze_attive']}
+Premio totale attivo: € {ins['premio_attivo_totale']:.2f}
+Sinistri totali: {ins['sinistri_totali']} · ultimo anno: {ins['sinistri_ultimo_anno']} · aperti: {ins['sinistri_aperti']}
+Polizze ferme >12 mesi: {len(ins['polizze_ferme_oltre_12m'])}
+Polizze sanitarie: {ins['polizze_sanitarie']}
+Ultima interazione marketing: {ins.get('ultima_interazione_marketing') or 'mai'}
+Suggerimenti automatici già rilevati: {[s['testo'] for s in ins['suggerimenti']]}
+Contesto extra dell'operatore: {body.get('contesto_extra','')}"""
+
+    system_msg = (
+        "Sei un assistente esperto di vendite assicurative in Italia. "
+        "Parli in italiano professionale ma amichevole. "
+        "Dato il profilo cliente, scrivi 3-5 frasi che indicano: "
+        "(1) come si presenta il cliente in sintesi, "
+        "(2) un'azione commerciale concreta da fare (upsell/cross-sell/check-up/contatto), "
+        "(3) entro quando agire e con quale canale (telefono/email/whatsapp). "
+        "Sii specifico e fattuale. Non inventare dati. Mai più di 100 parole."
+    )
+
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+
+    try:
+        chat = LlmChat(
+            api_key=key,
+            session_id=f"assistente-{aid}-{user.get('id')}",
+            system_message=system_msg,
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        resp = await chat.send_message(UserMessage(text=prompt_ctx))
+        # resp è una stringa col testo della risposta
+        testo = str(resp) if resp else "(nessuna risposta dall'AI)"
+    except Exception as e:
+        raise HTTPException(503, f"Errore Claude: {e}")
+
+    # Log nel diario cliente
+    await db.diario_cliente.insert_one({
+        "id": str(uuid.uuid4()),
+        "anagrafica_id": aid,
+        "tipo": "ai_suggerimento",
+        "data": _now_iso(),
+        "operatore_id": user.get("id"),
+        "contenuto": testo,
+        "fonte": "assistente_personale",
+    })
+    return {"anagrafica_id": aid, "consiglio": testo, "contesto": ins}
+
+
+# ============= TRATTATIVE =============
+class TrattativaBody(BaseModel):
+    anagrafica_id: str
+    titolo: str
+    descrizione: Optional[str] = None
+    ramo: Optional[str] = None
+    compagnia_di_provenienza: Optional[str] = None
+    compagnia_target_id: Optional[str] = None
+    data_scadenza_corrente: Optional[str] = None  # scadenza polizza concorrente
+    premio_corrente: float = 0
+    premio_proposto: float = 0
+    stato: str = "aperta"  # aperta | proposta_inviata | in_attesa | vinta | persa
+    note: Optional[str] = None
+    visibili_cliente: bool = False
+    collaboratore_id: Optional[str] = None
+
+
+@router.get("/trattative")
+async def list_trattative(
+    stato: Optional[str] = None, anagrafica_id: Optional[str] = None,
+    user=Depends(current_user),
+) -> list[dict]:
+    flt: dict = {}
+    if stato: flt["stato"] = stato
+    if anagrafica_id: flt["anagrafica_id"] = anagrafica_id
+    items = await db.trattative.find(flt, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    ana_ids = list({t["anagrafica_id"] for t in items})
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    for t in items:
+        a = anas.get(t["anagrafica_id"], {})
+        t["anagrafica_nome"] = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+    return items
+
+
+@router.post("/trattative", status_code=201)
+async def create_trattativa(body: TrattativaBody,
+                            user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    doc = {
+        "id": str(uuid.uuid4()),
+        **body.model_dump(),
+        "collaboratore_id": body.collaboratore_id or user.get("id"),
+        "created_at": _now_iso(),
+    }
+    await db.trattative.insert_one(doc)
+    return doc
+
+
+@router.put("/trattative/{tid}")
+async def update_trattativa(tid: str, body: TrattativaBody,
+                            user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    data = body.model_dump()
+    data["updated_at"] = _now_iso()
+    res = await db.trattative.update_one({"id": tid}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Trattativa non trovata")
+    return await db.trattative.find_one({"id": tid}, {"_id": 0})
+
+
+@router.delete("/trattative/{tid}")
+async def delete_trattativa(tid: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    res = await db.trattative.delete_one({"id": tid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Trattativa non trovata")
+    return {"ok": True}

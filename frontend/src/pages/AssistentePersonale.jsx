@@ -10,8 +10,11 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Loading, PageHeader } from "@/components/Shared";
-import { Brain, AlertTriangle, RefreshCw, ChevronRight } from "lucide-react";
+import { Brain, AlertTriangle, RefreshCw, ChevronRight, Sparkles, Search } from "lucide-react";
+import { toast } from "sonner";
 
 const PRIORITA_COLOR = {
     alta: "border-rose-400 bg-rose-50/40",
@@ -54,6 +57,9 @@ export default function AssistentePersonale() {
                     </Button>
                 }
             />
+
+            <AiConsiglioPanel />
+
 
             <Card className="p-3 flex flex-wrap gap-2 items-center">
                 <span className="text-xs text-slate-500 font-medium">Filtra per priorità:</span>
@@ -107,3 +113,90 @@ export default function AssistentePersonale() {
         </div>
     );
 }
+
+
+// ============ AI Consiglio personalizzato (Claude Sonnet 4.6) ============
+function AiConsiglioPanel() {
+    const [query, setQuery] = useState("");
+    const [risultati, setRisultati] = useState([]);
+    const [selected, setSelected] = useState(null);
+    const [contesto, setContesto] = useState("");
+    const [consiglio, setConsiglio] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    const search = async (q) => {
+        setQuery(q);
+        if (q.length < 2) { setRisultati([]); return; }
+        try {
+            const r = await api.get("/anagrafiche", { params: { q, limit: 8 } });
+            setRisultati(r.data || []);
+        } catch { setRisultati([]); }
+    };
+
+    const genera = async () => {
+        if (!selected) { toast.error("Seleziona prima un cliente"); return; }
+        setLoading(true); setConsiglio(null);
+        try {
+            const r = await api.post("/assistente-personale/genera-consiglio", {
+                anagrafica_id: selected.id, contesto_extra: contesto,
+            });
+            setConsiglio(r.data.consiglio);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore AI"); }
+        finally { setLoading(false); }
+    };
+
+    return (
+        <Card className="p-4 border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white" data-testid="ai-panel">
+            <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="text-violet-600" size={18} />
+                <h2 className="font-semibold text-slate-800">Consiglio AI personalizzato (Claude Sonnet 4.6)</h2>
+            </div>
+            <div className="space-y-3">
+                <div>
+                    <div className="text-xs text-slate-600 mb-1">Cerca cliente</div>
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Input value={query} onChange={(e) => search(e.target.value)}
+                            placeholder="Inizia a digitare nome o cognome…" className="pl-9"
+                            data-testid="ai-search" />
+                    </div>
+                    {risultati.length > 0 && !selected && (
+                        <div className="mt-1 max-h-40 overflow-y-auto bg-white border border-slate-200 rounded shadow text-sm">
+                            {risultati.map((a) => (
+                                <button key={a.id} className="block w-full text-left px-3 py-1.5 hover:bg-violet-50"
+                                    onClick={() => { setSelected(a); setQuery(a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`); setRisultati([]); }}
+                                    data-testid={`ai-cli-${a.id}`}>
+                                    <span className="font-medium">{a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}</span>
+                                    <span className="text-xs text-slate-500 ml-2">{a.codice_fiscale || a.partita_iva || ""}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {selected && (
+                        <div className="mt-1 bg-white border-2 border-violet-300 rounded p-2 flex items-center gap-2">
+                            <span className="text-sm font-medium flex-1">{selected.ragione_sociale || `${selected.cognome || ""} ${selected.nome || ""}`}</span>
+                            <button onClick={() => { setSelected(null); setQuery(""); setConsiglio(null); }}
+                                className="text-xs text-rose-600 hover:underline">cambia</button>
+                        </div>
+                    )}
+                </div>
+                <div>
+                    <div className="text-xs text-slate-600 mb-1">Contesto extra (opzionale)</div>
+                    <Textarea rows={2} value={contesto} onChange={(e) => setContesto(e.target.value)}
+                        placeholder="es. Ha appena cambiato lavoro, mi ha chiesto info sulla casa al mare…"
+                        data-testid="ai-contesto" />
+                </div>
+                <Button onClick={genera} disabled={!selected || loading}
+                    className="bg-violet-700 hover:bg-violet-800" data-testid="ai-genera">
+                    <Sparkles size={14} className="mr-1" /> {loading ? "Claude sta scrivendo…" : "Genera consiglio AI"}
+                </Button>
+                {consiglio && (
+                    <div className="bg-white border-l-4 border-violet-500 rounded p-3 shadow-sm whitespace-pre-wrap text-sm" data-testid="ai-result">
+                        {consiglio}
+                    </div>
+                )}
+            </div>
+        </Card>
+    );
+}
+

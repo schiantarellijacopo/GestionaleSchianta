@@ -42,6 +42,14 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (29/06/2026 — Claude AI + Trattative + Catastrofale)
+- **Assistente Personale AI con Claude Sonnet 4.6**: nuovo endpoint `POST /api/assistente-personale/genera-consiglio` che usa Emergent LLM key per generare consigli narrativi personalizzati. Prende il profilo cliente (mesi cliente, polizze, sinistri, marketing, polizze ferme) e produce 3-5 frasi in italiano con azione consigliata, tempistica e canale. Risposta loggata automaticamente nel Diario cliente
+- **UI AI Panel**: pannello "Consiglio AI personalizzato" nella pagina Assistente Personale con search cliente (typeahead `/anagrafiche?q=`), contesto extra opzionale, pulsante "Genera consiglio AI". Output formattato con bordo violetto laterale
+- **Tag Catastrofale finalizzato**: bulk update eseguito su 460 polizze. Filtro `?catastrofale=true` su `/api/polizze`. Badge "🌊 CAT" visualizzato nella colonna Ramo della lista polizze
+- **Sezione Trattative** `/trattative`: nuova pagina + CRUD `/api/trattative` per gestire proposte commerciali e disdette clienti da altre compagnie. Campi: titolo, ramo, compagnia provenienza, scadenza concorrente, premio attuale vs proposto, risparmio calcolato, stato (aperta/proposta_inviata/in_attesa/vinta/persa), flag "visibile al cliente"
+- **Sidebar**: voce "Trattative" in sezione Assicurazione (icona Briefcase)
+- **Testato Claude live**: risposta reale di 80 parole formattata con header (Profilo cliente / Azione consigliata / Tempistica)
+
 ## Changelog (29/06/2026 — Il Cervello come controllo di gestione)
 - **Riorganizzato modulo AI**:
   - 🧠 **Il Cervello** = Controllo di gestione economico-finanziario (solo admin)
