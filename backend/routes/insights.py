@@ -324,7 +324,11 @@ async def statistiche_overview(user=Depends(current_user)) -> dict:
 
 
 @router.get("/statistiche/isa")
-async def statistiche_isa(anno: int | None = None, user=Depends(current_user)) -> dict:
+async def statistiche_isa(
+    anno: int | None = None,
+    base_data: str | None = None,  # "copertura" | "incasso" (default: incasso)
+    user=Depends(current_user),
+) -> dict:
     """Calcolo Indice ISA (Indici Sintetici di Affidabilità fiscale).
 
     Per un'agenzia assicurativa il punteggio reale dipende dai dati fiscali
@@ -337,20 +341,29 @@ async def statistiche_isa(anno: int | None = None, user=Depends(current_user)) -
     - **Continuità**: % polizze non scadute (peso 20%)
     - **Crescita**: nuovi clienti 12 mesi / clienti totali (peso 15%)
 
-    Ogni indicatore è normalizzato 0-1 poi pesato e moltiplicato × 10.
+    `base_data`:
+    - "incasso" (default): ricavi calcolati su `data_incasso` titoli
+    - "copertura": ricavi calcolati su `data_copertura` titoli
     """
     now = datetime.now(timezone.utc)
     if anno is None:
         anno = now.year
     inizio_anno = f"{anno}-01-01"
     fine_anno = f"{anno}-12-31"
+    base_data = (base_data or "incasso").lower()
 
-    # Ricavi annuali (provvigioni dai movimenti contabili)
-    agg_prov = await db.movimenti.aggregate([
-        {"$match": {"tipo": "entrata", "data_movimento": {"$gte": inizio_anno, "$lte": fine_anno}}},
-        {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
-    ]).to_list(1)
-    ricavi = float(agg_prov[0]["tot"]) if agg_prov else 0
+    # Ricavi annuali — switchabili tra data_incasso / data_copertura
+    if base_data == "copertura":
+        agg_ric = await db.titoli.aggregate([
+            {"$match": {"data_copertura": {"$gte": inizio_anno, "$lte": fine_anno}}},
+            {"$group": {"_id": None, "tot": {"$sum": {"$ifNull": ["$provvigioni", 0]}}}},
+        ]).to_list(1)
+    else:
+        agg_ric = await db.titoli.aggregate([
+            {"$match": {"data_incasso": {"$gte": inizio_anno, "$lte": fine_anno}, "stato": "incassato"}},
+            {"$group": {"_id": None, "tot": {"$sum": {"$ifNull": ["$provvigioni", 0]}}}},
+        ]).to_list(1)
+    ricavi = float(agg_ric[0]["tot"]) if agg_ric else 0
 
     # Costi struttura (dal cervello)
     costi_doc = await db.costi_annuali.find_one({"anno": anno}, {"_id": 0})
@@ -404,6 +417,7 @@ async def statistiche_isa(anno: int | None = None, user=Depends(current_user)) -
 
     return {
         "anno": anno,
+        "base_data": base_data,
         "punteggio": score,
         "livello": livello,
         "colore": colore,

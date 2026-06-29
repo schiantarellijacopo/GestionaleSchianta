@@ -150,10 +150,31 @@ async def esegui_setup(
                 "created_by": user.get("id"),
             })
 
-    # 3. Sospesi manuali iniziali
+    # 3. Sospesi manuali iniziali — creati come titoli virtuali in db.titoli
+    #    così appaiono direttamente nel modulo "Sospesi (anticipi)"
     for sp in body.sospesi:
+        # cerca polizza target (se sp.polizza_id) o crea titolo orfano legato all'anagrafica
+        tit_id = str(uuid.uuid4())
+        await db.titoli.insert_one({
+            "id": tit_id,
+            "polizza_id": sp.polizza_id or None,
+            "contraente_id_setup": sp.anagrafica_id,
+            "tipo": "sospeso_iniziale",
+            "stato": "da_incassare",
+            "titolo_coperto": True,  # appare in /titoli/sospesi
+            "data_copertura": sp.data,
+            "data_scadenza": sp.data,
+            "data_pagamento_originale": sp.data,
+            "importo_lordo": round(sp.importo, 2),
+            "importo_netto": round(sp.importo, 2),
+            "descrizione": sp.descrizione,
+            "is_setup_iniziale": True,
+            "created_at": _now_iso(),
+        })
+        # mantengo anche record in sospesi_manuali per tracciabilità
         await db.sospesi_manuali.insert_one({
             "id": str(uuid.uuid4()),
+            "titolo_id": tit_id,
             "anagrafica_id": sp.anagrafica_id,
             "polizza_id": sp.polizza_id,
             "importo": round(sp.importo, 2),
@@ -194,6 +215,7 @@ async def esegui_setup(
         await db.setup_iniziale.update_one({"id": "setup_main"}, {"$set": setup_doc})
     else:
         await db.setup_iniziale.insert_one(setup_doc)
+    setup_doc.pop("_id", None)
 
     return {"ok": True, "setup": setup_doc}
 
@@ -204,11 +226,13 @@ async def reset_setup(user=Depends(require_user("admin"))) -> dict:
     sospesi e azzera il flag completato_at. Richiede ruolo admin."""
     res_mov = await db.movimenti.delete_many({"is_setup_iniziale": True})
     res_sosp = await db.sospesi_manuali.delete_many({"is_setup_iniziale": True})
+    res_tit = await db.titoli.delete_many({"is_setup_iniziale": True})
     await db.setup_iniziale.delete_many({})
     return {
         "ok": True,
         "movimenti_eliminati": res_mov.deleted_count,
         "sospesi_eliminati": res_sosp.deleted_count,
+        "titoli_eliminati": res_tit.deleted_count,
     }
 
 

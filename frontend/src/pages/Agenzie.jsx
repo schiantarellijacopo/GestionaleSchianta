@@ -16,7 +16,7 @@ import {
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Building2, Edit, Trash2, Crown, Handshake } from "lucide-react";
+import { Plus, Building2, Edit, Trash2, Crown, Handshake, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Agenzie() {
@@ -100,6 +100,7 @@ export default function Agenzie() {
 }
 
 function AgenziaCard({ a, onEdit, onDelete, testid }) {
+    const [collegaOpen, setCollegaOpen] = useState(false);
     return (
         <Card className={`p-4 ${a.tipo === "principale" ? "border-l-4 border-amber-400" : ""}`} data-testid={testid}>
             <div className="flex items-start justify-between gap-2">
@@ -124,14 +125,96 @@ function AgenziaCard({ a, onEdit, onDelete, testid }) {
                 {a.telefono && <div className="font-mono">{a.telefono}</div>}
                 {a.citta && <div>{a.citta} {a.provincia ? `(${a.provincia})` : ""}</div>}
                 {a.partita_iva && <div>P.IVA: <span className="font-mono">{a.partita_iva}</span></div>}
+                {a.perc_ritenuta_acconto > 0 && (
+                    <div className="text-rose-700 font-medium">Ritenuta acconto: {a.perc_ritenuta_acconto}%</div>
+                )}
             </div>
             {a.tipo === "partner" && (
-                <div className="mt-2 pt-2 border-t border-slate-100 text-xs">
-                    <span className="text-slate-500">Compagnie collegate: </span>
-                    <span className="font-bold text-sky-700">{a.n_compagnie_collegate || 0}</span>
+                <div className="mt-2 pt-2 border-t border-slate-100 text-xs flex items-center justify-between">
+                    <div>
+                        <span className="text-slate-500">Compagnie collegate: </span>
+                        <span className="font-bold text-sky-700">{a.n_compagnie_collegate || 0}</span>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => setCollegaOpen(true)}
+                        data-testid={`age-collega-${a.id}`}>
+                        <Link2 size={11} className="mr-1" /> Collega compagnie
+                    </Button>
                 </div>
             )}
+            {collegaOpen && <CollegaCompagnieDialog agenzia={a} onClose={() => setCollegaOpen(false)} />}
         </Card>
+    );
+}
+
+function CollegaCompagnieDialog({ agenzia, onClose }) {
+    const [comps, setComps] = useState(null);
+    const [collegate, setCollegate] = useState(new Set());
+    useEffect(() => {
+        api.get("/compagnie").then((r) => {
+            setComps(r.data);
+            setCollegate(new Set((r.data || []).filter((c) => c.agenzia_partner_id === agenzia.id).map((c) => c.id)));
+        });
+    }, [agenzia.id]);
+
+    const toggle = (id) => {
+        setCollegate((p) => {
+            const n = new Set(p);
+            if (n.has(id)) n.delete(id);
+            else n.add(id);
+            return n;
+        });
+    };
+
+    const save = async () => {
+        try {
+            for (const c of comps) {
+                const wantLinked = collegate.has(c.id);
+                const isLinked = c.agenzia_partner_id === agenzia.id;
+                if (wantLinked && !isLinked) {
+                    await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "collaborazione", agenzia_partner_id: agenzia.id });
+                } else if (!wantLinked && isLinked) {
+                    await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                }
+            }
+            toast.success("Collegamenti aggiornati"); onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader><DialogTitle>Collega compagnie a {agenzia.ragione_sociale}</DialogTitle></DialogHeader>
+                <div className="space-y-2 py-2">
+                    <div className="text-xs text-slate-600 bg-amber-50 border border-amber-200 p-2 rounded">
+                        Le compagnie selezionate diventano <strong>mandato di collaborazione</strong> via questa agenzia.
+                        Le compagnie deselezionate tornano a mandato diretto.
+                    </div>
+                    {comps === null ? <Loading /> : (
+                        <div className="grid grid-cols-1 gap-1 max-h-96 overflow-y-auto">
+                            {comps.map((c) => (
+                                <label key={c.id} className={`flex items-center gap-2 p-2 border rounded cursor-pointer text-sm
+                                    ${collegate.has(c.id) ? "bg-sky-50 border-sky-400" : "border-slate-200"}`}>
+                                    <Checkbox checked={collegate.has(c.id)} onCheckedChange={() => toggle(c.id)} />
+                                    <div className="flex-1">
+                                        <div className="font-medium">{c.ragione_sociale}</div>
+                                        <div className="text-[10px] text-slate-400 font-mono">{c.codice}</div>
+                                    </div>
+                                    {c.agenzia_partner_id && c.agenzia_partner_id !== agenzia.id && (
+                                        <span className="text-[10px] text-amber-700">⚠ già collegata ad altra agenzia</span>
+                                    )}
+                                </label>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="age-collega-save">
+                        Salva collegamenti ({collegate.size})
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

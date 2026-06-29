@@ -1,0 +1,40 @@
+{
+  "summary": "Iter25 — Backend pytest 17/18 PASS (1 skip atteso su paga-provvigioni: no provvigioni maturate per il collaboratore di test). Frontend Playwright: tutte le 7 pagine nuove caricano correttamente (Ritenute hub 3 tab, Statistiche 2 tab + ISA filtri, Setup iniziale form, Documenti Inbox dropzone, Lead Liste import, Fatture Agenzia Partner stats+table, Agenzie principale/partner+collega). Trovato e FIXATO un bug minor in setup_scambio.py (ObjectId non serializzabile nel return di /api/setup-iniziale).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/setup-iniziale", "issue": "FIXED in questa iterazione: motor mutava setup_doc aggiungendo _id (ObjectId) dopo insert_one, causando PydanticSerializationError 500. Aggiunto setup_doc.pop('_id', None) prima del return."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_agenzie_commerciale_setup_inbox.py",
+    "/app/test_reports/pytest/iter25_results.xml"
+  ],
+  "action_items": [
+    "Verificare scenario completo paga-provvigioni con un collaboratore che ha effettivamente provvigioni maturate (test skippato in regression).",
+    "Considerare aggiunta indice MongoDB su db.ritenute_compagnia.compagnia_id per performance estratto conto."
+  ],
+  "critical_code_review_comments": [
+    "setup_scambio.py: setup_iniziale endpoint - motor.insert_one() mutava il dict con _id ObjectId causando 500 al return. FIXED. Pattern simile da auditare in altri router (es. agenzie.py riga 87-90 ha doc.pop('_id') correttamente).",
+    "commerciale.py:268 - /ritenute-compagnia esegue check tipo_mandato='diretto' solo se il campo è impostato (`if comp.get('tipo_mandato') and ... != 'diretto'`). Compagnie senza tipo_mandato accettano la ritenuta. Comportamento accettabile ma da documentare.",
+    "setup_scambio.py:283 - scambio_dati_preview esegue una list comprehension async dentro un'altra (anagrafiche dentro allegati) — potrebbe essere lento su DB grossi, accettabile per ora.",
+    "documenti_inbox.py:286 - foto_volto_bbox può avere x/y/w/h=None (LLM ritorna null). Codice li forza a 0 con `float(bbox.get('x') or 0)` → controllo `w>0 and h>0` evita crop spurio. OK.",
+    "marketing_pro.py /lead-liste/dispatch è MOCKED — logga solo in db.dispatch_log, nessun invio reale Twilio/Spoki (documentato in test_credentials.md)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25_agenzie_commerciale_setup_inbox.py (new)",
+    "/app/backend/routes/setup_scambio.py (fix: pop _id from setup_doc before return)"
+  ],
+  "success_rate": {"backend": "94% (17/18, 1 skip atteso)", "frontend": "100% (7/7 pagine verificate)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Test crea: 1 agenzia partner TEST_Partner_xxx (cleanup in test_zz_cleanup), 1 trattativa TEST_trattativa_iter25 (cleanup), 1 ritenuta compagnia 100€ (creata→versata→stornata, resta in db come stornata), 3 fatture agenzia partner 1000€ TEST_FP_xxx (NON cleanup → restano in DB), 1 lista lead TEST_lista_xxx con 2 lead (NON cleanup), 1 sospeso iniziale (eliminato dal reset finale). NOTA: alcune compagnie esistenti potrebbero essere state promosse a tipo_mandato=collaborazione+agenzia_partner_id durante il test_create_calcola_netto — verificare se serve ripristinare.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tutto il backend modulare iter25 funziona: (1) /api/agenzie CRUD + n_compagnie_collegate; (2) POST /trattative ora funziona (bug routing duplicato in insights.py risolto, era /api/insights/trattative vs /api/trattative); (3) /ritenute-compagnia rispetta tipo_mandato='diretto', versa→USCITA in movimenti, storna funziona, estratto-conto compagnia espone tipo_mandato + totale_ritenute_compagnia + totale_fatture_partner; (4) /fatture-agenzia-partner calcola importo_netto = importo*(1-perc_ritenuta/100) correttamente (1000@23% → 770); (5) /partite-agenzia-partner espone provvigioni_maturate + totale_fatturato + partita_aperta; (6) /statistiche/isa?base_data=incasso|copertura entrambi ritornano punteggio 1-10; (7) /setup-iniziale crea movimenti+titoli is_setup_iniziale=True, /stato ritorna completato_at, /reset cancella tutto; (8) /documenti-inbox lista funziona (analyze non testato perché richiede OCR Gemini reale, accetta upload PDF/PNG); (9) /lead-liste/import CSV (Nome,Cognome,Email) crea 2 lead correttamente; (10) /scambio-dati/preview+log funzionano; (11) /collaboratori/{id}/paga-provvigioni con perc_ritenuta crea record auto in db.ritenute con causale 1040 (skippato perché collaboratore di test non ha provvigioni). Frontend: tutte le pagine target (/ritenute, /statistiche, /agenzie, /setup-iniziale, /documenti-inbox, /lead-liste, /fatture-agenzia-partner) caricano senza errori, mostrano la struttura attesa (tab, dropzone, form, tabelle).",
+  "rca of the issue": "Bug FIXED setup_iniziale 500: motor (mongo async driver) muta il dict passato a insert_one aggiungendo `_id: ObjectId(...)`. FastAPI poi tenta di serializzare il return JSON e fallisce con PydanticSerializationError perché ObjectId non è JSON-serializable. Fix: aggiungere `setup_doc.pop('_id', None)` dopo l'insert. Pattern da considerare a livello globale: ogni `insert_one(doc)` seguito da `return doc` (o `return {... 'x': doc}`) DEVE fare pop('_id'). Già fatto in altri router (es. commerciale.py:106 `await db.trattative.insert_one(doc); doc.pop('_id', None)`)."
+}
