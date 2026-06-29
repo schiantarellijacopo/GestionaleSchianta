@@ -103,6 +103,7 @@ async def create_modello(
             {"$set": {"default": False}},
         )
     await db.template_modelli.insert_one(doc)
+    doc.pop("_id", None)
     await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
     return doc
 

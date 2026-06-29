@@ -470,3 +470,177 @@ async def sposta_attivi_in_storico(user=Depends(require_user("admin"))) -> dict:
             await db.avvisi.delete_one({"id": a["id"]})
             moved += 1
     return {"moved": moved}
+
+
+class StoricoAvvisoBody(BaseModel):
+    model_config = {"extra": "allow"}  # accetta campi extra dal frontend
+    canale: str  # "email" | "whatsapp" | "sms" | "pec" | "pdf"
+    contraente_id: Optional[str] = None
+    contraente_nome: Optional[str] = None
+    polizza_id: Optional[str] = None
+    titolo_id: Optional[str] = None
+    titoli_ids: List[str] = []
+    tipo: Optional[str] = "avviso_scadenza"
+    target: Optional[str] = None
+    destinatario: Optional[str] = None
+    oggetto: Optional[str] = None
+    soggetto: Optional[str] = None
+    messaggio: Optional[str] = None
+    importo: Optional[float] = None
+
+
+@router.post("/storico-avvisi/registra", status_code=201)
+async def registra_storico_avviso(
+    body: StoricoAvvisoBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Registra l'invio di un avviso nello storico (chiamato dal frontend
+    dopo apertura WhatsApp/Email/PDF/SMS)."""
+    doc = {
+        "id": str(uuid.uuid4()),
+        **body.model_dump(exclude_none=False),
+        "sent_at": _now_iso(),
+        "operatore_id": user.get("id"),
+        "operatore_nome": user.get("name") or user.get("email"),
+    }
+    await db.storico_avvisi.insert_one(doc); doc.pop("_id", None)
+    return doc
+
+
+# ===========================================================
+# 8) SALUTE FISCALE CLIENTE (corporate: OCR bilancio + score rischio + cross-sell)
+# ===========================================================
+@router.post("/anagrafiche/{aid}/salute-fiscale/ocr-bilancio")
+async def salute_fiscale_ocr(
+    aid: str,
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """OCR del bilancio di un cliente azienda → salva su anagrafica.salute_fiscale_dati
+    con calcolo automatico di indicatori (ROE, leva, liquidità, score rischio)."""
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande")
+    ct = file.content_type or ""
+    if ct == "application/pdf":
+        import pdfplumber
+        with pdfplumber.open(BytesIO(contents)) as pdf:
+            if not pdf.pages:
+                raise HTTPException(400, "PDF vuoto")
+            img = pdf.pages[0].to_image(resolution=200).original
+            out = BytesIO(); img.save(out, format="JPEG", quality=85)
+            img_bytes = out.getvalue()
+    elif ct.startswith("image/"):
+        img_bytes = contents
+    else:
+        raise HTTPException(400, "Formato non supportato")
+    dati = await _ocr_bilancio_gemini(img_bytes)
+    # Calcolo indicatori di salute fiscale
+    def _f(k):
+        try:
+            v = dati.get(k)
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    ricavi = _f("ricavi") or 0
+    utile_netto = _f("utile_netto") or 0
+    utile_lordo = _f("utile_lordo") or 0
+    totale_attivo = _f("totale_attivo") or 0
+    patrimonio_netto = _f("patrimonio_netto") or 0
+    oneri_fin = _f("oneri_finanziari") or 0
+    imposte = _f("imposte") or 0
+    indicatori = {
+        "roe_pct": round((utile_netto / patrimonio_netto * 100), 2) if patrimonio_netto > 0 else None,
+        "ros_pct": round((utile_lordo / ricavi * 100), 2) if ricavi > 0 else None,
+        "leva_finanziaria": round((totale_attivo / patrimonio_netto), 2) if patrimonio_netto > 0 else None,
+        "incidenza_oneri_fin_pct": round((oneri_fin / ricavi * 100), 2) if ricavi > 0 else None,
+        "pressione_fiscale_pct": round((imposte / utile_lordo * 100), 2) if utile_lordo > 0 else None,
+    }
+    # Score rischio default 0-10 (10 = max rischio)
+    rischio = 0
+    if utile_netto < 0: rischio += 4
+    elif utile_netto < ricavi * 0.02: rischio += 2
+    if indicatori["leva_finanziaria"] and indicatori["leva_finanziaria"] > 3: rischio += 2
+    if indicatori["incidenza_oneri_fin_pct"] and indicatori["incidenza_oneri_fin_pct"] > 5: rischio += 2
+    if indicatori["roe_pct"] is not None and indicatori["roe_pct"] < 3: rischio += 1
+    if patrimonio_netto <= 0: rischio += 3
+    rischio = min(10, rischio)
+    # Cross-selling suggerito (azienda con bilancio positivo + utile > 50k):
+    cross_sell = []
+    if utile_netto > 50000 and patrimonio_netto > 100000:
+        cross_sell.append("RC Professionale / D&O")
+        cross_sell.append("Polizze Vita / Key Man")
+    if ricavi > 500000:
+        cross_sell.append("Cyber Risk")
+        cross_sell.append("RC Prodotti")
+    if oneri_fin > 10000:
+        cross_sell.append("Tutela Legale aziendale")
+    payload = {
+        "salute_fiscale_dati": {
+            "bilancio_estratto": dati,
+            "indicatori": indicatori,
+            "score_rischio_default": rischio,
+            "cross_sell_suggerito": cross_sell,
+            "ocr_data": _now_iso()[:10],
+        },
+        "salute_fiscale_aggiornata_il": _now_iso(),
+    }
+    await db.anagrafiche.update_one({"id": aid}, {"$set": payload})
+    return payload["salute_fiscale_dati"]
+
+
+@router.get("/anagrafiche/{aid}/salute-fiscale")
+async def get_salute_fiscale(aid: str, user=Depends(current_user)) -> dict:
+    ana = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, "salute_fiscale_dati": 1, "salute_fiscale_aggiornata_il": 1},
+    )
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    return {
+        "dati": ana.get("salute_fiscale_dati") or {},
+        "aggiornato_il": ana.get("salute_fiscale_aggiornata_il"),
+    }
+
+
+# ===========================================================
+# 9) RACCOLTA DATI + POTENTI DOMANDE (onboarding cliente)
+# ===========================================================
+class RaccoltaDatiBody(BaseModel):
+    raccolta_dati: dict
+
+
+@router.put("/anagrafiche/{aid}/raccolta-dati")
+async def save_raccolta_dati(
+    aid: str, body: RaccoltaDatiBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    res = await db.anagrafiche.update_one({"id": aid}, {"$set": {
+        "raccolta_dati": body.raccolta_dati,
+        "raccolta_dati_aggiornata_il": _now_iso(),
+        "updated_at": _now_iso(),
+    }})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Anagrafica non trovata")
+    return {"ok": True, "aggiornato_il": _now_iso()}
+
+
+class PotentiDomandeBody(BaseModel):
+    risposte: List[dict]  # [{"domanda_id": int, "domanda": str, "risposta": str}]
+
+
+@router.put("/anagrafiche/{aid}/potenti-domande")
+async def save_potenti_domande(
+    aid: str, body: PotentiDomandeBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    res = await db.anagrafiche.update_one({"id": aid}, {"$set": {
+        "potenti_domande_risposte": body.risposte,
+        "potenti_domande_aggiornate_il": _now_iso(),
+        "updated_at": _now_iso(),
+    }})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Anagrafica non trovata")
+    return {"ok": True, "aggiornato_il": _now_iso(), "n_risposte": len(body.risposte)}

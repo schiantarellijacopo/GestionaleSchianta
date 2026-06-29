@@ -20,9 +20,11 @@ export default function Voucher() {
     const [stato, setStato] = useState("all");
     const [open, setOpen] = useState(false);
     const [bulkOpen, setBulkOpen] = useState(false);
+    const [assignTarget, setAssignTarget] = useState(null);
     const [editing, setEditing] = useState(null);
     const [compagnie, setCompagnie] = useState([]);
     const [anagrafiche, setAnagrafiche] = useState([]);
+    const [collaboratori, setCollaboratori] = useState([]);
     const load = () => {
         const params = stato !== "all" ? { stato } : {};
         api.get("/voucher", { params }).then((r) => setItems(r.data));
@@ -31,20 +33,14 @@ export default function Voucher() {
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data));
         api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data));
+        api.get("/utenti").then((r) => setCollaboratori(
+            (r.data || []).filter((u) => ["collaboratore", "dipendente", "admin"].includes(u.role))
+        )).catch(() => setCollaboratori([]));
     }, []);
 
     const del = async (id) => {
         if (!window.confirm("Eliminare?")) return;
         await api.delete(`/voucher/${id}`); toast.success("Eliminato"); load();
-    };
-
-    const assegna = async (v) => {
-        const aid = window.prompt(`Assegna voucher ${v.codice} — digita ID anagrafica o lascia vuoto:`);
-        if (!aid) return;
-        try {
-            await api.post(`/voucher/${v.id}/assegna`, { anagrafica_id: aid });
-            toast.success("Assegnato"); load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     const counts = (items || []).reduce((acc, v) => {
@@ -115,11 +111,19 @@ export default function Voucher() {
                                     <td className="text-right font-mono">{v.tipo_valore === "percentuale" ? `${v.valore}%` : fmtEur(v.valore)}</td>
                                     <td>{v.tipo_valore}</td>
                                     <td>{v.valido_dal || ""} → {v.valido_al || "∞"}</td>
-                                    <td>{v.assegnato_a_nome || <span className="text-emerald-700 font-semibold">DISPONIBILE</span>}</td>
-                                    <td>{v.usato ? "✓ Usato" : (v.assegnato_a ? "Assegnato" : "—")}</td>
+                                    <td>
+                                        {v.assegnato_a_nome && <div className="text-emerald-700 text-[10px]">👤 {v.assegnato_a_nome}</div>}
+                                        {v.assegnato_a_collaboratore_nome && <div className="text-sky-700 text-[10px]">🧑‍💼 {v.assegnato_a_collaboratore_nome}</div>}
+                                        {!v.assegnato_a_nome && !v.assegnato_a_collaboratore_nome && (
+                                            <span className="text-emerald-700 font-semibold">DISPONIBILE</span>
+                                        )}
+                                    </td>
+                                    <td>{v.usato ? "✓ Usato" : ((v.assegnato_a || v.assegnato_a_collaboratore) ? "Assegnato" : "—")}</td>
                                     <td className="space-x-1 text-right">
-                                        {!v.assegnato_a && (
-                                            <button onClick={() => assegna(v)} className="text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded text-[10px]">
+                                        {!v.usato && (
+                                            <button onClick={() => setAssignTarget(v)}
+                                                className="text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded text-[10px]"
+                                                data-testid={`vou-assegna-${v.id}`}>
                                                 Assegna
                                             </button>
                                         )}
@@ -136,7 +140,83 @@ export default function Voucher() {
                     </table>
                 </div>
             )}
+            {assignTarget && (
+                <AssegnaDialog v={assignTarget} anagrafiche={anagrafiche} collaboratori={collaboratori}
+                    onClose={() => { setAssignTarget(null); load(); }} />
+            )}
         </div>
+    );
+}
+
+function AssegnaDialog({ v, anagrafiche, collaboratori, onClose }) {
+    const [anaId, setAnaId] = useState(v.assegnato_a || "");
+    const [collId, setCollId] = useState(v.assegnato_a_collaboratore || "");
+    const [qa, setQa] = useState("");
+    const [busy, setBusy] = useState(false);
+    const anaFiltered = (anagrafiche || []).filter((a) =>
+        !qa.trim() || `${a.ragione_sociale || ""} ${a.codice_fiscale || ""}`.toLowerCase().includes(qa.toLowerCase())
+    ).slice(0, 50);
+    const submit = async () => {
+        if (!anaId && !collId) { toast.error("Seleziona almeno un cliente o un collaboratore"); return; }
+        setBusy(true);
+        try {
+            await api.post(`/voucher/${v.id}/assegna`, {
+                anagrafica_id: anaId || null,
+                collaboratore_id: collId || null,
+            });
+            toast.success("Voucher assegnato"); onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setBusy(false); }
+    };
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid="vou-assegna-dialog">
+                <DialogHeader>
+                    <DialogTitle>Assegna voucher <span className="font-mono text-emerald-700">{v.codice}</span></DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                    <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 text-sky-800">
+                        💡 Puoi assegnare il voucher contemporaneamente a un <b>Collaboratore</b> e a un <b>Cliente</b>.
+                        Almeno uno dei due è obbligatorio.
+                    </div>
+                    <div>
+                        <Label className="text-xs">Collaboratore (opzionale)</Label>
+                        <Select value={collId || "_none_"} onValueChange={(v) => setCollId(v === "_none_" ? "" : v)}>
+                            <SelectTrigger data-testid="vou-assegna-coll"><SelectValue placeholder="— Nessun collaboratore —" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="_none_">— Nessuno —</SelectItem>
+                                {collaboratori.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>{c.name || c.email} ({c.role})</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label className="text-xs">Cliente (opzionale)</Label>
+                        <Input placeholder="Cerca cliente per nome o CF…" value={qa}
+                            onChange={(e) => setQa(e.target.value)} className="mb-1.5" data-testid="vou-assegna-search" />
+                        <Select value={anaId || "_none_"} onValueChange={(v) => setAnaId(v === "_none_" ? "" : v)}>
+                            <SelectTrigger data-testid="vou-assegna-ana"><SelectValue placeholder="— Nessun cliente —" /></SelectTrigger>
+                            <SelectContent className="max-h-72">
+                                <SelectItem value="_none_">— Nessuno —</SelectItem>
+                                {anaFiltered.map((a) => (
+                                    <SelectItem key={a.id} value={a.id}>
+                                        {a.ragione_sociale} {a.codice_fiscale && `· ${a.codice_fiscale}`}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={submit} disabled={busy} className="bg-emerald-700 hover:bg-emerald-800"
+                        data-testid="vou-assegna-save">
+                        {busy ? "…" : "Assegna voucher"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

@@ -35,7 +35,8 @@ class VoucherBody(BaseModel):
     valido_dal: Optional[str] = None
     valido_al: Optional[str] = None
     ramo: Optional[str] = None
-    assegnato_a: Optional[str] = None  # anagrafica_id
+    assegnato_a: Optional[str] = None  # anagrafica_id (cliente)
+    assegnato_a_collaboratore: Optional[str] = None  # user_id (collaboratore)
     note: Optional[str] = None
     usato: bool = False
     data_uso: Optional[str] = None
@@ -50,21 +51,27 @@ async def list_voucher(
     flt: dict = {}
     if compagnia_id: flt["compagnia_id"] = compagnia_id
     if stato == "disponibile":
-        flt["assegnato_a"] = None; flt["usato"] = False
+        flt["assegnato_a"] = None; flt["assegnato_a_collaboratore"] = None; flt["usato"] = False
     elif stato == "assegnato":
-        flt["assegnato_a"] = {"$ne": None}; flt["usato"] = False
+        flt["$or"] = [{"assegnato_a": {"$ne": None}}, {"assegnato_a_collaboratore": {"$ne": None}}]
+        flt["usato"] = False
     elif stato == "usato":
         flt["usato"] = True
     items = await db.voucher.find(flt, {"_id": 0}).sort("created_at", -1).to_list(5000)
     ana_ids = list({v["assegnato_a"] for v in items if v.get("assegnato_a")})
     anas = {a["id"]: a async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    coll_ids = list({v["assegnato_a_collaboratore"] for v in items if v.get("assegnato_a_collaboratore")})
+    colls = {u["id"]: u async for u in db.users.find(
+        {"id": {"$in": coll_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
     comp_ids = list({v["compagnia_id"] for v in items if v.get("compagnia_id")})
     comps = {c["id"]: c async for c in db.compagnie.find(
         {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
     for v in items:
         a = anas.get(v.get("assegnato_a"), {})
         v["assegnato_a_nome"] = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+        c = colls.get(v.get("assegnato_a_collaboratore"), {})
+        v["assegnato_a_collaboratore_nome"] = c.get("name") or c.get("email")
         v["compagnia_nome"] = comps.get(v.get("compagnia_id"), {}).get("ragione_sociale")
     return items
 
@@ -104,12 +111,18 @@ async def delete_voucher(vid: str, user=Depends(require_user("admin"))) -> dict:
 @router.post("/voucher/{vid}/assegna")
 async def assegna_voucher(vid: str, body: dict,
                           user=Depends(require_user("admin", "collaboratore"))) -> dict:
-    ana_id = body.get("anagrafica_id")
-    if not ana_id:
-        raise HTTPException(400, "anagrafica_id obbligatorio")
-    await db.voucher.update_one({"id": vid}, {"$set": {
-        "assegnato_a": ana_id, "data_assegnazione": _now_iso(),
-    }})
+    """Assegna un voucher a un cliente (anagrafica_id) e/o a un collaboratore (collaboratore_id).
+    Almeno uno dei due deve essere presente. Si possono assegnare entrambi contemporaneamente."""
+    ana_id = body.get("anagrafica_id") or None
+    coll_id = body.get("collaboratore_id") or None
+    if not ana_id and not coll_id:
+        raise HTTPException(400, "Indicare almeno un cliente o un collaboratore")
+    upd = {"data_assegnazione": _now_iso()}
+    if ana_id:
+        upd["assegnato_a"] = ana_id
+    if coll_id:
+        upd["assegnato_a_collaboratore"] = coll_id
+    await db.voucher.update_one({"id": vid}, {"$set": upd})
     return await db.voucher.find_one({"id": vid}, {"_id": 0})
 
 
@@ -244,6 +257,7 @@ async def invia_newsletter(nid: str,
 COL_ALIASES = {
     "nome": ["nome", "first_name", "firstname", "first name", "name"],
     "cognome": ["cognome", "last_name", "lastname", "last name", "surname"],
+    "nome_completo_unico": ["contatto", "nominativo", "cliente", "denominazione"],  # "PEPE ALFONSO" → cognome+nome
     "codice_fiscale": ["codice fiscale", "codice_fiscale", "cf", "fiscal code", "fiscalcode"],
     "email": ["email", "e-mail", "mail", "posta", "indirizzo email"],
     "telefono": ["telefono", "phone", "tel", "fisso"],
@@ -253,7 +267,41 @@ COL_ALIASES = {
     "ragione_sociale": ["ragione sociale", "ragione_sociale", "azienda", "company"],
     "data_nascita": ["data nascita", "data_nascita", "birthdate", "data di nascita"],
     "indirizzo": ["indirizzo", "address", "via"],
-    "tipo": ["tipo", "categoria"],
+    "tipo": ["tipo", "categoria", "segmento lista", "partizionamento cliente"],
+    "professione": ["professione", "professione/attività", "professione/attivita", "occupazione", "attività"],
+    "eta": ["età", "eta", "anni"],
+    "codice_agente": ["cod. age.", "cod age", "codice agente", "punto vendita", "rhx", "cod. age. - rhx"],
+    "esito": ["esito", "stato attivazione", "stato"],
+    "cross_selling": ["cross selling", "cross-selling"],
+    # === RHX specific (Cattolica/Generali iniziativa AutoConvenienTe & DNA senza RCA) ===
+    "id_contatto": ["idcontatto", "id contatto"],
+    "id_gestore": ["idgestore", "id gestore"],
+    "gestore_contatto": ["gestore contatto", "gestore"],
+    "canale": ["canale"],
+    "stato_comunicazione": ["stato comunicazione"],
+    "data_scadenza_contatto": ["data scadenza contatto"],
+    "codice_sag": ["codice sag", "sag"],
+    "privacy_commerciale": ["privacy commerciale"],
+    "privacy_posta_telefono": ["privacy posta/telefono", "privacy posta telefono"],
+    "privacy_email_sms": ["privacy email/sms", "privacy email sms"],
+    "livello_piu_generali": ["livello più generali", "livello piu generali"],
+    "stato_ultimo_puc": ["stato ultimo puc"],
+    "profilo_cliente": ["profilo cliente"],
+    "esito_comunicazione": ["esito comunicazione"],
+    "azione_cliente": ["azione cliente"],
+    "esito_direzionale": ["esito direzionale"],
+    "esito_contatto": ["esito contatto"],
+    "esito_trattativa": ["esito trattativa"],
+    "attivazione_s": ["attivaz.", "attivaz. - [s]", "attivazione"],
+    "aggiorna_attivazione": ["aggiorna attivazione"],
+    "aggiorna_data_scadenza": ["aggiorna data scadenza contatto (nel formato gg/mm/aaaa)", "aggiorna data scadenza contatto"],
+    "data_comunicazione": ["data comunicazione"],
+    "data_azione_cliente": ["data azione cliente"],
+    "data_direzionale": ["data direzionale"],
+    "aggiorna_contatto": ["aggiorna contatto"],
+    "data_contatto": ["data contatto"],
+    "aggiorna_trattativa": ["aggiorna trattativa"],
+    "data_trattativa": ["data trattativa"],
 }
 
 
@@ -290,24 +338,27 @@ def _parse_xlsx(content: bytes) -> List[dict]:
     except ImportError:
         raise HTTPException(500, "openpyxl non installato")
     wb = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
-    ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
-    header = next(rows_iter, None)
-    if not header:
-        return []
-    cols = [_normalize_col(c) for c in header]
-    rows = []
-    for r in rows_iter:
-        if not r or all(v is None or str(v).strip() == "" for v in r):
+    rows: List[dict] = []
+    # Itera su TUTTI i fogli (es. file RHX con "AutoConvenienTe" + "DNA senza RCA")
+    for ws in wb.worksheets:
+        rows_iter = ws.iter_rows(values_only=True)
+        header = next(rows_iter, None)
+        if not header:
             continue
-        row = {}
-        for i, v in enumerate(r):
-            if i >= len(cols): break
-            col = cols[i]
-            if col and v is not None and str(v).strip():
-                row[col] = str(v).strip()
-        if row:
-            rows.append(row)
+        cols = [_normalize_col(c) for c in header]
+        if not any(cols):
+            continue
+        for r in rows_iter:
+            if not r or all(v is None or str(v).strip() == "" for v in r):
+                continue
+            row = {"_sheet": ws.title}
+            for i, v in enumerate(r):
+                if i >= len(cols): break
+                col = cols[i]
+                if col and v is not None and str(v).strip():
+                    row[col] = str(v).strip()
+            if len(row) > 1:
+                rows.append(row)
     return rows
 
 
@@ -367,6 +418,44 @@ async def import_lead_lista(
 
     if not rows:
         raise HTTPException(400, "File vuoto o senza dati validi")
+
+    # Post-process: se c'è solo "nome_completo_unico" (es. "PEPE ALFONSO" = cognome nome),
+    # spezzalo in cognome + nome.
+    for r in rows:
+        nc = r.pop("nome_completo_unico", None)
+        if nc and not r.get("nome") and not r.get("cognome"):
+            parts = str(nc).strip().split()
+            if len(parts) >= 2:
+                r["cognome"] = parts[0]
+                r["nome"] = " ".join(parts[1:])
+            elif len(parts) == 1:
+                r["cognome"] = parts[0]
+        # Pulizia: i file Excel usano "-" come placeholder per "vuoto"
+        for k in list(r.keys()):
+            if r[k] in ("-", "--", "---"):
+                r[k] = None
+        # Email lowercase
+        if r.get("email"):
+            r["email"] = r["email"].lower().strip()
+        # Privacy normalization: "S" → True, "N" → False
+        for pk in ("privacy_commerciale", "privacy_posta_telefono", "privacy_email_sms"):
+            v = r.get(pk)
+            if v is not None:
+                r[pk] = str(v).strip().upper() in ("S", "SI", "SÌ", "Y", "YES", "1", "TRUE")
+        # Indirizzo RHX format: "VIA X 12-23030-CITTA-SO" → splitta in indirizzo + citta + cap + provincia
+        ind = r.get("indirizzo")
+        if ind and "-" in ind and not r.get("citta"):
+            parts = [p.strip() for p in ind.split("-")]
+            if len(parts) >= 3:
+                r["indirizzo"] = parts[0]
+                # cap (5 digits)
+                for p in parts[1:]:
+                    if p.isdigit() and len(p) == 5:
+                        r["cap"] = p
+                if len(parts) >= 3:
+                    r["citta"] = parts[2] if len(parts) > 2 else parts[1]
+                if len(parts) >= 4 and len(parts[-1]) == 2:
+                    r["provincia"] = parts[-1].upper()
 
     lista_id = str(uuid.uuid4())
     matched_clienti, lead_creati = 0, 0

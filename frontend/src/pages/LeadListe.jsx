@@ -164,8 +164,11 @@ function ImportDialog({ onClose }) {
                         onChange={(e) => set("file", e.target.files?.[0])} data-testid="ll-imp-file" /></div>
                 <div className="text-[11px] text-slate-500 bg-indigo-50 border border-indigo-200 rounded p-2">
                     <strong>Schema accettato (colonne con header):</strong> Nome, Cognome, Codice Fiscale,
-                    Email, Telefono, Cellulare, Città, Note, Ragione Sociale, Indirizzo, Data Nascita.
-                    Il matching avviene su CF → Email → Telefono.
+                    Email, Telefono, Cellulare, Città, Note, Ragione Sociale, Indirizzo, Data Nascita.<br />
+                    <strong>✓ Formato RHX/Cattolica/Generali supportato:</strong> "Contatto" (NOME COGNOME), Telefono, Cellulare, Email,
+                    Indirizzo (es. "VIA X 12-23030-CITTA-SO"), Età, Professione/Attività, Privacy Commerciale/Posta/Email (S/N),
+                    Segmento Lista, Cross Selling, Esito. Funziona anche su file multi-foglio (es. AutoConvenienTe + Vita-DNA senza RCA).<br />
+                    Il matching avviene su CF → Email → Telefono/Cellulare.
                 </div>
                 <div><Label>Note</Label>
                     <Textarea rows={2} value={f.note} onChange={(e) => set("note", e.target.value)} /></div>

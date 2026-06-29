@@ -2762,22 +2762,106 @@ const MODELLI_TIPI = [
 ];
 
 const PLACEHOLDERS_DOC = [
-    { k: "cliente_nome", desc: "Nome contraente" },
-    { k: "cliente_indirizzo", desc: "Indirizzo del cliente" },
-    { k: "cliente_comune", desc: "Comune" },
-    { k: "cliente_cap", desc: "CAP" },
-    { k: "cliente_provincia", desc: "Provincia" },
-    { k: "azienda_nome", desc: "Ragione sociale agenzia" },
-    { k: "azienda_iban", desc: "IBAN agenzia" },
-    { k: "azienda_telefono", desc: "Telefono agenzia" },
-    { k: "azienda_email", desc: "Email agenzia" },
-    { k: "totale", desc: "Importo totale (€)" },
-    { k: "numero_titoli", desc: "Numero titoli" },
-    { k: "data_oggi", desc: "Data odierna (gg-mm-aaaa)" },
-    { k: "numero_polizza", desc: "Numero polizza (singola)" },
-    { k: "numero_titolo", desc: "Numero titolo" },
-    { k: "scadenza", desc: "Data scadenza" },
-    { k: "importo_abbuono", desc: "Importo abbuono (€)" },
+    // === Cliente / Contraente ===
+    { k: "cliente_nome", desc: "Nome / Ragione sociale contraente", cat: "Cliente" },
+    { k: "cliente_cognome", desc: "Cognome contraente (se persona fisica)", cat: "Cliente" },
+    { k: "cliente_indirizzo", desc: "Indirizzo del cliente", cat: "Cliente" },
+    { k: "cliente_comune", desc: "Comune di residenza", cat: "Cliente" },
+    { k: "cliente_cap", desc: "CAP", cat: "Cliente" },
+    { k: "cliente_provincia", desc: "Provincia", cat: "Cliente" },
+    { k: "cliente_codice_fiscale", desc: "Codice fiscale", cat: "Cliente" },
+    { k: "cliente_partita_iva", desc: "Partita IVA", cat: "Cliente" },
+    { k: "cliente_email", desc: "Email cliente", cat: "Cliente" },
+    { k: "cliente_telefono", desc: "Telefono fisso", cat: "Cliente" },
+    { k: "cliente_cellulare", desc: "Cellulare", cat: "Cliente" },
+    { k: "cliente_data_nascita", desc: "Data di nascita", cat: "Cliente" },
+    { k: "cliente_luogo_nascita", desc: "Luogo di nascita", cat: "Cliente" },
+    { k: "cliente_professione", desc: "Professione/Attività", cat: "Cliente" },
+    { k: "cliente_iban", desc: "IBAN cliente", cat: "Cliente" },
+    // === Polizza ===
+    { k: "numero_polizza", desc: "Numero polizza", cat: "Polizza" },
+    { k: "ramo", desc: "Ramo polizza (es. RCA, CASA, VITA)", cat: "Polizza" },
+    { k: "prodotto", desc: "Prodotto polizza (nome commerciale)", cat: "Polizza" },
+    { k: "stato_polizza", desc: "Stato polizza (attiva/scaduta/…)", cat: "Polizza" },
+    { k: "data_effetto", desc: "Data effetto polizza", cat: "Polizza" },
+    { k: "data_scadenza", desc: "Data scadenza polizza", cat: "Polizza" },
+    { k: "data_scadenza_copertura", desc: "Data scadenza copertura", cat: "Polizza" },
+    { k: "data_prossima_quietanza", desc: "Data prossima quietanza", cat: "Polizza" },
+    { k: "frazionamento", desc: "Frazionamento (annuale/semestrale/…)", cat: "Polizza" },
+    { k: "mandato", desc: "Mandato polizza", cat: "Polizza" },
+    { k: "termini_mora_giorni", desc: "Termini mora (giorni)", cat: "Polizza" },
+    { k: "termini_disdetta_giorni", desc: "Termini disdetta (giorni)", cat: "Polizza" },
+    { k: "tacito_rinnovo", desc: "Tacito rinnovo (sì/no)", cat: "Polizza" },
+    { k: "oggetto_assicurato", desc: "Oggetto assicurato", cat: "Polizza" },
+    // === Premi ===
+    { k: "premio_lordo", desc: "Premio lordo (€)", cat: "Premi" },
+    { k: "premio_netto", desc: "Premio netto (€)", cat: "Premi" },
+    { k: "premio_tasse", desc: "Imposte assicurative (€)", cat: "Premi" },
+    { k: "premio_imposte", desc: "Altre imposte/oneri (€)", cat: "Premi" },
+    { k: "premio_ssn", desc: "Contributo SSN (€)", cat: "Premi" },
+    { k: "provvigioni", desc: "Provvigioni (€)", cat: "Premi" },
+    // === Veicolo (RCA) ===
+    { k: "targa", desc: "Targa veicolo", cat: "Veicolo" },
+    { k: "veicolo_marca", desc: "Marca veicolo", cat: "Veicolo" },
+    { k: "veicolo_modello", desc: "Modello veicolo", cat: "Veicolo" },
+    { k: "veicolo_tipo", desc: "Tipo veicolo (auto/moto/autocarro…)", cat: "Veicolo" },
+    { k: "veicolo_alimentazione", desc: "Alimentazione (benzina/diesel/…)", cat: "Veicolo" },
+    { k: "veicolo_uso", desc: "Uso (privato/uso terzi/…)", cat: "Veicolo" },
+    { k: "veicolo_immatricolazione", desc: "Data immatricolazione", cat: "Veicolo" },
+    { k: "veicolo_cv_fiscali", desc: "CV fiscali", cat: "Veicolo" },
+    { k: "veicolo_kw", desc: "KW", cat: "Veicolo" },
+    { k: "veicolo_cilindrata", desc: "Cilindrata", cat: "Veicolo" },
+    { k: "veicolo_posti", desc: "Numero posti", cat: "Veicolo" },
+    { k: "bm_provenienza", desc: "B-M di provenienza", cat: "Veicolo" },
+    { k: "bm_assegnata", desc: "B-M assegnata", cat: "Veicolo" },
+    { k: "bm_assegnata_cu", desc: "B-M assegnata CU", cat: "Veicolo" },
+    { k: "intestatario", desc: "Intestatario veicolo", cat: "Veicolo" },
+    // === Compagnia ===
+    { k: "compagnia_nome", desc: "Ragione sociale compagnia", cat: "Compagnia" },
+    { k: "compagnia_codice", desc: "Codice compagnia", cat: "Compagnia" },
+    // === Titolo ===
+    { k: "numero_titolo", desc: "Numero titolo", cat: "Titolo" },
+    { k: "data_emissione_titolo", desc: "Data emissione titolo", cat: "Titolo" },
+    { k: "data_scadenza_titolo", desc: "Data scadenza titolo", cat: "Titolo" },
+    { k: "data_incasso", desc: "Data incasso titolo", cat: "Titolo" },
+    { k: "importo_lordo_titolo", desc: "Importo lordo titolo (€)", cat: "Titolo" },
+    { k: "mezzo_pagamento", desc: "Mezzo di pagamento", cat: "Titolo" },
+    // === Sinistro ===
+    { k: "numero_sinistro", desc: "Numero sinistro", cat: "Sinistro" },
+    { k: "data_avvenimento_sinistro", desc: "Data avvenimento sinistro", cat: "Sinistro" },
+    { k: "data_denuncia_sinistro", desc: "Data denuncia sinistro", cat: "Sinistro" },
+    { k: "luogo_sinistro", desc: "Luogo sinistro", cat: "Sinistro" },
+    { k: "stato_sinistro", desc: "Stato sinistro", cat: "Sinistro" },
+    { k: "riserva_sinistro", desc: "Riserva sinistro (€)", cat: "Sinistro" },
+    { k: "liquidazione_sinistro", desc: "Liquidazione sinistro (€)", cat: "Sinistro" },
+    // === Collaboratore / Operatore ===
+    { k: "operatore_nome", desc: "Nome collaboratore di riferimento", cat: "Operatore" },
+    { k: "operatore_email", desc: "Email collaboratore", cat: "Operatore" },
+    { k: "operatore_telefono", desc: "Telefono collaboratore", cat: "Operatore" },
+    // === Agenzia ===
+    { k: "azienda_nome", desc: "Ragione sociale agenzia", cat: "Agenzia" },
+    { k: "azienda_iban", desc: "IBAN agenzia", cat: "Agenzia" },
+    { k: "azienda_telefono", desc: "Telefono agenzia", cat: "Agenzia" },
+    { k: "azienda_email", desc: "Email agenzia", cat: "Agenzia" },
+    { k: "azienda_indirizzo", desc: "Indirizzo agenzia", cat: "Agenzia" },
+    { k: "azienda_pec", desc: "PEC agenzia", cat: "Agenzia" },
+    // === Totali aggregati ===
+    { k: "totale", desc: "Importo totale (€)", cat: "Totali" },
+    { k: "totale_lordo", desc: "Totale lordo (€)", cat: "Totali" },
+    { k: "totale_netto", desc: "Totale netto (€)", cat: "Totali" },
+    { k: "numero_titoli", desc: "Numero titoli", cat: "Totali" },
+    { k: "numero_polizze", desc: "Numero polizze", cat: "Totali" },
+    { k: "numero_sinistri", desc: "Numero sinistri", cat: "Totali" },
+    // === Sistema / Date ===
+    { k: "data_oggi", desc: "Data odierna (gg-mm-aaaa)", cat: "Sistema" },
+    { k: "ora_oggi", desc: "Ora odierna (HH:MM)", cat: "Sistema" },
+    { k: "anno_corrente", desc: "Anno corrente", cat: "Sistema" },
+    { k: "scadenza", desc: "Data scadenza (alias generico)", cat: "Sistema" },
+    { k: "importo_abbuono", desc: "Importo abbuono (€)", cat: "Sistema" },
+    // === Voucher / Marketing ===
+    { k: "voucher_codice", desc: "Codice voucher", cat: "Marketing" },
+    { k: "voucher_valore", desc: "Valore voucher (€ o %)", cat: "Marketing" },
+    { k: "voucher_validita", desc: "Periodo di validità voucher", cat: "Marketing" },
 ];
 
 // Categorie raggruppate per chiarezza UI (tabs)
@@ -3085,15 +3169,37 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                     </div>
 
                     <div className="bg-slate-50 border border-slate-200 rounded-md p-2">
-                        <Label className="text-[11px] uppercase tracking-wider text-slate-500">Inserisci placeholder</Label>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                            {PLACEHOLDERS_DOC.map((p) => (
-                                <button key={p.k} type="button" onClick={() => insertPlaceholder(p.k)}
-                                    title={p.desc}
-                                    className="text-[11px] px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-sky-50 hover:border-sky-300 font-mono"
-                                    data-testid={`ph-${p.k}`}>
-                                    {`{${p.k}}`}
-                                </button>
+                        <Label className="text-[11px] uppercase tracking-wider text-slate-500">Inserisci placeholder (clicca per inserire)</Label>
+                        <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
+                            {Object.entries(
+                                PLACEHOLDERS_DOC.reduce((acc, p) => {
+                                    const cat = p.cat || "Altro";
+                                    if (!acc[cat]) acc[cat] = [];
+                                    acc[cat].push(p);
+                                    return acc;
+                                }, {})
+                            ).map(([cat, items]) => (
+                                <div key={cat} className="bg-white border border-slate-200 rounded p-2">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-sky-700 mb-1.5">
+                                        {cat} <span className="text-slate-400 font-mono">({items.length})</span>
+                                    </div>
+                                    <table className="w-full text-xs">
+                                        <tbody>
+                                            {items.map((p) => (
+                                                <tr key={p.k} className="border-t border-slate-100 hover:bg-sky-50">
+                                                    <td className="py-1 pr-2">
+                                                        <button type="button" onClick={() => insertPlaceholder(p.k)}
+                                                            className="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 bg-white hover:bg-sky-100 hover:border-sky-400 font-mono whitespace-nowrap"
+                                                            data-testid={`ph-${p.k}`}>
+                                                            {`{${p.k}}`}
+                                                        </button>
+                                                    </td>
+                                                    <td className="py-1 text-slate-600 text-[11px]">{p.desc}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             ))}
                         </div>
                     </div>

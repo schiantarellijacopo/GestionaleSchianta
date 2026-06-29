@@ -27,6 +27,10 @@ import AnalisiClienteTab from "@/components/AnalisiClienteTab";
 import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
 import TagsEditor from "@/components/TagsEditor";
+import RaccoltaDatiTab from "@/components/RaccoltaDatiTab";
+import PotentiDomandeTab from "@/components/PotentiDomandeTab";
+import SaluteFiscaleTab from "@/components/SaluteFiscaleTab";
+import CustomerInsightsWidget from "@/components/CustomerInsightsWidget";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -120,6 +124,11 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="albero" data-testid="tab-albero">Albero genealogico</TabsTrigger>
                     <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.length})</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
+                    <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
+                    <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
+                    {ana.tipo === "persona_giuridica" && (
+                        <TabsTrigger value="salute-fiscale" data-testid="tab-salute-fiscale">💼 Salute Fiscale</TabsTrigger>
+                    )}
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
                     <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Altri allegati</TabsTrigger>
@@ -128,11 +137,17 @@ export default function AnagraficaDetail() {
                 </TabsList>
 
                 <TabsContent value="dati">
+                    <CustomerInsightsWidget anagrafica_id={id} />
                     <DatiTab ana={ana} canEdit={canEdit} onReload={load} />
                 </TabsContent>
                 <TabsContent value="albero"><AlberoGenealogico ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="polizze"><PolizzeTab polizze={polizze} /></TabsContent>
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                {ana.tipo === "persona_giuridica" && (
+                    <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
+                )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="documenti"><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>

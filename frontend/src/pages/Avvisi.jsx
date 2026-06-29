@@ -422,16 +422,22 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
     );
 }
 
-function openWA(g) {
+async function openWA(g) {
     const cell = g.contraente_cellulare?.replace(/[^\d+]/g, "");
     if (!cell) { toast.error("Nessun cellulare"); return; }
     const tot = g.titoli.reduce((s, t) => s + (t.importo_lordo || 0), 0);
     const msg = `Buongiorno ${g.contraente_nome || ""}, le segnaliamo ${g.titoli.length} titolo/i scaduti per un totale di ${tot.toFixed(2)} €. La invitiamo a contattarci.`;
-    api.post("/storico-avvisi/registra", {
-        canale: "whatsapp", contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
-        destinatario: cell, titoli_ids: g.titoli.map((t) => t.id),
-        soggetto: "Sollecito titoli scaduti",
-    }).catch(() => {});
+    try {
+        await api.post("/storico-avvisi/registra", {
+            canale: "whatsapp", contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
+            destinatario: cell, target: cell, titoli_ids: g.titoli.map((t) => t.id),
+            soggetto: "Sollecito titoli scaduti", oggetto: "Sollecito titoli scaduti",
+            messaggio: msg, importo: tot, tipo: "sollecito_titoli",
+        });
+        toast.success("Avviso WhatsApp registrato nello storico");
+    } catch (e) {
+        toast.warning("WhatsApp aperto ma storico non registrato");
+    }
     window.open(`https://wa.me/${cell}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
@@ -444,7 +450,16 @@ async function stampaPdfAvviso(g) {
         const blob = new Blob([r.data], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank", "noopener");
-        toast.success("PDF avviso generato");
+        // Registra nello storico anche il PDF generato
+        try {
+            await api.post("/storico-avvisi/registra", {
+                canale: "pdf", contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
+                titoli_ids: g.titoli.map((t) => t.id),
+                oggetto: "PDF Avviso scadenza titoli", tipo: "pdf_avviso",
+                importo: g.titoli.reduce((s, t) => s + (t.importo_lordo || 0), 0),
+            });
+        } catch (_) { /* non bloccare */ }
+        toast.success("PDF avviso generato e registrato nello storico");
     } catch (e) {
         toast.error(e.response?.data?.detail || "Errore generazione PDF");
     }
@@ -463,7 +478,14 @@ async function stampaPdfAvvisoPolizza(p) {
         }, { responseType: "blob" });
         const blob = new Blob([r.data], { type: "application/pdf" });
         window.open(URL.createObjectURL(blob), "_blank", "noopener");
-        toast.success("PDF avviso generato");
+        try {
+            await api.post("/storico-avvisi/registra", {
+                canale: "pdf", contraente_id: p.contraente_id, contraente_nome: p.contraente_nome,
+                polizza_id: p.id, titoli_ids: titoli.map((t) => t.id),
+                oggetto: `PDF Avviso polizza ${p.numero_polizza}`, tipo: "pdf_avviso_polizza",
+            });
+        } catch (_) { /* non bloccante */ }
+        toast.success("PDF generato e registrato nello storico");
     } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
 }
 
@@ -500,9 +522,17 @@ function PolizzeTable({ items, onEmail }) {
                                     )}
                                     {cell && (
                                         <Button size="sm" variant="outline" className="h-7 w-7 p-0"
-                                            onClick={() => {
+                                            onClick={async () => {
                                                 const msg = `Buongiorno ${p.contraente_nome || ""}, la sua polizza ${p.numero_polizza} scade il ${fmtDate(p.scadenza)}. Premio: ${fmtEur(p.premio_lordo)}.`;
-                                                api.post("/storico-avvisi/registra", { canale: "whatsapp", contraente_id: p.contraente_id, contraente_nome: p.contraente_nome, polizza_id: p.id }).catch(() => {});
+                                                try {
+                                                    await api.post("/storico-avvisi/registra", {
+                                                        canale: "whatsapp", contraente_id: p.contraente_id, contraente_nome: p.contraente_nome,
+                                                        polizza_id: p.id, destinatario: cell, target: cell,
+                                                        messaggio: msg, oggetto: `Scadenza polizza ${p.numero_polizza}`,
+                                                        tipo: "avviso_scadenza_polizza", importo: p.premio_lordo,
+                                                    });
+                                                    toast.success("WhatsApp registrato nello storico");
+                                                } catch (_) { toast.warning("Storico non registrato"); }
                                                 window.open(`https://wa.me/${cell}?text=${encodeURIComponent(msg)}`, "_blank");
                                             }} data-testid={`btn-wa-pol-${p.id}`}>
                                             <MessageCircle size={12} className="text-emerald-600" />

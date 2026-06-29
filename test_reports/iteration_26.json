@@ -1,0 +1,46 @@
+{
+  "summary": "Iter26 — Test del batch massive (search globale espansa, voucher doppia assegnazione, raccolta dati / potenti domande, storico avvisi /registra, salute fiscale, OCR bilancio endpoints, lead liste RHX multifoglio, librerie modelli con nuovi placeholder). Backend pytest: 20/20 PASS dopo fix di 1 bug ObjectId in modelli.py. Frontend Playwright: tutti i nuovi data-testid presenti (vou-assegna-dialog/coll/ana, tab-raccolta-dati, tab-potenti-domande, tab-dati, cerv-ocr-bilancio, customer insights widget, placeholder TopBar aggiornato). Trovati e segnalati 2 bug minori non bloccanti.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/anagrafiche/{id}/salute-fiscale", "issue": "Quando l'anagrafica non ha mai impostato salute_fiscale_dati/salute_fiscale_aggiornata_il, find_one con projection ritorna {} (dict vuoto). Il check `if not ana:` lo considera 'not found' → 404 anche se l'anagrafica esiste. Fix: usare `if ana is None`. Vedi extras_p1p2.py:597-601."},
+      {"endpoint": "POST /api/cervello/ocr-bilancio e /api/anagrafiche/{id}/salute-fiscale/ocr-bilancio", "issue": "Quando Gemini rifiuta l'input (es. PNG 1x1px → 'Unable to process input image'), _ocr_bilancio_gemini fa raise ChatError non gestita → FastAPI ritorna 500 Internal Server Error invece di 502. Avvolgere la chiamata stream_message in try/except e raise HTTPException(502, str(e))."},
+      {"endpoint": "POST /api/librerie/modelli", "issue": "FIXED in questa iterazione: insert_one mutava doc aggiungendo _id ObjectId, return doc → PydanticSerializationError 500. Aggiunto doc.pop('_id', None) in modelli.py:106."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AnagraficaDetail (Titoli sub-component)", "issues": ["Console warning React 'Each child in a list should have a unique key prop' in TitoliByContraente — non bloccante ma da fixare con key={titolo.id}"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter26_search_voucher_extras.py",
+    "/app/test_reports/pytest/iter26_results.xml"
+  ],
+  "action_items": [
+    "FIX extras_p1p2.py::get_salute_fiscale: cambiare `if not ana:` in `if ana is None:` per gestire anagrafica esistente senza dati di salute fiscale (linee ~597-601).",
+    "FIX extras_p1p2.py::_ocr_bilancio_gemini: wrappare chat.stream_message in try/except generico per ritornare HTTPException(502, dettaglio) invece di lasciare il 500.",
+    "FIX React key warning in TitoliByContraente (AnagraficaDetail sub-component).",
+    "Auditare tutti i router per pattern `insert_one(doc); return doc` → aggiungere `doc.pop('_id', None)` dove manca (già fatto in setup_scambio iter25 e ora modelli)."
+  ],
+  "critical_code_review_comments": [
+    "extras_p1p2.py:597 — bug get_salute_fiscale con projection + truthiness check su dict vuoto. Anti-pattern: con MongoDB projection, find_one ritorna sempre dict (anche vuoto) per documento esistente. Usare `if ana is None`.",
+    "extras_p1p2.py:_ocr_bilancio_gemini — eccezioni di emergentintegrations (ChatError, BadRequestError da litellm) non gestite, bubbano a 500. Servirebbe try/except attorno allo stream con conversione a HTTPException(502).",
+    "modelli.py:105 — pattern insert_one(doc) + return doc senza pop _id. Stesso problema visto in iter25 setup_scambio. Considerare helper `await insert_and_return(coll, doc)` che gestisce il pop automaticamente.",
+    "Voucher: lista arricchimento (marketing_pro.py:71-74) è O(n) sulle ana_ids e coll_ids — accettabile per liste piccole, ma con 1000+ voucher e id distinti serve indice + bulk fetch.",
+    "Search globale (server.py:9313): query regex case-insensitive su molti campi senza indici → costoso su collection grandi. Considerare text index Mongo o Atlas Search."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter26_search_voucher_extras.py (NEW)",
+    "/app/backend/routes/modelli.py (fix: doc.pop('_id', None) dopo insert_one in create_modello)"
+  ],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "~95% (tutti i testid critici trovati; tab-salute-fiscale visibile solo per persona_giuridica come da spec)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Test crea: 1 voucher TEST_VOU_xxx (auto-cleanup), 1 modello TEST_modello_iter26_xxx (auto-cleanup), 1 lista lead TEST_RHX_xxx con 3 lead (NON cleanup → restano in DB), 2 storico_avvisi (NON cleanup, di tipo whatsapp/email), modifica raccolta_dati + potenti_domande_risposte sulla prima anagrafica del DB (es. campo professione=Avvocato, 3 risposte di test).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tutti gli endpoint del batch sono implementati e funzionanti: /api/search restituisce 5 collezioni (anagrafiche/polizze/sinistri/titoli/compagnie) con espansione su ramo/prodotto/telefono/email/comune/indirizzo. /api/voucher/{id}/assegna supporta sia anagrafica_id che collaboratore_id (o entrambi); 400 se nessuno; la lista voucher arricchisce con assegnato_a_nome e assegnato_a_collaboratore_nome. /api/anagrafiche/{id}/raccolta-dati e /potenti-domande salvano correttamente e persistono. /api/storico-avvisi/registra accetta extra fields (Pydantic extra='allow') e canale whatsapp ok. /api/cervello/ocr-bilancio e /api/anagrafiche/{id}/salute-fiscale/ocr-bilancio esistono ma ritornano 500 (non 502) quando Gemini rifiuta — gestione eccezioni da migliorare. /api/lead-liste/import .xlsx multifoglio funziona (parsing 3 righe da 2 fogli OK). /api/librerie/modelli POST funziona dopo fix ObjectId. Frontend: testid voucher dialog (vou-assegna-dialog, vou-assegna-coll, vou-assegna-ana) tutti presenti, tabs anagrafica tab-raccolta-dati/tab-potenti-domande presenti, tab-salute-fiscale renderizzato solo per persona_giuridica (correct). Cervello tab Costi&Bilancio mostra il bottone cerv-ocr-bilancio. Top bar placeholder include 'ramo, prodotto, telefono, email, targa, sinistri'. Customer Insights widget presente. La sezione modelli in /librerie usa data-testid='modelli-new' (non testo 'Nuovo modello' fisso — il label è dinamico per tab).",
+  "rca of the issue": "Bug get_salute_fiscale 404: MongoDB find_one con projection {'_id':0, 'campo_a':1, 'campo_b':1} ritorna {} per documento esistente senza campo_a/campo_b. Il check `if not ana:` (truthy check) considera il dict vuoto come falsy → raise 404. Fix: confrontare esplicitamente con None. Bug OCR 500: emergentintegrations stream_message può sollevare ChatError (da litellm.BadRequestError di Vertex AI) — non è una HTTPException, FastAPI la converte in 500. Fix: try/except generico attorno al loop async for e raise HTTPException(502, str(e)). Bug modelli ObjectId FIXED: motor insert_one muta il dict aggiungendo _id ObjectId post-insert; il return doc fallisce alla serializzazione JSON. Fix: doc.pop('_id', None) subito dopo insert_one. Pattern ricorrente nel codebase, già fixato in setup_scambio iter25."
+}

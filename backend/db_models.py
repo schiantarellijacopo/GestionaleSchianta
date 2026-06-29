@@ -229,6 +229,19 @@ class Anagrafica(BaseDoc):
     compagnia_id: Optional[str] = None
     collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
     fonte: Literal["manuale", "import_ania"] = "manuale"
+    # === RACCOLTA DATI cliente (onboarding business analysis) ===
+    # Struttura libera: { motivazioni, appetito_rischio, famiglia, lavoro, aziende,
+    # risparmi, immobili, altri_beni, hobby, bilancio_familiare, obiettivi_impegni,
+    # gestione_rischi_attuale, ... }
+    raccolta_dati: dict = Field(default_factory=dict)
+    raccolta_dati_aggiornata_il: Optional[str] = None
+    # === POTENTI DOMANDE primo appuntamento (30 domande) ===
+    # [{"domanda_id": int, "domanda": str, "risposta": str}]
+    potenti_domande_risposte: List[dict] = Field(default_factory=list)
+    potenti_domande_aggiornate_il: Optional[str] = None
+    # === SALUTE FISCALE (per clienti corporate — da OCR bilanci) ===
+    salute_fiscale_dati: dict = Field(default_factory=dict)
+    salute_fiscale_aggiornata_il: Optional[str] = None
 
 
 # =============== POLIZZE ===============

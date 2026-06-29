@@ -9046,6 +9046,9 @@ async def upload_allegato(
     entita_tipo: str = Query(...),
     entita_id: str = Query(...),
     descrizione: Optional[str] = Query(None),
+    categoria: Optional[str] = Query(None),
+    visibile_cliente: bool = Query(False),
+    applicazione_matricola_id: Optional[str] = Query(None),
     file: UploadFile = File(...),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
@@ -9067,6 +9070,8 @@ async def upload_allegato(
         nome_file=file.filename, storage_path=result["path"],
         content_type=content_type, size=result.get("size", len(data)),
         descrizione=descrizione, autore_id=user["id"],
+        categoria=categoria, visibile_cliente=visibile_cliente,
+        applicazione_matricola_id=applicazione_matricola_id,
     )
     await db.allegati.insert_one(obj.model_dump())
     await log_attivita(user, "upload", "allegato", obj.id, f"{file.filename} su {entita_tipo}:{entita_id}")
@@ -9307,23 +9312,40 @@ async def notifiche_sommario(user=Depends(current_user)):
 
 @api.get("/search")
 async def search_globale(q: str, limit: int = 8, user=Depends(current_user)):
-    """Ricerca rapida cross-entità per la barra in alto."""
+    """Ricerca rapida cross-entità per la barra in alto.
+    Cerca su: anagrafiche (nome, CF, P.IVA, email, telefono, cellulare, comune, indirizzo),
+    polizze (numero, ramo, prodotto, targa, contraente), sinistri (numero, luogo),
+    titoli (numero), compagnie (ragione sociale)."""
     if not q or len(q.strip()) < 2:
-        return {"anagrafiche": [], "polizze": [], "sinistri": [], "titoli": []}
-    qrx = {"$regex": q.strip(), "$options": "i"}
+        return {"anagrafiche": [], "polizze": [], "sinistri": [], "titoli": [], "compagnie": []}
+    qclean = q.strip()
+    qrx = {"$regex": qclean, "$options": "i"}
     is_client = user["role"] == "cliente"
-    ana_filter = {"id": user.get("anagrafica_id")} if is_client else {
-        "$or": [{"ragione_sociale": qrx}, {"codice_fiscale": qrx}, {"partita_iva": qrx}, {"email": qrx}]
-    }
+    # === ANAGRAFICHE: cerca su molti campi ===
+    ana_filter = {"id": user.get("anagrafica_id")} if is_client else {"$or": [
+        {"ragione_sociale": qrx}, {"nome": qrx}, {"cognome": qrx},
+        {"codice_fiscale": qrx}, {"partita_iva": qrx},
+        {"email": qrx}, {"telefono": qrx}, {"cellulare": qrx},
+        {"comune": qrx}, {"indirizzo": qrx}, {"professione": qrx},
+        {"tags": qrx},
+    ]}
     anas = await db.anagrafiche.find(
-        ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1, "comune": 1}
+        ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1,
+                     "comune": 1, "email": 1, "cellulare": 1, "telefono": 1},
     ).limit(limit).to_list(limit)
 
-    pol_filter = {"$or": [{"numero_polizza": qrx}, {"targa": qrx}]}
+    # === POLIZZE: numero, targa, ramo, prodotto, oggetto assicurato, note ===
+    pol_filter = {"$or": [
+        {"numero_polizza": qrx}, {"targa": qrx},
+        {"ramo": qrx}, {"prodotto": qrx},
+        {"oggetto_assicurato": qrx},
+        {"veicolo_marca": qrx}, {"veicolo_modello": qrx},
+    ]}
     if is_client:
         pol_filter = {"$and": [pol_filter, {"contraente_id": user.get("anagrafica_id")}]}
     polizze = await db.polizze.find(
-        pol_filter, {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "stato": 1, "targa": 1, "contraente_id": 1}
+        pol_filter, {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+                     "stato": 1, "targa": 1, "contraente_id": 1},
     ).limit(limit).to_list(limit)
     # arricchisci con contraente
     ana_ids = [p.get("contraente_id") for p in polizze if p.get("contraente_id")]
@@ -9332,15 +9354,49 @@ async def search_globale(q: str, limit: int = 8, user=Depends(current_user)):
     for p in polizze:
         p["contraente_nome"] = ana_map.get(p.get("contraente_id", ""))
 
-    sin_filter = {"numero_sinistro": qrx}
+    # Aggiungi polizze trovate tramite anagrafica matchata (per nome contraente)
+    if anas and not is_client:
+        anag_ids_to_search = [a["id"] for a in anas]
+        extra_pol = await db.polizze.find(
+            {"contraente_id": {"$in": anag_ids_to_search}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1, "stato": 1, "targa": 1, "contraente_id": 1},
+        ).limit(limit).to_list(limit)
+        existing_pol_ids = {p["id"] for p in polizze}
+        for ep in extra_pol:
+            if ep["id"] not in existing_pol_ids:
+                ep["contraente_nome"] = ana_map.get(ep.get("contraente_id")) or next(
+                    (a["ragione_sociale"] for a in anas if a["id"] == ep.get("contraente_id")), None)
+                polizze.append(ep)
+        polizze = polizze[:limit * 2]
+
+    # === SINISTRI ===
+    sin_filter = {"$or": [{"numero_sinistro": qrx}, {"luogo": qrx}, {"descrizione": qrx}]}
     if is_client:
         sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
     sinistri = await db.sinistri.find(
-        sin_filter, {"_id": 0, "id": 1, "numero_sinistro": 1, "polizza_id": 1, "stato": 1, "data_avvenimento": 1}
+        sin_filter, {"_id": 0, "id": 1, "numero_sinistro": 1, "polizza_id": 1, "stato": 1, "data_avvenimento": 1},
     ).limit(limit).to_list(limit)
 
+    # === TITOLI ===
+    titoli = []
+    if not is_client:
+        titoli = await db.titoli.find(
+            {"$or": [{"numero_titolo": qrx}, {"numero_polizza": qrx}, {"contraente_nome": qrx}]},
+            {"_id": 0, "id": 1, "numero_titolo": 1, "numero_polizza": 1, "polizza_id": 1,
+             "contraente_nome": 1, "importo_lordo": 1, "stato": 1, "data_scadenza": 1},
+        ).limit(limit).to_list(limit)
+
+    # === COMPAGNIE ===
+    compagnie = []
+    if not is_client:
+        compagnie = await db.compagnie.find(
+            {"$or": [{"ragione_sociale": qrx}, {"codice": qrx}]},
+            {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
+        ).limit(limit).to_list(limit)
+
     return {
-        "anagrafiche": anas, "polizze": polizze, "sinistri": sinistri, "titoli": [],
+        "anagrafiche": anas, "polizze": polizze, "sinistri": sinistri,
+        "titoli": titoli, "compagnie": compagnie,
     }
 
 

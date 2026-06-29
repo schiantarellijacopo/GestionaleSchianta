@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader, Loading } from "@/components/Shared";
-import { Brain, Save, Upload, TrendingUp, Trophy, PieChart, Wallet, Users } from "lucide-react";
+import { Brain, Save, Upload, TrendingUp, Trophy, PieChart, Wallet, Users, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const COMP_COLOR = { auto: "sky", persone: "emerald", aziende: "amber", vita: "violet" };
@@ -127,7 +127,7 @@ function TopClientiTab({ anno }) {
                     <div>
                         <div className="font-semibold">Pareto 80/20</div>
                         <div className="text-xs text-slate-600">
-                            I primi <b>{data.pareto_80_idx}</b> clienti generano l'80% delle provvigioni (totale: {fmtEur(data.totale_provvigioni)} su {data.n_clienti_top} clienti)
+                            I primi <b>{data.pareto_80_idx}</b> clienti generano l&apos;80% delle provvigioni (totale: {fmtEur(data.totale_provvigioni)} su {data.n_clienti_top} clienti)
                         </div>
                     </div>
                 </div>
@@ -271,21 +271,60 @@ function CostiBilancioTab({ anno }) {
                 </div>
             </Card>
 
-            <div className="flex justify-between items-center">
-                <label className="inline-flex items-center gap-2 px-3 py-2 border border-sky-200 bg-sky-50 text-sky-700 rounded text-sm cursor-pointer hover:bg-sky-100" data-testid="bilancio-upload">
-                    <Upload size={14} />
-                    {uploading ? "Caricamento…" : "Carica bilancio (CSV/JSON)"}
-                    <input type="file" hidden accept=".csv,.json,.txt" onChange={upload} />
-                </label>
+            <div className="flex justify-between items-center flex-wrap gap-2">
+                <div className="flex gap-2 flex-wrap">
+                    <label className="inline-flex items-center gap-2 px-3 py-2 border border-sky-200 bg-sky-50 text-sky-700 rounded text-sm cursor-pointer hover:bg-sky-100" data-testid="bilancio-upload">
+                        <Upload size={14} />
+                        {uploading ? "Caricamento…" : "Carica bilancio (CSV/JSON)"}
+                        <input type="file" hidden accept=".csv,.json,.txt" onChange={upload} />
+                    </label>
+                    <OcrBilancioButton anno={anno} onSaved={load} />
+                </div>
                 <Button onClick={save} disabled={saving} className="bg-violet-700 hover:bg-violet-800" data-testid="costi-save">
                     <Save size={14} className="mr-1" /> {saving ? "Salvataggio…" : "Salva costi"}
                 </Button>
             </div>
 
             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-3">
-                💡 Suggerimento: il file CSV può contenere voci come <code>affitto,12000</code> · <code>stipendi,80000</code> · <code>marketing,5000</code>. Le voci verranno classificate automaticamente in: struttura, stipendi, marketing, amministrazione.
+                💡 Il file CSV può contenere voci come <code>affitto,12000</code> · <code>stipendi,80000</code>. Le voci verranno classificate automaticamente. <br />
+                ✨ <b>OCR Bilancio Gemini</b>: carica un bilancio PDF/JPG → estrazione automatica costi, ricavi, utile + auto-popolamento dei costi annuali.
             </div>
         </div>
+    );
+}
+
+function OcrBilancioButton({ anno, onSaved }) {
+    const [busy, setBusy] = useState(false);
+    const [risultato, setRisultato] = useState(null);
+    const onPick = async (e) => {
+        const f = e.target.files?.[0]; if (!f) return;
+        setBusy(true);
+        try {
+            const fd = new FormData(); fd.append("file", f); fd.append("salva", "true");
+            const r = await api.post("/cervello/ocr-bilancio", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setRisultato(r.data);
+            const anno_estratto = r.data.salvato_anno || r.data.dati_estratti?.anno;
+            toast.success(`OCR completato · anno ${anno_estratto || "—"} · ${r.data.voci_create || 0} voci salvate`);
+            if (onSaved) onSaved();
+        } catch (err) { toast.error(err.response?.data?.detail || "Errore OCR"); }
+        finally { setBusy(false); e.target.value = ""; }
+    };
+    return (
+        <>
+            <label className="inline-flex items-center gap-2 px-3 py-2 border border-violet-300 bg-violet-50 text-violet-700 rounded text-sm cursor-pointer hover:bg-violet-100"
+                data-testid="cerv-ocr-bilancio">
+                <Sparkles size={14} />
+                {busy ? "Elaborazione AI…" : "OCR Bilancio (Gemini)"}
+                <input type="file" hidden accept="application/pdf,image/*" onChange={onPick} />
+            </label>
+            {risultato?.dati_estratti && (
+                <div className="text-[10px] text-emerald-700 mt-1">
+                    ✓ Estratto: anno {risultato.dati_estratti.anno} · ricavi {risultato.dati_estratti.ricavi}€ · utile netto {risultato.dati_estratti.utile_netto}€
+                </div>
+            )}
+        </>
     );
 }
 

@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
+import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
@@ -33,6 +34,7 @@ export default function PolizzaDetail() {
     const [paying, setPaying] = useState(null);
     const [letteraAbbuonoTitolo, setLetteraAbbuonoTitolo] = useState(null);
     const [titoloEditing, setTitoloEditing] = useState(null);
+    const [regolazioneOpen, setRegolazioneOpen] = useState(false);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
     useEffect(() => {
@@ -66,6 +68,14 @@ export default function PolizzaDetail() {
                     <ArrowLeft size={14} /> Torna alle polizze
                 </Link>
                 <div className="flex gap-2">
+                    {pol.regolazione_premio && (
+                        <Button variant="outline" size="sm"
+                            onClick={() => setRegolazioneOpen(true)}
+                            className="border-violet-300 text-violet-700 hover:bg-violet-50"
+                            data-testid="pol-regolazione-btn">
+                            <Zap size={14} className="mr-1" /> Regolazione premio
+                        </Button>
+                    )}
                     {canEdit && (
                         <Button variant="outline" size="sm" onClick={() => setEditOpen(true)} data-testid="pol-edit-button">
                             <Pencil size={14} className="mr-1" /> Modifica polizza

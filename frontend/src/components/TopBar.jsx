@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, X, Menu, User as UserIcon } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
@@ -56,7 +56,8 @@ export default function TopBar() {
         nav(path);
     };
 
-    const total = (results?.anagrafiche?.length || 0) + (results?.polizze?.length || 0) + (results?.sinistri?.length || 0);
+    const total = (results?.anagrafiche?.length || 0) + (results?.polizze?.length || 0)
+        + (results?.sinistri?.length || 0) + (results?.titoli?.length || 0) + (results?.compagnie?.length || 0);
 
     return (
         <div className="sticky top-0 z-30 bg-white border-b border-slate-200 px-3 sm:px-6 py-2.5 flex items-center gap-2 sm:gap-4" data-testid="topbar">
@@ -100,7 +101,7 @@ export default function TopBar() {
                     value={q}
                     onChange={(e) => { setQ(e.target.value); setOpen(true); }}
                     onFocus={() => setOpen(true)}
-                    placeholder="Cerca clienti, polizze, targhe, sinistri... (Ctrl+K)"
+                    placeholder="Cerca clienti, polizze, ramo, prodotto, telefono, email, targa, sinistri… (Ctrl+K)"
                     data-testid="global-search-input"
                     className="w-full pl-9 pr-9 py-2 text-sm rounded-md border border-slate-200 bg-slate-50 focus:bg-white focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition"
                 />
@@ -121,7 +122,11 @@ export default function TopBar() {
                                 render={(a) => (
                                     <button key={a.id} onClick={() => go(`/anagrafiche/${a.id}`)} className="w-full text-left px-4 py-2 hover:bg-sky-50 border-b border-slate-50">
                                         <div className="font-medium text-sm">{a.ragione_sociale}</div>
-                                        <div className="text-[11px] text-slate-500 num">{a.codice_fiscale || ""} · {a.comune || ""}</div>
+                                        <div className="text-[11px] text-slate-500 num">
+                                            {a.codice_fiscale || ""} · {a.comune || ""}
+                                            {a.cellulare && <> · 📱 {a.cellulare}</>}
+                                            {a.email && <> · ✉ {a.email}</>}
+                                        </div>
                                     </button>
                                 )}
                             />
@@ -131,11 +136,22 @@ export default function TopBar() {
                                 title="Polizze" icon={<FileText size={12} />} items={results.polizze}
                                 render={(p) => (
                                     <button key={p.id} onClick={() => go(`/polizze/${p.id}`)} className="w-full text-left px-4 py-2 hover:bg-sky-50 border-b border-slate-50">
-                                        <div className="font-medium text-sm">{p.numero_polizza}</div>
+                                        <div className="font-medium text-sm">N. {p.numero_polizza}{p.prodotto && <span className="ml-1 text-slate-600">· {p.prodotto}</span>}</div>
                                         <div className="text-[11px] text-slate-500">
                                             {p.contraente_nome || "—"} · {p.ramo} · <span className="badge badge-neutral">{p.stato}</span>
                                             {p.targa && <span className="ml-1 text-sky-700 num">{p.targa}</span>}
                                         </div>
+                                    </button>
+                                )}
+                            />
+                        )}
+                        {results.titoli?.length > 0 && (
+                            <ResultGroup
+                                title="Titoli" icon={<Receipt size={12} />} items={results.titoli}
+                                render={(t) => (
+                                    <button key={t.id} onClick={() => go(`/polizze/${t.polizza_id}`)} className="w-full text-left px-4 py-2 hover:bg-sky-50 border-b border-slate-50">
+                                        <div className="font-medium text-sm">Titolo {t.numero_titolo || "—"} · Pol. {t.numero_polizza}</div>
+                                        <div className="text-[11px] text-slate-500">{t.contraente_nome || "—"} · {t.stato} · scad. {t.data_scadenza || "—"}</div>
                                     </button>
                                 )}
                             />
@@ -147,6 +163,17 @@ export default function TopBar() {
                                     <button key={s.id} onClick={() => go(`/sinistri`)} className="w-full text-left px-4 py-2 hover:bg-sky-50 border-b border-slate-50">
                                         <div className="font-medium text-sm">{s.numero_sinistro}</div>
                                         <div className="text-[11px] text-slate-500">{s.data_avvenimento} · {s.stato}</div>
+                                    </button>
+                                )}
+                            />
+                        )}
+                        {results.compagnie?.length > 0 && (
+                            <ResultGroup
+                                title="Compagnie" icon={<Building2 size={12} />} items={results.compagnie}
+                                render={(c) => (
+                                    <button key={c.id} onClick={() => go(`/compagnie`)} className="w-full text-left px-4 py-2 hover:bg-sky-50 border-b border-slate-50">
+                                        <div className="font-medium text-sm">{c.ragione_sociale}</div>
+                                        <div className="text-[11px] text-slate-500">{c.codice || ""}</div>
                                     </button>
                                 )}
                             />
