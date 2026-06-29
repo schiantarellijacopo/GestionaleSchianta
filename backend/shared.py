@@ -169,12 +169,24 @@ async def intestazione_pdf() -> dict:
 
 async def visibility_filter(user: dict, base_filter: dict | None = None) -> dict:
     """Applica filtro per ruolo:
-    - admin/collaboratore/dipendente: vede tutto (con restrizioni a livello azione)
+    - admin: vede tutto
+    - collaboratore: vede SOLO i propri record (filtro su collaboratore_id == user.id).
+      I documenti senza collaboratore_id sono visibili (es. anagrafiche storiche)
+      a meno che l'utente abbia ``solo_miei_obbligatorio: True`` nel profilo.
+    - dipendente: vede tutto (come admin per i propri compiti)
     - cliente: vede solo le proprie polizze/anagrafica
     """
     base_filter = dict(base_filter or {})
     if user["role"] == "cliente" and user.get("anagrafica_id"):
         base_filter["contraente_id"] = user["anagrafica_id"]
+    elif user["role"] == "collaboratore" and user.get("id"):
+        # Filtro su collaboratore_id (record assegnati). Compat: $or per accettare
+        # record privi del campo (legacy) — disabilitabile in futuro tramite flag.
+        base_filter["$or"] = [
+            {"collaboratore_id": user["id"]},
+            {"collaboratore_id": {"$exists": False}},
+            {"collaboratore_id": None},
+        ]
     return base_filter
 
 

@@ -36,12 +36,13 @@ export default function AssistentePersonale() {
     const navigate = useNavigate();
     const [items, setItems] = useState(null);
     const [filter, setFilter] = useState("all");
+    const [soloMiei, setSoloMiei] = useState(false);
     const load = () => {
         setItems(null);
-        api.get("/cervello/suggerimenti", { params: { limit: 100 } })
+        api.get("/cervello/suggerimenti", { params: { limit: 100, solo_miei: soloMiei } })
             .then((r) => setItems(r.data || []));
     };
-    useEffect(() => { load(); }, []);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloMiei]);
     if (items === null) return <Loading />;
     const filtered = filter === "all" ? items : items.filter((i) => i.priorita === filter);
     const counts = items.reduce((acc, i) => { acc[i.priorita] = (acc[i.priorita] || 0) + 1; return acc; }, {});
@@ -78,6 +79,10 @@ export default function AssistentePersonale() {
                             : `${p === "alta" ? "Alta" : "Media"} (${counts[p] || 0})`}
                     </button>
                 ))}
+                <label className="ml-auto inline-flex items-center gap-1.5 text-xs cursor-pointer select-none" data-testid="solo-miei-toggle">
+                    <input type="checkbox" checked={soloMiei} onChange={(e) => setSoloMiei(e.target.checked)} className="accent-violet-600" />
+                    <span className={soloMiei ? "font-semibold text-violet-700" : "text-slate-600"}>👤 Solo i miei clienti</span>
+                </label>
             </Card>
 
             {filtered.length === 0 ? (

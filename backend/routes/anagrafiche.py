@@ -317,6 +317,9 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
 async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
     body = await _auto_geocode(body)
+    # Default collaboratore_id = utente loggato se non specificato (visibilità)
+    if not body.get("collaboratore_id"):
+        body["collaboratore_id"] = user.get("id")
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")

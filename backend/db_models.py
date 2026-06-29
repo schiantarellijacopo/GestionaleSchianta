@@ -185,6 +185,7 @@ class Anagrafica(BaseDoc):
     data_inizio_contribuzione: Optional[str] = None
     settimane_contributive: Optional[int] = None
     note: Optional[str] = None
+    collaboratore_id: Optional[str] = None  # responsabile principale (filtro visibilità)
     # albero genealogico
     parente_di: List[dict] = Field(default_factory=list)  # [{"anagrafica_id":..., "relazione":"figlio|coniuge|..."}]
     # consensi privacy

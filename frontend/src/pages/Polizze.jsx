@@ -281,7 +281,19 @@ export default function Polizze() {
                                     <td className="text-xs text-slate-600">{p.collaboratore_nome ? <CollaboratoreCell nome={p.collaboratore_nome} avatarUrl={p.collaboratore_avatar_url} /> : "—"}</td>
                                     <td><span className="badge badge-neutral">{p.ramo}</span>
                                         {p.catastrofale && (
-                                            <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded font-bold" title="Polizza con garanzie catastrofali">🌊 CAT</span>
+                                            <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded font-bold" title="Garanzia catastrofale (terremoto/alluvione)">🌊 CAT</span>
+                                        )}
+                                        {p.check_up && (
+                                            <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded font-bold" title="Garanzia Check-up sanitario">🏥 CHK</span>
+                                        )}
+                                        {p.inabilita_malattia && (
+                                            <span className="ml-1 text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded font-bold" title="Inabilità da malattia">🤒 INA</span>
+                                        )}
+                                        {p.tutela_legale && (
+                                            <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-800 border border-indigo-300 px-1 py-0.5 rounded font-bold" title="Tutela legale">⚖️ TL</span>
+                                        )}
+                                        {p.infortuni_conducente && (
+                                            <span className="ml-1 text-[9px] bg-violet-100 text-violet-800 border border-violet-300 px-1 py-0.5 rounded font-bold" title="Infortuni conducente">🚗 IC</span>
                                         )}
                                     </td>
                                     <td><StatusBadge stato={p.stato} /></td>

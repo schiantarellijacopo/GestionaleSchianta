@@ -42,6 +42,13 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (29/06/2026 — visibilità collaboratore + garanzie estese)
+- **Rilevamento garanzie speciali esteso**: `_detect_garanzie_speciali()` ora rileva 5 flag su ogni polizza: `catastrofale`, `check_up`, `inabilita_malattia`, `tutela_legale`, `infortuni_conducente`. Bulk update su 460 polizze totali. Endpoint compat retro-compatibile
+- **Badge multipli nella lista Polizze**: 🌊 CAT (catastrofale) · 🏥 CHK (check-up) · 🤒 INA (inabilità malattia) · ⚖️ TL (tutela legale) · 🚗 IC (infortuni conducente). Filtri backend: `?check_up=true` / `?inabilita_malattia=true` / `?tutela_legale=true` / `?infortuni_conducente=true`
+- **Visibility filter per collaboratore**: `visibility_filter()` ora restringe le query del ruolo `collaboratore` ai propri record (`collaboratore_id == user.id`) con `$or` per accettare anche record legacy senza il campo. Si applica a `polizze`, `sinistri`, `anagrafiche` (Anagrafica esteso con campo `collaboratore_id`)
+- **Auto-set collaboratore_id**: alla creazione di una nuova Anagrafica, viene impostato automaticamente al `user.id` corrente se non specificato → ogni anagrafica ha sempre un "owner" responsabile
+- **Filtro "Solo i miei clienti"** nell'Assistente Personale: toggle in alto a destra. Param `solo_miei=true` su `/api/cervello/suggerimenti` restringe la scansione alle polizze/sinistri del collaboratore loggato. Testato: admin senza polizze proprie ottiene 2 suggerimenti (vs 19 globali)
+
 ## Changelog (29/06/2026 — nuove regole Assistente Personale)
 - **+4 regole automatiche** in `/api/cervello/suggerimenti`:
   - **Cliente fedele ≥10 anni**: rileva anagrafiche con `created_at` ≥10 anni fa con polizza attiva → suggerisce sconto fedeltà / upgrade premium

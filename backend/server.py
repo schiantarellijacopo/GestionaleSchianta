@@ -2081,6 +2081,10 @@ async def list_polizze(
     collaboratore_id: Optional[str] = None,
     categoria: Optional[str] = None,  # auto_priv|auto_az|altri_priv|altri_az|vita_inv|vita_prot
     catastrofale: Optional[bool] = None,
+    check_up: Optional[bool] = None,
+    inabilita_malattia: Optional[bool] = None,
+    tutela_legale: Optional[bool] = None,
+    infortuni_conducente: Optional[bool] = None,
     # filtri periodo (su scadenza)
     dal: Optional[str] = None,
     al: Optional[str] = None,
@@ -2159,10 +2163,15 @@ async def list_polizze(
         it["collaboratore_avatar_url"] = _c.get("avatar_url")
     # Filtro categoria business (post-processing — richiede tipo anagrafica)
     if catastrofale is not None:
-        if catastrofale:
-            items = [p for p in items if p.get("catastrofale") is True]
-        else:
-            items = [p for p in items if not p.get("catastrofale")]
+        items = [p for p in items if (p.get("catastrofale") is True) == catastrofale]
+    if check_up is not None:
+        items = [p for p in items if (p.get("check_up") is True) == check_up]
+    if inabilita_malattia is not None:
+        items = [p for p in items if (p.get("inabilita_malattia") is True) == inabilita_malattia]
+    if tutela_legale is not None:
+        items = [p for p in items if (p.get("tutela_legale") is True) == tutela_legale]
+    if infortuni_conducente is not None:
+        items = [p for p in items if (p.get("infortuni_conducente") is True) == infortuni_conducente]
     if categoria:
         anag_tipo = {a["id"]: (a.get("tipo") or "persona_fisica")
                      async for a in db.anagrafiche.find(

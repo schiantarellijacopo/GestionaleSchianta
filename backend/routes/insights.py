@@ -151,12 +151,12 @@ async def cliente_insights(aid: str, user=Depends(current_user)) -> dict:
     }
 
 
-# ---------------------------- TAG CATASTROFALE AUTO ----------------------------
-def _detect_catastrofale(polizza: dict) -> bool:
-    """Rileva automaticamente se una polizza include garanzie catastrofali
-    (terremoto, alluvione, inondazione, eventi catastrofali, sovraccarico neve)."""
-    keywords = ["TERREMOT", "ALLUVION", "INONDAZ", "CATASTROF", "SISMA",
-                "FRAN", "SOVRACCAR", "EVENTI_NATUR"]
+# ---------------------------- TAG GARANZIE SPECIALI AUTO ----------------------------
+def _detect_garanzie_speciali(polizza: dict) -> dict:
+    """Rileva automaticamente garanzie speciali dalla descrizione delle garanzie/note.
+
+    Ritorna ``{catastrofale, check_up, inabilita_malattia, tutela_legale, infortuni_conducente}``.
+    """
     haystacks = []
     if polizza.get("garanzie"):
         for g in polizza["garanzie"]:
@@ -164,37 +164,71 @@ def _detect_catastrofale(polizza: dict) -> bool:
                 haystacks.append((g.get("nome") or "") + " " + (g.get("descrizione") or ""))
             else:
                 haystacks.append(str(g))
-    if polizza.get("ramo"): haystacks.append(polizza["ramo"])
-    if polizza.get("prodotto"): haystacks.append(polizza["prodotto"])
-    if polizza.get("note"): haystacks.append(polizza.get("note") or "")
+    for k in ("ramo", "prodotto", "note"):
+        if polizza.get(k):
+            haystacks.append(polizza[k])
     text = " ".join(haystacks).upper()
-    return any(k in text for k in keywords)
+
+    def any_in(words):
+        return any(w in text for w in words)
+
+    return {
+        "catastrofale": any_in(["TERREMOT", "ALLUVION", "INONDAZ", "CATASTROF",
+                                "SISMA", "FRAN", "SOVRACCAR", "EVENTI_NATUR"]),
+        "check_up": any_in(["CHECK UP", "CHECK-UP", "CHECKUP", "VISITA PERIODIC",
+                            "PREVENZ", "ESAMI DI ROUTINE"]),
+        "inabilita_malattia": any_in(["INABILIT", "MALATTI", "GG MALATTI",
+                                       "DIARIA MALATTI", "ITT", "INVALIDIT PERMANENTE MALATT"]),
+        "tutela_legale": any_in(["TUTELA LEGAL", "ASSISTENZA LEGAL"]),
+        "infortuni_conducente": any_in(["INFORTUNI CONDUC", "INFORTUNI DEL CONDUCENTE",
+                                          "RC CONDUCENTE"]),
+    }
+
+
+def _detect_catastrofale(polizza: dict) -> bool:
+    """Compat: ritorna solo il flag catastrofale (per chiamate legacy)."""
+    return _detect_garanzie_speciali(polizza)["catastrofale"]
+
+
+@router.get("/polizze/{pid}/check-garanzie-speciali")
+async def check_garanzie_speciali(pid: str, user=Depends(current_user)) -> dict:
+    p = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Polizza non trovata")
+    flags = _detect_garanzie_speciali(p)
+    upd = {k: v for k, v in flags.items() if p.get(k) != v}
+    if upd:
+        await db.polizze.update_one({"id": pid}, {"$set": upd})
+    return {"polizza_id": pid, **flags}
 
 
 @router.get("/polizze/{pid}/check-catastrofale")
 async def check_catastrofale(pid: str, user=Depends(current_user)) -> dict:
-    p = await db.polizze.find_one({"id": pid}, {"_id": 0})
-    if not p:
-        raise HTTPException(404, "Polizza non trovata")
-    has = _detect_catastrofale(p)
-    if p.get("catastrofale") != has:
-        await db.polizze.update_one({"id": pid}, {"$set": {"catastrofale": has}})
-    return {"polizza_id": pid, "catastrofale": has}
+    """Compat: rileva solo catastrofale."""
+    return await check_garanzie_speciali(pid, user)
 
 
 @router.post("/polizze/check-catastrofale-bulk")
-async def check_catastrofale_bulk(user=Depends(require_user("admin", "collaboratore"))) -> dict:
-    """Scansiona TUTTE le polizze attive e aggiorna il flag ``catastrofale``."""
+async def check_garanzie_bulk(user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    """Scansiona TUTTE le polizze e aggiorna i flag garanzie speciali."""
     updated = 0
     total = 0
+    counters = {"catastrofale": 0, "check_up": 0, "inabilita_malattia": 0,
+                "tutela_legale": 0, "infortuni_conducente": 0}
     async for p in db.polizze.find({}, {"_id": 0, "id": 1, "ramo": 1, "prodotto": 1,
-                                        "garanzie": 1, "note": 1, "catastrofale": 1}):
+                                        "garanzie": 1, "note": 1, "catastrofale": 1,
+                                        "check_up": 1, "inabilita_malattia": 1,
+                                        "tutela_legale": 1, "infortuni_conducente": 1}):
         total += 1
-        has = _detect_catastrofale(p)
-        if p.get("catastrofale") != has:
-            await db.polizze.update_one({"id": p["id"]}, {"$set": {"catastrofale": has}})
+        flags = _detect_garanzie_speciali(p)
+        diff = {k: v for k, v in flags.items() if p.get(k) != v}
+        if diff:
+            await db.polizze.update_one({"id": p["id"]}, {"$set": diff})
             updated += 1
-    return {"total": total, "updated": updated}
+        for k, v in flags.items():
+            if v:
+                counters[k] += 1
+    return {"total": total, "updated": updated, "totali_garanzie": counters}
 
 
 # ---------------------------- ME PERMISSIONS ----------------------------
@@ -292,14 +326,19 @@ async def statistiche_overview(user=Depends(current_user)) -> dict:
 # ---------------------------- IL CERVELLO (AI) ----------------------------
 @router.get("/cervello/suggerimenti")
 async def cervello_suggerimenti(
-    limit: int = 30, user=Depends(current_user),
+    limit: int = 30, solo_miei: bool = False, user=Depends(current_user),
 ) -> list[dict]:
-    """Suggerimenti di attività generati da regole deterministiche su
-    polizze ferme, clienti senza interazioni, sinistri aperti vecchi,
-    rinnovi imminenti, catastrofali mancanti.
+    """Suggerimenti di attività generati da regole deterministiche.
+
+    Param ``solo_miei=true``: filtra solo i record assegnati al collaboratore
+    loggato (polizze/sinistri/anagrafiche con ``collaboratore_id == user.id``).
     """
     now = datetime.now(timezone.utc)
     items: list[dict] = []
+    # Pre-filtro per collaboratore loggato
+    extra_filter: dict = {}
+    if solo_miei and user.get("id"):
+        extra_filter["collaboratore_id"] = user["id"]
 
     # 1) Polizze scadute non rinnovate (≤30gg)
     soon = (now + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -307,6 +346,7 @@ async def cervello_suggerimenti(
     async for p in db.polizze.find({
         "stato": {"$in": ["attiva", "in_emissione"]},
         "scadenza": {"$gte": today, "$lte": soon},
+        **extra_filter,
     }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "scadenza": 1,
         "premio_lordo": 1, "ramo": 1}).limit(15):
         items.append({
@@ -323,6 +363,7 @@ async def cervello_suggerimenti(
     ninety = (now - timedelta(days=90)).strftime("%Y-%m-%d")
     async for s in db.sinistri.find({
         "stato": "aperto", "data_denuncia": {"$lte": ninety},
+        **extra_filter,
     }, {"_id": 0, "id": 1, "numero_sinistro": 1, "contraente_id": 1, "data_denuncia": 1}).limit(15):
         items.append({
             "tipo": "sinistro_lento",
@@ -339,6 +380,7 @@ async def cervello_suggerimenti(
         "stato": {"$in": ["attiva", "in_emissione"]},
         "ramo": {"$regex": "CASA|GLOBAL", "$options": "i"},
         "catastrofale": {"$ne": True},
+        **extra_filter,
     }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1}).limit(10):
         items.append({
             "tipo": "upsell_catastrofale",
@@ -359,6 +401,7 @@ async def cervello_suggerimenti(
             "contraente_id": {"$in": aziende_ids},
             "stato": {"$in": ["attiva", "in_emissione"]},
             "catastrofale": {"$ne": True},
+            **extra_filter,
         }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1}).limit(10):
             items.append({
                 "tipo": "obbligo_catastrofale_azienda",
@@ -404,6 +447,7 @@ async def cervello_suggerimenti(
             {"updated_at": {"$lte": five_y}},
             {"updated_at": {"$exists": False}},
         ],
+        **extra_filter,
     }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1,
         "updated_at": 1, "decorrenza": 1}).limit(10):
         rif = p.get("updated_at") or p.get("decorrenza", "")
