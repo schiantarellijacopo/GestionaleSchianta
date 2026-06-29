@@ -23,6 +23,130 @@ router = APIRouter()
 
 
 # ===========================================================
+# 10) INSIGHTS · DOCUMENTI MANCANTI (widget dashboard)
+# ===========================================================
+@router.get("/insights/documenti-mancanti")
+async def documenti_mancanti(user=Depends(current_user)) -> dict:
+    """Ritorna le liste di entità senza documenti essenziali:
+    - polizze senza PDF/allegato polizza
+    - anagrafiche senza carta d'identità o documento equivalente
+    - polizze veicolo senza libretto allegato.
+    Limit 100 per categoria per non saturare la UI."""
+    LIMIT = 200
+
+    # === 1. POLIZZE SENZA ALLEGATO ===
+    # Sono "attive" o "in corso" da almeno 1 giorno (date_effetto <= today)
+    today = _now_iso()[:10]
+    pol_filter = {
+        "stato": {"$in": ["attiva", "in_corso", "in corso", "vigente"]},
+        "$or": [{"effetto": {"$lte": today}}, {"data_effetto": {"$lte": today}}],
+    }
+    is_client = user["role"] == "cliente"
+    if is_client:
+        pol_filter["contraente_id"] = user.get("anagrafica_id")
+    polizze = await db.polizze.find(pol_filter, {
+        "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+        "contraente_id": 1, "scadenza": 1, "effetto": 1, "targa": 1,
+    }).limit(2000).to_list(2000)
+    if polizze:
+        pol_ids = [p["id"] for p in polizze]
+        # Trova polizze CHE HANNO almeno un allegato (categoria polizza o "polizza" o "contratto")
+        pol_con_allegato = set()
+        async for a in db.allegati.find(
+            {"entita_tipo": "polizza", "entita_id": {"$in": pol_ids}},
+            {"_id": 0, "entita_id": 1, "categoria": 1, "nome_file": 1},
+        ):
+            pol_con_allegato.add(a["entita_id"])
+        polizze_senza = [p for p in polizze if p["id"] not in pol_con_allegato][:LIMIT]
+    else:
+        polizze_senza = []
+
+    # === 2. POLIZZE VEICOLO SENZA LIBRETTO ===
+    veicolo_filter = {
+        **pol_filter,
+        "$and": [{"targa": {"$ne": None, "$exists": True}}, {"targa": {"$ne": ""}}],
+    }
+    # Rimuovi $or duplicato se presente
+    veicoli = await db.polizze.find(veicolo_filter, {
+        "_id": 0, "id": 1, "numero_polizza": 1, "targa": 1,
+        "contraente_id": 1, "veicolo_marca": 1, "veicolo_modello": 1,
+    }).limit(2000).to_list(2000)
+    if veicoli:
+        v_ids = [v["id"] for v in veicoli]
+        v_con_libretto = set()
+        async for a in db.allegati.find(
+            {"entita_tipo": "polizza", "entita_id": {"$in": v_ids},
+             "$or": [{"categoria": "libretto_circolazione"}, {"categoria": "libretto"},
+                     {"nome_file": {"$regex": "libretto", "$options": "i"}}]},
+            {"_id": 0, "entita_id": 1},
+        ):
+            v_con_libretto.add(a["entita_id"])
+        veicoli_senza = [v for v in veicoli if v["id"] not in v_con_libretto][:LIMIT]
+    else:
+        veicoli_senza = []
+
+    # === 3. ANAGRAFICHE SENZA CARTA D'IDENTITÀ ===
+    ana_filter = {"tipo": {"$ne": "persona_giuridica"}}
+    if is_client:
+        ana_filter["id"] = user.get("anagrafica_id")
+    anagrafiche = await db.anagrafiche.find(ana_filter, {
+        "_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
+        "cellulare": 1, "email": 1,
+    }).limit(2000).to_list(2000)
+    if anagrafiche:
+        a_ids = [a["id"] for a in anagrafiche]
+        a_con_ci = set()
+        async for a in db.allegati.find(
+            {"entita_tipo": "anagrafica", "entita_id": {"$in": a_ids},
+             "$or": [
+                 {"categoria": "documento_identita"},
+                 {"categoria": "carta_identita"},
+                 {"categoria": "patente"},
+                 {"categoria": "passaporto"},
+                 {"nome_file": {"$regex": "(carta|identita|patente|passaport|ci\\b)", "$options": "i"}},
+             ]},
+            {"_id": 0, "entita_id": 1},
+        ):
+            a_con_ci.add(a["entita_id"])
+        anagrafiche_senza_ci = [a for a in anagrafiche if a["id"] not in a_con_ci][:LIMIT]
+    else:
+        anagrafiche_senza_ci = []
+
+    # Arricchisci con contraente_nome per le polizze
+    cid_set = list({p.get("contraente_id") for p in polizze_senza + veicoli_senza if p.get("contraente_id")})
+    if cid_set:
+        ana_map = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+                   async for a in db.anagrafiche.find(
+                       {"id": {"$in": cid_set}},
+                       {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    else:
+        ana_map = {}
+    for p in polizze_senza + veicoli_senza:
+        p["contraente_nome"] = ana_map.get(p.get("contraente_id"), "—")
+
+    return {
+        "polizze_senza_allegato": polizze_senza,
+        "veicoli_senza_libretto": veicoli_senza,
+        "anagrafiche_senza_ci": anagrafiche_senza_ci,
+        "totali": {
+            "polizze": len(polizze_senza),
+            "veicoli": len(veicoli_senza),
+            "anagrafiche": len(anagrafiche_senza_ci),
+        },
+    }
+
+
+# ===========================================================
+# 11) STORICO AVVISI · LISTA (vedi sezione 7 più sotto)
+# ===========================================================
+
+
+router = router  # mantieni
+
+
+
+
+# ===========================================================
 # 1) DOCUMENTI PRE-IMPOSTATI PER RAMO POLIZZA
 # ===========================================================
 DOCUMENTI_TEMPLATE_RAMO = {
@@ -90,6 +214,47 @@ async def list_applicazioni(polizza_id: str, user=Depends(current_user)) -> list
     ).sort("data_inserimento", -1).to_list(2000)
     # enrich con conteggio allegati
     for a in items:
+        a["n_allegati"] = await db.allegati.count_documents({
+            "applicazione_matricola_id": a["id"], "is_deleted": {"$ne": True},
+        })
+    return items
+
+
+@router.get("/libro-matricola")
+async def list_all_libro_matricola(
+    q: Optional[str] = None,
+    stato: Optional[str] = None,  # attivo | cessato
+    polizza_id: Optional[str] = None,
+    limit: int = 5000,
+    user=Depends(current_user),
+) -> list[dict]:
+    """Lista globale di TUTTE le applicazioni di libro matricola (per pagina standalone).
+    Arricchita con polizza_numero, contraente_nome, n_allegati."""
+    flt: dict = {}
+    if polizza_id: flt["polizza_id"] = polizza_id
+    if stato == "cessato":
+        flt["data_cessazione"] = {"$ne": None, "$exists": True}
+    elif stato == "attivo":
+        flt["$or"] = [{"data_cessazione": None}, {"data_cessazione": {"$exists": False}}]
+    if q and q.strip():
+        rx = {"$regex": q.strip(), "$options": "i"}
+        flt["$or"] = [{"targa": rx}, {"descrizione_veicolo": rx}, {"telaio": rx}, {"matricola": rx}]
+    items = await db.applicazioni_matricola.find(flt, {"_id": 0}).sort("data_inserimento", -1).limit(limit).to_list(limit)
+    # enrich
+    pol_ids = list({a.get("polizza_id") for a in items if a.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "is_libro_matricola": 1})}
+    cont_ids = list({pols.get(p, {}).get("contraente_id") for p in pol_ids})
+    cont_map = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+                async for a in db.anagrafiche.find(
+                    {"id": {"$in": [c for c in cont_ids if c]}},
+                    {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    for a in items:
+        p = pols.get(a.get("polizza_id"), {})
+        a["polizza_numero"] = p.get("numero_polizza")
+        a["polizza_ramo"] = p.get("ramo")
+        a["contraente_nome"] = cont_map.get(p.get("contraente_id"))
         a["n_allegati"] = await db.allegati.count_documents({
             "applicazione_matricola_id": a["id"], "is_deleted": {"$ne": True},
         })
@@ -458,8 +623,11 @@ async def list_storico_avvisi(
 ) -> list[dict]:
     flt = {}
     if anagrafica_id: flt["anagrafica_id"] = anagrafica_id
+    if anagrafica_id: flt.setdefault("contraente_id", anagrafica_id)
     if canale: flt["canale"] = canale
     if tipo: flt["tipo"] = tipo
+    if user["role"] == "cliente":
+        flt["contraente_id"] = user.get("anagrafica_id")
     return await db.storico_avvisi.find(flt, {"_id": 0}).sort("sent_at", -1).limit(limit).to_list(limit)
 
 

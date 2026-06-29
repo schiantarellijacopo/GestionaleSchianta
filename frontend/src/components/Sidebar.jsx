@@ -7,7 +7,7 @@ import {
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
-    Banknote, ArrowRightLeft, Sparkles,
+    Banknote, ArrowRightLeft, Sparkles, ClipboardList,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
@@ -30,6 +30,7 @@ const ALL_MENU_ITEMS = [
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "trattative", path: "/trattative", icon: "Briefcase", label: "Trattative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "alert", path: "/alert", icon: "Zap", label: "Alert & Automazioni", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "libro_matricola", path: "/libro-matricola", icon: "ClipboardList", label: "Libro Matricola", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "primanota", path: "/contabilita", icon: "BookOpen", label: "Prima nota", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "titoli_storici", path: "/titoli-storici", icon: "Receipt", label: "Titoli storici", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "sospesi", path: "/sospesi", icon: "TimerReset", label: "Sospesi (anticipati)", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
@@ -42,6 +43,7 @@ const ALL_MENU_ITEMS = [
     { id: "cervello", path: "/cervello", icon: "Brain", label: "Il Cervello", section: "strumenti", roles: ["admin"] },
     { id: "assistente", path: "/assistente-personale", icon: "Bot", label: "Assistente personale", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
+    { id: "corsi_ivass", path: "/corsi-ivass", icon: "GraduationCap", label: "Corsi IVASS · 30h", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "newsletter", path: "/newsletter", icon: "Mail", label: "Newsletter", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "voucher", path: "/voucher", icon: "Ticket", label: "Voucher Compagnia", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
@@ -65,7 +67,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList,
 };
 
 const SECTION_LABELS = {

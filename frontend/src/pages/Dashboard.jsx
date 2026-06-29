@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtNum } from "@/lib/api";
 import { PageHeader } from "@/components/Shared";
+import DocumentiMancantiWidget from "@/components/DocumentiMancantiWidget";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -70,6 +71,9 @@ export default function Dashboard() {
                 subtitle="Panoramica generale del portafoglio assicurativo"
             />
             <LinkUtiliCard />
+            <div className="mb-6">
+                <DocumentiMancantiWidget />
+            </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
                 <Stat label="Anagrafiche" value={fmtNum(data.anagrafiche)} icon={<Users size={18} />} testid="stat-anagrafiche" to="/anagrafiche" />

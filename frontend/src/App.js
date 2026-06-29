@@ -16,6 +16,8 @@ import Sinistri from "@/pages/Sinistri";
 import SinistroDetail from "@/pages/SinistroDetail";
 import Statistiche from "@/pages/Statistiche";
 import Cervello from "@/pages/Cervello";
+import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
+import CorsiIvass from "@/pages/CorsiIvass";
 import AssistentePersonale from "@/pages/AssistentePersonale";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
@@ -78,6 +80,8 @@ function App() {
                             <Route path="/sinistri/:id" element={<SinistroDetail />} />
                             <Route path="/statistiche" element={<Statistiche />} />
                             <Route path="/cervello" element={<Cervello />} />
+                            <Route path="/libro-matricola" element={<LibroMatricolaPage />} />
+                            <Route path="/corsi-ivass" element={<CorsiIvass />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}><RitenuteHub /></ProtectedRoute>

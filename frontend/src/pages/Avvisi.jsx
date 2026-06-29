@@ -215,6 +215,9 @@ export default function Avvisi() {
                 <TabBtn active={tab === "polizze"} onClick={() => setTab("polizze")} testid="tab-avvisi-polizze">
                     Polizze in scadenza ({totali.polizze})
                 </TabBtn>
+                <TabBtn active={tab === "storico"} onClick={() => setTab("storico")} testid="tab-avvisi-storico">
+                    📋 Storico avvisi inviati
+                </TabBtn>
             </div>
 
             {loading || !data ? <Loading /> : (
@@ -224,7 +227,9 @@ export default function Avvisi() {
                         onBulk={(ids) => setBulkOpen({ titoli_ids: ids })}
                         onEmail={setEmailTarget}
                     />
-                    : <PolizzeTable items={data.polizze || []} onEmail={setEmailTarget} />
+                    : tab === "polizze"
+                        ? <PolizzeTable items={data.polizze || []} onEmail={setEmailTarget} />
+                        : <StoricoAvvisiTab />
             )}
 
             {emailTarget && (
@@ -745,5 +750,82 @@ function StoricoAvvisiDialog({ onClose }) {
                 <DialogFooter><Button variant="outline" onClick={onClose}>Chiudi</Button></DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+
+
+function StoricoAvvisiTab() {
+    const [items, setItems] = useState(null);
+    const [canale, setCanale] = useState("");
+    const [q, setQ] = useState("");
+
+    const load = () => {
+        const params = canale ? { canale, limit: 500 } : { limit: 500 };
+        api.get("/storico-avvisi", { params }).then((r) => setItems(r.data || []));
+    };
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [canale]);
+
+    if (!items) return <Loading />;
+    const filtered = q.trim()
+        ? items.filter((x) => JSON.stringify(x).toLowerCase().includes(q.toLowerCase()))
+        : items;
+
+    const COL_BG = {
+        whatsapp: "bg-emerald-100 text-emerald-700",
+        email: "bg-sky-100 text-sky-700",
+        pdf: "bg-violet-100 text-violet-700",
+        sms: "bg-amber-100 text-amber-700",
+        pec: "bg-rose-100 text-rose-700",
+    };
+
+    return (
+        <Card className="overflow-hidden" data-testid="storico-tab">
+            <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+                <select value={canale} onChange={(e) => setCanale(e.target.value)}
+                    className="text-sm border border-slate-300 rounded px-2 py-1" data-testid="storico-canale">
+                    <option value="">Tutti i canali</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="email">Email</option>
+                    <option value="pdf">PDF</option>
+                    <option value="sms">SMS</option>
+                    <option value="pec">PEC</option>
+                </select>
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca…"
+                    className="text-sm border border-slate-300 rounded px-2 py-1 flex-1 max-w-xs" data-testid="storico-search" />
+                <div className="ml-auto text-xs text-slate-500 font-mono">{filtered.length} record</div>
+            </div>
+            {filtered.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">Nessun avviso inviato</div>
+            ) : (
+                <div className="tbl-scroll">
+                    <table className="tbl-compact w-full text-xs">
+                        <thead><tr>
+                            <th>Inviato</th><th>Canale</th><th>Destinatario</th><th>Oggetto</th>
+                            <th>Polizza</th><th className="text-right">Importo</th><th>Operatore</th>
+                        </tr></thead>
+                        <tbody>
+                            {filtered.map((s, i) => (
+                                <tr key={s.id || i} data-testid={`storico-row-${i}`}>
+                                    <td className="font-mono whitespace-nowrap">{s.sent_at?.replace("T", " ").slice(0, 16) || "—"}</td>
+                                    <td>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${COL_BG[s.canale] || "bg-slate-100"}`}>
+                                            {s.canale}
+                                        </span>
+                                    </td>
+                                    <td>{s.contraente_nome || "—"}
+                                        {s.destinatario && <div className="text-[10px] text-slate-500 font-mono">{s.destinatario}</div>}
+                                    </td>
+                                    <td className="text-slate-700">{s.oggetto || s.soggetto || "—"}</td>
+                                    <td className="font-mono text-sky-700">{s.polizza_id ? s.polizza_id.slice(0, 8) : "—"}</td>
+                                    <td className="num text-right font-mono">{s.importo ? fmtEur(s.importo) : "—"}</td>
+                                    <td className="text-slate-500 text-[10px]">{s.operatore_nome || "—"}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </Card>
     );
 }
