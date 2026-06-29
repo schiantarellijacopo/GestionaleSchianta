@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -26,6 +26,7 @@ const SECTIONS = [
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
+    { key: "tipologie-sinistri", label: "Tipologie sinistri", icon: <AlertTriangle size={14} />, endpoint: "/librerie/tipologie-sinistri" },
     { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
@@ -251,6 +252,27 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
         );
     }
     // rami
+    if (section.key === "tipologie-sinistri") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Categoria</th><th>Nome tipologia</th><th>CAI</th><th>Denuncia</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((t) => (
+                        <tr key={t.id}>
+                            <td className="text-xs font-medium text-sky-700">{t.categoria}</td>
+                            <td>{t.nome}</td>
+                            <td className="text-center">{t.richiede_cai ? <span className="badge badge-warning">CAI</span> : "—"}</td>
+                            <td className="text-center">{t.richiede_denuncia ? <span className="badge badge-info">sì</span> : "—"}</td>
+                            <td>{t.attivo !== false ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} label="tipologia" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
     if (section.key === "rami") {
         return (
             <table className="tbl w-full">
@@ -401,6 +423,7 @@ const SECTION_FORMS = {
     "tipi-pagamento": TipoPagamentoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
+    "tipologie-sinistri": TipologiaSinistroForm,
     "compagnie": CompagniaForm,
     "utenti": UtenteForm,
     "schema-provvigionale": SchemaProvvForm,
@@ -873,6 +896,48 @@ function RamoForm({ section, editing, onClose }) {
         )}
     />;
 }
+
+function TipologiaSinistroForm({ section, editing, onClose }) {
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{
+            nome: "", categoria: "Generale", descrizione: "",
+            richiede_cai: false, richiede_denuncia: true, attivo: true, ordine: 100,
+        }}
+        fields={(f, set) => (
+            <>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Nome tipologia *</Label>
+                        <Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)}
+                            placeholder="es. RC AUTO - Collisione" data-testid="tip-nome" /></div>
+                    <div><Label>Categoria</Label>
+                        <Input value={f.categoria || ""} onChange={(e) => set("categoria", e.target.value)}
+                            placeholder="Auto / Casa / Persona / Azienda / Vita / Viaggio / Generale" /></div>
+                </div>
+                <div><Label>Descrizione</Label>
+                    <Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
+                <div className="flex gap-4 mt-2">
+                    <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={!!f.richiede_cai}
+                            onChange={(e) => set("richiede_cai", e.target.checked)} data-testid="tip-cai" />
+                        Richiede CAI (Costatazione Amichevole)
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={!!f.richiede_denuncia}
+                            onChange={(e) => set("richiede_denuncia", e.target.checked)} />
+                        Richiede modulo denuncia
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={f.attivo !== false}
+                            onChange={(e) => set("attivo", e.target.checked)} />
+                        Attiva
+                    </label>
+                </div>
+            </>
+        )}
+    />;
+}
+
+
 
 function CompagniaForm({ section, editing, onClose }) {
     return <GenericForm section={section} editing={editing} onClose={onClose}

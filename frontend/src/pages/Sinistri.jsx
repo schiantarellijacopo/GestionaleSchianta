@@ -286,6 +286,7 @@ export default function Sinistri() {
 function NuovoSinistroDialog({ onClose }) {
     const navigate = useNavigate();
     const [polizze, setPolizze] = useState([]);
+    const [tipoLib, setTipoLib] = useState([]);
     const [f, setF] = useState({
         numero_sinistro: "", numero_interno: "", polizza_id: "",
         data_avvenimento: new Date().toISOString().slice(0, 10),
@@ -293,7 +294,12 @@ function NuovoSinistroDialog({ onClose }) {
         luogo: "", descrizione: "", riserva: 0, stato: "aperto",
         tipologia_sinistro: "",
     });
-    useEffect(() => { api.get("/polizze").then((r) => setPolizze(r.data)); }, []);
+    useEffect(() => {
+        Promise.all([
+            api.get("/polizze"),
+            api.get("/librerie/tipologie-sinistri").catch(() => ({ data: [] })),
+        ]).then(([p, t]) => { setPolizze(p.data); setTipoLib(t.data || []); });
+    }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const save = async () => {
@@ -336,8 +342,19 @@ function NuovoSinistroDialog({ onClose }) {
                     </Select>
                 </div>
                 <div><Label className="text-xs">Tipologia sinistro</Label>
-                    <Input value={f.tipologia_sinistro} onChange={(e) => set("tipologia_sinistro", e.target.value)}
-                        placeholder="es. SINISTRI FENOMENO ELETTRICO" /></div>
+                    <Select value={f.tipologia_sinistro} onValueChange={(v) => set("tipologia_sinistro", v)}>
+                        <SelectTrigger data-testid="sin-tipologia-select"><SelectValue placeholder="Seleziona tipologia…" /></SelectTrigger>
+                        <SelectContent className="max-h-80">
+                            {tipoLib.map((t) => <SelectItem key={t.id} value={t.nome}>{t.categoria} · {t.nome}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    {(() => {
+                        const sel = tipoLib.find((t) => t.nome === f.tipologia_sinistro);
+                        if (sel?.richiede_cai) return <div className="mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">📌 Richiede CAI (Costatazione Amichevole)</div>;
+                        if (sel?.richiede_denuncia) return <div className="mt-1 text-[10px] text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1">📌 Richiede modulo denuncia compilato</div>;
+                        return null;
+                    })()}
+                </div>
                 <div>
                     <Label className="text-xs">Stato</Label>
                     <Select value={f.stato} onValueChange={(v) => set("stato", v)}>

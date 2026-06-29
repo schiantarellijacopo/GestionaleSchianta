@@ -10137,6 +10137,7 @@ from routes import alert as _alert_router  # noqa: E402
 from routes import modelli as _modelli_router  # noqa: E402
 from routes import kpi as _kpi_router  # noqa: E402
 from routes import permessi as _perm_router  # noqa: E402
+from routes import insights as _insights_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10144,6 +10145,7 @@ api.include_router(_alert_router.router)
 api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)
 api.include_router(_perm_router.router)
+api.include_router(_insights_router.router)
 
 app.include_router(api)
 
@@ -10273,7 +10275,12 @@ async def startup():
         from routes.permessi import seed_default_profili
         await seed_default_profili()
     except Exception as e:
-        logger.warning("Seed profili permessi fallito: %s", e)
+        logging.warning(f"seed permessi profili skipped: {e}")
+    try:
+        from routes.librerie import seed_default_tipologie_sinistri
+        await seed_default_tipologie_sinistri()
+    except Exception as e:
+        logger.warning("Seed tipologie sinistri fallito: %s", e)
 
     # IMAP Poller — avviato automaticamente solo se abilitato in config
     try:

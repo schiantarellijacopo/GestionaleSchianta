@@ -14,6 +14,9 @@ import TitoliStorici from "@/pages/TitoliStorici";
 import Alert from "@/pages/Alert";
 import Sinistri from "@/pages/Sinistri";
 import SinistroDetail from "@/pages/SinistroDetail";
+import Statistiche from "@/pages/Statistiche";
+import Cervello from "@/pages/Cervello";
+import Ritenute from "@/pages/Ritenute";
 import Contabilita from "@/pages/Contabilita";
 import Compagnie from "@/pages/Compagnie";
 import Importazione from "@/pages/Importazione";
@@ -61,6 +64,9 @@ function App() {
                             <Route path="/alert" element={<Alert />} />
                             <Route path="/sinistri" element={<Sinistri />} />
                             <Route path="/sinistri/:id" element={<SinistroDetail />} />
+                            <Route path="/statistiche" element={<Statistiche />} />
+                            <Route path="/cervello" element={<Cervello />} />
+                            <Route path="/ritenute" element={<Ritenute />} />
                             <Route
                                 path="/avvisi"
                                 element={

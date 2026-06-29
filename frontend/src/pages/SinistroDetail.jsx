@@ -47,10 +47,14 @@ export default function SinistroDetail() {
     const navigate = useNavigate();
     const [s, setS] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [tipoLib, setTipoLib] = useState([]);
 
     const load = () => api.get(`/sinistri/${id}`).then((r) => setS(r.data))
         .catch(() => toast.error("Sinistro non trovato"));
     useEffect(() => { load(); }, [id]);
+    useEffect(() => {
+        api.get("/librerie/tipologie-sinistri").then((r) => setTipoLib(r.data || [])).catch(() => {});
+    }, []);
 
     if (!s) return <Loading />;
     const isRcAuto = (s.ramo || s.polizza?.ramo || "").toUpperCase().includes("AUTO")
@@ -155,8 +159,18 @@ export default function SinistroDetail() {
                     <CampoInput label="Anno" type="number" value={s.anno || new Date(s.data_avvenimento || Date.now()).getFullYear()} onChange={(v) => setField("anno", parseInt(v) || null)} testid="sin-anno" />
                     <div className="col-span-2">
                         <Label className="text-xs">Tipologia Sinistro</Label>
-                        <Input value={s.tipologia_sinistro || ""} onChange={(e) => setField("tipologia_sinistro", e.target.value)}
-                            placeholder="es. SINISTRI FENOMENO ELETTRICO" data-testid="sin-tipologia" />
+                        <Select value={s.tipologia_sinistro || ""} onValueChange={(v) => setField("tipologia_sinistro", v)}>
+                            <SelectTrigger data-testid="sin-tipologia"><SelectValue placeholder="Seleziona tipologia…" /></SelectTrigger>
+                            <SelectContent className="max-h-96">
+                                {tipoLib.map((t) => <SelectItem key={t.id} value={t.nome}>{t.categoria} · {t.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        {(() => {
+                            const sel = tipoLib.find((t) => t.nome === s.tipologia_sinistro);
+                            if (sel?.richiede_cai) return <div className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">📌 Compilare la <b>Costatazione Amichevole</b> (tab dedicato)</div>;
+                            if (sel?.richiede_denuncia) return <div className="mt-1 text-[11px] text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1">📌 Caricare il modulo di denuncia tra i Documenti</div>;
+                            return null;
+                        })()}
                     </div>
                     <div>
                         <Label className="text-xs">Stato</Label>

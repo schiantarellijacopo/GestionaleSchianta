@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 from typing import Literal, Optional
+import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
@@ -745,6 +746,110 @@ async def delete_prodotto(pid: str, user: dict = Depends(require_user("admin")))
     await db.prodotti.delete_one({"id": pid})
     await log_attivita(user, "delete", "prodotto", pid)
     return {"ok": True}
+
+
+# --- TIPOLOGIE SINISTRI ---
+@router.get("/librerie/tipologie-sinistri")
+async def list_tipologie_sinistri(user: dict = Depends(current_user)) -> list[dict]:
+    return await db.tipologie_sinistri.find({}, {"_id": 0}).sort("nome", 1).to_list(500)
+
+
+@router.post("/librerie/tipologie-sinistri", status_code=201)
+async def create_tipologia_sinistro(
+    body: dict, user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    nome = (body.get("nome") or "").strip()
+    if not nome:
+        raise HTTPException(400, "Nome obbligatorio")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "nome": nome,
+        "categoria": body.get("categoria") or "Generale",
+        "descrizione": body.get("descrizione"),
+        "richiede_cai": bool(body.get("richiede_cai")),  # se True, doc obbligatorio "CAI"
+        "richiede_denuncia": bool(body.get("richiede_denuncia", True)),
+        "attivo": body.get("attivo", True),
+        "ordine": body.get("ordine", 100),
+        "created_at": _now_iso(),
+    }
+    await db.tipologie_sinistri.insert_one(doc)
+    await log_attivita(user, "create", "tipologia_sinistro", doc["id"], nome)
+    return doc
+
+
+@router.put("/librerie/tipologie-sinistri/{tid}")
+async def update_tipologia_sinistro(
+    tid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    body["updated_at"] = _now_iso()
+    res = await db.tipologie_sinistri.update_one({"id": tid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Tipologia non trovata")
+    return strip_mongo_id(await db.tipologie_sinistri.find_one({"id": tid}, {"_id": 0}))
+
+
+@router.delete("/librerie/tipologie-sinistri/{tid}")
+async def delete_tipologia_sinistro(tid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    await db.tipologie_sinistri.delete_one({"id": tid})
+    return {"ok": True}
+
+
+async def seed_default_tipologie_sinistri() -> None:
+    """Crea tipologie sinistri standard se non esistono (idempotente)."""
+    if await db.tipologie_sinistri.count_documents({}) > 0:
+        return
+    defaults = [
+        ("RC AUTO - Collisione tra veicoli", "Auto", True, True),
+        ("RC AUTO - Investimento pedone", "Auto", False, True),
+        ("RC AUTO - Urto contro ostacolo fisso", "Auto", False, True),
+        ("ARD AUTO - Furto totale", "Auto", False, True),
+        ("ARD AUTO - Furto parziale", "Auto", False, True),
+        ("ARD AUTO - Incendio", "Auto", False, True),
+        ("ARD AUTO - Atti vandalici", "Auto", False, True),
+        ("ARD AUTO - Eventi atmosferici (grandine)", "Auto", False, True),
+        ("ARD AUTO - Kasko / Collisione", "Auto", False, True),
+        ("ARD AUTO - Cristalli", "Auto", False, True),
+        ("INFORTUNI - Conducente", "Persona", False, True),
+        ("INFORTUNI - Lavoro", "Persona", False, True),
+        ("INFORTUNI - Extraprofessionali", "Persona", False, True),
+        ("MALATTIE - Ricovero", "Persona", False, True),
+        ("MALATTIE - Day Hospital", "Persona", False, True),
+        ("MALATTIE - Visite specialistiche", "Persona", False, True),
+        ("VITA - Decesso", "Vita", False, True),
+        ("VITA - Invalidità permanente", "Vita", False, True),
+        ("CASA - Furto contenuto", "Casa", False, True),
+        ("CASA - Furto fabbricato", "Casa", False, True),
+        ("CASA - Incendio", "Casa", False, True),
+        ("CASA - Danni d'acqua", "Casa", False, True),
+        ("CASA - Eventi atmosferici", "Casa", False, True),
+        ("CASA - Eventi catastrofali (terremoto)", "Casa", False, True),
+        ("CASA - Eventi catastrofali (alluvione)", "Casa", False, True),
+        ("CASA - Responsabilità civile", "Casa", False, True),
+        ("AZIENDA - Incendio fabbricato/contenuto", "Azienda", False, True),
+        ("AZIENDA - Furto", "Azienda", False, True),
+        ("AZIENDA - Danni elettrici", "Azienda", False, True),
+        ("AZIENDA - Eventi catastrofali", "Azienda", False, True),
+        ("AZIENDA - RC verso terzi", "Azienda", False, True),
+        ("AZIENDA - RC prodotti", "Azienda", False, True),
+        ("AZIENDA - All Risks", "Azienda", False, True),
+        ("TUTELA LEGALE - Penale", "Tutela", False, True),
+        ("TUTELA LEGALE - Civile", "Tutela", False, True),
+        ("VIAGGIO - Annullamento", "Viaggio", False, True),
+        ("VIAGGIO - Bagaglio", "Viaggio", False, True),
+        ("VIAGGIO - Spese mediche", "Viaggio", False, True),
+        ("ALTRO", "Generale", False, True),
+    ]
+    docs = []
+    for i, (nome, cat, cai, denuncia) in enumerate(defaults):
+        docs.append({
+            "id": str(uuid.uuid4()), "nome": nome, "categoria": cat,
+            "richiede_cai": cai, "richiede_denuncia": denuncia,
+            "attivo": True, "ordine": i * 10, "created_at": _now_iso(),
+        })
+    await db.tipologie_sinistri.insert_many(docs)
+
+
+
 
 
 # --- RAMI ---
