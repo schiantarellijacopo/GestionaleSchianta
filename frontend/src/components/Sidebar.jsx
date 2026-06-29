@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
-    NotebookPen, Inbox, Brain, Bot, Briefcase,
+    NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X,
 } from "lucide-react";
 
@@ -42,6 +42,8 @@ const ALL_MENU_ITEMS = [
     { id: "assistente", path: "/assistente-personale", icon: "Bot", label: "Assistente personale", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "newsletter", path: "/newsletter", icon: "Mail", label: "Newsletter", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "voucher", path: "/voucher", icon: "Ticket", label: "Voucher Compagnia", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "chat", path: "/chat", icon: "MessageCircle", label: "Chat", section: "strumenti", roles: null },
     { id: "posta", path: "/posta", icon: "Inbox", label: "Posta", section: "strumenti", roles: null },
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
@@ -56,7 +58,7 @@ const ALL_MENU_ITEMS = [
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
-    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase,
+    MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket,
 };
 
 const SECTION_LABELS = {
@@ -92,6 +94,7 @@ export default function Sidebar() {
         return new Set();
     });
     const [dragId, setDragId] = useState(null);
+    const [search, setSearch] = useState("");
 
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(order)); } catch (e) { /* ignore */ }
@@ -115,7 +118,12 @@ export default function Sidebar() {
         .concat(ALL_MENU_ITEMS.filter((m) => !order.includes(m.id) && (!m.roles || m.roles.includes(role))));
 
     // In edit mode mostra tutto, altrimenti filtra le voci nascoste
-    const itemsToRender = editMode ? visibleItems : visibleItems.filter((m) => !hidden.has(m.id));
+    let itemsToRender = editMode ? visibleItems : visibleItems.filter((m) => !hidden.has(m.id));
+    // Filtra per testo digitato nella barra di ricerca
+    if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        itemsToRender = itemsToRender.filter((m) => m.label.toLowerCase().includes(q));
+    }
 
     // Raggruppa per sezione mantenendo l'ordine del custom
     const sezioni = [];
@@ -242,6 +250,25 @@ export default function Sidebar() {
                     </button>
                 </div>
             )}
+
+            <div className="px-2 pt-2 pb-1">
+                <div className="relative">
+                    <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Cerca nel menu…"
+                        className="w-full pl-7 pr-7 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                        data-testid="sidebar-search"
+                    />
+                    {search && (
+                        <button onClick={() => setSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200">
+                            <X size={11} />
+                        </button>
+                    )}
+                </div>
+            </div>
 
             <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
                 {sezioni.map((sec, i) => (

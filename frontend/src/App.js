@@ -19,6 +19,8 @@ import Cervello from "@/pages/Cervello";
 import AssistentePersonale from "@/pages/AssistentePersonale";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
+import Newsletter from "@/pages/Newsletter";
+import Voucher from "@/pages/Voucher";
 import Contabilita from "@/pages/Contabilita";
 import Compagnie from "@/pages/Compagnie";
 import Importazione from "@/pages/Importazione";
@@ -71,6 +73,8 @@ function App() {
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={<Ritenute />} />
                             <Route path="/trattative" element={<Trattative />} />
+                            <Route path="/newsletter" element={<Newsletter />} />
+                            <Route path="/voucher" element={<Voucher />} />
                             <Route
                                 path="/avvisi"
                                 element={

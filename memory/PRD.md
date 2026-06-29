@@ -42,6 +42,13 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (29/06/2026 — Marketing avanzato + Sidebar Search)
+- **Sezione Newsletter** (`/newsletter`): CRUD campagne marketing massive (email/SMS/WhatsApp). Targeting per tag, tipo cliente (privati/aziende), filtro consenso commerciale obbligatorio. Conteggio destinatari live + invio simulato che logga su Diario di ogni cliente
+- **Sezione Voucher Compagnia** (`/voucher`): gestione codici sconto forniti dalle compagnie. CRUD singolo + import massivo (paste lista codici). KPI: Disponibili / Assegnati (non usati) / Usati. Assegnazione manuale a cliente specifico. Filtri per stato cliccabili
+- **Backend `routes/marketing_pro.py`**: 11 endpoint nuovi (`/voucher` CRUD+assegna+bulk-import, `/newsletter` CRUD+invia, `/voucher/bulk-import`). Newsletter conta dinamicamente destinatari rispettando consenso_commerciale
+- **Barra di ricerca nella Sidebar**: input testuale sopra il menu che filtra in tempo reale le voci di navigazione. Ottimo per accesso rapido in app con 30+ sezioni
+- **Sidebar**: 2 nuove voci (Newsletter / Voucher Compagnia) con icone Mail/Ticket
+
 ## Changelog (29/06/2026 — visibilità collaboratore + garanzie estese)
 - **Rilevamento garanzie speciali esteso**: `_detect_garanzie_speciali()` ora rileva 5 flag su ogni polizza: `catastrofale`, `check_up`, `inabilita_malattia`, `tutela_legale`, `infortuni_conducente`. Bulk update su 460 polizze totali. Endpoint compat retro-compatibile
 - **Badge multipli nella lista Polizze**: 🌊 CAT (catastrofale) · 🏥 CHK (check-up) · 🤒 INA (inabilità malattia) · ⚖️ TL (tutela legale) · 🚗 IC (infortuni conducente). Filtri backend: `?check_up=true` / `?inabilita_malattia=true` / `?tutela_legale=true` / `?infortuni_conducente=true`
