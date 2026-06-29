@@ -10242,6 +10242,7 @@ from routes import commerciale as _comm_router  # noqa: E402
 from routes import agenzie as _age_router  # noqa: E402
 from routes import setup_scambio as _setup_router  # noqa: E402
 from routes import documenti_inbox as _docinbox_router  # noqa: E402
+from routes import extras_p1p2 as _extras_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10256,6 +10257,7 @@ api.include_router(_comm_router.router)
 api.include_router(_age_router.router)
 api.include_router(_setup_router.router)
 api.include_router(_docinbox_router.router)
+api.include_router(_extras_router.router)
 
 app.include_router(api)
 

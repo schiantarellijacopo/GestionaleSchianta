@@ -266,6 +266,14 @@ class Polizza(BaseDoc):
     ultimo_mezzo_pagamento: Optional[str] = None
     ultimo_mezzo_pagamento_data: Optional[str] = None
     is_libro_matricola: bool = False  # se True → polizza con applicazioni veicoli (libro matricola RCA)
+    # Regolazione premio (polizze con premio variabile a posteriori — es. fatturato/dipendenti/addetti)
+    regolazione_premio: bool = False
+    regolazione_base: Optional[Literal["fatturato", "mercedi", "addetti", "ricavi", "altro"]] = None
+    regolazione_tasso: Optional[float] = None  # % o ‰ a seconda della base
+    regolazione_periodicita: Optional[Literal["annuale", "biennale"]] = "annuale"
+    regolazione_minima: Optional[float] = None  # premio minimo non rimborsabile
+    regolazione_ultimo_calcolo: Optional[str] = None  # YYYY-MM-DD
+    regolazione_dovuto: float = 0  # ultimo importo calcolato
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     sostituita_da_polizza_id: Optional[str] = None  # backlink dopo sostituzione
@@ -771,6 +779,14 @@ class Allegato(BaseDoc):
     descrizione: Optional[str] = None
     autore_id: Optional[str] = None
     is_deleted: bool = False
+    # Visibilità: True = visibile anche al cliente nel suo portale,
+    # False (default) = solo agenzia
+    visibile_cliente: bool = False
+    # Categoria del documento per template pre-impostati polizze
+    # (libretto, polizza, condizioni, foto, ricevuta, altro)
+    categoria: Optional[str] = None
+    # Riferimento all'applicazione di libro matricola (per polizze flotta)
+    applicazione_matricola_id: Optional[str] = None
 
 
 # =============== DIARIO CLIENTE ===============

@@ -223,6 +223,7 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
         ragione_sociale: "", codice: "", tipo: "partner",
         referente: "", email: "", telefono: "", indirizzo: "", citta: "", provincia: "", cap: "",
         partita_iva: "", codice_fiscale: "", iban: "", note: "", attiva: true,
+        perc_ritenuta_acconto: 0,
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const save = async () => {
@@ -274,7 +275,18 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     <Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
                 <div className="col-span-2"><Label>Note</Label>
                     <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
-                <div className="col-span-2 flex items-center gap-2">
+                <div>
+                    <Label className="text-rose-700">Ritenuta d'acconto % (auto su fatture)</Label>
+                    <Input type="number" step="0.01" min="0" max="100"
+                        value={f.perc_ritenuta_acconto || 0}
+                        onChange={(e) => set("perc_ritenuta_acconto", parseFloat(e.target.value) || 0)}
+                        data-testid="age-perc-ritenuta"
+                        placeholder="es. 23" />
+                    <div className="text-[10px] text-slate-500 mt-1">
+                        Verrà applicata automaticamente alle fatture provvigioni emesse dall'agenzia.
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 pt-6">
                     <Checkbox id="att" checked={!!f.attiva} onCheckedChange={(v) => set("attiva", !!v)} />
                     <Label htmlFor="att" className="text-xs">Attiva</Label>
                 </div>
