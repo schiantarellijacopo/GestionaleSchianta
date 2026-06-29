@@ -370,6 +370,116 @@ async def cervello_suggerimenti(
                 "azione_suggerita": "vendita_catastrofale_legge",
             })
 
+    # 5) Clienti fedeli (≥10 anni con noi) → ringraziare/upgrade
+    ten_years_ago = (now - timedelta(days=365 * 10)).isoformat()
+    n_fedeli = 0
+    async for a in db.anagrafiche.find({
+        "created_at": {"$lte": ten_years_ago},
+    }, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1, "created_at": 1}).limit(10):
+        nome = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+        # solo se ha almeno una polizza attiva
+        if await db.polizze.count_documents({
+            "contraente_id": a["id"], "stato": {"$in": ["attiva", "in_emissione"]},
+        }) == 0:
+            continue
+        anni = (now - datetime.fromisoformat(a["created_at"].replace("Z", "+00:00"))).days // 365
+        items.append({
+            "tipo": "cliente_fedele",
+            "priorita": "media",
+            "titolo": f"Cliente fedele da {anni} anni: {nome}",
+            "descrizione": f"Cliente con noi da {anni} anni. Ringraziare con sconto fedeltà o proporre upgrade premium.",
+            "anagrafica_id": a["id"],
+            "azione_suggerita": "premia_fedelta",
+        })
+        n_fedeli += 1
+        if n_fedeli >= 10:
+            break
+
+    # 6) Polizze NON AUTO ferme da oltre 5 anni (casa/infortuni/vita ecc.)
+    five_y = (now - timedelta(days=365 * 5)).isoformat()
+    async for p in db.polizze.find({
+        "stato": {"$in": ["attiva", "in_emissione"]},
+        "ramo": {"$not": {"$regex": "AUTO|RCA", "$options": "i"}},
+        "$or": [
+            {"updated_at": {"$lte": five_y}},
+            {"updated_at": {"$exists": False}},
+        ],
+    }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1,
+        "updated_at": 1, "decorrenza": 1}).limit(10):
+        rif = p.get("updated_at") or p.get("decorrenza", "")
+        anni_ferma = "5+"
+        try:
+            dt = datetime.fromisoformat(str(rif).replace("Z", "+00:00"))
+            anni_ferma = (now - dt).days // 365
+        except Exception:
+            pass
+        items.append({
+            "tipo": "polizza_ferma_5y",
+            "priorita": "alta",
+            "titolo": f"Polizza ferma {anni_ferma} anni: {p['numero_polizza']}",
+            "descrizione": f"{p.get('ramo','—')} non movimentata da oltre 5 anni. Garanzie/massimali probabilmente obsoleti. Check-up urgente.",
+            "anagrafica_id": p.get("contraente_id"),
+            "polizza_id": p.get("id"),
+            "azione_suggerita": "revisione_polizza",
+        })
+
+    # 7) Clienti con ≥3 sinistri ultimo anno → revisione tariffa/franchigie
+    one_y = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    agg_sin = await db.sinistri.aggregate([
+        {"$match": {"data_avvenimento": {"$gte": one_y}}},
+        {"$group": {"_id": "$contraente_id", "n": {"$sum": 1}}},
+        {"$match": {"n": {"$gte": 3}}},
+        {"$sort": {"n": -1}}, {"$limit": 10},
+    ]).to_list(10)
+    cid_to_name = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+                    async for a in db.anagrafiche.find(
+                       {"id": {"$in": [s["_id"] for s in agg_sin if s["_id"]]}},
+                       {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    for s in agg_sin:
+        items.append({
+            "tipo": "molti_sinistri",
+            "priorita": "alta",
+            "titolo": f"⚠️ {s['n']} sinistri ultimo anno: {cid_to_name.get(s['_id'], '—')}",
+            "descrizione": f"Cliente ad alta sinistrosità ({s['n']} sinistri in 12 mesi). Rivedere franchigie/massimali o segmentare il rischio.",
+            "anagrafica_id": s["_id"],
+            "azione_suggerita": "rivedi_franchigie",
+        })
+
+    # 8) Polizze Auto con aumento premio significativo (>50€ rispetto a precedente)
+    # Heuristic: confrontiamo premio della polizza con la versione precedente
+    # (stesso contraente + stesso veicolo/targa, ordinata per decorrenza).
+    auto_by_cli: dict = {}
+    async for p in db.polizze.find({
+        "ramo": {"$regex": "AUTO|RCA", "$options": "i"},
+        "stato": {"$in": ["attiva", "in_emissione", "scaduta"]},
+    }, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "premio_lordo": 1,
+        "decorrenza": 1, "targa": 1, "stato": 1, "ramo": 1}):
+        if not p.get("contraente_id") or not p.get("premio_lordo"):
+            continue
+        key = (p["contraente_id"], (p.get("targa") or "").upper())
+        auto_by_cli.setdefault(key, []).append(p)
+    cnt_aumenti = 0
+    for (cid, _), pols in auto_by_cli.items():
+        if len(pols) < 2 or cnt_aumenti >= 10:
+            continue
+        pols.sort(key=lambda x: x.get("decorrenza") or "")
+        last, prev = pols[-1], pols[-2]
+        if last.get("stato") not in ("attiva", "in_emissione"):
+            continue
+        delta = float(last.get("premio_lordo") or 0) - float(prev.get("premio_lordo") or 0)
+        if delta > 50:
+            items.append({
+                "tipo": "aumento_premio_auto",
+                "priorita": "alta",
+                "titolo": f"Aumento premio +{delta:.0f} €: {last['numero_polizza']}",
+                "descrizione": f"Auto {last.get('targa') or '—'}: premio +{delta:.2f} € rispetto all'anno scorso. Avvisare cliente prima del rinnovo per evitare disdetta.",
+                "anagrafica_id": cid,
+                "polizza_id": last.get("id"),
+                "azione_suggerita": "anticipa_aumento",
+            })
+            cnt_aumenti += 1
+
+
     return items[:limit]
 
 

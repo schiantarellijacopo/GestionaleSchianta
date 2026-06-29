@@ -26,6 +26,10 @@ const TIPO_LABEL = {
     sinistro_lento: "Sinistro fermo",
     upsell_catastrofale: "Upsell catastrofale",
     obbligo_catastrofale_azienda: "Obbligo di legge",
+    cliente_fedele: "Cliente fedele",
+    polizza_ferma_5y: "Polizza ferma 5+ anni",
+    molti_sinistri: "Alto rischio",
+    aumento_premio_auto: "Aumento premio",
 };
 
 export default function AssistentePersonale() {
@@ -34,7 +38,7 @@ export default function AssistentePersonale() {
     const [filter, setFilter] = useState("all");
     const load = () => {
         setItems(null);
-        api.get("/cervello/suggerimenti", { params: { limit: 60 } })
+        api.get("/cervello/suggerimenti", { params: { limit: 100 } })
             .then((r) => setItems(r.data || []));
     };
     useEffect(() => { load(); }, []);

@@ -42,6 +42,15 @@ modulare. Ogni cliente accende solo i servizi che gli servono.
 - Refactoring `server.py` (>9700 righe)
 - Dashboard "Stato integrazioni" per vendita modulare
 
+## Changelog (29/06/2026 — nuove regole Assistente Personale)
+- **+4 regole automatiche** in `/api/cervello/suggerimenti`:
+  - **Cliente fedele ≥10 anni**: rileva anagrafiche con `created_at` ≥10 anni fa con polizza attiva → suggerisce sconto fedeltà / upgrade premium
+  - **Polizza ferma 5+ anni** (non-AUTO): polizze CASA/INFORTUNI/VITA/AZIENDA non aggiornate da oltre 5 anni → check-up urgente garanzie/massimali
+  - **Cliente alto rischio**: ≥3 sinistri nell'ultimo anno → rivedere franchigie/massimali o segmentare il rischio
+  - **Aumento premio AUTO >50€**: confronta la polizza corrente con la precedente (stesso contraente+targa) → avvisare cliente PRIMA del rinnovo per evitare disdetta
+- Frontend AssistentePersonale: aggiornato `TIPO_LABEL` per mostrare i nuovi badge ("Cliente fedele", "Polizza ferma 5+ anni", "Alto rischio", "Aumento premio")
+- Testato live: 19 suggerimenti generati, di cui 1 alto rischio (4 sinistri) + 1 aumento premio (+300€)
+
 ## Changelog (29/06/2026 — Claude AI + Trattative + Catastrofale)
 - **Assistente Personale AI con Claude Sonnet 4.6**: nuovo endpoint `POST /api/assistente-personale/genera-consiglio` che usa Emergent LLM key per generare consigli narrativi personalizzati. Prende il profilo cliente (mesi cliente, polizze, sinistri, marketing, polizze ferme) e produce 3-5 frasi in italiano con azione consigliata, tempistica e canale. Risposta loggata automaticamente nel Diario cliente
 - **UI AI Panel**: pannello "Consiglio AI personalizzato" nella pagina Assistente Personale con search cliente (typeahead `/anagrafiche?q=`), contesto extra opzionale, pulsante "Genera consiglio AI". Output formattato con bordo violetto laterale
