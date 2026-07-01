@@ -12,9 +12,11 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle } from "lucide-react";
 import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
+import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
+import TargaConflictWidget from "@/components/TargaConflictWidget";
 
 export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     const [list, setList] = useState([]);
@@ -148,6 +150,9 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
                         onEdit={setEditing}
                         onDelete={onDelete}
                         onSostituisci={(a) => setSostituendo(a)}
+                        onAnnulla={(a) => setAnnullando(a)}
+                        onDocs={(a) => setDocsApp(a)}
+                        onConflict={(a) => setConflictApp(a)}
                     />
                     {showStorico && storico.length > 0 && (
                         <ApplicazioniTable
@@ -155,6 +160,8 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
                             items={storico}
                             onEdit={setEditing}
                             onDelete={onDelete}
+                            onDocs={(a) => setDocsApp(a)}
+                            onConflict={(a) => setConflictApp(a)}
                             isStorico
                         />
                     )}
@@ -175,11 +182,34 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
                     onClose={() => { setSostituendo(null); load(); }}
                 />
             )}
+            {annullando && (
+                <AnnullaAppDialog
+                    applicazione={annullando}
+                    onClose={() => { setAnnullando(null); load(); }}
+                />
+            )}
+            {docsApp && (
+                <DocsAppDialog polizzaId={polizzaId} applicazione={docsApp}
+                    onClose={() => setDocsApp(null)} />
+            )}
+            {conflictApp && (
+                <Dialog open onOpenChange={(o) => !o && setConflictApp(null)}>
+                    <DialogContent className="max-w-2xl" data-testid="lm-conflict-dialog">
+                        <DialogHeader>
+                            <DialogTitle>
+                                <AlertTriangle className="inline text-amber-600 mr-1" size={16} />
+                                Altre polizze con targa <span className="font-mono">{conflictApp.targa}</span>
+                            </DialogTitle>
+                        </DialogHeader>
+                        <TargaConflictWidget targa={conflictApp.targa} excludeId={polizzaId} compact={false} />
+                    </DialogContent>
+                </Dialog>
+            )}
         </Card>
     );
 }
 
-function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, isStorico = false }) {
+function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, onAnnulla, onDocs, onConflict, isStorico = false }) {
     if (!items || items.length === 0) return null;
     return (
         <div className={isStorico ? "border-t border-slate-200 bg-amber-50/30" : ""}>
@@ -239,10 +269,31 @@ function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, isSt
                                         onClick={() => onEdit(a)} data-testid={`lm-edit-${a.id}`} title="Modifica">
                                         <Pencil size={12} />
                                     </Button>
+                                    {a.targa && onConflict && (
+                                        <Button size="sm" variant="outline" className="h-7 px-2 text-amber-700 hover:bg-amber-50"
+                                            onClick={() => onConflict(a)} data-testid={`lm-conflict-${a.id}`}
+                                            title="Verifica altre polizze con stessa targa">
+                                            <AlertTriangle size={12} />
+                                        </Button>
+                                    )}
+                                    {onDocs && (
+                                        <Button size="sm" variant="outline" className="h-7 px-2 text-sky-700 hover:bg-sky-50"
+                                            onClick={() => onDocs(a)} data-testid={`lm-docs-${a.id}`}
+                                            title="Documenti veicolo (libretto, foto, ecc.)">
+                                            <Paperclip size={12} />
+                                        </Button>
+                                    )}
                                     {!isStorico && a.stato === "attiva" && onSostituisci && (
                                         <Button size="sm" variant="outline" className="h-7 px-2 text-violet-700 hover:bg-violet-50"
                                             onClick={() => onSostituisci(a)} data-testid={`lm-sostituisci-${a.id}`} title="Sostituisci">
                                             <ArrowLeftRight size={12} />
+                                        </Button>
+                                    )}
+                                    {!isStorico && a.stato === "attiva" && onAnnulla && (
+                                        <Button size="sm" variant="outline" className="h-7 px-2 text-orange-700 hover:bg-orange-50"
+                                            onClick={() => onAnnulla(a)} data-testid={`lm-annulla-${a.id}`}
+                                            title="Annulla (vendita/demolizione/…)">
+                                            <Ban size={12} />
                                         </Button>
                                     )}
                                     <Button size="sm" variant="outline" className="h-7 px-2 text-rose-700 hover:bg-rose-50"
