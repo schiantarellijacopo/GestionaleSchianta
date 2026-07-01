@@ -62,7 +62,19 @@ export default function SinistroDetail() {
         || (s.polizza?.targa);
     const stato = s.stato || "aperto";
 
-    const setField = (k, v) => setS({ ...s, [k]: v });
+    const setField = (k, v) => {
+        setS((prev) => {
+            const upd = { ...prev, [k]: v };
+            // Auto-chiusura: quando l'utente inserisce data_liquidazione,
+            // lo stato diventa automaticamente "liquidato" (se non già chiuso).
+            if (k === "data_liquidazione" && v
+                && !["liquidato", "chiuso_senza_seguito", "respinto"].includes(prev.stato)) {
+                upd.stato = "liquidato";
+                setTimeout(() => toast.info("Stato aggiornato automaticamente a 'Liquidato'"), 50);
+            }
+            return upd;
+        });
+    };
     const setNested = (parent, k, v) => setS({ ...s, [parent]: { ...(s[parent] || {}), [k]: v } });
 
     const save = async () => {
@@ -75,6 +87,7 @@ export default function SinistroDetail() {
                 data_apertura: s.data_apertura, luogo: s.luogo,
                 descrizione: s.descrizione, stato: s.stato,
                 riserva: parseFloat(s.riserva) || 0, liquidazione: parseFloat(s.liquidazione) || 0,
+                data_liquidazione: s.data_liquidazione || null,
                 garanzie_colpite: s.garanzie_colpite || [],
                 soggetti_coinvolti: s.soggetti_coinvolti || [],
                 anagrafiche_associate: s.anagrafiche_associate || [],

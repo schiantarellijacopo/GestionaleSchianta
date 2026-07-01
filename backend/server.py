@@ -3875,6 +3875,12 @@ async def update_sinistro(sid: str, body: dict, user=Depends(require_user("admin
     if not prev:
         raise HTTPException(404, "Non trovato")
     body["updated_at"] = _now_iso()
+    # Auto-transizione stato: se viene impostata data_liquidazione e lo stato
+    # non è già chiuso/liquidato, marca il sinistro come "liquidato".
+    if body.get("data_liquidazione"):
+        curr_stato = body.get("stato") or prev.get("stato")
+        if curr_stato not in ("liquidato", "chiuso_senza_seguito", "respinto"):
+            body["stato"] = "liquidato"
     await db.sinistri.update_one({"id": sid}, {"$set": body})
     await log_attivita(user, "update", "sinistro", sid)
     new = await db.sinistri.find_one({"id": sid}, {"_id": 0})

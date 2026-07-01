@@ -409,6 +409,7 @@ class Sinistro(BaseDoc):
     descrizione: Optional[str] = None
     riserva: float = 0.0
     liquidazione: float = 0.0
+    data_liquidazione: Optional[str] = None  # YYYY-MM-DD — se presente, stato auto → "liquidato"
     danneggiati: List[dict] = Field(default_factory=list)
     collaboratore_id: Optional[str] = None
     id_sinistro_exp: Optional[str] = None
