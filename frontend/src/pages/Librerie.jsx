@@ -3068,6 +3068,25 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     const isPdf = (f.tipo || "").startsWith("pdf_");
     const isEmail = f.tipo === "email";
 
+    // 🔧 FIX BUG: quando l'utente apre l'edit su un modello diverso senza chiudere il dialog,
+    // React riusa la stessa istanza e l'initial useState non viene rieseguito.
+    // Sincronizziamo lo state locale con l'editing prop ogni volta che cambia l'id.
+    useEffect(() => {
+        if (editing && editing.id) {
+            setF({
+                tipo: editing.tipo,
+                nome: editing.nome || "",
+                oggetto: editing.oggetto || "",
+                corpo: editing.corpo || "",
+                sezioni: editing.sezioni || [],
+                categoria: editing.categoria || "",
+                default: !!editing.default,
+                attivo: editing.attivo !== false,
+                note: editing.note || "",
+            });
+        }
+    }, [editing?.id, editing?.updated_at]);
+
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const insertPlaceholder = (ph) => {
