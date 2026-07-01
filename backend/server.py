@@ -4235,6 +4235,38 @@ async def sostituisci_applicazione(
     return {"nuova": obj.model_dump(), "sostituita_id": aid}
 
 
+@api.post("/polizze/{pid}/applicazioni/{aid}/annulla")
+async def annulla_applicazione(
+    pid: str, aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Annulla un'applicazione del libro matricola (vendita/demolizione/…).
+
+    body: { motivo: str, data_annullamento?: YYYY-MM-DD }
+    """
+    app = await db.applicazioni.find_one({"id": aid, "polizza_id": pid}, {"_id": 0})
+    if not app:
+        raise HTTPException(404, "Applicazione non trovata")
+    if app.get("stato") in ("annullata", "sostituita"):
+        raise HTTPException(400, "Applicazione già non attiva")
+    motivo = (body.get("motivo") or "").strip()
+    if not motivo:
+        raise HTTPException(400, "Motivo obbligatorio")
+    data_ann = body.get("data_annullamento") or _now_iso()[:10]
+    await db.applicazioni.update_one(
+        {"id": aid},
+        {"$set": {
+            "stato": "annullata",
+            "data_esclusione": data_ann,
+            "motivo_annullamento": motivo,
+            "updated_at": _now_iso(),
+        }},
+    )
+    await log_attivita(user, "annulla", "applicazione", aid,
+                       f"Targa {app.get('targa')} — {motivo}")
+    return {"ok": True, "stato": "annullata", "data_esclusione": data_ann}
+
+
 @api.post("/polizze/{pid}/applicazioni", status_code=201)
 async def create_applicazione(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "is_libro_matricola": 1})
@@ -9047,10 +9079,14 @@ async def delete_diario(did: str, user=Depends(require_user("admin", "collaborat
 @api.get("/allegati")
 async def list_allegati(
     entita_tipo: str, entita_id: str,
+    applicazione_matricola_id: Optional[str] = None,
     user=Depends(current_user),
 ):
+    flt: dict = {"entita_tipo": entita_tipo, "entita_id": entita_id, "is_deleted": False}
+    if applicazione_matricola_id:
+        flt["applicazione_matricola_id"] = applicazione_matricola_id
     items = await db.allegati.find(
-        {"entita_tipo": entita_tipo, "entita_id": entita_id, "is_deleted": False},
+        flt,
         {"_id": 0},
     ).sort("created_at", -1).to_list(200)
     return items

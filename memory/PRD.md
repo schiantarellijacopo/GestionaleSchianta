@@ -39,14 +39,23 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 
 ## Backlog priorità
 
+### Sessione 01/07 (iter28)
+- ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.
+- ✅ **Libro Matricola · Documenti per singolo veicolo**: dialog "Documenti veicolo" per applicazione con categorie predefinite (Libretto, Certificato assicurativo, Quietanza, Foto, Atto vendita, Altro). Filtro `applicazione_matricola_id` aggiunto a `GET /allegati`. Documenti restano collegati alla polizza ma filtrabili per veicolo/targa.
+
 ### P0 — In valutazione utente
 - Test end-to-end auto-archiviazione Documenti Inbox con file reali.
+- Test end-to-end nuovi dialog Annulla/Documenti veicolo in Libro Matricola.
 
 ### P1 — Prossime sessioni
-- **Twilio/Spoki**: integrazione SMS/WhatsApp reale (credenziali utente).
 - **Refactor `server.py`** (>10k righe) in router modulari per anagrafiche/polizze/titoli/sinistri/movimenti.
 - **Storico Avvisi UI**: tab dedicato nella sezione Avvisi (backend già pronto).
-- **Libro Matricola pagina standalone** (oltre al tab in PolizzaDetail).
+- Chiarimenti PDF variazioni: #6 setup agenziale, #9 sezione regolazione, #10 elenco documenti, #21 pipeline email.
+- Variazione PDF #3 Mappa anagrafica cliente (Leaflet + Nominatim).
+- Variazione PDF #4 CRUD Raccolta Dati + Potenti Domande in Librerie.
+- Variazione PDF #16 Associazione 3D Ramo→Prodotto→Garanzie.
+- Variazione PDF #17 Diario cliente da invio avvisi.
+- Variazione PDF #19+#20 Pagina "Alert Studio" per invio manuale bulk.
 
 ### P2 — Future
 - Stripe billing.

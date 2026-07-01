@@ -22,6 +22,9 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     const [list, setList] = useState([]);
     const [editing, setEditing] = useState(null);
     const [sostituendo, setSostituendo] = useState(null);
+    const [annullando, setAnnullando] = useState(null);
+    const [docsApp, setDocsApp] = useState(null);
+    const [conflictApp, setConflictApp] = useState(null);
     const [q, setQ] = useState("");
     const [showStorico, setShowStorico] = useState(false);
     const [showImport, setShowImport] = useState(false);
@@ -504,6 +507,122 @@ function SostituisciDialog({ polizzaId, applicazione, onClose }) {
                         {saving ? "Sostituendo…" : "Sostituisci"}
                     </Button>
                 </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+function AnnullaAppDialog({ applicazione, onClose }) {
+    const [motivo, setMotivo] = useState("");
+    const [motivoPreset, setMotivoPreset] = useState("");
+    const [data, setData] = useState(new Date().toISOString().slice(0, 10));
+    const [saving, setSaving] = useState(false);
+
+    const confermaAnnulla = async () => {
+        const motivoFinale = motivoPreset && motivoPreset !== "Altro"
+            ? (motivo ? `${motivoPreset} — ${motivo}` : motivoPreset)
+            : motivo.trim();
+        if (!motivoFinale) { toast.error("Motivo obbligatorio"); return; }
+        setSaving(true);
+        try {
+            await api.post(
+                `/polizze/${applicazione.polizza_id}/applicazioni/${applicazione.id}/annulla`,
+                { motivo: motivoFinale, data_annullamento: data },
+            );
+            toast.success("Applicazione annullata");
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open onOpenChange={onClose}>
+            <DialogContent className="max-w-lg" data-testid="lm-annulla-dialog">
+                <DialogHeader>
+                    <DialogTitle>
+                        <Ban className="inline mr-2 -mt-1 text-orange-600" size={18} />
+                        Annulla applicazione {applicazione.numero} — {applicazione.targa}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                    <div className="text-xs bg-orange-50 border border-orange-200 rounded p-2 text-orange-900">
+                        L&apos;applicazione verrà marcata come <strong>annullata</strong> con la data di esclusione indicata.
+                        Il veicolo non risulterà più coperto dalla data di annullamento.
+                    </div>
+                    <div>
+                        <Label>Motivo *</Label>
+                        <Select value={motivoPreset} onValueChange={setMotivoPreset}>
+                            <SelectTrigger data-testid="lm-annulla-preset"><SelectValue placeholder="Seleziona motivo…" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="Vendita">Vendita veicolo</SelectItem>
+                                <SelectItem value="Demolizione">Demolizione</SelectItem>
+                                <SelectItem value="Furto">Furto</SelectItem>
+                                <SelectItem value="Restituzione leasing">Restituzione leasing</SelectItem>
+                                <SelectItem value="Cessazione uso">Cessazione uso</SelectItem>
+                                <SelectItem value="Errore inserimento">Errore inserimento</SelectItem>
+                                <SelectItem value="Altro">Altro (specificare)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label>{motivoPreset === "Altro" || !motivoPreset ? "Descrizione motivo *" : "Note aggiuntive"}</Label>
+                        <Input
+                            value={motivo}
+                            onChange={(e) => setMotivo(e.target.value)}
+                            placeholder={motivoPreset === "Altro" ? "Es. veicolo distrutto in incendio" : "Facoltativo"}
+                            data-testid="lm-annulla-motivo"
+                        />
+                    </div>
+                    <div>
+                        <Label>Data annullamento</Label>
+                        <Input type="date" value={data} onChange={(e) => setData(e.target.value)} data-testid="lm-annulla-data" />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={confermaAnnulla} disabled={saving} className="bg-orange-600 hover:bg-orange-700" data-testid="lm-annulla-conferma">
+                        <Ban size={14} className="mr-1" />
+                        {saving ? "Annullando…" : "Conferma annullamento"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+function DocsAppDialog({ polizzaId, applicazione, onClose }) {
+    // Categorie tipiche di documenti per veicolo/applicazione libro matricola
+    const categorieVeicolo = [
+        { key: "libretto", label: "Libretto di circolazione", visibile_default: true },
+        { key: "certificato", label: "Certificato assicurativo", visibile_default: true },
+        { key: "quietanza", label: "Quietanza / Ricevuta", visibile_default: true },
+        { key: "foto", label: "Foto veicolo / danni", visibile_default: false },
+        { key: "atto_vendita", label: "Atto di vendita / passaggio", visibile_default: false },
+        { key: "altro", label: "Altro documento veicolo", visibile_default: false },
+    ];
+    return (
+        <Dialog open onOpenChange={onClose}>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="lm-docs-dialog">
+                <DialogHeader>
+                    <DialogTitle>
+                        <Paperclip className="inline mr-2 -mt-1 text-sky-600" size={18} />
+                        Documenti veicolo — {applicazione.targa} (app. {applicazione.numero})
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 text-sky-900 mb-3">
+                    Documenti collegati a <strong>questo specifico veicolo</strong> del libro matricola
+                    (es. libretto, certificato, foto). Restano collegati alla polizza ma filtrati per targa.
+                </div>
+                <DocumentiSezioneSplit
+                    entita_tipo="polizza"
+                    entita_id={polizzaId}
+                    applicazione_matricola_id={applicazione.id}
+                    categorie={categorieVeicolo}
+                    titolo={`Veicolo ${applicazione.targa}`}
+                />
             </DialogContent>
         </Dialog>
     );

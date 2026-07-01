@@ -4,7 +4,7 @@ Legenda: ✅ FATTO · 🟡 IN CORSO · ⏳ PIANIFICATO · ⏸ DEFERRED · ❓ DA
 
 | # | Modifica | Stato | Note |
 |---|---|---|---|
-| 1 | Annulla applicazione libro matricola (vendita/demolizione/…) | ✅ | Dialog "Annulla" con motivo + data (iter precedente) |
+| 1 | Annulla applicazione libro matricola (vendita/demolizione/…) | ✅ | Dialog "Annulla" con motivo + data (incl. `POST /polizze/{pid}/applicazioni/{aid}/annulla`) |
 | 2 | Cross-targa: cerca stessa targa in altre polizze | ✅ | `TargaConflictWidget` in Libro Matr. + PolizzaDetail |
 | 3 | Mappa in anagrafica cliente + immobili + veicoli | ⏳ | Prossima iter — Leaflet + geocode |
 | 4 | Raccolta Dati + Potenti Domande gestibili in Librerie (CRUD) | ⏳ | Prossima iter — modello DB `questionari_libreria` |
@@ -14,7 +14,7 @@ Legenda: ✅ FATTO · 🟡 IN CORSO · ⏳ PIANIFICATO · ⏸ DEFERRED · ❓ DA
 | 8 | Rinominare "Mezzo pagamento" → "Tipo pagamento" nelle polizze | ✅ | Label aggiornata in PolizzaDetail |
 | 9 | Sezione Regolazione premio mancante | ❓ | Dialog Regolazione Premio esiste già — chiarire dove serve la "sezione" |
 | 10 | Elenco documenti | ❓ | Chiarire scopo (lista categorie? tipi doc con conteggi?) |
-| 11 | Libretto sempre visibile + N certificati per frazionamento (verdi in Dashboard) | 🟡 | Categorie visibili default OK (#24) — logica N/frazionamento da fare |
+| 11 | Libretto sempre visibile + N certificati per frazionamento (verdi in Dashboard) | 🟡 | Categorie visibili default OK (#24). Ora libretto/certificato/quietanza/foto allegabili **per singolo veicolo** in Libro Matricola (dialog "Documenti veicolo") — logica N/frazionamento resta da fare |
 | 12 | Termini disdetta + tacito rinnovo + periodo mora nella Librerie Prodotto | ✅ | Aggiunti 3 campi al form Prodotto |
 | 13 | Sezione "Altri dati" → solo Nota | ✅ | Tab "Altri" ora mostra una nota unificata |
 | 14 | Scambio dati: Agenzia Sorgente vs Agenzia Ricevente | ⏳ | Rename ruoli nella pagina Scambio Dati |
