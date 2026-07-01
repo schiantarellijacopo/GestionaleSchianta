@@ -2357,6 +2357,21 @@ async def get_polizza(pid: str, user=Depends(current_user)):
     doc["provvigione_margine"] = bk["provvigione_margine"]
     doc["provvigione_pct_collab"] = bk["pct_collab"]
     doc["provvigione_schema_nome"] = bk["schema_nome"]
+    # 📅 SCADENZA COPERTURA: se ci sono titoli incassati/coperti, la copertura effettiva
+    # arriva fino alla scadenza dell'ULTIMO titolo pagato/coperto.
+    ultimo_titolo = await db.titoli.find_one(
+        {"polizza_id": pid, "stato": {"$in": ["incassato", "coperto", "abbuonato"]}},
+        {"_id": 0, "scadenza": 1, "coperto_fino_a": 1, "data_incasso": 1, "stato": 1, "numero_titolo": 1},
+        sort=[("scadenza", -1)],
+    )
+    if ultimo_titolo:
+        doc["copertura_fino_a"] = ultimo_titolo.get("coperto_fino_a") or ultimo_titolo.get("scadenza")
+        doc["ultimo_titolo_stato"] = ultimo_titolo.get("stato")
+        doc["ultimo_titolo_scadenza"] = ultimo_titolo.get("scadenza")
+        doc["ultimo_titolo_numero"] = ultimo_titolo.get("numero_titolo")
+    else:
+        doc["copertura_fino_a"] = None
+        doc["ultimo_titolo_stato"] = None
     # Raccogli IDs della catena di polizze sostituite (storia)
     polizza_ids_catena = [pid]
     cursor_id = doc.get("sostituisce_polizza")

@@ -801,7 +801,7 @@ function ProdottoForm({ section, editing, onClose }) {
         return ["VITA", "VITA_RC", "PREVIDENZA"].includes(r) ? 30 : 15;
     };
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, is_libro_matricola: false, attivo: true }}
+        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, termini_disdetta_giorni: 60, tacito_rinnovo: true, is_libro_matricola: false, attivo: true }}
         fields={(f, set) => {
             const ramoUpper = String(f.ramo || "").toUpperCase();
             const isRcAuto = ramoUpper.includes("RCA") || ramoUpper.includes("AUTO");
@@ -860,19 +860,52 @@ function ProdottoForm({ section, editing, onClose }) {
                             </div>
                         </div>
                     )}
-                    <div className="bg-sky-50 border border-sky-200 rounded p-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={!!f.mostra_sezione_veicolo}
-                                onChange={(e) => set("mostra_sezione_veicolo", e.target.checked)}
-                                data-testid="prodotto-mostra-veicolo"
-                            />
-                            <span className="text-sm font-medium text-sky-900">Mostra sezione &quot;Dati veicolo&quot;?</span>
-                        </label>
-                        <div className="text-[10px] text-sky-700 mt-1">
-                            Spunta per prodotti che gestiscono un veicolo (es. RCA, Kasko, ARD, infortuni conducente). Per ramo <b>RCAuto</b> la sezione viene mostrata sempre, anche se non spuntato.
-                        </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                    <div>
+                        <Label>Termini di disdetta (gg)</Label>
+                        <Input
+                            type="number" min="0" max="365"
+                            value={f.termini_disdetta_giorni ?? 60}
+                            onChange={(e) => set("termini_disdetta_giorni", parseInt(e.target.value || 0, 10))}
+                            data-testid="prodotto-termini-disdetta"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">Default: 60 gg</div>
+                    </div>
+                    <div>
+                        <Label>Tacito rinnovo</Label>
+                        <Select value={f.tacito_rinnovo ? "si" : "no"} onValueChange={(v) => set("tacito_rinnovo", v === "si")}>
+                            <SelectTrigger data-testid="prodotto-tacito"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="si">Sì</SelectItem>
+                                <SelectItem value="no">No</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <div className="text-[10px] text-slate-500 mt-1">Rinnovo automatico salvo disdetta</div>
+                    </div>
+                    <div>
+                        <Label>Periodo di mora (gg)</Label>
+                        <Input
+                            type="number" min="0" max="180"
+                            value={f.periodo_mora_giorni ?? f.termini_mora_giorni ?? 15}
+                            onChange={(e) => set("periodo_mora_giorni", parseInt(e.target.value || 0, 10))}
+                            data-testid="prodotto-periodo-mora"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">Copertura garantita post scadenza</div>
+                    </div>
+                </div>
+                <div className="bg-sky-50 border border-sky-200 rounded p-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={!!f.mostra_sezione_veicolo}
+                            onChange={(e) => set("mostra_sezione_veicolo", e.target.checked)}
+                            data-testid="prodotto-mostra-veicolo"
+                        />
+                        <span className="text-sm font-medium text-sky-900">Mostra sezione &quot;Dati veicolo&quot;?</span>
+                    </label>
+                    <div className="text-[10px] text-sky-700 mt-1">
+                        Spunta per prodotti che gestiscono un veicolo (es. RCA, Kasko, ARD, infortuni conducente). Per ramo <b>RCAuto</b> la sezione viene mostrata sempre, anche se non spuntato.
                     </div>
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>

@@ -436,12 +436,14 @@ export default function PolizzaDetail() {
                             entita_id={pol.id}
                             canEdit={canEdit}
                             titolo="Documenti polizza · gestione visibilità"
-                            sottotitolo="Allega contratto, condizioni, certificati. Usa i due riquadri per separare ciò che il cliente può vedere dal materiale interno."
+                            sottotitolo="Polizza, condizioni, quietanze, libretto di pagamento sono visibili al cliente. Preventivi, appunti e altro restano interni."
                             categorie={[
-                                { key: "contratto", label: "Contratto", icon: "📄", default_visibile: true },
+                                { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true },
                                 { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true },
-                                { key: "certificato", label: "Certificato", icon: "🏅", default_visibile: true },
+                                { key: "quietanza", label: "Quietanza", icon: "🧾", default_visibile: true },
+                                { key: "libretto_pagamento", label: "Libretto pagam.", icon: "📕", default_visibile: true, descrizione: "Certificati/libretto pagamento (più di 1 all'anno secondo frazionamento)" },
                                 { key: "preventivo", label: "Preventivo", icon: "📋", default_visibile: false },
+                                { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false },
                             ]}
                         />
                     </div>
@@ -504,18 +506,13 @@ export default function PolizzaDetail() {
 
 
                 <TabsContent value="altri">
-                    <Card className="p-6 border-slate-200 mt-4 space-y-5">
-                        <div>
-                            <SezioneTitolo titolo="Caratteristiche" />
-                            <div className="text-sm whitespace-pre-line">{pol.caratteristiche || "—"}</div>
+                    <Card className="p-6 border-slate-200 mt-4 space-y-3">
+                        <SezioneTitolo titolo="Note polizza" />
+                        <div className="text-xs text-slate-500 -mt-3">
+                            💡 Sezione unificata. Annota qui informazioni libere sulla polizza (caratteristiche, da restituire, note interne, appunti).
                         </div>
-                        <div>
-                            <SezioneTitolo titolo="Da restituire" extra />
-                            <div className="text-sm whitespace-pre-line">{pol.da_restituire || "—"}</div>
-                        </div>
-                        <div>
-                            <SezioneTitolo titolo="Note interne" extra />
-                            <div className="text-sm whitespace-pre-line">{pol.note_interne || pol.note || "—"}</div>
+                        <div className="text-sm whitespace-pre-line min-h-[120px] bg-slate-50 border border-slate-200 rounded p-3">
+                            {[pol.note_interne, pol.note, pol.caratteristiche, pol.da_restituire].filter(Boolean).join("\n\n") || "—"}
                         </div>
                     </Card>
                 </TabsContent>
@@ -748,7 +745,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                             <div><Label>Termini mora (gg)</Label><Input type="number" value={f.termini_mora_giorni} onChange={(e) => set("termini_mora_giorni", e.target.value)} /></div>
                             <div><Label>Termini disdetta (gg)</Label><Input type="number" value={f.termini_disdetta_giorni} onChange={(e) => set("termini_disdetta_giorni", e.target.value)} /></div>
                             <div>
-                                <Label>Mezzo pagamento preferito (questa polizza)</Label>
+                                <Label>Tipo pagamento preferito (questa polizza)</Label>
                                 <Select
                                     value={f.mezzo_pagamento_preferito || "__auto__"}
                                     onValueChange={(v) => set("mezzo_pagamento_preferito", v === "__auto__" ? "" : v)}
