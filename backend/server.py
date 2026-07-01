@@ -9131,6 +9131,38 @@ async def delete_allegato(aid: str, user=Depends(require_user("admin", "collabor
     return {"ok": True}
 
 
+@api.patch("/allegati/{aid}/visibilita")
+async def toggle_allegato_visibilita(
+    aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Toggle visibile_cliente di un allegato (per spostarlo tra 'visibile' e 'interno')."""
+    new_val = bool(body.get("visibile_cliente", False))
+    res = await db.allegati.update_one(
+        {"id": aid}, {"$set": {"visibile_cliente": new_val, "updated_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Allegato non trovato")
+    return {"ok": True, "visibile_cliente": new_val}
+
+
+@api.patch("/allegati/{aid}")
+async def patch_allegato(
+    aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna campi descrittivi (categoria, descrizione, visibile_cliente, applicazione_matricola_id)."""
+    allowed = {"categoria", "descrizione", "visibile_cliente", "applicazione_matricola_id"}
+    upd = {k: v for k, v in body.items() if k in allowed}
+    if not upd:
+        raise HTTPException(400, "Nessun campo aggiornabile fornito")
+    upd["updated_at"] = _now_iso()
+    res = await db.allegati.update_one({"id": aid}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Allegato non trovato")
+    return await db.allegati.find_one({"id": aid}, {"_id": 0})
+
+
 # ============================================================
 # STORAGE GENERICO (logo azienda, documenti utente, attestati)
 # Path canonico: /api/storage/{full_path}

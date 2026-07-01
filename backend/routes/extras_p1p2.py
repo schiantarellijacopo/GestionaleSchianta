@@ -9,7 +9,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -26,13 +26,15 @@ router = APIRouter()
 # 10) INSIGHTS · DOCUMENTI MANCANTI (widget dashboard)
 # ===========================================================
 @router.get("/insights/documenti-mancanti")
-async def documenti_mancanti(user=Depends(current_user)) -> dict:
-    """Ritorna le liste di entità senza documenti essenziali:
+async def documenti_mancanti(
+    collaboratore_id: Optional[str] = None,
+    user=Depends(current_user),
+) -> dict:
+    """Ritorna le liste di entità senza documenti essenziali, filtrabile per collaboratore.
     - polizze senza PDF/allegato polizza
     - anagrafiche senza carta d'identità o documento equivalente
-    - polizze veicolo senza libretto allegato.
-    Limit 100 per categoria per non saturare la UI."""
-    LIMIT = 200
+    - polizze veicolo senza libretto allegato."""
+    LIMIT = 500
 
     # === 1. POLIZZE SENZA ALLEGATO ===
     # Sono "attive" o "in corso" da almeno 1 giorno (date_effetto <= today)
@@ -44,6 +46,8 @@ async def documenti_mancanti(user=Depends(current_user)) -> dict:
     is_client = user["role"] == "cliente"
     if is_client:
         pol_filter["contraente_id"] = user.get("anagrafica_id")
+    if collaboratore_id:
+        pol_filter["collaboratore_id"] = collaboratore_id
     polizze = await db.polizze.find(pol_filter, {
         "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
         "contraente_id": 1, "scadenza": 1, "effetto": 1, "targa": 1,
@@ -89,6 +93,10 @@ async def documenti_mancanti(user=Depends(current_user)) -> dict:
     ana_filter = {"tipo": {"$ne": "persona_giuridica"}}
     if is_client:
         ana_filter["id"] = user.get("anagrafica_id")
+    # Se filtra per collaboratore: solo anagrafiche con almeno 1 polizza assegnata a lui
+    if collaboratore_id:
+        coll_ana_ids = await db.polizze.distinct("contraente_id", {"collaboratore_id": collaboratore_id})
+        ana_filter["id"] = {"$in": coll_ana_ids} if not is_client else user.get("anagrafica_id")
     anagrafiche = await db.anagrafiche.find(ana_filter, {
         "_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
         "cellulare": 1, "email": 1,
@@ -300,6 +308,95 @@ async def delete_applicazione(
     if res.deleted_count == 0:
         raise HTTPException(404, "Applicazione non trovata")
     return {"ok": True}
+
+
+class CessazioneBody(BaseModel):
+    data_cessazione: str  # YYYY-MM-DD
+    tipo_cessazione: Literal["sostituita", "venduta", "demolita", "esportata", "rubata", "cessata_altro"] = "cessata_altro"
+    motivo_dettaglio: Optional[str] = None
+
+
+@router.post("/libro-matricola/applicazioni/{aid}/annulla")
+async def annulla_applicazione(
+    aid: str, body: CessazioneBody,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Cessa un'applicazione (veicolo venduto/demolito/esportato/rubato/altro).
+    A differenza di delete, mantiene lo storico marcando data_cessazione + tipo_cessazione."""
+    res = await db.applicazioni_matricola.update_one(
+        {"id": aid},
+        {"$set": {
+            "data_cessazione": body.data_cessazione,
+            "tipo_cessazione": body.tipo_cessazione,
+            "motivo_cessazione": body.motivo_dettaglio,
+            "cessata_da": user.get("id"),
+            "cessata_il": _now_iso(),
+            "updated_at": _now_iso(),
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Applicazione non trovata")
+    return await db.applicazioni_matricola.find_one({"id": aid}, {"_id": 0})
+
+
+# ===========================================================
+# 2.b) CROSS-TARGA SEARCH (warning: polizze multiple con stessa targa)
+# ===========================================================
+@router.get("/polizze/by-targa/{targa}")
+async def cerca_polizze_per_targa(
+    targa: str,
+    exclude_id: Optional[str] = None,
+    user=Depends(current_user),
+) -> dict:
+    """Cerca tutte le polizze (E applicazioni matricola) che riportano la stessa targa.
+    Utile per ricordare aggiornamenti coordinati (RCA + Infortuni Conducente + Tutela Legale, ecc.)."""
+    targa_clean = (targa or "").strip().upper().replace(" ", "")
+    if not targa_clean:
+        return {"polizze": [], "applicazioni": []}
+    # polizze dirette
+    pol_filter = {"targa": {"$regex": f"^{re.escape(targa_clean)}$", "$options": "i"}}
+    if exclude_id:
+        pol_filter["id"] = {"$ne": exclude_id}
+    is_client = user["role"] == "cliente"
+    if is_client:
+        pol_filter["contraente_id"] = user.get("anagrafica_id")
+    polizze = await db.polizze.find(pol_filter, {
+        "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+        "stato": 1, "contraente_id": 1, "scadenza": 1, "data_scadenza": 1,
+        "compagnia_id": 1, "is_libro_matricola": 1,
+    }).limit(50).to_list(50)
+    # applicazioni matricola con la stessa targa
+    applicazioni = await db.applicazioni_matricola.find(
+        {"targa": {"$regex": f"^{re.escape(targa_clean)}$", "$options": "i"}},
+        {"_id": 0},
+    ).limit(50).to_list(50)
+    # enrich
+    cids = list({p.get("contraente_id") for p in polizze if p.get("contraente_id")})
+    cmap = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+            async for a in db.anagrafiche.find(
+                {"id": {"$in": cids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
+    comp_ids = list({p.get("compagnia_id") for p in polizze if p.get("compagnia_id")})
+    compmap = {c["id"]: c.get("ragione_sociale") async for c in db.compagnie.find(
+        {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    for p in polizze:
+        p["contraente_nome"] = cmap.get(p.get("contraente_id"))
+        p["compagnia_nome"] = compmap.get(p.get("compagnia_id"))
+    pol_by_id = {p["id"]: p for p in polizze}
+    for a in applicazioni:
+        pol = pol_by_id.get(a.get("polizza_id"))
+        if pol:
+            a["polizza_numero"] = pol.get("numero_polizza")
+            a["polizza_ramo"] = pol.get("ramo")
+            a["contraente_nome"] = pol.get("contraente_nome")
+        else:
+            sub_pol = await db.polizze.find_one(
+                {"id": a.get("polizza_id")},
+                {"_id": 0, "numero_polizza": 1, "ramo": 1, "contraente_id": 1},
+            )
+            if sub_pol:
+                a["polizza_numero"] = sub_pol.get("numero_polizza")
+                a["polizza_ramo"] = sub_pol.get("ramo")
+    return {"polizze": polizze, "applicazioni": applicazioni, "targa": targa_clean}
 
 
 # ===========================================================

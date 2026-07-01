@@ -240,8 +240,12 @@ async def analizza_documento(
                 updated["auto_archive_result"] = res
                 return updated
         except Exception as e:
-            logging.warning("Auto-archive fallito per %s: %s", inbox_id, e)
-            # Lascia in pending: l'utente potrà rivedere manualmente
+            logging.exception("Auto-archive fallito per %s: %s", inbox_id, e)
+            # Lascia in pending: l'utente potrà rivedere manualmente.
+            # Annota l'errore nel doc inbox così è visibile in UI
+            await db.documenti_inbox.update_one({"id": inbox_id}, {"$set": {
+                "auto_archive_errore": str(e)[:300],
+            }})
 
     return doc_inbox
 
@@ -440,3 +444,41 @@ async def elimina_inbox(
     if res.deleted_count == 0:
         raise HTTPException(404, "Documento non trovato")
     return {"ok": True}
+
+
+@router.post("/documenti-inbox/retry-auto-archive")
+async def retry_auto_archive(
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Riprocessa tutti i documenti pending che sono eleggibili per auto-archiviazione
+    (confidenza alta + tipo riconosciuto + anagrafica trovata)."""
+    archived = 0
+    failed = 0
+    errors = []
+    async for inb in db.documenti_inbox.find({"stato": "pending"}, {"_id": 0}):
+        if inb.get("confidenza") != "alta":
+            continue
+        tipo = inb.get("tipo_documento")
+        if not tipo or tipo == "altro":
+            continue
+        target_a = inb.get("target_anagrafica") or {}
+        target_p = inb.get("target_polizza") or {}
+        if not target_a.get("id") and not target_p.get("id"):
+            continue
+        body = {
+            "anagrafica_id": target_a.get("id"),
+            "polizza_id": target_p.get("id"),
+            "campi_da_applicare": list((inb.get("dati") or {}).keys()),
+            "dati": inb.get("dati") or {},
+            "salva_avatar": True,
+        }
+        try:
+            await _do_save(inb["id"], body, user)
+            archived += 1
+        except Exception as e:
+            failed += 1
+            errors.append({"id": inb["id"], "err": str(e)[:200]})
+            await db.documenti_inbox.update_one({"id": inb["id"]}, {"$set": {
+                "auto_archive_errore": str(e)[:300],
+            }})
+    return {"archived": archived, "failed": failed, "errors": errors}

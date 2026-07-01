@@ -12,8 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
-import { ClipboardList, Car, Search, FileText, Paperclip, X } from "lucide-react";
+import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
+import TargaConflictWidget from "@/components/TargaConflictWidget";
+import { ClipboardList, Car, Search, FileText, Paperclip, X, Ban, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog as Dlg2, DialogContent as DC2, DialogHeader as DH2, DialogTitle as DT2, DialogFooter as DF2 } from "@/components/ui/dialog";
 
 export default function LibroMatricolaPage() {
     const [items, setItems] = useState(null);
@@ -21,6 +24,8 @@ export default function LibroMatricolaPage() {
     const [stato, setStato] = useState("all");
     const [polFilter, setPolFilter] = useState("");
     const [docsApp, setDocsApp] = useState(null);
+    const [annullaApp, setAnnullaApp] = useState(null);
+    const [conflictApp, setConflictApp] = useState(null);
 
     const load = () => {
         const params = {};
@@ -125,16 +130,32 @@ export default function LibroMatricolaPage() {
                                             <td className="px-2 py-1.5 num text-right font-mono">{fmtEur(a.premio_lordo || 0)}</td>
                                             <td className="px-2 py-1.5">
                                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${isCessato ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-                                                    {isCessato ? "CESSATO" : "ATTIVO"}
+                                                    {isCessato ? (a.tipo_cessazione || "cessato").toUpperCase() : "ATTIVO"}
                                                 </span>
                                             </td>
                                             <td className="px-2 py-1.5 font-mono">{a.data_cessazione || "—"}</td>
                                             <td className="px-2 py-1.5 text-center">
-                                                <button onClick={() => setDocsApp(a)}
-                                                    className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-violet-300 text-violet-700 hover:bg-violet-50"
-                                                    data-testid={`lm-docs-${a.id}`}>
-                                                    <Paperclip size={11} /> {a.n_allegati || 0}
-                                                </button>
+                                                <div className="inline-flex items-center gap-1">
+                                                    <button onClick={() => setDocsApp(a)}
+                                                        className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-violet-300 text-violet-700 hover:bg-violet-50"
+                                                        data-testid={`lm-docs-${a.id}`} title="Documenti">
+                                                        <Paperclip size={11} /> {a.n_allegati || 0}
+                                                    </button>
+                                                    {a.targa && (
+                                                        <button onClick={() => setConflictApp(a)}
+                                                            className="inline-flex items-center text-[10px] px-1.5 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                                                            data-testid={`lm-conflict-${a.id}`} title="Verifica altre polizze con stessa targa">
+                                                            <AlertTriangle size={11} />
+                                                        </button>
+                                                    )}
+                                                    {!isCessato && (
+                                                        <button onClick={() => setAnnullaApp(a)}
+                                                            className="inline-flex items-center text-[10px] px-1.5 py-1 rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
+                                                            data-testid={`lm-annulla-${a.id}`} title="Annulla applicazione (vendita/demolizione/…)">
+                                                            <Ban size={11} />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -148,6 +169,12 @@ export default function LibroMatricolaPage() {
             {/* Dialog documenti per applicazione */}
             {docsApp && (
                 <DocsApplicazioneDialog app={docsApp} onClose={() => { setDocsApp(null); load(); }} />
+            )}
+            {annullaApp && (
+                <AnnullaApplicazioneDialog app={annullaApp} onClose={() => { setAnnullaApp(null); load(); }} />
+            )}
+            {conflictApp && (
+                <ConflittoTargaDialog app={conflictApp} onClose={() => setConflictApp(null)} />
             )}
         </div>
     );
@@ -172,45 +199,14 @@ function Kpi({ label, value, icon: Icon, color, mono }) {
 }
 
 function DocsApplicazioneDialog({ app, onClose }) {
-    const [items, setItems] = useState(null);
-    const [uploading, setUploading] = useState(false);
-
-    const load = () => api.get("/allegati", {
-        params: { entita_tipo: "polizza", entita_id: app.polizza_id, applicazione_matricola_id: app.id },
-    }).then((r) => setItems(r.data.filter((a) => a.applicazione_matricola_id === app.id || !a.applicazione_matricola_id)));
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [app.id]);
-
-    const upload = async (e) => {
-        const file = e.target.files?.[0]; if (!file) return;
-        setUploading(true);
-        try {
-            const fd = new FormData(); fd.append("file", file);
-            await api.post(
-                `/allegati?entita_tipo=polizza&entita_id=${app.polizza_id}&applicazione_matricola_id=${app.id}`,
-                fd, { headers: { "Content-Type": "multipart/form-data" } }
-            );
-            toast.success("Documento allegato");
-            await load();
-        } catch (err) { toast.error(err.response?.data?.detail || "Errore"); }
-        finally { setUploading(false); e.target.value = ""; }
-    };
-
-    const del = async (aid) => {
-        if (!window.confirm("Eliminare?")) return;
-        try { await api.delete(`/allegati/${aid}`); toast.success("Eliminato"); await load(); }
-        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
-    };
-
-    const myDocs = (items || []).filter((a) => a.applicazione_matricola_id === app.id);
-
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-2xl" data-testid="lm-docs-dialog">
+            <DialogContent className="max-w-3xl" data-testid="lm-docs-dialog">
                 <DialogHeader>
                     <DialogTitle className="flex items-center justify-between">
                         <span>
                             <Car className="inline mr-1 text-sky-600" size={16} />
-                            Documenti · {app.targa || app.matricola || "—"}
+                            Documenti veicolo · <span className="font-mono">{app.targa || app.matricola || "—"}</span>
                             <span className="ml-2 text-xs text-slate-500 font-normal">
                                 Pol. {app.polizza_numero} · {app.contraente_nome}
                             </span>
@@ -218,37 +214,118 @@ function DocsApplicazioneDialog({ app, onClose }) {
                         <button onClick={onClose}><X size={16} /></button>
                     </DialogTitle>
                 </DialogHeader>
-                <div className="text-xs text-slate-600 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
-                    💡 Allega qui libretto di circolazione, fotografie, autorizzazioni e ogni documento specifico del veicolo.
+                <DocumentiSezioneSplit
+                    entita_tipo="polizza"
+                    entita_id={app.polizza_id}
+                    applicazione_matricola_id={app.id}
+                    canEdit={true}
+                    titolo={`Documenti del veicolo ${app.targa || app.matricola || ""}`}
+                    sottotitolo="Allega libretto di circolazione, fotografie, autorizzazioni, certificati di proprietà. Separa visibili al cliente da interni."
+                    categorie={[
+                        { key: "libretto_circolazione", label: "Libretto", icon: "📕", default_visibile: true, descrizione: "Libretto di circolazione del veicolo" },
+                        { key: "foto_veicolo", label: "Foto", icon: "📸", default_visibile: true },
+                        { key: "certificato_proprieta", label: "Cert. proprietà", icon: "📜", default_visibile: false },
+                        { key: "preventivo_riparazione", label: "Preventivo", icon: "🔧", default_visibile: false },
+                    ]}
+                />
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+
+function AnnullaApplicazioneDialog({ app, onClose }) {
+    const [tipo, setTipo] = useState("venduta");
+    const [dataCess, setDataCess] = useState(new Date().toISOString().slice(0, 10));
+    const [motivo, setMotivo] = useState("");
+    const [busy, setBusy] = useState(false);
+    const submit = async () => {
+        if (!dataCess) { toast.error("Data cessazione obbligatoria"); return; }
+        setBusy(true);
+        try {
+            await api.post(`/libro-matricola/applicazioni/${app.id}/annulla`, {
+                data_cessazione: dataCess,
+                tipo_cessazione: tipo,
+                motivo_dettaglio: motivo || null,
+            });
+            toast.success(`Applicazione ${app.targa || app.matricola} annullata (${tipo})`);
+            onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setBusy(false); }
+    };
+    return (
+        <Dlg2 open onOpenChange={(o) => !o && onClose()}>
+            <DC2 className="max-w-lg" data-testid="lm-annulla-dialog">
+                <DH2>
+                    <DT2 className="flex items-center gap-2">
+                        <Ban className="text-rose-600" size={16} /> Annulla applicazione veicolo
+                    </DT2>
+                </DH2>
+                <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-800 mb-2">
+                    <b>Veicolo:</b> <span className="font-mono">{app.targa || app.matricola}</span> — {app.descrizione_veicolo || ""}
+                    <div>Polizza {app.polizza_numero} · {app.contraente_nome}</div>
                 </div>
-                <div className="space-y-2">
-                    {myDocs.length === 0 ? (
-                        <div className="text-center py-4 text-sm text-slate-400 italic">Nessun documento allegato</div>
-                    ) : (
-                        myDocs.map((a) => (
-                            <div key={a.id} className="flex items-center gap-2 border border-slate-200 rounded p-2 hover:bg-sky-50">
-                                <FileText size={14} className="text-sky-600" />
-                                <div className="flex-1 min-w-0">
-                                    <a href={`${API_BASE}/allegati/${a.id}/download`} target="_blank" rel="noreferrer"
-                                        className="text-sm font-medium text-sky-700 hover:underline truncate block">
-                                        {a.nome_file}
-                                    </a>
-                                    <div className="text-[10px] text-slate-500">
-                                        {a.categoria && <span className="bg-slate-100 px-1 rounded mr-1">{a.categoria}</span>}
-                                        {a.descrizione || ""} · {(a.size / 1024).toFixed(0)} KB
-                                    </div>
-                                </div>
-                                <button onClick={() => del(a.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded">
-                                    <X size={12} />
-                                </button>
-                            </div>
-                        ))
+                <div className="space-y-3">
+                    <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Motivo cessazione *</label>
+                        <select value={tipo} onChange={(e) => setTipo(e.target.value)}
+                            className="w-full h-9 border border-slate-300 rounded px-2 text-sm" data-testid="lm-annulla-tipo">
+                            <option value="venduta">🏷 Venduta</option>
+                            <option value="demolita">🔨 Demolita</option>
+                            <option value="esportata">🌍 Esportata</option>
+                            <option value="rubata">🚨 Rubata</option>
+                            <option value="sostituita">🔄 Sostituita (nuovo veicolo)</option>
+                            <option value="cessata_altro">📋 Altro motivo</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Data cessazione *</label>
+                        <input type="date" value={dataCess} onChange={(e) => setDataCess(e.target.value)}
+                            className="w-full h-9 border border-slate-300 rounded px-2 text-sm" data-testid="lm-annulla-data" />
+                    </div>
+                    <div>
+                        <label className="text-xs font-medium text-slate-600 block mb-1">Note / dettaglio</label>
+                        <textarea rows={2} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+                            className="w-full border border-slate-300 rounded px-2 py-1 text-sm" data-testid="lm-annulla-motivo" />
+                    </div>
+                    {app.targa && (
+                        <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                            ⚠ <b>Attenzione</b>: verifica anche eventuali altre polizze (Infortuni Conducente, Tutela Legale, Kasko…) legate alla targa <span className="font-mono">{app.targa}</span>.
+                            Puoi usare il pulsante <AlertTriangle size={11} className="inline" /> nella riga per aprirle.
+                        </div>
                     )}
-                    <label className="block w-full p-3 text-center border-2 border-dashed border-violet-300 rounded cursor-pointer hover:bg-violet-50 text-violet-700 text-sm" data-testid="lm-upload-btn">
-                        <Paperclip size={14} className="inline mr-1" />
-                        {uploading ? "Caricamento…" : "Allega documento (PDF/JPG)"}
-                        <input type="file" hidden onChange={upload} />
-                    </label>
+                </div>
+                <DF2>
+                    <button onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50">Annulla</button>
+                    <button onClick={submit} disabled={busy}
+                        className="px-3 py-1.5 text-sm bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50"
+                        data-testid="lm-annulla-conferma">
+                        {busy ? "…" : "Conferma cessazione"}
+                    </button>
+                </DF2>
+            </DC2>
+        </Dlg2>
+    );
+}
+
+
+function ConflittoTargaDialog({ app, onClose }) {
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-2xl" data-testid="lm-conflict-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center justify-between">
+                        <span>
+                            <AlertTriangle className="inline mr-1 text-amber-600" size={16} />
+                            Altre polizze con targa <span className="font-mono">{app.targa}</span>
+                        </span>
+                        <button onClick={onClose}><X size={16} /></button>
+                    </DialogTitle>
+                </DialogHeader>
+                <TargaConflictWidget targa={app.targa} excludeId={app.polizza_id} compact={false} />
+                <div className="text-[11px] text-slate-500">
+                    💡 Ricorda: quando sostituisci/annulli un veicolo, aggiorna coerentemente TUTTE le polizze collegate alla stessa targa.
                 </div>
             </DialogContent>
         </Dialog>

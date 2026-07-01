@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import { Card } from "@/components/ui/card";
 import { Loading } from "@/components/Shared";
 import {
@@ -202,9 +203,13 @@ export default function SinistroDetail() {
                             <CampoInput label="Numero Sinistro" value={s.numero_sinistro || ""} onChange={(v) => setField("numero_sinistro", v)} />
                             <CampoInput label="Data Avvenimento" type="date" value={s.data_avvenimento || ""} onChange={(v) => setField("data_avvenimento", v)} />
                             <CampoInput label="Data Denuncia" type="date" value={s.data_denuncia || ""} onChange={(v) => setField("data_denuncia", v)} />
-                            <div className="col-span-2"><Label className="text-xs">Luogo</Label><Input value={s.luogo || ""} onChange={(e) => setField("luogo", e.target.value)} /></div>
-                            <CampoInput label="Riserva €" type="number" value={s.riserva || 0} onChange={(v) => setField("riserva", v)} />
-                            <CampoInput label="Liquidazione €" type="number" value={s.liquidazione || 0} onChange={(v) => setField("liquidazione", v)} />
+                            <CampoInput label="Luogo" value={s.luogo || ""} onChange={(v) => setField("luogo", v)} className="col-span-2" />
+                            <CampoInput label="Riserva €" type="number" value={s.riserva || 0} onChange={(v) => setField("riserva", v)} testid="sin-riserva" />
+                            <CampoInput label="Liquidato €" type="number" value={s.liquidazione || 0} onChange={(v) => setField("liquidazione", v)} testid="sin-liquidato" />
+                            <CampoInput label="Data liquidazione" type="date" value={s.data_liquidazione || ""} onChange={(v) => setField("data_liquidazione", v)} testid="sin-data-liquidazione" />
+                        </div>
+                        <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 text-sky-800">
+                            💡 La <b>Riserva</b> è la stima a riserva (importo accantonato), la <b>Liquidazione</b> è l&apos;importo effettivamente pagato al cliente.
                         </div>
                         <div>
                             <Label className="text-xs">Descrizione</Label>
@@ -231,6 +236,22 @@ export default function SinistroDetail() {
 
                 <TabsContent value="documenti">
                     <DocumentiTab sinistroId={id} docs={s.documenti || []} onReload={load} />
+                    <div className="mt-4">
+                        <DocumentiSezioneSplit
+                            entita_tipo="sinistro"
+                            entita_id={id}
+                            canEdit={true}
+                            titolo="Documenti sinistro · gestione visibilità"
+                            sottotitolo="Allega CID, perizia, foto, fatture riparazione. Separa documenti visibili al cliente da quelli interni allo staff."
+                            categorie={[
+                                { key: "cid", label: "CID", icon: "📝", default_visibile: true },
+                                { key: "perizia", label: "Perizia", icon: "🔎", default_visibile: false },
+                                { key: "foto", label: "Foto", icon: "📸", default_visibile: true },
+                                { key: "fattura", label: "Fattura", icon: "🧾", default_visibile: true },
+                                { key: "denuncia", label: "Denuncia", icon: "📋", default_visibile: true },
+                            ]}
+                        />
+                    </div>
                 </TabsContent>
 
                 {isRcAuto && (

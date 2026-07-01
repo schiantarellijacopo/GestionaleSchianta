@@ -116,9 +116,21 @@ export default function DocumentiInbox() {
                 </div>
             </Card>
 
-            <div className="flex gap-2 text-sm">
+            <div className="flex gap-2 text-sm items-center flex-wrap">
                 <span className="text-violet-700 font-medium">⏳ Da rivedere: {pendingCount}</span>
                 <span className="text-emerald-700 font-medium ml-3">✓ Salvati: {savedCount}</span>
+                {pendingCount > 0 && (
+                    <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        onClick={async () => {
+                            try {
+                                const r = await api.post("/documenti-inbox/retry-auto-archive");
+                                toast.success(`Auto-archiviati ${r.data.archived} · falliti ${r.data.failed}`);
+                                load();
+                            } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+                        }} data-testid="di-retry-auto">
+                        ⚡ Riprova auto-archivio sui pending
+                    </Button>
+                )}
             </div>
 
             {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessun documento. Carica il primo!" /> : (

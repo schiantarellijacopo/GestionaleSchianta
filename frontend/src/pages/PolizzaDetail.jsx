@@ -19,8 +19,10 @@ import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
+import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
+import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
 import AllegatiCell from "@/components/AllegatiCell";
 
@@ -128,6 +130,10 @@ export default function PolizzaDetail() {
                     <F label="Provvigioni" value={fmtEur(pol.provvigioni)} />
                 </div>
             </Card>
+
+            {pol.targa && (
+                <TargaConflictWidget targa={pol.targa} excludeId={pol.id} compact />
+            )}
 
             <Tabs defaultValue="veicolo">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
@@ -424,6 +430,21 @@ export default function PolizzaDetail() {
 
                 <TabsContent value="documenti">
                     <DocumentiPolizzaTab polizzaId={pol.id} canEdit={canEdit} onAfterOCR={load} />
+                    <div className="mt-4">
+                        <DocumentiSezioneSplit
+                            entita_tipo="polizza"
+                            entita_id={pol.id}
+                            canEdit={canEdit}
+                            titolo="Documenti polizza · gestione visibilità"
+                            sottotitolo="Allega contratto, condizioni, certificati. Usa i due riquadri per separare ciò che il cliente può vedere dal materiale interno."
+                            categorie={[
+                                { key: "contratto", label: "Contratto", icon: "📄", default_visibile: true },
+                                { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true },
+                                { key: "certificato", label: "Certificato", icon: "🏅", default_visibile: true },
+                                { key: "preventivo", label: "Preventivo", icon: "📋", default_visibile: false },
+                            ]}
+                        />
+                    </div>
                 </TabsContent>
 
                 <TabsContent value="sinistri">

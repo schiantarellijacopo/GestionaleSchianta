@@ -47,7 +47,7 @@ const presetParams = (key) => {
 const INITIAL_FILTERS = {
     preset: "attive", q: "",
     stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
-    collaboratore_id: "all",
+    collaboratore_id: "all", contraente_id: "all",
     dal: "", al: "",
 };
 
@@ -70,6 +70,7 @@ export default function Polizze() {
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
+        if (filters.contraente_id !== "all") p.contraente_id = filters.contraente_id;
         if (filters.prodotto) p.prodotto = filters.prodotto;
         if (filters.dal) p.dal = filters.dal;
         if (filters.al) p.al = filters.al;
@@ -229,7 +230,7 @@ export default function Polizze() {
                             onChange={(e) => setF("prodotto", e.target.value)}
                             data-testid="pol-f-prodotto"
                         />
-                        <div></div>
+                        <ContraenteFilter value={filters.contraente_id} onChange={(v) => setF("contraente_id", v)} />
                         <div>
                             <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
                             <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="pol-f-dal" />
