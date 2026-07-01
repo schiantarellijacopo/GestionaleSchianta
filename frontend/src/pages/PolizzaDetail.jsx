@@ -101,9 +101,9 @@ export default function PolizzaDetail() {
                         <div className="text-xs text-slate-300 mt-1">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
                     </div>
                     <div className="flex gap-6 text-xs">
-                        <Hd label="Ultimo titolo" value={fmtDate(pol.titoli?.[0]?.data_incasso || pol.effetto)} />
+                        <Hd label="Ultimo titolo" value={fmtDate(pol.ultimo_titolo_scadenza || pol.titoli?.[0]?.data_incasso || pol.effetto)} />
                         <Hd label="Stato" value={<StatusBadge stato={pol.stato} />} />
-                        <Hd label="Copertura" value={pol.scadenza_copertura || pol.scadenza} />
+                        <Hd label="Copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />
                         <Hd label="Collaboratore" value={pol.collaboratore_nome || (pol.collaboratore_id ? pol.collaboratore_id.slice(0, 6) : "—")} />
                     </div>
                 </div>
@@ -117,7 +117,7 @@ export default function PolizzaDetail() {
                     <F label="Effetto" value={fmtDate(pol.effetto)} />
                     <F label="Presa in carico" value={fmtDate(pol.presa_in_carico)} />
                     <F label="Prossima quietanza" value={fmtDate(pol.prossima_quietanza)} />
-                    <F label="Scad. copertura" value={fmtDate(pol.scadenza_copertura || pol.scadenza)} />
+                    <F label="Scad. copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />
                     <F label="Scad. contratto" value={fmtDate(pol.scadenza)} />
                     <F label="Termini mora" value={pol.termini_mora_giorni ? `${pol.termini_mora_giorni} gg` : "—"} />
                     <F label="Termini disdetta" value={pol.termini_disdetta_giorni ? `${pol.termini_disdetta_giorni} gg` : "—"} />

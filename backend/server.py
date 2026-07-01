@@ -2335,6 +2335,20 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         raise HTTPException(404, "Non trovata")
     if user["role"] == "cliente" and user.get("anagrafica_id") != doc.get("contraente_id"):
         raise HTTPException(403, "Permesso negato")
+    # 🔧 FIX: se `prodotto` contiene un UUID di ProdottoLibreria (per errore di
+    # importazione), risolvi con il nome vero + migra il dato in DB.
+    prodotto_val = doc.get("prodotto")
+    if prodotto_val and isinstance(prodotto_val, str) and len(prodotto_val) == 36 and prodotto_val.count("-") == 4:
+        prod_lib = await db.prodotti.find_one(
+            {"id": prodotto_val}, {"_id": 0, "nome": 1},
+        )
+        if prod_lib and prod_lib.get("nome"):
+            doc["prodotto"] = prod_lib["nome"]
+            # migrazione idempotente: aggiorna il record
+            await db.polizze.update_one(
+                {"id": pid},
+                {"$set": {"prodotto": prod_lib["nome"], "updated_at": _now_iso()}},
+            )
     doc["contraente"] = await db.anagrafiche.find_one({"id": doc["contraente_id"]}, {"_id": 0})
     doc["compagnia"] = await db.compagnie.find_one({"id": doc["compagnia_id"]}, {"_id": 0})
     # Arricchimento collaboratore (operatore)
@@ -10354,6 +10368,39 @@ async def _migrate_unify_sconti() -> dict:
 async def migra_sconti(user=Depends(require_user("admin"))):
     """Endpoint admin per re-eseguire la migrazione (dopo aver pulito il flag)."""
     return await _migrate_unify_sconti()
+
+
+@api.post("/admin/migra-prodotti-uuid")
+async def migra_polizze_prodotti_uuid(user=Depends(require_user("admin"))):
+    """Migrazione idempotente: risolve i campi Polizza.prodotto che contengono
+    un UUID di ProdottoLibreria (bug import ANIA) sostituendoli col nome corretto.
+    """
+    import re
+    r = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    # mappa UUID → nome dal catalogo prodotti
+    id_to_name = {}
+    async for p in db.prodotti.find({}, {"_id": 0, "id": 1, "nome": 1}):
+        if p.get("id") and p.get("nome"):
+            id_to_name[p["id"]] = p["nome"]
+    migrate_count = 0
+    unresolved = 0
+    async for pol in db.polizze.find(
+        {"prodotto": {"$exists": True, "$ne": None}},
+        {"_id": 0, "id": 1, "prodotto": 1},
+    ):
+        v = pol.get("prodotto")
+        if not (v and isinstance(v, str) and r.match(v)):
+            continue
+        nome = id_to_name.get(v)
+        if nome:
+            await db.polizze.update_one(
+                {"id": pol["id"]},
+                {"$set": {"prodotto": nome, "updated_at": _now_iso()}},
+            )
+            migrate_count += 1
+        else:
+            unresolved += 1
+    return {"migrate": migrate_count, "unresolved": unresolved}
 
 
 # ----- Mount -----
