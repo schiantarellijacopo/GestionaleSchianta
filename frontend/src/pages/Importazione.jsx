@@ -27,12 +27,14 @@ import { toast } from "sonner";
 
 const TIPO_LABEL = {
     compagnia: "Compagnia",
+    ramo: "Ramo",
     collaboratore: "Operatore / Collaboratore",
     prodotto: "Prodotto",
     garanzia: "Garanzia",
 };
 const TIPO_PLURAL = {
     compagnie: "compagnia",
+    rami: "ramo",
     collaboratori: "collaboratore",
     prodotti: "prodotto",
     garanzie: "garanzia",
@@ -310,7 +312,7 @@ function MappingWizardDialog({ open, onClose }) {
         try {
             const res = await api.get(`/import/unmapped${showAll ? "?include_mapped=true" : ""}`);
             setData(res.data);
-            const first = ["compagnia", "collaboratore", "prodotto", "garanzia"]
+            const first = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
                 .find((t) => (res.data[t] || []).length > 0);
             if (first) setActive(first);
         } catch (e) {
@@ -339,7 +341,7 @@ function MappingWizardDialog({ open, onClose }) {
             for (const [mid, entita_id] of updates) {
                 const it = byId[mid];
                 if (!it) continue;
-                const tipo = ["compagnia", "collaboratore", "prodotto", "garanzia"]
+                const tipo = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
                     .find((t) => (data[t] || []).some((x) => x.id === mid));
                 await api.post("/import/mappings", {
                     tipo,
@@ -382,7 +384,8 @@ function MappingWizardDialog({ open, onClose }) {
             const total = (s.polizze_collaboratore || 0)
                 + (s.polizze_prodotto || 0)
                 + (s.polizze_garanzia || 0)
-                + (s.polizze_compagnia || 0);
+                + (s.polizze_compagnia || 0)
+                + (s.polizze_ramo || 0);
             if (showToast) {
                 toast.success(`Back-fill completato: ${total} polizze aggiornate`);
             }
@@ -395,7 +398,7 @@ function MappingWizardDialog({ open, onClose }) {
 
     if (!open) return null;
 
-    const tipi = ["compagnia", "collaboratore", "prodotto", "garanzia"];
+    const tipi = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"];
     const counts = data ? Object.fromEntries(tipi.map((t) => [t, (data[t] || []).length])) : {};
     const totalCount = Object.values(counts).reduce((s, n) => s + n, 0);
 

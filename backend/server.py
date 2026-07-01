@@ -5710,11 +5710,11 @@ async def list_unmapped_entities(
     la modifica/eliminazione del mapping dal wizard).
     """
     by_tipo: dict[str, list[dict]] = {
-        "compagnia": [], "prodotto": [], "collaboratore": [], "garanzia": [],
+        "compagnia": [], "ramo": [], "prodotto": [], "collaboratore": [], "garanzia": [],
     }
     flt: dict = {
         "flusso": flusso,
-        "tipo": {"$in": ["compagnia", "prodotto", "collaboratore", "garanzia"]},
+        "tipo": {"$in": ["compagnia", "ramo", "prodotto", "collaboratore", "garanzia"]},
     }
     if not include_mapped:
         flt["$or"] = [{"entita_id": None}, {"entita_id": ""}]
@@ -5729,11 +5729,15 @@ async def list_unmapped_entities(
                 "entita_id": m.get("entita_id"),
                 "label_programma": m.get("label_programma"),
             })
-    # Candidati DB (librerie esistenti — i Rami sono esclusi: gestiti manualmente)
+    # Candidati DB (librerie esistenti)
     candidates: dict[str, list[dict]] = {}
     candidates["compagnia"] = [
         {"id": c["id"], "label": c.get("ragione_sociale") or c.get("codice")}
         async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1}).sort("ragione_sociale", 1)
+    ]
+    candidates["ramo"] = [
+        {"id": r["id"], "label": r.get("nome") or r.get("codice")}
+        async for r in db.rami.find({"attivo": {"$ne": False}}, {"_id": 0, "id": 1, "nome": 1, "codice": 1}).sort("nome", 1)
     ]
     candidates["collaboratore"] = [
         {"id": u["id"], "label": u.get("name") or u.get("email")}
@@ -5855,11 +5859,25 @@ async def apply_import_mappings(
             summary["polizze_compagnia"] += r1.modified_count
 
         elif tipo == "prodotto":
+            # 🔧 FIX: usa il nome del prodotto (non l'UUID) come valore in polizze.prodotto
+            prod = await db.prodotti.find_one({"id": entita_id}, {"_id": 0, "nome": 1})
+            nome_prod = (prod or {}).get("nome") or entita_id
             r = await db.polizze.update_many(
                 {"$or": [{"prodotto": valore}, {"prodotto_originale": valore}]},
-                {"$set": {"prodotto": entita_id, "updated_at": _now_iso()}},
+                {"$set": {"prodotto": nome_prod, "updated_at": _now_iso()}},
             )
             summary["polizze_prodotto"] += r.modified_count
+
+        elif tipo == "ramo":
+            # Back-fill: aggiorna polizze con ramo_originale == valore_flusso (codice importato es. "3D")
+            # entita_id qui è il CODICE del RamoLibreria (es. "INFORTUNI"), non un UUID
+            ramo_doc = await db.rami.find_one({"id": entita_id}, {"_id": 0, "codice": 1, "nome": 1})
+            codice_ramo = (ramo_doc or {}).get("codice") or entita_id
+            r = await db.polizze.update_many(
+                {"$or": [{"ramo": valore}, {"ramo_originale": valore}]},
+                {"$set": {"ramo": codice_ramo, "updated_at": _now_iso()}},
+            )
+            summary["polizze_ramo"] = summary.get("polizze_ramo", 0) + r.modified_count
 
         elif tipo == "garanzia":
             gar_map[valore.upper()] = entita_id
@@ -10401,6 +10419,35 @@ async def migra_polizze_prodotti_uuid(user=Depends(require_user("admin"))):
         else:
             unresolved += 1
     return {"migrate": migrate_count, "unresolved": unresolved}
+
+
+@api.post("/admin/ricalcola-titoli-netto")
+async def ricalcola_titoli_netto(user=Depends(require_user("admin"))):
+    """Ricalcola `importo_netto` dei titoli come `importo_lordo - imposte`
+    quando la somma non torna. Fix dei titoli importati con imposte incomplete
+    (solo tasse assicurative invece di tasse+imposte+ssn).
+    """
+    fixed = 0
+    checked = 0
+    async for t in db.titoli.find(
+        {}, {"_id": 0, "id": 1, "importo_lordo": 1, "importo_netto": 1, "imposte": 1},
+    ):
+        checked += 1
+        lordo = float(t.get("importo_lordo") or 0)
+        netto = float(t.get("importo_netto") or 0)
+        imposte = float(t.get("imposte") or 0)
+        if lordo <= 0:
+            continue
+        # Se la somma netto + imposte non torna al lordo (tolleranza 1 cent),
+        # ricalcola netto = lordo - imposte
+        if abs((netto + imposte) - lordo) > 0.01:
+            new_netto = round(lordo - imposte, 2)
+            await db.titoli.update_one(
+                {"id": t["id"]},
+                {"$set": {"importo_netto": new_netto, "updated_at": _now_iso()}},
+            )
+            fixed += 1
+    return {"checked": checked, "fixed": fixed}
 
 
 # ----- Mount -----

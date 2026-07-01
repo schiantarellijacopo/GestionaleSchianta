@@ -481,15 +481,35 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             operatore_codice, collaboratore_id = await _resolve_operatore_codice(
                 db, row, mapping_operatori, tracker=tracker, import_mappings=import_mappings,
             )
-            # Ramo: NON viene tracciato come entità da mappare (richiesta utente — i rami
-            # vanno gestiti manualmente nella libreria Rami). Manteniamo solo il valore
-            # originale sulla polizza per riferimento.
+            # Ramo: traccia come entità da mappare nel wizard (Ramo → RamoLibreria).
+            # Se già mappato, applica il codice del ramo (es. "3D" → "INFORTUNI").
+            ramo_raw = (row.get("ramo_share") or row.get("ramo_cmp") or "").strip()
             ramo_mapped = None
+            if ramo_raw and ramo_raw != "VARIE":
+                mapped_ramo_id = (import_mappings or {}).get("ramo", {}).get(ramo_raw)
+                if mapped_ramo_id:
+                    ramo_doc = await db.rami.find_one(
+                        {"id": mapped_ramo_id}, {"_id": 0, "codice": 1},
+                    )
+                    if ramo_doc and ramo_doc.get("codice"):
+                        ramo_mapped = ramo_doc["codice"]
+                elif tracker is not None:
+                    await _track_unmapped(
+                        db, tracker, "ramo", ramo_raw,
+                        label=ramo_raw, import_mappings=import_mappings,
+                    )
             # Traccia prodotto come non mappato (verrà associato manualmente dalla libreria Prodotti)
             prodotto_raw = (row.get("prodotto_cmp") or "").strip()
             prodotto_mapped = None
             if prodotto_raw:
-                prodotto_mapped = (import_mappings or {}).get("prodotto", {}).get(prodotto_raw)
+                prodotto_mapped_id = (import_mappings or {}).get("prodotto", {}).get(prodotto_raw)
+                if prodotto_mapped_id:
+                    # 🔧 FIX: risolvi il NOME del prodotto (non l'UUID)
+                    prod_doc = await db.prodotti.find_one(
+                        {"id": prodotto_mapped_id}, {"_id": 0, "nome": 1},
+                    )
+                    if prod_doc and prod_doc.get("nome"):
+                        prodotto_mapped = prod_doc["nome"]
                 if not prodotto_mapped and tracker is not None:
                     await _track_unmapped(
                         db, tracker, "prodotto", prodotto_raw,
@@ -746,14 +766,23 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             id_t = row.get("id_titolo_exp") or _uid()
             stato = _MAP_STATO_TITOLO.get((row.get("stato_share") or "").lower(), "da_incassare")
             existing = await db.titoli.find_one({"id_titolo_exp": id_t})
+            # 🔧 FIX titoli import ANIA:
+            # Il flusso fornisce netto_totale (netto tecnico) + tasse_totale + accessori.
+            # L'utente si aspetta: `netto commerciale = lordo - tasse` (visibile in fattura).
+            # Ricalcoliamo il netto come lordo - imposte per garantire coerenza al display
+            # (netto + imposte = lordo). Le imposte sono le "tasse assicurative" del flusso.
+            lordo = _parse_float(row.get("lordo_totale", ""))
+            tasse = _parse_float(row.get("tasse_totale") or "")
+            imposte_eff = tasse if tasse > 0 else _parse_float(row.get("imposte", ""))
+            netto_calc = round(lordo - imposte_eff, 2) if lordo > 0 else 0.0
             data = {
                 "polizza_id": pol_id,
                 "effetto": _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10],
                 "scadenza": _parse_date(row.get("data_scadenza_emesso", "")) or _now_iso()[:10],
                 "stato": stato,
-                "importo_lordo": _parse_float(row.get("lordo_totale", "")),
-                "importo_netto": _parse_float(row.get("netto_totale", "")),
-                "imposte": _parse_float(row.get("tasse_totale", "")),
+                "importo_lordo": lordo,
+                "importo_netto": netto_calc,
+                "imposte": round(imposte_eff, 2),
                 "provvigioni": _parse_float(row.get("provvigioni_totale", "")),
                 "data_incasso": _parse_date(row.get("dt_pag_cliente", "")),
                 "mezzo_pagamento": row.get("mezzo_pag_share") or None,
