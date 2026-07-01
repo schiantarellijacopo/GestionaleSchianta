@@ -2858,7 +2858,7 @@ const PLACEHOLDERS_DOC = [
     { k: "data_scadenza_titolo", desc: "Data scadenza titolo", cat: "Titolo" },
     { k: "data_incasso", desc: "Data incasso titolo", cat: "Titolo" },
     { k: "importo_lordo_titolo", desc: "Importo lordo titolo (€)", cat: "Titolo" },
-    { k: "mezzo_pagamento", desc: "Mezzo di pagamento", cat: "Titolo" },
+    { k: "mezzo_pagamento", desc: "Tipo di pagamento", cat: "Titolo" },
     // === Sinistro ===
     { k: "numero_sinistro", desc: "Numero sinistro", cat: "Sinistro" },
     { k: "data_avvenimento_sinistro", desc: "Data avvenimento sinistro", cat: "Sinistro" },

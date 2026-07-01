@@ -1195,6 +1195,7 @@ const DOC_TIPI_ANAG = [
     { key: "codice_fiscale_doc", label: "Tessera codice fiscale", icon: "🧾" },
     { key: "tessera_sanitaria", label: "Tessera sanitaria", icon: "❤️" },
     { key: "visura_camerale", label: "Visura camerale", icon: "🏢" },
+    { key: "mandato_sdd", label: "Mandato SDD", icon: "🏦" },
     { key: "privacy_firmata", label: "Privacy firmata", icon: "✍️" },
 ];
 
@@ -1260,8 +1261,8 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
         <div className="space-y-4 mt-4" data-testid="documenti-tab">
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center justify-between flex-wrap gap-3">
                 <div className="text-xs text-sky-900">
-                    <strong>Documenti del cliente</strong>: CI, patente, passaporto, codice fiscale, privacy firmata.
-                    Tutti i file sono protetti (solo staff può vederli).
+                    <strong>Documenti del cliente</strong>: CI, patente, passaporto, codice fiscale, tessera sanitaria, visura camerale, mandato SDD, privacy firmata.
+                    Tutti questi documenti sono <strong>sempre visibili al cliente</strong> nel suo portale.
                 </div>
                 <Button size="sm" variant="outline" onClick={scaricaPrivacy} data-testid="genera-privacy-btn">
                     <FileText size={13} className="mr-1" /> Privacy & Consensi

@@ -49,7 +49,7 @@ UPPER_FIELDS = {
 ANAGRAFICA_DOC_TIPI = {
     "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
     "tessera_sanitaria", "visura_camerale", "estratto_contributivo",
-    "privacy_firmata", "altro",
+    "privacy_firmata", "mandato_sdd", "altro",
 }
 
 

@@ -19,6 +19,7 @@ import ChiusuraPill from "@/components/ChiusuraPill";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import TitoloDialog from "@/components/TitoloDialog";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
@@ -275,7 +276,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                             </SelectContent>
                         </Select>
                         <Select value={filters.mezzo_pagamento || "all"} onValueChange={(v) => setF("mezzo_pagamento", v === "all" ? "" : v)}>
-                            <SelectTrigger data-testid="f-mezzo-pag"><SelectValue placeholder="Mezzo pag." /></SelectTrigger>
+                            <SelectTrigger data-testid="f-mezzo-pag"><SelectValue placeholder="Tipo pag." /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Tutti i mezzi</SelectItem>
                                 {mezziPagamento.map((m) => <SelectItem key={m.codice} value={m.codice}>{m.label || m.codice}</SelectItem>)}
@@ -749,15 +750,8 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                         />
                                     </div>
                                     <div>
-                                        <Label className="text-xs">Mezzo pagamento</Label>
-                                        <Select value={mezzo} onValueChange={setMezzo}>
-                                            <SelectTrigger data-testid="bulk-mezzo"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {mezzi.map((m) => (
-                                                    <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <Label className="text-xs">Tipo pagamento</Label>
+                                        <SelectTipoPagamento value={mezzo} onChange={setMezzo} testid="bulk-mezzo" />
                                     </div>
                                 </div>
                                 <div>

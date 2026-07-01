@@ -11,7 +11,7 @@ Legenda: ✅ FATTO · 🟡 IN CORSO · ⏳ PIANIFICATO · ⏸ DEFERRED · ❓ DA
 | 5 | Data scadenza polizza = ultimo titolo incassato/coperto | ✅ | `GET /polizze/{id}` ora ritorna `copertura_fino_a` e `ultimo_titolo_*` |
 | 6 | Setup agenziale: estratto conto compagnie non riporta dati | ❓ | Manda screenshot per dettagli |
 | 7 | Ritenute in prima nota con segno – + saldo iniziale solo in saldo | ⏳ | Revisione logica movimenti da fare |
-| 8 | Rinominare "Mezzo pagamento" → "Tipo pagamento" nelle polizze | ✅ | Label aggiornata in PolizzaDetail |
+| 8 | Rinominare "Mezzo pagamento" → "Tipo pagamento" nelle polizze | ✅ | Label aggiornata in PolizzaDetail + Titoli bulk + Avvisi + Contabilita/Provvigioni (colonne) + KpiBar + Librerie placeholder |
 | 9 | Sezione Regolazione premio mancante | ❓ | Dialog Regolazione Premio esiste già — chiarire dove serve la "sezione" |
 | 10 | Elenco documenti | ❓ | Chiarire scopo (lista categorie? tipi doc con conteggi?) |
 | 11 | Libretto sempre visibile + N certificati per frazionamento (verdi in Dashboard) | 🟡 | Categorie visibili default OK (#24). Ora libretto/certificato/quietanza/foto allegabili **per singolo veicolo** in Libro Matricola (dialog "Documenti veicolo") — logica N/frazionamento resta da fare |

@@ -436,12 +436,13 @@ export default function PolizzaDetail() {
                             entita_id={pol.id}
                             canEdit={canEdit}
                             titolo="Documenti polizza · gestione visibilità"
-                            sottotitolo="Polizza, condizioni, quietanze, libretto di pagamento sono visibili al cliente. Preventivi, appunti e altro restano interni."
+                            sottotitolo="Polizza, condizioni, quietanze, libretto di pagamento, atto di vendita sono visibili al cliente. Preventivi, appunti e altro restano interni."
                             categorie={[
                                 { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true },
                                 { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true },
-                                { key: "quietanza", label: "Quietanza", icon: "🧾", default_visibile: true },
-                                { key: "libretto_pagamento", label: "Libretto pagam.", icon: "📕", default_visibile: true, descrizione: "Certificati/libretto pagamento (più di 1 all'anno secondo frazionamento)" },
+                                { key: "libretto_pagamento", label: "Libretto pagam.", icon: "📕", default_visibile: true, descrizione: "Libretto pagamento (più di 1 all'anno secondo frazionamento)" },
+                                { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, descrizione: "Atto di vendita / passaggio proprietà" },
+                                { key: "quietanza", label: "Quietanza", icon: "🧾", default_visibile: true, descrizione: "Quietanze pagate (multiple secondo frazionamento)", multiple: true },
                                 { key: "preventivo", label: "Preventivo", icon: "📋", default_visibile: false },
                                 { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false },
                             ]}

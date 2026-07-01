@@ -153,7 +153,7 @@ const FILTRO_KIND_BY_SEZIONE = {
     titoli: [
         { v: "tag", l: "Tag anagrafica" }, { v: "stato", l: "Stato titolo" },
         { v: "ramo", l: "Ramo" }, { v: "compagnia", l: "Compagnia" },
-        { v: "prodotto", l: "Prodotto" }, { v: "mezzo_pagamento", l: "Mezzo pagamento" },
+        { v: "prodotto", l: "Prodotto" }, { v: "mezzo_pagamento", l: "Tipo pagamento" },
         { v: "conto_cassa", l: "Conto / Banca" },
     ],
     sinistri: [

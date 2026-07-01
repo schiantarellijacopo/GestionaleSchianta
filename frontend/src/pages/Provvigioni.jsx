@@ -557,7 +557,7 @@ function StoricoPagamentiCollab({ collab }) {
                             <th className="text-right">Rit.</th>
                             <th className="text-right">Contributi</th>
                             <th className="text-right">Netto</th>
-                            <th>Mezzo</th>
+                            <th>Tipo pag.</th>
                             <th className="text-center">Titoli</th>
                             <th className="text-center">Allegati</th>
                             <th className="text-center">Stampa</th>

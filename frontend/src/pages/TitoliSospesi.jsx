@@ -6,10 +6,15 @@ import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import DialogIncasso from "@/components/DialogIncasso";
-import { Coins, Clock, AlertTriangle, CheckCircle, Printer } from "lucide-react";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import { Coins, Clock, AlertTriangle, CheckCircle, Printer, Layers } from "lucide-react";
 
 export default function TitoliSospesi() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -18,7 +23,9 @@ export default function TitoliSospesi() {
     const [collab, setCollab] = useState([]);
     const [filtroCollab, setFiltroCollab] = useState("all");
     const [conti, setConti] = useState([]);
-    const [paying, setPaying] = useState(null);  // titolo in pagamento
+    const [paying, setPaying] = useState(null);  // titolo in pagamento singolo
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [bulkOpen, setBulkOpen] = useState(false);
 
     const load = useCallback(() => {
         const params = {};
@@ -68,6 +75,33 @@ export default function TitoliSospesi() {
         return Array.from(map.values()).sort((a, b) => b.importo - a.importo);
     }, [items]);
 
+    // Multi-select logic
+    const toggleOne = (id) => {
+        setSelectedIds((prev) => {
+            const n = new Set(prev);
+            if (n.has(id)) n.delete(id); else n.add(id);
+            return n;
+        });
+    };
+    const toggleAll = () => {
+        const visible = visibleItems || [];
+        if (visible.length && visible.every((t) => selectedIds.has(t.id))) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(visible.map((t) => t.id)));
+        }
+    };
+    const selectedItems = useMemo(
+        () => (visibleItems || []).filter((t) => selectedIds.has(t.id)),
+        [visibleItems, selectedIds],
+    );
+    const selectedTotal = useMemo(
+        () => selectedItems.reduce((s, t) => s + (t.importo_lordo || 0), 0),
+        [selectedItems],
+    );
+    // Reset selection when filtroCollab or items change materially
+    useEffect(() => { setSelectedIds(new Set()); }, [filtroCollab, ggMin]);
+
     return (
         <div data-testid="sospesi-page">
             <PageHeader
@@ -113,6 +147,15 @@ export default function TitoliSospesi() {
                     disabled={!items || items.length === 0}
                 >
                     <Printer size={14} className="mr-1" /> Stampa PDF
+                </Button>
+                <Button
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => setBulkOpen(true)}
+                    disabled={selectedIds.size === 0}
+                    data-testid="sospesi-bulk-incassa"
+                >
+                    <Layers size={14} className="mr-1" />
+                    Incassa selezionati ({selectedIds.size}){selectedIds.size > 0 ? ` · ${fmtEur(selectedTotal)}` : ""}
                 </Button>
             </Card>
 
@@ -173,6 +216,13 @@ export default function TitoliSospesi() {
                     <table className="tbl w-full">
                         <thead>
                             <tr>
+                                <th className="w-8">
+                                    <Checkbox
+                                        checked={visibleItems.length > 0 && visibleItems.every((t) => selectedIds.has(t.id))}
+                                        onCheckedChange={toggleAll}
+                                        data-testid="sospesi-toggle-all"
+                                    />
+                                </th>
                                 <th>Cliente</th>
                                 <th>Cellulare</th>
                                 <th>Collaboratore</th>
@@ -188,8 +238,16 @@ export default function TitoliSospesi() {
                         <tbody>
                             {visibleItems.map((t) => {
                                 const old = (t.giorni_anticipo || 0) > 30;
+                                const isChecked = selectedIds.has(t.id);
                                 return (
-                                    <tr key={t.id} data-testid={`sospeso-${t.id}`}>
+                                    <tr key={t.id} data-testid={`sospeso-${t.id}`} className={isChecked ? "bg-emerald-50/60" : ""}>
+                                        <td>
+                                            <Checkbox
+                                                checked={isChecked}
+                                                onCheckedChange={() => toggleOne(t.id)}
+                                                data-testid={`sospeso-check-${t.id}`}
+                                            />
+                                        </td>
                                         <td className="font-medium">
                                             <Link to={`/anagrafiche/${t.contraente_id}`} className="text-sky-700 hover:underline">
                                                 {t.contraente_nome}
@@ -229,7 +287,7 @@ export default function TitoliSospesi() {
                         </tbody>
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
-                                <td colSpan="8" className="text-right">TOTALE ANTICIPI</td>
+                                <td colSpan="9" className="text-right">TOTALE ANTICIPI</td>
                                 <td className="num text-right">{fmtEur(totali.importo)}</td>
                                 <td></td>
                             </tr>
@@ -242,7 +300,173 @@ export default function TitoliSospesi() {
                 <DialogIncasso titolo={paying} conti={conti}
                               onClose={() => { setPaying(null); load(); }} />
             )}
+            {bulkOpen && (
+                <BulkIncassaDialog
+                    titoli={selectedItems}
+                    onClose={(reload) => {
+                        setBulkOpen(false);
+                        if (reload) { setSelectedIds(new Set()); load(); }
+                    }}
+                />
+            )}
         </div>
+    );
+}
+
+
+// =====================================================================
+// BulkIncassaDialog — incassa più titoli sospesi in un colpo solo
+// Ogni riga ha un importo editabile (default = premio); un unico
+// Tipo di pagamento + data incasso vengono applicati a tutti i titoli.
+// =====================================================================
+function BulkIncassaDialog({ titoli, onClose }) {
+    const oggi = new Date().toISOString().slice(0, 10);
+    const [dataIncasso, setDataIncasso] = useState(oggi);
+    const [tipoPag, setTipoPag] = useState("");
+    const [perTit, setPerTit] = useState(() => {
+        const o = {};
+        for (const t of titoli) {
+            o[t.id] = {
+                importo_pagato: (parseFloat(t.importo_lordo) || 0).toFixed(2),
+                tipo_chiusura: "sconto",
+            };
+        }
+        return o;
+    });
+    const [saving, setSaving] = useState(false);
+    const setPT = (id, k, v) => setPerTit((p) => ({ ...p, [id]: { ...p[id], [k]: v } }));
+
+    const totalePremio = useMemo(
+        () => titoli.reduce((s, t) => s + (parseFloat(t.importo_lordo) || 0), 0),
+        [titoli],
+    );
+    const totalePagato = useMemo(
+        () => Object.values(perTit).reduce((s, r) => s + (parseFloat(r.importo_pagato) || 0), 0),
+        [perTit],
+    );
+
+    const conferma = async () => {
+        if (!tipoPag) { toast.error("Seleziona il tipo di pagamento"); return; }
+        setSaving(true);
+        let ok = 0, ko = 0, totale = 0;
+        for (const t of titoli) {
+            const pt = perTit[t.id] || {};
+            const importo = parseFloat(pt.importo_pagato);
+            if (isNaN(importo) || importo < 0) { ko += 1; continue; }
+            const lordo = parseFloat(t.importo_lordo) || 0;
+            const residuo = Math.max(0, lordo - importo);
+            const tipo_ch = residuo > 0 ? (pt.tipo_chiusura || "sconto") : "sconto";
+            try {
+                await api.post(`/titoli/${t.id}/incassa`, {
+                    data_incasso: dataIncasso,
+                    mezzo_pagamento: tipoPag,
+                    conto_cassa_id: null,
+                    importo_pagato: importo,
+                    tipo_chiusura: tipo_ch,
+                    motivo_sconto: tipo_ch === "sconto" && residuo > 0 ? "Sconto applicato" : null,
+                });
+                ok += 1;
+                totale += importo;
+            } catch { ko += 1; }
+        }
+        setSaving(false);
+        if (ok > 0) toast.success(`${ok} titoli incassati per ${fmtEur(totale)}${ko > 0 ? ` · ${ko} errori` : ""}`);
+        else toast.error("Nessun titolo incassato");
+        onClose(ok > 0);
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-3xl max-h-[92vh] overflow-hidden flex flex-col" data-testid="bulk-sospesi-dialog">
+                <DialogHeader>
+                    <DialogTitle>
+                        <Layers className="inline mr-2 -mt-1 text-emerald-600" size={18} />
+                        Incassa {titoli.length} titoli sospesi — {fmtEur(totalePremio)} totali
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-3 py-2">
+                    <div>
+                        <Label>Data incasso</Label>
+                        <Input type="date" value={dataIncasso} onChange={(e) => setDataIncasso(e.target.value)} data-testid="bulk-sosp-data" />
+                    </div>
+                    <div>
+                        <Label>Tipo pagamento *</Label>
+                        <SelectTipoPagamento value={tipoPag} onChange={setTipoPag} testid="bulk-sosp-tipo" />
+                    </div>
+                </div>
+                <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
+                    Modifica l&apos;importo pagato per ciascun titolo. Se importo &lt; premio → residuo trattato come <strong>sconto</strong> (o sospeso).
+                    Il conto/cassa viene determinato automaticamente dal tipo pagamento.
+                </div>
+                <div className="border border-slate-200 rounded overflow-auto flex-1 mt-2">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                                <th className="text-left px-2 py-1.5">Cliente</th>
+                                <th className="text-left px-2 py-1.5">Polizza</th>
+                                <th className="text-right px-2 py-1.5">Premio</th>
+                                <th className="text-right px-2 py-1.5 w-[110px]">Pagato</th>
+                                <th className="text-right px-2 py-1.5 w-[80px]">Residuo</th>
+                                <th className="text-left px-2 py-1.5 w-[130px]">Se residuo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {titoli.map((t) => {
+                                const lordo = parseFloat(t.importo_lordo) || 0;
+                                const pt = perTit[t.id] || {};
+                                const pagato = parseFloat(pt.importo_pagato);
+                                const residuo = Math.max(0, lordo - (isNaN(pagato) ? 0 : pagato));
+                                const hasResiduo = residuo > 0.005;
+                                return (
+                                    <tr key={t.id} className="border-t border-slate-100">
+                                        <td className="px-2 py-1 truncate max-w-[180px]" title={t.contraente_nome}>{t.contraente_nome || "—"}</td>
+                                        <td className="px-2 py-1 font-mono text-slate-600">{t.numero_polizza}</td>
+                                        <td className="px-2 py-1 text-right num">{fmtEur(lordo)}</td>
+                                        <td className="px-2 py-1">
+                                            <Input type="number" step="0.01" min="0"
+                                                value={pt.importo_pagato}
+                                                onChange={(e) => setPT(t.id, "importo_pagato", e.target.value)}
+                                                className="h-7 text-right num text-xs px-1"
+                                                data-testid={`bulk-sosp-imp-${t.id}`}
+                                            />
+                                        </td>
+                                        <td className="px-2 py-1 text-right num text-slate-600">{hasResiduo ? fmtEur(residuo) : "—"}</td>
+                                        <td className="px-2 py-1">
+                                            {hasResiduo ? (
+                                                <Select
+                                                    value={pt.tipo_chiusura || "sconto"}
+                                                    onValueChange={(v) => setPT(t.id, "tipo_chiusura", v)}
+                                                >
+                                                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="sconto">Sconto</SelectItem>
+                                                        <SelectItem value="sospeso">Sospeso (residuo)</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : <span className="text-slate-300">—</span>}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                        <tfoot>
+                            <tr className="bg-slate-50 font-semibold">
+                                <td colSpan="2" className="px-2 py-1.5 text-right">TOTALI</td>
+                                <td className="px-2 py-1.5 text-right num">{fmtEur(totalePremio)}</td>
+                                <td className="px-2 py-1.5 text-right num text-emerald-700">{fmtEur(totalePagato)}</td>
+                                <td colSpan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <DialogFooter className="mt-3">
+                    <Button variant="outline" onClick={() => onClose(false)} disabled={saving}>Annulla</Button>
+                    <Button onClick={conferma} disabled={saving || !tipoPag} className="bg-emerald-600 hover:bg-emerald-700" data-testid="bulk-sosp-conferma">
+                        {saving ? "Incasso in corso…" : `Conferma incasso ${titoli.length} titoli`}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

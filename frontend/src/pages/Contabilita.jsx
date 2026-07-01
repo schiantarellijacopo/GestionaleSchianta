@@ -132,7 +132,7 @@ export default function Contabilita() {
                                         <th>Tipo</th>
                                         <th>Categoria</th>
                                         <th>Descrizione</th>
-                                        <th>Mezzo</th>
+                                        <th>Tipo pag.</th>
                                         <th>Documento</th>
                                         <th className="text-right">Entrata</th>
                                         <th className="text-right">Uscita</th>

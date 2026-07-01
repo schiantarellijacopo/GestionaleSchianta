@@ -176,7 +176,7 @@ export default function Avvisi() {
                             </Select>
                         </div>
                         <div>
-                            <label className="text-xs font-medium text-slate-600">Mezzo pagamento</label>
+                            <label className="text-xs font-medium text-slate-600">Tipo pagamento</label>
                             <Select value={filters.mezzo_pagamento}
                                 onValueChange={(v) => setFilters((p) => ({ ...p, mezzo_pagamento: v }))}>
                                 <SelectTrigger data-testid="filter-mezzo"><SelectValue /></SelectTrigger>
