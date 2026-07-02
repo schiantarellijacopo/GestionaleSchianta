@@ -42,14 +42,14 @@ def _cfg() -> tuple[str, str]:
     return url, key
 
 
-async def _call(method: str, path: str, *, json: Optional[dict] = None, instance_token: Optional[str] = None) -> dict:
+async def _call(method: str, path: str, *, json: Optional[dict] = None, instance_token: Optional[str] = None, timeout: float = 30.0) -> dict:
     """Chiamata HTTP verso Evolution API. Usa la global key di default,
     o il token della singola istanza se fornito."""
     url_base, global_key = _cfg()
     headers = {"apikey": instance_token or global_key, "Content-Type": "application/json"}
     url = f"{url_base}{path}"
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.request(method, url, headers=headers, json=json)
     except httpx.RequestError as e:
         raise HTTPException(502, f"Evolution API non raggiungibile: {e}") from e
@@ -85,16 +85,20 @@ async def get_config(user=Depends(current_user)) -> dict:
 
 @router.get("/instances")
 async def list_instances(user=Depends(require_user("admin", "collaboratore"))) -> list[dict]:
-    """Elenco delle istanze WhatsApp create dalle nostre agenzie."""
+    """Elenco delle istanze WhatsApp create dalle nostre agenzie.
+    Il live-status è best-effort con timeout breve: se Evolution API
+    è lenta/down, ritorniamo comunque la lista dal DB con state_live=None.
+    """
     rows = await db.whatsapp_instances.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    # arricchisci con stato in tempo reale dall'API (best-effort)
     for r in rows:
         try:
-            st = await _call("GET", f"/instance/connectionState/{r['instance_name']}")
+            st = await _call("GET", f"/instance/connectionState/{r['instance_name']}", timeout=5.0)
             state = (((st or {}).get("instance") or {}).get("state")
                      or (st or {}).get("state") or "unknown")
             r["state_live"] = state
         except HTTPException:
+            r["state_live"] = None
+        except Exception:  # noqa: BLE001
             r["state_live"] = None
     return rows
 
@@ -171,14 +175,24 @@ async def get_qr(name: str, user=Depends(require_user("admin", "collaboratore"))
 
 @router.get("/instances/{name}/status")
 async def get_status(name: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
-    """Stato connessione dell'istanza."""
-    resp = await _call("GET", f"/instance/connectionState/{name}")
-    st = ((resp or {}).get("instance") or {}).get("state") or (resp or {}).get("state") or "unknown"
-    await db.whatsapp_instances.update_one(
-        {"instance_name": name},
-        {"$set": {"state": st, "updated_at": _now_iso()}},
-    )
-    return {"instance_name": name, "state": st, "raw": resp}
+    """Stato connessione dell'istanza. Se Evolution API è down/lenta,
+    ritorniamo lo stato salvato in DB con `stale=true`."""
+    try:
+        resp = await _call("GET", f"/instance/connectionState/{name}", timeout=5.0)
+        st = ((resp or {}).get("instance") or {}).get("state") or (resp or {}).get("state") or "unknown"
+        await db.whatsapp_instances.update_one(
+            {"instance_name": name},
+            {"$set": {"state": st, "updated_at": _now_iso()}},
+        )
+        return {"instance_name": name, "state": st, "stale": False}
+    except HTTPException as e:
+        inst = await db.whatsapp_instances.find_one({"instance_name": name}, {"_id": 0, "state": 1})
+        return {
+            "instance_name": name,
+            "state": (inst or {}).get("state") or "unknown",
+            "stale": True,
+            "error": str(e.detail)[:200],
+        }
 
 
 @router.post("/instances/{name}/logout")
@@ -314,7 +328,10 @@ async def list_chats(
     name: str,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> list[dict]:
-    """Aggregazione: 1 riga per numero, con ultimo messaggio + count non letti."""
+    """Aggregazione: 1 riga per numero, con ultimo messaggio + count non letti.
+    Include automaticamente l'associazione al cliente in anagrafiche
+    tramite match del numero (cellulare/telefono).
+    """
     pipeline = [
         {"$match": {"instance_name": name}},
         {"$sort": {"created_at": -1}},
@@ -328,9 +345,160 @@ async def list_chats(
             "count_out": {"$sum": {"$cond": [{"$eq": ["$direction", "out"]}, 1, 0]}},
         }},
         {"$sort": {"last_time": -1}},
-        {"$limit": 100},
+        {"$limit": 200},
     ]
-    rows = await db.whatsapp_messages.aggregate(pipeline).to_list(100)
+    rows = await db.whatsapp_messages.aggregate(pipeline).to_list(200)
+
+    # Associazione anagrafica: cerca clienti dove cellulare/telefono termina con le
+    # ultime 9 cifre del numero WhatsApp (garantisce match con/senza prefisso).
     for r in rows:
-        r["number"] = r.pop("_id")
+        num = str(r.pop("_id") or "")
+        r["number"] = num
+        r["anagrafica_id"] = None
+        r["anagrafica_nome"] = None
+        if not num:
+            continue
+        # Ricerca fuzzy: match sulle ultime 9 cifre (Italia = 10 cifre senza +39)
+        digits = "".join(c for c in num if c.isdigit())
+        if len(digits) < 6:
+            continue
+        tail = digits[-9:] if len(digits) >= 9 else digits
+        # Cerca in tutti i campi telefono
+        query = {
+            "$or": [
+                {"cellulare": {"$regex": tail + "$"}},
+                {"telefono": {"$regex": tail + "$"}},
+                {"whatsapp": {"$regex": tail + "$"}},
+            ]
+        }
+        anag = await db.anagrafiche.find_one(
+            query,
+            {"_id": 0, "id": 1, "nome": 1, "cognome": 1, "ragione_sociale": 1, "tipo": 1},
+        )
+        if anag:
+            nome = (
+                anag.get("ragione_sociale")
+                or f"{anag.get('nome') or ''} {anag.get('cognome') or ''}".strip()
+                or None
+            )
+            r["anagrafica_id"] = anag.get("id")
+            r["anagrafica_nome"] = nome
     return rows
+
+
+# ---------- Invio media / allegati ----------
+class SendMediaBody(BaseModel):
+    number: str
+    media_base64: str      # base64 senza prefisso data:
+    filename: str
+    caption: Optional[str] = None
+    mimetype: Optional[str] = None  # es. "application/pdf"
+
+
+@router.post("/instances/{name}/send-media")
+async def send_media(
+    name: str, body: SendMediaBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Invia allegato (PDF/immagine/documento) via WhatsApp."""
+    inst = await db.whatsapp_instances.find_one({"instance_name": name}, {"_id": 0})
+    if not inst:
+        raise HTTPException(404, "Istanza non trovata")
+
+    # Determina il mediatype (image | video | document | audio)
+    mt = (body.mimetype or "").lower()
+    if mt.startswith("image/"):
+        media_type = "image"
+    elif mt.startswith("video/"):
+        media_type = "video"
+    elif mt.startswith("audio/"):
+        media_type = "audio"
+    else:
+        media_type = "document"
+
+    payload = {
+        "number": body.number,
+        "mediatype": media_type,
+        "media": body.media_base64,
+        "fileName": body.filename,
+    }
+    if body.caption:
+        payload["caption"] = body.caption
+    if body.mimetype:
+        payload["mimetype"] = body.mimetype
+    try:
+        resp = await _call(
+            "POST", f"/message/sendMedia/{name}",
+            json=payload, instance_token=inst.get("token"),
+        )
+        return {"ok": True, "resp": resp}
+    finally:
+        try:
+            await db.whatsapp_messages.insert_one({
+                "id": str(uuid.uuid4()),
+                "instance_name": name,
+                "direction": "out",
+                "number": body.number,
+                "text": body.caption or f"[allegato: {body.filename}]",
+                "message_type": media_type,
+                "attachment_name": body.filename,
+                "attachment_mimetype": body.mimetype,
+                "created_at": _now_iso(),
+            })
+        except Exception:
+            pass
+
+
+# ---------- Salva conversazione nel diario cliente ----------
+class SaveToDiaryBody(BaseModel):
+    number: str
+    anagrafica_id: str
+
+
+@router.post("/instances/{name}/save-to-diary")
+async def save_conversation_to_diary(
+    name: str, body: SaveToDiaryBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Copia l'intera conversazione WhatsApp con `number` nel diario cliente
+    dell'anagrafica indicata. Salva 1 sola voce di riepilogo con il transcript.
+    """
+    anag = await db.anagrafiche.find_one({"id": body.anagrafica_id}, {"_id": 0, "id": 1, "nome": 1, "cognome": 1, "ragione_sociale": 1})
+    if not anag:
+        raise HTTPException(404, "Anagrafica non trovata")
+
+    msgs = await db.whatsapp_messages.find(
+        {"instance_name": name, "number": body.number},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(500)
+    if not msgs:
+        raise HTTPException(400, "Nessun messaggio da salvare")
+
+    lines = []
+    for m in msgs:
+        ts = (m.get("created_at") or "")[:16].replace("T", " ")
+        dir_marker = "→" if m.get("direction") == "out" else "←"
+        text = m.get("text") or "(allegato)"
+        lines.append(f"[{ts}] {dir_marker} {text}")
+    transcript = "\n".join(lines)
+    nome_cli = (
+        anag.get("ragione_sociale")
+        or f"{anag.get('nome') or ''} {anag.get('cognome') or ''}".strip()
+    )
+
+    entry = {
+        "id": str(uuid.uuid4()),
+        "anagrafica_id": body.anagrafica_id,
+        "tipo": "whatsapp",
+        "canale": "whatsapp",
+        "titolo": f"Conversazione WhatsApp con {nome_cli} ({body.number})",
+        "descrizione": transcript,
+        "messaggi_count": len(msgs),
+        "instance_name": name,
+        "numero": body.number,
+        "created_at": _now_iso(),
+        "utente_id": user.get("id"),
+    }
+    await db.diario_cliente.insert_one(entry.copy())
+    entry.pop("_id", None)
+    return {"ok": True, "diario_id": entry["id"], "messaggi_salvati": len(msgs)}

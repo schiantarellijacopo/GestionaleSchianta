@@ -243,11 +243,15 @@ function WhatsAppInbox() {
     const [instances, setInstances] = useState([]);
     const [selInst, setSelInst] = useState(null);       // istanza selezionata
     const [chats, setChats] = useState([]);
-    const [selChat, setSelChat] = useState(null);       // numero selezionato
+    const [selChat, setSelChat] = useState(null);       // { number, anagrafica_id?, anagrafica_nome? }
     const [msgs, setMsgs] = useState([]);
     const [text, setText] = useState("");
     const [sending, setSending] = useState(false);
+    const [reconnecting, setReconnecting] = useState(false);
+    const [savingDiary, setSavingDiary] = useState(false);
+    const [uploadingFile, setUploadingFile] = useState(false);
     const scrollRef = useRef();
+    const fileInputRef = useRef();
 
     // Carica istanze
     useEffect(() => {
@@ -258,25 +262,40 @@ function WhatsAppInbox() {
         }).catch(() => setInstances([]));
     }, []);
 
-    // Carica chat per istanza selezionata (aggiornamento ogni 5s)
+    // Carica chat per istanza (con gestione errore graceful "Riconnessione…")
     useEffect(() => {
         if (!selInst) return;
-        const load = () => api.get(`/whatsapp-evo/instances/${selInst}/chats`)
-            .then((r) => setChats(r.data || [])).catch(() => setChats([]));
+        let stopped = false;
+        const load = async () => {
+            try {
+                const r = await api.get(`/whatsapp-evo/instances/${selInst}/chats`);
+                if (!stopped) { setChats(r.data || []); setReconnecting(false); }
+            } catch {
+                if (!stopped) setReconnecting(true);
+            }
+        };
         load();
         const t = setInterval(load, 5000);
-        return () => clearInterval(t);
+        return () => { stopped = true; clearInterval(t); };
     }, [selInst]);
 
-    // Carica messaggi della chat selezionata (aggiornamento ogni 3s)
+    // Carica messaggi conversazione selezionata
     useEffect(() => {
-        if (!selInst || !selChat) { setMsgs([]); return; }
-        const load = () => api.get(`/whatsapp-evo/instances/${selInst}/messages`, {
-            params: { number: selChat, limit: 100 },
-        }).then((r) => setMsgs((r.data || []).slice().reverse())).catch(() => setMsgs([]));
+        if (!selInst || !selChat?.number) { setMsgs([]); return; }
+        let stopped = false;
+        const load = async () => {
+            try {
+                const r = await api.get(`/whatsapp-evo/instances/${selInst}/messages`, {
+                    params: { number: selChat.number, limit: 100 },
+                });
+                if (!stopped) { setMsgs((r.data || []).slice().reverse()); setReconnecting(false); }
+            } catch {
+                if (!stopped) setReconnecting(true);
+            }
+        };
         load();
         const t = setInterval(load, 3000);
-        return () => clearInterval(t);
+        return () => { stopped = true; clearInterval(t); };
     }, [selInst, selChat]);
 
     useEffect(() => {
@@ -285,21 +304,73 @@ function WhatsAppInbox() {
 
     const invia = async (e) => {
         e?.preventDefault();
-        if (!selInst || !selChat || !text.trim() || sending) return;
+        if (!selInst || !selChat?.number || !text.trim() || sending) return;
         setSending(true);
         try {
             await api.post(`/whatsapp-evo/instances/${selInst}/send-text`, {
-                number: selChat, text: text.trim(),
+                number: selChat.number, text: text.trim(),
             });
             setText("");
-            // ricarica immediatamente
             const r = await api.get(`/whatsapp-evo/instances/${selInst}/messages`, {
-                params: { number: selChat, limit: 100 },
+                params: { number: selChat.number, limit: 100 },
             });
             setMsgs((r.data || []).slice().reverse());
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore invio");
         } finally { setSending(false); }
+    };
+
+    // Invio allegato (PDF/immagine/documento) via WhatsApp
+    const inviaFile = async (file) => {
+        if (!file || !selInst || !selChat?.number) return;
+        if (file.size > 15 * 1024 * 1024) { toast.error("File max 15 MB"); return; }
+        setUploadingFile(true);
+        try {
+            const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const result = reader.result || "";
+                    const b64 = String(result).split(",")[1] || String(result);
+                    resolve(b64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+            await api.post(`/whatsapp-evo/instances/${selInst}/send-media`, {
+                number: selChat.number,
+                media_base64: base64,
+                filename: file.name,
+                mimetype: file.type || "application/octet-stream",
+                caption: text.trim() || null,
+            });
+            toast.success(`Allegato inviato: ${file.name}`);
+            setText("");
+            if (fileInputRef.current) fileInputRef.current.value = "";
+            const r = await api.get(`/whatsapp-evo/instances/${selInst}/messages`, {
+                params: { number: selChat.number, limit: 100 },
+            });
+            setMsgs((r.data || []).slice().reverse());
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore invio allegato");
+        } finally { setUploadingFile(false); }
+    };
+
+    // Salva conversazione WhatsApp nel diario del cliente
+    const salvaNelDiario = async () => {
+        if (!selChat?.anagrafica_id) {
+            toast.error("Cliente non associato — impossibile salvare nel diario");
+            return;
+        }
+        setSavingDiary(true);
+        try {
+            const r = await api.post(`/whatsapp-evo/instances/${selInst}/save-to-diary`, {
+                number: selChat.number,
+                anagrafica_id: selChat.anagrafica_id,
+            });
+            toast.success(`${r.data.messaggi_salvati} messaggi salvati nel diario di ${selChat.anagrafica_nome}`);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore salvataggio diario");
+        } finally { setSavingDiary(false); }
     };
 
     if (instances.length === 0) {
@@ -337,6 +408,12 @@ function WhatsAppInbox() {
             )}
 
             <Card className="border-slate-200 overflow-hidden" style={{ height: "calc(100vh - 300px)" }}>
+                {reconnecting && (
+                    <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-xs text-amber-800 flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                        Riconnessione in corso alle Evolution API…
+                    </div>
+                )}
                 <div className="grid grid-cols-12 h-full">
                     {/* Lista chat */}
                     <div className="col-span-4 border-r border-slate-200 overflow-y-auto" data-testid="wa-chats-list">
@@ -358,18 +435,26 @@ function WhatsAppInbox() {
                                 {chats.map((c) => (
                                     <li
                                         key={c.number}
-                                        onClick={() => setSelChat(c.number)}
+                                        onClick={() => setSelChat(c)}
                                         data-testid={`wa-chat-${c.number}`}
-                                        className={`px-4 py-3 cursor-pointer hover:bg-slate-50 ${selChat === c.number ? "bg-emerald-50 border-l-2 border-emerald-600" : ""}`}
+                                        className={`px-4 py-3 cursor-pointer hover:bg-slate-50 ${selChat?.number === c.number ? "bg-emerald-50 border-l-2 border-emerald-600" : ""}`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                                                <Phone size={14} />
+                                            <div className={`w-9 h-9 rounded-full flex items-center justify-center ${c.anagrafica_id ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                                {c.anagrafica_id ? (c.anagrafica_nome || "?").charAt(0).toUpperCase() : <Phone size={14} />}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-medium text-slate-900 truncate">
-                                                    {c.last_push_name || c.number}
+                                                <div className="text-sm font-medium text-slate-900 truncate flex items-center gap-1">
+                                                    {c.anagrafica_nome || c.last_push_name || `+${c.number}`}
+                                                    {c.anagrafica_id && (
+                                                        <span className="text-[9px] px-1 py-0 rounded bg-sky-100 text-sky-700 border border-sky-200" title="Cliente in anagrafica">
+                                                            CLIENTE
+                                                        </span>
+                                                    )}
                                                 </div>
+                                                {c.anagrafica_nome && (
+                                                    <div className="text-[10px] text-slate-500 font-mono">+{c.number}</div>
+                                                )}
                                                 <div className="text-xs text-slate-500 truncate">
                                                     {c.last_direction === "out" && <span className="text-emerald-600">➜ </span>}
                                                     {c.last_text?.slice(0, 40) || "(allegato)"}
@@ -396,16 +481,45 @@ function WhatsAppInbox() {
                             </div>
                         ) : (
                             <>
-                                <div className="border-b border-slate-200 px-4 py-2 bg-slate-50 flex items-center gap-2">
-                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                                        <Phone size={13} />
+                                <div className="border-b border-slate-200 px-4 py-2 bg-slate-50 flex items-center gap-2 flex-wrap">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${selChat.anagrafica_id ? "bg-sky-100 text-sky-700 font-medium" : "bg-emerald-100 text-emerald-700"}`}>
+                                        {selChat.anagrafica_id ? (selChat.anagrafica_nome || "?").charAt(0).toUpperCase() : <Phone size={13} />}
                                     </div>
-                                    <div className="text-sm font-medium">+{selChat}</div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="text-sm font-medium truncate flex items-center gap-2">
+                                            {selChat.anagrafica_nome || `+${selChat.number}`}
+                                            {selChat.anagrafica_id && (
+                                                <a href={`/anagrafiche/${selChat.anagrafica_id}`} target="_blank" rel="noreferrer"
+                                                   className="text-[10px] px-1.5 py-0 rounded bg-sky-100 text-sky-700 border border-sky-200 hover:bg-sky-200">
+                                                    Apri scheda ↗
+                                                </a>
+                                            )}
+                                        </div>
+                                        {selChat.anagrafica_nome && (
+                                            <div className="text-[10px] text-slate-500 font-mono">+{selChat.number}</div>
+                                        )}
+                                    </div>
+                                    {selChat.anagrafica_id && (
+                                        <Button
+                                            size="sm" variant="outline"
+                                            onClick={salvaNelDiario}
+                                            disabled={savingDiary || msgs.length === 0}
+                                            className="text-xs"
+                                            data-testid="wa-save-diary"
+                                        >
+                                            {savingDiary ? "Salvataggio…" : "💾 Salva nel diario"}
+                                        </Button>
+                                    )}
                                 </div>
                                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
                                     {msgs.map((m) => (
                                         <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
                                             <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${m.direction === "out" ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                                {m.attachment_name && (
+                                                    <div className={`flex items-center gap-1 text-[11px] mb-1 ${m.direction === "out" ? "text-emerald-50" : "text-slate-500"}`}>
+                                                        <Paperclip size={11} /> {m.attachment_name}
+                                                    </div>
+                                                )}
                                                 <div className="whitespace-pre-wrap break-words">{m.text || <em className="opacity-60">(allegato)</em>}</div>
                                                 <div className={`text-[10px] mt-1 ${m.direction === "out" ? "text-emerald-100" : "text-slate-400"}`}>
                                                     {m.created_at?.slice(11, 16)}
@@ -415,13 +529,31 @@ function WhatsAppInbox() {
                                     ))}
                                 </div>
                                 <form onSubmit={invia} className="border-t border-slate-200 p-3 flex gap-2 items-center bg-white">
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        className="hidden"
+                                        onChange={(e) => e.target.files?.[0] && inviaFile(e.target.files[0])}
+                                        accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                                        data-testid="wa-file-input"
+                                    />
+                                    <Button
+                                        type="button" variant="outline" size="icon"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploadingFile}
+                                        title="Allega file (max 15 MB) — la didascalia è il testo qui a fianco"
+                                        data-testid="wa-attach-button"
+                                    >
+                                        <Paperclip size={14} />
+                                    </Button>
                                     <Input
                                         value={text}
                                         onChange={(e) => setText(e.target.value)}
-                                        placeholder="Scrivi un messaggio WhatsApp..."
+                                        placeholder={uploadingFile ? "Invio allegato…" : "Scrivi un messaggio WhatsApp..."}
                                         data-testid="wa-msg-input"
+                                        disabled={uploadingFile}
                                     />
-                                    <Button type="submit" disabled={sending || !text.trim()} className="bg-emerald-600 hover:bg-emerald-700" data-testid="wa-msg-send">
+                                    <Button type="submit" disabled={sending || uploadingFile || !text.trim()} className="bg-emerald-600 hover:bg-emerald-700" data-testid="wa-msg-send">
                                         <Send size={14} />
                                     </Button>
                                 </form>
