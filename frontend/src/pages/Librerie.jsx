@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
@@ -1891,14 +1891,73 @@ const IMAP_PRESETS = {
 function WhatsAppSection({ f, set }) {
     const [instances, setInstances] = useState([]);
     const [loading, setLoading] = useState(true);
-    useEffect(() => {
-        api.get("/whatsapp-evo/instances")
-            .then((r) => setInstances(r.data || []))
-            .catch(() => setInstances([]))
-            .finally(() => setLoading(false));
-    }, []);
+    const [creating, setCreating] = useState(false);
+    const [qrDialog, setQrDialog] = useState(null); // { instance_name, base64, code, ... }
+    const [nomeAgenzia, setNomeAgenzia] = useState("");
+
+    const load = async () => {
+        setLoading(true);
+        try {
+            const r = await api.get("/whatsapp-evo/instances");
+            setInstances(r.data || []);
+        } catch { setInstances([]); }
+        finally { setLoading(false); }
+    };
+    useEffect(() => { load(); }, []);
+
     const provider = f.whatsapp_provider || "wame";
-    const configuredCount = instances.filter((i) => (i.state_live || i.state) === "open").length;
+    const activeInstance = instances.find((i) => (i.state_live || i.state) === "open");
+
+    const createInstance = async () => {
+        const nome = (nomeAgenzia || "").trim();
+        if (!nome) { toast.error("Nome agenzia obbligatorio"); return; }
+        setCreating(true);
+        try {
+            const r = await api.post("/whatsapp-evo/instances", { agenzia_nome: nome });
+            const qr = r.data?.qr || {};
+            toast.success(`Istanza '${r.data.instance_name}' creata`);
+            setNomeAgenzia("");
+            await load();
+            if (qr.base64 || qr.code) {
+                setQrDialog({ instance_name: r.data.instance_name, ...qr });
+            } else {
+                openQr(r.data.instance_name);
+            }
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore creazione istanza");
+        } finally { setCreating(false); }
+    };
+
+    const openQr = async (name) => {
+        try {
+            const r = await api.get(`/whatsapp-evo/instances/${name}/qr`);
+            if (!r.data.base64 && !r.data.code) {
+                toast.info("QR non disponibile — istanza già connessa o in errore.");
+                return;
+            }
+            setQrDialog({ instance_name: name, ...r.data });
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore recupero QR"); }
+    };
+
+    const deleteInstance = async (name) => {
+        if (!window.confirm(`Eliminare l'istanza '${name}'?`)) return;
+        try {
+            await api.delete(`/whatsapp-evo/instances/${name}`);
+            toast.success("Istanza eliminata");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const testSend = async (name) => {
+        const number = window.prompt("Numero destinatario (formato: 393401234567, senza + né spazi):");
+        if (!number) return;
+        const text = window.prompt("Messaggio di test:", "Test WhatsApp da gestionale ✅");
+        if (!text) return;
+        try {
+            await api.post(`/whatsapp-evo/instances/${name}/send-text`, { number, text });
+            toast.success("Messaggio inviato!");
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore invio"); }
+    };
 
     return (
         <section data-testid="lib-com-whatsapp" className="border border-emerald-200 rounded-lg p-4 bg-emerald-50/30">
@@ -1909,26 +1968,24 @@ function WhatsAppSection({ f, set }) {
                 <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="text-base font-semibold text-slate-800">WhatsApp — Configurazione unica</h4>
-                        {configuredCount > 0 && (
+                        {activeInstance && (
                             <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                {configuredCount} istanz{configuredCount === 1 ? "a" : "e"} connesse
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Connessa · {activeInstance.agenzia_nome}
                             </span>
                         )}
                     </div>
                     <p className="text-[11px] text-slate-500 mt-1">
-                        Provider di invio predefinito per tutti i moduli (Avvisi, Alert Studio, invii manuali, ecc.).
-                        Le istanze WhatsApp per agenzia si gestiscono in <a href="/whatsapp" className="text-emerald-700 underline">WhatsApp Agenzie</a>.
+                        Ogni agenzia ha la propria istanza WhatsApp isolata. Puoi creare + collegare il numero qui sotto.
                     </p>
                 </div>
             </div>
 
             {/* Scelta provider */}
-            <Label className="text-xs uppercase tracking-wide text-slate-600">Provider di default</Label>
+            <Label className="text-xs uppercase tracking-wide text-slate-600">Provider invio default</Label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                 {[
-                    { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp con testo precompilato — l'utente clicca 'Invia'. Gratis, universale.", icon: "🔗" },
-                    { v: "evolution", label: "Evolution API (automatico)", desc: "Invio server-to-server, senza intervento manuale. Serve almeno 1 istanza connessa.", icon: "⚡" },
+                    { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp con testo precompilato. Gratis, universale.", icon: "🔗" },
+                    { v: "evolution", label: "Evolution API (auto)", desc: "Invio server-to-server automatico. Serve almeno 1 istanza connessa.", icon: "⚡" },
                 ].map((p) => (
                     <button
                         key={p.v}
@@ -1943,29 +2000,89 @@ function WhatsAppSection({ f, set }) {
                 ))}
             </div>
 
-            {/* Se Evolution → scelta istanza default */}
+            {/* Crea nuova istanza + Lista istanze */}
             {provider === "evolution" && (
                 <div className="mt-3 pt-3 border-t border-emerald-200">
-                    <Label>Istanza WhatsApp di default</Label>
-                    <div className="text-[11px] text-slate-500 mb-1.5">
-                        Usata quando la regola/avviso non specifica un'istanza (es. avvisi condivisi). Se vuota, sceglie automaticamente la prima connessa.
+                    <Label className="text-xs uppercase tracking-wide text-slate-600">Istanze WhatsApp collegate</Label>
+
+                    {/* Form creazione veloce */}
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                        <Input
+                            placeholder="Nome agenzia (es. Agenzia Milano)"
+                            value={nomeAgenzia}
+                            onChange={(e) => setNomeAgenzia(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && createInstance()}
+                            className="flex-1 min-w-[200px]"
+                            data-testid="wa-lib-nome"
+                        />
+                        <Button
+                            onClick={createInstance}
+                            disabled={creating || !nomeAgenzia.trim()}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            data-testid="wa-lib-crea"
+                        >
+                            {creating ? "Creazione…" : "+ Crea + QR"}
+                        </Button>
                     </div>
-                    <select
-                        value={f.whatsapp_default_instance || ""}
-                        onChange={(e) => set("whatsapp_default_instance", e.target.value || null)}
-                        className="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm bg-white"
-                        data-testid="wa-default-instance"
-                    >
-                        <option value="">— Auto (prima istanza connessa) —</option>
-                        {instances.map((i) => (
-                            <option key={i.instance_name} value={i.instance_name}>
-                                {i.agenzia_nome} · {i.instance_name} · {i.state_live || i.state}
-                            </option>
-                        ))}
-                    </select>
-                    {!loading && instances.length === 0 && (
-                        <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
-                            Nessuna istanza WhatsApp creata. Vai in <a href="/whatsapp" className="underline font-medium">WhatsApp Agenzie</a> per crearne una.
+
+                    {/* Lista */}
+                    <div className="mt-3 space-y-1.5">
+                        {loading && <div className="text-xs text-slate-500">Caricamento…</div>}
+                        {!loading && instances.length === 0 && (
+                            <div className="text-xs text-slate-500 italic">Nessuna istanza. Creane una sopra ↑</div>
+                        )}
+                        {instances.map((inst) => {
+                            const st = inst.state_live || inst.state;
+                            const meta = st === "open" ? { color: "bg-emerald-100 text-emerald-700 border-emerald-300", label: "Connessa" }
+                                : st === "connecting" ? { color: "bg-amber-100 text-amber-800 border-amber-300", label: "In connessione" }
+                                : { color: "bg-slate-100 text-slate-600 border-slate-300", label: st || "Sconosciuta" };
+                            return (
+                                <div key={inst.instance_name} className="flex items-center gap-2 bg-white border border-emerald-200 rounded-md px-3 py-2 flex-wrap"
+                                     data-testid={`wa-lib-row-${inst.instance_name}`}>
+                                    <div className="flex-1 min-w-[180px]">
+                                        <div className="font-medium text-sm">{inst.agenzia_nome}</div>
+                                        <div className="text-[10px] text-slate-500 font-mono">{inst.instance_name}</div>
+                                    </div>
+                                    <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${meta.color}`}>
+                                        {st === "open" && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                                        {meta.label}
+                                    </span>
+                                    <Button size="sm" variant="outline" onClick={() => openQr(inst.instance_name)} title="Mostra QR"
+                                            data-testid={`wa-lib-qr-${inst.instance_name}`}>
+                                        <QrCode size={13} />
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => testSend(inst.instance_name)} title="Test invio"
+                                            disabled={st !== "open"}
+                                            data-testid={`wa-lib-send-${inst.instance_name}`}>
+                                        <Send size={13} />
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => deleteInstance(inst.instance_name)}
+                                            className="text-red-600 hover:bg-red-50" title="Elimina"
+                                            data-testid={`wa-lib-del-${inst.instance_name}`}>
+                                        <Trash2 size={13} />
+                                    </Button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Istanza default */}
+                    {instances.length > 1 && (
+                        <div className="mt-3">
+                            <Label>Istanza default per avvisi automatici</Label>
+                            <select
+                                value={f.whatsapp_default_instance || ""}
+                                onChange={(e) => set("whatsapp_default_instance", e.target.value || null)}
+                                className="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm bg-white mt-1"
+                                data-testid="wa-default-instance"
+                            >
+                                <option value="">— Auto (prima istanza connessa) —</option>
+                                {instances.map((i) => (
+                                    <option key={i.instance_name} value={i.instance_name}>
+                                        {i.agenzia_nome} · {i.state_live || i.state}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                     )}
                 </div>
@@ -1986,9 +2103,91 @@ function WhatsAppSection({ f, set }) {
                     data-testid="wa-firma"
                 />
             </div>
+
+            {qrDialog && (
+                <WhatsAppQrDialog data={qrDialog} onClose={() => { setQrDialog(null); load(); }} onDone={load} />
+            )}
         </section>
     );
 }
+
+
+function WhatsAppQrDialog({ data, onClose, onDone }) {
+    const [state, setState] = useState(null);
+    const [qr, setQr] = useState(data);
+
+    useEffect(() => {
+        let stopped = false;
+        const pollState = async () => {
+            try {
+                const r = await api.get(`/whatsapp-evo/instances/${data.instance_name}/status`);
+                if (!stopped) setState(r.data.state);
+                if (r.data.state === "open") {
+                    toast.success("WhatsApp collegato con successo! 🎉");
+                    onDone();
+                    setTimeout(() => onClose(), 1500);
+                }
+            } catch { /* ignore */ }
+        };
+        const refreshQr = async () => {
+            try {
+                const r = await api.get(`/whatsapp-evo/instances/${data.instance_name}/qr`);
+                if (!stopped && (r.data.base64 || r.data.code)) {
+                    setQr({ instance_name: data.instance_name, ...r.data });
+                }
+            } catch { /* ignore */ }
+        };
+        pollState();
+        const stateInt = setInterval(pollState, 3000);
+        const qrInt = setInterval(refreshQr, 25000);
+        return () => { stopped = true; clearInterval(stateInt); clearInterval(qrInt); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data.instance_name]);
+
+    const imgSrc = qr.base64
+        ? (qr.base64.startsWith("data:") ? qr.base64 : `data:image/png;base64,${qr.base64}`)
+        : null;
+
+    return (
+        <Dialog open onOpenChange={onClose}>
+            <DialogContent className="max-w-md" data-testid="wa-lib-qr-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <QrCode size={18} /> Collega WhatsApp — {qr.instance_name}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 text-sky-900 mb-3">
+                    Sul telefono: <strong>WhatsApp → Impostazioni → Dispositivi collegati → Collega un dispositivo</strong> → inquadra il QR.
+                    Il codice si rigenera ogni ~25s automaticamente.
+                </div>
+                <div className="flex flex-col items-center gap-3 py-2">
+                    {imgSrc ? (
+                        <img src={imgSrc} alt="QR" className="w-64 h-64 border border-slate-200 rounded" data-testid="wa-lib-qr-image" />
+                    ) : (
+                        <div className="w-64 h-64 flex items-center justify-center bg-slate-100 rounded text-slate-500 text-sm">
+                            Generazione QR…
+                        </div>
+                    )}
+                    {qr.pairingCode && (
+                        <div className="text-center">
+                            <div className="text-xs text-slate-500">Oppure inserisci questo codice:</div>
+                            <div className="font-mono text-lg font-bold tracking-widest">{qr.pairingCode}</div>
+                        </div>
+                    )}
+                    <div className="text-xs text-slate-600">
+                        Stato: <strong className={state === "open" ? "text-emerald-600" : "text-amber-600"}>
+                            {state || "in attesa…"}
+                        </strong>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
 
 
