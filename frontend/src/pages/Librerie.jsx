@@ -1888,6 +1888,110 @@ const IMAP_PRESETS = {
     imap: {},
 };
 
+function WhatsAppSection({ f, set }) {
+    const [instances, setInstances] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        api.get("/whatsapp-evo/instances")
+            .then((r) => setInstances(r.data || []))
+            .catch(() => setInstances([]))
+            .finally(() => setLoading(false));
+    }, []);
+    const provider = f.whatsapp_provider || "wame";
+    const configuredCount = instances.filter((i) => (i.state_live || i.state) === "open").length;
+
+    return (
+        <section data-testid="lib-com-whatsapp" className="border border-emerald-200 rounded-lg p-4 bg-emerald-50/30">
+            <div className="flex items-start gap-3 mb-3">
+                <div className="bg-emerald-100 text-emerald-700 p-2 rounded-md mt-0.5">
+                    <MessageCircle size={18} />
+                </div>
+                <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-base font-semibold text-slate-800">WhatsApp — Configurazione unica</h4>
+                        {configuredCount > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                {configuredCount} istanz{configuredCount === 1 ? "a" : "e"} connesse
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                        Provider di invio predefinito per tutti i moduli (Avvisi, Alert Studio, invii manuali, ecc.).
+                        Le istanze WhatsApp per agenzia si gestiscono in <a href="/whatsapp" className="text-emerald-700 underline">WhatsApp Agenzie</a>.
+                    </p>
+                </div>
+            </div>
+
+            {/* Scelta provider */}
+            <Label className="text-xs uppercase tracking-wide text-slate-600">Provider di default</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                {[
+                    { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp con testo precompilato — l'utente clicca 'Invia'. Gratis, universale.", icon: "🔗" },
+                    { v: "evolution", label: "Evolution API (automatico)", desc: "Invio server-to-server, senza intervento manuale. Serve almeno 1 istanza connessa.", icon: "⚡" },
+                ].map((p) => (
+                    <button
+                        key={p.v}
+                        type="button"
+                        onClick={() => set("whatsapp_provider", p.v)}
+                        className={`px-3 py-2 text-sm border rounded transition-colors text-left ${provider === p.v ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-emerald-300 hover:border-emerald-500"}`}
+                        data-testid={`wa-provider-${p.v}`}
+                    >
+                        <div className="font-medium">{p.icon} {p.label}</div>
+                        <div className={`text-[10px] mt-0.5 ${provider === p.v ? "text-emerald-50" : "text-slate-500"}`}>{p.desc}</div>
+                    </button>
+                ))}
+            </div>
+
+            {/* Se Evolution → scelta istanza default */}
+            {provider === "evolution" && (
+                <div className="mt-3 pt-3 border-t border-emerald-200">
+                    <Label>Istanza WhatsApp di default</Label>
+                    <div className="text-[11px] text-slate-500 mb-1.5">
+                        Usata quando la regola/avviso non specifica un'istanza (es. avvisi condivisi). Se vuota, sceglie automaticamente la prima connessa.
+                    </div>
+                    <select
+                        value={f.whatsapp_default_instance || ""}
+                        onChange={(e) => set("whatsapp_default_instance", e.target.value || null)}
+                        className="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm bg-white"
+                        data-testid="wa-default-instance"
+                    >
+                        <option value="">— Auto (prima istanza connessa) —</option>
+                        {instances.map((i) => (
+                            <option key={i.instance_name} value={i.instance_name}>
+                                {i.agenzia_nome} · {i.instance_name} · {i.state_live || i.state}
+                            </option>
+                        ))}
+                    </select>
+                    {!loading && instances.length === 0 && (
+                        <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
+                            Nessuna istanza WhatsApp creata. Vai in <a href="/whatsapp" className="underline font-medium">WhatsApp Agenzie</a> per crearne una.
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Firma opzionale */}
+            <div className="mt-3 pt-3 border-t border-emerald-200">
+                <Label>Firma automatica (opzionale)</Label>
+                <div className="text-[11px] text-slate-500 mb-1.5">
+                    Aggiunta in coda a tutti i messaggi WhatsApp inviati. Vuoto = nessuna firma.
+                </div>
+                <textarea
+                    rows={2}
+                    value={f.whatsapp_firma_default || ""}
+                    onChange={(e) => set("whatsapp_firma_default", e.target.value)}
+                    placeholder="— Assicurazioni Schiantarelli · rispondi a questo numero per info"
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                    data-testid="wa-firma"
+                />
+            </div>
+        </section>
+    );
+}
+
+
+
 function ImapSection({ f, set, onSet }) {
     const [provider, setProvider] = useState(_detectEmailProvider(f.imap_host || f.smtp_host));
     const [testing, setTesting] = useState(false);
@@ -2248,17 +2352,16 @@ function ComunicazioniSezione() {
             {/* IMAP — Ricezione email + smistamento per alias */}
             <ImapSection f={f} set={set} onSet={setF} />
 
-            {/* TWILIO SMS + WHATSAPP */}
+            {/* TWILIO SMS (solo SMS — WhatsApp è gestito sotto) */}
             <section data-testid="lib-com-twilio">
                 <div className="flex items-center gap-2 mb-3">
                     <Building2 size={16} className="text-rose-600" />
-                    <h4 className="text-sm font-semibold text-slate-800">SMS &amp; WhatsApp — Twilio</h4>
+                    <h4 className="text-sm font-semibold text-slate-800">SMS — Twilio (opzionale)</h4>
                 </div>
                 <div className="text-[11px] text-slate-500 mb-3">
-                    Provider consigliato per SMS + WhatsApp Business.
+                    Solo per <strong>SMS</strong>. WhatsApp è gestito nella sezione dedicata più sotto.
                     {" "}<a href="https://console.twilio.com/" target="_blank" rel="noreferrer"
-                        className="text-sky-700 underline">Apri console Twilio</a>{" "}
-                    per ottenere SID/Token e i numeri verificati.
+                        className="text-sky-700 underline">Apri console Twilio</a>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
@@ -2276,86 +2379,18 @@ function ComunicazioniSezione() {
                             onChange={(e) => set("twilio_auth_token", e.target.value)}
                             data-testid="com-twilio-token" />
                     </div>
-                    <div>
+                    <div className="md:col-span-2">
                         <Label>Numero SMS mittente</Label>
                         <Input placeholder="+39…"
                             value={f.twilio_sms_from || ""}
                             onChange={(e) => set("twilio_sms_from", e.target.value)}
                             data-testid="com-twilio-sms" />
                     </div>
-                    <div>
-                        <Label>Numero WhatsApp Business</Label>
-                        <Input placeholder="whatsapp:+14155238886"
-                            value={f.twilio_whatsapp_from || ""}
-                            onChange={(e) => set("twilio_whatsapp_from", e.target.value)}
-                            data-testid="com-twilio-wa" />
-                    </div>
                 </div>
             </section>
 
-            {/* SPOKI — WhatsApp BSP italiano */}
-            <section data-testid="lib-com-spoki" className="border border-emerald-200 rounded-lg p-4 bg-emerald-50/30">
-                <div className="flex items-start gap-3 mb-3">
-                    <div className="bg-emerald-100 text-emerald-700 p-2 rounded-md mt-0.5">
-                        <MessageCircle size={18} />
-                    </div>
-                    <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-base font-semibold text-slate-800">WhatsApp — Spoki</h4>
-                            {f.spoki_api_key_set && (
-                                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Configurato
-                                </span>
-                            )}
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-1">
-                            Provider italiano BSP certificato Meta. Più semplice di Twilio (gestiscono loro la verifica).
-                            {" "}<a href="https://spoki.com/it/prezzi" target="_blank" rel="noreferrer"
-                                className="text-emerald-700 underline">spoki.com/it/prezzi</a> per piani e API key.
-                        </p>
-                    </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                        <Label>API Key Spoki</Label>
-                        <Input type="password"
-                            placeholder={f.spoki_api_key_set ? "API key salvata (modifica per cambiare)" : "X-Spoki-Api-Key"}
-                            value={f.spoki_api_key || ""}
-                            onChange={(e) => set("spoki_api_key", e.target.value)}
-                            data-testid="com-spoki-key" />
-                    </div>
-                    <div>
-                        <Label>Nome mittente (opzionale)</Label>
-                        <Input placeholder="Assicurazioni Schiantarelli"
-                            value={f.spoki_sender_name || ""}
-                            onChange={(e) => set("spoki_sender_name", e.target.value)}
-                            data-testid="com-spoki-sender" />
-                    </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-emerald-200">
-                    <Label className="text-xs uppercase tracking-wide text-slate-600">
-                        Provider WhatsApp da usare per gli invii automatici
-                    </Label>
-                    <div className="flex gap-2 mt-2 flex-wrap">
-                        {[
-                            { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp per inviare manualmente" },
-                            { v: "twilio", label: "Twilio", desc: "Automatico (a pagamento)" },
-                            { v: "spoki", label: "Spoki", desc: "Automatico (italiano)" },
-                        ].map((p) => (
-                            <button
-                                key={p.v}
-                                type="button"
-                                onClick={() => set("whatsapp_provider", p.v)}
-                                className={`px-3 py-2 text-sm border rounded transition-colors text-left ${(f.whatsapp_provider || "wame") === p.v ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-emerald-300 hover:border-emerald-500"}`}
-                                data-testid={`wa-provider-${p.v}`}
-                            >
-                                <div className="font-medium">{p.label}</div>
-                                <div className={`text-[10px] mt-0.5 ${(f.whatsapp_provider || "wame") === p.v ? "text-emerald-50" : "text-slate-500"}`}>{p.desc}</div>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </section>
+            {/* WHATSAPP — libreria unica: wa.me + Evolution API */}
+            <WhatsAppSection f={f} set={set} />
 
             {/* SAVE + TEST */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">

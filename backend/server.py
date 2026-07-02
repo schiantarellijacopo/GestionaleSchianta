@@ -8672,14 +8672,17 @@ async def avvisi_genera_pdf(body: dict, user=Depends(current_user)):
 
 
 # ============================================================
-# WHATSAPP DISPATCH — wa.me link OR Twilio (scelta provider azienda)
+# WHATSAPP DISPATCH — wa.me (click-to-chat) OR Evolution API (server invio)
 # ============================================================
 @api.post("/comunicazioni/whatsapp/invia")
 async def whatsapp_invia(body: dict, user=Depends(current_user)):
     """Invia messaggio WhatsApp.
 
-    Body: ``{numero, messaggio, anagrafica_id?, polizza_id?, provider?}``.
-    Provider: 'wame' (default, ritorna link da aprire), 'twilio' (invio diretto).
+    Body: ``{numero, messaggio, anagrafica_id?, polizza_id?, provider?, instance_name?}``.
+
+    Provider supportati:
+    - ``wame`` (default): ritorna link ``https://wa.me/…`` da aprire nel browser
+    - ``evolution``: invio server-side tramite Evolution API (multi-agenzia)
     """
     numero = (body.get("numero") or "").strip()
     messaggio = (body.get("messaggio") or "").strip()
@@ -8692,14 +8695,12 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
     if cleaned.startswith("00"):
         cleaned = "+" + cleaned[2:]
     if not cleaned.startswith("+"):
-        # default Italia
-        cleaned = "+39" + cleaned
+        cleaned = "+39" + cleaned  # default Italia
 
     if provider == "wame":
         from urllib.parse import quote
         wa_number = cleaned.lstrip("+")
         url = f"https://wa.me/{wa_number}?text={quote(messaggio)}"
-        # Log nel diario / storico
         await db.storico_avvisi.insert_one({
             "id": _uid_local(),
             "canale": "whatsapp",
@@ -8713,60 +8714,49 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
         })
         return {"ok": True, "provider": "wame", "url": url}
 
-    if provider == "twilio":
-        if not (az.get("twilio_account_sid") and az.get("twilio_auth_token")
-                and az.get("twilio_whatsapp_from")):
-            raise HTTPException(400, "Twilio WhatsApp non configurato in Librerie")
-        try:
-            from twilio.rest import Client  # type: ignore[import-untyped]
-        except ImportError:
-            raise HTTPException(503, "Libreria Twilio non installata")
-        try:
-            tw = Client(az["twilio_account_sid"], az["twilio_auth_token"])
-            tw.messages.create(
-                body=messaggio,
-                from_=az["twilio_whatsapp_from"],
-                to=f"whatsapp:{cleaned}",
+    if provider == "evolution":
+        # Sceglie l'istanza: esplicita nel body oppure la prima "open"
+        instance_name = body.get("instance_name")
+        if instance_name:
+            inst = await db.whatsapp_instances.find_one(
+                {"instance_name": instance_name}, {"_id": 0, "token": 1},
             )
-        except Exception as e:
-            raise HTTPException(503, f"Errore Twilio: {e}")
-        await db.storico_avvisi.insert_one({
-            "id": _uid_local(),
-            "canale": "whatsapp",
-            "provider": "twilio",
-            "destinatario": cleaned,
-            "messaggio": messaggio[:2000],
-            "anagrafica_id": body.get("anagrafica_id"),
-            "polizza_id": body.get("polizza_id"),
-            "utente_id": user["id"],
-            "created_at": _now_iso(),
-        })
-        return {"ok": True, "provider": "twilio"}
+        else:
+            inst = (await db.whatsapp_instances.find_one(
+                {"state": {"$in": ["open", "connected"]}}, {"_id": 0, "instance_name": 1, "token": 1},
+            ) or await db.whatsapp_instances.find_one({}, {"_id": 0, "instance_name": 1, "token": 1}))
+            if inst:
+                instance_name = inst.get("instance_name")
+        if not inst or not instance_name:
+            raise HTTPException(400, "Nessuna istanza WhatsApp configurata (vai in WhatsApp Agenzie)")
 
-    if provider == "spoki":
-        api_key = az.get("spoki_api_key")
-        if not api_key:
-            raise HTTPException(400, "Spoki non configurato (manca API key in Librerie)")
+        url_base = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
+        api_key = inst.get("token") or os.environ.get("WHATSAPP_API_KEY") or ""
+        if not url_base or not api_key:
+            raise HTTPException(400, "Evolution API non configurata")
+
         import httpx
+        to_clean = cleaned.lstrip("+")
         try:
-            async with httpx.AsyncClient(timeout=15) as http:
+            async with httpx.AsyncClient(timeout=20) as http:
                 resp = await http.post(
-                    "https://api.spoki.com/api/1/messages/send",
-                    headers={"X-Spoki-Api-Key": api_key, "Content-Type": "application/json"},
-                    json={"to": cleaned, "body": messaggio},
+                    f"{url_base}/message/sendText/{instance_name}",
+                    headers={"apikey": api_key, "Content-Type": "application/json"},
+                    json={"number": to_clean, "text": messaggio[:2000]},
                 )
             if resp.status_code >= 400:
-                raise HTTPException(503, f"Errore Spoki ({resp.status_code}): {resp.text[:200]}")
-            spoki_id = (resp.json() or {}).get("id")
+                raise HTTPException(503, f"Errore Evolution API ({resp.status_code}): {resp.text[:300]}")
+            provider_id = ((resp.json() or {}).get("key") or {}).get("id")
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(503, f"Errore Spoki: {e}")
+            raise HTTPException(503, f"Errore Evolution API: {e}")
         await db.storico_avvisi.insert_one({
             "id": _uid_local(),
             "canale": "whatsapp",
-            "provider": "spoki",
-            "spoki_message_id": spoki_id,
+            "provider": "evolution",
+            "instance_name": instance_name,
+            "provider_id": provider_id,
             "destinatario": cleaned,
             "messaggio": messaggio[:2000],
             "anagrafica_id": body.get("anagrafica_id"),
@@ -8774,9 +8764,23 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
             "utente_id": user["id"],
             "created_at": _now_iso(),
         })
-        return {"ok": True, "provider": "spoki", "spoki_message_id": spoki_id}
+        # traccia anche in inbox
+        try:
+            await db.whatsapp_messages.insert_one({
+                "id": _uid_local(),
+                "instance_name": instance_name,
+                "direction": "out",
+                "number": to_clean,
+                "text": messaggio[:2000],
+                "created_at": _now_iso(),
+                "anagrafica_id": body.get("anagrafica_id"),
+                "polizza_id": body.get("polizza_id"),
+            })
+        except Exception:
+            pass
+        return {"ok": True, "provider": "evolution", "instance_name": instance_name, "provider_id": provider_id}
 
-    raise HTTPException(400, f"Provider non supportato: {provider}")
+    raise HTTPException(400, f"Provider non supportato: {provider} (usa 'wame' o 'evolution')")
 
 
 def _uid_local() -> str:

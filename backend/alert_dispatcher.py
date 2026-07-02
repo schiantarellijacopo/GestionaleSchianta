@@ -298,24 +298,72 @@ async def send_sms(rule: dict, dest: dict, ctx: dict) -> dict:
 
 
 async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
-    """WhatsApp via Twilio. Provider config dal DB o env."""
+    """WhatsApp via Evolution API (multi-tenant).
+
+    Sceglie l'istanza in base a:
+    - `rule.whatsapp_instance` (nome fisso), oppure
+    - istanza dell'agenzia del `collaboratore` proprietario, oppure
+    - prima istanza in stato `open` (fallback).
+    """
     to_num = dest.get("whatsapp") or dest.get("cellulare")
     if not to_num:
         return {"status": "skipped", "error": "WhatsApp destinatario assente"}
-    cfg = await _load_provider("whatsapp")
-    sid = cfg.get("twilio_sid")
-    tok = cfg.get("twilio_token")
-    from_wa = cfg.get("twilio_from")
-    if not (sid and tok and from_wa):
-        return {"status": "skipped", "error": "Provider WhatsApp non configurato — vai in /alert → tab Configurazione"}
+
+    # normalizza numero (rimuovi +, spazi, trattini)
+    to_clean = "".join(c for c in str(to_num) if c.isdigit())
+    if not to_clean:
+        return {"status": "skipped", "error": "Numero non valido"}
+
+    # sceglie l'istanza
+    instance_name = rule.get("whatsapp_instance")
+    if not instance_name:
+        # cerca la prima istanza connessa
+        inst = await db.whatsapp_instances.find_one(
+            {"state": {"$in": ["open", "connected"]}}, {"_id": 0, "instance_name": 1, "token": 1},
+        )
+        if not inst:
+            # fallback: prima istanza esistente qualunque stato
+            inst = await db.whatsapp_instances.find_one({}, {"_id": 0, "instance_name": 1, "token": 1})
+        if not inst:
+            return {"status": "skipped", "error": "Nessuna istanza WhatsApp configurata"}
+        instance_name = inst["instance_name"]
+    else:
+        inst = await db.whatsapp_instances.find_one(
+            {"instance_name": instance_name}, {"_id": 0, "token": 1},
+        )
+        if not inst:
+            return {"status": "skipped", "error": f"Istanza '{instance_name}' non trovata"}
+
+    url_base = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
+    api_key = inst.get("token") or os.environ.get("WHATSAPP_API_KEY") or ""
+    if not url_base or not api_key:
+        return {"status": "skipped", "error": "Evolution API non configurata"}
+
     try:
-        from twilio.rest import Client  # type: ignore
-        client = Client(sid, tok)
-        normalized = to_num if to_num.startswith("whatsapp:") else f"whatsapp:{to_num}"
-        if not from_wa.startswith("whatsapp:"):
-            from_wa = f"whatsapp:{from_wa}"
-        msg = client.messages.create(from_=from_wa, to=normalized, body=(ctx.get("corpo") or "")[:1500])
-        return {"status": "ok", "provider_id": msg.sid}
+        import httpx  # type: ignore
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{url_base}/message/sendText/{instance_name}",
+                headers={"apikey": api_key, "Content-Type": "application/json"},
+                json={"number": to_clean, "text": (ctx.get("corpo") or "")[:2000]},
+            )
+        if r.status_code >= 400:
+            return {"status": "errore", "error": f"Evolution API {r.status_code}: {r.text[:200]}"}
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        # trace copia messaggio in inbox
+        try:
+            await db.whatsapp_messages.insert_one({
+                "id": str(__import__('uuid').uuid4()),
+                "instance_name": instance_name,
+                "direction": "out",
+                "number": to_clean,
+                "text": (ctx.get("corpo") or "")[:2000],
+                "created_at": _now_iso(),
+                "rule_id": rule.get("id"),
+            })
+        except Exception:
+            pass
+        return {"status": "ok", "provider_id": (data.get("key") or {}).get("id")}
     except Exception as e:
         return {"status": "errore", "error": str(e)}
 

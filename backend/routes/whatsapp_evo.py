@@ -111,12 +111,23 @@ async def create_instance(
     if await db.whatsapp_instances.find_one({"instance_name": slug}):
         raise HTTPException(409, f"Istanza '{slug}' già esistente")
 
+    # Webhook che riceverà i messaggi in arrivo per questa istanza
+    backend_base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+    webhook_url = f"{backend_base}/api/whatsapp-evo/webhook/{slug}" if backend_base else None
+
     # crea su Evolution API — usa integration Baileys (default) e richiede QR
-    payload = {
+    payload: dict = {
         "instanceName": slug,
         "qrcode": True,
         "integration": "WHATSAPP-BAILEYS",
     }
+    if webhook_url:
+        payload["webhook"] = {
+            "url": webhook_url,
+            "byEvents": False,
+            "base64": False,
+            "events": ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "MESSAGES_UPDATE"],
+        }
     resp = await _call("POST", "/instance/create", json=payload)
     inst = (resp or {}).get("instance") or {}
     qr = (resp or {}).get("qrcode") or {}
@@ -129,6 +140,7 @@ async def create_instance(
         "agenzia_nome": body.agenzia_nome,
         "token": hash_key,
         "state": inst.get("status") or "created",
+        "webhook_url": webhook_url,
         "created_at": _now_iso(),
         "created_by": user.get("id"),
     }
@@ -206,9 +218,119 @@ async def send_text(
     inst = await db.whatsapp_instances.find_one({"instance_name": name}, {"_id": 0})
     if not inst:
         raise HTTPException(404, "Istanza non trovata")
-    resp = await _call(
-        "POST", f"/message/sendText/{name}",
-        json={"number": body.number, "text": body.text},
-        instance_token=inst.get("token"),
-    )
-    return {"ok": True, "resp": resp}
+    try:
+        resp = await _call(
+            "POST", f"/message/sendText/{name}",
+            json={"number": body.number, "text": body.text},
+            instance_token=inst.get("token"),
+        )
+        return {"ok": True, "resp": resp}
+    finally:
+        # salva copia in DB come "sent" per tracking (anche se il call fallisce)
+        try:
+            await db.whatsapp_messages.insert_one({
+                "id": str(uuid.uuid4()),
+                "instance_name": name,
+                "direction": "out",
+                "number": body.number,
+                "text": body.text,
+                "created_at": _now_iso(),
+            })
+        except Exception:
+            pass
+
+
+# ---------- Webhook & Inbox messaggi ----------
+from fastapi import Request  # noqa: E402
+
+
+@router.post("/webhook/{name}")
+async def evolution_webhook(name: str, request: Request) -> dict:
+    """Webhook chiamato da Evolution API per ogni evento.
+    NON è autenticato con JWT: Evolution posta liberamente.
+    Salviamo il messaggio nella collection `whatsapp_messages` per la inbox.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": False, "reason": "invalid json"}
+
+    event = payload.get("event") or ""
+    data = payload.get("data") or payload
+
+    # MESSAGES_UPSERT: nuovo messaggio ricevuto/inviato
+    if "messages" in str(event).lower() or "messages" in payload:
+        msgs = data if isinstance(data, list) else [data]
+        for m in msgs:
+            key = m.get("key") or {}
+            msg = m.get("message") or {}
+            text = (msg.get("conversation")
+                    or (msg.get("extendedTextMessage") or {}).get("text")
+                    or (msg.get("imageMessage") or {}).get("caption")
+                    or "")
+            remote = (key.get("remoteJid") or "").split("@")[0]
+            direction = "out" if key.get("fromMe") else "in"
+            await db.whatsapp_messages.insert_one({
+                "id": str(uuid.uuid4()),
+                "instance_name": name,
+                "direction": direction,
+                "number": remote,
+                "text": text,
+                "message_type": next(iter(msg.keys())) if msg else None,
+                "wamid": key.get("id"),
+                "push_name": m.get("pushName"),
+                "created_at": _now_iso(),
+                "received_at": _now_iso() if direction == "in" else None,
+            })
+
+    # CONNECTION_UPDATE: aggiornamento stato
+    if "connection" in str(event).lower():
+        state = (data or {}).get("state") or (data or {}).get("status")
+        if state:
+            await db.whatsapp_instances.update_one(
+                {"instance_name": name},
+                {"$set": {"state": state, "updated_at": _now_iso()}},
+            )
+
+    return {"ok": True}
+
+
+@router.get("/instances/{name}/messages")
+async def list_messages(
+    name: str,
+    limit: int = 100,
+    number: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> list[dict]:
+    """Elenco messaggi (in e out) per l'istanza. Ordina per data desc."""
+    flt: dict = {"instance_name": name}
+    if number:
+        flt["number"] = number
+    return await db.whatsapp_messages.find(flt, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+
+
+@router.get("/instances/{name}/chats")
+async def list_chats(
+    name: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> list[dict]:
+    """Aggregazione: 1 riga per numero, con ultimo messaggio + count non letti."""
+    pipeline = [
+        {"$match": {"instance_name": name}},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$number",
+            "last_text": {"$first": "$text"},
+            "last_direction": {"$first": "$direction"},
+            "last_time": {"$first": "$created_at"},
+            "last_push_name": {"$first": "$push_name"},
+            "count_in": {"$sum": {"$cond": [{"$eq": ["$direction", "in"]}, 1, 0]}},
+            "count_out": {"$sum": {"$cond": [{"$eq": ["$direction", "out"]}, 1, 0]}},
+        }},
+        {"$sort": {"last_time": -1}},
+        {"$limit": 100},
+    ]
+    rows = await db.whatsapp_messages.aggregate(pipeline).to_list(100)
+    for r in rows:
+        r["number"] = r.pop("_id")
+    return rows

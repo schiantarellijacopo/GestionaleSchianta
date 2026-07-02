@@ -900,15 +900,10 @@ class AziendaConfig(BaseDoc):
     imap_password: Optional[str] = None
     imap_use_ssl: bool = True
     imap_folder: str = "INBOX"
-    # Twilio per SMS + WhatsApp Business (libreria comunicazioni unica)
+    # Twilio SMS: solo per SMS (WhatsApp è gestito via Evolution API o wa.me)
     twilio_account_sid: Optional[str] = None
     twilio_auth_token: Optional[str] = None
     twilio_sms_from: Optional[str] = None        # numero verificato es. +391234567890
-    twilio_whatsapp_from: Optional[str] = None   # numero WA Business es. whatsapp:+14155238886
-    # Spoki — provider WhatsApp italiano (BSP Meta certificato)
-    # https://spoki.com/it/prezzi · API base https://api.spoki.com/api/1/
-    spoki_api_key: Optional[str] = None
-    spoki_sender_name: Optional[str] = None      # nome mittente registrato
     # Notifica scadenze giornaliera (cron 08:00)
     notifica_scadenze_attiva: bool = True
     notifica_scadenze_giorni: int = 15
@@ -918,8 +913,11 @@ class AziendaConfig(BaseDoc):
     imap_poller_minutes: int = 5            # frequenza polling in minuti
     imap_poller_last_run: Optional[str] = None
     imap_poller_last_uid: Optional[int] = None  # ultimo UID processato (per fetch incrementale)
-    # WhatsApp — provider di default scelto dal cliente: "wame" (link) | "twilio"
+    # ─── WHATSAPP (unica libreria) ───
+    # provider: 'wame' (link click-to-chat) | 'evolution' (invio server via Evolution API)
     whatsapp_provider: str = "wame"
+    whatsapp_default_instance: Optional[str] = None  # slug istanza default per invii automatici
+    whatsapp_firma_default: Optional[str] = None     # firma finale automatica dei messaggi
 
 
 # =============== SCHEMA / SISTEMA PROVVIGIONALE ===============
