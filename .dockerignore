@@ -1,0 +1,17 @@
+# .dockerignore — escludi tutto ciò che non serve al backend
+frontend/
+node_modules/
+.git/
+.emergent/
+.pytest_cache/
+.ruff_cache/
+memory/
+test_reports/
+tests/
+*.md
+*.log
+.env
+.env.*
+design_guidelines.json
+yarn.lock
+package-lock.json
