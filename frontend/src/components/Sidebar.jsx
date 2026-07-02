@@ -59,6 +59,7 @@ const ALL_MENU_ITEMS = [
     { id: "setup_iniziale", path: "/setup-iniziale", icon: "Banknote", label: "Setup iniziale", section: "amministrazione", roles: ["admin"] },
     { id: "scambio_dati", path: "/scambio-dati", icon: "ArrowRightLeft", label: "Scambio dati agenzie", section: "amministrazione", roles: ["admin"] },
     { id: "librerie", path: "/librerie", icon: "Library", label: "Librerie", section: "amministrazione", roles: ["admin", "collaboratore"] },
+    { id: "whatsapp", path: "/whatsapp", icon: "MessageCircle", label: "WhatsApp Agenzie", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "importazioni", path: "/importazioni", icon: "Upload", label: "Importazioni Flussi", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "attivita", path: "/attivita", icon: "Activity", label: "Log attività", section: "amministrazione", roles: ["admin", "collaboratore"] },
 ];
