@@ -239,6 +239,104 @@ export default function Chat() {
 // =====================================================================
 // TAB WHATSAPP — Inbox multi-istanza con vista chat live
 // =====================================================================
+function MessageAttachment({ msg }) {
+    const [imgUrl, setImgUrl] = useState(null);
+    const isImage = (msg.attachment_mimetype || "").startsWith("image/");
+    const isAudio = (msg.attachment_mimetype || "").startsWith("audio/");
+    const isVideo = (msg.attachment_mimetype || "").startsWith("video/");
+    const hasAttachment = msg.has_media || msg.attachment_name;
+
+    useEffect(() => {
+        if (!hasAttachment || !isImage) return;
+        let stopped = false;
+        api.get(`/whatsapp-evo/messages/${msg.id}/media`, { responseType: "blob" })
+            .then((r) => { if (!stopped) setImgUrl(URL.createObjectURL(r.data)); })
+            .catch(() => { /* ignore */ });
+        return () => { stopped = true; if (imgUrl) URL.revokeObjectURL(imgUrl); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [msg.id, hasAttachment, isImage]);
+
+    if (!hasAttachment) return null;
+
+    const bytesLabel = msg.attachment_size
+        ? msg.attachment_size > 1024 * 1024
+            ? `${(msg.attachment_size / 1024 / 1024).toFixed(1)} MB`
+            : `${Math.round(msg.attachment_size / 1024)} KB`
+        : "";
+
+    const download = async () => {
+        try {
+            const r = await api.get(`/whatsapp-evo/messages/${msg.id}/media`, { responseType: "blob" });
+            const url = URL.createObjectURL(r.data);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = msg.attachment_name || "allegato";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            toast.error("Errore download allegato");
+        }
+    };
+
+    if (isImage) {
+        return (
+            <div className="mb-1">
+                {imgUrl ? (
+                    <img src={imgUrl} alt={msg.attachment_name || "immagine"}
+                         className="max-w-full rounded cursor-pointer max-h-72 object-contain"
+                         onClick={() => window.open(imgUrl, "_blank")}
+                         data-testid={`wa-msg-img-${msg.id}`} />
+                ) : (
+                    <div className="flex items-center gap-2 py-6 px-4 bg-slate-100 rounded text-slate-500 text-xs">
+                        <ImageIcon size={16} /> Caricamento immagine…
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    if (isVideo) {
+        return (
+            <div className="mb-1">
+                <button onClick={download}
+                        className="flex items-center gap-2 text-xs underline opacity-90"
+                        data-testid={`wa-msg-video-${msg.id}`}>
+                    <Download size={13} /> Video — {msg.attachment_name} {bytesLabel && `(${bytesLabel})`}
+                </button>
+            </div>
+        );
+    }
+
+    if (isAudio) {
+        return (
+            <div className="mb-1">
+                <button onClick={download}
+                        className="flex items-center gap-2 text-xs underline opacity-90"
+                        data-testid={`wa-msg-audio-${msg.id}`}>
+                    <Download size={13} /> 🎵 Audio {bytesLabel && `(${bytesLabel})`}
+                </button>
+            </div>
+        );
+    }
+
+    // documento / altro
+    return (
+        <button onClick={download}
+                className="flex items-center gap-2 py-1.5 px-2 bg-black/10 rounded text-xs mb-1 hover:bg-black/20"
+                data-testid={`wa-msg-doc-${msg.id}`}>
+            <FileText size={14} />
+            <div className="text-left">
+                <div className="font-medium truncate max-w-[220px]">{msg.attachment_name || "documento"}</div>
+                {bytesLabel && <div className="text-[10px] opacity-70">{bytesLabel}</div>}
+            </div>
+            <Download size={12} />
+        </button>
+    );
+}
+
+
 function WhatsAppInbox() {
     const [instances, setInstances] = useState([]);
     const [selInst, setSelInst] = useState(null);       // istanza selezionata
@@ -515,12 +613,13 @@ function WhatsAppInbox() {
                                     {msgs.map((m) => (
                                         <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
                                             <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${m.direction === "out" ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                                                {m.attachment_name && (
-                                                    <div className={`flex items-center gap-1 text-[11px] mb-1 ${m.direction === "out" ? "text-emerald-50" : "text-slate-500"}`}>
-                                                        <Paperclip size={11} /> {m.attachment_name}
-                                                    </div>
+                                                <MessageAttachment msg={m} />
+                                                {m.text && (
+                                                    <div className="whitespace-pre-wrap break-words">{m.text}</div>
                                                 )}
-                                                <div className="whitespace-pre-wrap break-words">{m.text || <em className="opacity-60">(allegato)</em>}</div>
+                                                {!m.text && !m.has_media && !m.attachment_name && (
+                                                    <em className="opacity-60">(vuoto)</em>
+                                                )}
                                                 <div className={`text-[10px] mt-1 ${m.direction === "out" ? "text-emerald-100" : "text-slate-400"}`}>
                                                     {m.created_at?.slice(11, 16)}
                                                 </div>

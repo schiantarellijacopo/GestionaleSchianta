@@ -1,0 +1,40 @@
+{
+  "summary": "Iter28 backend testing — WhatsApp media/attachment support + AI chat (OpenAI via emergentintegrations). 15/15 pytest PASS. Coverage: (1) evolution webhook estrae correttamente metadata di image/video/audio/document/sticker (attachment_name, mimetype, size, has_media, message_type); (2) GET /messages/{id}/media risponde 404 se messaggio non trovato, 400 se senza allegato, 502/50x se Evolution API non ha la sessione (con messaggio errore corretto); (3) list_messages con param `number` marca 'in' come read_at; (4) /unread-count ritorna {unread: N}; (5) POST chats/{n}/meta upsert su whatsapp_chat_meta (archived+tags); (6) list_chats filtra archived + arricchisce anagrafica_id/nome via regex tail 9 cifre; (7) save-to-diary usa collection `diario` e la voce è leggibile immediatamente da GET /api/anagrafiche/{aid}/diario; (8) POST /api/ai/chat con OpenAI gpt-5.4 ritorna response e persiste in ai_chat_messages; (9) POST /api/ai/chat/stream espone SSE con Content-Type=text/event-stream + Cache-Control=no-cache + X-Accel-Buffering=no (verificato su backend interno; Cloudflare in ingress riscrive Cache-Control e strippa X-Accel-Buffering ma il backend li setta correttamente).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/ai/chat/stream", "issue": "Cloudflare/ingress proxy riscrive Cache-Control='no-store, no-cache, must-revalidate' e strippa X-Accel-Buffering. Il backend interno (localhost:8001) risponde correttamente con 'no-cache' e 'x-accel-buffering: no'. Impatto reale sullo streaming da valutare in produzione (Cloudflare gestisce comunque buffering SSE)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter28_whatsapp_media_ai_chat.py",
+    "/app/test_reports/pytest/iter28_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "whatsapp_evo.py:329 remote = key.remoteJid.split('@')[0] — se il JID è un gruppo (@g.us) il numero include suffisso '-<epoch>'. list_chats non gestisce esplicitamente i gruppi (potrebbe generare match spurii con anagrafiche in tail regex). Considerare filtro esplicito su JID individuali o marker `is_group`.",
+    "whatsapp_evo.py:478-484 anagrafica lookup usa regex '$regex: tail + \"$\"' senza escape. Se il numero contenesse caratteri regex sarebbe un problema; oggi digits-only quindi OK ma fragile.",
+    "whatsapp_evo.py:445-446 aggregation `unread` count usa $ifNull su read_at — corretto, ma esiste già check `read_at: {$exists: false}` in update_many:375. Assicurarsi di uniformare la definizione di 'non letto' in un helper (ora è duplicata in 2 endpoint + 1 aggregation).",
+    "whatsapp_evo.py:301,306,311 attachment_name deriva dal mimetype con `.split('/')[-1]` — per audio/ogg;codecs=opus il primo elemento è già rimosso via `.split(';')[0]`, ma per image/svg+xml salverebbe 'immagine.svg+xml' (non sanificato).",
+    "ai_chat.py:47-53 la password EMERGENT_LLM_KEY e provider/model sono presi dal request body (client-side controllable). Un utente autenticato può forzare 'anthropic' o 'gemini' oppure modelli costosi. Considerare whitelist server-side o rate-limit per utente.",
+    "ai_chat.py:60-70 la conversazione precedente NON viene passata al chat.send_message() — LlmChat gestisce sessione lato provider tramite session_id ma il /chat one-shot non ricarica lo storico dal DB, quindi ogni chiamata è indipendente lato modello. Chiaro dal design ma può confondere il consumatore dell'API.",
+    "ai_chat.py:106-115 nel branch finally del generator SSE, se `event_generator` viene abortita dal client (disconnect), il finally esegue insert_one comunque — corretto. Ma se full_response è vuoto (stream fallito) si salva comunque un record 'vuoto' in ai_chat_messages.",
+    "ai_chat.py: mancano rate-limit e quota per utente. In sistemi multi-tenant con LLM key condivisa questo può esaurire il credit quickly.",
+    "whatsapp_evo.py:411-419 set_chat_meta ritorna il documento dopo l'upsert ma se `_id` fosse serializzabile (non lo è) sarebbe problematico — la proiezione {'_id': 0} è corretta."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter28_whatsapp_media_ai_chat.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Test crea 1 istanza WhatsApp 'test-iter28-<hex>' se non presente + molti whatsapp_messages con wamid prefissato 'TEST_iter28_*' + 2 anagrafiche (TEST_iter28 Enrich, TEST_iter28d Diary) create+eliminate durante il test. 1 diario entry NON viene cleanupata (lasciata come evidenza; è collegata a un'anagrafica cancellata al termine del test, quindi orfana).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Il file di test è /app/backend/tests/test_iter28_whatsapp_media_ai_chat.py — puo essere riutilizzato per regression. Il test per gli header SSE usa http://localhost:8001 direttamente per bypassare Cloudflare che riscrive Cache-Control e strippa X-Accel-Buffering. L'endpoint /api/ai/chat funziona con EMERGENT_LLM_KEY e OpenAI gpt-5.4. Il webhook Evolution è pubblico (no JWT). Tutti gli endpoint della flow allegato/media sono operativi lato server; il test 'media_download_attempt' accetta anche 400/404/500/502 perché l'Evolution API non ha una sessione WhatsApp connessa reale.",
+  "rca of the issue": "Bug utente 'allegato non visibile in chat WhatsApp' — RCA: il webhook precedente non estraeva i metadata degli allegati (mancavano attachment_name/mimetype/size/has_media/message_type). Il fix implementato in whatsapp_evo.py:291-346 ora estrae correttamente image/video/audio/document/sticker/documentWithCaption. L'endpoint GET /messages/{id}/media consente il download binario on-demand tramite Evolution API /chat/getBase64FromMediaMessage. Verificato via 5 test webhook (uno per tipo). Retesting in un ambiente con sessione WhatsApp connessa e cliente reale confermerà anche il download effettivo del binario."
+}
