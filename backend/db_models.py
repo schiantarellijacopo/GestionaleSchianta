@@ -331,6 +331,7 @@ class Polizza(BaseDoc):
     valore_veicolo: float = 0.0
     valore_residuo_veicolo: float = 0.0
     valore_accessori: float = 0.0
+    capitale_assicurato: float = 0.0  # capitale/valore assicurato aggregato (max delle garanzie rec30 col W)
     guida_esperta: bool = False
     guida_esclusiva: bool = False
     rinuncia_rivalsa: bool = False
@@ -368,6 +369,7 @@ class Titolo(BaseDoc):
     importo_lordo: float = 0.0
     importo_netto: float = 0.0
     imposte: float = 0.0
+    accessori: float = 0.0    # accessori del titolo (rec40 col AU accessori_totale)
     provvigioni: float = 0.0
     data_incasso: Optional[str] = None
     importo_pagato: Optional[float] = None       # se diverso dal lordo → sconto applicato

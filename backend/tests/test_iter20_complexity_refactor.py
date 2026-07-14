@@ -25,7 +25,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://assure-platform-3.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://whatsapp-crm-146.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@assicura.it")
 ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "Admin123!")
 

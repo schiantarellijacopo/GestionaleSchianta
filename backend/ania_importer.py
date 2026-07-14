@@ -274,6 +274,34 @@ _MAP_STATO_SINISTRO = {
     "r": "respinto", "respinto": "respinto",
 }
 
+# Mapping frazionamento_share ANIA (rec20 col AN) → valore Polizza.frazionamento
+# Codici numerici del flusso ANIA:
+#   1 = annuale, 2 = semestrale, 3 = quadrimestrale, 4 = trimestrale,
+#   12 = mensile, U/0/9 = unica (una tantum)
+_MAP_FRAZIONAMENTO_ANIA = {
+    "1": "annuale",
+    "2": "semestrale",
+    "3": "quadrimestrale",
+    "4": "trimestrale",
+    "12": "mensile",
+    "U": "unica",
+    "u": "unica",
+    "0": "unica",
+    "9": "unica",
+    "annuale": "annuale",
+    "semestrale": "semestrale",
+    "quadrimestrale": "quadrimestrale",
+    "trimestrale": "trimestrale",
+    "mensile": "mensile",
+    "unica": "unica",
+}
+
+
+def _parse_frazionamento(value: str) -> str:
+    """Converte frazionamento_share (codice ANIA o testo) in valore normalizzato."""
+    v = (value or "").strip()
+    return _MAP_FRAZIONAMENTO_ANIA.get(v, _MAP_FRAZIONAMENTO_ANIA.get(v.lower(), "annuale"))
+
 
 # ---------------------------------------------------------------------------
 # Processor: rec10 (anagrafiche)
@@ -426,6 +454,8 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "stato": stato,
         "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
         "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
+        # Frazionamento (rec20 col AN — frazionamento_share)
+        "frazionamento": _parse_frazionamento(row.get("frazionamento_share", "")),
         "premio_lordo": _parse_float(row.get("lordo_totale", "")),
         "premio_netto": _parse_float(row.get("netto_totale", "")),
         "premio_tasse": _parse_float(row.get("tasse_totale") or row.get("imposte_totali", "")),
@@ -685,6 +715,12 @@ def _risolvi_nome_garanzia(key: str, descr: str,
 
 def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[str]) -> dict:
     """Mappa una riga rec30 nel dict garanzia da salvare in polizza.garanzie[]."""
+    # Capitale assicurato: rec30 col W = valore_ass_1 (principale). Il flusso ANIA fornisce
+    # fino a 3 valori assicurati (valore_ass_1/2/3): prendiamo il max non-zero.
+    cap_1 = _parse_float(row.get("valore_ass_1", ""))
+    cap_2 = _parse_float(row.get("valore_ass_2", ""))
+    cap_3 = _parse_float(row.get("valore_ass_3", ""))
+    capitale = max(cap_1, cap_2, cap_3)
     return {
         "garanzia": nome_finale,
         "garanzia_originale": descr,
@@ -698,6 +734,7 @@ def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[st
         "provvigione": _parse_float(row.get("provvigione_garanzia")
                                     or row.get("provvigioni_totali")
                                     or row.get("provvigione", "")),
+        "capitale_assicurato": capitale,
     }
 
 
@@ -741,9 +778,14 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
         # Bulk update per polizza
         for pol_id, garanzie in gar_per_pol.items():
             diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
+            # Capitale assicurato di polizza = max dei capitali per garanzia
+            capitale_pol = max((g.get("capitale_assicurato", 0.0) for g in garanzie), default=0.0)
+            update_fields = {"garanzie": garanzie, "diritti": diritti_tot, "updated_at": _now_iso()}
+            if capitale_pol > 0:
+                update_fields["capitale_assicurato"] = capitale_pol
             await db.polizze.update_one(
                 {"id": pol_id},
-                {"$set": {"garanzie": garanzie, "diritti": diritti_tot, "updated_at": _now_iso()}},
+                {"$set": update_fields},
             )
 
 
@@ -775,6 +817,8 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             tasse = _parse_float(row.get("tasse_totale") or "")
             imposte_eff = tasse if tasse > 0 else _parse_float(row.get("imposte", ""))
             netto_calc = round(lordo - imposte_eff, 2) if lordo > 0 else 0.0
+            # Accessori titolo: rec40 col AU = accessori_totale
+            accessori_titolo = _parse_float(row.get("accessori_totale", ""))
             data = {
                 "polizza_id": pol_id,
                 "effetto": _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10],
@@ -783,6 +827,7 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,
                 "imposte": round(imposte_eff, 2),
+                "accessori": round(accessori_titolo, 2),
                 "provvigioni": _parse_float(row.get("provvigioni_totale", "")),
                 "data_incasso": _parse_date(row.get("dt_pag_cliente", "")),
                 "mezzo_pagamento": row.get("mezzo_pag_share") or None,

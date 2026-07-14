@@ -18,7 +18,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://assure-platform-3.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://whatsapp-crm-146.preview.emergentagent.com").rstrip("/")
 ADMIN_EMAIL = "admin@assicura.it"
 ADMIN_PASSWORD = "Admin123!"
 

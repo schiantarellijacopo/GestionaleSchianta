@@ -39,6 +39,9 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 
 ## Backlog priorità
 
+### Sessione 04/02/2026 (iter29)
+- ✅ **ANIA Importer · Colonne mancanti (P0)**: aggiunto mapping colonne `frazionamento_share` (rec20 col AN → codici 1=annuale, 2=semestrale, 3=quadrimestrale, 4=trimestrale, 12=mensile, U/0/9=unica), `valore_ass_1/2/3` (rec30 col W → nuovo campo `capitale_assicurato` su Polizza + per-garanzia), `accessori_totale` (rec40 col AU → nuovo campo `accessori` su Titolo). Test unitario `test_ania_import.py` esteso con assert su tutti i nuovi campi. Modelli Pydantic aggiornati: `Polizza.capitale_assicurato`, `Titolo.accessori`.
+
 ### Sessione 01/07 (iter28)
 - ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.
 - ✅ **Libro Matricola · Documenti per singolo veicolo**: dialog "Documenti veicolo" per applicazione con categorie predefinite (Libretto, Certificato assicurativo, Quietanza, Foto, Atto vendita, Altro). Filtro `applicazione_matricola_id` aggiunto a `GET /allegati`. Documenti restano collegati alla polizza ma filtrabili per veicolo/targa.

@@ -617,6 +617,7 @@ async def save_conversation_to_diary(
 
 # ---------- Download media on-demand ----------
 from fastapi.responses import Response  # noqa: E402
+import storage as obj_storage  # noqa: E402
 
 
 @router.get("/messages/{message_id}/media")
@@ -666,3 +667,93 @@ async def download_message_media(
         media_type=mimetype,
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
+
+
+# ---------- Archivia allegato WhatsApp nello storage e come Allegato ----------
+class ArchiveMediaBody(BaseModel):
+    entita_tipo: str  # "anagrafica" | "polizza" | "sinistro"
+    entita_id: str
+    categoria: Optional[str] = None
+    visibile_cliente: bool = False
+
+
+@router.post("/messages/{message_id}/archive")
+async def archive_message_media(
+    message_id: str, body: ArchiveMediaBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Salva l'allegato di un messaggio WhatsApp nello Object Storage e crea
+    un record Allegato collegato all'entità (cliente / polizza / sinistro).
+
+    Utile per: cliente manda foto sinistro via WhatsApp → l'operatore la
+    archivia con 1 click nella pratica sinistro.
+    """
+    msg = await db.whatsapp_messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Messaggio non trovato")
+    if not msg.get("has_media"):
+        raise HTTPException(400, "Il messaggio non ha allegati")
+
+    inst_name = msg["instance_name"]
+    inst = await db.whatsapp_instances.find_one({"instance_name": inst_name}, {"_id": 0, "token": 1})
+    if not inst:
+        raise HTTPException(404, "Istanza non trovata")
+
+    # 1) Download da Evolution
+    try:
+        resp = await _call(
+            "POST", f"/chat/getBase64FromMediaMessage/{inst_name}",
+            json={"message": {"key": {"id": msg.get("wamid")}}, "convertToMp4": False},
+            instance_token=inst.get("token"), timeout=25.0,
+        )
+    except HTTPException as e:
+        raise HTTPException(502, f"Download da Evolution fallito: {e.detail}") from e
+
+    import base64 as _b64
+    b64 = resp.get("base64") or ""
+    if not b64:
+        raise HTTPException(404, "Allegato non più disponibile")
+    try:
+        raw = _b64.b64decode(b64)
+    except Exception:
+        raise HTTPException(500, "Impossibile decodificare l'allegato")
+
+    filename = msg.get("attachment_name") or f"whatsapp-{message_id}.bin"
+    mimetype = msg.get("attachment_mimetype") or "application/octet-stream"
+    ext = (filename.rsplit(".", 1)[-1] if "." in filename else "bin").lower().strip("+")
+
+    # 2) Upload su Object Storage
+    app_name = os.environ.get("APP_NAME", "assicura")
+    storage_path = f"{app_name}/whatsapp/{msg['number']}/{uuid.uuid4()}.{ext}"
+    try:
+        result = obj_storage.put_object(storage_path, raw, mimetype)
+    except Exception as e:
+        raise HTTPException(503, f"Object storage non disponibile: {e}") from e
+
+    # 3) Crea record Allegato
+    allegato = {
+        "id": str(uuid.uuid4()),
+        "entita_tipo": body.entita_tipo,
+        "entita_id": body.entita_id,
+        "nome_file": filename,
+        "storage_path": result.get("path", storage_path),
+        "content_type": mimetype,
+        "size": result.get("size", len(raw)),
+        "descrizione": f"Da WhatsApp {msg.get('number')} — {msg.get('created_at', '')[:16]}",
+        "autore_id": user.get("id"),
+        "is_deleted": False,
+        "visibile_cliente": body.visibile_cliente,
+        "categoria": body.categoria,
+        "created_at": _now_iso(),
+    }
+    await db.allegati.insert_one(allegato.copy())
+    allegato.pop("_id", None)
+
+    # 4) Aggiorna il messaggio con il riferimento all'allegato
+    await db.whatsapp_messages.update_one(
+        {"id": message_id},
+        {"$set": {"archived_allegato_id": allegato["id"], "archived_at": _now_iso()}},
+    )
+
+    return {"ok": True, "allegato": allegato}
+

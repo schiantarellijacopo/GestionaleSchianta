@@ -1,0 +1,161 @@
+<analysis>**original_problem_statement**: Full-stack CRM tailored for Italian insurance agencies (Programma Assicurativo). Core features include Kpi, Dashboards, Marketing tools, AI insights, strict role/collaborator data boundaries, extensive document handling, P&L tracking, and workflow automation.
+
+**User's preferred language**: **Italian** (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the **Italian** language only).
+
+**what currently exists?** 
+A highly complex, feature-rich React + FastAPI + MongoDB CRM.
+Recently implemented features:
+- Libro Matricola complete actions (Annulla, Sostituisci, Document attachments per application).
+- Sospesi Anticipi multi-select and bulk incasso feature.
+- Auto-status resolution for Sinistri upon setting data_liquidazione.
+- WhatsApp Evolution API integration (Fully working in production) handling multi-tenant instances, Live Chat inbox, QR pairing, webhook parsing, TopBar notification bell, archive/tags, and Save to Diario.
+- Object Storage fully integrated for saving WhatsApp attachments as CRM .
+- OpenAI Chat Models integration via .
+- Deployment configurations optimized for Railway (Backend) and Vercel (Frontend).
+
+**Last working item**:
+    - **Last item agent was working**: Adding File & media storage integration. The agent enabled the internal Emergent Object Storage, created endpoints to download WhatsApp media from the Evolution API webhook, and added a 1-click option to save them as  associated with the specific Anagrafica in the CRM.
+    - **Status**: COMPLETED
+    - **Agent Testing Done**: Y
+    - **Which testing method agent to use?**: testing_agent_v3_fork + manual bash curl (End-to-end file upload/download tested and verified).
+    - **User Testing Done**: N
+
+**All Pending/In progress Issue list**:  
+  - **Issue 1**: ANIA Importer missing specific columns mapping (P0)
+     - **Attempted fixes**: The agent located  and identified the column mappings (rec20 col AN, rec30 col W, rec40 col AU). However, the task was interrupted by the urgent WhatsApp deployment request.
+     - **Next debug checklist**: Modify . Add  (rec20 col AN: 1=annuale, 2=semestrale, 12=mensile),  (rec30 col W), and  (rec40 col AU). Ensure these flow correctly into  and  objects.
+     - **Why fix this issue and what will be achieved with the fix?**: User explicitly requested this in Message 395 to accurately reflect policy payment frequencies and values from the ANIA flows.
+     - **Status**: NOT STARTED
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: backend
+
+**In progress Task List**: 
+  - **Task 1**: Variazioni Gestionale PDF (Remaining minor fixes) (P1)
+     - **Where to resume**: Check . 
+     - **What will be achieved with this?**: Fulfills the remaining layout and logic adjustments requested by the user previously (e.g., Mappa Anagrafica, CRUD Raccolta Dati).
+     - **Status**: IN PROGRESS
+     - **Should Test frontend/backend/both after fix?**: both
+     - **Blocked on something**: No.
+
+**Upcoming and Future Tasks**
+  - **Task 1 (P1)**: Automazioni Avvisi su WhatsApp. Now that Evolution API is live and instances are created, route the existing Alert Dispatcher to send scheduled messages via the correct WhatsApp instance associated with the agency.
+  - **Task 2 (P1)**: Google Drive Integration. Connect Google Drive API to automatically sync and archive generated PDFs (polizze, titoli, ricevute) to a dedicated Drive folder.
+  - **Task 3 (P1)**: Ambiente di Test Multi-Agenzia & Scambio Dati. Seed the DB with Agenzia Milano and Agenzia Roma to test strict isolation. Enhance the Scambio Dati view to allow Super Admin to transfer/copy client packages between agencies.
+  - **Task 4 (P3)**: Refactor  (>10,600 lines) into modular routers.
+
+**Completed work in this session**
+- Libro Matricola Annulla logic & specific document attachment UI (DONE)
+- Added atto di vendita & mandato sdd to client-visible docs (DONE)
+- Tipo pagamento labels renamed globally across tables and dialogs (DONE)
+- TitoliSospesi bulk multi-select incasso (DONE)
+- Sinistro auto-status change to Liquidato/Chiuso (DONE)
+- UUID to Product Name UI and mass DB migration (DONE)
+- ANIA importer Importo Netto math fix (lordo - imposte) & mass migration (DONE)
+- Railway Dockerfile & vercel.json configurations (DONE)
+- WhatsApp Evolution API configuration, UI instances creation & Live QR code (DONE)
+- WhatsApp Live Chat tab with auto-Anagrafica matching, Topbar Bell, Tags, Archive, and Save to Diario (DONE)
+- OpenAI GPT-5.4 Chat Models integration (DONE)
+- Object Storage activation & WhatsApp attachment handling (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+   - None
+
+**Known issue recurrence from previous fork**
+  - Recurrence count: 0
+  - Status: RESOLVED
+
+**Code Architecture**
+/app/
+├── backend/
+│   ├── server.py              # Main API (>10,600 lines, NEEDS REFACTOR)
+│   ├── db_models.py           # Pydantic schemas 
+│   ├── storage.py             # Emergent Object Storage integration
+│   ├── routes/
+│   │   ├── whatsapp_evo.py    # Evolution API instances, messages, webhooks
+│   │   ├── ai_chat.py         # OpenAI chat endpoints
+│   ├── ania_importer.py       # Import logic for ANIA files
+├── frontend/
+│   ├── src/pages/
+│   │   ├── Chat.jsx           # Internal Chat + WhatsApp Inbox UI
+│   │   ├── Librerie.jsx       # WhatsApp settings
+│   │   ├── Importazione.jsx   # Import wizard
+│   ├── src/components/
+│   │   ├── TopBar.jsx         # Notification bell added here
+
+**Key Technical Concepts**
+React (Shadcn UI), FastAPI, MongoDB, Emergent Object Storage, WhatsApp Evolution API (Polling & Webhooks),  (OpenAI GPT-5.4).
+
+**key DB schema**
+  - , : New schemas for Evolution API.
+  - : Stores chronological events for a client (including saved WhatsApp chats).
+  - : Stores file metadata and  for internal object storage.
+
+**changes in tech stack**
+  - Removed Twilio WhatsApp & Spoki logic.
+  - Added Evolution API integration.
+  - Integrated OpenAI Chat Models via .
+  - Enabled Emergent Object Storage.
+
+**All files of reference** 
+  -  (Contains webhook and chat logic)
+  -  (Contains the Live Chat UI)
+  -  (Needs updating for the missing columns)
+  - 
+  - 
+
+**Areas that need refactoring**: 
+  -  is critically bloated.
+
+**key api endpoints**
+  - 
+  - 
+  - 
+  - 
+
+**Critical Info for New Agent** 
+- **LANGUAGE REQUIREMENT**: Respond ONLY in **Italian**.
+- **DEPLOYMENT STATE**: The user has successfully deployed the backend to Railway () and the frontend to Vercel. Be extremely careful when managing environment variables and modifying configuration files so as not to break production builds.
+- **ANIA IMPORTER**: The user's request regarding  columns (, , ) was left hanging because of the pivot to WhatsApp. Address this as priority P0.
+
+**documents and test reports created in this job** 
+  - /app/memory/PRD.md
+  - /app/test_reports/iteration_28.json (15/15 PASS for WhatsApp attachments & OpenAI)
+  - /app/Dockerfile, /app/railway.json, /app/frontend/vercel.json (Deployment configs)
+
+**Last 10 User Messages and any pending HUMAN messages** 
+1. User: Add the File & media storage integration to my app. (Agent implemented Object storage for WhatsApp attachments).
+2. User: Add the OpenAI Chat Models integration to my app. (Agent integrated via emergentintegrations).
+3. User: Add the Gemini Chat Models integration to my app. (Handled alongside OpenAI logic).
+4. User: Attachments sent from phone must be visible on the CRM WhatsApp. (Agent updated Evolution webhook to extract media and allow downloading).
+5. User: Fix Salva nel diario bug (was saving to wrong collection), move WhatsApp bell to TopBar with unread counter, add Archive/Tags for conversations. (Agent implemented).
+6. User: Requested 3 features for Chat UI: associate number with Anagrafica Name, Attachment paperclip, and Save to diary button. Handle 500 error on timeouts. (Agent implemented).
+7. User: The red error WhatsApp not configured is showing on Preview. (Agent synced Railway env vars to the preview environment).
+8. User: Add WhatsApp tab to the internal Chat section. Make the QR code generation available directly inside Librerie per agency. (Agent implemented).
+9. User: Asked to remove Spoki and Twilio WhatsApp completely in favor of Evolution API. (Agent removed legacy integrations).
+10. User: Setup multi-tenant logic (test/staging), Google Drive integration, dummy agencies, and scambio dati. (Agent deferred this to focus on WhatsApp testing).
+
+**Project Health Check:**
+- Backend running smoothly.  passed previously for WhatsApp attachments and OpenAI. Object Storage initialized.
+
+**3rd Party Integrations** 
+- OpenAI GPT-5.4 — uses Emergent LLM Key
+- Claude 4.5 Sonnet — uses Emergent LLM Key
+- Gemini 3 Flash (for OCR) — uses Emergent LLM Key
+- WhatsApp Evolution API — requires User API Key (Configured in Prod)
+- Google Drive API — requires User OAuth Keys (Pending integration)
+
+**Testing status**
+  - Testing agent used after significant changes: YES ( for WhatsApp attachments).
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: None
+  - Known regressions: None
+
+**Credentials to test flow:**
+Admin:  / 
+
+**What agent forgot to execute**
+The agent completely mapped out the ANIA importer columns (, , ) in  as requested in Message 395, but got interrupted by the user's immediate request to focus on WhatsApp deployment. These columns still need to be integrated into the import parser.
+
+<TESTING METHOD>
+Backend Python -c or curl tests for the ANIA importer fix. If large changes occur, use .
+</TESTING METHOD></analysis>
