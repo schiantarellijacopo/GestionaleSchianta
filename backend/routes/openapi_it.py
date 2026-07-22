@@ -235,7 +235,12 @@ async def fetch_risk_for_anagrafica(aid: str, user=Depends(current_user)) -> dic
     key = ana.get("codice_fiscale") or ana.get("partita_iva")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
-    data = await svc.fetch_risk(key)
+    data = await svc.fetch_risk(
+        key,
+        name=ana.get("nome") or "",
+        surname=ana.get("cognome") or "",
+        company_name=ana.get("ragione_sociale") or "",
+    )
     await _update_openapi_field(aid, "risk", data)
     return data
 

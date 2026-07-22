@@ -1,23 +1,22 @@
-"""OpenAPI.it integration service — LIVE (OAuth2 client_credentials) con fallback MOCK.
+"""OpenAPI.it integration — LIVE PROD (OAuth2 client_credentials) con fallback MOCK.
 
-Flusso OAuth2 v2 (documentazione: https://console.openapi.com/it/apis/oauth/documentation):
-  1. Basic Auth con email + APIkey a POST https://oauth.openapi.it/token
-     con body {"scopes": [...], "ttl": seconds}  → riceve access token
-  2. Bearer token per chiamate alle API di dominio (imprese.openapi.it, visengine2, ecc.)
+Scopes verificati sull'account (2026-02):
+  ✅ Visengine     — `GET:visengine2.altravia.com/fornitori` (+ POST /richiesta, GET /documento)
+  ✅ Risk          — `POST:risk.openapi.com/IT-report-persona`, `GET:.../IT-report-azienda`
+  ✅ Catasto       — `GET:catasto.openapi.it/territorio`, `POST:.../richiesta`
+  🟡 Automotive    — token OK ma serve "Codice Cliente" configurato sull'account
+                     (dominio `automotive.openapi.com/IT-car/{targa}` e `/IT-bike/{targa}`)
+  ❌ Imprese       — 406 "API not enabled" — richiede attivazione sulla console
+                     https://console.openapi.com/it/apis/company
 
-Variabili d'ambiente lette:
-  OPENAPI_IT_CLIENT_ID     → email account OpenAPI.it (es "user@example.com")
-  OPENAPI_IT_CLIENT_SECRET → APIkey personale (da console.openapi.com/it/oauth)
+L'utente può in qualunque momento attivare/abilitare prodotti mancanti nella console.
+Se manca lo scope o il token OAuth va in errore → fallback MOCK trasparente.
+
+ENV richieste:
+  OPENAPI_IT_CLIENT_ID     → email account OpenAPI.it
+  OPENAPI_IT_CLIENT_SECRET → APIkey personale (console.openapi.com/it/oauth)
   OPENAPI_IT_ENV           → "prod" (default) | "sandbox"
-
-**In sandbox** i domini API hanno prefisso `test.` sia negli scope che nelle URL
-(es. `test.imprese.openapi.it` invece di `imprese.openapi.it`).
-
-Se le credenziali mancano OPPURE una chiamata live fallisce (402 saldo zero,
-401 non autorizzato, 406 scope non abilitato, connection error, ecc.) →
-**automatic fallback** su dati MOCK con seed deterministico per non spezzare l'UI.
-
-Ogni token è cache-ato in memoria fino a scadenza-60s per limitare le richieste.
+  OPENAPI_IT_BEARER_TOKEN  → (opzionale) token statico che bypassa OAuth exchange
 """
 from __future__ import annotations
 import base64
@@ -36,12 +35,15 @@ def _is_sandbox() -> bool:
     return (os.environ.get("OPENAPI_IT_ENV") or "prod").strip().lower() == "sandbox"
 
 
-def _host(name: str) -> str:
-    """Ritorna il dominio API con prefisso `test.` se siamo in sandbox.
+def _host(name: str, *, sandbox_prefix: bool = True) -> str:
+    """Ritorna il dominio API con prefisso `test.` in sandbox (dove supportato).
 
-    name esempio: "imprese.openapi.it" → sandbox: "test.imprese.openapi.it"
+    Alcune API non supportano il prefisso `test.` (automotive.openapi.com,
+    risk.openapi.com). In quel caso passa sandbox_prefix=False.
     """
-    return f"test.{name}" if _is_sandbox() else name
+    if _is_sandbox() and sandbox_prefix:
+        return f"test.{name}"
+    return name
 
 
 # ---------- Config ----------
@@ -56,20 +58,18 @@ def _cfg() -> dict:
 
 
 def has_credentials() -> bool:
-    """DEPRECATED - vedi la nuova has_credentials() più sotto (con bearer support)."""
+    static_bearer = (os.environ.get("OPENAPI_IT_BEARER_TOKEN") or "").strip()
+    if static_bearer:
+        return True
     c = _cfg()
     return bool(c["client_id"] and c["client_secret"])
-
-
-def _has_creds_legacy_placeholder() -> bool:
-    return False
 
 
 def is_mock_mode() -> bool:
     return not has_credentials()
 
 
-# ---------- Token cache (in-memory) ----------
+# ---------- Token cache ----------
 _token_cache: dict = {}
 
 
@@ -79,21 +79,9 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 
 
 async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
-    """Ottiene un access_token dagli scopes richiesti. Usa cache in memoria.
-
-    PRIORITÀ:
-      1. Se `OPENAPI_IT_BEARER_TOKEN` è settato → usa direttamente quello (production
-         token pre-generato dalla console OpenAPI.it — bypassa OAuth2 exchange).
-      2. Altrimenti, se ci sono client_id + client_secret → esegue OAuth2
-         client_credentials su /token.
-      3. Se nessuna credenziale → None (fallback su MOCK).
-    """
-    # 1. Production Bearer Token diretto
     static_bearer = (os.environ.get("OPENAPI_IT_BEARER_TOKEN") or "").strip()
     if static_bearer:
         return static_bearer
-
-    # 2. OAuth2 client_credentials
     if not has_credentials():
         return None
     c = _cfg()
@@ -102,7 +90,6 @@ async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
     cached = _token_cache.get(cache_key)
     if cached and cached.get("expire", 0) - 60 > now:
         return cached["token"]
-
     url = f"{c['oauth_base']}/token"
     headers = {
         "Authorization": _basic_auth_header(c["client_id"], c["client_secret"]),
@@ -113,33 +100,17 @@ async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.post(url, json=payload, headers=headers)
         if r.status_code != 200:
-            logger.warning(
-                "OpenAPI.it token endpoint HTTP %s (scopes=%s): %s",
-                r.status_code, scopes, r.text[:300],
-            )
+            logger.warning("OpenAPI.it token %s HTTP %s: %s", scopes, r.status_code, r.text[:300])
             return None
         data = r.json()
         token = data.get("token")
         expire = int(data.get("expire") or (now + ttl_sec))
         if token:
             _token_cache[cache_key] = {"token": token, "expire": expire}
-            logger.info(
-                "OpenAPI.it token acquisito (env=%s, scopes=%d, exp=%s)",
-                c["env"], len(scopes), expire,
-            )
         return token
     except Exception as e:
         logger.warning("OpenAPI.it token error: %s", e)
         return None
-
-
-def has_credentials() -> bool:
-    """True se abbiamo qualunque forma di credenziale (bearer diretto O client_id/secret)."""
-    static_bearer = (os.environ.get("OPENAPI_IT_BEARER_TOKEN") or "").strip()
-    if static_bearer:
-        return True
-    c = _cfg()
-    return bool(c["client_id"] and c["client_secret"])
 
 
 async def get_credit() -> Optional[float]:
@@ -160,7 +131,6 @@ async def get_credit() -> Optional[float]:
 
 
 async def get_available_scopes() -> list[str]:
-    """Ritorna la lista completa degli scope disponibili sull'account."""
     if not has_credentials():
         return []
     c = _cfg()
@@ -177,7 +147,6 @@ async def get_available_scopes() -> list[str]:
     return []
 
 
-# ---------- API call helper ----------
 async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optional[dict]:
     token = await _get_token(scopes)
     if not token:
@@ -188,12 +157,10 @@ async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optio
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.request(method, url, headers=headers, **kwargs)
         if r.status_code == 402:
-            logger.warning("OpenAPI.it %s %s → 402 credito insufficiente", method, url)
+            logger.warning("OpenAPI.it %s %s → 402 credito/billing", method, url)
             return None
         if r.status_code >= 400:
-            logger.warning(
-                "OpenAPI.it %s %s → HTTP %s: %s", method, url, r.status_code, r.text[:300]
-            )
+            logger.warning("OpenAPI.it %s %s → HTTP %s: %s", method, url, r.status_code, r.text[:300])
             return None
         return r.json() if r.headers.get("content-type", "").startswith("application/json") else {"raw": r.text}
     except Exception as e:
@@ -202,25 +169,20 @@ async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optio
 
 
 # ===================================================================
-# SERVIZIO 1 · COMPANY (dati camerali imprese)
-# Prod scope:     GET:imprese.openapi.it/advance   |   /base
-# Sandbox scope:  GET:test.imprese.openapi.it/advance   |   /base
+# SERVIZIO 1 · COMPANY (Imprese)
 # ===================================================================
 async def fetch_company(piva_or_cf: str) -> dict:
     key = (piva_or_cf or "").strip()
     if has_credentials():
         host = _host("imprese.openapi.it")
-        # advance (dati completi con LR, ATECO, PEC, ecc.)
-        scope_adv = [f"GET:{host}/advance"]
-        res = await _call_api(scope_adv, "GET", f"https://{host}/advance/{key}")
-        if res and res.get("success") and res.get("data"):
-            return _normalize_company(res["data"], key)
-        # fallback su /base
-        scope_base = [f"GET:{host}/base"]
-        res_b = await _call_api(scope_base, "GET", f"https://{host}/base/{key}")
-        if res_b and res_b.get("success") and res_b.get("data"):
-            return _normalize_company(res_b["data"], key)
-        logger.info("OpenAPI.it live fetch_company fallito, fallback a MOCK per '%s'", key)
+        for endpoint in ("advance", "base"):
+            res = await _call_api(
+                [f"GET:{host}/{endpoint}"], "GET",
+                f"https://{host}/{endpoint}/{key}",
+            )
+            if res and res.get("success") and res.get("data"):
+                return _normalize_company(res["data"], key)
+        logger.info("OpenAPI.it Company fallback MOCK per '%s'", key)
     return _mock_company(key)
 
 
@@ -229,15 +191,12 @@ def _normalize_company(data, key: str) -> dict:
         data = data[0] if data else {}
     if not isinstance(data, dict):
         return _mock_company(key)
-    # Sandbox/Prod usa schema italiano con `dettaglio` nested per campi camerali
     dett = data.get("dettaglio") or {}
-    # Indirizzo può essere già una stringa ("VIALE MARINETTI 221") o dict con via/civico
     indirizzo_str = data.get("indirizzo") or ""
     if not indirizzo_str and (data.get("via") or data.get("toponimo")):
         indirizzo_str = " ".join(x for x in [
             data.get("toponimo"), data.get("via"), str(data.get("civico") or "")
         ] if x).strip()
-    # Legale rappresentante può essere nested in `soci` o `amministratori`
     lr = None
     for coll in ("amministratori", "soci", "cariche"):
         v = dett.get(coll) or data.get(coll)
@@ -270,12 +229,12 @@ def _normalize_company(data, key: str) -> dict:
     }
 
 
-def _mock_company(piva_or_cf: str) -> dict:
-    random.seed(hash(piva_or_cf) % (2**31))
+def _mock_company(key: str) -> dict:
+    random.seed(hash(key) % (2**31))
     return {
         "provider": "openapi.it (MOCK)",
-        "piva": piva_or_cf if len(piva_or_cf) == 11 else "".join(random.choices("0123456789", k=11)),
-        "cf": piva_or_cf,
+        "piva": key if len(key) == 11 else "".join(random.choices("0123456789", k=11)),
+        "cf": key,
         "ragione_sociale": random.choice([
             "Tecnologie Innovative SRL", "Verdi & Bianchi SPA",
             "Milano Servizi SRL", "Alpha Consulting SNC",
@@ -284,69 +243,111 @@ def _mock_company(piva_or_cf: str) -> dict:
         "cap": f"{random.randint(20000, 39999)}",
         "comune": random.choice(["MILANO", "TORINO", "BOLOGNA", "ROMA"]),
         "provincia": random.choice(["MI", "TO", "BO", "RM"]),
-        "ateco": f"{random.randint(10, 82)}.{random.randint(10, 99)}.{random.randint(1, 9)}",
+        "ateco": f"{random.randint(10, 82)}.{random.randint(10, 99)}",
         "ateco_descrizione": random.choice([
             "Attività dei servizi di ristorazione",
             "Consulenza gestionale e amministrativa",
             "Sviluppo software e consulenza informatica",
-            "Commercio all'ingrosso di prodotti alimentari",
         ]),
         "pec": f"pec{random.randint(100,999)}@legalmail.it",
-        "capitale_sociale_versato": random.choice([10000, 50000, 100000, 500000]),
-        "legale_rappresentante": random.choice(["Mario Rossi", "Giulia Bianchi", "Luca Ferrari"]),
-        "forma_giuridica": random.choice(["SRL", "SPA", "SNC", "SAS"]),
-        "data_costituzione": f"{random.randint(1970, 2020)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
+        "capitale_sociale_versato": random.choice([10000, 50000, 100000]),
+        "legale_rappresentante": random.choice(["Mario Rossi", "Giulia Bianchi"]),
+        "forma_giuridica": random.choice(["SRL", "SPA"]),
+        "data_costituzione": "2010-05-14",
         "attiva": True,
-        "cciaa": random.choice(["MI", "TO", "BO"]),
+        "cciaa": "MI",
         "rea": f"MI-{random.randint(1000000, 9999999)}",
     }
 
 
 # ===================================================================
-# SERVIZIO 2 · CATASTO
-# Note: gli scope disponibili sono catasto.openapi.it/territorio (query per
-# foglio/particella) e /indirizzo (reverse). NON esiste lookup catasto per CF
-# nel piano attuale. → sempre MOCK finché non attivi il piano dedicato.
+# SERVIZIO 2 · CATASTO (per persona/azienda)
 # ===================================================================
 async def fetch_cadastre(cf_or_piva: str) -> list[dict]:
+    """Catasto — endpoint è PATH PARAMETER (non body field).
+    Usa `ricerca_nazionale` (non richiede provincia). Ricerca per CF/PIVA in tutta Italia.
+    """
+    key = (cf_or_piva or "").strip()
     if has_credentials():
-        logger.info(
-            "OpenAPI.it: catasto by CF non disponibile nell'attuale piano — usato MOCK"
+        host = _host("catasto.openapi.it")
+        body = {"cf_piva": key, "tipo_catasto": "TF"}
+        res = await _call_api(
+            [f"POST:{host}/richiesta"], "POST",
+            f"https://{host}/richiesta/ricerca_nazionale", json=body,
         )
-    return _mock_cadastre((cf_or_piva or "").strip())
+        if res and res.get("success"):
+            rid = (res.get("data") or {}).get("id") or res.get("id")
+            if rid:
+                import asyncio
+                for _ in range(4):
+                    await asyncio.sleep(2.0)
+                    r2 = await _call_api(
+                        [f"GET:{host}/richiesta"], "GET",
+                        f"https://{host}/richiesta/{rid}",
+                    )
+                    if r2 and r2.get("success"):
+                        payload = r2.get("data") or {}
+                        stato = (payload.get("stato") or "").lower()
+                        if stato in ("completato", "success", "done", "evaso"):
+                            return _normalize_cadastre(payload, key)
+                return _mock_cadastre(key)
+        logger.info("OpenAPI.it Catasto fallback MOCK per '%s'", key)
+    return _mock_cadastre(key)
+
+
+def _normalize_cadastre(payload: dict, key: str) -> list[dict]:
+    immobili = payload.get("immobili") or payload.get("beni") or payload.get("risultato") or []
+    if not isinstance(immobili, list):
+        immobili = [immobili]
+    out = []
+    for im in immobili[:20]:
+        if not isinstance(im, dict):
+            continue
+        out.append({
+            "provider": "openapi.it/catasto (LIVE)",
+            "comune": im.get("comune") or im.get("Comune"),
+            "foglio": im.get("foglio") or im.get("Foglio"),
+            "particella": im.get("particella") or im.get("Particella"),
+            "subalterno": im.get("subalterno") or im.get("Sub"),
+            "categoria": im.get("categoria") or im.get("Categoria"),
+            "classe": im.get("classe") or im.get("Classe"),
+            "consistenza": im.get("consistenza") or im.get("Consistenza"),
+            "superficie_catastale_mq": im.get("superficie") or im.get("Superficie"),
+            "rendita_eur": im.get("rendita") or im.get("Rendita"),
+            "indirizzo": im.get("indirizzo") or im.get("Indirizzo"),
+            "titolo": im.get("titolarita") or im.get("Titolo") or "Proprietà",
+        })
+    return out
 
 
 def _mock_cadastre(key: str) -> list[dict]:
     random.seed(hash(key + "_cad") % (2**31))
     n = random.randint(0, 4)
     out = []
-    for i in range(n):
+    for _ in range(n):
         out.append({
-            "provider": "openapi.it/cadastre (MOCK)",
-            "comune": random.choice(["MILANO", "ROMA", "TORINO", "BOLOGNA"]),
+            "provider": "openapi.it/catasto (MOCK)",
+            "comune": random.choice(["MILANO", "ROMA", "TORINO"]),
             "foglio": random.randint(1, 999),
             "particella": random.randint(1, 999),
             "subalterno": random.randint(1, 20),
-            "categoria": random.choice(["A/2", "A/3", "A/4", "C/6", "C/2"]),
+            "categoria": random.choice(["A/2", "A/3", "C/6"]),
             "classe": str(random.randint(1, 6)),
             "consistenza": random.randint(3, 12),
             "superficie_catastale_mq": random.randint(60, 250),
             "rendita_eur": round(random.uniform(300, 3000), 2),
             "indirizzo": f"Via {random.choice(['Verdi','Rossi','Bianchi'])} {random.randint(1,150)}",
-            "titolo": random.choice(["Proprietà 100%", "Proprietà 50%", "Nuda proprietà"]),
+            "titolo": "Proprietà 100%",
         })
     return out
 
 
 # ===================================================================
-# SERVIZIO 3 · AUTOMOTIVE (PRA)
-# Note: nessuno scope live disponibile nell'account attuale — sempre MOCK.
+# SERVIZIO 3 · AUTOMOTIVE by CF/PIVA (non supportato — solo by targa)
 # ===================================================================
 async def fetch_vehicles(cf_or_piva: str) -> list[dict]:
-    if has_credentials():
-        logger.info(
-            "OpenAPI.it: automotive/PRA non abilitato sull'account — usato MOCK"
-        )
+    """PRA by CF non è disponibile sull'API OpenAPI.it (solo lookup by targa).
+    Ritorna sempre MOCK per compatibilità UI."""
     return _mock_vehicles((cf_or_piva or "").strip())
 
 
@@ -354,59 +355,92 @@ def _mock_vehicles(key: str) -> list[dict]:
     random.seed(hash(key + "_veh") % (2**31))
     n = random.randint(0, 3)
     out = []
-    for i in range(n):
-        marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT", "PEUGEOT"])
-        model = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4", "CLIO"])
+    for _ in range(n):
+        marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT"])
+        modello = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4"])
         out.append({
             "provider": "openapi.it/automotive (MOCK)",
             "targa": f"{''.join(random.choices('ABCDEFGHJKLMNPRSTVXYZ',k=2))}{random.randint(100,999)}{''.join(random.choices('ABCDEFGHJKLMNPRSTVXYZ',k=2))}",
-            "marca": marca,
-            "modello": model,
-            "alimentazione": random.choice(["BENZINA", "DIESEL", "GPL", "ELETTRICA", "IBRIDA"]),
-            "cilindrata": random.choice([1000, 1200, 1400, 1600, 1900]),
+            "marca": marca, "modello": modello,
+            "alimentazione": random.choice(["BENZINA", "DIESEL", "IBRIDA"]),
+            "cilindrata": random.choice([1200, 1400, 1600]),
             "potenza_kw": random.randint(50, 130),
-            "data_immatricolazione": f"{random.randint(2010,2024)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-            "scadenza_revisione": f"{random.randint(2025,2027)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-            "categoria": random.choice(["AUTOVETTURA", "AUTOCARRO", "MOTOCICLO"]),
-            "tipo_alimentazione": random.choice(["EURO 5", "EURO 6"]),
+            "data_immatricolazione": f"{random.randint(2010,2024)}-05-14",
+            "scadenza_revisione": f"{random.randint(2025,2027)}-05-14",
+            "categoria": "AUTOVETTURA",
         })
     return out
 
 
 # ===================================================================
 # SERVIZIO 4 · VISURA CAMERALE (Visengine)
-# Prod scope:    POST:visengine2.altravia.com/richiesta + GET .../documento
-# Sandbox scope: POST:test.visengine2.altravia.com/richiesta + GET .../documento
 # ===================================================================
 async def fetch_visura(piva: str) -> dict:
-    """Visura sandbox richiede 2 step: prima GET /fornitori per hash, poi POST /richiesta.
-
-    Per ora manteniamo il fallback MOCK finché non è disponibile un piano visura
-    completo su prod. Il flusso è documentato in visengine2.altravia.com.
+    """Flow ufficiale Visengine PROD:
+       1) GET /visure → lista prodotti con hash_visura (Camerali/Patronato)
+       2) POST /richiesta → id richiesta
+       3) GET /richiesta/{id} → polling per download_url
     """
     key = (piva or "").strip()
     if has_credentials():
-        host = _host("visengine2.altravia.com")
-        # Step 1: recupera hash del prodotto visura dal fornitore
-        scope_forn = [f"GET:{host}/fornitori"]
-        forn = await _call_api(scope_forn, "GET", f"https://{host}/fornitori")
+        host = "visengine2.altravia.com"
+        # Step 1: /visure — trova hash Camera Commercio (PF vs PG)
+        vis_list = await _call_api([f"GET:{host}/visure"], "GET", f"https://{host}/visure")
         hash_visura = None
-        if forn and forn.get("success"):
-            items = forn.get("data") or []
-            for it in items if isinstance(items, list) else []:
-                if (it.get("tipo") or "").lower() == "ordinaria":
-                    hash_visura = it.get("hash") or it.get("hash_visura")
+        is_pg = len(key) == 11 and key.isdigit()
+        if vis_list and vis_list.get("success"):
+            items = vis_list.get("data") or []
+            # Cerca "Visura Centrale Rischi Persona Giuridica/Fisica"
+            keyword_pg = "giuridica"
+            keyword_pf = "persona fisica"
+            for it in items:
+                name = (it.get("nome_visura") or "").lower()
+                if is_pg and keyword_pg in name and "camerali" in (it.get("nome_categoria") or "").lower():
+                    hash_visura = it.get("hash_visura")
                     break
+                if not is_pg and keyword_pf in name and "camerali" in (it.get("nome_categoria") or "").lower():
+                    hash_visura = it.get("hash_visura")
+                    break
+            # Fallback: primo prodotto camerale
+            if not hash_visura:
+                for it in items:
+                    if "camerali" in (it.get("nome_categoria") or "").lower():
+                        hash_visura = it.get("hash_visura")
+                        break
         if hash_visura:
-            scope_post = [f"POST:{host}/richiesta"]
+            # json_visura è REQUIRED — contiene i dati specifici della visura richiesta
+            json_visura = {"cf_piva": key}
+            if is_pg:
+                json_visura["piva"] = key
+            else:
+                json_visura["cf"] = key.upper()
+            body = {
+                "hash_visura": hash_visura,
+                "json_visura": json_visura,
+            }
             res_post = await _call_api(
-                scope_post, "POST", f"https://{host}/richiesta",
-                json={"hash_visura": hash_visura, "piva": key, "tipo_visura": "ordinaria"},
+                [f"POST:{host}/richiesta"], "POST", f"https://{host}/richiesta",
+                json=body,
             )
             if res_post and res_post.get("success"):
-                rid = (res_post.get("data") or {}).get("id") or res_post.get("id") or "n/a"
-                return _normalize_visura(res_post.get("data") or {}, key, rid)
-        logger.info("OpenAPI.it live fetch_visura non completato, fallback a MOCK per '%s'", key)
+                pd = res_post.get("data") or {}
+                rid = pd.get("id") or pd.get("id_richiesta") or res_post.get("id")
+                if rid:
+                    import asyncio
+                    for _ in range(5):
+                        await asyncio.sleep(2.0)
+                        r_get = await _call_api(
+                            [f"GET:{host}/richiesta"], "GET",
+                            f"https://{host}/richiesta/{rid}",
+                        )
+                        if r_get and r_get.get("success"):
+                            gp = r_get.get("data") or {}
+                            stato = (gp.get("stato") or "").lower()
+                            if stato in ("completato", "success", "done", "pronto", "evaso"):
+                                return _normalize_visura(gp, key, rid)
+                    # Ritorna comunque i dati parziali (in lavorazione)
+                    return _normalize_visura(pd, key, rid)
+        logger.info("OpenAPI.it Visura fallback MOCK per '%s' (hash=%s)", key, hash_visura)
     return _mock_visura(key)
 
 
@@ -418,13 +452,13 @@ def _normalize_visura(data: dict, piva: str, request_id: str) -> dict:
         "stato": data.get("stato") or "IN_LAVORAZIONE",
         "ragione_sociale": data.get("denominazione") or data.get("ragione_sociale"),
         "tipo_visura": data.get("tipo_visura") or "ordinaria",
-        "data_estrazione": data.get("data_estrazione"),
+        "data_estrazione": data.get("data_estrazione") or data.get("data_richiesta"),
         "capitale_sociale": data.get("capitale_sociale"),
         "amministratori": data.get("amministratori") or [],
         "sedi_secondarie": data.get("sedi_secondarie") or 0,
         "unita_locali": data.get("unita_locali") or 0,
         "bilanci_depositati": data.get("bilanci_depositati"),
-        "download_url": data.get("download_url"),
+        "download_url": data.get("download_url") or data.get("url_documento") or data.get("url"),
         "rating_finanziario": data.get("rating"),
         "punteggio_rischio_credito": data.get("credit_score"),
     }
@@ -447,25 +481,27 @@ def _mock_visura(piva: str) -> dict:
         "unita_locali": random.randint(1, 5),
         "bilanci_depositati": random.randint(2019, 2024),
         "download_url": None,
-        "rating_finanziario": random.choice(["A", "BBB", "BB", "B"]),
+        "rating_finanziario": random.choice(["A", "BBB", "BB"]),
         "punteggio_rischio_credito": random.randint(30, 90),
     }
 
 
 # ===================================================================
-# SERVIZIO 5 · AUTOMOTIVE by TARGA
+# SERVIZIO 5 · AUTOMOTIVE by TARGA (dominio .com, NO test. sandbox)
 # ===================================================================
 async def fetch_automotive_by_targa(targa: str) -> dict:
-    """Lookup veicolo per TARGA. Fallback MOCK trasparente."""
     key = (targa or "").upper().strip().replace(" ", "")
     if has_credentials():
-        host = _host("automotive.openapi.it")
-        for path in ("veicoli", "pra"):
-            scope = [f"GET:{host}/{path}"]
-            res = await _call_api(scope, "GET", f"https://{host}/{path}/{key}")
+        # Dominio automotive.openapi.com (NON .it, NON test.)
+        host = "automotive.openapi.com"
+        for path in ("IT-car", "IT-bike"):
+            res = await _call_api(
+                [f"GET:{host}/{path}"], "GET",
+                f"https://{host}/{path}/{key}",
+            )
             if res and res.get("success") and res.get("data"):
                 return _normalize_automotive(res["data"], key)
-        logger.info("OpenAPI.it live fetch_automotive_by_targa fallito, fallback MOCK per '%s'", key)
+        logger.info("OpenAPI.it Automotive fallback MOCK per '%s'", key)
     return _mock_automotive_by_targa(key)
 
 
@@ -476,40 +512,40 @@ def _normalize_automotive(data, targa: str) -> dict:
         return _mock_automotive_by_targa(targa)
     return {
         "provider": "openapi.it/automotive (LIVE)",
-        "targa": data.get("targa") or targa,
-        "marca": data.get("marca") or data.get("make"),
+        "targa": data.get("targa") or data.get("plate") or targa,
+        "marca": data.get("marca") or data.get("make") or data.get("brand"),
         "modello": data.get("modello") or data.get("model"),
-        "allestimento": data.get("allestimento") or data.get("versione"),
+        "allestimento": data.get("allestimento") or data.get("versione") or data.get("version"),
         "cilindrata": data.get("cilindrata") or data.get("displacement"),
         "potenza_kw": data.get("potenza_kw") or data.get("kw"),
-        "potenza_cv": data.get("potenza_cv") or data.get("cv"),
+        "potenza_cv": data.get("potenza_cv") or data.get("cv") or data.get("hp"),
         "alimentazione": data.get("alimentazione") or data.get("fuel"),
         "anno_immatricolazione": data.get("anno_immatricolazione") or data.get("year"),
         "data_immatricolazione": data.get("data_immatricolazione"),
-        "scadenza_revisione": data.get("scadenza_revisione"),
+        "scadenza_revisione": data.get("scadenza_revisione") or data.get("mot_expiration"),
         "telaio": data.get("telaio") or data.get("vin"),
         "categoria": data.get("categoria"),
-        "euro": data.get("euro"),
+        "euro": data.get("euro") or data.get("emission_class"),
         "raw": data,
     }
 
 
 def _mock_automotive_by_targa(targa: str) -> dict:
     random.seed(hash(targa + "_veh_by_targa") % (2**31))
-    marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT", "PEUGEOT"])
-    modello = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4", "CLIO"])
+    marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT"])
+    modello = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4"])
     return {
         "provider": "openapi.it/automotive (MOCK)",
         "targa": targa,
         "marca": marca, "modello": modello,
         "allestimento": random.choice(["LOUNGE", "SPORT", "GT LINE"]),
-        "cilindrata": random.choice([1000, 1200, 1400, 1600, 1900]),
+        "cilindrata": random.choice([1000, 1200, 1400, 1600]),
         "potenza_kw": random.randint(50, 130),
         "potenza_cv": random.randint(70, 180),
-        "alimentazione": random.choice(["BENZINA", "DIESEL", "GPL", "IBRIDA"]),
+        "alimentazione": random.choice(["BENZINA", "DIESEL", "IBRIDA"]),
         "anno_immatricolazione": random.randint(2010, 2024),
-        "data_immatricolazione": f"{random.randint(2010,2024)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-        "scadenza_revisione": f"{random.randint(2025,2027)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
+        "data_immatricolazione": f"{random.randint(2010,2024)}-05-14",
+        "scadenza_revisione": f"{random.randint(2025,2027)}-05-14",
         "telaio": f"WBA{''.join(random.choices('0123456789ABCDEFGHJKLMNPRSTVWXYZ',k=14))}",
         "categoria": "AUTOVETTURA",
         "euro": random.choice(["EURO 5", "EURO 6"]),
@@ -517,34 +553,61 @@ def _mock_automotive_by_targa(targa: str) -> dict:
 
 
 # ===================================================================
-# SERVIZIO 6 · RISK
+# SERVIZIO 6 · RISK (dominio .com, tipo PF vs PG differenziato)
 # ===================================================================
-async def fetch_risk(cf_or_piva: str) -> dict:
+async def fetch_risk(cf_or_piva: str, name: str = "", surname: str = "",
+                     company_name: str = "") -> dict:
+    """Report rischio credito. PG richiede taxCode+companyName, PF richiede taxCode+name+surname."""
     key = (cf_or_piva or "").strip()
     if has_credentials():
-        host = _host("risk.openapi.it")
-        res = await _call_api([f"GET:{host}/report"], "GET", f"https://{host}/report/{key}")
-        if res and res.get("success") and res.get("data"):
-            return _normalize_risk(res["data"], key)
-        logger.info("OpenAPI.it live fetch_risk fallito, fallback MOCK per '%s'", key)
+        host = "risk.openapi.com"  # ⚠️ .com — NON .it
+        is_pg = len(key) == 11 and key.isdigit()
+        if is_pg:
+            body = {
+                "taxCode": key,
+                "companyName": company_name or "Azienda",
+            }
+            res = await _call_api(
+                [f"POST:{host}/IT-report-azienda"], "POST",
+                f"https://{host}/IT-report-azienda", json=body,
+                headers={"Content-Type": "application/json"},
+            )
+        else:
+            body = {
+                "taxCode": key.upper(),
+                "name": name or "N/A",
+                "surname": surname or "N/A",
+            }
+            res = await _call_api(
+                [f"POST:{host}/IT-report-persona"], "POST",
+                f"https://{host}/IT-report-persona", json=body,
+                headers={"Content-Type": "application/json"},
+            )
+        if res and res.get("success"):
+            payload = res.get("data") or res
+            return _normalize_risk(payload, key)
+        logger.info("OpenAPI.it Risk fallback MOCK per '%s' (pg=%s)", key, is_pg)
     return _mock_risk(key)
 
 
 def _normalize_risk(data, key: str) -> dict:
-    if isinstance(data, dict):
-        return {
-            "provider": "openapi.it/risk (LIVE)",
-            "soggetto": key,
-            "rating": data.get("rating"),
-            "score_credito": data.get("credit_score") or data.get("score"),
-            "livello_rischio": data.get("risk_level"),
-            "protesti": data.get("protesti") or [],
-            "pregiudizievoli": data.get("pregiudizievoli") or [],
-            "procedure_concorsuali": data.get("procedure_concorsuali") or [],
-            "eventi_negativi_count": data.get("eventi_negativi_count") or 0,
-            "data_report": data.get("data_report"),
-        }
-    return _mock_risk(key)
+    if not isinstance(data, dict):
+        return _mock_risk(key)
+    return {
+        "provider": "openapi.it/risk (LIVE)",
+        "soggetto": key,
+        "id_richiesta": data.get("id") or data.get("request_id"),
+        "stato": data.get("stato") or data.get("status"),
+        "rating": data.get("rating") or data.get("credit_rating"),
+        "score_credito": data.get("credit_score") or data.get("score"),
+        "livello_rischio": data.get("risk_level") or data.get("livello_rischio"),
+        "protesti": data.get("protesti") or data.get("protests") or [],
+        "pregiudizievoli": data.get("pregiudizievoli") or data.get("prejudicial") or [],
+        "procedure_concorsuali": data.get("procedure_concorsuali") or data.get("bankruptcy") or [],
+        "eventi_negativi_count": data.get("eventi_negativi_count") or 0,
+        "data_report": data.get("data_report") or data.get("report_date"),
+        "raw": data,
+    }
 
 
 def _mock_risk(key: str) -> dict:
@@ -556,11 +619,10 @@ def _mock_risk(key: str) -> dict:
         "soggetto": key,
         "rating": random.choice(["A", "BBB", "BB", "B"]),
         "score_credito": random.randint(30, 95),
-        "livello_rischio": random.choice(["basso", "medio", "medio", "alto"]),
+        "livello_rischio": random.choice(["basso", "medio", "alto"]),
         "protesti": [{"data": "2023-05-15", "importo_eur": 500.0, "tipo": "CAMBIALE"} for _ in range(n_prot)],
         "pregiudizievoli": [{"data": "2022-08-20", "tipo": "IPOTECA", "importo_eur": 15000.0} for _ in range(n_preg)],
         "procedure_concorsuali": [],
         "eventi_negativi_count": n_prot + n_preg,
         "data_report": "2026-02-04",
     }
-
