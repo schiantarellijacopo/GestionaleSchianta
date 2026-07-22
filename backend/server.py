@@ -10504,6 +10504,8 @@ from routes import super_admin as _super_admin_router  # noqa: E402
 from routes import marketplace as _marketplace_router  # noqa: E402
 from routes import tickets as _tickets_router  # noqa: E402
 from routes import super_admin_logs as _sa_logs_router  # noqa: E402
+from routes import openapi_it as _openapi_router  # noqa: E402
+from routes import lookup as _lookup_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10526,6 +10528,8 @@ api.include_router(_super_admin_router.router)
 api.include_router(_marketplace_router.router)
 api.include_router(_tickets_router.router)
 api.include_router(_sa_logs_router.router)
+api.include_router(_openapi_router.router)
+api.include_router(_lookup_router.router)
 
 app.include_router(api)
 

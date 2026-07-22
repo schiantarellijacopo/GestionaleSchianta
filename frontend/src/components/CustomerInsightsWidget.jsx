@@ -8,7 +8,7 @@ import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Sparkles, ShieldAlert, TrendingUp, FileText, AlertTriangle } from "lucide-react";
 
-export default function CustomerInsightsWidget({ anagrafica_id }) {
+export default function CustomerInsightsWidget({ anagrafica_id, onTabChange }) {
     const [data, setData] = useState(null);
     useEffect(() => {
         api.get(`/anagrafiche/${anagrafica_id}/customer-insights-widget`)
@@ -23,6 +23,8 @@ export default function CustomerInsightsWidget({ anagrafica_id }) {
     const ai = data.ultimo_suggerimento_ai;
 
     const rcol = rsk <= 3 ? "emerald" : rsk <= 6 ? "amber" : "rose";
+    const go = (tab) => onTabChange && onTabChange(tab);
+    const goCross = (ramo) => onTabChange && onTabChange("polizze", { newRamo: ramo });
 
     return (
         <Card className="p-4 mb-4 bg-gradient-to-br from-violet-50 via-white to-sky-50 border-violet-200" data-testid="customer-insights-widget">
@@ -31,21 +33,23 @@ export default function CustomerInsightsWidget({ anagrafica_id }) {
                 <h3 className="font-semibold text-violet-900 text-sm">Customer Insights · AI Snapshot</h3>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-center">
-                <KpiMini icon={FileText} label="Polizze attive" value={kpi.n_polizze_attive} color="sky" />
-                <KpiMini icon={FileText} label="Polizze scadute" value={kpi.n_polizze_scadute} color="amber" />
-                <KpiMini icon={TrendingUp} label="Rami coperti" value={kpi.n_rami_coperti} color="emerald" />
-                <KpiMini icon={AlertTriangle} label="Sinistri (anno)" value={kpi.n_sinistri_anno_corrente} color="rose" />
-                <KpiMini icon={FileText} label="Premio attivo" value={fmtEur(kpi.premio_totale_attivo)} color="violet" mono />
-                <KpiMini icon={ShieldAlert} label="Rischio" value={`${rsk}/10`} color={rcol} mono />
+                <KpiMini icon={FileText} label="Polizze attive" value={kpi.n_polizze_attive} color="sky" onClick={() => go("polizze", { filter: "attiva" })} testid="kpi-polizze-attive" />
+                <KpiMini icon={FileText} label="Polizze scadute" value={kpi.n_polizze_scadute} color="amber" onClick={() => go("polizze", { filter: "scaduta" })} testid="kpi-polizze-scadute" />
+                <KpiMini icon={TrendingUp} label="Rami coperti" value={kpi.n_rami_coperti} color="emerald" onClick={() => go("analisi")} testid="kpi-rami" />
+                <KpiMini icon={AlertTriangle} label="Sinistri (anno)" value={kpi.n_sinistri_anno_corrente} color="rose" onClick={() => go("sinistri")} testid="kpi-sinistri" />
+                <KpiMini icon={FileText} label="Premio attivo" value={fmtEur(kpi.premio_totale_attivo)} color="violet" mono onClick={() => go("estratto-conto")} testid="kpi-premio" />
+                <KpiMini icon={ShieldAlert} label="Rischio" value={`${rsk}/10`} color={rcol} mono onClick={() => go("profilo-rischio")} testid="kpi-rischio" />
             </div>
             {opp.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-violet-100">
-                    <div className="text-[10px] uppercase text-violet-700 font-semibold mb-1">Opportunità Cross-Selling</div>
+                    <div className="text-[10px] uppercase text-violet-700 font-semibold mb-1">Opportunità Cross-Selling · clicca un ramo per preventivare</div>
                     <div className="flex flex-wrap gap-1.5">
                         {opp.map((r) => (
-                            <span key={r} className="text-[11px] bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full">
-                                {r}
-                            </span>
+                            <button key={r} type="button" onClick={() => goCross(r)}
+                                className="text-[11px] bg-violet-100 hover:bg-violet-200 text-violet-800 px-2 py-0.5 rounded-full transition-colors"
+                                data-testid={`cross-sell-${r}`}>
+                                + {r}
+                            </button>
                         ))}
                     </div>
                 </div>
@@ -68,11 +72,13 @@ const COLOR_BG = {
     slate: "border-slate-200 text-slate-700",
 };
 
-const KpiMini = ({ icon: Icon, label, value, color, mono }) => (
-    <div className={`bg-white border ${COLOR_BG[color] || COLOR_BG.sky} rounded p-2`}>
+const KpiMini = ({ icon: Icon, label, value, color, mono, onClick, testid }) => (
+    <button type="button" onClick={onClick} disabled={!onClick}
+        data-testid={testid}
+        className={`bg-white border ${COLOR_BG[color] || COLOR_BG.sky} rounded p-2 transition-all ${onClick ? "hover:shadow-md hover:-translate-y-0.5 cursor-pointer" : "cursor-default"}`}>
         <div className="flex items-center justify-center gap-1 text-[10px] uppercase tracking-wider text-slate-500">
             <Icon size={10} /> {label}
         </div>
         <div className={`text-lg font-bold ${mono ? "font-mono" : ""} mt-0.5`}>{value ?? "—"}</div>
-    </div>
+    </button>
 );

@@ -40,7 +40,26 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
-- ✅ ANIA importer + Multi-tenant + Storage abstraction + Query auto-filter + Super Admin Panel + Marketplace + Ticket + Audit Log + Resend Mock.
+- ✅ ANIA + Multi-tenant + Storage + Super Admin Panel + Marketplace CRUD (core+estensioni) + Ticket + Audit Log + Resend Mock + Console Super Admin dedicata (`/admin-login`).
+- ✅ **OpenAPI.it MOCK integration**:
+  - `openapi_it_service.py`: 4 servizi mock (company/cadastre/vehicles/visure) con dati realistici pseudo-random deterministici (seed = hash CF).
+  - Router `/api/openapi-it/*`: lookup diretto + endpoint POST che aggiornano `Anagrafica.openapi_data.{company|cadastre|automotive|visura}`.
+  - Toggle mock/live via env `OPENAPI_IT_TOKEN`. Placeholder pronto per swap chiave reale.
+- ✅ **IBAN → Banca lookup**:
+  - `bank_lookup.py` con tabella statica di 47 banche italiane top (95%+ mercato retail) — ABI code → ragione sociale + BIC.
+  - Parsing IBAN italiano (ABI/CAB/CIN/conto) + fallback su `banks_registry` DB (per import CAB completi in futuro).
+  - Router `/api/lookup/iban`, `/api/lookup/iban/validate`, `/api/lookup/banks`, `/api/lookup/cap`.
+  - Test IT60X0542811101000000123456 → Banco BPM (BAPPIT21) ✅.
+- ✅ **Anagrafica model esteso**:
+  - `avatar_url`, `sotto_tipo` (azienda/asd/condominio/parrocchia/onlus/altro)
+  - `stile_vita` dict (sport, fumo, alcol, patologie, cane, viaggi, hobby)
+  - `corporate_profile` dict (fatturato, dipendenti, valori assicurabili, export USA)
+  - `consenso_marketing_whatsapp/sms/email` (GDPR distinti)
+  - `conti_correnti` array (multi-IBAN con banca risolta)
+  - `openapi_data` cache locale
+- 🟡 **Frontend Anagrafica**: da completare in prossima iter (avatar UI 80/32px, sezione Conti Correnti con lookup IBAN, tab Profilazione, bottoni OpenAPI, Customer Insights cards già rese cliccabili).
+
+### Sessione 01/07 (iter28)
 - ✅ **Super Admin dedicato & isolato dal frontend agenzia**:
   - Nuova login page dedicata `/admin-login` (dark theme viola con Shield icon) con credenziali pre-caricate.
   - Nuovo `SuperAdminLayout.jsx` (no sidebar clienti, solo header viola con logout).

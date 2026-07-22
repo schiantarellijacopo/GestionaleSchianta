@@ -322,6 +322,35 @@ class Anagrafica(BaseDoc):
     salute_fiscale_dati: dict = Field(default_factory=dict)
     salute_fiscale_aggiornata_il: Optional[str] = None
 
+    # === AVATAR / LOGO ===
+    avatar_url: Optional[str] = None  # foto persona / logo azienda / immagine edificio
+    sotto_tipo: Optional[Literal["azienda", "asd", "condominio", "parrocchia", "onlus", "altro"]] = None
+
+    # === STILE DI VITA (persona fisica) — dati sensibili art.9 GDPR ===
+    stile_vita: dict = Field(default_factory=dict)
+    # {sport_pericolosi:bool, sport_praticati:[str], fumatore:bool, sigarette_giorno:int,
+    #  consumo_alcol:str, patologie:str, interventi:str, possiede_cane:bool, cane_razza:str,
+    #  cane_taglia:str, viaggi_estero_frequenti:bool, viaggi_destinazioni:[str], hobby:[str]}
+
+    # === CORPORATE PROFILE (persona giuridica) ===
+    corporate_profile: dict = Field(default_factory=dict)
+    # {fatturato_annuo, monte_salari, numero_dipendenti, valore_fabbricato,
+    #  valore_macchinari, valore_merci, export_usa_extra_ue:bool, ateco, pec,
+    #  capitale_sociale, legale_rappresentante}
+
+    # === CONSENSI GDPR ESTESI ===
+    consenso_marketing_whatsapp: bool = False
+    consenso_marketing_sms: bool = False
+    consenso_marketing_email: bool = False
+
+    # === CONTI CORRENTI (multi-IBAN con banca auto-risolta da ABI) ===
+    conti_correnti: List[dict] = Field(default_factory=list)
+    # [{iban, banca_ragione_sociale, banca_abi, banca_cab, banca_bic, intestazione,
+    #   principale:bool, note}]
+
+    # === CACHE OPENAPI.IT (company/cadastre/automotive/visure) ===
+    openapi_data: dict = Field(default_factory=dict)
+
 
 # =============== POLIZZE ===============
 PolizzaStato = Literal["attiva", "sospesa", "annullata", "scaduta", "in_emissione"]
