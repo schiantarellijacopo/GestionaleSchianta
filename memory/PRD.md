@@ -40,30 +40,25 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
-- ✅ **ANIA Importer · Colonne mancanti (P0)**: aggiunto mapping colonne `frazionamento_share` (rec20 col AN → codici 1=annuale, 2=semestrale, 3=quadrimestrale, 4=trimestrale, 12=mensile, U/0/9=unica), `valore_ass_1/2/3` (rec30 col W → nuovo campo `capitale_assicurato` su Polizza + per-garanzia), `accessori_totale` (rec40 col AU → nuovo campo `accessori` su Titolo). Test unitario `test_ania_import.py` esteso con assert su tutti i nuovi campi. Modelli Pydantic aggiornati: `Polizza.capitale_assicurato`, `Titolo.accessori`.
-- ✅ **ANIA Importer · Scadenza contratto**: usato `scadenza_effettiva` (rec20 col AK) come scadenza contratto della Polizza, con fallback su `scadenza_originale` (col AJ). Test aggiornato.
-- ✅ **Multi-Tenant Foundation (Fase 1)**:
-  - Nuovo modello `Tenant` (collezione `tenants`) — distinto dalla libreria `agenzie` (partner esterni).
-  - Seed idempotente di 3 tenant: `principale` (Schiantarelli — dati reali), `demo` (staging con dati fittizi), `clean` (master pulito per onboarding nuove agenzie).
-  - Campo `agenzia_tenant_id` aggiunto a `BaseDoc` → ereditato da tutte le entità (Anagrafica, Polizza, Titolo, Sinistro, Allegato, Movimento, Diario, ecc.).
-  - `UserPublic.is_super_admin` — bypassa il filtro tenant per l'owner.
-  - JWT include `agenzia_tenant_id` + `is_super_admin`.
-  - Helper `tenant.py`: `tenant_filter(user)`, `assign_tenant(user, doc)`, `user_tenant_id(user)`, `is_super_admin(user)`, `migrate_existing_data_to_principale()`.
-  - Startup automatico: seed tenants + migrate legacy → tutti i record esistenti assegnati al `tenant-principale-schiantarelli`. Migrazione idempotente.
-  - Nuovo router `/api/tenants` (list/create/patch/delete/switch/migrate-legacy). Endpoint solo per super_admin. Utenti normali vedono solo il proprio.
-  - **Migrazione eseguita in preview**: 862 anagrafiche + 851 polizze + 629 titoli + 44 sinistri + 33 allegati + 5 utenti + 12 compagnie + 248 mapping garanzie + tutti gli altri record → tutti al tenant principale. **Zero perdite dati**.
-- ✅ **Storage Engine Abstraction (Fase 2)**:
-  - Nuovo `StorageService` (`storage_service.py`) con driver pluggable: `emergent` (attivo), `s3` / `google_drive` / `onedrive` (placeholder in attesa credenziali).
-  - Path canonico multi-tenant: `agencies/{tenant_id}/{clients|policies|claims|titles|companies}/{entita_id}/{filename}`.
-  - `Allegato.storage_provider` traccia il provider usato per ogni file (recupero corretto in fase di download).
-  - Fallback automatico su Emergent se un driver esterno non è configurato.
-- ✅ **Multi-Tenant Query Auto-Filter (Fase 1b — ISOLAMENTO ATTIVO)** 🔴 P0 CRITICO:
-  - **`database.py` riscritto** con `TenantAwareDB` + `TenantAwareCollection` wrapper. **Zero modifiche** al codice esistente dei router: il wrapper intercetta automaticamente `find/find_one/count_documents/update_*/delete_*/aggregate/distinct/find_one_and_*` iniettando il filtro `agenzia_tenant_id` in base al `ContextVar` `_current_user_ctx`.
-  - **Middleware `tenant_context_middleware`** in `server.py`: estrae utente dal JWT (cookie o Bearer) e imposta il ContextVar per ogni request. Request anonime (webhook WhatsApp, login) → nessun filtro → passthrough.
-  - `raw_db` esposto per operazioni di sistema (startup, seed, migrazioni) che devono bypassare il filtro.
-  - `aggregate()` inietta `{"$match": tenant_filter}` come primo stage della pipeline.
-  - **Test end-to-end su preview**: creato utente `demo-user@assicura.it` (tenant DEMO, non super_admin) → vede **0 anagrafiche, 0 polizze, 0 titoli, 0 sinistri** (mentre nel DB ci sono 862/851/629/44 di Schiantarelli). Super admin continua a vedere tutto. **Isolamento tenant REALE e attivo su TUTTI i router simultaneamente.**
-  - Script standalone `migrate_to_multitenant.py` per Railway prod (idempotente, con report finale e verifica zero-doc-senza-tenant).
+- ✅ **ANIA Importer · Colonne mancanti (P0)**: aggiunto mapping colonne `frazionamento_share` (rec20 col AN → codici 1=annuale, 2=semestrale, 3=quadrimestrale, 4=trimestrale, 12=mensile, U/0/9=unica), `valore_ass_1/2/3` (rec30 col W → nuovo campo `capitale_assicurato` su Polizza + per-garanzia), `accessori_totale` (rec40 col AU → nuovo campo `accessori` su Titolo).
+- ✅ **ANIA Importer · Scadenza contratto**: usato `scadenza_effettiva` (rec20 col AK) come scadenza polizza, con fallback su `scadenza_originale`.
+- ✅ **Multi-Tenant Foundation + Query Auto-Filter (Fase 1+1b)**: `Tenant` model + 3 tenant seed (principale/demo/clean) + `agenzia_tenant_id` su BaseDoc + `TenantAwareDB` wrapper + middleware. Migrazione 862 anagrafiche/851 polizze/629 titoli/44 sinistri/33 allegati → tenant principale. Test isolamento tenant DEMO → 0 dati Schiantarelli visibili.
+- ✅ **Storage Engine Abstraction (Fase 2)**: `StorageService` con driver `emergent`/`s3`/`google_drive`/`onedrive` (placeholder). Path `agencies/{tid}/{clients|policies|...}/{eid}/{filename}`.
+- ✅ **Super Admin Panel (Platform Owner)** 🔒 GDPR-safe:
+  - Nuova pagina `/super-admin` con 5 tab: Agenzie, Abbonamenti, Transazioni, Marketplace, Ticket Helpdesk.
+  - **Super admin BLOCCATO** da tutti i dati clienti tenant (`tenant_filter` restituisce filtro impossibile per collezioni scoped).
+  - Endpoint `/api/super-admin/*`: agenzie CRUD, attiva/sospendi/estendi-prova, stats (MRR/ARR), abbonamenti, transazioni.
+  - Modello `Tenant` esteso con: `stato_abbonamento`, `piano`, `prezzo_mensile_eur`, `data_fine_prova`, `stripe_customer_id/subscription_id`, `max_utenti`.
+  - Wizard "Nuova Agenzia": form con template (`clean` vuoto | `demo` con dati fittizi copiati) + creazione admin iniziale in un colpo solo.
+  - **Popolamento tenant DEMO**: 18 anagrafiche + 25 polizze + 42 titoli + 5 sinistri + 5 compagnie fittizi via `demo_seed.py` (endpoint `POST /api/super-admin/demo/seed`).
+- ✅ **Marketplace Moduli & Ticket Helpdesk**:
+  - **TopBar**: 2 nuovi pulsanti (`ShoppingCart` Marketplace + `Headphones` Assistenza).
+  - **MarketplaceDrawer**: catalogo con 7 moduli seed (Risk 3D, Firma Digitale, SMS 1000, WhatsApp illimitato, Google Drive Sync, OneDrive, S3 dedicato). Bottone "Richiedi attivazione" invia richiesta al super_admin.
+  - **TicketDialog**: form con categoria/priorità/descrizione + storico ticket con stato colorato.
+  - **Endpoint agenzia**: `/api/marketplace/moduli|richieste`, `/api/tickets|mie`.
+  - **Endpoint super_admin**: `/api/super-admin/marketplace/richieste/{id}/toggle`, `/api/super-admin/tickets/{id}/rispondi`.
+  - Ticket auto-passa a `in_lavorazione` quando il super_admin risponde. Email via Resend: **placeholder log** (necessita API key Resend per attivare invio reale).
+  - Test E2E: richiesta modulo demo → visibile su super_admin. Ticket demo → risposta admin → stato aggiornato + 2 messaggi in thread. ✅
 
 ### Sessione 01/07 (iter28)
 - ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.

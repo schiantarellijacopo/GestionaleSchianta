@@ -53,6 +53,7 @@ import SetupIniziale from "@/pages/SetupIniziale";
 import ScambioDati from "@/pages/ScambioDati";
 import DocumentiInbox from "@/pages/DocumentiInbox";
 import WhatsAppInstances from "@/pages/WhatsAppInstances";
+import SuperAdminPanel from "@/pages/SuperAdminPanel";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -237,6 +238,11 @@ function App() {
                                     </ProtectedRoute>
                                 }
                             />
+                            <Route path="/super-admin" element={
+                                <ProtectedRoute roles={["admin"]}>
+                                    <SuperAdminPanel />
+                                </ProtectedRoute>
+                            } />
                             <Route path="*" element={<Navigate to="/" replace />} />
                         </Route>
                     </Routes>

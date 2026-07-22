@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon, ShoppingCart, Headphones } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
+import MarketplaceDrawer from "./MarketplaceDrawer";
+import TicketDialog from "./TicketDialog";
 
 export default function TopBar() {
     const { user } = useAuth();
@@ -13,6 +15,8 @@ export default function TopBar() {
     const [results, setResults] = useState(null);
     const [open, setOpen] = useState(false);
     const [azienda, setAzienda] = useState(null);
+    const [showMarketplace, setShowMarketplace] = useState(false);
+    const [showTicket, setShowTicket] = useState(false);
     const ref = useRef();
     const nav = useNavigate();
 
@@ -189,6 +193,28 @@ export default function TopBar() {
 
             <NotificheBell />
 
+            {/* Marketplace button */}
+            <button
+                type="button"
+                onClick={() => setShowMarketplace(true)}
+                className="relative p-2 text-slate-600 hover:text-violet-600 hover:bg-violet-50 rounded-md transition-colors"
+                title="Marketplace moduli aggiuntivi"
+                data-testid="topbar-marketplace-btn"
+            >
+                <ShoppingCart size={18} />
+            </button>
+
+            {/* Assistenza & Ticket button */}
+            <button
+                type="button"
+                onClick={() => setShowTicket(true)}
+                className="relative p-2 text-slate-600 hover:text-sky-600 hover:bg-sky-50 rounded-md transition-colors"
+                title="Assistenza & Ticket di supporto"
+                data-testid="topbar-support-btn"
+            >
+                <Headphones size={18} />
+            </button>
+
             {/* Logo agenzia — alto a destra */}
             {azienda?.logo_url && (
                 <img
@@ -199,6 +225,9 @@ export default function TopBar() {
                     data-testid="topbar-azienda-logo"
                 />
             )}
+
+            <MarketplaceDrawer open={showMarketplace} onClose={() => setShowMarketplace(false)} />
+            <TicketDialog open={showTicket} onClose={() => setShowTicket(false)} />
         </div>
     );
 }

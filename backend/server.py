@@ -10492,6 +10492,9 @@ from routes import extras_p1p2 as _extras_router  # noqa: E402
 from routes import whatsapp_evo as _wa_evo_router  # noqa: E402
 from routes import ai_chat as _ai_chat_router  # noqa: E402
 from routes import tenants as _tenants_router  # noqa: E402
+from routes import super_admin as _super_admin_router  # noqa: E402
+from routes import marketplace as _marketplace_router  # noqa: E402
+from routes import tickets as _tickets_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10510,6 +10513,9 @@ api.include_router(_extras_router.router)
 api.include_router(_wa_evo_router.router)
 api.include_router(_ai_chat_router.router)
 api.include_router(_tenants_router.router)
+api.include_router(_super_admin_router.router)
+api.include_router(_marketplace_router.router)
+api.include_router(_tickets_router.router)
 
 app.include_router(api)
 
@@ -10585,15 +10591,28 @@ async def startup():
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
-        admin = UserPublic(email=admin_email, name="Amministratore", role="admin").model_dump()
+        admin = UserPublic(email=admin_email, name="Amministratore", role="admin",
+                           is_super_admin=True).model_dump()
         admin["password_hash"] = hash_password(admin_password)
         await db.users.insert_one(admin)
         logger.info("Admin seeded: %s", admin_email)
-    elif not verify_password(admin_password, existing.get("password_hash", "")):
-        await db.users.update_one(
-            {"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}}
-        )
-        logger.info("Admin password updated: %s", admin_email)
+    else:
+        updates: dict = {}
+        if not verify_password(admin_password, existing.get("password_hash", "")):
+            updates["password_hash"] = hash_password(admin_password)
+        if not existing.get("is_super_admin"):
+            updates["is_super_admin"] = True
+        if updates:
+            await db.users.update_one({"email": admin_email}, {"$set": updates})
+
+    # Multi-tenant seed + migrazione dati legacy
+    from tenant import seed_tenants, migrate_existing_data_to_principale
+    await seed_tenants()
+    await migrate_existing_data_to_principale()
+    await db.tenants.create_index("id", unique=True)
+    # Marketplace default modules
+    from routes.marketplace import seed_default_moduli
+    await seed_default_moduli()
 
     # demo users (dipendente + cliente collegato a anagrafica demo)
     from seed_demo import seed_demo

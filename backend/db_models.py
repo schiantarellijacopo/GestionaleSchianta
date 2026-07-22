@@ -56,6 +56,46 @@ class Tenant(BaseDoc):
     partita_iva: Optional[str] = None
     codice_fiscale: Optional[str] = None
     note: Optional[str] = None
+    # ---- Licensing & Abbonamenti (SaaS) ----
+    stato_abbonamento: Literal["attiva", "in_prova", "sospesa", "scaduta", "cancellata"] = "in_prova"
+    piano: Literal["trial", "starter", "professional", "enterprise", "custom"] = "trial"
+    prezzo_mensile_eur: float = 0.0
+    data_inizio_abbonamento: Optional[str] = None  # ISO date
+    data_fine_prova: Optional[str] = None  # ISO date (per trial)
+    data_prossimo_rinnovo: Optional[str] = None  # ISO date
+    max_utenti: int = 5
+    max_polizze: int = 0  # 0 = illimitato
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+
+
+# =============== SUBSCRIPTION & TRANSACTION (SUPER ADMIN ONLY) ===============
+class Subscription(BaseDoc):
+    """Abbonamento SaaS di un tenant. NON tenant-scoped (gestito da super_admin)."""
+    tenant_id: str  # riferimento al tenant abbonato
+    piano: Literal["trial", "starter", "professional", "enterprise", "custom"] = "trial"
+    stato: Literal["attiva", "in_prova", "sospesa", "scaduta", "cancellata"] = "in_prova"
+    prezzo_mensile_eur: float = 0.0
+    data_inizio: str  # ISO
+    data_fine: Optional[str] = None  # None = ricorrente
+    data_prossimo_rinnovo: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    stripe_customer_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+class Transaction(BaseDoc):
+    """Transazione di pagamento (Stripe). NON tenant-scoped."""
+    tenant_id: str
+    subscription_id: Optional[str] = None
+    stripe_payment_intent_id: Optional[str] = None
+    stripe_invoice_id: Optional[str] = None
+    importo_eur: float
+    valuta: str = "EUR"
+    stato: Literal["pending", "succeeded", "failed", "refunded"] = "pending"
+    data_transazione: str  # ISO
+    descrizione: Optional[str] = None
+    metodo_pagamento: Optional[str] = None  # card | bonifico | sepa
 
 
 # =============== USERS ===============
@@ -820,6 +860,73 @@ class RamoLibreria(BaseDoc):
     nome: str
     descrizione: Optional[str] = None
     attivo: bool = True
+
+
+# =============== MARKETPLACE & MODULI (SaaS Add-ons) ===============
+class MarketplaceModule(BaseDoc):
+    """Modulo aggiuntivo acquistabile nel Marketplace (globale, non tenant-scoped).
+    Es. `Risk Assessment 3D`, `Firma Digitale`, `Pacchetto SMS 1000`, `Google Drive Sync`.
+    """
+    codice: str  # es. RISK_3D, SMS_1000
+    nome: str
+    descrizione: str
+    prezzo_eur: float = 0.0
+    tipo: Literal["ricorrente", "una_tantum", "consumo"] = "ricorrente"
+    icona: Optional[str] = None
+    categoria: Optional[str] = None  # analisi | comunicazione | integrazioni | firma
+    attivo: bool = True
+    ordine: int = 0
+
+
+class MarketplaceRequest(BaseDoc):
+    """Richiesta di attivazione/acquisto di un modulo da parte di un'agenzia.
+    NON tenant-scoped: il super_admin le vede tutte."""
+    tenant_id: str  # riferimento tenant che ha richiesto
+    module_codice: str
+    module_nome: str
+    stato: Literal["richiesto", "in_lavorazione", "attivo", "non_attivo", "rifiutato"] = "richiesto"
+    prezzo_concordato_eur: float = 0.0
+    note_agenzia: Optional[str] = None
+    note_admin: Optional[str] = None
+    data_attivazione: Optional[str] = None
+    data_scadenza: Optional[str] = None
+    richiesto_da_user_id: Optional[str] = None
+
+
+# =============== TICKET DI SUPPORTO ===============
+class TicketAllegato(BaseModel):
+    nome_file: str
+    storage_path: str
+    content_type: str
+    size: int = 0
+
+
+class Ticket(BaseDoc):
+    """Ticket di assistenza aperto da un'agenzia verso il super_admin.
+    NON tenant-scoped (gestito centralmente dall'helpdesk)."""
+    tenant_id: str
+    tenant_ragione_sociale: Optional[str] = None
+    numero: Optional[str] = None  # es. TCK-2026-0001
+    oggetto: str
+    categoria: Literal["bug", "feature_request", "supporto", "billing", "integrazione", "altro"] = "supporto"
+    priorita: Literal["bassa", "normale", "alta", "urgente"] = "normale"
+    descrizione: str
+    stato: Literal["aperto", "in_lavorazione", "risolto", "chiuso"] = "aperto"
+    aperto_da_user_id: Optional[str] = None
+    aperto_da_email: Optional[str] = None
+    assegnato_a_user_id: Optional[str] = None
+    allegati: List[TicketAllegato] = Field(default_factory=list)
+    data_chiusura: Optional[str] = None
+
+
+class TicketMessage(BaseDoc):
+    """Messaggio in un thread ticket. NON tenant-scoped."""
+    ticket_id: str
+    autore_user_id: Optional[str] = None
+    autore_email: Optional[str] = None
+    autore_ruolo: Literal["agenzia", "super_admin"] = "agenzia"
+    messaggio: str
+    allegati: List[TicketAllegato] = Field(default_factory=list)
 
 
 # =============== ALLEGATI / DOCUMENTI ===============

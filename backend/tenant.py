@@ -145,17 +145,26 @@ def user_tenant_id(user: dict[str, Any] | None) -> Optional[str]:
     return user.get("agenzia_tenant_id") or TENANT_PRINCIPALE_ID
 
 
-def tenant_filter(user: dict[str, Any] | None) -> dict[str, Any]:
+def tenant_filter(user: dict[str, Any] | None) -> dict[str, Any] | None:
     """Ritorna un filtro MongoDB per isolare i dati per tenant.
 
-    - Super admin: filtro vuoto (vede tutto).
-    - Altri utenti: filtro {"agenzia_tenant_id": <tid>}.
+    - **Super admin** (owner della piattaforma SaaS): per motivi di **privacy/GDPR**
+      NON deve poter accedere ai dati clienti delle agenzie tenant. Ritorna un
+      filtro impossibile (`{"__super_admin_blocked__": True}`) su collezioni
+      tenant-scoped → 0 risultati.
+    - **Utenti normali**: filtro `{"agenzia_tenant_id": <tid>}`.
 
-    Retro-compat: include anche i doc con `agenzia_tenant_id` mancante quando
-    il tenant è quello principale (dati pre-migrazione).
+    Retro-compat: per il tenant principale include anche i doc pre-migrazione
+    (senza il campo `agenzia_tenant_id`).
+
+    NB: questa funzione è chiamata dal wrapper `TenantAwareCollection` SOLO su
+    collezioni tenant-scoped (`TENANT_SCOPED_COLLECTIONS`). Per collezioni non
+    scoped (tenants, subscriptions, transactions, users, librerie) il wrapper
+    ritorna None → nessun filtro applicato.
     """
     if is_super_admin(user):
-        return {}
+        # GDPR: super_admin non vede clienti/polizze/incassi/allegati delle agenzie
+        return {"__super_admin_blocked__": True}
     tid = user_tenant_id(user)
     if tid == TENANT_PRINCIPALE_ID:
         return {"$or": [
