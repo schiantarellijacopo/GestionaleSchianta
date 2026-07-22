@@ -4274,6 +4274,7 @@ async def sostituisci_applicazione(
         raise HTTPException(400, "Applicazione già non attiva")
 
     motivo = body.pop("motivo", None)
+    eredita_libretto = bool(body.pop("eredita_libretto", False))
     today_iso = _now_iso()[:10]
     last = await db.applicazioni.find(
         {"polizza_id": pid}, {"_id": 0, "numero": 1},
@@ -4293,6 +4294,43 @@ async def sostituisci_applicazione(
     obj = ApplicazioneLibroMatricola(**nuovo)
     await db.applicazioni.insert_one(obj.model_dump())
 
+    # -------- RCA sostituzione: logica libretto/atto vendita --------
+    old_targa = (old.get("targa") or "").upper().replace(" ", "")
+    new_targa = (obj.targa or "").upper().replace(" ", "")
+    stessa_targa = bool(old_targa and new_targa and old_targa == new_targa)
+    docs_ereditati = 0
+    docs_mancanti_flag = []
+    if eredita_libretto or stessa_targa:
+        # Copia gli allegati "libretto*" collegati alla vecchia applicazione sulla nuova
+        cursor = db.allegati.find({
+            "applicazione_matricola_id": aid,
+            "$or": [
+                {"categoria": {"$in": ["libretto_circolazione", "libretto"]}},
+                {"nome_file": {"$regex": "libretto", "$options": "i"}},
+            ],
+        }, {"_id": 0})
+        async for al in cursor:
+            new_al = {**al}
+            new_al["id"] = _uid()
+            new_al["applicazione_matricola_id"] = obj.id
+            new_al["created_at"] = _now_iso()
+            new_al["updated_at"] = _now_iso()
+            new_al["descrizione"] = f"Ereditato da appl. #{old.get('numero')} (stessa targa)"
+            await db.allegati.insert_one(new_al)
+            docs_ereditati += 1
+    else:
+        # Targa diversa → segnala documenti richiesti automaticamente
+        docs_mancanti_flag = ["libretto_circolazione_nuovo", "atto_vendita_o_rottamazione"]
+        await db.applicazioni.update_one(
+            {"id": obj.id},
+            {"$set": {
+                "documenti_richiesti_sostituzione": docs_mancanti_flag,
+                "note_sostituzione": (f"Sostituzione con targa diversa ({old_targa} → {new_targa}). "
+                                      f"Richiesti: libretto nuovo veicolo + atto vendita/rottamazione precedente."),
+                "updated_at": _now_iso(),
+            }},
+        )
+
     # marca old come sostituita
     await db.applicazioni.update_one(
         {"id": aid},
@@ -4306,8 +4344,15 @@ async def sostituisci_applicazione(
         }},
     )
     await log_attivita(user, "sostituisci", "applicazione", obj.id,
-                       f"Sostituita {old.get('targa')} -> {obj.targa}")
-    return {"nuova": obj.model_dump(), "sostituita_id": aid}
+                       f"Sostituita {old.get('targa')} -> {obj.targa} "
+                       f"({'stessa targa · libretto ereditato' if stessa_targa else 'targa diversa · doc mancanti flaggati'})")
+    return {
+        "nuova": obj.model_dump(),
+        "sostituita_id": aid,
+        "stessa_targa": stessa_targa,
+        "documenti_ereditati": docs_ereditati,
+        "documenti_richiesti": docs_mancanti_flag,
+    }
 
 
 @api.post("/polizze/{pid}/applicazioni/{aid}/annulla")
@@ -10537,6 +10582,8 @@ from routes import insights as _insights_router  # noqa: E402
 from routes import cervello as _cervello_router  # noqa: E402
 from routes import marketing_pro as _mktp_router  # noqa: E402
 from routes import commerciale as _comm_router  # noqa: E402
+from routes import patrimonio as _patrim_router  # noqa: E402
+api.include_router(_patrim_router.router)
 from routes import agenzie as _age_router  # noqa: E402
 from routes import setup_scambio as _setup_router  # noqa: E402
 from routes import documenti_inbox as _docinbox_router  # noqa: E402

@@ -1260,15 +1260,26 @@ class PipelineCard(BaseDoc):
 
 # =============== ANALISI CLIENTE (Diagnosi completa) ===============
 class ImmobileItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     tipo: Literal["abitativo", "commerciale", "ufficio", "garage", "terreno", "altro"] = "abitativo"
     indirizzo: Optional[str] = None
     comune: Optional[str] = None
+    provincia: Optional[str] = None
+    cap: Optional[str] = None
     foglio: Optional[str] = None
     particella: Optional[str] = None
     sub: Optional[str] = None
     categoria_catastale: Optional[str] = None
     rendita_catastale: float = 0.0
     valore_commerciale: float = 0.0
+    # Nuovi: valore ricostruzione + degrado (per polizze casa/abitazione)
+    superficie_mq: float = 0.0
+    valore_ricostruzione: float = 0.0
+    percentuale_degrado: float = 0.0
+    anno_costruzione: Optional[int] = None
+    # Geolocalizzazione (Leaflet)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     titolo: Literal["proprieta", "comproprieta", "usufrutto", "nuda_proprieta", "locazione"] = "proprieta"
     percentuale_proprieta: float = 100.0
     targa_immobile: Optional[str] = None

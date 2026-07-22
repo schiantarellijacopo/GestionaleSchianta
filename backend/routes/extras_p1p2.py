@@ -145,6 +145,47 @@ async def documenti_mancanti(
 
 
 # ===========================================================
+# 10.b) NOTE / SOLLECITI su Documenti mancanti
+# ===========================================================
+@router.post("/insights/documenti-mancanti/note")
+async def salva_nota_sollecito(
+    body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Salva/aggiorna una nota di sollecito su un'entità (polizza/anagrafica).
+    body = { entita_tipo: 'polizza'|'anagrafica', entita_id: str, nota: str }
+    """
+    et = (body.get("entita_tipo") or "").strip()
+    eid = (body.get("entita_id") or "").strip()
+    nota = (body.get("nota") or "").strip()
+    if et not in ("polizza", "anagrafica"):
+        raise HTTPException(400, "entita_tipo deve essere 'polizza' o 'anagrafica'")
+    if not eid:
+        raise HTTPException(400, "entita_id obbligatorio")
+    doc = {
+        "entita_tipo": et,
+        "entita_id": eid,
+        "nota": nota,
+        "autore_id": user.get("id"),
+        "autore_nome": user.get("name") or user.get("email"),
+        "updated_at": _now_iso(),
+    }
+    await db.documenti_solleciti.update_one(
+        {"entita_tipo": et, "entita_id": eid},
+        {"$set": doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "nota": nota}
+
+
+@router.get("/insights/documenti-mancanti/note")
+async def lista_note_solleciti(user=Depends(current_user)) -> list[dict]:
+    """Ritorna tutte le note di sollecito dell'utente/tenant."""
+    docs = await db.documenti_solleciti.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500)
+    return docs
+
+
+# ===========================================================
 # 11) STORICO AVVISI · LISTA (vedi sezione 7 più sotto)
 # ===========================================================
 
