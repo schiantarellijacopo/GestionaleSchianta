@@ -27,11 +27,15 @@ def _secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
-def create_access_token(user_id: str, email: str, role: str) -> str:
+def create_access_token(user_id: str, email: str, role: str,
+                        agenzia_tenant_id: str | None = None,
+                        is_super_admin: bool = False) -> str:
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
+        "agenzia_tenant_id": agenzia_tenant_id,
+        "is_super_admin": is_super_admin,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_MINUTES),
         "type": "access",
     }

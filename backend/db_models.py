@@ -21,6 +21,41 @@ class BaseDoc(BaseModel):
     id: str = Field(default_factory=_uid)
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
+    # Multi-tenant isolation: ogni documento appartiene a un tenant (agenzia).
+    # Il valore è settato da `tenant.assign_tenant(user, doc)` al momento della
+    # creazione. Retro-compat: `None` viene trattato come "tenant principale".
+    agenzia_tenant_id: Optional[str] = None
+
+
+# =============== TENANT (Multi-Agency Isolation) ===============
+TenantTipo = Literal["principale", "demo", "clean", "partner"]
+StorageProvider = Literal["emergent", "s3", "google_drive", "onedrive"]
+
+
+class Tenant(BaseDoc):
+    """Rappresenta un'agenzia tenant (unità di isolamento multi-tenant).
+
+    Distinto dalla libreria `agenzie` che rappresenta invece agenzie **partner**
+    esterne per collaborazioni di mandato.
+    """
+    ragione_sociale: str
+    codice: Optional[str] = None
+    tipo: TenantTipo = "partner"
+    attivo: bool = True
+    # Storage provider di default per i file dell'agenzia
+    storage_provider: StorageProvider = "emergent"
+    # Configurazione provider (bucket S3, token OAuth Drive/OneDrive, ecc.)
+    storage_config: dict = Field(default_factory=dict)
+    # Metadata agenzia (per header PDF, email, ecc.)
+    referente: Optional[str] = None
+    email: Optional[str] = None
+    telefono: Optional[str] = None
+    indirizzo: Optional[str] = None
+    citta: Optional[str] = None
+    provincia: Optional[str] = None
+    partita_iva: Optional[str] = None
+    codice_fiscale: Optional[str] = None
+    note: Optional[str] = None
 
 
 # =============== USERS ===============
@@ -32,6 +67,8 @@ class UserPublic(BaseDoc):
     name: str
     role: Role
     anagrafica_id: Optional[str] = None
+    # Super admin (Owner): ignora il filtro tenant, può vedere tutte le agenzie.
+    is_super_admin: bool = False
     # Dati collaboratore (per ruoli collaboratore/dipendente)
     codice_fiscale: Optional[str] = None
     partita_iva: Optional[str] = None
@@ -126,6 +163,8 @@ class UserCreate(BaseModel):
     name: str
     role: Role = "dipendente"
     anagrafica_id: Optional[str] = None
+    agenzia_tenant_id: Optional[str] = None
+    is_super_admin: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -790,6 +829,9 @@ class Allegato(BaseDoc):
     entita_id: str
     nome_file: str
     storage_path: str
+    # Provider di storage utilizzato per questo file (emergent/s3/google_drive/onedrive).
+    # Necessario per il "pescaggio" corretto quando l'agenzia usa più provider.
+    storage_provider: Optional[str] = "emergent"
     content_type: str
     size: int = 0
     descrizione: Optional[str] = None

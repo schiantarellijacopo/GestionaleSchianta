@@ -101,7 +101,10 @@ async def login(payload: LoginRequest, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Credenziali non valide")
-    access = create_access_token(user["id"], user["email"], user["role"])
+    tid = user.get("agenzia_tenant_id")
+    is_su = bool(user.get("is_super_admin"))
+    access = create_access_token(user["id"], user["email"], user["role"],
+                                 agenzia_tenant_id=tid, is_super_admin=is_su)
     refresh = create_refresh_token(user["id"])
     response.set_cookie("access_token", access, httponly=True, secure=False,
                         samesite="lax", max_age=60 * 60 * 8, path="/")
@@ -10488,6 +10491,7 @@ from routes import documenti_inbox as _docinbox_router  # noqa: E402
 from routes import extras_p1p2 as _extras_router  # noqa: E402
 from routes import whatsapp_evo as _wa_evo_router  # noqa: E402
 from routes import ai_chat as _ai_chat_router  # noqa: E402
+from routes import tenants as _tenants_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10505,6 +10509,7 @@ api.include_router(_docinbox_router.router)
 api.include_router(_extras_router.router)
 api.include_router(_wa_evo_router.router)
 api.include_router(_ai_chat_router.router)
+api.include_router(_tenants_router.router)
 
 app.include_router(api)
 
