@@ -66,6 +66,7 @@ class ModuloCatalogoBody(BaseModel):
     nome: str
     descrizione: str
     prezzo_eur: float = 0.0
+    tipo_modulo: Literal["core", "estensione"] = "estensione"
     tipo: Literal["ricorrente", "una_tantum", "consumo"] = "ricorrente"
     categoria: Optional[str] = None
     icona: Optional[str] = None
@@ -74,14 +75,48 @@ class ModuloCatalogoBody(BaseModel):
 
 
 @router.post("/marketplace/moduli", status_code=201)
-async def sa_create_modulo(body: ModuloCatalogoBody,
+async def sa_create_modulo(body: ModuloCatalogoBody, request: Request,
                            user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     from db_models import MarketplaceModule
+    existing = await raw_db.marketplace_modules.find_one({"codice": body.codice}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Modulo con codice {body.codice} già esistente")
     m = MarketplaceModule(**body.model_dump()).model_dump()
     await raw_db.marketplace_modules.insert_one(m)
     m.pop("_id", None)
+    await log_action(user=user, action_type="MARKETPLACE_MODULE_CREATED",
+                     details=f"Nuovo modulo '{body.nome}' ({body.tipo_modulo}) - €{body.prezzo_eur}/mese",
+                     request=request)
     return m
+
+
+@router.patch("/marketplace/moduli/{modulo_id}")
+async def sa_update_modulo(modulo_id: str, body: ModuloCatalogoBody, request: Request,
+                           user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    payload = {**body.model_dump(exclude_unset=True), "updated_at": _now_iso()}
+    res = await raw_db.marketplace_modules.update_one({"id": modulo_id}, {"$set": payload})
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="Modulo non trovato")
+    await log_action(user=user, action_type="MARKETPLACE_MODULE_CREATED",
+                     details=f"Modulo aggiornato: {body.nome}", request=request)
+    return await raw_db.marketplace_modules.find_one({"id": modulo_id}, {"_id": 0})
+
+
+@router.delete("/marketplace/moduli/{modulo_id}")
+async def sa_delete_modulo(modulo_id: str, request: Request,
+                           user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    m = await raw_db.marketplace_modules.find_one({"id": modulo_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Modulo non trovato")
+    # Soft-delete: mark inattivo invece di cancellare (per non rompere le richieste)
+    await raw_db.marketplace_modules.update_one({"id": modulo_id},
+                                                {"$set": {"attivo": False, "updated_at": _now_iso()}})
+    await log_action(user=user, action_type="MARKETPLACE_MODULE_CREATED",
+                     details=f"Modulo disattivato: {m.get('nome')}", request=request)
+    return {"ok": True}
 
 
 @router.get("/marketplace/richieste")

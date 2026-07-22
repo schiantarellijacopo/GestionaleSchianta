@@ -40,7 +40,21 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
-- ✅ **ANIA Importer · Colonne mancanti (P0)**: mapping `frazionamento_share`, `valore_ass_1/2/3`, `accessori_totale`, `scadenza_effettiva`.
+- ✅ ANIA importer + Multi-tenant + Storage abstraction + Query auto-filter + Super Admin Panel + Marketplace + Ticket + Audit Log + Resend Mock.
+- ✅ **Super Admin dedicato & isolato dal frontend agenzia**:
+  - Nuova login page dedicata `/admin-login` (dark theme viola con Shield icon) con credenziali pre-caricate.
+  - Nuovo `SuperAdminLayout.jsx` (no sidebar clienti, solo header viola con logout).
+  - `ProtectedRoute` esteso con `superAdminOnly` (route riservate) e `blockSuperAdmin` (redirect super_admin fuori dalle route client).
+  - Login normale (`/login`) reindirizza super_admin a `/super-admin` invece di dashboard.
+  - Utente dedicato `superadmin@assicura.it / Superadmin123!` creato via startup seed idempotente (aggiuntivo rispetto a `admin@assicura.it` che resta admin del tenant principale).
+  - Test end-to-end: login OK, 4 endpoint super_admin HTTP 200, 0 anagrafiche/polizze visibili (GDPR).
+- ✅ **Marketplace CRUD moduli (core + estensioni)**:
+  - Nuovo campo `tipo_modulo: "core" | "estensione"` su `MarketplaceModule`.
+  - Seed automatico di 23 moduli: **14 CORE** (Portafoglio, Anagrafica, Sinistri, Prima Nota, Provvigioni, ANIA Import, Statistiche, Alert, Chat Interna, WhatsApp Base, OCR, AI Assistente, Corsi IVASS, Marketing) + **9 ESTENSIONI** (Risk 3D, Firma Digitale, SMS 1000, WhatsApp Illimitato, Google Drive, OneDrive, S3, Stripe Pay, Pensioni INPS).
+  - Endpoint PATCH/DELETE super_admin per catalog CRUD.
+  - Tab Marketplace del pannello ora ha 2 sotto-tab: **Richieste** (attivazione dalle agenzie) + **Catalogo** (CRUD moduli) con filtri Core/Estensioni e form completo per creazione/modifica.
+
+### Sessione 01/07 (iter28)
 - ✅ **Multi-Tenant Foundation + Query Auto-Filter**: `Tenant` model, `TenantAwareDB` wrapper, migrazione ~2500 record al principale, isolamento reale attivo su tutti i router. Script `migrate_to_multitenant.py` per Railway prod.
 - ✅ **Super Admin Panel (Platform Owner)** 🔒 GDPR-safe con 6 tab: Agenzie, Abbonamenti, Transazioni, Marketplace, Ticket Helpdesk, **Log Piattaforma**.
 - ✅ **Storage Engine Abstraction**: driver `emergent` attivo, `s3`/`google_drive`/`onedrive` placeholder.

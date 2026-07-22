@@ -20,6 +20,11 @@ export default function Login() {
 
     useEffect(() => {
         if (user && user !== false) {
+            // Se super_admin arriva sulla login normale, dirotta subito al pannello dedicato
+            if (user.is_super_admin) {
+                nav("/super-admin", { replace: true });
+                return;
+            }
             const from = loc.state?.from || "/";
             nav(from, { replace: true });
         }

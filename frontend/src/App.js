@@ -54,6 +54,8 @@ import ScambioDati from "@/pages/ScambioDati";
 import DocumentiInbox from "@/pages/DocumentiInbox";
 import WhatsAppInstances from "@/pages/WhatsAppInstances";
 import SuperAdminPanel from "@/pages/SuperAdminPanel";
+import AdminLogin from "@/pages/AdminLogin";
+import SuperAdminLayout from "@/components/SuperAdminLayout";
 import { Toaster } from "@/components/ui/sonner";
 
 function App() {
@@ -63,9 +65,22 @@ function App() {
                 <BrowserRouter>
                     <Routes>
                         <Route path="/login" element={<Login />} />
+                        <Route path="/admin-login" element={<AdminLogin />} />
+
+                        {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}
                         <Route
                             element={
-                                <ProtectedRoute>
+                                <ProtectedRoute superAdminOnly>
+                                    <SuperAdminLayout />
+                                </ProtectedRoute>
+                            }
+                        >
+                            <Route path="/super-admin" element={<SuperAdminPanel />} />
+                        </Route>
+
+                        <Route
+                            element={
+                                <ProtectedRoute blockSuperAdmin>
                                     <Layout />
                                 </ProtectedRoute>
                             }
@@ -239,8 +254,8 @@ function App() {
                                 }
                             />
                             <Route path="/super-admin" element={
-                                <ProtectedRoute roles={["admin"]}>
-                                    <SuperAdminPanel />
+                                <ProtectedRoute superAdminOnly>
+                                    <Navigate to="/super-admin" replace />
                                 </ProtectedRoute>
                             } />
                             <Route path="*" element={<Navigate to="/" replace />} />

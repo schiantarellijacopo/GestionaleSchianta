@@ -333,49 +333,225 @@ function TransazioniTab() {
 }
 
 function MarketplaceTab() {
-    const [items, setItems] = useState([]);
-    const load = () => api.get("/super-admin/marketplace/richieste").then((r) => setItems(r.data || []));
-    useEffect(() => { load(); }, []);
+    const [subTab, setSubTab] = useState("richieste"); // richieste | catalogo
+    const [richieste, setRichieste] = useState([]);
+    const [moduli, setModuli] = useState([]);
+    const [filterTipo, setFilterTipo] = useState("all");
+    const [editing, setEditing] = useState(null);
+
+    const loadRichieste = () => api.get("/super-admin/marketplace/richieste").then((r) => setRichieste(r.data || []));
+    const loadModuli = () => api.get("/super-admin/marketplace/moduli").then((r) => setModuli(r.data || []));
+    useEffect(() => { loadRichieste(); loadModuli(); }, []);
 
     const toggle = async (id, stato) => {
         try {
             await api.patch(`/super-admin/marketplace/richieste/${id}/toggle`, { stato });
             toast.success("Aggiornato");
-            load();
+            loadRichieste();
         } catch (e) { toast.error(e?.response?.data?.detail || "Errore"); }
     };
 
+    const filtered = moduli.filter((m) => filterTipo === "all" || m.tipo_modulo === filterTipo);
+
     return (
-        <div className="border border-slate-200 rounded-lg overflow-hidden">
-            {items.length === 0 && <div className="p-6 text-center text-slate-500 text-sm">Nessuna richiesta di attivazione.</div>}
-            <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-600">
-                    <tr><th className="text-left px-3 py-2">Data</th><th className="text-left px-3 py-2">Agenzia</th><th className="text-left px-3 py-2">Modulo</th><th className="text-right px-3 py-2">Prezzo</th><th className="text-left px-3 py-2">Stato</th><th className="text-right px-3 py-2">Azioni</th></tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {items.map((r) => (
-                        <tr key={r.id} data-testid={`sa-marketplace-req-${r.id}`}>
-                            <td className="px-3 py-2 text-xs">{new Date(r.created_at).toLocaleDateString("it-IT")}</td>
-                            <td className="px-3 py-2 font-medium">{r.tenant_ragione_sociale}</td>
-                            <td className="px-3 py-2">{r.module_nome}</td>
-                            <td className="px-3 py-2 text-right">€ {r.prezzo_concordato_eur?.toFixed(2)}</td>
-                            <td className="px-3 py-2"><span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${STATO_COLORS[r.stato]}`}>{r.stato}</span></td>
-                            <td className="px-3 py-2 text-right">
-                                {r.stato !== "attivo" && (
-                                    <button onClick={() => toggle(r.id, "attivo")}
-                                        className="text-xs px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
-                                        data-testid={`sa-toggle-on-${r.id}`}>Attiva</button>
-                                )}
-                                {r.stato === "attivo" && (
-                                    <button onClick={() => toggle(r.id, "non_attivo")}
-                                        className="text-xs px-2 py-1 rounded bg-slate-500 text-white hover:bg-slate-600"
-                                        data-testid={`sa-toggle-off-${r.id}`}>Disattiva</button>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
+        <div>
+            <div className="flex gap-1 mb-4 border-b border-slate-100">
+                <button onClick={() => setSubTab("richieste")}
+                    className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${subTab === "richieste" ? "border-violet-600 text-violet-700" : "border-transparent text-slate-600"}`}
+                    data-testid="sa-mkt-subtab-richieste">
+                    Richieste attivazione ({richieste.length})
+                </button>
+                <button onClick={() => setSubTab("catalogo")}
+                    className={`px-3 py-1.5 text-sm font-medium border-b-2 -mb-px ${subTab === "catalogo" ? "border-violet-600 text-violet-700" : "border-transparent text-slate-600"}`}
+                    data-testid="sa-mkt-subtab-catalogo">
+                    Catalogo moduli ({moduli.length})
+                </button>
+            </div>
+
+            {subTab === "richieste" && (
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    {richieste.length === 0 && <div className="p-6 text-center text-slate-500 text-sm">Nessuna richiesta di attivazione.</div>}
+                    <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-600">
+                            <tr><th className="text-left px-3 py-2">Data</th><th className="text-left px-3 py-2">Agenzia</th><th className="text-left px-3 py-2">Modulo</th><th className="text-right px-3 py-2">Prezzo</th><th className="text-left px-3 py-2">Stato</th><th className="text-right px-3 py-2">Azioni</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {richieste.map((r) => (
+                                <tr key={r.id} data-testid={`sa-marketplace-req-${r.id}`}>
+                                    <td className="px-3 py-2 text-xs">{new Date(r.created_at).toLocaleDateString("it-IT")}</td>
+                                    <td className="px-3 py-2 font-medium">{r.tenant_ragione_sociale}</td>
+                                    <td className="px-3 py-2">{r.module_nome}</td>
+                                    <td className="px-3 py-2 text-right">€ {r.prezzo_concordato_eur?.toFixed(2)}</td>
+                                    <td className="px-3 py-2"><span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${STATO_COLORS[r.stato]}`}>{r.stato}</span></td>
+                                    <td className="px-3 py-2 text-right">
+                                        {r.stato !== "attivo" ? (
+                                            <button onClick={() => toggle(r.id, "attivo")}
+                                                className="text-xs px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                                                data-testid={`sa-toggle-on-${r.id}`}>Attiva</button>
+                                        ) : (
+                                            <button onClick={() => toggle(r.id, "non_attivo")}
+                                                className="text-xs px-2 py-1 rounded bg-slate-500 text-white hover:bg-slate-600"
+                                                data-testid={`sa-toggle-off-${r.id}`}>Disattiva</button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {subTab === "catalogo" && (
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex gap-2">
+                            <button onClick={() => setFilterTipo("all")}
+                                className={`text-xs px-3 py-1 rounded-full ${filterTipo === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}
+                                data-testid="sa-mkt-filter-all">Tutti ({moduli.length})</button>
+                            <button onClick={() => setFilterTipo("core")}
+                                className={`text-xs px-3 py-1 rounded-full ${filterTipo === "core" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"}`}
+                                data-testid="sa-mkt-filter-core">Core inclusi ({moduli.filter(m => m.tipo_modulo === "core").length})</button>
+                            <button onClick={() => setFilterTipo("estensione")}
+                                className={`text-xs px-3 py-1 rounded-full ${filterTipo === "estensione" ? "bg-violet-600 text-white" : "bg-violet-50 text-violet-700"}`}
+                                data-testid="sa-mkt-filter-estensione">Estensioni ({moduli.filter(m => m.tipo_modulo === "estensione").length})</button>
+                        </div>
+                        <button onClick={() => setEditing({})}
+                            className="text-xs font-semibold px-3 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-1"
+                            data-testid="sa-mkt-new-btn">
+                            <Plus size={14} /> Nuovo Modulo
+                        </button>
+                    </div>
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-xs uppercase text-slate-600">
+                                <tr>
+                                    <th className="text-left px-3 py-2">Codice</th>
+                                    <th className="text-left px-3 py-2">Nome</th>
+                                    <th className="text-left px-3 py-2">Tipo</th>
+                                    <th className="text-left px-3 py-2">Categoria</th>
+                                    <th className="text-right px-3 py-2">Prezzo</th>
+                                    <th className="text-left px-3 py-2">Attivo</th>
+                                    <th className="text-right px-3 py-2">Azioni</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filtered.map((m) => (
+                                    <tr key={m.id} className="hover:bg-slate-50" data-testid={`sa-mkt-module-${m.codice}`}>
+                                        <td className="px-3 py-2 font-mono text-xs">{m.codice}</td>
+                                        <td className="px-3 py-2 font-medium">{m.nome}<div className="text-[11px] text-slate-500 truncate max-w-xs">{m.descrizione}</div></td>
+                                        <td className="px-3 py-2">
+                                            <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded border ${m.tipo_modulo === "core" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-violet-50 text-violet-700 border-violet-200"}`}>
+                                                {m.tipo_modulo === "core" ? "CORE" : "ESTENSIONE"}
+                                            </span>
+                                        </td>
+                                        <td className="px-3 py-2 text-xs">{m.categoria || "-"}</td>
+                                        <td className="px-3 py-2 text-right">{m.prezzo_eur === 0 ? "Incluso" : `€ ${m.prezzo_eur.toFixed(2)}`}</td>
+                                        <td className="px-3 py-2"><span className={`text-[10px] font-semibold ${m.attivo ? "text-emerald-700" : "text-slate-400"}`}>{m.attivo ? "✓ attivo" : "✗ nascosto"}</span></td>
+                                        <td className="px-3 py-2 text-right">
+                                            <button onClick={() => setEditing(m)}
+                                                className="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200"
+                                                data-testid={`sa-mkt-edit-${m.codice}`}>Modifica</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {editing !== null && (
+                <ModuloForm modulo={editing} onClose={() => setEditing(null)}
+                    onSaved={() => { setEditing(null); loadModuli(); }} />
+            )}
+        </div>
+    );
+}
+
+function ModuloForm({ modulo, onClose, onSaved }) {
+    const isNew = !modulo?.id;
+    const [f, setF] = useState({
+        codice: modulo?.codice || "",
+        nome: modulo?.nome || "",
+        descrizione: modulo?.descrizione || "",
+        prezzo_eur: modulo?.prezzo_eur ?? 0,
+        tipo_modulo: modulo?.tipo_modulo || "estensione",
+        tipo: modulo?.tipo || "ricorrente",
+        categoria: modulo?.categoria || "",
+        icona: modulo?.icona || "",
+        attivo: modulo?.attivo ?? true,
+        ordine: modulo?.ordine ?? 0,
+    });
+    const [saving, setSaving] = useState(false);
+    const save = async (e) => {
+        e.preventDefault();
+        if (!f.codice.trim() || !f.nome.trim()) { toast.error("Codice e nome obbligatori"); return; }
+        setSaving(true);
+        try {
+            if (isNew) {
+                await api.post("/super-admin/marketplace/moduli", f);
+                toast.success("Modulo creato!");
+            } else {
+                await api.patch(`/super-admin/marketplace/moduli/${modulo.id}`, f);
+                toast.success("Modulo aggiornato!");
+            }
+            onSaved();
+        } catch (err) {
+            toast.error(err?.response?.data?.detail || "Errore");
+        } finally { setSaving(false); }
+    };
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+            <form onSubmit={save} className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto"
+                data-testid="sa-mkt-form">
+                <h3 className="text-lg font-semibold mb-4">{isNew ? "Nuovo Modulo" : `Modifica: ${modulo.nome}`}</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                    <FormField label="Codice *" value={f.codice} onChange={(v) => setF({ ...f, codice: v.toUpperCase() })} testid="sa-mkt-form-codice" />
+                    <FormField label="Nome *" value={f.nome} onChange={(v) => setF({ ...f, nome: v })} testid="sa-mkt-form-nome" />
+                    <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Descrizione</label>
+                        <textarea rows={2} value={f.descrizione} onChange={(e) => setF({ ...f, descrizione: e.target.value })}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none"
+                            data-testid="sa-mkt-form-descrizione" />
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Tipo Modulo *</label>
+                        <select value={f.tipo_modulo} onChange={(e) => setF({ ...f, tipo_modulo: e.target.value, prezzo_eur: e.target.value === "core" ? 0 : f.prezzo_eur })}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
+                            data-testid="sa-mkt-form-tipo-modulo">
+                            <option value="core">Core (incluso nel pacchetto)</option>
+                            <option value="estensione">Estensione (a pagamento)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Modello prezzo</label>
+                        <select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
+                            data-testid="sa-mkt-form-tipo">
+                            <option value="ricorrente">Mensile ricorrente</option>
+                            <option value="una_tantum">Una tantum</option>
+                            <option value="consumo">A consumo (pacchetto)</option>
+                        </select>
+                    </div>
+                    <FormField label="Prezzo €" type="number" value={f.prezzo_eur} onChange={(v) => setF({ ...f, prezzo_eur: parseFloat(v) || 0 })} testid="sa-mkt-form-prezzo" />
+                    <FormField label="Categoria" value={f.categoria} onChange={(v) => setF({ ...f, categoria: v })} testid="sa-mkt-form-categoria" />
+                    <FormField label="Icona (lucide name)" value={f.icona} onChange={(v) => setF({ ...f, icona: v })} testid="sa-mkt-form-icona" />
+                    <FormField label="Ordine" type="number" value={f.ordine} onChange={(v) => setF({ ...f, ordine: parseInt(v) || 0 })} testid="sa-mkt-form-ordine" />
+                    <label className="flex items-center gap-2 mt-2 col-span-2">
+                        <input type="checkbox" checked={f.attivo} onChange={(e) => setF({ ...f, attivo: e.target.checked })}
+                            data-testid="sa-mkt-form-attivo" />
+                        <span className="text-sm">Attivo (visibile alle agenzie)</span>
+                    </label>
+                </div>
+                <div className="flex justify-end gap-2 mt-5">
+                    <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-300 rounded-md">Annulla</button>
+                    <button type="submit" disabled={saving}
+                        className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-md disabled:opacity-60"
+                        data-testid="sa-mkt-form-submit">
+                        {saving ? "Salvo…" : (isNew ? "Crea Modulo" : "Aggiorna")}
+                    </button>
+                </div>
+            </form>
         </div>
     );
 }

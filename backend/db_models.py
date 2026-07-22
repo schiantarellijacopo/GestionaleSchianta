@@ -864,16 +864,20 @@ class RamoLibreria(BaseDoc):
 
 # =============== MARKETPLACE & MODULI (SaaS Add-ons) ===============
 class MarketplaceModule(BaseDoc):
-    """Modulo aggiuntivo acquistabile nel Marketplace (globale, non tenant-scoped).
-    Es. `Risk Assessment 3D`, `Firma Digitale`, `Pacchetto SMS 1000`, `Google Drive Sync`.
+    """Modulo del software (core incluso nel pacchetto o estensione a pagamento).
+    Globale, non tenant-scoped.
+    Es. `Portafoglio Polizze` (core), `Risk Assessment 3D` (estensione).
     """
-    codice: str  # es. RISK_3D, SMS_1000
+    codice: str  # es. PORTAFOGLIO, RISK_3D
     nome: str
     descrizione: str
     prezzo_eur: float = 0.0
+    # tipo_modulo distingue tra funzionalità core (incluse) ed estensioni acquistabili
+    tipo_modulo: Literal["core", "estensione"] = "estensione"
+    # tipo distingue il modello di ricavo per le estensioni
     tipo: Literal["ricorrente", "una_tantum", "consumo"] = "ricorrente"
     icona: Optional[str] = None
-    categoria: Optional[str] = None  # analisi | comunicazione | integrazioni | firma
+    categoria: Optional[str] = None
     attivo: bool = True
     ordine: int = 0
 

@@ -10624,6 +10624,26 @@ async def startup():
     from routes.marketplace import seed_default_moduli
     await seed_default_moduli()
 
+    # Dedicated super admin user (idempotent)
+    super_email = "superadmin@assicura.it"
+    super_pwd = "Superadmin123!"
+    existing_su = await db.users.find_one({"email": super_email})
+    if not existing_su:
+        su_doc = UserPublic(email=super_email, name="Super Admin", role="admin",
+                            is_super_admin=True).model_dump()
+        su_doc["password_hash"] = hash_password(super_pwd)
+        su_doc["attivo"] = True
+        await db.users.insert_one(su_doc)
+        logger.info("Super admin seeded: %s", super_email)
+    else:
+        updates = {}
+        if not verify_password(super_pwd, existing_su.get("password_hash", "")):
+            updates["password_hash"] = hash_password(super_pwd)
+        if not existing_su.get("is_super_admin"):
+            updates["is_super_admin"] = True
+        if updates:
+            await db.users.update_one({"email": super_email}, {"$set": updates})
+
     # demo users (dipendente + cliente collegato a anagrafica demo)
     from seed_demo import seed_demo
     await seed_demo(db)
