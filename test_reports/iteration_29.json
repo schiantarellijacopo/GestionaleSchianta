@@ -1,0 +1,46 @@
+{
+  "summary": "Testing frontend dei 4 punti P0 su AnagraficaDetail (KPI deep-link, Conti Correnti multi-IBAN, OpenAPI.it, Profilazione & GDPR). 3 punti su 4 funzionanti. Un BUG critico su cc-lookup (banca non risolta lato UI per mismatch tra formato risposta backend e attese frontend).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/lookup/iban", "issue": "Backend restituisce struttura FLAT {iban, abi, cab, cin, conto, ragione_sociale, bic, source} ma frontend ContiCorrentiTab.jsx attende struttura NESTED {valid:true, abi, cab, banca:{ragione_sociale, bic}}. Il review_request originale descriveva il contratto nested (POST) — quindi il backend è divergente dal contratto atteso. Anche il verbo indicato nel problem statement (POST) è discordante: l'endpoint è GET."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ContiCorrentiTab.jsx (AddIbanForm)",
+        "issue": "Dopo click su 'Risolvi banca' con IBAN valido IT60X0542811101000000123456: (a) il pannello cc-lookup-result NON viene mostrato, (b) il toast è 'Banca non presente in tabella locale' invece di 'Banca risolta: Banco BPM', (c) alla salvataggio, banca_ragione_sociale=null e banca_bic=null (persi). Rendering IBAN in lista mostra '—' al posto della banca. Causa: r.data.banca è undefined perché backend torna struttura flat, non nested.",
+        "selector": "cc-lookup-result / cc-item-0",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Aggiunta IBAN con auto-lookup banca",
+        "issue": "Contratto API disallineato tra /api/lookup/iban (flat: ragione_sociale/bic al top level) e ContiCorrentiTab.jsx (lookup?.banca?.ragione_sociale, lookup?.banca?.bic, lookup?.valid). Il dato ABI/CAB viene salvato correttamente (letti dal top level), ma banca_ragione_sociale, banca_bic e la card di anteprima non funzionano.",
+        "affected_selectors": ["cc-lookup-result", "cc-item-0"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Allineare il contratto /api/lookup/iban. Opzione A (preferita): modificare /app/backend/routes/lookup.py (o bank_lookup.lookup_bank_from_iban) per restituire {valid:true|false, iban, abi, cab, cin, conto, banca:{ragione_sociale, bic, ...}, source}. Opzione B: modificare /app/frontend/src/components/ContiCorrentiTab.jsx per consumare la struttura flat (leggere lookup?.ragione_sociale e lookup?.bic direttamente). L'opzione A è più corretta perché lo schema nested è più semantico e coerente col resto (banca come sotto-oggetto).",
+    "Chiarire nel problem statement se /api/lookup/iban è GET (come implementato oggi e come usato dal FE) o POST (come indicato nella review request). Attualmente è GET."
+  ],
+  "critical_code_review_comments": [
+    "ContiCorrentiTab.jsx: la lookup non ha fallback su struttura flat; qualsiasi drift del backend produce silenziosamente banca_ragione_sociale=null salvato in DB (perdita dati) senza segnalare errore all'utente.",
+    "ContiCorrentiTab.jsx: quando IBAN è invalido, il codice controlla r.data?.valid === false — ma il backend attuale non ritorna mai il campo valid; l'utente non vede feedback distinto tra 'banca non nota' e 'IBAN errato'.",
+    "OpenApiActions.jsx: l'hint per Camerale/Catasto/Veicoli è 'P.IVA/CF mancante' ma per persone fisiche senza P.IVA i bottoni sono comunque abilitati con solo CF, quindi l'hint non appare — coerente col comportamento richiesto.",
+    "AnagraficaDetail.jsx: il tab 'salute-fiscale' viene renderizzato solo per persona_giuridica; se durante il flusso attivo l'utente viene su quel tab e poi l'anagrafica cambia tipo, si potrebbe finire con activeTab non risolto — edge case non critico ma da tenere presente."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "95%", "frontend": "90%"},
+  "test_credentials": "admin@assicura.it / Admin123! (funzionanti)",
+  "seed_data_creation": "Nessun seed creato. Anagrafica utilizzata: A. S. D. MELLO (id e15e701a-4b0f-490d-9848-23c7e9147500, persona fisica, CF 01075160141). Aggiunto IBAN IT60X0542811101000000123456 (Principale) e attivati consensi gdpr-privacy + gdpr-mkt-whatsapp + sv-fumatore.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "3/4 punti P0 sono OK: (1) tutti e 6 i KPI navigano correttamente (polizze-attive/scaduta -> tab polizze con filtro visibile e polizze-clear-filter presente; rami/premio/rischio -> tab-analisi; sinistri -> /sinistri?anagrafica_id=...). (3) 4 bottoni OpenAPI presenti con MOCK badge; Camerale funziona (pannello 'Dati camerali' visibile). (4) Profilazione & GDPR tab con tutti i testid attesi (sv-*, cp-*, gdpr-*); salvataggio e persistenza dopo reload OK. Cross-sell pills clickable e cambiano tab.\n\nDA RITESTARE: (2) Conti Correnti: la salvezza IBAN persiste ma banca_ragione_sociale e banca_bic vanno persi per bug contratto lookup. Verificare fix su /api/lookup/iban vs ContiCorrentiTab.jsx.",
+  "rca of the issue": "Data contract mismatch fra frontend e backend sul lookup IBAN:\n\nReprod:\n1) Login admin@assicura.it / Admin123!\n2) Apri /anagrafiche/{id}\n3) Tab '🏦 Conti Correnti' -> 'Aggiungi IBAN'\n4) Inserisci IT60X0542811101000000123456 e clicca 'Risolvi banca'\n\nOsservato:\n- Toast: 'Banca non presente in tabella locale' (warning)\n- cc-lookup-result panel non visibile\n- Salvando: entry mostra 'ABI 05428 · CAB 11101' ma banca — assente\n\nAtteso:\n- Toast: 'Banca risolta: Banco BPM'\n- Pannello cc-lookup-result visibile con 'Banco BPM'\n- Entry salvata con banca_ragione_sociale='Banco BPM', banca_bic='BAPPIT21'\n\nRoot cause: Backend /api/lookup/iban (GET) restituisce {iban, abi, cab, cin, conto, ragione_sociale, bic, source} (flat), mentre ContiCorrentiTab.jsx accede a r.data.banca.ragione_sociale, r.data.banca.bic e r.data.valid. Il campo `valid` non esiste (usato solo da /lookup/iban/validate). L'estrazione flat di abi/cab funziona perché quei nomi combaciano, ma banca* no.\n\nMitigation (raccomandata, backend-side): in /app/backend/bank_lookup.py o /app/backend/routes/lookup.py wrap del risultato in `{valid: bool, iban, abi, cab, cin, conto, banca: {ragione_sociale, bic, ...}, source}`."
+}

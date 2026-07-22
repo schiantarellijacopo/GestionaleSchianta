@@ -32,6 +32,9 @@ import RaccoltaDatiTab from "@/components/RaccoltaDatiTab";
 import PotentiDomandeTab from "@/components/PotentiDomandeTab";
 import SaluteFiscaleTab from "@/components/SaluteFiscaleTab";
 import CustomerInsightsWidget from "@/components/CustomerInsightsWidget";
+import ContiCorrentiTab from "@/components/ContiCorrentiTab";
+import ProfilazioneGdprTab from "@/components/ProfilazioneGdprTab";
+import OpenApiActions from "@/components/OpenApiActions";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -41,7 +44,17 @@ export default function AnagraficaDetail() {
     const [ana, setAna] = useState(null);
     const [polizze, setPolizze] = useState([]);
     const [privacyOpenHdr, setPrivacyOpenHdr] = useState(false);
+    const [activeTab, setActiveTab] = useState("dati");
+    const [polizzeFilter, setPolizzeFilter] = useState(null);
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+
+    // Deep-link handler passato al CustomerInsightsWidget.
+    const handleTabChange = (tab, extra) => {
+        if (!tab) return;
+        setActiveTab(tab);
+        if (tab === "polizze" && extra?.filter) setPolizzeFilter(extra.filter);
+        else if (tab !== "polizze") setPolizzeFilter(null);
+    };
 
     const load = async () => {
         const [a, p] = await Promise.all([
@@ -123,11 +136,13 @@ export default function AnagraficaDetail() {
                 }
             />
 
-            <Tabs defaultValue="dati" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     <TabsTrigger value="dati" data-testid="tab-dati">Anagrafica</TabsTrigger>
                     <TabsTrigger value="albero" data-testid="tab-albero">Albero genealogico</TabsTrigger>
                     <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.length})</TabsTrigger>
+                    <TabsTrigger value="conti-correnti" data-testid="tab-conti-correnti">🏦 Conti Correnti</TabsTrigger>
+                    <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Profilazione & GDPR</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
                     <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
                     <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
@@ -142,11 +157,14 @@ export default function AnagraficaDetail() {
                 </TabsList>
 
                 <TabsContent value="dati">
-                    <CustomerInsightsWidget anagrafica_id={id} />
+                    <CustomerInsightsWidget anagrafica_id={id} onTabChange={handleTabChange} />
+                    <OpenApiActions ana={ana} canEdit={canEdit} onReload={load} />
                     <DatiTab ana={ana} canEdit={canEdit} onReload={load} />
                 </TabsContent>
                 <TabsContent value="albero"><AlberoGenealogico ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
-                <TabsContent value="polizze"><PolizzeTab polizze={polizze} /></TabsContent>
+                <TabsContent value="polizze"><PolizzeTab polizze={polizze} filter={polizzeFilter} onClearFilter={() => setPolizzeFilter(null)} /></TabsContent>
+                <TabsContent value="conti-correnti"><ContiCorrentiTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                <TabsContent value="profilazione-gdpr"><ProfilazioneGdprTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
@@ -403,16 +421,23 @@ function DatiTab({ ana, canEdit, onReload }) {
     );
 }
 
-function PolizzeTab({ polizze }) {
+function PolizzeTab({ polizze, filter, onClearFilter }) {
+    const filtered = !filter ? polizze : polizze.filter((p) => (p.stato || "").toLowerCase() === filter);
     return (
         <Card className="border-slate-200 mt-4 overflow-hidden">
-            {polizze.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-sm">Nessuna polizza intestata.</div>
+            {filter && (
+                <div className="px-4 py-2 bg-sky-50 border-b border-sky-200 text-xs text-sky-900 flex items-center justify-between">
+                    <span>Filtro attivo: <b>stato = {filter}</b> · {filtered.length}/{polizze.length}</span>
+                    <button onClick={onClearFilter} className="text-sky-700 hover:underline" data-testid="polizze-clear-filter">Rimuovi filtro</button>
+                </div>
+            )}
+            {filtered.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-sm">{filter ? `Nessuna polizza con stato "${filter}".` : "Nessuna polizza intestata."}</div>
             ) : (
                 <table className="tbl w-full">
                     <thead><tr><th>Numero</th><th>Compagnia</th><th>Ramo</th><th>Stato</th><th>Effetto</th><th>Scadenza</th><th className="text-right">Premio</th></tr></thead>
                     <tbody>
-                        {polizze.map((p) => (
+                        {filtered.map((p) => (
                             <tr key={p.id}>
                                 <td><Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline">{p.numero_polizza}</Link></td>
                                 <td>{p.compagnia_nome}</td>

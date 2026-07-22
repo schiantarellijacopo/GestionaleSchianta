@@ -2,14 +2,19 @@
  * CustomerInsightsWidget — widget compatto da posizionare in AnagraficaDetail.
  * Mostra KPI rapide cliente + opportunità cross-selling + rischio score +
  * ultimo suggerimento AI.
+ *
+ * Deep-link: ogni KPI naviga al tab pertinente (Polizze / Sinistri / Analisi).
+ * "Sinistri" apre la pagina /sinistri filtrata per anagrafica_id.
  */
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Sparkles, ShieldAlert, TrendingUp, FileText, AlertTriangle } from "lucide-react";
 
 export default function CustomerInsightsWidget({ anagrafica_id, onTabChange }) {
     const [data, setData] = useState(null);
+    const navigate = useNavigate();
     useEffect(() => {
         api.get(`/anagrafiche/${anagrafica_id}/customer-insights-widget`)
             .then((r) => setData(r.data))
@@ -23,7 +28,8 @@ export default function CustomerInsightsWidget({ anagrafica_id, onTabChange }) {
     const ai = data.ultimo_suggerimento_ai;
 
     const rcol = rsk <= 3 ? "emerald" : rsk <= 6 ? "amber" : "rose";
-    const go = (tab) => onTabChange && onTabChange(tab);
+    const go = (tab, extra) => onTabChange && onTabChange(tab, extra);
+    const goSinistri = () => navigate(`/sinistri?anagrafica_id=${anagrafica_id}`);
     const goCross = (ramo) => onTabChange && onTabChange("polizze", { newRamo: ramo });
 
     return (
@@ -36,13 +42,13 @@ export default function CustomerInsightsWidget({ anagrafica_id, onTabChange }) {
                 <KpiMini icon={FileText} label="Polizze attive" value={kpi.n_polizze_attive} color="sky" onClick={() => go("polizze", { filter: "attiva" })} testid="kpi-polizze-attive" />
                 <KpiMini icon={FileText} label="Polizze scadute" value={kpi.n_polizze_scadute} color="amber" onClick={() => go("polizze", { filter: "scaduta" })} testid="kpi-polizze-scadute" />
                 <KpiMini icon={TrendingUp} label="Rami coperti" value={kpi.n_rami_coperti} color="emerald" onClick={() => go("analisi")} testid="kpi-rami" />
-                <KpiMini icon={AlertTriangle} label="Sinistri (anno)" value={kpi.n_sinistri_anno_corrente} color="rose" onClick={() => go("sinistri")} testid="kpi-sinistri" />
-                <KpiMini icon={FileText} label="Premio attivo" value={fmtEur(kpi.premio_totale_attivo)} color="violet" mono onClick={() => go("estratto-conto")} testid="kpi-premio" />
-                <KpiMini icon={ShieldAlert} label="Rischio" value={`${rsk}/10`} color={rcol} mono onClick={() => go("profilo-rischio")} testid="kpi-rischio" />
+                <KpiMini icon={AlertTriangle} label="Sinistri (anno)" value={kpi.n_sinistri_anno_corrente} color="rose" onClick={goSinistri} testid="kpi-sinistri" />
+                <KpiMini icon={FileText} label="Premio attivo" value={fmtEur(kpi.premio_totale_attivo)} color="violet" mono onClick={() => go("analisi")} testid="kpi-premio" />
+                <KpiMini icon={ShieldAlert} label="Rischio" value={`${rsk}/10`} color={rcol} mono onClick={() => go("analisi")} testid="kpi-rischio" />
             </div>
             {opp.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-violet-100">
-                    <div className="text-[10px] uppercase text-violet-700 font-semibold mb-1">Opportunità Cross-Selling · clicca un ramo per preventivare</div>
+                    <div className="text-[10px] uppercase text-violet-700 font-semibold mb-1">Opportunità Cross-Selling · clicca un ramo per aprirlo in analisi</div>
                     <div className="flex flex-wrap gap-1.5">
                         {opp.map((r) => (
                             <button key={r} type="button" onClick={() => goCross(r)}
