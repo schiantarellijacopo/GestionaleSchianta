@@ -102,13 +102,24 @@ async def tool_search_clienti(q: str, user: dict, limit: int = 8) -> list[dict]:
     q = (q or "").strip()
     if not q:
         return []
-    regex = {"$regex": re.escape(q), "$options": "i"}
-    filt = {"$or": [
-        {"ragione_sociale": regex}, {"cognome": regex}, {"nome": regex},
-        {"codice_fiscale": q.upper()}, {"partita_iva": q},
-        {"email": regex}, {"cellulare": regex}, {"telefono": regex},
-    ]}
-    filt.update(_rbac_anagrafica_filter(user))
+    # Splitta la query in parole per ricerca AND (tutte le parole devono comparire)
+    words = [w for w in re.split(r"\s+", q) if len(w) >= 2]
+    if not words:
+        return []
+    # Costruisci un $and dove ogni parola è un $or su più campi
+    and_clauses = []
+    for w in words:
+        regex = {"$regex": re.escape(w), "$options": "i"}
+        and_clauses.append({"$or": [
+            {"ragione_sociale": regex}, {"cognome": regex}, {"nome": regex},
+            {"codice_fiscale": {"$regex": w.upper(), "$options": "i"}},
+            {"partita_iva": w},
+            {"email": regex}, {"cellulare": regex}, {"telefono": regex},
+        ]})
+    filt = {"$and": and_clauses} if len(and_clauses) > 1 else and_clauses[0]
+    rbac = _rbac_anagrafica_filter(user)
+    if rbac:
+        filt = {"$and": [filt, rbac]}
     proj = {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
             "codice_fiscale": 1, "partita_iva": 1, "email": 1, "cellulare": 1,
             "tipo": 1, "comune": 1}
@@ -399,18 +410,41 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
     elif "mese" in msg or "mensile" in msg:
         giorni_scad = 30
 
-    # CLIENTE menzionato
+    # CLIENTE — estrai TUTTI i candidati nome (case-insensitive, min 3 char)
     anagrafica_id = None
-    nomi = re.findall(r"\b([A-ZÀ-Ù][A-Za-zà-ù']{2,}(?:\s+[A-ZÀ-Ù][A-Za-zà-ù']{2,})?)\b", user_message or "")
-    STOP = {"Chi", "Cosa", "Quando", "Dove", "Come", "Perche", "Quanti",
-            "Quante", "Trova", "Mostra", "Fammi", "Dimmi", "Dammi", "Il", "La", "Le", "Un", "Una"}
-    for cand in nomi:
-        if cand in STOP or len(cand) < 3:
+    STOP = {
+        "chi","cosa","quando","dove","come","perche","perché","quanti","quante",
+        "trova","trovami","trovi","mi","mostra","fammi","dimmi","dammi","dimme","dammelo",
+        "il","la","le","lo","i","gli","un","una","uno","del","della","dei","degli","delle","al","alla",
+        "polizza","polizze","polizzi","cliente","clienti","titolo","titoli","sinistro","sinistri",
+        "quanto","costa","costano","prezzo","premio","importo","valore","questo","questa",
+        "che","chi","con","per","tra","fra","sono","sta","stanno","hai","ha","tuo","tua","tuoi","tue","mio","mia","miei","mie",
+        "assicurativo","assicurazione","assicurazioni","auto","casa","salute","vita","infortuni","rc","rca",
+        "dei","gli","le","voglio","vorrei","posso","puoi","tu","io","noi","voi","loro",
+        "e","ed","o","od","ma","se","non","già","ancora","anche","altrettanto","cerca","cercami","cercare",
+        "buongiorno","ciao","buonasera","salve","grazie","prego",
+    }
+    # Prima prova la frase intera (senza stop words) come chiave di ricerca
+    words = re.findall(r"[A-Za-zÀ-ù']{2,}", user_message or "")
+    keep = [w for w in words if w.lower() not in STOP and len(w) >= 3]
+    # Cerca combinazioni ad accoppiate + singole (max 3 tentativi)
+    tentativi = []
+    if len(keep) >= 2:
+        tentativi.append(" ".join(keep[:2]))  # es. "bottoni cristian"
+        tentativi.append(" ".join(keep[-2:]))  # ultimi 2
+    tentativi.extend(keep[:4])  # singoli
+    tried = set()
+    for cand in tentativi:
+        if cand.lower() in tried or len(cand) < 3:
             continue
-        found = await tool_search_clienti(cand, user, limit=3)
+        tried.add(cand.lower())
+        found = await tool_search_clienti(cand, user, limit=5)
         if found:
             ctx[f"Clienti trovati per '{cand}'"] = found
             if len(found) == 1:
+                anagrafica_id = found[0]["id"]
+            elif len(found) <= 3:
+                # Se pochi match, prendi il primo per successivi tool
                 anagrafica_id = found[0]["id"]
             break
 
@@ -423,6 +457,7 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
 
     # KEYWORD DISPATCH
     async_ran = False
+    ask_premio = any(k in msg for k in ["quanto costa", "quanto costano", "prezzo", "importo", "quanto pago", "quanto è", "quanto ho pagato"])
     if any(k in msg for k in KEYWORDS_SCADENZA) and not any(k in msg for k in KEYWORDS_PAGAMENTI):
         ctx[f"Polizze in scadenza nei prossimi {giorni_scad} giorni"] = await tool_polizze_in_scadenza(user, giorni=giorni_scad)
         async_ran = True
@@ -454,12 +489,17 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
         ctx["Riepilogo portafoglio"] = await tool_portafoglio_summary(user)
         async_ran = True
 
-    # Fallback: se non ha trovato niente, prova almeno il riepilogo o cliente
-    if not async_ran and not ctx:
+    # Se ha chiesto "quanto costa" e ha trovato un cliente ma non ha già le polizze
+    if ask_premio and anagrafica_id and "Polizze" not in ctx:
+        ctx["Polizze del cliente (con premio)"] = await tool_polizze(user, anagrafica_id=anagrafica_id)
+        async_ran = True
+
+    # Fallback: se ha trovato un cliente ma nessuna keyword specifica, mostra polizze + titoli
+    if not async_ran:
         if anagrafica_id:
             ctx["Polizze del cliente"] = await tool_polizze(user, anagrafica_id=anagrafica_id)
             ctx["Titoli del cliente"] = await tool_titoli(user, anagrafica_id=anagrafica_id, limit=15)
-        else:
+        elif not ctx:
             ctx["Riepilogo portafoglio"] = await tool_portafoglio_summary(user)
 
     return ctx
