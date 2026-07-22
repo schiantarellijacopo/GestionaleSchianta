@@ -94,5 +94,24 @@ async def fetch_visura_for_anagrafica(aid: str, user=Depends(current_user)) -> d
 
 @router.get("/status")
 async def status(user=Depends(current_user)) -> dict:
-    """Utile per il frontend: mostrare 'MOCK' vs 'LIVE' badge."""
-    return {"mode": "mock" if svc.is_mock_mode() else "live"}
+    """Diagnostica per il frontend: modalità + credito residuo + env.
+
+    Ritorna:
+      {
+        "mode": "live" | "mock",
+        "has_credentials": bool,
+        "env": "prod" | "sandbox",
+        "credit_eur": float | null    # None se non disponibile
+      }
+    """
+    from os import environ
+    has_creds = svc.has_credentials()
+    credit = None
+    if has_creds:
+        credit = await svc.get_credit()
+    return {
+        "mode": "live" if has_creds else "mock",
+        "has_credentials": has_creds,
+        "env": (environ.get("OPENAPI_IT_ENV") or "prod").lower(),
+        "credit_eur": credit,
+    }

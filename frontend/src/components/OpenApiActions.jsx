@@ -12,12 +12,16 @@ import { toast } from "sonner";
 
 export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [mode, setMode] = useState(null); // "mock" | "live"
+    const [credit, setCredit] = useState(null);
     const [loading, setLoading] = useState(null); // key attualmente in caricamento
     const [expanded, setExpanded] = useState(null);
     const openapi = ana.openapi_data || {};
 
     useEffect(() => {
-        api.get("/openapi-it/status").then((r) => setMode(r.data.mode)).catch(() => setMode(null));
+        api.get("/openapi-it/status").then((r) => {
+            setMode(r.data.mode);
+            setCredit(r.data.credit_eur);
+        }).catch(() => setMode(null));
     }, []);
 
     const call = async (endpoint, key, label) => {
@@ -46,9 +50,16 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     <h4 className="font-medium text-sm text-sky-900">Autocompilazione dati da OpenAPI.it</h4>
                 </div>
                 {mode && (
-                    <span className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ${mode === "mock" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`} data-testid="openapi-mode-badge">
-                        {mode === "mock" ? "⚠ MOCK" : "🟢 LIVE"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ${mode === "mock" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`} data-testid="openapi-mode-badge">
+                            {mode === "mock" ? "⚠ MOCK" : "🟢 LIVE"}
+                        </span>
+                        {credit !== null && credit !== undefined && (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${credit > 5 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`} data-testid="openapi-credit-badge">
+                                Credito: €{credit.toFixed(2)}
+                            </span>
+                        )}
+                    </div>
                 )}
             </div>
 
