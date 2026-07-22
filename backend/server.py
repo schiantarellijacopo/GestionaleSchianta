@@ -10525,6 +10525,44 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# Multi-tenant context middleware
+# ------------------------------------------------------------
+# Estrae l'utente dal JWT (cookie o Bearer) e lo mette in `_current_user_ctx`.
+# Il wrapper `TenantAwareCollection` legge il ContextVar e inietta il filtro
+# `agenzia_tenant_id` automaticamente in tutte le query DB dei router.
+#
+# In caso di request anonima (login, webhook WhatsApp, health-check) → nessun
+# filtro applicato → il wrapper fa passthrough puro.
+# ============================================================
+from auth import get_token_from_request, decode_token as _decode_tok  # noqa: E402
+from database import raw_db, _current_user_ctx  # noqa: E402
+
+
+@app.middleware("http")
+async def tenant_context_middleware(request, call_next):
+    user = None
+    token = get_token_from_request(request)
+    if token:
+        try:
+            payload = _decode_tok(token)
+            if payload.get("type") == "access":
+                user = await raw_db.users.find_one(
+                    {"id": payload["sub"]}, {"password_hash": 0, "_id": 0},
+                )
+        except Exception:
+            user = None
+    ctx_tok = _current_user_ctx.set(user)
+    try:
+        response = await call_next(request)
+    finally:
+        try:
+            _current_user_ctx.reset(ctx_tok)
+        except (ValueError, LookupError):
+            pass
+    return response
+
+
 # ----- Startup -----
 @app.on_event("startup")
 async def startup():

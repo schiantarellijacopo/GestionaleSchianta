@@ -57,6 +57,13 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
   - Path canonico multi-tenant: `agencies/{tenant_id}/{clients|policies|claims|titles|companies}/{entita_id}/{filename}`.
   - `Allegato.storage_provider` traccia il provider usato per ogni file (recupero corretto in fase di download).
   - Fallback automatico su Emergent se un driver esterno non è configurato.
+- ✅ **Multi-Tenant Query Auto-Filter (Fase 1b — ISOLAMENTO ATTIVO)** 🔴 P0 CRITICO:
+  - **`database.py` riscritto** con `TenantAwareDB` + `TenantAwareCollection` wrapper. **Zero modifiche** al codice esistente dei router: il wrapper intercetta automaticamente `find/find_one/count_documents/update_*/delete_*/aggregate/distinct/find_one_and_*` iniettando il filtro `agenzia_tenant_id` in base al `ContextVar` `_current_user_ctx`.
+  - **Middleware `tenant_context_middleware`** in `server.py`: estrae utente dal JWT (cookie o Bearer) e imposta il ContextVar per ogni request. Request anonime (webhook WhatsApp, login) → nessun filtro → passthrough.
+  - `raw_db` esposto per operazioni di sistema (startup, seed, migrazioni) che devono bypassare il filtro.
+  - `aggregate()` inietta `{"$match": tenant_filter}` come primo stage della pipeline.
+  - **Test end-to-end su preview**: creato utente `demo-user@assicura.it` (tenant DEMO, non super_admin) → vede **0 anagrafiche, 0 polizze, 0 titoli, 0 sinistri** (mentre nel DB ci sono 862/851/629/44 di Schiantarelli). Super admin continua a vedere tutto. **Isolamento tenant REALE e attivo su TUTTI i router simultaneamente.**
+  - Script standalone `migrate_to_multitenant.py` per Railway prod (idempotente, con report finale e verifica zero-doc-senza-tenant).
 
 ### Sessione 01/07 (iter28)
 - ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.
