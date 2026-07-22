@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from auth import require_user
@@ -37,6 +37,10 @@ from db_models import Tenant, _now_iso
 from tenant import (
     TENANT_PRINCIPALE_ID, TENANT_DEMO_ID, TENANT_CLEAN_ID,
     is_super_admin, TENANT_SCOPED_COLLECTIONS,
+)
+from audit_super_admin import log_action, get_agency_name
+from resend_service import (
+    send_marketplace_activation, send_ticket_reply, send_welcome_user,
 )
 
 
@@ -97,7 +101,7 @@ class ToggleModuloBody(BaseModel):
 
 
 @router.patch("/marketplace/richieste/{req_id}/toggle")
-async def sa_toggle_richiesta(req_id: str, body: ToggleModuloBody,
+async def sa_toggle_richiesta(req_id: str, body: ToggleModuloBody, request: Request,
                               user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     payload = {"stato": body.stato, "updated_at": _now_iso()}
@@ -108,7 +112,20 @@ async def sa_toggle_richiesta(req_id: str, body: ToggleModuloBody,
     res = await raw_db.marketplace_requests.update_one({"id": req_id}, {"$set": payload})
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="Richiesta non trovata")
-    return await raw_db.marketplace_requests.find_one({"id": req_id}, {"_id": 0})
+    req_doc = await raw_db.marketplace_requests.find_one({"id": req_id}, {"_id": 0})
+    # Log + Email
+    await log_action(user=user, action_type="MARKETPLACE_MODULE_TOGGLED",
+                     target_agency_id=req_doc.get("tenant_id"),
+                     target_agency_name=await get_agency_name(req_doc.get("tenant_id", "")),
+                     details=f"Modulo {req_doc.get('module_nome')} → {body.stato}",
+                     request=request)
+    tenant = await raw_db.tenants.find_one({"id": req_doc.get("tenant_id")}, {"_id": 0, "email": 1})
+    if tenant and tenant.get("email"):
+        await send_marketplace_activation(
+            to=tenant["email"], modulo_nome=req_doc.get("module_nome", ""),
+            stato=body.stato,
+        )
+    return req_doc
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +158,7 @@ class RispostaBody(BaseModel):
 
 
 @router.post("/tickets/{ticket_id}/rispondi")
-async def sa_rispondi_ticket(ticket_id: str, body: RispostaBody,
+async def sa_rispondi_ticket(ticket_id: str, body: RispostaBody, request: Request,
                              user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     t = await raw_db.tickets.find_one({"id": ticket_id}, {"_id": 0})
@@ -161,13 +178,19 @@ async def sa_rispondi_ticket(ticket_id: str, body: RispostaBody,
     if new_state in ("risolto", "chiuso"):
         set_payload["data_chiusura"] = _now_iso()
     await raw_db.tickets.update_one({"id": ticket_id}, {"$set": set_payload})
-    # TODO: inviare email via Resend all'agenzia quando disponibile la API key
-    # (Vedi routes/notifications.py — placeholder log per ora)
+    # Log + Email
+    await log_action(user=user, action_type="TICKET_REPLIED",
+                     target_agency_id=t.get("tenant_id"),
+                     target_agency_name=t.get("tenant_ragione_sociale"),
+                     details=f"Ticket {t.get('numero')} → {new_state}",
+                     request=request)
     if t.get("aperto_da_email"):
-        import logging
-        logging.getLogger(__name__).info(
-            "[ticket-notify] TO=%s ticket=%s new_state=%s (email Resend non configurata)",
-            t["aperto_da_email"], t.get("numero"), new_state,
+        await send_ticket_reply(
+            to=t["aperto_da_email"],
+            numero_ticket=t.get("numero", ""),
+            oggetto=t.get("oggetto", ""),
+            messaggio=body.messaggio,
+            stato=new_state,
         )
     return {"ok": True, "stato": new_state}
 
@@ -263,7 +286,8 @@ async def get_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
 
 
 @router.post("/agenzie", status_code=201)
-async def create_agenzia(body: AgenziaNuovaBody, user=Depends(require_user("admin"))) -> dict:
+async def create_agenzia(body: AgenziaNuovaBody, request: Request,
+                         user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     now = datetime.now(timezone.utc)
     fine_prova = (now + timedelta(days=body.giorni_prova)).date().isoformat() if body.piano == "trial" else None
@@ -312,17 +336,28 @@ async def create_agenzia(body: AgenziaNuovaBody, user=Depends(require_user("admi
             }
             await raw_db.users.insert_one(admin_doc)
             tenant["admin_created"] = body.admin_email
+            # Welcome email
+            await send_welcome_user(
+                to=body.admin_email.lower(),
+                name=admin_doc["name"],
+                agency_name=tenant["ragione_sociale"],
+            )
 
     # Se template == demo → clona i dati fittizi del tenant demo
     if body.template == "demo":
         cloned = await _clone_from_demo(tenant["id"])
         tenant["seeded_from_demo"] = cloned
 
+    await log_action(user=user, action_type="AGENCY_CREATED",
+                     target_agency_id=tenant["id"],
+                     target_agency_name=tenant["ragione_sociale"],
+                     details=f"Piano={body.piano}, template={body.template}, prezzo={body.prezzo_mensile_eur}€/mese",
+                     request=request)
     return tenant
 
 
 @router.patch("/agenzie/{tid}")
-async def update_agenzia(tid: str, body: AgenziaUpdateBody,
+async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
                          user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
@@ -330,21 +365,30 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody,
     res = await raw_db.tenants.update_one({"id": tid}, {"$set": payload})
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="Tenant non trovato")
+    await log_action(user=user, action_type="AGENCY_UPDATED",
+                     target_agency_id=tid, target_agency_name=await get_agency_name(tid),
+                     details=f"Campi aggiornati: {', '.join(payload.keys())}",
+                     request=request)
     return await raw_db.tenants.find_one({"id": tid}, {"_id": 0})
 
 
 @router.post("/agenzie/{tid}/attiva")
-async def attiva_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
+async def attiva_agenzia(tid: str, request: Request,
+                         user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     await raw_db.tenants.update_one(
         {"id": tid},
         {"$set": {"stato_abbonamento": "attiva", "attivo": True, "updated_at": _now_iso()}},
     )
+    await log_action(user=user, action_type="TENANT_ACTIVATED",
+                     target_agency_id=tid, target_agency_name=await get_agency_name(tid),
+                     request=request)
     return {"ok": True, "stato": "attiva"}
 
 
 @router.post("/agenzie/{tid}/sospendi")
-async def sospendi_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
+async def sospendi_agenzia(tid: str, request: Request,
+                           user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     if tid == TENANT_PRINCIPALE_ID:
         raise HTTPException(status_code=400, detail="Impossibile sospendere il tenant principale")
@@ -352,11 +396,14 @@ async def sospendi_agenzia(tid: str, user=Depends(require_user("admin"))) -> dic
         {"id": tid},
         {"$set": {"stato_abbonamento": "sospesa", "attivo": False, "updated_at": _now_iso()}},
     )
+    await log_action(user=user, action_type="TENANT_SUSPENDED",
+                     target_agency_id=tid, target_agency_name=await get_agency_name(tid),
+                     request=request)
     return {"ok": True, "stato": "sospesa"}
 
 
 @router.post("/agenzie/{tid}/estendi-prova")
-async def estendi_prova(tid: str, giorni: int = 30,
+async def estendi_prova(tid: str, request: Request, giorni: int = 30,
                         user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     now = datetime.now(timezone.utc)
@@ -366,11 +413,16 @@ async def estendi_prova(tid: str, giorni: int = 30,
         {"$set": {"stato_abbonamento": "in_prova", "attivo": True,
                   "data_fine_prova": fine, "updated_at": _now_iso()}},
     )
+    await log_action(user=user, action_type="TENANT_TRIAL_EXTENDED",
+                     target_agency_id=tid, target_agency_name=await get_agency_name(tid),
+                     details=f"+{giorni} giorni (nuova scadenza: {fine})",
+                     request=request)
     return {"ok": True, "data_fine_prova": fine}
 
 
 @router.delete("/agenzie/{tid}")
-async def cancella_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
+async def cancella_agenzia(tid: str, request: Request,
+                           user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     if tid in (TENANT_PRINCIPALE_ID, TENANT_DEMO_ID, TENANT_CLEAN_ID):
         raise HTTPException(status_code=400, detail="Tenant di sistema non cancellabile")
@@ -378,6 +430,9 @@ async def cancella_agenzia(tid: str, user=Depends(require_user("admin"))) -> dic
         {"id": tid},
         {"$set": {"stato_abbonamento": "cancellata", "attivo": False, "updated_at": _now_iso()}},
     )
+    await log_action(user=user, action_type="AGENCY_DELETED",
+                     target_agency_id=tid, target_agency_name=await get_agency_name(tid),
+                     request=request)
     return {"ok": True}
 
 
@@ -438,11 +493,17 @@ async def platform_stats(user=Depends(require_user("admin"))) -> dict:
 # DEMO SEED
 # ---------------------------------------------------------------------------
 @router.post("/demo/seed")
-async def demo_seed(user=Depends(require_user("admin"))) -> dict:
+async def demo_seed(request: Request, user=Depends(require_user("admin"))) -> dict:
     """Popola il tenant `demo` con dati fittizi per le simulazioni commerciali."""
     _ensure_super_admin(user)
     from demo_seed import seed_demo_tenant
-    return await seed_demo_tenant()
+    res = await seed_demo_tenant()
+    await log_action(user=user, action_type="DEMO_SEEDED",
+                     target_agency_id=TENANT_DEMO_ID,
+                     target_agency_name="Agenzia Demo (Staging)",
+                     details=f"Records: {res.get('created')}",
+                     request=request)
+    return res
 
 
 async def _clone_from_demo(target_tid: str) -> dict[str, int]:

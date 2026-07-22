@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -9,6 +9,7 @@ const TABS = [
     { id: "transazioni", label: "Transazioni", icon: TrendingUp },
     { id: "marketplace", label: "Marketplace", icon: Package },
     { id: "tickets", label: "Ticket Helpdesk", icon: Headphones },
+    { id: "logs", label: "Log Piattaforma", icon: Activity },
 ];
 
 const STATO_COLORS = {
@@ -68,6 +69,7 @@ export default function SuperAdminPanel() {
             {tab === "transazioni" && <TransazioniTab />}
             {tab === "marketplace" && <MarketplaceTab />}
             {tab === "tickets" && <TicketsTab />}
+            {tab === "logs" && <LogsTab />}
         </div>
     );
 }
@@ -377,6 +379,118 @@ function MarketplaceTab() {
         </div>
     );
 }
+
+function LogsTab() {
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [actionTypes, setActionTypes] = useState([]);
+    const [filter, setFilter] = useState({ q: "", action_type: "", agency_id: "", from_date: "", to_date: "" });
+    const [agenzie, setAgenzie] = useState([]);
+
+    const load = () => {
+        setLoading(true);
+        const params = Object.fromEntries(Object.entries(filter).filter(([, v]) => v));
+        api.get("/super-admin/logs", { params })
+            .then((r) => setItems(r.data || []))
+            .finally(() => setLoading(false));
+    };
+    useEffect(() => {
+        api.get("/super-admin/logs/action-types").then((r) => setActionTypes(r.data || []));
+        api.get("/super-admin/agenzie").then((r) => setAgenzie(r.data || []));
+        load();
+    }, []);
+
+    const exportCsv = async () => {
+        const params = Object.fromEntries(Object.entries(filter).filter(([k, v]) => v && k !== "q"));
+        try {
+            const res = await api.get("/super-admin/logs/export/csv", { params, responseType: "blob" });
+            const url = URL.createObjectURL(res.data);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `super_admin_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast.success("Log esportato");
+        } catch { toast.error("Errore export"); }
+    };
+
+    return (
+        <div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+                <div className="relative md:col-span-2">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input type="text" value={filter.q}
+                        onChange={(e) => setFilter({ ...filter, q: e.target.value })}
+                        placeholder="Cerca per agenzia, email, dettagli..."
+                        className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-md"
+                        data-testid="sa-logs-search" />
+                </div>
+                <select value={filter.action_type}
+                    onChange={(e) => setFilter({ ...filter, action_type: e.target.value })}
+                    className="px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
+                    data-testid="sa-logs-action-filter">
+                    <option value="">Tutte le azioni</option>
+                    {actionTypes.map((a) => <option key={a.code} value={a.code}>{a.label}</option>)}
+                </select>
+                <select value={filter.agency_id}
+                    onChange={(e) => setFilter({ ...filter, agency_id: e.target.value })}
+                    className="px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
+                    data-testid="sa-logs-agency-filter">
+                    <option value="">Tutte le agenzie</option>
+                    {agenzie.map((a) => <option key={a.id} value={a.id}>{a.ragione_sociale}</option>)}
+                </select>
+                <div className="flex gap-1">
+                    <button onClick={load}
+                        className="flex-1 text-xs font-semibold px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-900"
+                        data-testid="sa-logs-apply-btn">Filtra</button>
+                    <button onClick={exportCsv}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-md border border-emerald-600 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1"
+                        data-testid="sa-logs-export-btn">
+                        <Download size={12} /> CSV
+                    </button>
+                </div>
+            </div>
+            {loading && <Loader2 className="animate-spin text-slate-400 mx-auto my-8" />}
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-600">
+                        <tr>
+                            <th className="text-left px-3 py-2">Timestamp</th>
+                            <th className="text-left px-3 py-2">Super Admin</th>
+                            <th className="text-left px-3 py-2">Azione</th>
+                            <th className="text-left px-3 py-2">Agenzia Target</th>
+                            <th className="text-left px-3 py-2">IP</th>
+                            <th className="text-left px-3 py-2">Dettagli</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {items.length === 0 && !loading && (
+                            <tr><td colSpan={6} className="text-center py-6 text-slate-500 text-sm">Nessun log presente.</td></tr>
+                        )}
+                        {items.map((l) => (
+                            <tr key={l.id} className="hover:bg-slate-50" data-testid={`sa-log-${l.id}`}>
+                                <td className="px-3 py-2 text-xs font-mono text-slate-600">
+                                    {new Date(l.timestamp).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                                </td>
+                                <td className="px-3 py-2 text-xs">{l.super_admin_email || "-"}</td>
+                                <td className="px-3 py-2">
+                                    <span className="text-[10px] font-mono uppercase tracking-wider bg-violet-100 text-violet-800 px-1.5 py-0.5 rounded">
+                                        {l.action_type}
+                                    </span>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">{l.action_label}</div>
+                                </td>
+                                <td className="px-3 py-2 text-xs">{l.target_agency_name || "-"}</td>
+                                <td className="px-3 py-2 text-xs font-mono text-slate-500">{l.ip_address || "-"}</td>
+                                <td className="px-3 py-2 text-xs text-slate-600">{l.details || "-"}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
 
 function TicketsTab() {
     const [items, setItems] = useState([]);

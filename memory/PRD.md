@@ -40,25 +40,25 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
-- ✅ **ANIA Importer · Colonne mancanti (P0)**: aggiunto mapping colonne `frazionamento_share` (rec20 col AN → codici 1=annuale, 2=semestrale, 3=quadrimestrale, 4=trimestrale, 12=mensile, U/0/9=unica), `valore_ass_1/2/3` (rec30 col W → nuovo campo `capitale_assicurato` su Polizza + per-garanzia), `accessori_totale` (rec40 col AU → nuovo campo `accessori` su Titolo).
-- ✅ **ANIA Importer · Scadenza contratto**: usato `scadenza_effettiva` (rec20 col AK) come scadenza polizza, con fallback su `scadenza_originale`.
-- ✅ **Multi-Tenant Foundation + Query Auto-Filter (Fase 1+1b)**: `Tenant` model + 3 tenant seed (principale/demo/clean) + `agenzia_tenant_id` su BaseDoc + `TenantAwareDB` wrapper + middleware. Migrazione 862 anagrafiche/851 polizze/629 titoli/44 sinistri/33 allegati → tenant principale. Test isolamento tenant DEMO → 0 dati Schiantarelli visibili.
-- ✅ **Storage Engine Abstraction (Fase 2)**: `StorageService` con driver `emergent`/`s3`/`google_drive`/`onedrive` (placeholder). Path `agencies/{tid}/{clients|policies|...}/{eid}/{filename}`.
-- ✅ **Super Admin Panel (Platform Owner)** 🔒 GDPR-safe:
-  - Nuova pagina `/super-admin` con 5 tab: Agenzie, Abbonamenti, Transazioni, Marketplace, Ticket Helpdesk.
-  - **Super admin BLOCCATO** da tutti i dati clienti tenant (`tenant_filter` restituisce filtro impossibile per collezioni scoped).
-  - Endpoint `/api/super-admin/*`: agenzie CRUD, attiva/sospendi/estendi-prova, stats (MRR/ARR), abbonamenti, transazioni.
-  - Modello `Tenant` esteso con: `stato_abbonamento`, `piano`, `prezzo_mensile_eur`, `data_fine_prova`, `stripe_customer_id/subscription_id`, `max_utenti`.
-  - Wizard "Nuova Agenzia": form con template (`clean` vuoto | `demo` con dati fittizi copiati) + creazione admin iniziale in un colpo solo.
-  - **Popolamento tenant DEMO**: 18 anagrafiche + 25 polizze + 42 titoli + 5 sinistri + 5 compagnie fittizi via `demo_seed.py` (endpoint `POST /api/super-admin/demo/seed`).
-- ✅ **Marketplace Moduli & Ticket Helpdesk**:
-  - **TopBar**: 2 nuovi pulsanti (`ShoppingCart` Marketplace + `Headphones` Assistenza).
-  - **MarketplaceDrawer**: catalogo con 7 moduli seed (Risk 3D, Firma Digitale, SMS 1000, WhatsApp illimitato, Google Drive Sync, OneDrive, S3 dedicato). Bottone "Richiedi attivazione" invia richiesta al super_admin.
-  - **TicketDialog**: form con categoria/priorità/descrizione + storico ticket con stato colorato.
-  - **Endpoint agenzia**: `/api/marketplace/moduli|richieste`, `/api/tickets|mie`.
-  - **Endpoint super_admin**: `/api/super-admin/marketplace/richieste/{id}/toggle`, `/api/super-admin/tickets/{id}/rispondi`.
-  - Ticket auto-passa a `in_lavorazione` quando il super_admin risponde. Email via Resend: **placeholder log** (necessita API key Resend per attivare invio reale).
-  - Test E2E: richiesta modulo demo → visibile su super_admin. Ticket demo → risposta admin → stato aggiornato + 2 messaggi in thread. ✅
+- ✅ **ANIA Importer · Colonne mancanti (P0)**: mapping `frazionamento_share`, `valore_ass_1/2/3`, `accessori_totale`, `scadenza_effettiva`.
+- ✅ **Multi-Tenant Foundation + Query Auto-Filter**: `Tenant` model, `TenantAwareDB` wrapper, migrazione ~2500 record al principale, isolamento reale attivo su tutti i router. Script `migrate_to_multitenant.py` per Railway prod.
+- ✅ **Super Admin Panel (Platform Owner)** 🔒 GDPR-safe con 6 tab: Agenzie, Abbonamenti, Transazioni, Marketplace, Ticket Helpdesk, **Log Piattaforma**.
+- ✅ **Storage Engine Abstraction**: driver `emergent` attivo, `s3`/`google_drive`/`onedrive` placeholder.
+- ✅ **Marketplace + Ticket Helpdesk**: TopBar button + drawer per agenzie, gestione admin cross-tenant + email notifiche.
+- ✅ **Resend Email Integration (MOCK MODE)**:
+  - `/app/backend/resend_service.py` con toggle automatico mock/prod: se `RESEND_API_KEY` inizia con `re_test_mock` o vuota → log invece di invio reale.
+  - 4 casi d'uso implementati: `send_ticket_reply`, `send_marketplace_activation`, `send_welcome_user`, `send_policy_expiring`.
+  - Template HTML email-safe con inline CSS + CTA button.
+  - Wire su endpoint `POST /super-admin/tickets/{id}/rispondi` (email all'agenzia), `PATCH /super-admin/marketplace/richieste/{id}/toggle` (attivazione modulo), `POST /super-admin/agenzie` (welcome admin iniziale).
+  - `RESEND_API_KEY=re_test_mock_123` e `SENDER_EMAIL=onboarding@resend.dev` in `.env`. `resend==2.34.0` installato + in requirements.txt.
+  - Per attivare invio reale: sostituire API key in `.env` con quella vera di Resend (`re_...`) + verificare dominio custom.
+- ✅ **Super Admin Audit Log** (`super_admin_logs` collection):
+  - Nuovo modulo `/app/backend/audit_super_admin.py` con helper `log_action(user, action_type, target_agency_id, details, request)`.
+  - Registra automaticamente: timestamp, super_admin_id/email/name, action_type, target_agency_id/name, ip_address (con X-Forwarded-For), user_agent, details, meta.
+  - 13 action_type catalogati: SUPER_ADMIN_LOGIN, AGENCY_CREATED/UPDATED/DELETED, TENANT_ACTIVATED/SUSPENDED/TRIAL_EXTENDED, MARKETPLACE_MODULE_TOGGLED/CREATED, TICKET_REPLIED/STATUS_CHANGED, DEMO_SEEDED, SUBSCRIPTION_UPDATED.
+  - Nuovo router `/api/super-admin/logs` con filtri (agency_id, action_type, from/to date, search q) + `GET /export/csv`.
+  - **Isolamento verificato**: utente non super_admin → HTTP 403 su `/api/super-admin/logs`. **Nessun utente tenant può accedere**.
+  - Frontend: 6° tab "Log Piattaforma" in `/super-admin` con tabella, ricerca full-text, filtri combinati (agenzia + tipologia + date), export CSV con un click.
 
 ### Sessione 01/07 (iter28)
 - ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.

@@ -96,7 +96,7 @@ api = APIRouter(prefix="/api")
 # AUTH
 # ============================================================
 @api.post("/auth/login")
-async def login(payload: LoginRequest, response: Response):
+async def login(payload: LoginRequest, request: Request, response: Response):
     email = payload.email.lower().strip()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
@@ -113,6 +113,14 @@ async def login(payload: LoginRequest, response: Response):
     user.pop("password_hash", None)
     user.pop("_id", None)
     await log_attivita(user, "login", "auth", user["id"], f"Login utente {email}")
+    # Super admin login audit
+    if is_su:
+        try:
+            from audit_super_admin import log_action as _sa_log
+            await _sa_log(user=user, action_type="SUPER_ADMIN_LOGIN",
+                          details=f"Login super_admin da IP", request=request)
+        except Exception:
+            pass
     return {"user": user, "access_token": access}
 
 
@@ -10495,6 +10503,7 @@ from routes import tenants as _tenants_router  # noqa: E402
 from routes import super_admin as _super_admin_router  # noqa: E402
 from routes import marketplace as _marketplace_router  # noqa: E402
 from routes import tickets as _tickets_router  # noqa: E402
+from routes import super_admin_logs as _sa_logs_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10516,6 +10525,7 @@ api.include_router(_tenants_router.router)
 api.include_router(_super_admin_router.router)
 api.include_router(_marketplace_router.router)
 api.include_router(_tickets_router.router)
+api.include_router(_sa_logs_router.router)
 
 app.include_router(api)
 
