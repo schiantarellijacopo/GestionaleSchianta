@@ -115,3 +115,128 @@ async def status(user=Depends(current_user)) -> dict:
         "env": (environ.get("OPENAPI_IT_ENV") or "prod").lower(),
         "credit_eur": credit,
     }
+
+
+# ============================================================
+# SERVIZIO 5 · AUTOMOTIVE BY TARGA (con cache in db.veicoli)
+# ============================================================
+@router.get("/automotive-by-targa/{targa}")
+async def lookup_targa(
+    targa: str,
+    force_refresh: bool = False,
+    user=Depends(current_user),
+) -> dict:
+    """Cerca il veicolo per targa. Prima consulta la cache interna `db.veicoli`;
+    se assente (o force_refresh=true) chiama OpenAPI.it Automotive e persiste
+    il risultato nel DB interno per riuso a costo zero.
+
+    Ritorna: {"veicolo": {...}, "fonte": "cache"|"openapi_live"|"openapi_mock"}
+    """
+    tk = (targa or "").upper().strip().replace(" ", "")
+    if not tk or len(tk) < 5:
+        raise HTTPException(400, "Targa non valida")
+
+    if not force_refresh:
+        cached = await db.veicoli.find_one({"targa": tk}, {"_id": 0})
+        if cached:
+            return {"veicolo": cached, "fonte": "cache"}
+
+    data = await svc.fetch_automotive_by_targa(tk)
+    fonte = "openapi_live" if "LIVE" in (data.get("provider") or "") else "openapi_mock"
+
+    # Upsert nel DB interno (mantenendo eventuali campi custom già presenti)
+    existing = await db.veicoli.find_one({"targa": tk}, {"_id": 0, "id": 1})
+    payload = {
+        "targa": tk,
+        "marca": data.get("marca"),
+        "modello": data.get("modello"),
+        "allestimento": data.get("allestimento"),
+        "cilindrata": data.get("cilindrata"),
+        "potenza_kw": data.get("potenza_kw"),
+        "potenza_cv": data.get("potenza_cv"),
+        "alimentazione": data.get("alimentazione"),
+        "anno_immatricolazione": data.get("anno_immatricolazione"),
+        "data_immatricolazione": data.get("data_immatricolazione"),
+        "scadenza_revisione": data.get("scadenza_revisione"),
+        "telaio": data.get("telaio"),
+        "categoria": data.get("categoria"),
+        "euro": data.get("euro"),
+        "updated_at": _now_iso(),
+    }
+    if existing:
+        await raw_db.veicoli.update_one({"id": existing["id"]}, {"$set": payload})
+        vid = existing["id"]
+    else:
+        import uuid
+        payload["id"] = str(uuid.uuid4())
+        payload["created_at"] = _now_iso()
+        payload["fonte"] = fonte
+        await raw_db.veicoli.insert_one(payload)
+        vid = payload["id"]
+
+    fresh = await db.veicoli.find_one({"id": vid}, {"_id": 0})
+    return {"veicolo": fresh, "fonte": fonte, "raw_openapi": data}
+
+
+# ============================================================
+# SERVIZIO 6 · RISK REPORT (affidabilità creditizia / protesti)
+# ============================================================
+@router.post("/risk/{aid}")
+async def fetch_risk_for_anagrafica(aid: str, user=Depends(current_user)) -> dict:
+    ana = await _get_anagrafica(aid, user)
+    key = ana.get("codice_fiscale") or ana.get("partita_iva")
+    if not key:
+        raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
+    data = await svc.fetch_risk(key)
+    await _update_openapi_field(aid, "risk", data)
+    return data
+
+
+# ============================================================
+# Aggiunta veicolo/proprietario allo storico (persistente)
+# ============================================================
+@router.post("/veicoli/{vid}/associa-proprietario/{aid}")
+async def associa_proprietario_veicolo(
+    vid: str,
+    aid: str,
+    tipo_operazione: str = "acquisto",   # "acquisto" | "vendita" | "rottamazione" | "eredita"
+    user=Depends(current_user),
+) -> dict:
+    """Associa un proprietario a un veicolo mantenendo lo storico.
+
+    Aggiorna:
+      - veicoli.proprietario_id (attuale)
+      - veicoli.storico_proprietari (append record)
+    """
+    veicolo = await db.veicoli.find_one({"id": vid}, {"_id": 0})
+    if not veicolo:
+        raise HTTPException(404, "Veicolo non trovato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+
+    nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip()
+    new_entry = {
+        "anagrafica_id": aid,
+        "nome": nome,
+        "tipo_operazione": tipo_operazione,
+        "data": _now_iso()[:10],
+        "utente_id": user.get("id"),
+    }
+    # Chiude il record precedente (se aperto)
+    storico = veicolo.get("storico_proprietari") or []
+    for rec in storico:
+        if rec.get("data_fine") is None and rec.get("anagrafica_id") != aid:
+            rec["data_fine"] = _now_iso()[:10]
+    storico.append(new_entry)
+
+    await raw_db.veicoli.update_one(
+        {"id": vid},
+        {"$set": {
+            "proprietario_id": aid,
+            "proprietario": nome,
+            "storico_proprietari": storico,
+            "updated_at": _now_iso(),
+        }},
+    )
+    return {"ok": True, "storico": storico}

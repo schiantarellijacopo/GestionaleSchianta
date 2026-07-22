@@ -718,6 +718,7 @@ function NuovaAnagraficaDialog({ onClose }) {
     const [collaboratori, setCollaboratori] = useState([]);
     const [ocrLoading, setOcrLoading] = useState(false);
     const [geoLoading, setGeoLoading] = useState(false);
+    const [importAziendaLoading, setImportAziendaLoading] = useState(false);
     // Duplicato rilevato: {existing:{id,ragione_sociale,...}, match_on, fonte}
     // Se fonte === "auto" viene proposto dopo OCR; se "save" viene proposto al salvataggio.
     const [duplicate, setDuplicate] = useState(null);
@@ -793,6 +794,44 @@ function NuovaAnagraficaDialog({ onClose }) {
             }));
             toast.success("Dati estratti dal CF");
         } catch (e) { toast.error(e.response?.data?.detail || "CF non valido"); }
+    };
+
+    // --- Importa Dati Azienda da OpenAPI.it (Camerale) ---
+    // Chiama /api/openapi-it/company?piva=... e pre-compila il form.
+    const importaAzienda = async () => {
+        const piva = (form.partita_iva || "").trim();
+        if (!piva || piva.length !== 11) { toast.error("P.IVA non valida (11 cifre richieste)"); return; }
+        setImportAziendaLoading(true);
+        try {
+            const r = await api.get("/openapi-it/company", { params: { piva } });
+            const d = r.data;
+            setForm((p) => ({
+                ...p,
+                tipo: "persona_giuridica",
+                ragione_sociale: (d.ragione_sociale || p.ragione_sociale || "").toUpperCase(),
+                codice_fiscale: (d.cf || p.codice_fiscale || "").toUpperCase(),
+                indirizzo: (d.indirizzo || p.indirizzo || "").toUpperCase(),
+                comune: (d.comune || p.comune || "").toUpperCase(),
+                provincia: d.provincia || p.provincia,
+                cap: d.cap || p.cap,
+                email: d.pec || p.email,
+                _dati_extra_visura: {
+                    forma_giuridica: d.forma_giuridica, rea: d.rea,
+                    capitale_sociale: d.capitale_sociale_versato,
+                    pec: d.pec, codice_ateco: d.ateco,
+                    stato_attivita: d.attiva ? "ATTIVA" : "CESSATA",
+                    data_costituzione: d.data_costituzione,
+                    legale_rappresentante: d.legale_rappresentante,
+                    cciaa: d.cciaa,
+                },
+            }));
+            const src = (d.provider || "").includes("MOCK") ? "MOCK" : "LIVE";
+            toast.success(`Dati azienda importati (${src}): ${d.ragione_sociale || piva}`);
+        } catch (e) {
+            toast.error("Import fallito: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setImportAziendaLoading(false);
+        }
     };
 
     // --- OCR Carta Identità ---

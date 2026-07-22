@@ -35,6 +35,7 @@ import CustomerInsightsWidget from "@/components/CustomerInsightsWidget";
 import ContiCorrentiTab from "@/components/ContiCorrentiTab";
 import ProfilazioneGdprTab from "@/components/ProfilazioneGdprTab";
 import OpenApiActions from "@/components/OpenApiActions";
+import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -184,6 +185,9 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
                     <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
                     {ana.tipo === "persona_giuridica" && (
+                        <TabsTrigger value="analisi-azienda" data-testid="tab-analisi-azienda">🏢 Analisi Azienda</TabsTrigger>
+                    )}
+                    {ana.tipo === "persona_giuridica" && (
                         <TabsTrigger value="salute-fiscale" data-testid="tab-salute-fiscale">💼 Salute Fiscale</TabsTrigger>
                     )}
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
@@ -202,6 +206,9 @@ export default function AnagraficaDetail() {
                 <TabsContent value="polizze"><PolizzeTab polizze={polizze} filter={polizzeFilter} onClearFilter={() => setPolizzeFilter(null)} /></TabsContent>
                 <TabsContent value="conti-correnti"><ContiCorrentiTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="profilazione-gdpr"><ProfilazioneGdprTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                {ana.tipo === "persona_giuridica" && (
+                    <TabsContent value="analisi-azienda"><AnalisiAziendaTab ana={ana} onReload={load} /></TabsContent>
+                )}
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>

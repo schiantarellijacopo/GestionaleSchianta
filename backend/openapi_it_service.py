@@ -426,3 +426,117 @@ def _mock_visura(piva: str) -> dict:
         "rating_finanziario": random.choice(["A", "BBB", "BB", "B"]),
         "punteggio_rischio_credito": random.randint(30, 90),
     }
+
+
+# ===================================================================
+# SERVIZIO 5 · AUTOMOTIVE by TARGA
+# ===================================================================
+async def fetch_automotive_by_targa(targa: str) -> dict:
+    """Lookup veicolo per TARGA. Fallback MOCK trasparente."""
+    key = (targa or "").upper().strip().replace(" ", "")
+    if has_credentials():
+        host = _host("automotive.openapi.it")
+        for path in ("veicoli", "pra"):
+            scope = [f"GET:{host}/{path}"]
+            res = await _call_api(scope, "GET", f"https://{host}/{path}/{key}")
+            if res and res.get("success") and res.get("data"):
+                return _normalize_automotive(res["data"], key)
+        logger.info("OpenAPI.it live fetch_automotive_by_targa fallito, fallback MOCK per '%s'", key)
+    return _mock_automotive_by_targa(key)
+
+
+def _normalize_automotive(data, targa: str) -> dict:
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return _mock_automotive_by_targa(targa)
+    return {
+        "provider": "openapi.it/automotive (LIVE)",
+        "targa": data.get("targa") or targa,
+        "marca": data.get("marca") or data.get("make"),
+        "modello": data.get("modello") or data.get("model"),
+        "allestimento": data.get("allestimento") or data.get("versione"),
+        "cilindrata": data.get("cilindrata") or data.get("displacement"),
+        "potenza_kw": data.get("potenza_kw") or data.get("kw"),
+        "potenza_cv": data.get("potenza_cv") or data.get("cv"),
+        "alimentazione": data.get("alimentazione") or data.get("fuel"),
+        "anno_immatricolazione": data.get("anno_immatricolazione") or data.get("year"),
+        "data_immatricolazione": data.get("data_immatricolazione"),
+        "scadenza_revisione": data.get("scadenza_revisione"),
+        "telaio": data.get("telaio") or data.get("vin"),
+        "categoria": data.get("categoria"),
+        "euro": data.get("euro"),
+        "raw": data,
+    }
+
+
+def _mock_automotive_by_targa(targa: str) -> dict:
+    random.seed(hash(targa + "_veh_by_targa") % (2**31))
+    marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT", "PEUGEOT"])
+    modello = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4", "CLIO"])
+    return {
+        "provider": "openapi.it/automotive (MOCK)",
+        "targa": targa,
+        "marca": marca, "modello": modello,
+        "allestimento": random.choice(["LOUNGE", "SPORT", "GT LINE"]),
+        "cilindrata": random.choice([1000, 1200, 1400, 1600, 1900]),
+        "potenza_kw": random.randint(50, 130),
+        "potenza_cv": random.randint(70, 180),
+        "alimentazione": random.choice(["BENZINA", "DIESEL", "GPL", "IBRIDA"]),
+        "anno_immatricolazione": random.randint(2010, 2024),
+        "data_immatricolazione": f"{random.randint(2010,2024)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
+        "scadenza_revisione": f"{random.randint(2025,2027)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
+        "telaio": f"WBA{''.join(random.choices('0123456789ABCDEFGHJKLMNPRSTVWXYZ',k=14))}",
+        "categoria": "AUTOVETTURA",
+        "euro": random.choice(["EURO 5", "EURO 6"]),
+    }
+
+
+# ===================================================================
+# SERVIZIO 6 · RISK
+# ===================================================================
+async def fetch_risk(cf_or_piva: str) -> dict:
+    key = (cf_or_piva or "").strip()
+    if has_credentials():
+        host = _host("risk.openapi.it")
+        res = await _call_api([f"GET:{host}/report"], "GET", f"https://{host}/report/{key}")
+        if res and res.get("success") and res.get("data"):
+            return _normalize_risk(res["data"], key)
+        logger.info("OpenAPI.it live fetch_risk fallito, fallback MOCK per '%s'", key)
+    return _mock_risk(key)
+
+
+def _normalize_risk(data, key: str) -> dict:
+    if isinstance(data, dict):
+        return {
+            "provider": "openapi.it/risk (LIVE)",
+            "soggetto": key,
+            "rating": data.get("rating"),
+            "score_credito": data.get("credit_score") or data.get("score"),
+            "livello_rischio": data.get("risk_level"),
+            "protesti": data.get("protesti") or [],
+            "pregiudizievoli": data.get("pregiudizievoli") or [],
+            "procedure_concorsuali": data.get("procedure_concorsuali") or [],
+            "eventi_negativi_count": data.get("eventi_negativi_count") or 0,
+            "data_report": data.get("data_report"),
+        }
+    return _mock_risk(key)
+
+
+def _mock_risk(key: str) -> dict:
+    random.seed(hash(key + "_risk") % (2**31))
+    n_prot = random.choice([0, 0, 0, 1, 2])
+    n_preg = random.choice([0, 0, 0, 1])
+    return {
+        "provider": "openapi.it/risk (MOCK)",
+        "soggetto": key,
+        "rating": random.choice(["A", "BBB", "BB", "B"]),
+        "score_credito": random.randint(30, 95),
+        "livello_rischio": random.choice(["basso", "medio", "medio", "alto"]),
+        "protesti": [{"data": "2023-05-15", "importo_eur": 500.0, "tipo": "CAMBIALE"} for _ in range(n_prot)],
+        "pregiudizievoli": [{"data": "2022-08-20", "tipo": "IPOTECA", "importo_eur": 15000.0} for _ in range(n_preg)],
+        "procedure_concorsuali": [],
+        "eventi_negativi_count": n_prot + n_preg,
+        "data_report": "2026-02-04",
+    }
+

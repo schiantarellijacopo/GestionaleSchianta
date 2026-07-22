@@ -1,0 +1,51 @@
+{
+  "summary": "iter35 — Backend 10/10 pytest PASS (automotive-by-targa con cache/fonte, risk con rating+protesti+pregiudizievoli, associa-proprietario con storico, regression status/company). Frontend AnalisiAziendaTab per PG e nascondiamo per PF: OK (verificato su id CORRETTO). MA 2 issue: (1) CRITICAL FRONTEND: bottone '⚡ Importa Dati Azienda' con data-testid anag-importa-azienda-btn NON è renderizzato nel NuovaAnagraficaDialog — la funzione importaAzienda() esiste (Anagrafiche.jsx:801) ma manca il JSX del button; (2) DATA: l'anagrafica id 4871fe9f-7f57-43b3-a80a-e27eeec2c3e9 (indicata nel PS come LIBERA PG) ha tipo=persona_fisica in DB → duplicato con la vera PG b5c72615-4c15-4a51-84d6-9b84e3d146b9. Il tab appare correttamente solo sull'id giusto.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "NuovaAnagraficaDialog (Anagrafiche.jsx)",
+        "issue": "Il bottone '⚡ Importa Dati Azienda' con data-testid='anag-importa-azienda-btn' NON è renderizzato nel JSX. La funzione importaAzienda() è definita a linea 801 ma non è mai collegata a nessun elemento UI. Nel dialog con tipo=persona_giuridica + P.IVA=12485671007 (11 cifre) non appare alcun bottone accanto al campo Partita IVA. Serve aggiungere il button, ad es. dentro il blocco {!isPF && (...) } a linea 1141-1146 di Anagrafiche.jsx.",
+        "selector": "[data-testid='anag-importa-azienda-btn']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter35_openapi_targa_risk.py",
+    "/app/test_reports/pytest/iter35_results.xml"
+  ],
+  "action_items": [
+    "AGGIUNGERE IN Anagrafiche.jsx (dentro NuovaAnagraficaDialog, nel blocco {!isPF && (...)} a riga ~1141) il button '⚡ Importa Dati Azienda' con data-testid='anag-importa-azienda-btn', condizionato a form.partita_iva.length===11, onClick={importaAzienda}, disabled={importAziendaLoading}. Es: <div className='col-span-2 flex items-end gap-2'><div className='flex-1'><Label>Partita IVA</Label><Input .../></div>{form.partita_iva?.length===11 && (<Button type='button' size='sm' onClick={importaAzienda} disabled={importAziendaLoading} data-testid='anag-importa-azienda-btn'><Zap size={13} className='mr-1'/>{importAziendaLoading?'Importo...':'⚡ Importa Dati Azienda'}</Button>)}</div>",
+    "DEDUPLICARE le anagrafiche LIBERA: id=4871fe9f... (tipo=persona_fisica, errato) è duplicato di id=b5c72615... (tipo=persona_giuridica, corretto). Il main agent dovrebbe verificare il flusso di check-duplicate su P.IVA=00795070143 e/o unificare le due schede.",
+    "Aggiornare la reference nel problem statement / documentazione: l'AID corretta per LIBERA come PG è b5c72615-4c15-4a51-84d6-9b84e3d146b9 (non 4871fe9f-7f57-43b3-a80a-e27eeec2c3e9)."
+  ],
+  "critical_code_review_comments": [
+    "Anagrafiche.jsx:801-835 importaAzienda(): funzione ben scritta (P.IVA validation, api.get /openapi-it/company, setForm con dati normalizzati, toast LIVE/MOCK). Bug: nessun rendering del button chiamante nel JSX del dialog.",
+    "Anagrafiche.jsx:1141-1146 il campo Partita IVA per PG è un Input semplice senza il bottone Importa a fianco. Va aggiornato (vedi action_items).",
+    "AnalisiAziendaTab.jsx: componente ben strutturato, badge LIVE/MOCK, 4 sotto-tab con EmptyPanel graceful fallback. Verificato in browser: renderizza tutto correttamente dopo aver premuto 'Scarica dati'.",
+    "AnagraficaDetail.jsx:187-189 il TabsTrigger tab-analisi-azienda è correttamente condizionato a ana.tipo === 'persona_giuridica'. Verificato in browser: appare per PG, nascosto per PF.",
+    "routes/openapi_it.py:123-178 /automotive-by-targa/{targa}: caching in db.veicoli funziona (prima chiamata fonte=openapi_mock, seconda cache). raw_openapi payload esposto: valutare se rimuoverlo per non leakare dettagli. Endpoint associa-proprietario correttamente chiude il record precedente con data_fine e aggiunge la nuova entry con anagrafica_id/nome/tipo_operazione/data.",
+    "openapi_it_service.py:434-492 fetch_automotive_by_targa: tenta scope 'veicoli' poi 'pra' su automotive.openapi.it, fallback MOCK trasparente. Documentazione inline ottima.",
+    "openapi_it_service.py:498-541 fetch_risk: struttura consistente con fetch_company, normalize+mock. In sandbox restituisce sempre MOCK con protesti/pregiudizievoli non deterministici tra chiamate (random.seed su key rende deterministico per soggetto). Persistenza in openapi_data.risk OK.",
+    "Data model minor: veicoli.storico_proprietari è mantenuto come lista embedded con push/close data_fine. Sarebbe più robusto memorizzare in una collezione separata 'veicoli_storico' con FK vid+aid+date_range, ma per ora accettabile visto il volume atteso."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter35_openapi_targa_risk.py"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 pytest PASS in 7.30s)",
+    "frontend": "66% (2/3 test UI PASS: AnalisiAziendaTab OK per PG, nascosto per PF; ma bottone Importa Dati Azienda NON renderizzato → BUG CRITICO)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md).",
+  "seed_data_creation": "Durante test backend: veicolo con targa AB123CD è stato persistito in db.veicoli (per verifica cache). MELLO (aid=e15e701a...) ha ricevuto openapi_data.risk. LIBERA b5c72615 ha ricevuto openapi_data.company via click UI 'Scarica dati'.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend iter35 completamente OK (10/10 pytest PASS in ~7s). Feature critical mancante lato frontend: il button anag-importa-azienda-btn dentro NuovaAnagraficaDialog non è nel JSX (funzione importaAzienda esiste a linea 801 di Anagrafiche.jsx ma non è renderizzata). Il main agent deve aggiungere il Button JSX condizionato a form.partita_iva?.length===11 dentro il blocco {!isPF && (...) } a linea ~1141. Il resto (AnalisiAziendaTab, tab condizionale su tipo=PG, sotto-tab dopo Scarica dati) funziona correttamente ma è stato verificato solo con l'id CORRETTO b5c72615-4c15-4a51-84d6-9b84e3d146b9 (LIBERA PG); l'id nel problem statement 4871fe9f... punta a un duplicato con tipo=persona_fisica (data issue da segnalare). Anagrafica di test valide: MELLO PF (e15e701a-4b0f-490d-9848-23c7e9147500), LIBERA PG (b5c72615-4c15-4a51-84d6-9b84e3d146b9). P.IVA sandbox OpenAPI.it: 12485671007 (ritorna OPENAPI S.P.A.).",
+  "rca of the issue": "1) FRONTEND MISSING BUTTON: sviluppo iter35 ha aggiunto la funzione importaAzienda() in NuovaAnagraficaDialog ma non ha inserito il JSX del button corrispondente. Grep 'anag-importa-azienda-btn' in Anagrafiche.jsx torna 0 occorrenze. Fix banale: aggiungere ~8 righe di JSX dentro il blocco !isPF alla riga 1141-1146. 2) DATA DUPLICATE: il problem statement fa riferimento a un id LIBERA (4871fe9f) che nella base dati corrente ha tipo=persona_fisica; probabilmente è stata creata una versione duplicata come PG (b5c72615-...). L'endpoint check-duplicate su P.IVA 00795070143 dovrebbe averlo intercettato (regression iter31)."
+}
