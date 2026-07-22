@@ -1,4 +1,4 @@
-"""AI Copilot + TTS endpoints."""
+"""AI Copilot + TTS endpoints — chat conversazionale con Claude Sonnet 4.6."""
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from typing import Optional
@@ -18,27 +18,44 @@ class CopilotRequest(BaseModel):
 
 class CopilotResponse(BaseModel):
     answer: str
+    session_id: str
     context_summary: dict
     audio_available: bool = False
 
 
 @router.post("/chat", response_model=CopilotResponse)
 async def copilot_chat(body: CopilotRequest, user=Depends(current_user)) -> CopilotResponse:
-    """Endpoint principale del Copilot AI. Recupera dati dal DB e chiama LLM."""
+    """Chat conversazionale (multi-turno con memoria in Mongo, Claude Sonnet 4.6)."""
     if not body.message or len(body.message.strip()) < 2:
         raise HTTPException(400, "Messaggio troppo corto")
-
-    ctx = await copilot.dispatch_query(body.message)
-    answer = await copilot.copilot_answer(body.message, ctx)
-
-    # Riepilogo del contesto per debug/UI (senza esporre tutti i dettagli)
-    summary = {k: (len(v) if isinstance(v, list) else 1) for k, v in ctx.items()}
-
+    out = await copilot.copilot_chat(body.message, user, session_id=body.session_id)
     return CopilotResponse(
-        answer=answer,
-        context_summary=summary,
+        answer=out["answer"],
+        session_id=out["session_id"],
+        context_summary=out["context_summary"],
         audio_available=tts_svc.is_configured() and body.use_tts,
     )
+
+
+@router.get("/sessions")
+async def list_sessions(user=Depends(current_user)) -> list[dict]:
+    """Lista sessioni chat dell'utente corrente (ordinate per ultimo aggiornamento)."""
+    return await copilot.list_sessions(user)
+
+
+@router.get("/sessions/{sid}/messages")
+async def get_session_messages(sid: str, user=Depends(current_user)) -> list[dict]:
+    """Cronologia messaggi di una sessione."""
+    msgs = await copilot.get_session_messages(sid, user)
+    return msgs
+
+
+@router.delete("/sessions/{sid}")
+async def delete_session(sid: str, user=Depends(current_user)) -> dict:
+    ok = await copilot.delete_session(sid, user)
+    if not ok:
+        raise HTTPException(404, "Sessione non trovata")
+    return {"ok": True}
 
 
 class TTSRequest(BaseModel):
@@ -49,7 +66,6 @@ class TTSRequest(BaseModel):
 
 @router.post("/tts")
 async def copilot_tts(body: TTSRequest, user=Depends(current_user)):
-    """Genera audio MP3 dal testo. Ritorna il file binario direttamente."""
     if not tts_svc.is_configured():
         raise HTTPException(400, "ElevenLabs non configurato — manca ELEVENLABS_API_KEY")
     try:
