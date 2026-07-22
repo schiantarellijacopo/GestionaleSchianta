@@ -10,11 +10,14 @@ Variabili d'ambiente lette:
   OPENAPI_IT_CLIENT_SECRET → APIkey personale (da console.openapi.com/it/oauth)
   OPENAPI_IT_ENV           → "prod" (default) | "sandbox"
 
-Se le credenziali mancano OPPURE una chiamata live fallisce (402 saldo zero,
-401 non autorizzato, connection error, ecc.) → **automatic fallback** su dati MOCK
-con seed deterministico per non spezzare l'UI.
+**In sandbox** i domini API hanno prefisso `test.` sia negli scope che nelle URL
+(es. `test.imprese.openapi.it` invece di `imprese.openapi.it`).
 
-Ogni token è cache-ato in memoria fino a scadenza-60s.
+Se le credenziali mancano OPPURE una chiamata live fallisce (402 saldo zero,
+401 non autorizzato, 406 scope non abilitato, connection error, ecc.) →
+**automatic fallback** su dati MOCK con seed deterministico per non spezzare l'UI.
+
+Ogni token è cache-ato in memoria fino a scadenza-60s per limitare le richieste.
 """
 from __future__ import annotations
 import base64
@@ -28,20 +31,27 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _is_sandbox() -> bool:
+    return (os.environ.get("OPENAPI_IT_ENV") or "prod").strip().lower() == "sandbox"
+
+
+def _host(name: str) -> str:
+    """Ritorna il dominio API con prefisso `test.` se siamo in sandbox.
+
+    name esempio: "imprese.openapi.it" → sandbox: "test.imprese.openapi.it"
+    """
+    return f"test.{name}" if _is_sandbox() else name
+
+
 # ---------- Config ----------
 def _cfg() -> dict:
-    env = (os.environ.get("OPENAPI_IT_ENV") or "prod").strip().lower()
-    is_sandbox = env == "sandbox"
+    is_sandbox = _is_sandbox()
     return {
         "client_id": (os.environ.get("OPENAPI_IT_CLIENT_ID") or "").strip(),
         "client_secret": (os.environ.get("OPENAPI_IT_CLIENT_SECRET") or "").strip(),
-        "env": env,
+        "env": "sandbox" if is_sandbox else "prod",
         "oauth_base": "https://test.oauth.openapi.it" if is_sandbox else "https://oauth.openapi.it",
-        # Le API di dominio non hanno "test." (sono gli stessi endpoint ma consumano crediti test)
-        "imprese_base": "https://imprese.openapi.it",
-        "visengine_base": "https://visengine2.altravia.com",
-        "catasto_base": "https://catasto.openapi.it",  # se non esistente → mock fallback
-        "automotive_base": "https://automotive.openapi.it",  # se non esistente → mock fallback
     }
 
 
@@ -51,12 +61,10 @@ def has_credentials() -> bool:
 
 
 def is_mock_mode() -> bool:
-    """Legacy compatibility — se non ci sono credenziali usiamo mock."""
     return not has_credentials()
 
 
 # ---------- Token cache (in-memory) ----------
-# _token_cache: dict mapping scope_key → {"token": str, "expire": epoch_seconds}
 _token_cache: dict = {}
 
 
@@ -68,7 +76,8 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
     """Ottiene un access_token dagli scopes richiesti. Usa cache in memoria.
 
-    Ritorna None se le credenziali non sono presenti o se il POST /token fallisce.
+    Ritorna None se le credenziali non sono presenti o se il POST /token fallisce
+    (es 406 = scope non abilitato / API non attiva sull'account).
     """
     if not has_credentials():
         return None
@@ -90,7 +99,8 @@ async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
             r = await client.post(url, json=payload, headers=headers)
         if r.status_code != 200:
             logger.warning(
-                "OpenAPI.it token endpoint HTTP %s: %s", r.status_code, r.text[:300]
+                "OpenAPI.it token endpoint HTTP %s (scopes=%s): %s",
+                r.status_code, scopes, r.text[:300],
             )
             return None
         data = r.json()
@@ -109,10 +119,6 @@ async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
 
 
 async def get_credit() -> Optional[float]:
-    """Ritorna il credito residuo in € (o None se non disponibile).
-
-    Usa direttamente Basic Auth (endpoint /credit non richiede token specifico).
-    """
     if not has_credentials():
         return None
     c = _cfg()
@@ -129,9 +135,26 @@ async def get_credit() -> Optional[float]:
     return None
 
 
-# ---------- API calls ----------
+async def get_available_scopes() -> list[str]:
+    """Ritorna la lista completa degli scope disponibili sull'account."""
+    if not has_credentials():
+        return []
+    c = _cfg()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{c['oauth_base']}/scopes",
+                headers={"Authorization": _basic_auth_header(c["client_id"], c["client_secret"])},
+            )
+        if r.status_code == 200:
+            return r.json().get("data") or []
+    except Exception:
+        pass
+    return []
+
+
+# ---------- API call helper ----------
 async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optional[dict]:
-    """Wrapper per chiamate live all'API OpenAPI.it. Ritorna dict o None su errore."""
     token = await _get_token(scopes)
     if not token:
         return None
@@ -156,61 +179,70 @@ async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optio
 
 # ===================================================================
 # SERVIZIO 1 · COMPANY (dati camerali imprese)
+# Prod scope:     GET:imprese.openapi.it/advance   |   /base
+# Sandbox scope:  GET:test.imprese.openapi.it/advance   |   /base
 # ===================================================================
 async def fetch_company(piva_or_cf: str) -> dict:
-    """Lookup dati camerali per P.IVA/CF. Usa `imprese.openapi.it/advance/{key}` in live mode.
-
-    Livello 'advance' include ATECO, capitale, LR, PEC.
-    """
     key = (piva_or_cf or "").strip()
     if has_credentials():
-        c = _cfg()
-        scopes = [f"GET:imprese.openapi.it/advance"]
-        url = f"{c['imprese_base']}/advance/{key}"
-        res = await _call_api(scopes, "GET", url)
+        host = _host("imprese.openapi.it")
+        # advance (dati completi con LR, ATECO, PEC, ecc.)
+        scope_adv = [f"GET:{host}/advance"]
+        res = await _call_api(scope_adv, "GET", f"https://{host}/advance/{key}")
         if res and res.get("success") and res.get("data"):
             return _normalize_company(res["data"], key)
-        # Fallback su livello base
-        res_base = await _call_api([f"GET:imprese.openapi.it/base"], "GET", f"{c['imprese_base']}/base/{key}")
-        if res_base and res_base.get("success") and res_base.get("data"):
-            return _normalize_company(res_base["data"], key)
+        # fallback su /base
+        scope_base = [f"GET:{host}/base"]
+        res_b = await _call_api(scope_base, "GET", f"https://{host}/base/{key}")
+        if res_b and res_b.get("success") and res_b.get("data"):
+            return _normalize_company(res_b["data"], key)
         logger.info("OpenAPI.it live fetch_company fallito, fallback a MOCK per '%s'", key)
     return _mock_company(key)
 
 
-def _normalize_company(data: dict, key: str) -> dict:
-    """Normalizza il JSON di imprese.openapi.it al formato usato dal frontend."""
-    # imprese.openapi.it può restituire un oggetto o una lista; gestiamo entrambi
+def _normalize_company(data, key: str) -> dict:
     if isinstance(data, list):
         data = data[0] if data else {}
-    addr = data.get("indirizzo") or {}
-    if isinstance(addr, str):
-        addr_str, cap, comune, provincia = addr, None, None, None
-    else:
-        addr_str = addr.get("registeredAddress") or addr.get("strada") or addr.get("street") or ""
-        cap = addr.get("cap") or addr.get("zipCode")
-        comune = addr.get("comune") or addr.get("town")
-        provincia = addr.get("provincia") or addr.get("province")
+    if not isinstance(data, dict):
+        return _mock_company(key)
+    # Sandbox/Prod usa schema italiano con `dettaglio` nested per campi camerali
+    dett = data.get("dettaglio") or {}
+    # Indirizzo può essere già una stringa ("VIALE MARINETTI 221") o dict con via/civico
+    indirizzo_str = data.get("indirizzo") or ""
+    if not indirizzo_str and (data.get("via") or data.get("toponimo")):
+        indirizzo_str = " ".join(x for x in [
+            data.get("toponimo"), data.get("via"), str(data.get("civico") or "")
+        ] if x).strip()
+    # Legale rappresentante può essere nested in `soci` o `amministratori`
+    lr = None
+    for coll in ("amministratori", "soci", "cariche"):
+        v = dett.get(coll) or data.get(coll)
+        if isinstance(v, list) and v:
+            first = v[0] if isinstance(v[0], dict) else {}
+            lr = first.get("nome_cognome") or first.get("denominazione") or first.get("nome")
+            if lr:
+                break
+    stato = (data.get("stato_attivita") or data.get("companyStatus") or "").upper()
     return {
         "provider": "openapi.it (LIVE)",
-        "piva": data.get("vatCode") or data.get("piva") or (key if len(key) == 11 else None),
-        "cf": data.get("taxCode") or data.get("cf") or key,
-        "ragione_sociale": data.get("companyName") or data.get("denominazione") or data.get("ragione_sociale"),
-        "indirizzo": addr_str,
-        "cap": cap,
-        "comune": comune,
-        "provincia": provincia,
-        "ateco": data.get("atecoCode") or data.get("codice_ateco"),
-        "ateco_descrizione": data.get("atecoDescription") or data.get("descrizione_ateco"),
-        "pec": data.get("pec"),
-        "capitale_sociale_versato": data.get("shareCapital") or data.get("capitale_sociale"),
-        "legale_rappresentante": data.get("legalForm") or data.get("legale_rappresentante"),
-        "forma_giuridica": data.get("legalForm") or data.get("forma_giuridica"),
-        "data_costituzione": data.get("startDate") or data.get("data_costituzione"),
-        "attiva": data.get("companyStatus", "").upper() != "CESSATA",
-        "cciaa": data.get("cciaa"),
-        "rea": data.get("rea") or data.get("reaCode"),
-        "raw": data,  # per debugging
+        "piva": data.get("piva") or data.get("vatCode") or (key if len(key) == 11 else None),
+        "cf": data.get("cf") or data.get("taxCode") or key,
+        "ragione_sociale": data.get("denominazione") or data.get("companyName") or data.get("ragione_sociale"),
+        "indirizzo": indirizzo_str,
+        "cap": data.get("cap") or dett.get("cap"),
+        "comune": data.get("comune") or dett.get("comune"),
+        "provincia": data.get("provincia") or dett.get("provincia"),
+        "ateco": dett.get("codice_ateco") or data.get("codice_ateco") or data.get("atecoCode"),
+        "ateco_descrizione": dett.get("descrizione_ateco") or data.get("descrizione_ateco") or data.get("atecoDescription"),
+        "pec": dett.get("pec") or data.get("pec"),
+        "capitale_sociale_versato": dett.get("capitale_sociale_versato") or dett.get("capitale_sociale") or data.get("capitale_sociale") or data.get("shareCapital"),
+        "legale_rappresentante": lr or dett.get("legale_rappresentante") or data.get("legale_rappresentante"),
+        "forma_giuridica": dett.get("descrizione_natura_giuridica") or dett.get("codice_natura_giuridica") or data.get("forma_giuridica") or data.get("legalForm"),
+        "data_costituzione": dett.get("data_inizio_attivita") or data.get("data_costituzione") or data.get("startDate"),
+        "attiva": stato in ("ATTIVA", "ACTIVE", "") or (data.get("attiva") is True),
+        "cciaa": dett.get("cciaa") or data.get("cciaa"),
+        "rea": dett.get("rea") or data.get("rea") or data.get("reaCode"),
+        "raw": data,
     }
 
 
@@ -247,50 +279,17 @@ def _mock_company(piva_or_cf: str) -> dict:
 
 
 # ===================================================================
-# SERVIZIO 2 · CATASTO (immobili di persona fisica/giuridica)
+# SERVIZIO 2 · CATASTO
+# Note: gli scope disponibili sono catasto.openapi.it/territorio (query per
+# foglio/particella) e /indirizzo (reverse). NON esiste lookup catasto per CF
+# nel piano attuale. → sempre MOCK finché non attivi il piano dedicato.
 # ===================================================================
 async def fetch_cadastre(cf_or_piva: str) -> list[dict]:
-    """Lookup immobili al catasto per CF/P.IVA.
-
-    Se ci sono credenziali OpenAPI.it, tenta il servizio Italian Cadastre di
-    OpenAPI. Se fallisce (endpoint non attivo, saldo=0, credenziali errate) →
-    fallback MOCK.
-    """
-    key = (cf_or_piva or "").strip()
     if has_credentials():
-        c = _cfg()
-        # Endpoint documentato: catasto.openapi.it richiede scope specifico
-        scopes = [f"GET:catasto.openapi.it/persona"]
-        url = f"{c['catasto_base']}/persona/{key}"
-        res = await _call_api(scopes, "GET", url)
-        if res and res.get("success") and res.get("data"):
-            return _normalize_cadastre(res["data"])
-        logger.info("OpenAPI.it live fetch_cadastre fallito, fallback a MOCK per '%s'", key)
-    return _mock_cadastre(key)
-
-
-def _normalize_cadastre(data) -> list[dict]:
-    if isinstance(data, dict):
-        data = data.get("immobili") or data.get("proprieta") or [data]
-    if not isinstance(data, list):
-        return []
-    out = []
-    for im in data:
-        out.append({
-            "provider": "openapi.it/cadastre (LIVE)",
-            "comune": im.get("comune"),
-            "foglio": im.get("foglio"),
-            "particella": im.get("particella"),
-            "subalterno": im.get("subalterno") or im.get("sub"),
-            "categoria": im.get("categoria"),
-            "classe": im.get("classe"),
-            "consistenza": im.get("consistenza"),
-            "superficie_catastale_mq": im.get("superficie") or im.get("mq"),
-            "rendita_eur": im.get("rendita"),
-            "indirizzo": im.get("indirizzo"),
-            "titolo": im.get("titolarita") or im.get("titolo") or "Proprietà",
-        })
-    return out
+        logger.info(
+            "OpenAPI.it: catasto by CF non disponibile nell'attuale piano — usato MOCK"
+        )
+    return _mock_cadastre((cf_or_piva or "").strip())
 
 
 def _mock_cadastre(key: str) -> list[dict]:
@@ -316,42 +315,15 @@ def _mock_cadastre(key: str) -> list[dict]:
 
 
 # ===================================================================
-# SERVIZIO 3 · AUTOMOTIVE (veicoli PRA)
+# SERVIZIO 3 · AUTOMOTIVE (PRA)
+# Note: nessuno scope live disponibile nell'account attuale — sempre MOCK.
 # ===================================================================
 async def fetch_vehicles(cf_or_piva: str) -> list[dict]:
-    key = (cf_or_piva or "").strip()
     if has_credentials():
-        c = _cfg()
-        scopes = [f"GET:automotive.openapi.it/pra"]
-        url = f"{c['automotive_base']}/pra/{key}"
-        res = await _call_api(scopes, "GET", url)
-        if res and res.get("success") and res.get("data"):
-            return _normalize_vehicles(res["data"])
-        logger.info("OpenAPI.it live fetch_vehicles fallito, fallback a MOCK per '%s'", key)
-    return _mock_vehicles(key)
-
-
-def _normalize_vehicles(data) -> list[dict]:
-    if isinstance(data, dict):
-        data = data.get("veicoli") or data.get("vehicles") or [data]
-    if not isinstance(data, list):
-        return []
-    out = []
-    for v in data:
-        out.append({
-            "provider": "openapi.it/automotive (LIVE)",
-            "targa": v.get("targa") or v.get("plate"),
-            "marca": v.get("marca") or v.get("make"),
-            "modello": v.get("modello") or v.get("model"),
-            "alimentazione": v.get("alimentazione"),
-            "cilindrata": v.get("cilindrata"),
-            "potenza_kw": v.get("potenza_kw") or v.get("power_kw"),
-            "data_immatricolazione": v.get("data_immatricolazione") or v.get("first_registration"),
-            "scadenza_revisione": v.get("scadenza_revisione"),
-            "categoria": v.get("categoria"),
-            "tipo_alimentazione": v.get("euro"),
-        })
-    return out
+        logger.info(
+            "OpenAPI.it: automotive/PRA non abilitato sull'account — usato MOCK"
+        )
+    return _mock_vehicles((cf_or_piva or "").strip())
 
 
 def _mock_vehicles(key: str) -> list[dict]:
@@ -378,41 +350,39 @@ def _mock_vehicles(key: str) -> list[dict]:
 
 
 # ===================================================================
-# SERVIZIO 4 · VISURA CAMERALE ORDINARIA (Visengine)
+# SERVIZIO 4 · VISURA CAMERALE (Visengine)
+# Prod scope:    POST:visengine2.altravia.com/richiesta + GET .../documento
+# Sandbox scope: POST:test.visengine2.altravia.com/richiesta + GET .../documento
 # ===================================================================
 async def fetch_visura(piva: str) -> dict:
-    """Visura camerale via visengine2. Flusso a 2 step (richiesta + poll).
+    """Visura sandbox richiede 2 step: prima GET /fornitori per hash, poi POST /richiesta.
 
-    Nota: la visura ordinaria è un servizio asincrono; l'endpoint POST /richiesta
-    ritorna un id, poi si polla GET /richiesta/{id} finché "stato"=="COMPLETATO"
-    ed infine si scarica il PDF via GET /documento/{id}.
-
-    In questa versione facciamo solo lo step POST/GET per ottenere metadata
-    veloci; il download PDF va gestito lato UI (link/download_url).
+    Per ora manteniamo il fallback MOCK finché non è disponibile un piano visura
+    completo su prod. Il flusso è documentato in visengine2.altravia.com.
     """
     key = (piva or "").strip()
     if has_credentials():
-        c = _cfg()
-        scopes = [
-            "POST:visengine2.altravia.com/richiesta",
-            "GET:visengine2.altravia.com/richiesta",
-        ]
-        res_post = await _call_api(
-            scopes, "POST",
-            f"{c['visengine_base']}/richiesta",
-            json={"tipo_visura": "ordinaria", "piva": key},
-        )
-        if res_post and res_post.get("success"):
-            rid = (res_post.get("data") or {}).get("id") or res_post.get("id")
-            if rid:
-                # Un solo poll (l'UI può richiamare l'endpoint per aggiornamenti)
-                res_get = await _call_api(
-                    scopes, "GET",
-                    f"{c['visengine_base']}/richiesta/{rid}",
-                )
-                if res_get:
-                    return _normalize_visura(res_get.get("data") or {}, key, rid)
-        logger.info("OpenAPI.it live fetch_visura fallito, fallback a MOCK per '%s'", key)
+        host = _host("visengine2.altravia.com")
+        # Step 1: recupera hash del prodotto visura dal fornitore
+        scope_forn = [f"GET:{host}/fornitori"]
+        forn = await _call_api(scope_forn, "GET", f"https://{host}/fornitori")
+        hash_visura = None
+        if forn and forn.get("success"):
+            items = forn.get("data") or []
+            for it in items if isinstance(items, list) else []:
+                if (it.get("tipo") or "").lower() == "ordinaria":
+                    hash_visura = it.get("hash") or it.get("hash_visura")
+                    break
+        if hash_visura:
+            scope_post = [f"POST:{host}/richiesta"]
+            res_post = await _call_api(
+                scope_post, "POST", f"https://{host}/richiesta",
+                json={"hash_visura": hash_visura, "piva": key, "tipo_visura": "ordinaria"},
+            )
+            if res_post and res_post.get("success"):
+                rid = (res_post.get("data") or {}).get("id") or res_post.get("id") or "n/a"
+                return _normalize_visura(res_post.get("data") or {}, key, rid)
+        logger.info("OpenAPI.it live fetch_visura non completato, fallback a MOCK per '%s'", key)
     return _mock_visura(key)
 
 

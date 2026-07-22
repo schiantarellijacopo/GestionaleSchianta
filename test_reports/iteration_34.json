@@ -1,0 +1,43 @@
+{
+  "summary": "iter34 — Integrazione LIVE OpenAPI.it (OAuth2 client_credentials sandbox) VALIDATA end-to-end. Backend: 10/10 pytest PASS. Frontend: badge LIVE (emerald) + credito €98.80 + click Camerale → toast success + CompanyPanel con dati LIVE (OPENAPI S.P.A., ATECO 6201, PEC openapi@legalmail.it, CCIAA RM/REA 1378273, data costituzione 2013-10-20). Fallback MOCK per catasto/vehicles/visura funzionante senza 500. Nessuna regressione (check-duplicate MELLO OK).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter34_openapi_it_live.py",
+    "/app/test_reports/pytest/iter34_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "openapi_it_service.py:76-118 _get_token — Token cache in-memory per scope-set con expire-60s buffer. Corretto. Nota: cache è per-processo, in ambienti multi-worker uvicorn ciascun worker avrà cache separata → non un problema in sandbox ma da tenere presente in prod se si scala orizzontalmente.",
+    "openapi_it_service.py:157-177 _call_api gestisce correttamente 402 (credito insuff) e >=400 con log warning + return None → fallback MOCK trasparente. Buono.",
+    "openapi_it_service.py:203-246 _normalize_company gestisce sia schema italiano nested (data.dettaglio) sia flat/EN — resiliente a variazioni sandbox/prod.",
+    "openapi_it_service.py:203 _normalize_company — se `data` è una lista prende solo il primo elemento (data[0]). Se sandbox/prod ritorna più risultati, il resto viene silenziosamente ignorato. Accettabile per ora ma potrebbe essere loggato.",
+    "routes/openapi_it.py:95-117 /status non espone client_secret ✓. Ritorna anche env=sandbox correttamente. Nessun leak di segreti.",
+    "OpenApiActions.jsx:20-25 useEffect carica /status solo al mount senza dipendenza ana.id → OK perché lo status è globale al tenant, non per-anagrafica.",
+    "OpenApiActions.jsx:54-59 badge LIVE (emerald) e credit (emerald>5€ / rose<=5€) — implementati correttamente come da spec.",
+    "OpenApiActions.jsx:35-38 gestione errore chiamata: toast.error usa e.response?.data?.detail — corretto per FastAPI HTTPException.",
+    "openapi_it_service.py:187-200 fetch_company: fa fallback su /base se /advance fallisce → questo consuma 2 token acquisitions se advance restituisce None. In sandbox advance funziona quindi in pratica 1 sola chiamata al token endpoint. Non blocking.",
+    "P2 minor: openapi_it_service.py:82 has_credentials solo verifica non-empty, non fa validazione formato email/apikey. In prod se qualcuno mette valori invalidi la chiamata /token fallirà con 401 → fallback MOCK trasparente. Accettabile.",
+    "P3 minor: _token_cache è una module-level dict senza lock. In async workload single-thread è safe, ma se in futuro si scala a multi-thread bisognerà usare asyncio.Lock per evitare race su acquisizione token concorrente (worst-case: 2 chiamate parallele al token endpoint invece di 1). Non blocking per uso attuale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter34_openapi_it_live.py"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 test PASS in 9s)",
+    "frontend": "100% (badge LIVE emerald + credito €98.80 + click Camerale → toast + CompanyPanel LIVE data verificati end-to-end)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md). Credenziali OpenAPI.it sandbox in backend/.env: client_id=schiantarelli.jacopo@gmail.com, env=sandbox. Credito osservato pre-test: €99.80 → post-test €98.80 (consumati €1.00 su ~5 chiamate live).",
+  "seed_data_creation": "Nessun nuovo dato seed creato. Utilizzata anagrafica esistente id=4871fe9f-7f57-43b3-a80a-e27eeec2c3e9 (AZ. AGRICOLA DI LIBERA DUILIO) come da problem statement. Il campo openapi_data.company è stato popolato durante il test (side-effect voluto per verifica persistenza).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter34 completamente OK. Integrazione OpenAPI.it OAuth2 v2 sandbox funzionante: (1) POST /token con Basic Auth email+APIkey ottiene access_token con TTL 3600s cache-ato in memoria per scope-set; (2) chiamate LIVE a test.imprese.openapi.it/advance con Bearer token ritornano dati OPENAPI S.P.A. (sandbox fixed data — normale); (3) fallback MOCK per catasto (scope non abilitato), automotive (scope non esiste), visura (sandbox senza fornitori attivi) — nessun 500 esposto all'utente; (4) GET /status ritorna mode=live, env=sandbox, credit_eur=(float>0) senza esporre client_secret; (5) POST /company/{aid} salva openapi_data.company con provider='openapi.it (LIVE)' su Anagrafica; (6) frontend badge LIVE emerald + credit badge emerald se >5€, click Camerale → toast success + CompanyPanel espanso. Da controllare in prod: se si scala multi-worker uvicorn il _token_cache è per-process (accettabile). Fine iter34.",
+  "rca of the issue": "N/A — nessun bug rilevato. Tutti i 10 backend test + flusso UI end-to-end passati al primo colpo. Il selector iniziale 'dati' matchava 'Raccolta Dati' invece di 'Anagrafica' — corretto nel secondo tentativo di test frontend (non è un bug del prodotto)."
+}
