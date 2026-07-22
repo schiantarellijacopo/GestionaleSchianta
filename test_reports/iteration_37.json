@@ -1,0 +1,36 @@
+{
+  "summary": "iter37 finale: TUTTI I TEST PASS. Il bottone anag-importa-azienda-btn è EFFETTIVAMENTE presente nel JSX (Anagrafiche.jsx:1151, verificato con grep e con playwright DOM). Backend /api/openapi-it/visura/{aid} accetta correttamente il CF come fallback per persone fisiche. Il bottone oapi-btn-visura in OpenApiActions è abilitato per anagrafiche con solo CF (non richiede più P.IVA obbligatoria). Nessuna regressione sui restanti endpoint OpenAPI.it.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter37_visura_pf.py",
+    "/app/test_reports/pytest/iter37.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "openapi_it.py:84-140 — Il download PDF Visura è già cablato (httpx + StorageService.put + Allegato con categoria 'visura_camerale'). In sandbox MOCK non c'è download_url, quindi allegato_saved è None; il codice è pronto per prod come dichiarato.",
+    "openapi_it.py:96 — /visura ora usa `partita_iva or codice_fiscale` (accetta PF), OK. Coerente con /company, /risk, /cadastre, /vehicles.",
+    "Anagrafiche.jsx:1141-1160 — button anag-importa-azienda-btn presente e condizionato correttamente a form.partita_iva.length===11 (test conferma: con 10 cifre il button count torna a 0).",
+    "OpenApiActions.jsx:69,77,85,93 — condizione disabled ora è `(!hasPiva && !hasCf)` (bastano CF OR P.IVA), coerente con backend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter37_visura_pf.py (nuovo)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 pytest PASS in 6.08s)",
+    "frontend": "100% (2/2 flow UI PASS: import azienda + visura PF)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! — OK",
+  "seed_data_creation": "Nessuna. Ha usato MELLO (aid=e15e701a-4b0f-490d-9848-23c7e9147500, PF con CF=01075160141) già presente.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter37 chiude tutte le richieste. Note per prossime iter: (1) In questa sessione l'ambiente OpenAPI.it è risultato 'live' (mode=live, credit=€97.20) per /company mentre Visura MOCK (provider='openapi.it/visure (MOCK)'). Comportamento normale: Visure è un servizio separato e in sandbox può restare MOCK. (2) Se in futuro Visura passa a live e OpenAPI restituisce download_url, verificare che l'allegato 'visura_camerale' venga effettivamente salvato in raw_db.allegati e che il file finisca sullo storage attivo. (3) Il test playwright è flaky sul wait_for_url dopo login (l'app redirect a '/' non a '/dashboard') — meglio usare wait_for_load_state('networkidle').",
+  "rca of the issue": "Non applicabile — iter36 aveva segnalato bottone mancante ma era file stale in cache; questa iter conferma che il file su disco È corretto e il bottone si comporta come atteso in UI."
+}

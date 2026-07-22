@@ -83,11 +83,59 @@ async def fetch_vehicles_for_anagrafica(aid: str, user=Depends(current_user)) ->
 
 @router.post("/visura/{aid}")
 async def fetch_visura_for_anagrafica(aid: str, user=Depends(current_user)) -> dict:
+    """Scarica la Visura camerale via OpenAPI.it Visengine.
+
+    Ora supporta sia persona giuridica (P.IVA) sia persona fisica (CF) — Visengine
+    espone documenti ufficiali anche per persone fisiche (categoria 'Person').
+
+    Se la risposta include un `download_url` (PDF), il backend scarica il file
+    e lo salva come `Allegato` legato all'anagrafica (categoria='visura_camerale').
+    """
     ana = await _get_anagrafica(aid, user)
-    key = ana.get("partita_iva")
+    # Accetta P.IVA (PG) o CF (PF)
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
     if not key:
-        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA")
+        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
     data = await svc.fetch_visura(key)
+
+    # Se OpenAPI ha restituito un download_url PDF → scarica e salva come Allegato.
+    dl = (data or {}).get("download_url")
+    if dl and dl.startswith("http"):
+        try:
+            import httpx as _httpx
+            import uuid as _uuid
+            from storage_service import StorageService
+            async with _httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+                r = await client.get(dl)
+            if r.status_code == 200 and r.content:
+                filename = f"visura_{key}_{_now_iso()[:10]}.pdf"
+                stored = await StorageService.put(
+                    user=user, entita_tipo="anagrafica", entita_id=aid,
+                    filename=filename, data=r.content,
+                    content_type=r.headers.get("content-type", "application/pdf"),
+                )
+                allegato = {
+                    "id": str(_uuid.uuid4()),
+                    "entita_tipo": "anagrafica",
+                    "entita_id": aid,
+                    "anagrafica_id": aid,
+                    "categoria": "visura_camerale",
+                    "nome_file": filename,
+                    "mime": "application/pdf",
+                    "size": stored.get("size"),
+                    "storage_path": stored.get("storage_path"),
+                    "storage_provider": stored.get("storage_provider"),
+                    "agenzia_tenant_id": stored.get("agenzia_tenant_id"),
+                    "created_at": _now_iso(),
+                    "created_by": user.get("id"),
+                    "fonte": "openapi.it/visengine",
+                }
+                await raw_db.allegati.insert_one(allegato)
+                data["allegato_id"] = allegato["id"]
+                data["allegato_saved"] = True
+        except Exception as e:
+            data["allegato_error"] = str(e)[:200]
+
     await _update_openapi_field(aid, "visura", data)
     return data
 

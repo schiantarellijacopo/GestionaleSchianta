@@ -90,10 +90,10 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                 />
                 <ActionBtn
                     icon={FileSearch} label="Visura" testid="oapi-btn-visura"
-                    disabled={!canEdit || !hasPiva || loading === "visura"}
+                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "visura"}
                     loading={loading === "visura"}
                     onClick={() => call("visura", "visura", "Visura")}
-                    hint={!hasPiva ? "P.IVA obbligatoria" : null}
+                    hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={!!openapi.visura}
                 />
             </div>

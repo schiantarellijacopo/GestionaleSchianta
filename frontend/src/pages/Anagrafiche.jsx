@@ -1140,8 +1140,22 @@ function NuovaAnagraficaDialog({ onClose }) {
 
                 {!isPF && (
                     <div className="col-span-2">
-                        <Label>Partita IVA</Label>
-                        <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)} />
+                        <div className="flex items-center justify-between mb-1">
+                            <Label>Partita IVA</Label>
+                            {form.partita_iva && form.partita_iva.length === 11 && (
+                                <button
+                                    type="button"
+                                    onClick={importaAzienda}
+                                    disabled={importAziendaLoading}
+                                    className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 transition-colors disabled:opacity-50"
+                                    data-testid="anag-importa-azienda-btn"
+                                    title="Autocompila dati azienda da OpenAPI.it (Camerale)"
+                                >
+                                    {importAziendaLoading ? "⏳ Importo..." : "⚡ Importa Dati Azienda"}
+                                </button>
+                            )}
+                        </div>
+                        <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)} data-testid="anag-piva-input" />
                     </div>
                 )}
 
