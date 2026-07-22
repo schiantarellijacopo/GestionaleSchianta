@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
+import AnagraficaAvatar from "@/components/AnagraficaAvatar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -557,7 +558,7 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
                 </td>
                 <td className="py-3 pr-3">
                     <div className="flex items-center gap-2">
-                        <Contact size={16} className="text-slate-400 shrink-0" />
+                        <AnagraficaAvatar ana={a} size="sm" />
                         <Link
                             to={`/anagrafiche/${a.id}`}
                             className={`hover:underline font-semibold text-[15px] tracking-wide ${cat.text}`}

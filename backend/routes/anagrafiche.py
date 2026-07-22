@@ -677,6 +677,45 @@ async def aggiorna_consensi_privacy(
 
 # ============================================================
 # FIRMA DIGITALE
+
+
+@router.post("/anagrafiche/{aid}/avatar")
+async def upload_avatar(
+    aid: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Upload/sostituzione avatar (foto persona, logo azienda, immagine edificio)."""
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 5 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "avatar.png")
+    if not (ct or "").startswith("image/"):
+        raise HTTPException(400, "Il file deve essere un'immagine")
+    ext = (file.filename or "avatar.png").rsplit(".", 1)[-1].lower() or "png"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/avatar_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    url = f"/api/storage/{result['path']}"
+    await db.anagrafiche.update_one({"id": aid},
+                                    {"$set": {"avatar_url": url, "updated_at": _now_iso()}})
+    return {"ok": True, "avatar_url": url}
+
+
+@router.delete("/anagrafiche/{aid}/avatar")
+async def delete_avatar(
+    aid: str,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    await db.anagrafiche.update_one({"id": aid},
+                                    {"$set": {"avatar_url": None, "updated_at": _now_iso()}})
+    return {"ok": True}
+
 # ============================================================
 @router.post("/anagrafiche/{aid}/firma-digitale")
 async def salva_firma_cliente(aid: str, body: dict,

@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
+import AnagraficaAvatar from "@/components/AnagraficaAvatar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -100,20 +101,24 @@ export default function AnagraficaDetail() {
                 }
                 subtitle={`${ana.tipo === "persona_giuridica" ? "Persona giuridica" : "Persona fisica"} · ${ana.codice_fiscale || ana.partita_iva || "—"}`}
                 actions={
-                    <div className="flex gap-2">
-                        <Button
-                            size="sm" variant="outline"
-                            onClick={() => setPrivacyOpenHdr(true)}
-                            className="border-sky-300 text-sky-700 hover:bg-sky-50"
-                            data-testid="hdr-privacy-btn"
-                        >
-                            <FileText size={13} className="mr-1" /> Privacy & Consensi
-                        </Button>
-                        <PrintButton
-                            onClick={() => openPdf(`/stampa/estratto-conto/${id}`)}
-                            label="Estratto conto"
-                            testid="print-estratto-button"
-                        />
+                    <div className="flex items-start gap-3">
+                        <div className="flex gap-2">
+                            <Button
+                                size="sm" variant="outline"
+                                onClick={() => setPrivacyOpenHdr(true)}
+                                className="border-sky-300 text-sky-700 hover:bg-sky-50"
+                                data-testid="hdr-privacy-btn"
+                            >
+                                <FileText size={13} className="mr-1" /> Privacy & Consensi
+                            </Button>
+                            <PrintButton
+                                onClick={() => openPdf(`/stampa/estratto-conto/${id}`)}
+                                label="Estratto conto"
+                                testid="print-estratto-button"
+                            />
+                        </div>
+                        <AnagraficaAvatar ana={ana} size="lg" editable
+                            onUpdated={(url) => { setAna({ ...ana, avatar_url: url }); }} />
                     </div>
                 }
             />

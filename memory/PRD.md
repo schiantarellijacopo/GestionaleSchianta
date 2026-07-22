@@ -40,7 +40,17 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
-- ✅ ANIA + Multi-tenant + Storage + Super Admin Panel + Marketplace CRUD (core+estensioni) + Ticket + Audit Log + Resend Mock + Console Super Admin dedicata (`/admin-login`).
+- ✅ ANIA + Multi-tenant + Storage + Super Admin Console (`/admin-login`) + Marketplace CRUD + Ticket + Audit Log + Resend Mock + OpenAPI.it Mock + IBAN/Banche lookup.
+- ✅ **Avatar UI (frontend) & Backend endpoint**:
+  - Componente `AnagraficaAvatar.jsx` riusabile (4 taglie: sm 32px / md 64px / lg 80px / xl 96px).
+  - Fallback icona + colore differenziati per tipologia: `persona_fisica` (sky+User), `persona_giuridica` (violet+Building), `condominio` (amber+Home), `parrocchia` (rose+Church), `onlus` (emerald), `asd` (teal).
+  - Modalità `editable`: overlay camera per upload + trash button per delete (hover reveal).
+  - Iniziali generate automaticamente per size sm (nome+cognome o ragione sociale).
+  - **Integrazione**: Anagrafiche list → avatar 32x32 nella colonna Cliente (sostituisce icona Contact); AnagraficaDetail header → avatar 80x80 a fianco dei pulsanti Privacy/Estratto conto con upload.
+  - Backend endpoint `POST/DELETE /api/anagrafiche/{aid}/avatar` (max 5MB, solo immagini). File salvato in Emergent Object Storage con path `assicura/anagrafiche/{aid}/avatar_{uid}.{ext}`.
+  - **Test**: DELETE HTTP 200, POST con immagine test PNG HTTP 200 → `avatar_url` restituito e salvato in DB.
+
+### Sessione 01/07 (iter28)
 - ✅ **OpenAPI.it MOCK integration**:
   - `openapi_it_service.py`: 4 servizi mock (company/cadastre/vehicles/visure) con dati realistici pseudo-random deterministici (seed = hash CF).
   - Router `/api/openapi-it/*`: lookup diretto + endpoint POST che aggiornano `Anagrafica.openapi_data.{company|cadastre|automotive|visura}`.
