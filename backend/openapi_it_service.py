@@ -56,8 +56,13 @@ def _cfg() -> dict:
 
 
 def has_credentials() -> bool:
+    """DEPRECATED - vedi la nuova has_credentials() più sotto (con bearer support)."""
     c = _cfg()
     return bool(c["client_id"] and c["client_secret"])
+
+
+def _has_creds_legacy_placeholder() -> bool:
+    return False
 
 
 def is_mock_mode() -> bool:
@@ -76,9 +81,19 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
     """Ottiene un access_token dagli scopes richiesti. Usa cache in memoria.
 
-    Ritorna None se le credenziali non sono presenti o se il POST /token fallisce
-    (es 406 = scope non abilitato / API non attiva sull'account).
+    PRIORITÀ:
+      1. Se `OPENAPI_IT_BEARER_TOKEN` è settato → usa direttamente quello (production
+         token pre-generato dalla console OpenAPI.it — bypassa OAuth2 exchange).
+      2. Altrimenti, se ci sono client_id + client_secret → esegue OAuth2
+         client_credentials su /token.
+      3. Se nessuna credenziale → None (fallback su MOCK).
     """
+    # 1. Production Bearer Token diretto
+    static_bearer = (os.environ.get("OPENAPI_IT_BEARER_TOKEN") or "").strip()
+    if static_bearer:
+        return static_bearer
+
+    # 2. OAuth2 client_credentials
     if not has_credentials():
         return None
     c = _cfg()
@@ -116,6 +131,15 @@ async def _get_token(scopes: list[str], ttl_sec: int = 3600) -> Optional[str]:
     except Exception as e:
         logger.warning("OpenAPI.it token error: %s", e)
         return None
+
+
+def has_credentials() -> bool:
+    """True se abbiamo qualunque forma di credenziale (bearer diretto O client_id/secret)."""
+    static_bearer = (os.environ.get("OPENAPI_IT_BEARER_TOKEN") or "").strip()
+    if static_bearer:
+        return True
+    c = _cfg()
+    return bool(c["client_id"] and c["client_secret"])
 
 
 async def get_credit() -> Optional[float]:

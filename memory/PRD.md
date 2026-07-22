@@ -37,7 +37,10 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - ✅ **Documenti Inbox · Auto-archiviazione**: quando OCR ha confidenza alta + anagrafica trovata, il documento viene AUTOMATICAMENTE archiviato nella sezione corretta (carta_identita → documento_identita, libretto → libretto_circolazione, ecc.) senza intervento utente. Drag&drop attivo. Fallback a "Rivedi e archivia" se confidenza media/bassa.
 - ✅ **Bugfix**: salute-fiscale 404 errato con projection (fix `if ana is None`), Gemini OCR errors 500→502, React key warning in TitoliByContraente (Fragment con key), label "CARTA D&RSQUO;IDENTITÀ" → apostrofo corretto.
 
-### Sessione 22/07 (iter29 → iter37)
+- ✅ **Bugfix IBAN BPER + banche aggiuntive** (iter38): ABI 05387 (BPER Banca), 05584 (Banco BPM), 01005 (BNL BNP Paribas), 05696 (BPS), 05856 (Sparkasse), 06045 (CR Asti), 08000 (ICCREA), 08258 (BCC Sondrio), 62290 (CR Ravenna), 63000 (BCC Emilbanca) aggiunti a `bank_lookup.py`. IBAN utente IT55I05387... ora restituisce correttamente "BPER Banca".
+- ✅ **ElevenLabs TTS integration scaffold** (iter38): SDK v2.59 installato, `/app/backend/elevenlabs_service.py` con `tts_generate()`, `list_voices()`, `clone_voice()` (Instant Voice Cloning). Env `ELEVENLABS_API_KEY` predisposta (vuota, attende chiave utente). Modello default `eleven_multilingual_v2` (supporta italiano nativo).
+
+### Sessione 22/07 (iter29 → iter38)
 - ✅ **P0 AnagraficaDetail — 4 punti** (iter29-30): Deep-link Customer Insights, Tab Conti Correnti, Bottoni OpenAPI.it, Tab Profilazione & GDPR.
 - ✅ **Duplicati OCR/manuale check-duplicate + overwrite_id** (iter31-32): endpoint GET check-duplicate, POST anagrafiche con overwrite_id, modale DuplicateOverwriteDialog single-click.
 - ✅ **Delete anagrafica cascade** (iter33): DELETE con force=true, 409 su collegati, UI trash button + Elimina in header.
