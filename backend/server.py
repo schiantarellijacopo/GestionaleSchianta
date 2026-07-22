@@ -2060,6 +2060,7 @@ async def ocr_carta_identita(
 
     # Se collegato a un'anagrafica, salva il file originale come documento
     documento_url = None
+    avatar_url = None
     if anagrafica_id:
         ext = (file.filename or "ci.bin").rsplit(".", 1)[-1].lower() or "bin"
         path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/carta_identita_{_uid()}.{ext}"
@@ -2081,10 +2082,53 @@ async def ocr_carta_identita(
         except Exception:
             pass  # OCR ha successo anche se l'upload fallisce
 
+        # AUTO-AVATAR: ritaglia la foto volto dal documento e la salva come avatar
+        bbox = data.get("foto_volto_bbox") or {}
+        if bbox and isinstance(bbox, dict):
+            try:
+                from PIL import Image
+                from io import BytesIO
+                img_pil = Image.open(BytesIO(file_for_ocr)).convert("RGB")
+                W, H = img_pil.size
+                x = float(bbox.get("x") or 0)
+                y = float(bbox.get("y") or 0)
+                w = float(bbox.get("w") or 0)
+                h = float(bbox.get("h") or 0)
+                if w > 0.05 and h > 0.05:
+                    pad = 0.05
+                    left = max(0, int((x - pad) * W))
+                    top = max(0, int((y - pad) * H))
+                    right = min(W, int((x + w + pad) * W))
+                    bottom = min(H, int((y + h + pad) * H))
+                    face = img_pil.crop((left, top, right, bottom))
+                    # square crop centered
+                    fw, fh = face.size
+                    side = min(fw, fh)
+                    lx = (fw - side) // 2
+                    ly = (fh - side) // 2
+                    face_sq = face.crop((lx, ly, lx + side, ly + side))
+                    # resize a max 512px
+                    if side > 512:
+                        face_sq = face_sq.resize((512, 512), Image.LANCZOS)
+                    face_out = BytesIO()
+                    face_sq.save(face_out, format="JPEG", quality=88)
+                    face_bytes = face_out.getvalue()
+                    avatar_path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/avatar_{_uid()}.jpg"
+                    ar = obj_storage.put_object(avatar_path, face_bytes, "image/jpeg")
+                    avatar_url = f"/api/storage/{ar['path']}"
+                    await db.anagrafiche.update_one(
+                        {"id": anagrafica_id},
+                        {"$set": {"avatar_url": avatar_url, "updated_at": _now_iso()}},
+                    )
+            except Exception as e:
+                logging.warning("Face crop → avatar fallito per %s: %s", anagrafica_id, e)
+
     await log_attivita(user, "ocr", "carta_identita", anagrafica_id,
                        f"OCR CI: {data.get('cognome')} {data.get('nome')}")
     if documento_url:
         data["_documento_salvato"] = documento_url
+    if avatar_url:
+        data["_avatar_salvato"] = avatar_url
     return data
 
 

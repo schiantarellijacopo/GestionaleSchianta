@@ -6,7 +6,7 @@ CRM completo per agenzie assicurative italiane. Gestisce anagrafiche, polizze, t
 ## Stack
 - **Backend**: FastAPI + MongoDB (Motor). Multi-tenant via ContextVar.
 - **Frontend**: React + Tailwind + Shadcn UI.
-- **AI**: Emergent LLM Key. Claude Sonnet 4.6 come motore Copilot/Assistente. Gemini 3 Flash per OCR bilanci/documenti.
+- **AI**: Emergent LLM Key. Claude Sonnet 4.6 come motore Copilot/Assistente. Gemini 3 Flash per OCR bilanci/documenti/CI.
 - **Integrazioni**: OpenAPI.it (Visengine/Automotive/Risk/Catasto/Imprese in PROD), ElevenLabs (TTS), WhatsApp Evolution API, Emergent Object Storage.
 
 ## Persona
@@ -15,59 +15,49 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ## Implementato — Sessione corrente (22/07)
 
 ### ✅ AI Copilot Conversazionale (Claude Sonnet 4.6)
-- **Riscrittura backend** `ai_copilot_service.py`:
-  - Multi-turno con storia persistente in `db.copilot_sessions` + `db.copilot_messages`.
-  - Dispatcher esteso: 8 keyword clusters (pagamenti/sospesi, polizze, scadenze, sinistri, veicoli, cross-sell, riepilogo, ricerca cliente).
-  - 10 tool READ-ONLY: `search_clienti`, `polizze`, `polizze_in_scadenza`, `titoli`, `titoli_sospesi`, `sinistri`, `veicoli`, `cross_sell`, `portafoglio_summary`.
-  - **RBAC filter**: role="cliente" forza `contraente_id=user.anagrafica_id`; "collaboratore/dipendente" filtra `collaboratore_id=user.id`; "admin" nessun filtro.
-  - Risposte con **link Markdown cliccabili** (es. `[Cliente](/anagrafiche/xxx)`, `[Polizza](/polizze/xxx)`).
-- **Endpoint API** (`routes/copilot.py`):
-  - `POST /api/copilot/chat` (multi-turno con session_id opzionale).
-  - `GET /api/copilot/sessions` (cronologia utente).
-  - `GET /api/copilot/sessions/{sid}/messages`.
-  - `DELETE /api/copilot/sessions/{sid}`.
-- **Frontend** `ChatCopilotPanel.jsx` sostituisce il vecchio form statico in AssistentePersonale:
-  - Chat piena con sidebar cronologia sessioni (apri/nuova/elimina).
-  - Chip suggerimenti iniziali (6) + follow-up dinamici (5) dopo primo scambio.
-  - Voice input (Web Speech API it-IT).
-  - Rendering Markdown con `remark-gfm` (tabelle GFM), link `/anagrafiche/*` come React Router Link.
-  - Badge context summary (es. "Riepilogo portafoglio: 1").
-- **Verificato**: Claude risponde in Live con dati reali del DB (832 polizze attive, 403 titoli sospesi, 41 sinistri aperti).
+- Riscrittura `ai_copilot_service.py` con multi-turno persistente in `db.copilot_sessions` + `db.copilot_messages`.
+- **10 tool READ-ONLY** con RBAC (cliente vede solo sé, collab solo suo portafoglio, admin tutto).
+- **Dispatcher intelligente**: estrae candidati nome case-insensitive (min 3 char), stop-words estese, ricerca AND multi-parola (es. "bottoni cristian" → matcha cognome+nome insieme), keyword "quanto costa" → auto-fetch polizze con premio.
+- **Endpoint** `/api/copilot/chat|sessions|sessions/{sid}/messages|sessions/{sid}` (delete).
+- **Frontend**:
+  - `ChatCopilotPanel.jsx`: chat full-page in `/assistente-personale` (sidebar cronologia, chip iniziali + follow-up, voice input, link Markdown → React Router Link, tabelle GFM via remark-gfm).
+  - `CopilotWidget.jsx` (bottom-right floating): stessa esperienza premium, 440px wide.
+- **Verificato LIVE**: query "mi trovi la polizza di bottoni cristian e mi dici quanto costa" → trova BOTTONI CRISTIAN con 2 polizze, costo totale € 123,75, link cliccabili, alert "polizze scadute" proattivo.
 
-### ✅ OpenAPI.it — passaggio a PROD LIVE
-- **`OPENAPI_IT_ENV="prod"`** attivato.
-- **Riscrittura service** con domini corretti verificati account per account:
-  - ✅ **Visengine** (`visengine2.altravia.com`): fix flow `GET /visure` → estrae `hash_visura` per Camera Commercio PF/PG → POST `/richiesta` con `json_visura` proper.
-  - ✅ **Catasto** (`catasto.openapi.it/richiesta/ricerca_nazionale`): endpoint come **path parameter** (non body field), scoperto via web docs.
-  - 🟡 **Risk** (`risk.openapi.com` — NON `.it`): flow POST con `taxCode + name/surname` per PF, `taxCode + companyName` per PG. **Richiede credito** account (402 error).
-  - 🟡 **Automotive** (`automotive.openapi.com` — NON `.it`): token OK ma richiede **"Codice Cliente"** configurato lato account.
-  - ❌ **Imprese/Company**: 406 "API not enabled" — richiede **attivazione prodotto sulla console** OpenAPI.it.
-- **Diagnostics endpoint** `GET /api/openapi-it/status` restituisce `mode=live, env=prod`.
+### ✅ OCR Carta Identità + Auto-Avatar (Gemini Vision)
+- `ocr_ci.py` PROMPT esteso con campo **`foto_volto_bbox: {x, y, w, h}`** (coordinate normalizzate 0-1 della fototessera).
+- Endpoint `POST /api/utility/ocr-carta-identita` (server.py:2022):
+  1. Gemini estrae dati anagrafici + bbox foto volto.
+  2. Se `anagrafica_id` presente: salva file come `Allegato` carta_identita.
+  3. Se bbox valido: crop quadrato centrato + resize 512px + JPEG 88% → salva come `avatar_xxx.jpg` in Object Storage.
+  4. Aggiorna `anagrafiche.avatar_url` automaticamente.
+- **Test PASS**: bbox rilevato `{x:0.721, y:0.186, w:0.216, h:0.447}`, avatar 271×271px 5.4 KB salvato, `avatar_url` popolato in DB.
 
-### 🔧 Configurazioni richieste all'utente (per attivare gli scope mancanti):
-1. **Imprese/Company** → https://console.openapi.com/it/apis/company → clic "Attiva".
-2. **Automotive** → console prodotto Automotive → configurare "Codice Cliente" nella sezione impostazioni.
-3. **Risk** → verificare/topup credito sull'account (attualmente 402 billing).
+### ✅ OpenAPI.it — PROD LIVE
+- `OPENAPI_IT_ENV=prod` attivato. Domini corretti: `.com` per Automotive/Risk, `.it` per Catasto/Imprese/Visengine.
+- **Visengine**: flow `GET /visure` → estrae `hash_visura` Camera Commercio PF/PG → POST `/richiesta` con `json_visura` proper (schema `$0..$5` ancora da compilare console).
+- **Catasto**: endpoint come path param `/richiesta/ricerca_nazionale` (scoperto via web docs).
+- **Risk**: payload `taxCode + companyName` per PG. Richiede credito account (402 attualmente).
+- **Automotive**: token OK, richiede "Codice Cliente" configurato lato account (402 attualmente).
+- **Imprese/Company**: 406 "API not enabled" → richiede attivazione prodotto sulla console.
 
 ## Backlog priorità
 
 ### P0 — Prossime sessioni
-- Completamento visura live (json_visura schema esatto — response 412 su primo tentativo, forse serve `json_visura` con nome/cognome esplici per PF).
-- Fix Assistente Personale: dropdown "Tutti i collaboratori" nel widget Documenti Mancanti.
-- Bottone "📎 Allega Documento" inline nel widget Documenti Mancanti.
-- RCA sostituzione business logic: stessa targa eredita libretto | targa diversa richiede 2 nuovi documenti (libretto nuovo + atto vendita).
+- Fix widget Documenti Mancanti: dropdown "Tutti i collaboratori" + bottone "📎 Allega" inline + campo Note/Sollecito.
+- RCA sostituzione: stessa targa eredita libretto | targa diversa richiede libretto+atto vendita mancanti.
 - Modulo Asset/Patrimonio Cliente: mappa Leaflet + geocoding + PDF reporting.
 
 ### P1
-- Tool call ReAct multi-step per Copilot (es. auto-follow-up: cerca cliente → poi polizze → poi sinistri).
-- Streaming SSE risposta Claude (attualmente non-streaming, 3-5s attesa).
-- Salvataggio consiglio AI nel Diario cliente (compatibilità con vecchia `assistente-personale/genera-consiglio`).
+- Tool call ReAct multi-step per Copilot (auto-follow-up query concatenate).
+- Streaming SSE risposta Claude (attualmente 3-5s attesa).
+- Salvataggio consiglio AI nel Diario cliente.
+- Configurazione console OpenAPI.it per attivare Imprese/Automotive + topup credito Risk.
 
 ### P2
 - Refactor `server.py` (>10.700 righe) in router modulari.
 - Seed CAP italiani (~7.900) + ABI/CAB completi Banca d'Italia.
-- Face-detection avatar automatico da CI via Gemini Vision.
-- Google Drive Integration per PDF sync automatico.
+- Google Drive Integration per PDF sync automatico per tenant.
 
 ## Credenziali test
 File: `/app/memory/test_credentials.md`

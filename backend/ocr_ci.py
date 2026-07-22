@@ -30,13 +30,21 @@ Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido:
   "indirizzo_residenza": "stringa o null",
   "comune_residenza": "stringa o null",
   "cittadinanza": "stringa o null",
-  "categorie_patente": "lista categorie es. ['B','BE'] (solo se patente) o null"
+  "categorie_patente": "lista categorie es. ['B','BE'] (solo se patente) o null",
+  "foto_volto_bbox": {
+      "x": "numero decimale 0-1 (coord X angolo sinistro alto della foto volto sul documento, come frazione della larghezza)",
+      "y": "numero decimale 0-1 (coord Y)",
+      "w": "numero decimale 0-1 (larghezza foto volto come frazione della larghezza totale)",
+      "h": "numero decimale 0-1 (altezza foto volto come frazione dell'altezza totale)"
+  }
 }
 
 Regole:
 - Tutti i campi opzionali. Restituisci null se non leggibili
 - Cognome/Nome in MAIUSCOLO senza accenti speciali
 - Date sempre YYYY-MM-DD
+- foto_volto_bbox: coordinate normalizzate 0-1 della fototessera del titolare visibile sul documento.
+  Se non c'è una foto volto visibile (retro CI, PDF testuale), usa null.
 - Non aggiungere testo prima o dopo il JSON
 - Non includere markdown ```json```
 """
