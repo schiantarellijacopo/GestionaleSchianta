@@ -37,6 +37,13 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - ✅ **Documenti Inbox · Auto-archiviazione**: quando OCR ha confidenza alta + anagrafica trovata, il documento viene AUTOMATICAMENTE archiviato nella sezione corretta (carta_identita → documento_identita, libretto → libretto_circolazione, ecc.) senza intervento utente. Drag&drop attivo. Fallback a "Rivedi e archivia" se confidenza media/bassa.
 - ✅ **Bugfix**: salute-fiscale 404 errato con projection (fix `if ana is None`), Gemini OCR errors 500→502, React key warning in TitoliByContraente (Fragment con key), label "CARTA D&RSQUO;IDENTITÀ" → apostrofo corretto.
 
+### Sessione 22/07 (iter29 → iter33)
+- ✅ **P0 AnagraficaDetail — 4 punti completati** (iter29-30, 100% test): (1) Deep-link Customer Insights (6 KPI cliccabili → tab polizze filtrato/analisi/sinistri-nav), (2) Tab "Conti Correnti" multi-IBAN con auto-lookup banca via `/api/lookup/iban` (contratto nested `banca:{ragione_sociale,bic,source}`), (3) Bottoni OpenAPI.it (Camerale/Catasto/Veicoli/Visura) con badge MOCK, (4) Tab "Profilazione & GDPR" con stile_vita/corporate_profile/consensi marketing distinti.
+- ✅ **Duplicati OCR/Excel — check-duplicate** (iter31-32): nuovo `GET /api/anagrafiche/check-duplicate?codice_fiscale=X|partita_iva=Y&tipo=Z` + `POST /api/anagrafiche` accetta ora `overwrite_id` (fa UPDATE invece di INSERT). Frontend `NuovaAnagraficaDialog`: check automatico dopo OCR CI (CF) e OCR Visura (P.IVA), safety net in save() sui campi manuali; modale `DuplicateOverwriteDialog` con conferma. Single-click confirm via param esplicito (`save(overrideOverwriteId)`) evita stale-closure. Fix onClick regression `{()=>save()}`.
+- ✅ **Eliminazione anagrafica con cascade** (iter33): `DELETE /api/anagrafiche/{aid}?force=true|false`: se `force=false` e ci sono polizze/sinistri, ritorna 409 con collegati counts; se force=true elimina in cascata polizze, titoli, sinistri, allegati, diario, interviste, avvisi, raccolta_dati, potenti_domande. UI: trash button per riga in Anagrafiche list (`anag-delete-{id}`) + bottone Elimina in header AnagraficaDetail (`hdr-delete-btn`), entrambi con dialog conferma cascade preview + testo "ELIMINA" richiesto per force delete.
+- ✅ **Import Anagrafiche Excel/CSV con auto-mapping intelligente** (iter33): nuovo `POST /api/import/anagrafiche/preview` + `/execute` in `/app/backend/routes/import_anagrafiche.py`. Riconosce automaticamente header IT/EN via normalizzazione (accents/punct/case) + fuzzy matching (token overlap + prefix, soglia 0.6). FIELD_ALIASES copre 20+ campi con varianti multiple (es `["codice fiscale","cf","c.f.","codicefiscale","fiscal code","tax code"]`). Preview stima duplicati; execute con policy `skip|overwrite|create_only`. UI wizard in tab dedicato di `/importazione` con select per correzione manuale mapping.
+- ✅ **Fix Multi-Tenant + Super Admin + Avatars + Resend/OpenAPI Mock** (sessione precedente): DB isolation via ContextVar, Super Admin panel GDPR-compliant separato, Marketplace + Ticketing + Audit Logs, `AnagraficaAvatar` component, Bank lookup IBAN→ABI/CAB/BIC.
+
 ## Backlog priorità
 
 ### Sessione 04/02/2026 (iter29)
@@ -110,9 +117,15 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 ### P0 — In valutazione utente
 - Test end-to-end auto-archiviazione Documenti Inbox con file reali.
 - Test end-to-end nuovi dialog Annulla/Documenti veicolo in Libro Matricola.
+- **Test end-to-end delete anagrafica** (cascade 409 su MELLO verificato, force-delete testato solo su TEST records).
+- **Test import Excel/CSV reale**: caricare un tracciato Excel di produzione (es export dalla vecchia gestionale) per validare l'auto-mapping su header reali.
 
 ### P1 — Prossime sessioni
-- **Refactor `server.py`** (>10k righe) in router modulari per anagrafiche/polizze/titoli/sinistri/movimenti.
+- **Seed CAP italiani** (~7.900) e ABI/CAB completi Banca d'Italia (script `postal_codes_import.py` + `banks_import.py`).
+- **Face detection avatar automatico** da carta d'identità via Gemini Vision (riusa pipeline OCR CI esistente).
+- **Automazioni Avvisi su WhatsApp** via Evolution API multi-tenant (routing Alert Dispatcher → istanza WhatsApp del tenant corretto).
+- **Google Drive Integration** per PDF sync automatico per tenant.
+- **Refactor `server.py`** (>10.700 righe) in router modulari per anagrafiche/polizze/titoli/sinistri/movimenti.
 - **Storico Avvisi UI**: tab dedicato nella sezione Avvisi (backend già pronto).
 - Chiarimenti PDF variazioni: #6 setup agenziale, #9 sezione regolazione, #10 elenco documenti, #21 pipeline email.
 - Variazione PDF #3 Mappa anagrafica cliente (Leaflet + Nominatim).
