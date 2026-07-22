@@ -870,14 +870,18 @@ function NuovaAnagraficaDialog({ onClose }) {
         finally { setGeoLoading(false); }
     };
 
-    const save = async () => {
+    const save = async (overrideOverwriteId = null) => {
         const isPF = form.tipo === "persona_fisica";
         if (isPF && !form.nome && !form.cognome) { toast.error("Inserisci Cognome o Nome"); return; }
         if (!isPF && !form.ragione_sociale) { toast.error("Inserisci la ragione sociale"); return; }
 
+        // Effective overwrite id: se passato esplicitamente (da onConfirmOverwrite)
+        // ha priorità sullo state form._overwrite_id (evita stale-closure).
+        const effectiveOverwriteId = overrideOverwriteId || form._overwrite_id;
+
         // Safety net: se non è stato ancora rilevato un duplicato via OCR ma
         // l'utente ha inserito CF/P.IVA a mano, controlla ADESSO prima di creare.
-        if (!form._overwrite_id) {
+        if (!effectiveOverwriteId) {
             const dup = await checkDup({
                 codice_fiscale: isPF ? form.codice_fiscale : null,
                 partita_iva: !isPF ? form.partita_iva : (form.partita_iva || null),
@@ -899,7 +903,7 @@ function NuovaAnagraficaDialog({ onClose }) {
             if (extra) payload.note = (payload.note ? payload.note + "\n" : "") + `[Da visura] ${extra}`;
         }
         // Se l'utente ha confermato la sovrascrittura, aggancia overwrite_id
-        if (_overwrite_id) payload.overwrite_id = _overwrite_id;
+        if (effectiveOverwriteId) payload.overwrite_id = effectiveOverwriteId;
 
         try {
             const created = await api.post("/anagrafiche", payload);
@@ -939,22 +943,22 @@ function NuovaAnagraficaDialog({ onClose }) {
                     };
                     try { await api.post("/anagrafiche", amm); } catch (err) { /* skip */ }
                 }
-                toast.success(`Ditta + ${_amministratori.length} amministratori ${_overwrite_id ? "aggiornata" : "creati"}`);
+                toast.success(`Ditta + ${_amministratori.length} amministratori ${effectiveOverwriteId ? "aggiornata" : "creati"}`);
             } else {
-                toast.success(_overwrite_id ? "Anagrafica sovrascritta con successo" : "Anagrafica creata");
+                toast.success(effectiveOverwriteId ? "Anagrafica sovrascritta con successo" : "Anagrafica creata");
             }
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
-    // Callback modale duplicato: conferma sovrascrittura
+    // Callback modale duplicato: conferma sovrascrittura.
+    // Passa l'id esplicitamente a save() per evitare stale-closure sul form state.
     const onConfirmOverwrite = () => {
         if (!duplicate?.existing) return;
-        setForm((f) => ({ ...f, _overwrite_id: duplicate.existing.id }));
+        const ovId = duplicate.existing.id;
+        setForm((f) => ({ ...f, _overwrite_id: ovId }));
         setDuplicate(null);
-        // Se il duplicato era stato scoperto in save(), richiama save automaticamente
-        // (piccolo delay per far propagare lo state)
-        setTimeout(() => save(), 50);
+        save(ovId);  // esplicito → nessun setTimeout, nessuna closure stale
     };
     const onCancelOverwrite = () => {
         // Se veniva da un save aborto -> chiudi. Se veniva da OCR (fonte=auto) -> tieni aperto.
@@ -1225,8 +1229,8 @@ function DuplicateOverwriteDialog({ open, existing, matchOn, fonte, onConfirm, o
                     </DialogTitle>
                     <DialogDescription>
                         {fonte === "auto"
-                            ? "L&apos;OCR ha rilevato un&apos;anagrafica con lo stesso identificativo già presente in archivio."
-                            : "È già presente un&apos;anagrafica con lo stesso identificativo."}
+                            ? "L\u2019OCR ha rilevato un\u2019anagrafica con lo stesso identificativo già presente in archivio."
+                            : "È già presente un\u2019anagrafica con lo stesso identificativo."}
                     </DialogDescription>
                 </DialogHeader>
                 <div className="bg-slate-50 border border-slate-200 rounded p-3 text-sm space-y-1">

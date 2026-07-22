@@ -1,0 +1,51 @@
+{
+  "summary": "RETEST iter31 fix su gestione duplicati Anagrafiche. RISULTATO: la fix ha risolto lo stale-closure (single-click overwrite ✅ funziona quando save() viene chiamato correttamente) e ha ripulito il decorator orfano backend ✅. TUTTAVIA la fix ha INTRODOTTO UNA REGRESSIONE CRITICA P0: il bottone 'Salva' (data-testid=anag-save-button) NON FA PIÙ NULLA quando cliccato dall'utente. Root cause: firma `save = async (overrideOverwriteId = null)` combinata con handler passato come reference `onClick={save}` alla riga 1198 → React passa il SyntheticEvent come primo argomento, il che rende overrideOverwriteId truthy, salta la check-duplicate e cerca di POST /anagrafiche con overwrite_id = evento (serializzazione axios fallisce silenziosamente). Nessun request HTTP viene sparata, nessun toast, nessun errore visibile all'utente. L'intera feature 'Nuova anagrafica' è BLOCCATA. Fix P2 apostrofi ✅ verificata (U+2019 renderizzato correttamente).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Anagrafiche.jsx > NuovaAnagraficaDialog > Button Salva (linea 1198)",
+        "issue": "P0 REGRESSIONE CRITICA: `<Button onClick={save}>` con `save = async (overrideOverwriteId=null)` fa sì che React passi il SyntheticEvent come primo argomento. Nell'handler, `effectiveOverwriteId = overrideOverwriteId || form._overwrite_id` diventa truthy (evento), quindi (a) la check-duplicate NON viene eseguita, (b) payload.overwrite_id viene impostato all'evento sintetico → axios.post fallisce silenziosamente nella serializzazione JSON (o produce payload malformato). Zero requests HTTP osservate. Zero toast. Zero errori console. L'utente clicca Salva e NON succede nulla. Confermato: chiamando manualmente `props.onClick()` (senza argomenti) via JS eval, il flusso funziona correttamente.",
+        "selector": "[data-testid=\"anag-save-button\"]",
+        "priority": "CRITICAL/P0"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Nuova anagrafica → Salva",
+        "issue": "Il click sul bottone Salva non produce nessuna chiamata HTTP. La creazione manuale di anagrafiche è completamente bloccata. Anche il check-duplicate non parte, quindi TUTTI i sotto-flussi dipendenti (regression create-new, cancel path, sovrascrivi PF, sovrascrivi PG) risultano irraggiungibili via UI standard.",
+        "affected_selectors": ["[data-testid=\"anag-save-button\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_32.json"
+  ],
+  "action_items": [
+    "P0 URGENT: Modificare linea 1198 di /app/frontend/src/pages/Anagrafiche.jsx da `<Button data-testid=\"anag-save-button\" onClick={save} ...>` a `<Button data-testid=\"anag-save-button\" onClick={() => save()} ...>`. In alternativa, usare useCallback con guard type-check: `const handleSave = () => save()`. Questa è una fix da UNA riga che sblocca l'intera feature.",
+    "P0 Dopo il fix del click: verificare che TUTTI i flussi funzionino via UI reale (non solo via evaluate): (a) sovrascrivi PF con CF esistente, (b) sovrascrivi PG con P.IVA esistente, (c) cancel path (annulla modale), (d) create-new senza duplicati.",
+    "P3 (nice-to-have): Aggiungere aria-describedby a DialogContent per rimuovere warning Radix 'Missing Description or aria-describedby'."
+  ],
+  "critical_code_review_comments": [
+    "Anagrafiche.jsx:873 → `const save = async (overrideOverwriteId = null) => ...` è corretta di per sé, MA linea 1198 la usa come `onClick={save}` senza wrapper, causando React a iniettare l'evento come argomento. Whenever an handler accetta un argomento con un default value, va SEMPRE wrappato in una arrow function per onClick React.",
+    "La regressione è stata rilevata SOLO perché il test ha ispezionato direttamente l'assenza di richieste HTTP. Il bottone appare funzionante (enabled, cliccabile) ma il click è no-op — UX estremamente ingannevole. Considerare: aggiungere un try/catch generico attorno a save() con un toast.error se qualcosa fallisce prima della POST.",
+    "Backend: verifica manuale conferma che @router.post('/anagrafiche', status_code=201) è registrato UNA SOLA volta alla riga 368 di /app/backend/routes/anagrafiche.py — fix P1 di iter31 ✅ applicata correttamente.",
+    "Fix P2 apostrofi ✅ verificata: la DialogDescription mostra correttamente 'È già presente un\u2019anagrafica con lo stesso identificativo.' (U+2019). I `&apos;` nel corpo JSX renderizzano come apostrofo dritto (U+0027) — non è literal string. Comportamento accettabile.",
+    "Stale-closure fix DI PER SÉ ✅ VERIFICATA: quando save() viene chiamato correttamente senza argomenti (via JS eval), il click su Sovrascrivi (dup-overwrite-btn) chiude la modale, esegue POST /api/anagrafiche con overwrite_id, riceve 201, chiude il dialog e mostra il toast 'Anagrafica sovrascritta con successo' — TUTTO al primo click. Il bug 2-click di iter31 è RISOLTO."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (già validato in iter31, orphan decorator confermato rimosso)",
+    "frontend": "20% (P0 regressione blocca click Salva → tutti i flussi UI standard rotti; overwrite click 1-shot ✅ verificato via workaround eval; apostrofo P2 ✅)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna. L'anagrafica MELLO (id=e15e701a-4b0f-490d-9848-23c7e9147500) è stata sovrascritta con cognome=MELLO_TESTBACKUP durante il test overwrite → RIPRISTINATA via PUT /api/anagrafiche/{id} con ragione_sociale='A. S. D. MELLO', cognome='', nome=''. Verificato via GET dopo restore: OK. NB: il cf 01075160141 rimane invariato.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Fix P0 URGENTE: linea 1198 Anagrafiche.jsx deve diventare `onClick={() => save()}`. Dopo il fix, ri-testare TUTTI i flussi via UI standard (non serve più il workaround eval): (1) Salva senza duplicati crea anagrafica → toast 'Anagrafica creata'; (2) CF=01075160141 → modale duplicato → 1-click Sovrascrivi → toast 'Anagrafica sovrascritta con successo'; (3) PG con P.IVA=00795070143 → modale (match_on=partita_iva) → 1-click Sovrascrivi; (4) Cancel modale → dialog rimane aperto, save button torna 'Salva'. RESTORE POST-TEST: se sovrascrivi PF, riportare MELLO a ragione_sociale='A. S. D. MELLO', cognome='', nome=''; se PG, ripristinare AZ. AGRICOLA DI LIBERA DUILIO (id=4871fe9f-7f57-43b3-a80a-e27eeec2c3e9). L'apostrofo tipografico U+2019 nella DialogDescription è già OK. Per la firma di save() con parametro opzionale, l'approccio corretto è tenerla ma wrappare l'onClick.",
+  "rca of the issue": "P0 REGRESSIONE — Save button no-op:\n\n**Contesto**: la fix di iter31 ha correttamente cambiato la signature di `save` da `async ()` a `async (overrideOverwriteId = null)` per eliminare lo stale-closure. `onConfirmOverwrite` ora chiama `save(duplicate.existing.id)` correttamente.\n\n**Bug**: linea 1198 di Anagrafiche.jsx:\n```jsx\n<Button data-testid=\"anag-save-button\" onClick={save} className=\"...\">\n```\nQuando l'utente clicca, React invoca `save(clickEvent)`. Nel body di save():\n```js\nconst effectiveOverwriteId = overrideOverwriteId || form._overwrite_id;\n// overrideOverwriteId = SyntheticBaseEvent (truthy object)\n// → effectiveOverwriteId = evento sintetico\n\nif (!effectiveOverwriteId) {\n    // SKIPPED perché evento è truthy\n    const dup = await checkDup(...);\n}\n\n// ...\nif (effectiveOverwriteId) payload.overwrite_id = effectiveOverwriteId;\n// payload.overwrite_id = evento sintetico\n\nawait api.post(\"/anagrafiche\", payload);\n// axios tenta di serializzare payload con evento circolare → fallisce internamente\n// Il catch cattura l'errore ma toast.error mostra 'Errore' generico\n// (o l'errore non viene lanciato ma la request è malformata e non viene mai inviata)\n```\n\n**Osservato**: 0 richieste HTTP dopo click Salva. Nessun errore console. Nessun toast. Bottone completamente muto.\n\n**Verifica del fix**: chiamando `props.onClick()` (senza args) via `page.evaluate()`, il flusso funziona correttamente:\n- GET /api/anagrafiche/check-duplicate → 200 (con duplicato trovato)\n- Modale duplicato appare con testo corretto (apostrofi tipografici OK)\n- Click su dup-overwrite-btn → POST /api/anagrafiche con overwrite_id → 201 → dialog+modale chiudono → toast success ✅ AL PRIMO CLICK\n\n**Fix (1 line)**:\n```diff\n- <Button data-testid=\"anag-save-button\" onClick={save} className=\"bg-sky-700 hover:bg-sky-800\">\n+ <Button data-testid=\"anag-save-button\" onClick={() => save()} className=\"bg-sky-700 hover:bg-sky-800\">\n```\n\n**Prevention**: quando un handler ha argomenti con default value, non passarlo mai come reference a un onClick React senza wrapper — usare sempre arrow function esplicita."
+}

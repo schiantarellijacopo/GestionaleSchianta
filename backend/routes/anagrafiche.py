@@ -366,9 +366,6 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/anagrafiche", status_code=201)
-
-
-@router.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
     body = await _auto_geocode(body)
