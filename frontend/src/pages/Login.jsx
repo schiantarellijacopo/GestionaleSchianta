@@ -126,6 +126,18 @@ export default function Login() {
                             <li>dipendente@assicura.it · Dipendente123!</li>
                             <li>cliente@assicura.it · Cliente123!</li>
                         </ul>
+                        <div className="mt-3 pt-3 border-t border-violet-100">
+                            <div className="font-medium mb-1 text-violet-700 flex items-center gap-1">
+                                <Shield size={11} /> Super Admin (Platform Owner):
+                            </div>
+                            <ul className="space-y-0.5 num">
+                                <li>superadmin@assicura.it · superadmin123!</li>
+                            </ul>
+                            <a href="/admin-login" className="inline-block mt-1 text-[11px] text-violet-600 hover:text-violet-800 font-semibold underline"
+                                data-testid="login-goto-admin">
+                                → Vai alla Super Admin Console
+                            </a>
+                        </div>
                     </div>
                 </Card>
             </div>
