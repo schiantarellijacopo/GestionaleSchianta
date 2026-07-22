@@ -13,7 +13,7 @@ export default function AdminLogin() {
     const { login, user, logout } = useAuth();
     const nav = useNavigate();
     const [email, setEmail] = useState("superadmin@assicura.it");
-    const [password, setPassword] = useState("Superadmin123!");
+    const [password, setPassword] = useState("superadmin123!");
     const [err, setErr] = useState("");
     const [loading, setLoading] = useState(false);
 
@@ -97,7 +97,7 @@ export default function AdminLogin() {
                     <div className="bg-violet-950/40 border border-violet-900/60 rounded-md px-3 py-2 text-[11px] text-violet-200 space-y-0.5">
                         <div className="font-semibold text-violet-100 uppercase tracking-wider text-[10px]">Credenziali Super Admin</div>
                         <div>Email: <span className="font-mono text-violet-300">superadmin@assicura.it</span></div>
-                        <div>Password: <span className="font-mono text-violet-300">Superadmin123!</span></div>
+                        <div>Password: <span className="font-mono text-violet-300">superadmin123!</span></div>
                     </div>
 
                     <div className="text-center pt-2">

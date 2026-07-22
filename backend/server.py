@@ -10596,22 +10596,26 @@ async def startup():
     await db.sinistri.create_index("id_sinistro_exp")
     await db.attivita_log.create_index("created_at")
 
-    # admin seed
+    # admin seed (admin agenzia principale — NON super_admin)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@assicura.it").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
         admin = UserPublic(email=admin_email, name="Amministratore", role="admin",
-                           is_super_admin=True).model_dump()
+                           is_super_admin=False).model_dump()
         admin["password_hash"] = hash_password(admin_password)
+        admin["agenzia_tenant_id"] = "tenant-principale-schiantarelli"
         await db.users.insert_one(admin)
         logger.info("Admin seeded: %s", admin_email)
     else:
         updates: dict = {}
         if not verify_password(admin_password, existing.get("password_hash", "")):
             updates["password_hash"] = hash_password(admin_password)
-        if not existing.get("is_super_admin"):
-            updates["is_super_admin"] = True
+        # admin@assicura.it è admin dell'agenzia, NON super_admin
+        if existing.get("is_super_admin"):
+            updates["is_super_admin"] = False
+        if not existing.get("agenzia_tenant_id"):
+            updates["agenzia_tenant_id"] = "tenant-principale-schiantarelli"
         if updates:
             await db.users.update_one({"email": admin_email}, {"$set": updates})
 
@@ -10624,9 +10628,9 @@ async def startup():
     from routes.marketplace import seed_default_moduli
     await seed_default_moduli()
 
-    # Dedicated super admin user (idempotent)
+    # Dedicated super admin user (idempotent) — SOLO questo utente ha is_super_admin=True
     super_email = "superadmin@assicura.it"
-    super_pwd = "Superadmin123!"
+    super_pwd = "superadmin123!"
     existing_su = await db.users.find_one({"email": super_email})
     if not existing_su:
         su_doc = UserPublic(email=super_email, name="Super Admin", role="admin",
