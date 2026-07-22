@@ -37,13 +37,16 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - ✅ **Documenti Inbox · Auto-archiviazione**: quando OCR ha confidenza alta + anagrafica trovata, il documento viene AUTOMATICAMENTE archiviato nella sezione corretta (carta_identita → documento_identita, libretto → libretto_circolazione, ecc.) senza intervento utente. Drag&drop attivo. Fallback a "Rivedi e archivia" se confidenza media/bassa.
 - ✅ **Bugfix**: salute-fiscale 404 errato con projection (fix `if ana is None`), Gemini OCR errors 500→502, React key warning in TitoliByContraente (Fragment con key), label "CARTA D&RSQUO;IDENTITÀ" → apostrofo corretto.
 
-### Sessione 22/07 (iter29 → iter34)
-- ✅ **P0 AnagraficaDetail — 4 punti completati** (iter29-30): Deep-link Customer Insights (6 KPI cliccabili), Tab Conti Correnti multi-IBAN con lookup banca, Bottoni OpenAPI.it (4 servizi), Tab Profilazione & GDPR.
-- ✅ **Duplicati OCR/manuale — check-duplicate + overwrite_id** (iter31-32): endpoint GET `/api/anagrafiche/check-duplicate`, POST `/api/anagrafiche` accetta `overwrite_id` per UPDATE, modale DuplicateOverwriteDialog con single-click confirm.
-- ✅ **Eliminazione anagrafica cascade** (iter33): DELETE `/api/anagrafiche/{aid}?force=true|false` con 409 su collegati; UI trash button per riga (admin-only) + Elimina in AnagraficaDetail header, dialog cascade con testo "ELIMINA" richiesto per force.
-- ✅ **Import Anagrafiche Excel/CSV auto-mapping** (iter33): `/api/import/anagrafiche/preview` + `/execute` con FIELD_ALIASES fuzzy matching (20+ campi IT/EN), policy skip/overwrite/create_only, wizard 3-step in /importazione tab dedicato.
-- ✅ **OpenAPI.it OAuth2 v2 LIVE** (iter34): backend riscritto con Basic Auth (email + APIkey) → POST /token con scopes → Bearer token cache in memoria; endpoint reali `imprese.openapi.it/advance` per Company (fallback /base), `visengine2.altravia.com` per Visura; scopes in sandbox usano prefisso `test.`; fallback MOCK automatico per catasto/automotive (scopes non abilitati sull'account) e su errori 401/402/406/500 senza esporre 500 all'utente. `_normalize_company` gestisce sia schema italiano nested (data.dettaglio) sia flat/EN. Frontend badge LIVE emerald + credito residuo (rosso <5€, verde ≥5€). Endpoint `/api/openapi-it/status` estese con `credit_eur`, `env`, `has_credentials`.
-- ✅ **Fix Multi-Tenant + Super Admin + Avatars + Resend/OpenAPI Mock** (sessioni precedenti): DB isolation via ContextVar, Super Admin panel GDPR-compliant, Marketplace + Ticketing + Audit Logs, `AnagraficaAvatar` component, Bank lookup IBAN→ABI/CAB/BIC.
+### Sessione 22/07 (iter29 → iter37)
+- ✅ **P0 AnagraficaDetail — 4 punti** (iter29-30): Deep-link Customer Insights, Tab Conti Correnti, Bottoni OpenAPI.it, Tab Profilazione & GDPR.
+- ✅ **Duplicati OCR/manuale check-duplicate + overwrite_id** (iter31-32): endpoint GET check-duplicate, POST anagrafiche con overwrite_id, modale DuplicateOverwriteDialog single-click.
+- ✅ **Delete anagrafica cascade** (iter33): DELETE con force=true, 409 su collegati, UI trash button + Elimina in header.
+- ✅ **Import Excel/CSV auto-mapping** (iter33): FIELD_ALIASES fuzzy matching 20+ campi IT/EN, wizard 3-step, policy skip/overwrite/create_only.
+- ✅ **OpenAPI.it OAuth2 v2 LIVE** (iter34): Basic Auth + token cache + Bearer, endpoint reali Company/Visura, fallback MOCK trasparente, badge LIVE + credit.
+- ✅ **OpenAPI Automotive by targa con cache DB** (iter35): `/automotive-by-targa/{targa}` cache-first in db.veicoli, `/risk/{aid}` con protesti/pregiudizievoli, `/veicoli/{vid}/associa-proprietario` con storico.
+- ✅ **AnalisiAziendaTab per PG** (iter35): 4 sotto-tab (Soci, Governance, Forza lavoro, Commercio estero), refresh button, EmptyPanel graceful fallback.
+- ✅ **NuovaAnagraficaDialog "⚡ Importa Dati Azienda"** (iter35-37): button condizionato a P.IVA 11 cifre + tipo=PG, pre-compila form via `/openapi-it/company`.
+- ✅ **Visura PDF → Allegato automatico** (iter37): endpoint /visura/{aid} ora accetta anche CF (persone fisiche), scarica PDF da download_url e lo salva come Allegato categoria='visura_camerale' via StorageService. In sandbox il MOCK non ha download_url, in prod funzionerà automaticamente.
 
 ## Backlog priorità
 
