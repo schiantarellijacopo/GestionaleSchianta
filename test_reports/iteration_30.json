@@ -1,0 +1,26 @@
+{
+  "summary": "RITEST bug cc-lookup dopo fix backend (/api/lookup/iban ora restituisce struttura NESTED come da contratto). Tutti i 4 punti P0 ora funzionanti al 100%.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Il fix backend (bank_lookup.py) è pulito: contratto uniforme {valid, iban, abi, cab, cin, conto, banca:{ragione_sociale, bic, source}|null, note?, error?}. Consigliato tenere questo schema come contratto stabile e documentarlo in un OpenAPI schema/pydantic model per evitare drift futuri.",
+    "ContiCorrentiTab.jsx: OK il gating (r.data?.banca?.ragione_sociale → success; r.data?.valid === false → error; else warning). Il caso 'IBAN troppo corto' viene ora gestito lato client (>=15 char) prima ancora di chiamare il backend — accettabile."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (funzionanti)",
+  "seed_data_creation": "Aggiunti 2 IBAN su A. S. D. MELLO (id e15e701a-4b0f-490d-9848-23c7e9147500): (1) IT60X0542811101000000123456 - Banco BPM (Principale), (2) IT60X9999999999000000123456 - banca sconosciuta (ABI 99999). Anche i consensi gdpr-privacy/gdpr-mkt-whatsapp e sv-fumatore restano attivi dall'iterazione precedente.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "P0 (2) — Conti Correnti multi-IBAN — COMPLETAMENTE FUNZIONANTE dopo fix backend. Verificato con 4 sotto-casi (IBAN valido → Banco BPM risolto, reload → persistenza banca, IBAN ABI sconosciuto → warning + salvabile con solo ABI/CAB, IBAN invalido → error dal backend). I 3 altri P0 (KPI/cross-sell, OpenAPI 4 bottoni + MOCK badge, Profilazione&GDPR tab) rimangono OK a valle di regression check visuale. Testid usati nella tab Profilazione&GDPR: sv-fumatore, sv-hobby (non cp-hobby), prof-gdpr-save (non gdpr-consensi-save-btn) — nota per prossimo agent.",
+  "rca of the issue": "L'issue di iteration_29 era un data contract mismatch tra backend (struttura flat) e frontend (struttura nested {banca:{...}, valid}). Il fix applicato lato backend in /app/backend/bank_lookup.py::lookup_bank_from_iban ha uniformato la risposta al contratto atteso dal FE.\n\nVerifica curl (post-fix):\n- IBAN valido → {valid:true, ..., banca:{ragione_sociale:'Banco BPM', bic:'BAPPIT21', source:'static'}} ✅\n- ABI sconosciuto → {valid:true, abi:'99999', banca:null, note:'ABI 99999 non trovato...'} ✅\n- IBAN invalido → {valid:false, error:'IBAN non valido o non italiano', banca:null} ✅\n\nUI end-to-end verificata:\n1. Toast 'Banca risolta: Banco BPM' + pannello cc-lookup-result con 'Banco BPM · ABI 05428 · CAB 11101 · BIC BAPPIT21' + badge verde 'IBAN valido' ✅\n2. Salvataggio → cc-item-0 mostra 'Banco BPM' + ABI/CAB/BIC popolati; persiste dopo reload ✅\n3. IBAN ABI sconosciuto → toast warning 'Banca non presente in tabella locale', cc-lookup-result nascosto, salvabile con banca='—' ma ABI/CAB visibili ✅\n4. IBAN invalido (XX99Z...) → toast error 'IBAN non valido o non italiano' dal backend ✅"
+}

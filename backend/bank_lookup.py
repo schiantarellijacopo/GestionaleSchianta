@@ -91,19 +91,29 @@ def parse_iban(iban: str) -> Optional[dict]:
 async def lookup_bank_from_iban(iban: str, raw_db=None) -> dict:
     """Ritorna dati banca risolti da IBAN. Prima cerca in `banks_registry` DB
     (per dati aggiornati caricati dall'utente), poi fallback su tabella statica.
+
+    Risposta (contratto stabile per frontend):
+      {
+        "valid": bool,
+        "iban": str,
+        "abi": str, "cab": str, "cin": str, "conto": str,
+        "banca": {"ragione_sociale": str|None, "bic": str|None, "source": "db"|"static"|None,
+                   "sportello_indirizzo"?: str, "sportello_comune"?: str} | None,
+        "note"?: str, "error"?: str
+      }
     """
     parsed = parse_iban(iban)
     if not parsed:
-        return {"error": "IBAN non valido o non italiano", "iban": iban}
+        return {"valid": False, "error": "IBAN non valido o non italiano", "iban": iban, "banca": None}
     abi = parsed["abi"]
     cab = parsed["cab"]
-    bank_data = None
+    banca: Optional[dict] = None
     # Cerca in DB (se disponibile)
     if raw_db is not None:
         try:
             row = await raw_db.banks_registry.find_one({"abi": abi}, {"_id": 0})
             if row:
-                bank_data = {
+                banca = {
                     "ragione_sociale": row.get("ragione_sociale"),
                     "bic": row.get("bic"),
                     "source": "db",
@@ -113,20 +123,24 @@ async def lookup_bank_from_iban(iban: str, raw_db=None) -> dict:
                     {"abi": abi, "cab": cab}, {"_id": 0}
                 )
                 if sport:
-                    bank_data["sportello_indirizzo"] = sport.get("indirizzo")
-                    bank_data["sportello_comune"] = sport.get("comune")
+                    banca["sportello_indirizzo"] = sport.get("indirizzo")
+                    banca["sportello_comune"] = sport.get("comune")
         except Exception:
             pass
     # Fallback su tabella statica
-    if not bank_data:
+    if not banca:
         static = ABI_TO_BANK.get(abi)
         if static:
-            bank_data = {**static, "source": "static"}
-    return {
+            banca = {**static, "source": "static"}
+    resp = {
+        "valid": True,
         "iban": parsed["iban"],
         "abi": abi,
         "cab": cab,
         "cin": parsed["cin"],
         "conto": parsed["conto"],
-        **(bank_data or {"ragione_sociale": None, "note": f"ABI {abi} non trovato nel registro. Aggiungilo alla libreria banche."}),
+        "banca": banca,
     }
+    if not banca:
+        resp["note"] = f"ABI {abi} non trovato nel registro. Aggiungilo alla libreria banche."
+    return resp
