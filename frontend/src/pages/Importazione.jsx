@@ -20,9 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import {
     Upload, FileArchive, CheckCircle2, AlertCircle, Clock,
-    AlertTriangle, FileText, Car, Wand2, X, Save,
+    AlertTriangle, FileText, Car, Wand2, X, Save, FileSpreadsheet,
 } from "lucide-react";
 import { toast } from "sonner";
+import ImportAnagraficheExcel from "@/pages/ImportAnagraficheExcel";
 
 
 const TIPO_LABEL = {
@@ -63,6 +64,7 @@ export default function Importazioni() {
             <div className="flex gap-2 mb-4 border-b">
                 {[
                     { v: "omnia", label: "Importazione OMNIA", Icon: FileArchive },
+                    { v: "excel", label: "Anagrafiche Excel/CSV", Icon: FileSpreadsheet },
                     { v: "targhe", label: "Targhe / Libri Matricola", Icon: Car },
                     { v: "storico", label: "Storico", Icon: Clock },
                 ].map(({ v, label, Icon }) => (
@@ -77,6 +79,7 @@ export default function Importazioni() {
                 ))}
             </div>
             {tab === "omnia" && <ImportOmnia onOpenWizard={() => setShowWizard(true)} />}
+            {tab === "excel" && <ImportAnagraficheExcel />}
             {tab === "targhe" && <ImportTargheStub />}
             {tab === "storico" && <Storico onOpenWizard={() => setShowWizard(true)} />}
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
@@ -40,13 +40,19 @@ import { formatPhone } from "@/lib/phone";
 
 export default function AnagraficaDetail() {
     const { id } = useParams();
+    const navigate = useNavigate();
     const { user } = useAuth();
     const [ana, setAna] = useState(null);
     const [polizze, setPolizze] = useState([]);
     const [privacyOpenHdr, setPrivacyOpenHdr] = useState(false);
     const [activeTab, setActiveTab] = useState("dati");
     const [polizzeFilter, setPolizzeFilter] = useState(null);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleteConflict, setDeleteConflict] = useState(null);
+    const [deleteText, setDeleteText] = useState("");
+    const [deleting, setDeleting] = useState(false);
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const canDelete = user?.role === "admin";
 
     // Deep-link handler passato al CustomerInsightsWidget.
     const handleTabChange = (tab, extra) => {
@@ -54,6 +60,27 @@ export default function AnagraficaDetail() {
         setActiveTab(tab);
         if (tab === "polizze" && extra?.filter) setPolizzeFilter(extra.filter);
         else if (tab !== "polizze") setPolizzeFilter(null);
+    };
+
+    const doDelete = async (force = false) => {
+        setDeleting(true);
+        try {
+            const r = await api.delete(`/anagrafiche/${id}${force ? "?force=true" : ""}`);
+            const cs = r.data?.cascade || {};
+            const msg = force && (cs.polizze || cs.sinistri)
+                ? `Anagrafica eliminata (cascade: ${cs.polizze} polizze, ${cs.sinistri} sinistri, ${cs.allegati} allegati)`
+                : "Anagrafica eliminata";
+            toast.success(msg);
+            navigate("/anagrafiche");
+        } catch (e) {
+            if (e.response?.status === 409) {
+                setDeleteConflict(e.response.data?.detail || {});
+            } else {
+                toast.error(e.response?.data?.detail || "Errore eliminazione");
+            }
+        } finally {
+            setDeleting(false);
+        }
     };
 
     const load = async () => {
@@ -129,6 +156,16 @@ export default function AnagraficaDetail() {
                                 label="Estratto conto"
                                 testid="print-estratto-button"
                             />
+                            {canDelete && (
+                                <Button
+                                    size="sm" variant="outline"
+                                    onClick={() => { setDeleteConflict(null); setDeleteText(""); setDeleteOpen(true); }}
+                                    className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                                    data-testid="hdr-delete-btn"
+                                >
+                                    <Trash2 size={13} className="mr-1" /> Elimina
+                                </Button>
+                            )}
                         </div>
                         <AnagraficaAvatar ana={ana} size="lg" editable
                             onUpdated={(url) => { setAna({ ...ana, avatar_url: url }); }} />
@@ -186,6 +223,68 @@ export default function AnagraficaDetail() {
                 canEdit={canEdit}
                 onReload={load}
             />
+
+            {/* Dialog di conferma eliminazione anagrafica (con cascade) */}
+            <Dialog open={deleteOpen} onOpenChange={(v) => { if (!v) { setDeleteOpen(false); setDeleteConflict(null); setDeleteText(""); } }}>
+                <DialogContent className="max-w-md" data-testid="detail-delete-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-rose-800">
+                            <Trash2 size={18} /> Elimina anagrafica
+                        </DialogTitle>
+                    </DialogHeader>
+                    {!deleteConflict ? (
+                        <>
+                            <div className="text-sm text-slate-700">
+                                Sei sicuro di voler eliminare <b>{ana.ragione_sociale}</b>?
+                            </div>
+                            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+                                L&apos;operazione è irreversibile. Verrà controllato se esistono polizze o sinistri collegati.
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting} data-testid="detail-delete-cancel">Annulla</Button>
+                                <Button onClick={() => doDelete(false)} disabled={deleting} className="bg-rose-600 hover:bg-rose-700" data-testid="detail-delete-confirm">
+                                    {deleting ? "Eliminazione..." : "Elimina"}
+                                </Button>
+                            </DialogFooter>
+                        </>
+                    ) : (
+                        <>
+                            <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm space-y-2">
+                                <div className="font-medium text-amber-900">
+                                    ⚠ Attenzione: <b>{(deleteConflict.collegati?.polizze || 0) + (deleteConflict.collegati?.sinistri || 0)} record collegati</b>
+                                </div>
+                                <ul className="text-xs list-disc ml-5 text-amber-900 space-y-0.5">
+                                    {deleteConflict.collegati?.polizze > 0 && <li><b>{deleteConflict.collegati.polizze}</b> polizze (con relativi titoli e ricevute)</li>}
+                                    {deleteConflict.collegati?.sinistri > 0 && <li><b>{deleteConflict.collegati.sinistri}</b> sinistri</li>}
+                                    {deleteConflict.collegati?.allegati > 0 && <li><b>{deleteConflict.collegati.allegati}</b> allegati</li>}
+                                    <li>Diario, interviste, avvisi, raccolta dati</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Per confermare, scrivi <b>ELIMINA</b>:</Label>
+                                <Input
+                                    value={deleteText}
+                                    onChange={(e) => setDeleteText(e.target.value)}
+                                    placeholder="ELIMINA"
+                                    data-testid="detail-delete-text"
+                                    autoFocus
+                                />
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting} data-testid="detail-delete-force-cancel">Annulla</Button>
+                                <Button
+                                    onClick={() => doDelete(true)}
+                                    disabled={deleting || deleteText !== "ELIMINA"}
+                                    className="bg-rose-700 hover:bg-rose-800"
+                                    data-testid="detail-delete-force"
+                                >
+                                    {deleting ? "Eliminazione in corso..." : "Elimina TUTTO"}
+                                </Button>
+                            </DialogFooter>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

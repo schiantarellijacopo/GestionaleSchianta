@@ -10506,6 +10506,7 @@ from routes import tickets as _tickets_router  # noqa: E402
 from routes import super_admin_logs as _sa_logs_router  # noqa: E402
 from routes import openapi_it as _openapi_router  # noqa: E402
 from routes import lookup as _lookup_router  # noqa: E402
+from routes import import_anagrafiche as _import_anag_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
@@ -10530,6 +10531,7 @@ api.include_router(_tickets_router.router)
 api.include_router(_sa_logs_router.router)
 api.include_router(_openapi_router.router)
 api.include_router(_lookup_router.router)
+api.include_router(_import_anag_router.router)
 
 app.include_router(api)
 

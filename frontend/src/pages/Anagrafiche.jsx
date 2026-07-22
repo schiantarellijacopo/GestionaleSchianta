@@ -36,10 +36,12 @@ export default function Anagrafiche() {
     const [expanded, setExpanded] = useState({});
     const [networks, setNetworks] = useState({});
     const [kpiDialogOpen, setKpiDialogOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null); // anagrafica da eliminare
     // filtri da URL (dashboard task)
     const compleannoFilter = searchParams.get("compleanno"); // "oggi" | "settimana" | "mese"
     const docFilter = searchParams.get("doc"); // "scaduti" | "in_scadenza"
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const canDelete = user?.role === "admin";
 
     const load = useCallback(() => {
         api.get("/anagrafiche", { params: { q: q || undefined, tag: tagFilter || undefined } })
@@ -294,6 +296,7 @@ export default function Anagrafiche() {
                                 <th className="text-right py-3 pr-3"><SortHeader k="premio_totale" sortKey={sortKey} dir={dir} toggle={toggle}>Premio totale</SortHeader></th>
                                 <th className="text-right py-3 pr-3 text-emerald-700"><SortHeader k="provvigioni" sortKey={sortKey} dir={dir} toggle={toggle}>Provvigioni</SortHeader></th>
                                 <th className="text-left py-3 pr-3">Tag</th>
+                                {canDelete && <th className="w-8 py-3"></th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -310,6 +313,8 @@ export default function Anagrafiche() {
                                         net={net}
                                         onToggle={() => toggleExpand(a.id)}
                                         onTagClick={(t) => setTagFilter(t)}
+                                        canDelete={canDelete}
+                                        onDelete={setDeleteTarget}
                                     />
                                 );
                             })}
@@ -322,6 +327,12 @@ export default function Anagrafiche() {
                 open={kpiDialogOpen}
                 onOpenChange={setKpiDialogOpen}
                 onChanged={() => api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {})}
+            />
+
+            <DeleteAnagraficaDialog
+                target={deleteTarget}
+                onClose={() => setDeleteTarget(null)}
+                onDeleted={() => { setDeleteTarget(null); load(); }}
             />
         </div>
     );
@@ -542,7 +553,7 @@ function PersonalizzaKpiDialog({ open, onOpenChange, onChanged }) {
     );
 }
 
-function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
+function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick, onDelete, canDelete }) {
     return (
         <>
             <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors" data-testid={`anagrafica-row-${a.id}`}>
@@ -617,10 +628,23 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick }) {
                         {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
                     </div>
                 </td>
+                {canDelete && (
+                    <td className="py-3 pr-2 text-right">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(a); }}
+                            className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors"
+                            data-testid={`anag-delete-${a.id}`}
+                            title="Elimina anagrafica"
+                            aria-label="Elimina anagrafica"
+                        >
+                            <Trash2 size={14} />
+                        </button>
+                    </td>
+                )}
             </tr>
             {isOpen && net && (
                 <tr className="bg-slate-50/60 border-b border-slate-200" data-testid={`anag-network-${a.id}`}>
-                    <td colSpan={9} className="px-12 py-4">
+                    <td colSpan={canDelete ? 10 : 9} className="px-12 py-4">
                         {net.collegati.length === 0 ? (
                             <div className="text-xs text-slate-500 italic">
                                 Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Albero genealogico.
@@ -1195,7 +1219,7 @@ function NuovaAnagraficaDialog({ onClose }) {
                         ⚠ Sovrascriverà l&apos;anagrafica esistente
                     </span>
                 )}
-                <Button data-testid="anag-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">
+                <Button data-testid="anag-save-button" onClick={() => save()} className="bg-sky-700 hover:bg-sky-800">
                     {form._overwrite_id ? "Sovrascrivi" : "Salva"}
                 </Button>
             </DialogFooter>
@@ -1286,6 +1310,116 @@ function ComplianceBadges({ ana }) {
                 D
             </span>
         </span>
+    );
+}
+
+
+// ============================================================
+// Dialog conferma eliminazione anagrafica (con cascade su polizze/sinistri)
+// ============================================================
+function DeleteAnagraficaDialog({ target, onClose, onDeleted }) {
+    const [busy, setBusy] = useState(false);
+    const [conflict, setConflict] = useState(null); // {collegati:{polizze,sinistri,allegati}}
+    const [confirmText, setConfirmText] = useState("");
+
+    // reset stato quando cambia target
+    useEffect(() => {
+        setConflict(null);
+        setConfirmText("");
+    }, [target?.id]);
+
+    if (!target) return null;
+
+    const doDelete = async (force = false) => {
+        setBusy(true);
+        try {
+            const r = await api.delete(`/anagrafiche/${target.id}${force ? "?force=true" : ""}`);
+            const cs = r.data?.cascade || {};
+            const msg = force && (cs.polizze || cs.sinistri)
+                ? `Anagrafica eliminata (cascade: ${cs.polizze} polizze, ${cs.sinistri} sinistri, ${cs.allegati} allegati)`
+                : "Anagrafica eliminata";
+            toast.success(msg);
+            onDeleted();
+        } catch (e) {
+            if (e.response?.status === 409) {
+                setConflict(e.response.data?.detail || {});
+            } else {
+                toast.error(e.response?.data?.detail || "Errore eliminazione");
+            }
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const nome = target.ragione_sociale || `${target.cognome || ""} ${target.nome || ""}`.trim();
+    const collegati = conflict?.collegati || {};
+    const nCollegati = (collegati.polizze || 0) + (collegati.sinistri || 0);
+
+    return (
+        <Dialog open={!!target} onOpenChange={(v) => !v && onClose()}>
+            <DialogContent className="max-w-md" data-testid="delete-anag-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-rose-800">
+                        <Trash2 size={18} /> Elimina anagrafica
+                    </DialogTitle>
+                </DialogHeader>
+
+                {!conflict ? (
+                    <>
+                        <div className="text-sm text-slate-700">
+                            Sei sicuro di voler eliminare <b>{nome}</b>?
+                        </div>
+                        <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+                            L&apos;operazione è irreversibile. Verrà controllato se esistono polizze o sinistri collegati.
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={onClose} disabled={busy} data-testid="delete-cancel-btn">Annulla</Button>
+                            <Button onClick={() => doDelete(false)} disabled={busy} className="bg-rose-600 hover:bg-rose-700" data-testid="delete-confirm-btn">
+                                {busy ? "Eliminazione..." : "Elimina"}
+                            </Button>
+                        </DialogFooter>
+                    </>
+                ) : (
+                    <>
+                        <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm space-y-2">
+                            <div className="font-medium text-amber-900 flex items-center gap-1">
+                                ⚠ Attenzione: <b>{nCollegati} record collegati</b>
+                            </div>
+                            <div className="text-amber-800">
+                                Eliminando <b>{nome}</b> verranno cancellati IN CASCATA anche:
+                            </div>
+                            <ul className="text-xs list-disc ml-5 text-amber-900 space-y-0.5">
+                                {collegati.polizze > 0 && <li><b>{collegati.polizze}</b> polizze (con relativi titoli e ricevute)</li>}
+                                {collegati.sinistri > 0 && <li><b>{collegati.sinistri}</b> sinistri</li>}
+                                {collegati.allegati > 0 && <li><b>{collegati.allegati}</b> allegati/documenti</li>}
+                                <li>Diario, interviste, avvisi, raccolta dati</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <Label className="text-xs">Per confermare, scrivi <b>ELIMINA</b>:</Label>
+                            <Input
+                                value={confirmText}
+                                onChange={(e) => setConfirmText(e.target.value)}
+                                placeholder="ELIMINA"
+                                data-testid="delete-confirm-text"
+                                autoFocus
+                            />
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={onClose} disabled={busy} data-testid="delete-force-cancel">Annulla</Button>
+                            <Button
+                                onClick={() => doDelete(true)}
+                                disabled={busy || confirmText !== "ELIMINA"}
+                                className="bg-rose-700 hover:bg-rose-800"
+                                data-testid="delete-force-btn"
+                            >
+                                {busy ? "Eliminazione in corso..." : `Elimina TUTTO (${nCollegati + 1} record)`}
+                            </Button>
+                        </DialogFooter>
+                    </>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }
 

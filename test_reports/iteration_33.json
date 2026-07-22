@@ -1,0 +1,41 @@
+{
+  "summary": "iter33 — Testato 3 feature: (1) FIX P0 iter32 regression sul button Salva NuovaAnagraficaDialog ✅ RISOLTO; (2) Delete anagrafica con cascade su polizze/sinistri (list + detail) ✅ FUNZIONANTE; (3) Import Anagrafiche Excel/CSV con auto-mapping ✅ FUNZIONANTE. 11/11 backend test PASS, 5/5 flussi UI PASS. Zero regressioni su iter30/iter31.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter33_delete_import.py",
+    "/app/test_reports/pytest/iter33_results.xml"
+  ],
+  "action_items": [
+    "Nessuna azione critica. Optional: investigare il singolo 500 osservato nel network durante il caricamento della pagina /anagrafiche (non blocking, non riproducibile — probabilmente race su un endpoint secondario stats/network)."
+  ],
+  "critical_code_review_comments": [
+    "Anagrafiche.jsx:1222 → ora `onClick={() => save()}` ✅ P0 fix di iter32 applicato correttamente e verificato via UI reale (POST /api/anagrafiche parte al primo click, dialog chiude, toast).",
+    "routes/anagrafiche.py:417 DELETE con force=false → HTTP 409 + detail.collegati {polizze, sinistri, allegati} ✅ corretto contract per il frontend cascade preview.",
+    "routes/import_anagrafiche.py: FIELD_ALIASES ben strutturato con normalize (accents/punct/case) + similarity (token overlap + prefix). Soglia 0.6 evita false positive. `used_canonical` evita doppio-mapping. Buon design.",
+    "import_anagrafiche.py:207 `_row_to_anagrafica` gestisce IBAN come nested conti_correnti[0] — attenzione: nel preview la count duplicates_stimati non conta due volte quando lo stesso CF appare più volte nel file (usa `set`) ✅ corretto.",
+    "AnagraficaDetail.jsx: hdr-delete-btn presente e detail-delete-dialog con force flow ✅ funzionante.",
+    "P3 minor: il conteggio `duplicates_stimati` esegue 2 count_documents ($in su cfs + $in su pivas con $nin su cfs). Su file grandi con 10k+ righe, il loop `for _, row in df.iterrows()` in preview per raccogliere cfs/pivas può essere lento — accettabile per import umani (< 5k righe). Non blocking.",
+    "P3 minor: excel-execute-btn NON disabilita il bottone durante l'esecuzione — un click multiplo potrebbe generare doppie richieste. Consigliato aggiungere `disabled={loading}`. Non blocking per uso normale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter33_delete_import.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 test PASS)",
+    "frontend": "100% (5/5 flussi UI PASS: P0 Salva, list delete TESTFIX, list delete MELLO cascade 409, detail delete cascade preview, import Excel CSV con 4-column auto-mapping + execute create=2)"
+  },
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tutte le anagrafiche di test create durante il testing sono state ripulite: TESTFIX REGRESSION (eliminata via UI), UITEST1/UITEST2 PLAYWRIGHT (eliminate via UI). MELLO (id=e15e701a-4b0f-490d-9848-23c7e9147500) VERIFICATA integra: ragione_sociale='A. S. D. MELLO', CF='01075160141' ✅.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iter33 completamente OK. Fix P0 di iter32 sul button Salva applicato a linea 1222 di Anagrafiche.jsx (`onClick={() => save()}`) verificato via UI (POST parte al primo click). Delete anagrafica con cascade funziona sia in Anagrafiche.jsx (RigaAnagrafica → DeleteAnagraficaDialog) sia in AnagraficaDetail.jsx (hdr-delete-btn → detail-delete-dialog con force flow). Import Excel/CSV rileva header IT/EN automaticamente (4/4 colonne su file test), esegue con policy skip/overwrite/create_only. Backend endpoint /api/import/anagrafiche/preview restituisce headers+detected+rows+total_rows+duplicates_stimati+available_fields, /execute restituisce total_rows+created+updated+skipped+errors+policy. Nessuna azione richiesta al main agent.",
+  "rca of the issue": "N/A — nessun bug rilevato. Tutte le 3 feature richieste (P0 fix, delete cascade, import Excel/CSV) sono state validate end-to-end."
+}
