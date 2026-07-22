@@ -46,6 +46,7 @@ import RubricaCompagnie from "@/pages/RubricaCompagnie";
 import Rappel from "@/pages/Rappel";
 import Agenzie from "@/pages/Agenzie";
 import RitenuteCompagnia from "@/pages/RitenuteCompagnia";
+import CopilotWidget from "@/components/CopilotWidget";
 import FattureAgenziaPartner from "@/pages/FattureAgenziaPartner";
 import LeadListe from "@/pages/LeadListe";
 import RitenuteHub from "@/pages/RitenuteHub";
@@ -262,6 +263,7 @@ function App() {
                         </Route>
                     </Routes>
                 </BrowserRouter>
+                <CopilotWidget />
                 <Toaster position="top-right" richColors />
             </AuthProvider>
         </div>

@@ -40,7 +40,9 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - ✅ **Bugfix IBAN BPER + banche aggiuntive** (iter38): ABI 05387 (BPER Banca), 05584 (Banco BPM), 01005 (BNL BNP Paribas), 05696 (BPS), 05856 (Sparkasse), 06045 (CR Asti), 08000 (ICCREA), 08258 (BCC Sondrio), 62290 (CR Ravenna), 63000 (BCC Emilbanca) aggiunti a `bank_lookup.py`. IBAN utente IT55I05387... ora restituisce correttamente "BPER Banca".
 - ✅ **ElevenLabs TTS integration scaffold** (iter38): SDK v2.59 installato, `/app/backend/elevenlabs_service.py` con `tts_generate()`, `list_voices()`, `clone_voice()` (Instant Voice Cloning). Env `ELEVENLABS_API_KEY` predisposta (vuota, attende chiave utente). Modello default `eleven_multilingual_v2` (supporta italiano nativo).
 
-### Sessione 22/07 (iter29 → iter38)
+- ✅ **AI Copilot omnipresente + TTS** (iter39): `CopilotWidget` fixed floating button (violet/sky gradient) → chat modal in bottom-right. Backend `/api/copilot/chat` con dispatch euristico (anno/nome/targa/keyword) che interroga in READ-ONLY 6 collezioni MongoDB (anagrafiche, polizze, titoli, sinistri, veicoli, allegati) + LLM GPT-5.4 via Emergent LLM Key. Input vocale via Web Speech API (browser nativo, it-IT). Output vocale opzionale via ElevenLabs TTS (`/api/copilot/tts` ritorna MP3). Endpoint `/api/copilot/voices` per gestione voci. Testato end-to-end: risposte in italiano con tabelle Markdown corrette. ⚠ Per l'output TTS live serve chiave ElevenLabs in .env.
+
+### Sessione 22/07 (iter29 → iter39)
 - ✅ **P0 AnagraficaDetail — 4 punti** (iter29-30): Deep-link Customer Insights, Tab Conti Correnti, Bottoni OpenAPI.it, Tab Profilazione & GDPR.
 - ✅ **Duplicati OCR/manuale check-duplicate + overwrite_id** (iter31-32): endpoint GET check-duplicate, POST anagrafiche con overwrite_id, modale DuplicateOverwriteDialog single-click.
 - ✅ **Delete anagrafica cascade** (iter33): DELETE con force=true, 409 su collegati, UI trash button + Elimina in header.
