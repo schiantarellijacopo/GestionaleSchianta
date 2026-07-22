@@ -453,7 +453,11 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "prodotto_originale": prodotto_raw,
         "stato": stato,
         "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
-        "scadenza": _parse_date(row.get("scadenza_originale", "")) or _now_iso()[:10],
+        # Scadenza contratto: rec20 col AK = scadenza_effettiva (scadenza reale del contratto).
+        # Fallback: scadenza_originale (col AJ) se scadenza_effettiva assente.
+        "scadenza": (_parse_date(row.get("scadenza_effettiva", ""))
+                     or _parse_date(row.get("scadenza_originale", ""))
+                     or _now_iso()[:10]),
         # Frazionamento (rec20 col AN — frazionamento_share)
         "frazionamento": _parse_frazionamento(row.get("frazionamento_share", "")),
         "premio_lordo": _parse_float(row.get("lordo_totale", "")),

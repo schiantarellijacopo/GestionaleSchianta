@@ -18,9 +18,9 @@ REC10 = "id_anagrafica_exp;ragione_sociale;codice_fiscale;partita_iva;data_nasci
 REC10 += "ANA001;ROSSI MARIO;RSSMRA80A01H501Z;;01/01/1980;ROMA;RM;M;VIA ROMA 1;ROMA;RM;00100;ITALIA;06123456;3331234567;mario@example.com;IT60X0542811101000000123456;S;01/01/2024;CATTOLICA;001\n"
 REC10 += "ANA002;BIANCHI SRL;;01234567890;;;;;VIA MILANO 10;MILANO;MI;20100;ITALIA;0212345;;info@bianchi.it;;S;15/03/2024;CATTOLICA;001\n"
 
-REC20 = "id_polizza_exp;numero_polizza_cmp;id_anagrafica_exp;compagnia_exp;compagnia_ania;ramo_share;ramo_cmp;prodotto_cmp;cod_stato_share;effetto;scadenza_originale;frazionamento_share;lordo_totale;netto_totale;provvigioni_totali\n"
-REC20 += "POL001;12345678;ANA001;CATTOLICA;001;RCA;010;AUTO PLUS;A;01/06/2024;01/06/2025;2;850,50;700,00;85,05\n"
-REC20 += "POL002;12345679;ANA002;CATTOLICA;001;INF;040;INFORTUNI;A;01/07/2024;01/07/2025;12;500,00;420,00;50,00\n"
+REC20 = "id_polizza_exp;numero_polizza_cmp;id_anagrafica_exp;compagnia_exp;compagnia_ania;ramo_share;ramo_cmp;prodotto_cmp;cod_stato_share;effetto;scadenza_originale;scadenza_effettiva;frazionamento_share;lordo_totale;netto_totale;provvigioni_totali\n"
+REC20 += "POL001;12345678;ANA001;CATTOLICA;001;RCA;010;AUTO PLUS;A;01/06/2024;01/06/2025;01/12/2025;2;850,50;700,00;85,05\n"
+REC20 += "POL002;12345679;ANA002;CATTOLICA;001;INF;040;INFORTUNI;A;01/07/2024;01/07/2025;;12;500,00;420,00;50,00\n"
 
 REC21 = "id_polizza_exp;targa;marca_veicolo;modello_veicolo;tipo_veicolo;alimentazione;uso_veicolo;data_immatricolazione;cilindrata;cv_fiscali;kw;quintali;numero_posti;gancio_traino;targa_rimorchio;tipo_tariffa;bm_provenienza;bm_assegnata;bm_assegnata_cu;pejus;franchigia;valore_veicolo;valore_residuo;valore_accessori;guida_esperta;guida_esclusiva;rinuncia_rivalsa;massimali\n"
 REC21 += "POL001;AB123CD;FIAT;PANDA;AUTOVETTURA;BENZINA;PRIVATO;01/01/2020;1200;14;55;;5;N;;BM;14;9;1;0;250;8500;6000;0;S;N;S;6 MILIONI\n"
@@ -98,6 +98,14 @@ async def run():
     pol2 = await db.polizze.find_one({"id_polizza_exp": "POL002"})
     assert pol2 and pol2.get("frazionamento") == "mensile", (
         f"POL002 frazionamento atteso 'mensile' (codice ANIA 12), got {pol2.get('frazionamento') if pol2 else None!r}"
+    )
+    # Scadenza contratto POL001 = scadenza_effettiva (2025-12-01), non scadenza_originale
+    assert pol.get("scadenza") == "2025-12-01", (
+        f"POL001 scadenza attesa '2025-12-01' (scadenza_effettiva rec20 col AK), got {pol.get('scadenza')!r}"
+    )
+    # POL002 scadenza_effettiva vuota → fallback a scadenza_originale
+    assert pol2.get("scadenza") == "2025-07-01", (
+        f"POL002 scadenza attesa '2025-07-01' (fallback su scadenza_originale), got {pol2.get('scadenza')!r}"
     )
     # Garanzie con capitale_assicurato per riga
     garanzie = pol.get("garanzie") or []

@@ -41,6 +41,7 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 
 ### Sessione 04/02/2026 (iter29)
 - ✅ **ANIA Importer · Colonne mancanti (P0)**: aggiunto mapping colonne `frazionamento_share` (rec20 col AN → codici 1=annuale, 2=semestrale, 3=quadrimestrale, 4=trimestrale, 12=mensile, U/0/9=unica), `valore_ass_1/2/3` (rec30 col W → nuovo campo `capitale_assicurato` su Polizza + per-garanzia), `accessori_totale` (rec40 col AU → nuovo campo `accessori` su Titolo). Test unitario `test_ania_import.py` esteso con assert su tutti i nuovi campi. Modelli Pydantic aggiornati: `Polizza.capitale_assicurato`, `Titolo.accessori`.
+- ✅ **ANIA Importer · Scadenza contratto**: usato `scadenza_effettiva` (rec20 col AK) come scadenza contratto della Polizza, con fallback su `scadenza_originale` (col AJ). Test aggiornato.
 
 ### Sessione 01/07 (iter28)
 - ✅ **Libro Matricola · Annulla applicazione**: nuovo `POST /polizze/{pid}/applicazioni/{aid}/annulla` con motivo obbligatorio + data. Dialog frontend con preset motivi (Vendita/Demolizione/Furto/Restituzione leasing/Cessazione uso/Errore/Altro) + note libere.
