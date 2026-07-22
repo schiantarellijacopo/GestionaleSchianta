@@ -288,6 +288,58 @@ async def list_anagrafiche(
     return items
 
 
+@router.get("/anagrafiche/check-duplicate")
+async def check_anagrafica_duplicate(
+    codice_fiscale: Optional[str] = None,
+    partita_iva: Optional[str] = None,
+    tipo: Optional[str] = None,
+    user: dict = Depends(current_user),
+):
+    """Verifica se esiste già un'anagrafica con lo stesso CF (persona fisica) o P.IVA
+    (persona giuridica). Usato dai flussi di import OCR / Excel per chiedere
+    all'utente se sovrascrivere.
+
+    NOTA: questa route DEVE essere definita PRIMA di `GET /anagrafiche/{aid}`
+    altrimenti FastAPI la interpreta come `aid="check-duplicate"`.
+
+    Query:
+      - codice_fiscale (opzionale)
+      - partita_iva (opzionale)
+      - tipo: "persona_fisica" | "persona_giuridica" (opzionale, restringe il match)
+
+    Risposta:
+      {"existing": {id, ragione_sociale, tipo, codice_fiscale, partita_iva,
+                    updated_at, cognome, nome} | null,
+       "match_on": "codice_fiscale" | "partita_iva" | null}
+    """
+    cf = (codice_fiscale or "").strip().upper() or None
+    piva = (partita_iva or "").strip() or None
+    if not cf and not piva:
+        return {"existing": None, "match_on": None}
+
+    # Costruisci query priorità: persona_giuridica → P.IVA primo; persona_fisica → CF primo.
+    order = []
+    if tipo == "persona_giuridica":
+        if piva:
+            order.append(("partita_iva", {"partita_iva": piva}))
+        if cf:
+            order.append(("codice_fiscale", {"codice_fiscale": cf}))
+    else:
+        if cf:
+            order.append(("codice_fiscale", {"codice_fiscale": cf}))
+        if piva:
+            order.append(("partita_iva", {"partita_iva": piva}))
+
+    proj = {"_id": 0, "id": 1, "ragione_sociale": 1, "tipo": 1,
+            "codice_fiscale": 1, "partita_iva": 1, "cognome": 1, "nome": 1,
+            "updated_at": 1, "created_at": 1}
+    for match_on, flt in order:
+        doc = await db.anagrafiche.find_one(flt, proj)
+        if doc:
+            return {"existing": doc, "match_on": match_on}
+    return {"existing": None, "match_on": None}
+
+
 @router.get("/anagrafiche/{aid}")
 async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
@@ -314,12 +366,34 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
 
 
 @router.post("/anagrafiche", status_code=201)
+
+
+@router.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
     body = await _auto_geocode(body)
     # Default collaboratore_id = utente loggato se non specificato (visibilità)
     if not body.get("collaboratore_id"):
         body["collaboratore_id"] = user.get("id")
+
+    # Se il chiamante indica overwrite_id (flusso import OCR/Excel con conferma
+    # utente), esegue una UPDATE sull'anagrafica esistente invece di crearne
+    # una nuova. Restituisce comunque lo status_code=201 + il documento aggiornato.
+    overwrite_id = body.pop("overwrite_id", None)
+    if overwrite_id:
+        existing = await db.anagrafiche.find_one({"id": overwrite_id}, {"_id": 0, "id": 1})
+        if not existing:
+            raise HTTPException(404, f"Anagrafica {overwrite_id} non trovata per sovrascrittura")
+        # Rimuovi id/created_at dal payload per non sovrascriverli con valori del form
+        body.pop("id", None)
+        body.pop("created_at", None)
+        body["updated_at"] = _now_iso()
+        await db.anagrafiche.update_one({"id": overwrite_id}, {"$set": body})
+        updated = strip_mongo_id(await db.anagrafiche.find_one({"id": overwrite_id}, {"_id": 0}))
+        await log_attivita(user, "overwrite", "anagrafica", overwrite_id,
+                           f"Anagrafica sovrascritta da import: {updated.get('ragione_sociale')}")
+        return updated
+
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")

@@ -694,6 +694,9 @@ function NuovaAnagraficaDialog({ onClose }) {
     const [collaboratori, setCollaboratori] = useState([]);
     const [ocrLoading, setOcrLoading] = useState(false);
     const [geoLoading, setGeoLoading] = useState(false);
+    // Duplicato rilevato: {existing:{id,ragione_sociale,...}, match_on, fonte}
+    // Se fonte === "auto" viene proposto dopo OCR; se "save" viene proposto al salvataggio.
+    const [duplicate, setDuplicate] = useState(null);
     const [form, setForm] = useState({
         tipo: "persona_fisica",
         ragione_sociale: "", nome: "", cognome: "",
@@ -708,12 +711,28 @@ function NuovaAnagraficaDialog({ onClose }) {
         tipologia_lavoratore: null,
         professione: "",
         lat: null, lng: null,
+        _overwrite_id: null,  // se != null il save farà PUT sull'esistente
     });
 
     useEffect(() => { api.get("/collaboratori").then((r) => setCollaboratori(r.data)); }, []);
 
     const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
     const setU = (k, v) => set(k, (v || "").toUpperCase());
+
+    // Verifica esistenza duplicato via /api/anagrafiche/check-duplicate.
+    // Ritorna existing?: {id, ragione_sociale, ...} | null.
+    const checkDup = async ({ codice_fiscale, partita_iva, tipo }) => {
+        try {
+            const r = await api.get("/anagrafiche/check-duplicate", {
+                params: {
+                    codice_fiscale: codice_fiscale || undefined,
+                    partita_iva: partita_iva || undefined,
+                    tipo: tipo || undefined,
+                },
+            });
+            return r.data;
+        } catch { return { existing: null, match_on: null }; }
+    };
 
     // --- Calcolo CF ---
     const calcolaCF = async () => {
@@ -781,6 +800,12 @@ function NuovaAnagraficaDialog({ onClose }) {
                 _ci_file_da_salvare: file,  // verrà ricaricato dopo create anagrafica per salvare in documenti
             }));
             toast.success("Carta d'identità riconosciuta — verifica i campi");
+            // Controllo duplicato immediato dopo OCR (persona fisica → CF)
+            const cf = (d.codice_fiscale || "").toUpperCase();
+            if (cf && cf.length === 16) {
+                const dup = await checkDup({ codice_fiscale: cf, tipo: "persona_fisica" });
+                if (dup?.existing) setDuplicate({ ...dup, fonte: "auto" });
+            }
         } catch (e) { toast.error("OCR fallito: " + (e.response?.data?.detail || e.message)); }
         finally { setOcrLoading(false); }
     };
@@ -819,6 +844,12 @@ function NuovaAnagraficaDialog({ onClose }) {
             }));
             const nAmm = (d.amministratori || []).length;
             toast.success(`Visura riconosciuta: ${d.ragione_sociale}${nAmm ? ` + ${nAmm} amministratori` : ""}`);
+            // Controllo duplicato immediato dopo OCR (persona giuridica → P.IVA)
+            const piva = d.partita_iva || "";
+            if (piva && piva.length >= 11) {
+                const dup = await checkDup({ partita_iva: piva, tipo: "persona_giuridica" });
+                if (dup?.existing) setDuplicate({ ...dup, fonte: "auto" });
+            }
         } catch (e) { toast.error("OCR visura fallito: " + (e.response?.data?.detail || e.message)); }
         finally { setOcrLoading(false); }
     };
@@ -843,7 +874,22 @@ function NuovaAnagraficaDialog({ onClose }) {
         const isPF = form.tipo === "persona_fisica";
         if (isPF && !form.nome && !form.cognome) { toast.error("Inserisci Cognome o Nome"); return; }
         if (!isPF && !form.ragione_sociale) { toast.error("Inserisci la ragione sociale"); return; }
-        const { _ci_file_da_salvare, _visura_file_da_salvare, _amministratori, _dati_extra_visura, ...payload } = form;
+
+        // Safety net: se non è stato ancora rilevato un duplicato via OCR ma
+        // l'utente ha inserito CF/P.IVA a mano, controlla ADESSO prima di creare.
+        if (!form._overwrite_id) {
+            const dup = await checkDup({
+                codice_fiscale: isPF ? form.codice_fiscale : null,
+                partita_iva: !isPF ? form.partita_iva : (form.partita_iva || null),
+                tipo: form.tipo,
+            });
+            if (dup?.existing) {
+                setDuplicate({ ...dup, fonte: "save" });
+                return;  // aspetta la decisione dell'utente sulla modale
+            }
+        }
+
+        const { _ci_file_da_salvare, _visura_file_da_salvare, _amministratori, _dati_extra_visura, _overwrite_id, ...payload } = form;
         if (isPF && !payload.ragione_sociale) {
             payload.ragione_sociale = `${form.cognome || ""} ${form.nome || ""}`.trim();
         }
@@ -852,6 +898,9 @@ function NuovaAnagraficaDialog({ onClose }) {
             const extra = Object.entries(_dati_extra_visura).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" · ");
             if (extra) payload.note = (payload.note ? payload.note + "\n" : "") + `[Da visura] ${extra}`;
         }
+        // Se l'utente ha confermato la sovrascrittura, aggancia overwrite_id
+        if (_overwrite_id) payload.overwrite_id = _overwrite_id;
+
         try {
             const created = await api.post("/anagrafiche", payload);
             const newId = created.data.id;
@@ -890,12 +939,26 @@ function NuovaAnagraficaDialog({ onClose }) {
                     };
                     try { await api.post("/anagrafiche", amm); } catch (err) { /* skip */ }
                 }
-                toast.success(`Ditta + ${_amministratori.length} amministratori creati`);
+                toast.success(`Ditta + ${_amministratori.length} amministratori ${_overwrite_id ? "aggiornata" : "creati"}`);
             } else {
-                toast.success("Anagrafica creata");
+                toast.success(_overwrite_id ? "Anagrafica sovrascritta con successo" : "Anagrafica creata");
             }
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    // Callback modale duplicato: conferma sovrascrittura
+    const onConfirmOverwrite = () => {
+        if (!duplicate?.existing) return;
+        setForm((f) => ({ ...f, _overwrite_id: duplicate.existing.id }));
+        setDuplicate(null);
+        // Se il duplicato era stato scoperto in save(), richiama save automaticamente
+        // (piccolo delay per far propagare lo state)
+        setTimeout(() => save(), 50);
+    };
+    const onCancelOverwrite = () => {
+        // Se veniva da un save aborto -> chiudi. Se veniva da OCR (fonte=auto) -> tieni aperto.
+        setDuplicate(null);
     };
 
     const isPF = form.tipo === "persona_fisica";
@@ -1123,9 +1186,69 @@ function NuovaAnagraficaDialog({ onClose }) {
 
             <DialogFooter>
                 {geoLoading && <span className="text-xs text-slate-500 mr-auto">Geolocalizzo...</span>}
-                <Button data-testid="anag-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">Salva</Button>
+                {form._overwrite_id && (
+                    <span className="text-xs text-amber-700 bg-amber-100 border border-amber-300 rounded px-2 py-1 mr-auto" data-testid="anag-overwrite-hint">
+                        ⚠ Sovrascriverà l&apos;anagrafica esistente
+                    </span>
+                )}
+                <Button data-testid="anag-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">
+                    {form._overwrite_id ? "Sovrascrivi" : "Salva"}
+                </Button>
             </DialogFooter>
+
+            {/* Modale di conferma sovrascrittura duplicato (OCR o Excel) */}
+            <DuplicateOverwriteDialog
+                open={!!duplicate}
+                existing={duplicate?.existing}
+                matchOn={duplicate?.match_on}
+                fonte={duplicate?.fonte}
+                onConfirm={onConfirmOverwrite}
+                onCancel={onCancelOverwrite}
+            />
         </DialogContent>
+    );
+}
+
+// ============================================================
+// Dialog di conferma sovrascrittura per duplicati (OCR/Excel)
+// ============================================================
+function DuplicateOverwriteDialog({ open, existing, matchOn, fonte, onConfirm, onCancel }) {
+    if (!existing) return null;
+    const label = matchOn === "partita_iva" ? "Partita IVA" : "Codice Fiscale";
+    const value = matchOn === "partita_iva" ? existing.partita_iva : existing.codice_fiscale;
+    return (
+        <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
+            <DialogContent className="max-w-md" data-testid="dup-overwrite-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-amber-800">
+                        ⚠ Anagrafica già esistente
+                    </DialogTitle>
+                    <DialogDescription>
+                        {fonte === "auto"
+                            ? "L&apos;OCR ha rilevato un&apos;anagrafica con lo stesso identificativo già presente in archivio."
+                            : "È già presente un&apos;anagrafica con lo stesso identificativo."}
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="bg-slate-50 border border-slate-200 rounded p-3 text-sm space-y-1">
+                    <div><span className="text-slate-500 text-xs uppercase tracking-wider">Ragione sociale</span><br /><b>{existing.ragione_sociale || "—"}</b></div>
+                    <div><span className="text-slate-500 text-xs uppercase tracking-wider">{label}</span><br /><span className="font-mono">{value || "—"}</span></div>
+                    <div><span className="text-slate-500 text-xs uppercase tracking-wider">Tipo</span><br />{existing.tipo === "persona_giuridica" ? "Azienda / P.G." : "Persona fisica"}</div>
+                    {existing.updated_at && (
+                        <div className="text-xs text-slate-500">Ultimo aggiornamento: {existing.updated_at.slice(0, 10)}</div>
+                    )}
+                </div>
+                <div className="text-xs text-slate-600">
+                    Vuoi <b>sovrascrivere</b> l&apos;anagrafica esistente con i nuovi dati?<br />
+                    <span className="text-slate-500">In caso contrario puoi annullare e modificare i dati manualmente prima di salvare.</span>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onCancel} data-testid="dup-cancel-btn">Annulla</Button>
+                    <Button onClick={onConfirm} className="bg-amber-600 hover:bg-amber-700" data-testid="dup-overwrite-btn">
+                        Sovrascrivi l&apos;esistente
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
