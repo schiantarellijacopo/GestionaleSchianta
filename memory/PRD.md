@@ -1,96 +1,74 @@
-# Programma Assicurativo — PRD
+# Programma Assicurativo — PRD (aggiornato 04/08/2026)
 
 ## Visione
-CRM completo per agenzie assicurative italiane. Gestisce anagrafiche, polizze, titoli, sinistri, P&L, marketing, AI insights, OCR documenti, ritenute, calcoli pensione INPS, chat AI conversazionale con accesso RBAC al DB.
+CRM completo per agenzie assicurative italiane multi-tenant: anagrafiche, polizze, titoli,
+Prima Nota/Brogliaccio con regole contabili rigorose, AI Copilot (Claude), OCR Gemini,
+OpenAPI.it, controllo di gestione (Cervello).
 
 ## Stack
-- **Backend**: FastAPI + MongoDB (Motor). Multi-tenant via ContextVar.
-- **Frontend**: React + Tailwind + Shadcn UI.
-- **AI**: Emergent LLM Key. Claude Sonnet 4.6 come motore Copilot/Assistente. Gemini 3 Flash per OCR bilanci/documenti/CI.
-- **Integrazioni**: OpenAPI.it (Visengine/Automotive/Risk/Catasto/Imprese in PROD), ElevenLabs (TTS), WhatsApp Evolution API, Emergent Object Storage.
+React (Shadcn) + FastAPI + MongoDB. Multi-tenant via agenzia_tenant_id (ContextVar).
 
-## Persona
-Agente assicurativo italiano + collaboratori + dipendenti + clienti.
+## Sessione 04/08 — Completato e TESTATO (iter_39 + iter_40, tutti PASS)
 
-## Implementato — Sessione corrente (22/07)
+### Migrazione Tipi Pagamento (iter_39: 11/11 PASS)
+- Movimenti CONTANTI BPER (81) + BONIFICO (41) + PayPal (1) → conto BPER Sondrio; dup eliminati.
+- Tab Librerie "Conti / Banche" → conti_cassa; "Tipi pagamento" RIPRISTINATO su richiesta utente
+  (etichette combinate modalità+conto es. CONTANTI BPER SONDRIO, 19 voci, colonna conto_nome).
+- `shared.resolve_conto_cassa`: nome conto → label tipi_pagamento → mezzi → fallback.
+- Nuovi tenant: seed 4 conti default (super_admin.create_agenzia).
 
-### ✅ AI Copilot Conversazionale (Claude Sonnet 4.6)
-- Riscrittura `ai_copilot_service.py` con multi-turno persistente in `db.copilot_sessions` + `db.copilot_messages`.
-- **10 tool READ-ONLY** con RBAC (cliente vede solo sé, collab solo suo portafoglio, admin tutto).
-- **Dispatcher intelligente**: estrae candidati nome case-insensitive (min 3 char), stop-words estese, ricerca AND multi-parola (es. "bottoni cristian" → matcha cognome+nome insieme), keyword "quanto costa" → auto-fetch polizze con premio.
-- **Endpoint** `/api/copilot/chat|sessions|sessions/{sid}/messages|sessions/{sid}` (delete).
-- **Frontend**:
-  - `ChatCopilotPanel.jsx`: chat full-page in `/assistente-personale` (sidebar cronologia, chip iniziali + follow-up, voice input, link Markdown → React Router Link, tabelle GFM via remark-gfm).
-  - `CopilotWidget.jsx` (bottom-right floating): stessa esperienza premium, 440px wide.
-- **Verificato LIVE**: query "mi trovi la polizza di bottoni cristian e mi dici quanto costa" → trova BOTTONI CRISTIAN con 2 polizze, costo totale € 123,75, link cliccabili, alert "polizze scadute" proattivo.
+### Fix regole contabili Brogliaccio (verificati)
+- POST/PUT /contabilita/movimenti risolve conto_cassa_id dal mezzo_pagamento (bug "saldo non si muove").
+- BrogliaccioTab + KpiBar si ricaricano dopo registrazione (refreshTick in Contabilita.jsx).
+- KPI prima_nota (routes/kpi.py): collezione movimenti + campo data_movimento (era rotto, sempre 0).
+- Versamento compagnia (pagamento_compagnia): colonna SALDO -importo + RIMESSE + banca.
+- Ritenuta compagnia: NON è spesa → solo SALDO -importo, nessun cash flow; anche in
+  _compute_saldi_compagnie (campo ritenute) e KPI cumulativi (cum_ritenute_comp).
+- Rappel: NON in Provvigioni → solo colonna RAPPEL, saldo -importo (entrambi i segni);
+  KPI: cum_rappel separato, saldo_cassa -= rappel.
+- Cleanup anticipi orfani: incassa_titolo elimina righe categoria 'anticipo' del titolo
+  (skip giornate chiuse). Sanati 15 movimenti storici.
+- POST /polizze fix premio_totale → premio_lordo.
 
-### ✅ OCR Carta Identità + Auto-Avatar (Gemini Vision)
-- `ocr_ci.py` PROMPT esteso con campo **`foto_volto_bbox: {x, y, w, h}`** (coordinate normalizzate 0-1 della fototessera).
-- Endpoint `POST /api/utility/ocr-carta-identita` (server.py:2022):
-  1. Gemini estrae dati anagrafici + bbox foto volto.
-  2. Se `anagrafica_id` presente: salva file come `Allegato` carta_identita.
-  3. Se bbox valido: crop quadrato centrato + resize 512px + JPEG 88% → salva come `avatar_xxx.jpg` in Object Storage.
-  4. Aggiorna `anagrafiche.avatar_url` automaticamente.
-- **Test PASS**: bbox rilevato `{x:0.721, y:0.186, w:0.216, h:0.447}`, avatar 271×271px 5.4 KB salvato, `avatar_url` popolato in DB.
+### Mini Bilancio Periodico (iter_40: 12/12 PASS, frontend 100%)
+- Tab Cervello "Mini Bilancio" (`MiniBilancioTab.jsx`): CE Ricavi/Costi riclassificati
+  automaticamente dalla Prima Nota + SP (saldi conti real-time, debiti v/compagnia, ritenute erario).
+- Filtri: Oggi/Mese/Trimestre/Anno/Custom. Drill-down per voce (righe di Prima Nota). Export PDF + Excel.
+- Backend: routes/cervello.py `_mb_classify`/`_mb_compute`, GET /cervello/mini-bilancio,
+  /dettaglio?key=, /export?formato=pdf|xlsx.
+- Voci auto: Provvigioni Attive, Rappel, Storni Ricavi (ricavi); Storni/Rivalse, Provvigioni
+  Passive, Spese Varie (costi). Ritenute compagnia ESCLUSE dal CE (partita di giro).
+- Libreria "Voci di bilancio" (voci_bilancio, seed 14 voci) + campo voce_bilancio_id nel
+  Nuovo movimento (mov-voce-bilancio-select).
 
-### ✅ OpenAPI.it — PROD LIVE
-- `OPENAPI_IT_ENV=prod` attivato. Domini corretti: `.com` per Automotive/Risk, `.it` per Catasto/Imprese/Visengine.
-- **Visengine**: flow `GET /visure` → estrae `hash_visura` Camera Commercio PF/PG → POST `/richiesta` con `json_visura` proper (schema `$0..$5` ancora da compilare console).
-- **Catasto**: endpoint come path param `/richiesta/ricerca_nazionale` (scoperto via web docs).
-- **Risk**: payload `taxCode + companyName` per PG. Richiede credito account (402 attualmente).
-- **Automotive**: token OK, richiede "Codice Cliente" configurato lato account (402 attualmente).
-- **Imprese/Company**: 406 "API not enabled" → richiede attivazione prodotto sulla console.
+### AZZERAMENTO CONTEGGI (richiesto dall'utente per prove — 04/08 17:15)
+- ELIMINATI: tutti i movimenti (230), chiusure giornaliere (6), rappel (13).
+- AZZERATI: saldo_iniziale di tutti i conti; 444 titoli incassati → da_incassare; 52 coperture reset.
+- BACKUP COMPLETO: /app/memory/backups/reset_20260804/*.json (movimenti, chiusure_giorno,
+  rappel, titoli, conti_cassa). Per ripristino: reinserire i JSON nelle collezioni.
+- Verificato: KPI, liquidità, saldi compagnie, estratti conto, mini-bilancio tutti = 0.
 
-## Implementato — Sessione 04/08 (fork)
+## PROSSIMO TASK (P0) — WhatsApp via Evolution API
+Collegare WhatsApp a: Alert & Automazioni + Avvisi di Scadenza.
+IN ATTESA dall'utente: URL server Evolution API, API Key globale, nome istanza.
+Usare integration_expert prima di implementare.
 
-### ✅ Migrazione "Tipi pagamento" → Conti / Banche (conti_cassa)
-- **Dati**: movimenti dei conti legacy `CONTANTI BPER` (81), `BONIFICO` (41), `PayPal/Online` (1) migrati su **BPER Sondrio** (ora 150 mov); duplicati `CONTANTI` e `PAGAMENTI IN DIREZIONE` eliminati (script: `/app/memory/migrate_conti_2026-08-04.py`).
-- **Backend**: `shared.resolve_conto_cassa` risolve il conto per NOME (case-insensitive) → fallback label legacy `tipi_pagamento` → mezzi_pagamento → primo attivo. Seed legacy `_seed_tipi_pagamento`/`_seed_conti_deposito_estesi` rimossi dallo startup. Validazione `nome` obbligatorio su POST/PUT conti-cassa. Fix `premio_totale` → `premio_lordo` in POST /polizze (server.py:2545).
-- **Frontend**: `SelectTipoPagamento` + `useTipiPagamento` ora elencano i conti_cassa attivi (value = nome conto, filtrati nascondi_prima_nota e nomi vuoti). Librerie: tab "Conti / Banche" punta a `/librerie/conti-cassa` (ContoForm), tab "Tipi pagamento" rimosso, BancaForm/TipoPagamentoForm eliminati. `Contabilita.jsx` NuovoMovimentoDialog deriva conto_cassa_id direttamente dal conto scelto.
-- **Multi-tenant**: nuovi tenant ricevono 4 conti default alla creazione (super_admin.create_agenzia); tenant esistenti senza conti seedati (demo jacopo incluso).
-- **Testing**: testing_agent iter_39 — backend 11/11 PASS (incasso per nome conto, Pagamento in Direzione is_direzione=true senza cash flow banche, legacy label, multi-tenant isolation, CRUD, brogliaccio). Bug trovati e fixati (SelectItem vuoto, validazione nome, premio_totale). 9 titoli reali incassati dai test ripristinati a `da_incassare` con i relativi movimenti rimossi.
-- **NB**: collezioni `tipi_pagamento` e `banche` restano in DB solo come legacy (nessuna UI, endpoint /librerie/banche e /librerie/tipi-pagamento ancora esposti per retrocompatibilità).
+## Backlog P1
+- Widget Documenti Mancanti: bottone Allega inline + note sollecito + filtro collaboratori.
+- RCA sostituzione: stessa targa eredita libretto | targa diversa richiede libretto+atto vendita.
+- Modulo Asset/Patrimonio Cliente: mappa Leaflet + geocoding + PDF.
+- Avatar auto-crop bypass su upload da "Sostituisci Documento".
+- Categorie setup_iniziale_* nel Literal MovimentoCategoria (db_models.py).
+- Saldi live accanto ai conti nel tab Conti/Banche.
 
-### ✅ Correzione 04/08 (richiesta utente): Tipi Pagamento RIPRISTINATI
-- L'utente ha chiarito: i **Tipi pagamento** (etichette combinate modalità+conto, es. "CONTANTI BPER SONDRIO") DEVONO esistere in Librerie e nei dropdown di incasso titoli / giroconto / nuovo movimento.
-- Ripristinati: tab Librerie "Tipi pagamento" (con colonna "Conto / Banca" che mostra il NOME del conto associato, enrichment `conto_nome` in GET /librerie/tipi-pagamento), TipoPagamentoForm, `useTipiPagamento` → `/librerie/tipi-pagamento?attivi=true`, `SelectTipoPagamento` con label tipo pagamento, seed `_seed_tipi_pagamento` allo startup.
-- RESTA VALIDO della migrazione: dati movimenti unificati su BPER Sondrio, conti duplicati eliminati, tab "Conti / Banche" su conti_cassa, e la NUOVA risoluzione in `shared.resolve_conto_cassa` (nome conto → label tipi_pagamento → mezzi → fallback) che ora mappa correttamente ogni tipo pagamento al suo conto (fix del bug storico che accumulava tutto sul primo conto).
-- Verificato: resolve testato per 6 label (CONTANTI BPER SONDRIO→BPER Sondrio, BONIFICO INTESA→Intesa, ASSEGNO BPER VILLA→BPER VILLA, PAGAMENTO IN DIREZIONE→Pagamento Direzione ecc.); screenshot dropdown Nuovo movimento = elenco identico a quello richiesto dall'utente (19 voci).
+## Backlog P2/P3
+- Google Drive sync PDF per tenant.
+- Refactor server.py (>10.900 righe) in router modulari.
 
-## Backlog priorità
-
-### P0 — Prossime sessioni
-- Fix widget Documenti Mancanti: dropdown "Tutti i collaboratori" + bottone "📎 Allega" inline + campo Note/Sollecito.
-- RCA sostituzione: stessa targa eredita libretto | targa diversa richiede libretto+atto vendita mancanti.
-- Modulo Asset/Patrimonio Cliente: mappa Leaflet + geocoding + PDF reporting.
-- Avatar auto-crop bypass: upload CI da "Sostituisci Documento" non passa per pipeline OCR volto.
-- Setup Iniziale: aggiungere categorie `setup_iniziale_*` a MovimentoCategoria (db_models.py).
-
-### P1
-- Tool call ReAct multi-step per Copilot (auto-follow-up query concatenate).
-- Streaming SSE risposta Claude (attualmente 3-5s attesa).
-- Salvataggio consiglio AI nel Diario cliente.
-- Configurazione console OpenAPI.it per attivare Imprese/Automotive + topup credito Risk.
-
-### P2
-- Refactor `server.py` (>10.700 righe) in router modulari.
-- Seed CAP italiani (~7.900) + ABI/CAB completi Banca d'Italia.
-- Google Drive Integration per PDF sync automatico per tenant.
+## Regole critiche
+- PAGAMENTO IN DIREZIONE: is_direzione=True → NESSUN cash flow su banche (conto_cassa_id=None).
+- Non alterare _RESET_CUSTODE_PASSWORD in routes/super_admin.py.
+- Rispondere SEMPRE in italiano.
 
 ## Credenziali test
-File: `/app/memory/test_credentials.md`
-- admin@assicura.it / Admin123!
-- collaboratore@assicura.it / Collab123!
-- dipendente@assicura.it / Dipendente123!
-- cliente@assicura.it / Cliente123!
-- superadmin@assicura.it / Superadmin123!
-
-## Sessione 2026-08-04 — Unificazione pagamenti sotto conti_cassa (COMPLETATA)
-- Migrazione approvata dall'utente: eliminati conti legacy CONTANTI BPER (81 mov) e BONIFICO (41 mov) → BPER Sondrio; PayPal/Online eliminato; duplicati CONTANTI / PAGAMENTI IN DIREZIONE fusi in Cassa Contanti / Pagamento Direzione. Script: /app/backend/scripts/migrazione_conti_unificati.py (mezzo_pagamento normalizzati ai nomi conto; codici import BON/CC/SDD/SEC/giroconto intatti).
-- Dropdown pagamenti (SelectTipoPagamento + useTipiPagamento) ora attinge SOLO da /librerie/conti-cassa?attivi=true (valore = nome conto). resolve_conto_cassa risolve per nome (poi legacy tipi_pagamento, mezzi, fallback).
-- Librerie: tab "Conti / Banche" unificata su conti_cassa; tab "Tipi pagamento" rimossa; "Modalità pagamento" mantenuta.
-- REGOLA UTENTE implementata: conti/banche/tipi/mezzi usati nello storico NON eliminabili (400 con messaggio) → solo archiviazione (pulsante archivia/riattiva in tabella, data-testid conto-toggle-attivo-{id}). Helper _usi_pagamento in routes/librerie.py.
-- Fix: validazione nome conto obbligatorio (POST/PUT), filtro FE conti senza nome, pdf_brogliaccio._calcola_larghezze clamp (chiusura-giorno 500 con >12 conti risolto — bug critico iter38), POST /polizze premio_totale→premio_lordo, filtri titolo_id/polizza_id su GET /contabilita/movimenti.
-- Test: iteration_39.json — backend 11/11 PASS, frontend OK; fix post-report verificati via curl.
-- Nota: is_direzione resta rilevato da "direzione" nel nome conto scelto ("Pagamento Direzione"); NON rinominare quel conto.
-- Fuori scope (LOW, non fatto): date picker nativo in NuovoMovimentoDialog.
+- Admin: admin@assicura.it / Admin123! — Demo tenant: jacopo@admin.it / Admin123!
