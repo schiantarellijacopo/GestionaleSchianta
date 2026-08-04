@@ -45,7 +45,9 @@ function addDays(iso, days) {
 }
 
 export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone }) {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const lordo = parseFloat(titolo.importo_lordo) || 0;
     const [pref, setPref] = useState(null);
     const [showLettera, setShowLettera] = useState(null); // titolo_id quando aprire lettera abbuono
@@ -59,14 +61,14 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const giaCoperto = !!titolo.titolo_coperto;
     const giaIncassato = titolo.stato === "incassato";
 
-    // --- DATI BASE titolo
+    // --- DATI BASE titolo — DEFAULT: data e ora ATTUALI (l'agente sta emettendo/incassando adesso)
     const [f, setF] = useState({
         tipo: titolo.tipo || "quietanza",
-        data_emissione: titolo.data_emissione || titolo.effetto || today,
-        effetto: titolo.effetto || today,
-        ora_effetto: titolo.ora_effetto || "24:00",
-        data_competenza: titolo.data_competenza || titolo.effetto || today,
-        scadenza_mora: titolo.scadenza_mora || addDays(titolo.effetto || today, 15),
+        data_emissione: today,
+        effetto: today,
+        ora_effetto: nowTime,
+        data_competenza: today,
+        scadenza_mora: addDays(today, 15),
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
