@@ -91,6 +91,8 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const [emailOperatori, setEmailOperatori] = useState(false);
     const [emailContraenti, setEmailContraenti] = useState(false);
     const [inDirezione, setInDirezione] = useState(false);
+    // Nota titolo (visibile anche nella scheda Polizza → Titoli)
+    const [notaTitolo, setNotaTitolo] = useState(titolo.nota || "");
 
     // --- INCASSO
     const [incasso, setIncasso] = useState(false);
@@ -132,7 +134,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
     const conferma = async () => {
         try {
-            // 1) AGGIORNA DATI BASE (tipo + date) sempre
+            // 1) AGGIORNA DATI BASE (tipo + date + nota) sempre
             await api.put(`/titoli/${titolo.id}`, {
                 tipo: f.tipo,
                 data_emissione: f.data_emissione,
@@ -140,6 +142,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                 ora_effetto: f.ora_effetto,
                 data_competenza: f.data_competenza,
                 scadenza_mora: f.scadenza_mora,
+                nota: notaTitolo || null,
             });
 
             // 2) COPERTURA (se richiesta e non già coperto)
@@ -149,11 +152,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     data_copertura: dataCopertura,
                     comunicazione_incasso: comunicazioneIncasso,
                     data_contabile: dataContabile,
-                    note: inDirezione ? "Pagamento effettuato dal cliente direttamente in direzione" : null,
                 });
-                if (inDirezione) {
-                    await api.put(`/titoli/${titolo.id}`, { pagamento_in_direzione: true });
-                }
                 // Upload allegato di copertura se presente
                 if (allegatoFile) {
                     try {
@@ -225,10 +224,10 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
         }
     };
 
-    // Stile celle "tabella" del facsimile
-    const cellLabel = "bg-slate-100 text-slate-700 font-medium text-right px-3 py-2 align-middle border border-slate-200 w-[180px]";
-    const cellValueRO = "bg-cyan-50 text-cyan-900 px-3 py-2 align-middle border border-slate-200";
-    const cellValueEdit = "bg-cyan-50 px-2 py-1 align-middle border border-slate-200";
+    // Stile tabella ottimizzato: celle compatte, allineate, contrasto migliore
+    const cellLabel = "bg-slate-50 text-slate-600 font-medium text-right px-2 py-1.5 align-middle border border-slate-200 text-xs w-[140px] whitespace-nowrap";
+    const cellValueRO = "bg-cyan-50/60 text-slate-800 px-2 py-1.5 align-middle border border-slate-200 text-sm";
+    const cellValueEdit = "bg-cyan-50/40 px-1.5 py-1 align-middle border border-slate-200";
 
     return (
         <>
@@ -473,16 +472,25 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                     />
                                     Invia email di notifica a contraenti
                                 </label>
-                                <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
-                                    <Checkbox
-                                        checked={inDirezione}
-                                        onCheckedChange={(v) => setInDirezione(v === true)}
-                                        data-testid="cb-direzione"
-                                    />
-                                    Pagamento (premio) effettuato dal cliente direttamente in direzione
-                                </label>
                             </div>
                         )}
+                    </div>
+
+                    {/* ---- NOTA TITOLO ---- */}
+                    <div className="mt-4 border border-amber-200 bg-amber-50/40 rounded p-3">
+                        <label className="text-xs font-semibold text-amber-800 flex items-center gap-1 mb-1">
+                            📝 Nota sul titolo
+                            <span className="text-[10px] text-slate-500 font-normal ml-1">
+                                (visibile nella scheda polizza → sezione Titoli)
+                            </span>
+                        </label>
+                        <textarea
+                            value={notaTitolo}
+                            onChange={(e) => setNotaTitolo(e.target.value)}
+                            placeholder="Es. Il cliente ha chiesto di aspettare la scadenza mora, contattato il 22/07…"
+                            className="w-full text-sm border border-slate-300 rounded p-2 min-h-[60px] bg-white"
+                            data-testid="ico-nota-titolo"
+                        />
                     </div>
 
                     {/* ---- INCASSO ---- */}
