@@ -148,7 +148,7 @@ export default function RitenuteCompagnia() {
                                         {r.compagnia_codice && <div className="text-[10px] text-slate-400 font-mono">{r.compagnia_codice}</div>}
                                     </td>
                                     <td className="text-slate-600">{r.descrizione || "—"}</td>
-                                    <td className="num text-right font-semibold text-rose-700">- {fmtEur(r.importo)}</td>
+                                    <td className="num text-right font-semibold text-rose-700">{(r.importo || 0) < 0 ? "- " : "+ "}{fmtEur(Math.abs(r.importo))}</td>
                                     <td>{versata ? <span className="badge badge-success">versata</span> : <span className="badge badge-warning">da versare</span>}</td>
                                     <td className="text-right whitespace-nowrap">
                                         {versata ? (
@@ -211,12 +211,13 @@ function RitenutaCompagniaDialog({ item, compagnie, onClose }) {
     const save = async () => {
         if (!f.compagnia_id) { toast.error("Seleziona la compagnia"); return; }
         if (!f.data) { toast.error("Inserisci la data"); return; }
-        const imp = parseFloat(f.importo);
-        if (!imp || imp <= 0) { toast.error("Importo deve essere positivo"); return; }
+        const imp = Math.abs(parseFloat(f.importo));
+        if (!imp) { toast.error("Importo deve essere diverso da zero"); return; }
+        const firmato = f.segno === "-" ? -imp : imp;
         setSaving(true);
         try {
             const body = {
-                compagnia_id: f.compagnia_id, data: f.data, importo: imp,
+                compagnia_id: f.compagnia_id, data: f.data, importo: firmato,
                 descrizione: f.descrizione || null, note: f.note || null,
                 anno: parseInt(f.data.slice(0, 4), 10),
             };
@@ -244,10 +245,18 @@ function RitenutaCompagniaDialog({ item, compagnie, onClose }) {
                             </SelectContent>
                         </Select>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                         <div>
                             <Label>Data *</Label>
                             <Input type="date" value={f.data} onChange={(e) => set("data", e.target.value)} data-testid="ritc-data" />
+                        </div>
+                        <div>
+                            <Label>Segno</Label>
+                            <select className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
+                                onChange={(e) => set("segno", e.target.value)} data-testid="ritc-segno">
+                                <option value="+">+ Alimenta il saldo</option>
+                                <option value="-">− Riduce il saldo</option>
+                            </select>
                         </div>
                         <div>
                             <Label>Importo € *</Label>

@@ -495,8 +495,9 @@ async def _mb_compute(dal: str, al: str) -> dict:
         {"$group": {"_id": "$compagnia_id",
                     "incassato_netto": {"$sum": {"$cond": [
                         {"$in": ["$categoria", ["incasso_premio", "incasso_premio_direzione"]]},
-                        {"$subtract": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$provvigioni", 0]}]}, 0]}},
-                    "versato": {"$sum": {"$cond": [{"$in": ["$categoria", ["pagamento_compagnia", "ritenuta_compagnia"]]}, {"$ifNull": ["$importo", 0]}, 0]}}}},
+                        {"$subtract": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$provvigioni", 0]}]},
+                        {"$cond": [{"$eq": ["$categoria", "ritenuta_compagnia"]}, {"$ifNull": ["$importo", 0]}, 0]}]}},
+                    "versato": {"$sum": {"$cond": [{"$eq": ["$categoria", "pagamento_compagnia"]}, {"$ifNull": ["$importo", 0]}, 0]}}}},
     ]).to_list(100)
     debiti = []
     for d in deb_agg:

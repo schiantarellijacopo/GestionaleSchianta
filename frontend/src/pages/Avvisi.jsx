@@ -433,17 +433,16 @@ async function openWA(g) {
     const tot = g.titoli.reduce((s, t) => s + (t.importo_lordo || 0), 0);
     const msg = `Buongiorno ${g.contraente_nome || ""}, le segnaliamo ${g.titoli.length} titolo/i scaduti per un totale di ${tot.toFixed(2)} €. La invitiamo a contattarci.`;
     try {
-        await api.post("/storico-avvisi/registra", {
-            canale: "whatsapp", contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
-            destinatario: cell, target: cell, titoli_ids: g.titoli.map((t) => t.id),
-            soggetto: "Sollecito titoli scaduti", oggetto: "Sollecito titoli scaduti",
-            messaggio: msg, importo: tot, tipo: "sollecito_titoli",
+        await api.post("/avvisi/whatsapp-invia", {
+            destinatario: cell, messaggio: msg,
+            contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
+            titoli_ids: g.titoli.map((t) => t.id),
+            oggetto: "Sollecito titoli scaduti", tipo: "sollecito_titoli", importo: tot,
         });
-        toast.success("Avviso WhatsApp registrato nello storico");
+        toast.success("WhatsApp inviato al cliente ✓");
     } catch (e) {
-        toast.warning("WhatsApp aperto ma storico non registrato");
+        toast.error(e.response?.data?.detail || "Invio WhatsApp fallito");
     }
-    window.open(`https://wa.me/${cell}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
 async function stampaPdfAvviso(g) {
@@ -530,15 +529,17 @@ function PolizzeTable({ items, onEmail }) {
                                             onClick={async () => {
                                                 const msg = `Buongiorno ${p.contraente_nome || ""}, la sua polizza ${p.numero_polizza} scade il ${fmtDate(p.scadenza)}. Premio: ${fmtEur(p.premio_lordo)}.`;
                                                 try {
-                                                    await api.post("/storico-avvisi/registra", {
-                                                        canale: "whatsapp", contraente_id: p.contraente_id, contraente_nome: p.contraente_nome,
-                                                        polizza_id: p.id, destinatario: cell, target: cell,
-                                                        messaggio: msg, oggetto: `Scadenza polizza ${p.numero_polizza}`,
+                                                    await api.post("/avvisi/whatsapp-invia", {
+                                                        destinatario: cell, messaggio: msg,
+                                                        contraente_id: p.contraente_id, contraente_nome: p.contraente_nome,
+                                                        polizza_id: p.id,
+                                                        oggetto: `Scadenza polizza ${p.numero_polizza}`,
                                                         tipo: "avviso_scadenza_polizza", importo: p.premio_lordo,
                                                     });
-                                                    toast.success("WhatsApp registrato nello storico");
-                                                } catch (_) { toast.warning("Storico non registrato"); }
-                                                window.open(`https://wa.me/${cell}?text=${encodeURIComponent(msg)}`, "_blank");
+                                                    toast.success("WhatsApp inviato al cliente ✓");
+                                                } catch (e) {
+                                                    toast.error(e.response?.data?.detail || "Invio WhatsApp fallito");
+                                                }
                                             }} data-testid={`btn-wa-pol-${p.id}`}>
                                             <MessageCircle size={12} className="text-emerald-600" />
                                         </Button>
@@ -563,7 +564,21 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
     const [soggetto, setSoggetto] = useState("Promemoria pagamento polizza/e in scadenza");
     const [corpo, setCorpo] = useState(CORPO_DEFAULT);
     const [sending, setSending] = useState(false);
+    const [sendingWa, setSendingWa] = useState(false);
     const [generatingPdf, setGeneratingPdf] = useState(false);
+
+    const inviaWa = async () => {
+        if (!window.confirm(`Inviare un messaggio WhatsApp REALE a ogni contraente dei ${titoli_ids.length} titoli selezionati?`)) return;
+        setSendingWa(true);
+        try {
+            const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", { titoli_ids });
+            const sk = r.data.skipped?.length || 0;
+            toast.success(`WhatsApp inviati: ${r.data.inviati}${sk ? ` · ${sk} saltati` : ""}`);
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio WhatsApp");
+        } finally { setSendingWa(false); }
+    };
 
     const invia = async () => {
         setSending(true);
@@ -627,6 +642,16 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                         >
                             <FileDown size={14} className="mr-1" />
                             {generatingPdf ? "Genero PDF…" : "Scarica PDF"}
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={inviaWa}
+                            disabled={sending || generatingPdf || sendingWa}
+                            data-testid="bulk-whatsapp"
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        >
+                            <MessageCircle size={14} className="mr-1" />
+                            {sendingWa ? "Invio WA…" : "Invia WhatsApp"}
                         </Button>
                         <Button
                             onClick={invia}

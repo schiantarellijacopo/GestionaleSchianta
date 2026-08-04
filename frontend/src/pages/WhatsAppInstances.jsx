@@ -102,16 +102,14 @@ export default function WhatsAppInstances() {
                 </div>
                 {!cfg?.configured && (
                     <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded p-3 text-amber-900">
-                        <strong>Configurazione richiesta.</strong> Aggiungi le seguenti variabili
-                        d&apos;ambiente nel backend:
-                        <ul className="list-disc list-inside mt-1 space-y-0.5 font-mono">
-                            <li><code>WHATSAPP_API_URL</code> = URL base Evolution (es. https://evolution-api-production-xxx.up.railway.app)</li>
-                            <li><code>WHATSAPP_API_KEY</code> = valore di <code>AUTHENTICATION_API_KEY</code> di Railway</li>
-                        </ul>
-                        Poi riavvia il backend.
+                        <strong>Configurazione richiesta.</strong> Inserisci qui sotto l&apos;URL del tuo
+                        server Evolution API e la sua API Key (AUTHENTICATION_API_KEY), poi salva.
                     </div>
                 )}
             </Card>
+
+            <ServerConfigCard cfg={cfg} onSaved={load} />
+            <AvvisiWhatsAppCard instances={list} />
 
             {/* Lista istanze */}
             <Card className="p-0 overflow-hidden">
@@ -185,6 +183,141 @@ export default function WhatsAppInstances() {
 }
 
 // ─── Helpers per azioni riga ─────────────────────────────────────────
+function ServerConfigCard({ cfg, onSaved }) {
+    const [serverUrl, setServerUrl] = useState("");
+    const [apiKey, setApiKey] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [testing, setTesting] = useState(false);
+
+    const save = async () => {
+        if (!serverUrl.trim() || !apiKey.trim()) { toast.error("Inserisci URL e API Key"); return; }
+        setSaving(true);
+        try {
+            await api.put("/whatsapp-evo/config", { server_url: serverUrl.trim(), api_key: apiKey.trim() });
+            toast.success("Server Evolution salvato per la tua agenzia");
+            setApiKey("");
+            onSaved?.();
+        } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+        setSaving(false);
+    };
+    const test = async () => {
+        setTesting(true);
+        try {
+            const r = await api.post("/whatsapp-evo/config/test");
+            if (r.data.ok) toast.success(`Connessione OK — ${r.data.istanze_sul_server} istanze sul server`);
+            else toast.error("Test fallito: " + (r.data.error || "errore sconosciuto"));
+        } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+        setTesting(false);
+    };
+    const remove = async () => {
+        if (!window.confirm("Rimuovere la configurazione server della tua agenzia?")) return;
+        try { await api.delete("/whatsapp-evo/config"); toast.success("Configurazione rimossa"); onSaved?.(); }
+        catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    };
+
+    return (
+        <Card className="p-4 space-y-3" data-testid="wa-server-config-card">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <div className="font-semibold text-sm">Configurazione server Evolution API</div>
+                    <div className="text-xs text-slate-500">
+                        Ogni agenzia collega qui il proprio server WhatsApp in autonomia.
+                        {cfg?.source === "agenzia" && " Attualmente attiva: configurazione della TUA agenzia."}
+                        {cfg?.source === "env" && " Attualmente attiva: configurazione predefinita di sistema (puoi sovrascriverla col tuo server)."}
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    {cfg?.configured && (
+                        <Button variant="outline" size="sm" onClick={test} disabled={testing} data-testid="wa-config-test-btn">
+                            {testing ? "Verifica…" : "Test connessione"}
+                        </Button>
+                    )}
+                    {cfg?.source === "agenzia" && (
+                        <Button variant="outline" size="sm" className="text-red-600" onClick={remove} data-testid="wa-config-delete-btn">
+                            Rimuovi
+                        </Button>
+                    )}
+                </div>
+            </div>
+            <div className="grid md:grid-cols-3 gap-2">
+                <input className="border rounded h-9 px-2 text-sm md:col-span-1" placeholder="https://tuo-server-evolution.it"
+                    value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} data-testid="wa-config-url-input" />
+                <input className="border rounded h-9 px-2 text-sm md:col-span-1" type="password" placeholder="API Key (AUTHENTICATION_API_KEY)"
+                    value={apiKey} onChange={(e) => setApiKey(e.target.value)} data-testid="wa-config-key-input" />
+                <Button onClick={save} disabled={saving} className="h-9" data-testid="wa-config-save-btn">
+                    {saving ? "Salvataggio…" : "Salva server agenzia"}
+                </Button>
+            </div>
+        </Card>
+    );
+}
+
+function AvvisiWhatsAppCard({ instances }) {
+    const [az, setAz] = useState(null);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => { api.get("/librerie/azienda").then((r) => setAz(r.data)).catch(() => setAz({})); }, []);
+    if (!az) return null;
+    const set = (k, v) => setAz((p) => ({ ...p, [k]: v }));
+    const save = async () => {
+        setSaving(true);
+        try {
+            await api.put("/librerie/azienda", {
+                notifica_scadenze_whatsapp: !!az.notifica_scadenze_whatsapp,
+                notifica_scadenze_whatsapp_template: az.notifica_scadenze_whatsapp_template || "",
+                notifica_scadenze_whatsapp_instance: az.notifica_scadenze_whatsapp_instance || "",
+            });
+            toast.success("Avvisi WhatsApp aggiornati");
+        } catch (e) { toast.error(e.response?.data?.detail || e.message); }
+        setSaving(false);
+    };
+    return (
+        <Card className="p-4 space-y-3" data-testid="wa-avvisi-card">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <div className="font-semibold text-sm">Avvisi di scadenza via WhatsApp</div>
+                    <div className="text-xs text-slate-500">
+                        Ogni mattina (job automatico alle 08:00) i clienti con polizze/titoli in scadenza
+                        ricevono un promemoria WhatsApp sul cellulare in anagrafica.
+                    </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4" checked={!!az.notifica_scadenze_whatsapp}
+                        onChange={(e) => set("notifica_scadenze_whatsapp", e.target.checked)}
+                        data-testid="wa-avvisi-toggle" />
+                    <span className={az.notifica_scadenze_whatsapp ? "text-emerald-700 font-medium" : "text-slate-500"}>
+                        {az.notifica_scadenze_whatsapp ? "Attivo" : "Disattivato"}
+                    </span>
+                </label>
+            </div>
+            <div className="grid md:grid-cols-2 gap-2">
+                <div>
+                    <div className="text-xs text-slate-500 mb-1">Template messaggio polizze (variabili: {"{cliente} {polizza} {ramo} {scadenza} {importo} {compagnia}"})</div>
+                    <textarea className="w-full border rounded p-2 text-sm h-20" data-testid="wa-avvisi-template"
+                        placeholder="Gentile {cliente}, ti ricordiamo che la polizza {polizza} ({ramo}) scade il {scadenza}. Premio: {importo}..."
+                        value={az.notifica_scadenze_whatsapp_template || ""}
+                        onChange={(e) => set("notifica_scadenze_whatsapp_template", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                    <div className="text-xs text-slate-500 mb-1">Istanza WhatsApp da usare</div>
+                    <select className="w-full border rounded h-9 px-2 text-sm" data-testid="wa-avvisi-instance"
+                        value={az.notifica_scadenze_whatsapp_instance || ""}
+                        onChange={(e) => set("notifica_scadenze_whatsapp_instance", e.target.value)}>
+                        <option value="">Automatica (prima istanza connessa)</option>
+                        {(instances || []).map((i) => (
+                            <option key={i.instance_name} value={i.instance_name}>
+                                {i.agenzia_nome || i.instance_name} {i.state_live === "open" ? "· connessa" : ""}
+                            </option>
+                        ))}
+                    </select>
+                    <Button onClick={save} disabled={saving} size="sm" data-testid="wa-avvisi-save-btn">
+                        {saving ? "Salvataggio…" : "Salva impostazioni avvisi"}
+                    </Button>
+                </div>
+            </div>
+        </Card>
+    );
+}
+
 async function openQr(name, setQrDialog) {
     try {
         const r = await api.get(`/whatsapp-evo/instances/${name}/qr`);

@@ -303,8 +303,8 @@ async def create_ritenuta_compagnia(
             400,
             "Le ritenute compagnia si applicano solo a compagnie con mandato diretto",
         )
-    if body.importo <= 0:
-        raise HTTPException(400, "Importo deve essere positivo (verrà trattenuto come negativo)")
+    if not body.importo:
+        raise HTTPException(400, "Importo deve essere diverso da zero (+ alimenta il saldo, − lo riduce)")
     anno = body.anno or int(body.data[:4])
     doc = {
         "id": str(uuid.uuid4()),

@@ -4961,10 +4961,12 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_ritenuta = ritenuta_riga
                 c_spese = importo  # netto banca uscita
             elif cat == "ritenuta_compagnia":
-                # Ritenuta trattenuta dalla compagnia: NON è una spesa reale.
-                # Alimenta solo il SALDO (riduce il debito verso compagnia). Nessun cash flow.
+                # Ritenuta compagnia: NON è una spesa reale, nessun cash flow.
+                # Alimenta il SALDO col segno scelto (di norma + : la compagnia
+                # trattiene provvigioni → aumenta il saldo da versare;
+                # con importo negativo lo riduce).
                 c_totale = 0.0
-                c_saldo = -importo
+                c_saldo = importo
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.
@@ -5127,7 +5129,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         "rimesse": round(cum_rimesse, 2),
         "sconti": round(cum_sconti, 2),
         "spese": round(cum_spese, 2),
-        "saldo_cassa": round(cum_saldo - cum_rimesse - cum_ritenute_comp - cum_rappel, 2),
+        "saldo_cassa": round(cum_saldo - cum_rimesse + cum_ritenute_comp - cum_rappel, 2),
         "rappel": round(cum_rappel, 2),
     }
 
@@ -5237,9 +5239,9 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rappel = rap_agg[0]["tot"] if rap_agg else 0.0
-        # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; meno ritenute
+        # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
         saldo_dovuto = (incassi - provv) if trattiene else incassi
-        saldo_residuo = saldo_dovuto - rimesse - rappel - ritenute
+        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute
         if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
@@ -7927,6 +7929,113 @@ async def avvisi_pdf_bulk(
             "Content-Disposition": f'attachment; filename="avvisi_scadenza_{_date_pdf.today().isoformat()}.pdf"',
         },
     )
+
+
+@api.post("/avvisi/whatsapp-invia")
+async def avvisi_whatsapp_invia(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invia un avviso WhatsApp REALE via Evolution API e lo registra nello storico.
+
+    body: { destinatario, messaggio, contraente_id?, contraente_nome?, polizza_id?,
+            titoli_ids?, oggetto?, tipo?, importo? }
+    """
+    dest = (body.get("destinatario") or "").strip()
+    msg = (body.get("messaggio") or "").strip()
+    if not dest or not msg:
+        raise HTTPException(400, "destinatario e messaggio obbligatori")
+    from routes.whatsapp_evo import send_text_via_evolution
+    r = await send_text_via_evolution(dest, msg)
+    await db.storico_avvisi.insert_one({
+        "id": str(uuid.uuid4()), "canale": "whatsapp",
+        "contraente_id": body.get("contraente_id"), "contraente_nome": body.get("contraente_nome"),
+        "polizza_id": body.get("polizza_id"), "titoli_ids": body.get("titoli_ids"),
+        "destinatario": dest, "target": dest,
+        "oggetto": body.get("oggetto") or "Avviso WhatsApp",
+        "soggetto": body.get("oggetto") or "Avviso WhatsApp",
+        "messaggio": msg, "tipo": body.get("tipo") or "avviso_whatsapp",
+        "importo": body.get("importo"),
+        "esito": "inviato" if r.get("ok") else f"errore: {r.get('error')}",
+        "sent_at": _now_iso(), "operatore_id": user.get("id"),
+        "operatore_nome": user.get("name") or user.get("email"),
+    })
+    if not r.get("ok"):
+        raise HTTPException(400, f"Invio WhatsApp fallito: {r.get('error')}")
+    await log_attivita(user, "whatsapp_avviso", "avvisi", None, f"→ {dest}")
+    return {"ok": True, "instance": r.get("instance_name")}
+
+
+@api.post("/avvisi/whatsapp-invia-bulk-titoli")
+async def whatsapp_bulk_avvisi_titoli(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invia UN messaggio WhatsApp per contraente con l'elenco dei suoi titoli scaduti.
+
+    body: { titoli_ids: [str], messaggio_intro?: str }
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio (lista)")
+    intro = (body.get("messaggio_intro") or
+             "Buongiorno {cliente}, le ricordiamo i seguenti titoli in scadenza/arretrati:")
+
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    if not titoli:
+        raise HTTPException(404, "Nessun titolo trovato")
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1},
+    )}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "telefono": 1},
+    )}
+
+    from collections import defaultdict
+    bucket: dict = defaultdict(list)
+    for t in titoli:
+        p = pols.get(t.get("polizza_id"), {})
+        if p.get("contraente_id"):
+            bucket[p["contraente_id"]].append({**t, "_pol": p})
+
+    from routes.whatsapp_evo import send_text_via_evolution
+    inviati, skipped = 0, []
+    for cid, ts in bucket.items():
+        a = anas.get(cid, {})
+        cell = (a.get("cellulare") or a.get("telefono") or "").strip()
+        nome = a.get("ragione_sociale") or "cliente"
+        if not cell:
+            skipped.append({"contraente": nome, "motivo": "cellulare mancante"})
+            continue
+        tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
+        righe = "\n".join(
+            f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
+            f"scad. {t.get('scadenza') or '-'} — € {float(t.get('importo_lordo') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            for t in ts[:15]
+        )
+        msg = (intro.replace("{cliente}", nome) + "\n" + righe +
+               ("\n… e altri" if len(ts) > 15 else "") +
+               f"\nTotale: € {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") +
+               "\nLa invitiamo a contattare l'agenzia. Grazie!")
+        r = await send_text_via_evolution(cell, msg)
+        await db.storico_avvisi.insert_one({
+            "id": str(uuid.uuid4()), "canale": "whatsapp", "contraente_id": cid,
+            "contraente_nome": nome, "destinatario": cell, "target": cell,
+            "titoli_ids": [t["id"] for t in ts], "oggetto": "Sollecito titoli scaduti",
+            "soggetto": "Sollecito titoli scaduti", "messaggio": msg,
+            "tipo": "sollecito_titoli", "importo": tot,
+            "esito": "inviato" if r.get("ok") else f"errore: {r.get('error')}",
+            "sent_at": _now_iso(), "operatore_id": user.get("id"),
+            "operatore_nome": user.get("name") or user.get("email"),
+        })
+        if r.get("ok"):
+            inviati += 1
+        else:
+            skipped.append({"contraente": nome, "motivo": r.get("error")})
+    await log_attivita(user, "whatsapp_bulk_avvisi", "avvisi", None, f"inviati={inviati}")
+    return {"inviati": inviati, "skipped": skipped}
 
 
 @api.post("/avvisi/invia-bulk-titoli")

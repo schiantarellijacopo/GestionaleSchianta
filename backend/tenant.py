@@ -123,6 +123,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "whatsapp_instances",
     "whatsapp_messages",
     "whatsapp_chats",
+    "whatsapp_server_config",
     "interviste",
     "calcoli_pensione",
 ]

@@ -30,14 +30,20 @@ router = APIRouter(prefix="/whatsapp-evo", tags=["whatsapp-evo"])
 
 
 # ---------- Client Evolution API ----------
-def _cfg() -> tuple[str, str]:
+async def _cfg() -> tuple[str, str]:
+    """Config del server Evolution: prima quella salvata dall'AGENZIA (tenant),
+    poi fallback sulle env globali. Ogni agenzia configura il proprio server
+    dalla pagina WhatsApp → Configurazione server."""
+    doc = await db.whatsapp_server_config.find_one({}, {"_id": 0, "server_url": 1, "api_key": 1})
+    if doc and doc.get("server_url") and doc.get("api_key"):
+        return doc["server_url"].rstrip("/"), doc["api_key"]
     url = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
     key = os.environ.get("WHATSAPP_API_KEY") or ""
     if not url or not key:
         raise HTTPException(
             503,
             "WhatsApp Evolution API non configurata. "
-            "Imposta WHATSAPP_API_URL e WHATSAPP_API_KEY in backend/.env",
+            "Inserisci URL server e API Key nella pagina WhatsApp → Configurazione server.",
         )
     return url, key
 
@@ -45,7 +51,7 @@ def _cfg() -> tuple[str, str]:
 async def _call(method: str, path: str, *, json: Optional[dict] = None, instance_token: Optional[str] = None, timeout: float = 30.0) -> dict:
     """Chiamata HTTP verso Evolution API. Usa la global key di default,
     o il token della singola istanza se fornito."""
-    url_base, global_key = _cfg()
+    url_base, global_key = await _cfg()
     headers = {"apikey": instance_token or global_key, "Content-Type": "application/json"}
     url = f"{url_base}{path}"
     try:
@@ -72,15 +78,72 @@ class CreateInstanceBody(BaseModel):
 # ---------- Endpoints gestione istanze ----------
 @router.get("/config")
 async def get_config(user=Depends(current_user)) -> dict:
-    """Verifica lo stato della configurazione senza esporre la chiave."""
+    """Stato configurazione server Evolution (senza esporre la chiave)."""
+    doc = await db.whatsapp_server_config.find_one({}, {"_id": 0})
+    if doc and doc.get("server_url") and doc.get("api_key"):
+        return {
+            "configured": True,
+            "source": "agenzia",
+            "url": doc["server_url"],
+            "url_set": True,
+            "key_set": True,
+            "updated_at": doc.get("updated_at"),
+        }
     url = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
     key = os.environ.get("WHATSAPP_API_KEY") or ""
     return {
         "configured": bool(url and key),
+        "source": "env" if (url and key) else None,
         "url_set": bool(url),
         "key_set": bool(key),
         "url": url or None,
     }
+
+
+class ServerConfigBody(BaseModel):
+    server_url: str
+    api_key: str
+
+
+@router.put("/config")
+async def save_server_config(body: ServerConfigBody, user=Depends(require_user("admin"))) -> dict:
+    """Salva la configurazione del server Evolution della PROPRIA agenzia."""
+    url = body.server_url.strip().rstrip("/")
+    key = body.api_key.strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "URL server non valido (deve iniziare con http:// o https://)")
+    if len(key) < 8:
+        raise HTTPException(400, "API Key troppo corta")
+    existing = await db.whatsapp_server_config.find_one({}, {"_id": 0, "id": 1})
+    if existing:
+        await db.whatsapp_server_config.update_one(
+            {"id": existing["id"]},
+            {"$set": {"server_url": url, "api_key": key,
+                      "updated_at": _now_iso(), "updated_by": user.get("id")}},
+        )
+    else:
+        await db.whatsapp_server_config.insert_one({
+            "id": str(uuid.uuid4()), "server_url": url, "api_key": key,
+            "created_at": _now_iso(), "updated_at": _now_iso(), "updated_by": user.get("id"),
+        })
+    return {"ok": True, "url": url}
+
+
+@router.delete("/config")
+async def delete_server_config(user=Depends(require_user("admin"))) -> dict:
+    r = await db.whatsapp_server_config.delete_many({})
+    return {"ok": True, "deleted": r.deleted_count}
+
+
+@router.post("/config/test")
+async def test_server_config(user=Depends(require_user("admin"))) -> dict:
+    """Verifica credenziali chiamando /instance/fetchInstances sul server."""
+    try:
+        resp = await _call("GET", "/instance/fetchInstances", timeout=10.0)
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)[:300]}
+    n = len(resp) if isinstance(resp, list) else len(resp.get("instances", []) if isinstance(resp, dict) else [])
+    return {"ok": True, "istanze_sul_server": n}
 
 
 @router.get("/instances")
@@ -757,3 +820,37 @@ async def archive_message_media(
 
     return {"ok": True, "allegato": allegato}
 
+
+
+# ---------- Helper riusabile (avvisi scadenze, automazioni) ----------
+async def send_text_via_evolution(number: str, text: str, instance_name: Optional[str] = None) -> dict:
+    """Invio best-effort: usa l'istanza indicata o la prima connessa del tenant."""
+    to_clean = "".join(c for c in str(number or "") if c.isdigit())
+    if not to_clean:
+        return {"ok": False, "error": "numero non valido"}
+    inst = None
+    if instance_name:
+        inst = await db.whatsapp_instances.find_one({"instance_name": instance_name}, {"_id": 0})
+    if not inst:
+        inst = await db.whatsapp_instances.find_one({"state": {"$in": ["open", "connected"]}}, {"_id": 0})
+    if not inst:
+        inst = await db.whatsapp_instances.find_one({}, {"_id": 0})
+    if not inst:
+        return {"ok": False, "error": "nessuna istanza WhatsApp configurata"}
+    try:
+        await _call(
+            "POST", f"/message/sendText/{inst['instance_name']}",
+            json={"number": to_clean, "text": (text or "")[:3000]},
+            instance_token=inst.get("token"),
+        )
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)[:200]}
+    try:
+        await db.whatsapp_messages.insert_one({
+            "id": str(uuid.uuid4()), "instance_name": inst["instance_name"],
+            "direction": "out", "number": to_clean, "text": (text or "")[:3000],
+            "source": "avvisi_automazioni", "created_at": _now_iso(),
+        })
+    except Exception:
+        pass
+    return {"ok": True, "instance_name": inst["instance_name"]}

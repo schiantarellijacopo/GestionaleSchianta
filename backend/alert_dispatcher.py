@@ -334,8 +334,9 @@ async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
         if not inst:
             return {"status": "skipped", "error": f"Istanza '{instance_name}' non trovata"}
 
-    url_base = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
-    api_key = inst.get("token") or os.environ.get("WHATSAPP_API_KEY") or ""
+    srv = await db.whatsapp_server_config.find_one({}, {"_id": 0, "server_url": 1, "api_key": 1}) or {}
+    url_base = (srv.get("server_url") or os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
+    api_key = inst.get("token") or srv.get("api_key") or os.environ.get("WHATSAPP_API_KEY") or ""
     if not url_base or not api_key:
         return {"status": "skipped", "error": "Evolution API non configurata"}
 

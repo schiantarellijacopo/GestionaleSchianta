@@ -357,6 +357,75 @@ async def _persist_log(db: AsyncIOMotorDatabase, log_entry: dict) -> None:
     await db.notifiche_scadenze.insert_one(log_entry)
 
 
+# ---------------------------------------------------------------------------
+# WhatsApp ai clienti (Evolution API) — best effort, non blocca l'email
+# ---------------------------------------------------------------------------
+_WA_TPL_POLIZZA_DEFAULT = (
+    "Gentile {cliente}, ti ricordiamo che la polizza {polizza} ({ramo}) "
+    "scade il {scadenza}. Premio: {importo}. "
+    "Per il rinnovo contatta la tua agenzia. Grazie!"
+)
+_WA_TPL_TITOLO_DEFAULT = (
+    "Gentile {cliente}, ti ricordiamo il pagamento del titolo della polizza "
+    "{polizza} ({ramo}) in scadenza il {scadenza}: {importo}. "
+    "Per info contatta la tua agenzia. Grazie!"
+)
+
+
+async def _invia_whatsapp_clienti(az: dict, scadenze: dict) -> dict[str, Any]:
+    """Invia un promemoria WhatsApp a ogni cliente con polizza/titolo in scadenza."""
+    from routes.whatsapp_evo import send_text_via_evolution
+    tpl_pol = az.get("notifica_scadenze_whatsapp_template") or _WA_TPL_POLIZZA_DEFAULT
+    tpl_tit = az.get("notifica_scadenze_whatsapp_template_titoli") or _WA_TPL_TITOLO_DEFAULT
+    instance = az.get("notifica_scadenze_whatsapp_instance") or None
+    max_invii = int(az.get("notifica_scadenze_whatsapp_max") or 50)  # anti-ban WhatsApp
+    inviati, falliti, senza_numero = 0, 0, 0
+    limite_raggiunto = False
+    dettagli: list[dict] = []
+    dedup: set = set()
+
+    async def _send(record: dict, tpl: str, importo_key: str) -> None:
+        nonlocal inviati, falliti, senza_numero
+        num = record.get("contraente_cellulare")
+        if not num:
+            senza_numero += 1
+            return
+        key = (num, record.get("numero_polizza"), record.get("scadenza"))
+        if key in dedup:
+            return
+        dedup.add(key)
+        msg = tpl.format(
+            cliente=record.get("contraente_nome") or "cliente",
+            polizza=record.get("numero_polizza") or "-",
+            ramo=record.get("ramo") or "-",
+            scadenza=_fmt_date(record.get("scadenza")),
+            importo=_fmt_eur(record.get(importo_key)),
+            compagnia=record.get("compagnia_nome") or "-",
+        )
+        r = await send_text_via_evolution(num, msg, instance_name=instance)
+        if r.get("ok"):
+            inviati += 1
+        else:
+            falliti += 1
+        dettagli.append({"numero": num, "polizza": record.get("numero_polizza"),
+                         "ok": bool(r.get("ok")), "errore": r.get("error")})
+
+    for p in scadenze.get("polizze", []):
+        if inviati + falliti >= max_invii:
+            limite_raggiunto = True
+            break
+        await _send(p, tpl_pol, "premio_lordo")
+    for t in scadenze.get("titoli", []):
+        if inviati + falliti >= max_invii:
+            limite_raggiunto = True
+            break
+        await _send(t, tpl_tit, "importo_lordo")
+
+    return {"attivo": True, "inviati": inviati, "falliti": falliti,
+            "senza_numero": senza_numero, "limite_raggiunto": limite_raggiunto,
+            "max_invii": max_invii, "dettagli": dettagli[:50]}
+
+
 async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False) -> dict[str, Any]:
     """Esegue il job avvisi scadenze. Salva traccia su ``db.notifiche_scadenze``."""
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
@@ -380,19 +449,32 @@ async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False
         return {"ok": True, "n_polizze": 0, "n_titoli": 0, "email_inviata": False,
                 "motivo": "Nessuna scadenza nel periodo"}
 
+    # --- WhatsApp ai clienti (indipendente dall'email, best-effort) ---
+    if az.get("notifica_scadenze_whatsapp"):
+        try:
+            log_entry["whatsapp"] = await _invia_whatsapp_clienti(az, scadenze)
+        except Exception as e:  # noqa: BLE001
+            log_entry["whatsapp"] = {"attivo": True, "errore": str(e)[:300]}
+            logger.exception("Errore invio avvisi WhatsApp")
+    else:
+        log_entry["whatsapp"] = {"attivo": False}
+
     # destinatario mancante
     if not to_addr:
         log_entry["errore"] = ("Destinatario non configurato "
                                "(notifica_scadenze_email_admin / email_commercialista)")
         await _persist_log(db, log_entry)
-        return {"ok": False, "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit}
+        return {"ok": bool((log_entry.get("whatsapp") or {}).get("inviati")),
+                "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit,
+                "whatsapp": log_entry.get("whatsapp")}
 
     # smtp non configurato
     if not (az.get("smtp_host") and az.get("smtp_user")):
         log_entry["errore"] = "SMTP non configurato in Librerie/Azienda"
         await _persist_log(db, log_entry)
-        return {"ok": False, "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit,
-                "scadenze": scadenze}
+        return {"ok": bool((log_entry.get("whatsapp") or {}).get("inviati")),
+                "errore": log_entry["errore"], "n_polizze": n_pol, "n_titoli": n_tit,
+                "scadenze": scadenze, "whatsapp": log_entry.get("whatsapp")}
 
     # invio email
     subject, text, html = _render_email_html(scadenze, giorni)
@@ -402,13 +484,15 @@ async def esegui_job_scadenze(db: AsyncIOMotorDatabase, *, manuale: bool = False
         log_entry["errore"] = str(e)
         await _persist_log(db, log_entry)
         logger.exception("Errore invio avvisi scadenze")
-        return {"ok": False, "errore": str(e), "n_polizze": n_pol, "n_titoli": n_tit}
+        return {"ok": False, "errore": str(e), "n_polizze": n_pol, "n_titoli": n_tit,
+                "whatsapp": log_entry.get("whatsapp")}
 
     log_entry["email_inviata"] = True
     await _persist_log(db, log_entry)
     logger.info("Avvisi scadenze inviati a %s: %d polizze, %d titoli", to_addr, n_pol, n_tit)
     return {"ok": True, "n_polizze": n_pol, "n_titoli": n_tit,
-            "email_inviata": True, "destinatario": to_addr}
+            "email_inviata": True, "destinatario": to_addr,
+            "whatsapp": log_entry.get("whatsapp")}
 
 
 # ============== Scheduler =================

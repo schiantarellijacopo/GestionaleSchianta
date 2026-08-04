@@ -1,0 +1,31 @@
+{
+  "summary": "Iter41 - Tested WhatsApp Evolution API multi-tenant config, WhatsApp avvisi (singolo/bulk/job), Ritenute Compagnia segno +/-, regressione brogliaccio/movimenti/mini-bilancio. Backend: 13/13 pytest PASS. Frontend: pagine /whatsapp, /avvisi, /ritenute-compagnia — tutti i data-testid critici presenti e funzionanti; toggle wa-avvisi lasciato disattivato; nessun invio a numeri reali eseguito.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter41_whatsapp_ritenute.py",
+    "/app/test_reports/pytest/iter41.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/server.py::avvisi_whatsapp_invia (~L7934): la row storico_avvisi viene SEMPRE inserita anche se l'invio fallisce con eccezione non-HTTPException (es. crash Evolution client). Attualmente r=send_text_via_evolution ritorna {ok:False,error:...} in caso di HTTPException, ma se _call solleva altra exception non catturata, si perde traccia dello storico. Considerare try/except globale.",
+    "backend/routes/whatsapp_evo.py::_cfg: la config agenzia e' single-doc globale (no tenant_id filter). Il commento parla di multi-tenant ma in realta' l'app usa DB-per-tenant, quindi corretto. Il claim 'per-agenzia self-service' funziona perche' ogni tenant ha il proprio DB.",
+    "backend/routes/whatsapp_evo.py::save_server_config: campo api_key salvato IN CHIARO nel DB. Considerare cifratura at-rest o vault. Meno critico visto che ogni agenzia ha il proprio DB.",
+    "backend/server.py::/avvisi/whatsapp-invia-bulk-titoli (~L7968): nessun rate-limit anti-ban tra un contraente e l'altro (a differenza del job automatico). Potrebbe causare ban WhatsApp su bulk grandi. Considerare sleep(1-2s) tra invii.",
+    "backend/server.py::_compute_brogliaccio L4963-4969 (ritenuta_compagnia): c_saldo=importo (segno diretto). Corretto per l'utente: + alimenta saldo, - riduce. Consistent con KPI cum_ritenute_comp (L5117)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter41_whatsapp_ritenute.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (tutti data-testid critici trovati)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Test crea/cancella: (1) anagrafica QA_ITER41_no_cell senza cellulare, (2) polizza+titolo QA_ITER41, (3) ritenute compagnia +5 (versata->movimento) e -7.5, (4) movimento CONTANTI test. Tutti cancellati a fine test via API. Cleanup diretto MongoDB delle righe storico_avvisi con contraente_nome=QA_ITER41/QA_TEST (3 righe rimosse).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Endpoint verificati: GET/PUT/DELETE /api/whatsapp-evo/config, POST /api/whatsapp-evo/config/test (server Railway reale, N istanze>0), POST /api/avvisi/whatsapp-invia (400 con numero fittizio 0000000000), POST /api/avvisi/whatsapp-invia-bulk-titoli (skipped cellulare mancante), POST /api/avvisi-scadenze/esegui (whatsapp.attivo:false OK), POST /api/ritenute-compagnia (importo 0 -> 400, negativo OK, positivo OK), POST /api/ritenute-compagnia/{id}/versa crea movimento categoria=ritenuta_compagnia con saldo=+importo e spese=0 nel brogliaccio, riepilogo_kpi.saldo_cassa incrementato di +5. Frontend testids: wa-server-config-card, wa-config-url-input, wa-config-key-input, wa-config-save-btn, wa-config-test-btn, wa-config-delete-btn, wa-avvisi-card, wa-avvisi-toggle, wa-avvisi-template, wa-avvisi-instance, wa-avvisi-save-btn, avvisi-page, bulk-send-btn, bulk-whatsapp (enabled), btn-wa-* (545 elementi), ritenute-compagnia-page, ritc-new, ritc-dialog, ritc-segno con options '+ Alimenta il saldo' (default) e '- Riduce il saldo'. NB: la ritenuta con segno negativo NON e' stata creata da UI (verificato solo via API); la lista mostra correttamente le entries con '+ ...' prefissato. La creazione UI con segno negativo va verificata dal main agent con smoke test veloce se necessario, ma il backend supporta importo negativo (test 100% pass).",
+  "rca of the issue": "Nessun bug bloccante. Failures iniziali su test dovute a: (1) test compilava initial_source==agenzia atteso invece che env (state DB pre-esistente); (2) Polizza/Titolo model richiedono campi 'effetto' e 'scadenza' non 'data_decorrenza'/'data_scadenza' (test-side error); (3) MovimentoContabile enum categoria non accetta 'spese_generali' ma 'spese_amministrative'. Fixati nel test file, tutti verdi."
+}
