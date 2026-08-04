@@ -61,14 +61,16 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const giaCoperto = !!titolo.titolo_coperto;
     const giaIncassato = titolo.stato === "incassato";
 
-    // --- DATI BASE titolo — DEFAULT: data e ora ATTUALI (l'agente sta emettendo/incassando adesso)
+    // --- DATI BASE titolo
+    // Data emissione / Rata del / Data competenza / Scadenza mora → SEMPRE dal titolo
+    // Solo "Dalle ore" (ora_effetto) → default ora corrente (istante di copertura)
     const [f, setF] = useState({
         tipo: titolo.tipo || "quietanza",
-        data_emissione: today,
-        effetto: today,
+        data_emissione: titolo.data_emissione || titolo.effetto || today,
+        effetto: titolo.effetto || today,
         ora_effetto: nowTime,
-        data_competenza: today,
-        scadenza_mora: addDays(today, 15),
+        data_competenza: titolo.data_competenza || titolo.effetto || today,
+        scadenza_mora: titolo.scadenza_mora || addDays(titolo.effetto || today, 15),
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
