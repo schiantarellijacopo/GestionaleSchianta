@@ -1,0 +1,53 @@
+{
+  "summary": "Backend testing for iter38: PAGAMENTO IN DIREZIONE flow, brogliaccio direzione/ritenuta/rappel fields, chiusura-giorno with direzione, banca is_incassi_direzione, super-admin reset-dati + backup, copilot lowercase multi-word name. 11/12 tests PASS. 1 CRITICAL BUG confirmed: POST /api/contabilita/chiusura-giorno returns 500 because PDF generation raises ValueError('negative availWidth') when tenant has >8 conti_cassa attivi (current tenant has 13). This is the exact 'Cannot close Prima Nota - get errors' bug reported by the user.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/contabilita/chiusura-giorno",
+        "issue": "Returns 500 Internal Server Error when generating brogliaccio PDF. Root cause: pdf_brogliaccio._calcola_larghezze() produces NEGATIVE descr_w when n_conti_cassa is large. Current tenant has 13 conti attivi (incl. duplicates 'Pagamento Direzione' + 'PAGAMENTI IN DIREZIONE'). Formula: descr_w = page_w(281mm) - fixed_w(90mm) - conti_w(15mm)*13 = -4mm. Reportlab raises: 'ValueError: Table ... flowable given negative availWidth=-23.33... width=-11.33'. This BLOCKS Prima Nota close entirely.",
+        "priority": "CRITICAL",
+        "file": "/app/backend/pdf_brogliaccio.py:123-128 (_calcola_larghezze)",
+        "suggested_fix": "Either (a) reduce fixed_w/conti_w when many conti, (b) shrink descr min width with wrap, (c) switch to A3 landscape / dynamic page size, or (d) filter out conti with 0 activity on the day. Also address the duplicated 'Pagamento Direzione' conto_cassa which is now redundant since is_direzione flag replaces need for a bank column."
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "librerie / conti_cassa",
+        "issue": "Duplicate/near-duplicate active conti_cassa still present: 'Pagamento Direzione' AND 'PAGAMENTI IN DIREZIONE' — user's original complaint was 'Conti Deposito duplica Banche' — recommend cleanup / hide these two conti as they are conceptually superseded by is_direzione flag on movimenti. Also affects PDF column overflow (bug above)."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter38_direzione_backup_copilot.py",
+    "/app/test_reports/pytest/iter38.xml"
+  ],
+  "action_items": [
+    "FIX pdf_brogliaccio._calcola_larghezze() to handle N>8 conti_cassa without producing negative descrizione column width — this unblocks POST /api/contabilita/chiusura-giorno.",
+    "Consider skipping conti_cassa with 0 activity on the day from the PDF (would also fix layout in most real cases).",
+    "Remove or archive the two 'Direzione' conti_cassa entries (now redundant with is_direzione flag) — also satisfies the user's original complaint about 'Conti Deposito duplica Banche' semantic clutter.",
+    "Consider exposing is_incassi_direzione on Banca in the librerie UI list (backend already returns it correctly)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 10912 lines — split into routers per domain (contabilita, titoli, polizze, etc.); already partially done under /routes but the huge server.py remains a maintenance risk.",
+    "_compute_brogliaccio: elif branch order is correct — is_direzione handled BEFORE fallback categories. Verified: is_dir=True on direzione titolo produces ONE riga with totale=0, spese=0, per_conto={}, saldo=-provv, direzione==provv. No duplicate rows.",
+    "incassa_titolo: correctly stores conto_cassa_id=None + importo=0 + categoria=incasso_premio_direzione + is_direzione=True when mezzo contains 'direzione'. Preserves provvigioni from titolo.",
+    "reset-dati endpoint: robust — password custode, ragione_sociale confirmation, gzipped backup BEFORE delete, safe path traversal check on download. Good defensive coding.",
+    "chiusura-giorno should try/except the PDF generation error and either continue (save chiusura without PDF) or return a meaningful 400/422 instead of 500 — currently a PDF layout issue makes the whole close endpoint unusable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter38_direzione_backup_copilot.py (NEW)"
+  ],
+  "success_rate": {"backend": "92% (11/12)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "admin@assicura.it/Admin123! and superadmin@assicura.it/Superadmin123! (capital S per /app/memory/test_credentials.md). Reset custode password confirmed: Cazzimiei91!",
+  "seed_data_creation": "Created 1 throwaway tenant (TEST_RESET_TENANT_*) for reset test — soft-deleted at teardown. Created 1 TEST_BANCA_DIR_* banca — deleted at teardown. Incassed one existing da_incassare titolo IN DIREZIONE (may leave 1 movimento in today's brogliaccio).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter38: the PAGAMENTO IN DIREZIONE flow works correctly on the API + brogliaccio compute layer — no duplicate rows, correct semantics. The ONLY remaining blocker is the PDF layout bug in _calcola_larghezze which makes chiusura-giorno fail with 500. After main agent fixes the PDF widths, re-run test_iter38::TestChiusuraDirezione. All other iter38 test coverage (banca is_incassi_direzione, super-admin reset+backup+download, copilot lowercase multi-word) is green.",
+  "rca_of_the_issue": {
+    "bug": "POST /api/contabilita/chiusura-giorno → 500 (user complaint: cannot close Prima Nota)",
+    "reproduction": "1) Login admin. 2) Ensure tenant has >=8 active conti_cassa (this tenant has 13). 3) Ensure at least 1 movimento on target date. 4) POST /api/contabilita/chiusura-giorno {data: today}.",
+    "root_cause": "pdf_brogliaccio._calcola_larghezze() computes descr_w = 281mm - 90mm - 15mm*n_conti. For n_conti>=13, descr_w becomes negative, ReportLab crashes with 'negative availWidth'. This has nothing to do with is_direzione directly — but the presence of the two extra 'Direzione' conti_cassa contributes to inflating n_conti.",
+    "mitigation": "Immediate: clamp descr_w to minimum 30mm and if page width overflows, split table into multiple pages or reduce fixed column widths dynamically. Long-term: filter conti_cassa with zero activity on the day, and clean up the two duplicate 'Direzione' conti."
+  }
+}

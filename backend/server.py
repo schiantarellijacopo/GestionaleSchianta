@@ -4868,39 +4868,32 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         contr = ana_map.get(contr_id) if contr_id else None
         contr_nome = (contr or {}).get("ragione_sociale") if contr else None
 
-        if is_entrata and cat == "incasso_premio":
-            # Premio lordo polizza
+        if is_entrata and cat == "incasso_premio" and not is_dir:
+            # Premio lordo polizza (path normale, NO direzione)
             provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
             trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
-            # Lo sconto eventualmente applicato è memorizzato sulla STESSA riga via
-            # quota_sconto (l'agenzia ha incassato meno per uno sconto cliente).
             quota_sc = float(m.get("quota_sconto") or 0)
             lordo_riga = importo + quota_sc
-            c_totale = lordo_riga                  # mostra il PREMIO LORDO
+            c_totale = lordo_riga
             c_provv = provv_riga
-            c_spese = quota_sc                     # sconto in colonna Spese
+            c_spese = quota_sc
             c_sconti = quota_sc
             if trattiene:
-                # Caso A: incasso il premio, devo versare (premio - provv) alla compagnia
-                # -> saldo = premio - provv (positivo = debito verso compagnia)
                 c_saldo = importo - provv_riga
             else:
-                # Caso B: pagamento Direzione/RID. Il cliente ha pagato direttamente
-                # alla compagnia. La compagnia ha già il premio. Devo solo registrare la
-                # provvigione che mi spetta -> saldo = -provv (negativo = compagnia mi deve)
                 c_saldo = -provv_riga
-            # Se l'incasso era parziale con residuo lasciato a sospeso, mostralo qui.
             quota_cred = float(m.get("quota_credito") or 0)
             if quota_cred > 0:
                 c_crediti = quota_cred
-        elif is_entrata and cat == "incasso_premio_direzione":
+        elif is_entrata and (cat == "incasso_premio_direzione" or is_dir):
             # PAGAMENTO IN DIREZIONE — cliente paga direttamente in compagnia.
-            # Nessun cash flow su nostra cassa/banca. Solo provvigioni maturate.
+            # Riconosciuto sia da categoria dedicata sia da flag is_direzione=True
+            # (retro-compat con movimenti pre-esistenti categorizzati incasso_premio).
             provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
             c_provv = provv_riga
-            c_direzione = provv_riga  # colonna dedicata "Incassi Direzione"
+            c_direzione = provv_riga
             c_saldo = -provv_riga  # compagnia mi deve le provvigioni
-            # Non tocca TOTALE, non tocca banche
+            # NON tocca TOTALE, NON tocca banche/cassa
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
