@@ -20,6 +20,7 @@ const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
+    { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
@@ -179,6 +180,27 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                                     </button>
                                     <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="conto" />
                                 </div>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    if (section.key === "tipi-pagamento") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Label</th><th>Modalità</th><th>Conto / Banca</th><th className="text-right">Ordine</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((t) => (
+                        <tr key={t.id}>
+                            <td className="font-semibold uppercase">{t.label}</td>
+                            <td className="text-xs"><span className="badge badge-neutral">{t.modalita_codice}</span></td>
+                            <td className="text-xs text-slate-600">{t.conto_nome || (t.conto_id ? <span className="num font-mono text-[10px]">{t.conto_id.slice(0,8)}</span> : <span className="italic text-slate-400">—</span>)}</td>
+                            <td className="num text-right">{t.ordine}</td>
+                            <td>{t.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} label="tipo pagamento" />
                             </td>
                         </tr>
                     ))}
@@ -401,6 +423,7 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
 const SECTION_FORMS = {
     "conti-cassa": ContoForm,
     "mezzi-pagamento": MezzoPagamentoForm,
+    "tipi-pagamento": TipoPagamentoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
     "tipologie-sinistri": TipologiaSinistroForm,
@@ -559,6 +582,103 @@ function ContoForm({ section, editing, onClose }) {
                 </div>
             </>
         )}
+    />;
+}
+
+function TipoPagamentoForm({ section, editing, onClose }) {
+    const [modalita, setModalita] = useState([]);
+    const [conti, setConti] = useState([]);
+    useEffect(() => {
+        api.get("/librerie/mezzi-pagamento").then((r) => setModalita(r.data || []));
+        api.get("/librerie/conti-cassa", { params: { attivi: true } })
+            .then((r) => setConti(r.data || []));
+    }, []);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{
+            label: "", modalita_codice: "", conto_id: "",
+            ordine: 0, attivo: true, note: "",
+        }}
+        fields={(f, set) => {
+            const autoLabel = () => {
+                const mod = modalita.find((m) => m.codice === f.modalita_codice);
+                const conto = conti.find((c) => c.id === f.conto_id);
+                const lbl = [mod?.label || mod?.codice || "", conto?.nome || ""]
+                    .filter(Boolean).join(" ").toUpperCase();
+                set("label", lbl);
+            };
+            return (
+                <>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Modalità *</Label>
+                            <select
+                                className="w-full border rounded h-9 px-2 text-sm"
+                                value={f.modalita_codice || ""}
+                                onChange={(e) => set("modalita_codice", e.target.value)}
+                                data-testid="tp-modalita"
+                            >
+                                <option value="">— seleziona —</option>
+                                {modalita.map((m) => (
+                                    <option key={m.codice} value={m.codice}>{m.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <Label>Conto / Banca</Label>
+                            <select
+                                className="w-full border rounded h-9 px-2 text-sm"
+                                value={f.conto_id || ""}
+                                onChange={(e) => set("conto_id", e.target.value)}
+                                data-testid="tp-conto"
+                            >
+                                <option value="">— nessuno —</option>
+                                {conti.map((c) => (
+                                    <option key={c.id} value={c.id}>{c.nome}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <div className="flex items-center justify-between mb-1">
+                            <Label>Label visualizzata *</Label>
+                            <button
+                                type="button" onClick={autoLabel}
+                                className="text-[10px] text-sky-700 hover:text-sky-900 underline"
+                                data-testid="tp-auto-label"
+                            >Auto-componi</button>
+                        </div>
+                        <Input
+                            placeholder="es. BONIFICO BPER SONDRIO"
+                            value={f.label || ""}
+                            onChange={(e) => set("label", e.target.value)}
+                            data-testid="tp-label"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Ordine</Label>
+                            <Input type="number" value={f.ordine || 0}
+                                onChange={(e) => set("ordine", parseInt(e.target.value, 10) || 0)}
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={f.attivo !== false}
+                                    onChange={(e) => set("attivo", e.target.checked)}
+                                />
+                                Attivo
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Note</Label>
+                        <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} />
+                    </div>
+                </>
+            );
+        }}
     />;
 }
 

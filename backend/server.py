@@ -8351,6 +8351,7 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
 from routes import librerie as _librerie_router  # noqa: E402
 api.include_router(_librerie_router.router)
 _seed_mezzi_pagamento = _librerie_router._seed_mezzi_pagamento  # backward-compat
+_seed_tipi_pagamento = _librerie_router._seed_tipi_pagamento
 
 
 
@@ -10788,6 +10789,8 @@ async def startup():
 
     # Seed mezzi pagamento (libreria unica) — idempotente
     await _seed_mezzi_pagamento()
+    # Seed tipi pagamento (combinazione modalità × conto) — solo se vuoto
+    await _seed_tipi_pagamento()
 
     # seed librerie (banche, conti cassa, rami) - solo se vuote
     if await db.conti_cassa.count_documents({}) == 0:

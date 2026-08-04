@@ -576,6 +576,14 @@ async def list_tipi_pagamento(
     if attivi:
         flt["attivo"] = True
     items = await db.tipi_pagamento.find(flt, {"_id": 0}).sort([("ordine", 1), ("label", 1)]).to_list(500)
+    conto_ids = list({i.get("conto_id") for i in items if i.get("conto_id")})
+    if conto_ids:
+        conti = {c["id"]: c["nome"] async for c in db.conti_cassa.find(
+            {"id": {"$in": conto_ids}}, {"_id": 0, "id": 1, "nome": 1},
+        )}
+        for i in items:
+            if i.get("conto_id"):
+                i["conto_nome"] = conti.get(i["conto_id"])
     return items
 
 

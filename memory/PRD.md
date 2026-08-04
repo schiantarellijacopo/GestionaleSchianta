@@ -51,6 +51,12 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - **Testing**: testing_agent iter_39 — backend 11/11 PASS (incasso per nome conto, Pagamento in Direzione is_direzione=true senza cash flow banche, legacy label, multi-tenant isolation, CRUD, brogliaccio). Bug trovati e fixati (SelectItem vuoto, validazione nome, premio_totale). 9 titoli reali incassati dai test ripristinati a `da_incassare` con i relativi movimenti rimossi.
 - **NB**: collezioni `tipi_pagamento` e `banche` restano in DB solo come legacy (nessuna UI, endpoint /librerie/banche e /librerie/tipi-pagamento ancora esposti per retrocompatibilità).
 
+### ✅ Correzione 04/08 (richiesta utente): Tipi Pagamento RIPRISTINATI
+- L'utente ha chiarito: i **Tipi pagamento** (etichette combinate modalità+conto, es. "CONTANTI BPER SONDRIO") DEVONO esistere in Librerie e nei dropdown di incasso titoli / giroconto / nuovo movimento.
+- Ripristinati: tab Librerie "Tipi pagamento" (con colonna "Conto / Banca" che mostra il NOME del conto associato, enrichment `conto_nome` in GET /librerie/tipi-pagamento), TipoPagamentoForm, `useTipiPagamento` → `/librerie/tipi-pagamento?attivi=true`, `SelectTipoPagamento` con label tipo pagamento, seed `_seed_tipi_pagamento` allo startup.
+- RESTA VALIDO della migrazione: dati movimenti unificati su BPER Sondrio, conti duplicati eliminati, tab "Conti / Banche" su conti_cassa, e la NUOVA risoluzione in `shared.resolve_conto_cassa` (nome conto → label tipi_pagamento → mezzi → fallback) che ora mappa correttamente ogni tipo pagamento al suo conto (fix del bug storico che accumulava tutto sul primo conto).
+- Verificato: resolve testato per 6 label (CONTANTI BPER SONDRIO→BPER Sondrio, BONIFICO INTESA→Intesa, ASSEGNO BPER VILLA→BPER VILLA, PAGAMENTO IN DIREZIONE→Pagamento Direzione ecc.); screenshot dropdown Nuovo movimento = elenco identico a quello richiesto dall'utente (19 voci).
+
 ## Backlog priorità
 
 ### P0 — Prossime sessioni
