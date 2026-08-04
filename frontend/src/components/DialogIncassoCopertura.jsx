@@ -76,6 +76,18 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
     // --- COPERTURA
     const [copertura, setCopertura] = useState(!giaCoperto); // default check se non ancora coperto
+    // Date di copertura (Data Copertura / Comunicazione incasso / Data Contabile) → default oggi
+    const [dataCopertura, setDataCopertura] = useState(today);
+    const [comunicazioneIncasso, setComunicazioneIncasso] = useState(today);
+    const [dataContabile, setDataContabile] = useState(today);
+    // Allega documento + firma
+    const [allegatoFile, setAllegatoFile] = useState(null);
+    // Toggle email/stampa copertura
+    const [emailContraente, setEmailContraente] = useState(false);
+    const [emailOperatoreAccount, setEmailOperatoreAccount] = useState(false);
+    const [stampaCopertura, setStampaCopertura] = useState(false);
+    const [emailSegnalazione, setEmailSegnalazione] = useState(false);
+    // Legacy toggles (già esistenti)
     const [emailOperatori, setEmailOperatori] = useState(false);
     const [emailContraenti, setEmailContraenti] = useState(false);
     const [inDirezione, setInDirezione] = useState(false);
@@ -96,6 +108,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
     const [inc, setInc] = useState({
         data_incasso: today,
+        data_coge: today,
         mezzo_pagamento: defaultMezzoPol,
         conto_cassa_id: conti?.[0]?.id || "",
         importo_pagato: lordo,
@@ -133,18 +146,38 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             if (copertura && !giaCoperto) {
                 await api.post(`/titoli/bulk-copertura`, {
                     ids: [titolo.id],
-                    data_copertura: f.effetto || today,
+                    data_copertura: dataCopertura,
+                    comunicazione_incasso: comunicazioneIncasso,
+                    data_contabile: dataContabile,
                     note: inDirezione ? "Pagamento effettuato dal cliente direttamente in direzione" : null,
                 });
                 if (inDirezione) {
                     await api.put(`/titoli/${titolo.id}`, { pagamento_in_direzione: true });
                 }
-                if (emailOperatori || emailContraenti) {
+                // Upload allegato di copertura se presente
+                if (allegatoFile) {
+                    try {
+                        const fd = new FormData();
+                        fd.append("file", allegatoFile);
+                        await api.post("/allegati", fd, {
+                            params: {
+                                entita_tipo: "titolo",
+                                entita_id: titolo.id,
+                                categoria: "copertura",
+                                descrizione: "Documento copertura titolo",
+                            },
+                            headers: { "Content-Type": "multipart/form-data" },
+                        });
+                    } catch { /* non bloccante */ }
+                }
+                if (emailOperatori || emailContraenti || emailContraente || emailOperatoreAccount || emailSegnalazione) {
                     try {
                         await api.post(`/titoli/notifica-copertura`, {
                             id: titolo.id,
-                            a_operatori: emailOperatori,
-                            a_contraenti: emailContraenti,
+                            a_operatori: emailOperatori || emailOperatoreAccount,
+                            a_contraenti: emailContraenti || emailContraente,
+                            stampa: stampaCopertura,
+                            segnalazione: emailSegnalazione,
                         });
                     } catch { /* non bloccante */ }
                 }
@@ -155,6 +188,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             if (incasso && !giaIncassato) {
                 const r = await api.post(`/titoli/${titolo.id}/incassa`, {
                     data_incasso: inc.data_incasso,
+                    data_coge: inc.data_coge,
                     mezzo_pagamento: inc.mezzo_pagamento,
                     conto_cassa_id: null,
                     importo_pagato: parseFloat(inc.importo_pagato) || 0,
@@ -227,6 +261,12 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     {/* ---- Tabella anagrafica ---- */}
                     <table className="w-full border-collapse text-sm">
                         <tbody>
+                            <tr>
+                                <td className={cellLabel}>Num. Contratto</td>
+                                <td className={cellValueRO} data-testid="ico-num-contratto">
+                                    <span className="text-slate-700 underline">{titolo.numero_polizza || titolo.polizza_numero || "—"}</span>
+                                </td>
+                            </tr>
                             <tr>
                                 <td className={cellLabel}>Contraente</td>
                                 <td className={cellValueRO} data-testid="ico-contraente">
@@ -333,8 +373,90 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                             </span>
                         </label>
                         {copertura && (
-                            <div className="pl-8 mt-2 space-y-2" data-testid="copertura-options">
-                                <ChiusuraGiornoBanner data={f.effetto} />
+                            <div className="pl-8 mt-3 space-y-3" data-testid="copertura-options">
+                                <ChiusuraGiornoBanner data={dataCopertura} />
+
+                                {/* Data Copertura / Comunicazione incasso / Data Contabile */}
+                                <table className="w-full border-collapse text-sm">
+                                    <tbody>
+                                        <tr>
+                                            <td className={cellLabel}>Data Copertura</td>
+                                            <td className={cellValueEdit} colSpan={3}>
+                                                <Input type="date" value={dataCopertura}
+                                                    onChange={(e) => setDataCopertura(e.target.value)}
+                                                    className="bg-white" data-testid="ico-data-copertura" />
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td className={cellLabel}>Comunicazione incasso</td>
+                                            <td className={cellValueEdit}>
+                                                <Input type="date" value={comunicazioneIncasso}
+                                                    onChange={(e) => setComunicazioneIncasso(e.target.value)}
+                                                    className="bg-white" data-testid="ico-comunicazione-incasso" />
+                                            </td>
+                                            <td className={cellLabel}>Data Contabile</td>
+                                            <td className={cellValueEdit}>
+                                                <Input type="date" value={dataContabile}
+                                                    onChange={(e) => setDataContabile(e.target.value)}
+                                                    className="bg-white" data-testid="ico-data-contabile" />
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                {/* Allega documento */}
+                                <div className="border border-cyan-200 bg-cyan-50/40 rounded p-3 space-y-2">
+                                    <div className="text-cyan-800 font-medium text-sm">Allega documento</div>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="file"
+                                            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                            onChange={(e) => setAllegatoFile(e.target.files?.[0] || null)}
+                                            className="text-xs"
+                                            data-testid="ico-allega-file"
+                                        />
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                        File di firma: <span className="italic">{allegatoFile ? allegatoFile.name : "(nessun file di firma)"}</span>
+                                    </div>
+                                    <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={emailContraente}
+                                            onCheckedChange={(v) => setEmailContraente(v === true)}
+                                            data-testid="cb-email-contraente-single"
+                                        />
+                                        Invia email a contraente
+                                    </label>
+                                    <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={emailOperatoreAccount}
+                                            onCheckedChange={(v) => setEmailOperatoreAccount(v === true)}
+                                            data-testid="cb-email-op-account"
+                                        />
+                                        Invia email a operatore account
+                                    </label>
+                                </div>
+
+                                {/* Toggle stampa / email segnalazione */}
+                                <label className="flex items-center gap-2 text-slate-700 text-sm cursor-pointer">
+                                    <Checkbox
+                                        checked={stampaCopertura}
+                                        onCheckedChange={(v) => setStampaCopertura(v === true)}
+                                        data-testid="cb-stampa-copertura"
+                                    />
+                                    Stampa documento copertura contraente
+                                </label>
+                                <label className="flex items-center gap-2 text-slate-700 text-sm cursor-pointer">
+                                    <Checkbox
+                                        checked={emailSegnalazione}
+                                        onCheckedChange={(v) => setEmailSegnalazione(v === true)}
+                                        data-testid="cb-email-segnalazione"
+                                    />
+                                    Invia email segnalazione copertura
+                                </label>
+
+                                <div className="border-t border-slate-200 my-2" />
+
                                 <label className="flex items-center gap-2 text-cyan-700 text-sm cursor-pointer">
                                     <Checkbox
                                         checked={emailOperatori}
@@ -384,28 +506,40 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                         {incasso && (
                             <div className="pl-8 mt-3 space-y-3" data-testid="incasso-options">
                                 <ChiusuraGiornoBanner data={inc.data_incasso} />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <div className="text-xs text-slate-600 mb-1">Data incasso</div>
-                                        <Input
-                                            type="date" value={inc.data_incasso}
-                                            onChange={(e) => setI("data_incasso", e.target.value)}
-                                            data-testid="ico-data-incasso"
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-slate-600 mb-1">Tipo pagamento</div>
-                                        <SelectTipoPagamento
-                                            value={inc.mezzo_pagamento}
-                                            onChange={(v) => setI("mezzo_pagamento", v)}
-                                            testid="ico-mezzo"
-                                        />
-                                        {polizzaPreferito && (
-                                            <div className="text-[10px] text-emerald-700 mt-1" data-testid="hint-mezzo-polizza">
-                                                ★ Preferito su questa polizza: <strong>{polizzaPreferito}</strong>
-                                            </div>
-                                        )}
-                                    </div>
+                                <table className="w-full border-collapse text-sm">
+                                    <tbody>
+                                        <tr>
+                                            <td className={cellLabel}>Data Pagamento</td>
+                                            <td className={cellValueEdit}>
+                                                <Input
+                                                    type="date" value={inc.data_incasso}
+                                                    onChange={(e) => setI("data_incasso", e.target.value)}
+                                                    className="bg-white" data-testid="ico-data-incasso"
+                                                />
+                                            </td>
+                                            <td className={cellLabel}>Data Co.Ge.</td>
+                                            <td className={cellValueEdit}>
+                                                <Input
+                                                    type="date" value={inc.data_coge}
+                                                    onChange={(e) => setI("data_coge", e.target.value)}
+                                                    className="bg-white" data-testid="ico-data-coge"
+                                                />
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <div>
+                                    <div className="text-xs text-slate-600 mb-1">Tipo pagamento</div>
+                                    <SelectTipoPagamento
+                                        value={inc.mezzo_pagamento}
+                                        onChange={(v) => setI("mezzo_pagamento", v)}
+                                        testid="ico-mezzo"
+                                    />
+                                    {polizzaPreferito && (
+                                        <div className="text-[10px] text-emerald-700 mt-1" data-testid="hint-mezzo-polizza">
+                                            ★ Preferito su questa polizza: <strong>{polizzaPreferito}</strong>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="text-[10px] text-slate-500">
                                     Il conto/banca viene determinato automaticamente dal mezzo di pagamento (vedi Librerie → Conti cassa).
