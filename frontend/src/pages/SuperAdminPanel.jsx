@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -100,6 +100,7 @@ function AgenzieTab() {
     const [loading, setLoading] = useState(false);
     const [showNew, setShowNew] = useState(false);
     const [editAgenzia, setEditAgenzia] = useState(null);
+    const [resetAgenzia, setResetAgenzia] = useState(null);
 
     const load = () => {
         setLoading(true);
@@ -218,6 +219,12 @@ function AgenzieTab() {
                                         data-testid={`sa-edit-${a.id}`}>
                                         <Pencil size={14} />
                                     </button>
+                                    <button onClick={() => setResetAgenzia(a)}
+                                        title="🔥 Reset dati tenant"
+                                        className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                                        data-testid={`sa-reset-${a.id}`}>
+                                        <Flame size={14} />
+                                    </button>
                                     <button onClick={() => azione(a.id, "estendi-prova", "Prova estesa +30gg")}
                                         title="Estendi prova"
                                         className="p-1 text-sky-600 hover:bg-sky-50 rounded"
@@ -232,6 +239,7 @@ function AgenzieTab() {
             </div>
             {showNew && <NuovaAgenziaDialog onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
             {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
+            {resetAgenzia && <ResetDatiDialog agenzia={resetAgenzia} onClose={() => setResetAgenzia(null)} onDone={() => { setResetAgenzia(null); load(); }} />}
         </div>
     );
 }
@@ -430,6 +438,162 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
         </div>
     );
 }
+
+function ResetDatiDialog({ agenzia, onClose, onDone }) {
+    const [password, setPassword] = useState("");
+    const [conferma, setConferma] = useState("");
+    const [mantieniAdmin, setMantieniAdmin] = useState(true);
+    const [confirmText, setConfirmText] = useState("");
+    const [step, setStep] = useState(1);   // 1=warning, 2=inputs, 3=in corso
+    const [saving, setSaving] = useState(false);
+    const [result, setResult] = useState(null);
+
+    const canProceed = confirmText === "RESET DATI" && password.length > 0 && conferma === agenzia.ragione_sociale;
+
+    const doReset = async () => {
+        if (!canProceed) return;
+        setSaving(true);
+        try {
+            const r = await api.post(`/super-admin/agenzie/${agenzia.id}/reset-dati`, {
+                password_custode: password,
+                mantieni_admin: mantieniAdmin,
+                conferma_ragione_sociale: conferma,
+            });
+            setResult(r.data);
+            setStep(3);
+            toast.success(`Reset completato: ${r.data.totale_record_eliminati} record eliminati`);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Reset fallito");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={step !== 3 ? undefined : onClose}>
+            <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+                {step === 1 && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center">
+                                <Flame size={24} className="text-rose-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-rose-900">Reset dati agenzia</h3>
+                                <p className="text-xs text-slate-500">Operazione irreversibile</p>
+                            </div>
+                        </div>
+                        <div className="bg-rose-50 border border-rose-200 rounded-md p-3 mb-4">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                                <div className="text-xs text-rose-800 space-y-2">
+                                    <p>Stai per <b>cancellare TUTTI i dati operativi</b> di:</p>
+                                    <p className="font-semibold text-sm">🏢 {agenzia.ragione_sociale}</p>
+                                    <p>Verranno rimossi in modo permanente:</p>
+                                    <ul className="list-disc pl-4 space-y-0.5">
+                                        <li>Anagrafiche, Polizze, Titoli, Sinistri</li>
+                                        <li>Movimenti Prima Nota, Allegati, Veicoli</li>
+                                        <li>Diario cliente, Avvisi, Notifiche</li>
+                                        <li>Chat AI Copilot, Whatsapp, Importazioni</li>
+                                        <li>Utenti non-admin (collaboratori/dipendenti/clienti)</li>
+                                    </ul>
+                                    <p className="mt-2"><b>Restano intatti:</b> tenant, configurazione, utenti admin, libreria conti/compagnie/collaboratori.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm border border-slate-300 rounded-md hover:bg-slate-50" data-testid="reset-cancel-1">Annulla</button>
+                            <button onClick={() => setStep(2)} className="px-4 py-2 text-sm bg-rose-600 hover:bg-rose-700 text-white rounded-md font-semibold" data-testid="reset-continue">
+                                Ho capito, continua →
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {step === 2 && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <Flame size={20} className="text-rose-600" />
+                            <h3 className="text-lg font-bold">Conferma reset — {agenzia.ragione_sociale}</h3>
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                                    1️⃣ Digita <span className="font-mono bg-slate-100 px-1.5">RESET DATI</span> per confermare
+                                </label>
+                                <input type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+                                    placeholder="RESET DATI"
+                                    autoComplete="off"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md font-mono"
+                                    data-testid="reset-confirm-text" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                                    2️⃣ Digita la ragione sociale <span className="font-mono bg-slate-100 px-1.5">{agenzia.ragione_sociale}</span>
+                                </label>
+                                <input type="text" value={conferma} onChange={(e) => setConferma(e.target.value)}
+                                    autoComplete="off"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md"
+                                    data-testid="reset-confirm-name" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                                    3️⃣ Password custode
+                                </label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                                    autoComplete="new-password"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md"
+                                    data-testid="reset-password" />
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                                <input type="checkbox" checked={mantieniAdmin} onChange={(e) => setMantieniAdmin(e.target.checked)}
+                                    data-testid="reset-mantieni-admin" />
+                                Mantieni gli utenti Admin del tenant (consigliato)
+                            </label>
+                        </div>
+                        <div className="flex justify-end gap-2 mt-6">
+                            <button onClick={() => setStep(1)} className="px-4 py-2 text-sm border border-slate-300 rounded-md" data-testid="reset-back">← Indietro</button>
+                            <button onClick={doReset} disabled={!canProceed || saving}
+                                className="px-4 py-2 text-sm bg-rose-600 hover:bg-rose-700 text-white rounded-md font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                                data-testid="reset-execute">
+                                {saving ? <><Loader2 size={14} className="animate-spin inline mr-1" /> Reset in corso…</> : "🔥 ESEGUI RESET"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {step === 3 && result && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                                <Flame size={24} className="text-emerald-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-emerald-900">Reset completato</h3>
+                                <p className="text-xs text-slate-500">{result.totale_record_eliminati} record eliminati</p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-md p-3 mb-4 max-h-56 overflow-y-auto">
+                            <div className="text-xs font-semibold text-slate-600 mb-1">Dettaglio:</div>
+                            <table className="w-full text-xs">
+                                <tbody>
+                                    {Object.entries(result.dettaglio || {}).map(([k, v]) => (
+                                        <tr key={k} className="border-b border-slate-100">
+                                            <td className="py-1 font-mono">{k}</td>
+                                            <td className="py-1 text-right font-mono text-rose-700">-{v}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="flex justify-end">
+                            <button onClick={onDone} className="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-900 text-white rounded-md" data-testid="reset-close">
+                                Chiudi
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 
 function AbbonamentiTab() {
     const [items, setItems] = useState([]);

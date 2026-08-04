@@ -472,6 +472,120 @@ async def cancella_agenzia(tid: str, request: Request,
 
 
 # ---------------------------------------------------------------------------
+# 🔥 RESET DATI TENANT (super-destructive, richiede password custode)
+# ---------------------------------------------------------------------------
+# Password custode: fissata lato server. NON esposta al frontend.
+_RESET_CUSTODE_PASSWORD = "Cazzimiei91!"
+
+# Collezioni azzerate dal reset. Manteniamo tenant, users admin, e config di sistema.
+_RESET_COLLECTIONS = [
+    "anagrafiche", "polizze", "titoli", "sinistri", "movimenti",
+    "allegati", "veicoli", "applicazioni", "libro_matricola",
+    "diario", "voci_diario", "avvisi", "notifiche",
+    "documenti_solleciti", "copilot_sessions", "copilot_messages",
+    "activity_log", "attivita",
+    "brogliaccio_chiusure", "prima_nota_chiusure",
+    "commissioni", "pagamenti_provvigioni", "ritenute",
+    "estratti_conto_compagnia", "rimesse_compagnia",
+    "whatsapp_instances", "whatsapp_messages",
+    "importazioni", "ocr_jobs",
+    "asset_immobili",
+]
+
+
+class ResetDatiBody(BaseModel):
+    password_custode: str
+    mantieni_admin: bool = True   # se True conserva gli utenti admin del tenant (default)
+    conferma_ragione_sociale: Optional[str] = None  # doppio-check anti-errore
+
+
+@router.post("/agenzie/{tid}/reset-dati")
+async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
+                            user=Depends(require_user("admin"))) -> dict:
+    """🔥 RESET COMPLETO dei dati operativi di un tenant.
+
+    Rimuove: anagrafiche, polizze, titoli, sinistri, movimenti, allegati,
+    veicoli, diario, avvisi, brogliaccio, chat AI, ecc.
+
+    NON rimuove: il tenant stesso, la sua configurazione (libreria conti/
+    tipi_pagamento/compagnie/collaboratori), gli utenti admin del tenant
+    (se mantieni_admin=True).
+
+    Richiede la password custode (server-side) per prevenire disastri.
+    """
+    _ensure_super_admin(user)
+
+    if body.password_custode != _RESET_CUSTODE_PASSWORD:
+        raise HTTPException(status_code=403, detail="Password custode errata")
+
+    if tid == TENANT_PRINCIPALE_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="Tenant principale non resettabile via questa API (usa cleanup manuale)",
+        )
+
+    tenant = await raw_db.tenants.find_one({"id": tid}, {"_id": 0, "ragione_sociale": 1})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant non trovato")
+
+    # Doppio-check opzionale: se il chiamante fornisce la ragione sociale deve combaciare
+    if body.conferma_ragione_sociale:
+        if body.conferma_ragione_sociale.strip().lower() != (tenant.get("ragione_sociale") or "").strip().lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Ragione sociale di conferma non corrisponde",
+            )
+
+    # Esegui delete su tutte le collezioni operative del tenant
+    dettaglio: dict[str, int] = {}
+    for coll_name in _RESET_COLLECTIONS:
+        try:
+            res = await raw_db[coll_name].delete_many({"agenzia_tenant_id": tid})
+            if res.deleted_count > 0:
+                dettaglio[coll_name] = res.deleted_count
+        except Exception as e:
+            dettaglio[f"{coll_name}_err"] = str(e)[:100]
+
+    # Utenti: mantieni solo gli admin (o cancella tutti se mantieni_admin=False)
+    if body.mantieni_admin:
+        # elimina utenti non-admin
+        res_u = await raw_db.users.delete_many({
+            "agenzia_tenant_id": tid,
+            "role": {"$nin": ["admin", "super_admin"]},
+        })
+    else:
+        res_u = await raw_db.users.delete_many({
+            "agenzia_tenant_id": tid,
+            "role": {"$ne": "super_admin"},  # mai cancellare super_admin
+        })
+    if res_u.deleted_count > 0:
+        dettaglio["users"] = res_u.deleted_count
+
+    # Marca il tenant come "resettato"
+    await raw_db.tenants.update_one(
+        {"id": tid},
+        {"$set": {
+            "ultimo_reset_dati": _now_iso(),
+            "reset_effettuato_da": user.get("id"),
+            "updated_at": _now_iso(),
+        }},
+    )
+
+    await log_action(user=user, action_type="TENANT_DATA_RESET",
+                     target_agency_id=tid, target_agency_name=tenant.get("ragione_sociale"),
+                     details=f"Reset dati: {sum(dettaglio.values())} record eliminati. "
+                             f"mantieni_admin={body.mantieni_admin}",
+                     request=request)
+
+    return {
+        "ok": True,
+        "tenant": tenant.get("ragione_sociale"),
+        "totale_record_eliminati": sum(v for v in dettaglio.values() if isinstance(v, int)),
+        "dettaglio": dettaglio,
+    }
+
+
+# ---------------------------------------------------------------------------
 # ABBONAMENTI & TRANSAZIONI
 # ---------------------------------------------------------------------------
 @router.get("/abbonamenti")
