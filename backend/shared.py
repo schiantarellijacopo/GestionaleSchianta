@@ -112,11 +112,25 @@ async def resolve_conto_cassa(mezzo: str | None, fallback_any: bool = True) -> s
     """Risolve un conto_cassa_id a partire dal mezzo di pagamento.
 
     Strategia:
-    1. Libreria `mezzi_pagamento` (codice match) → `conto_default_id` o `tipo_conto`.
-    2. Mappatura statica `_MEZZO_TO_TIPO`.
-    3. Fallback al primo ContoCassa attivo.
+    1. Match diretto per NOME conto_cassa (i dropdown ora inviano il nome del conto).
+    2. Legacy: label `tipi_pagamento` → conto_id.
+    3. Libreria `mezzi_pagamento` (codice match) → `conto_default_id` o `tipo_conto`.
+    4. Mappatura statica `_MEZZO_TO_TIPO`.
+    5. Fallback al primo ContoCassa attivo.
     """
     if mezzo:
+        import re as _re
+        rx = {"$regex": f"^{_re.escape(mezzo.strip())}$", "$options": "i"}
+        c = await db.conti_cassa.find_one({"nome": rx, "attivo": True}, {"_id": 0, "id": 1})
+        if c:
+            return c["id"]
+        tp = await db.tipi_pagamento.find_one({"label": rx}, {"_id": 0, "conto_id": 1})
+        if tp and tp.get("conto_id"):
+            c = await db.conti_cassa.find_one(
+                {"id": tp["conto_id"], "attivo": True}, {"_id": 0, "id": 1},
+            )
+            if c:
+                return c["id"]
         m_low = mezzo.lower()
         mz = await db.mezzi_pagamento.find_one(
             {"codice": m_low, "attivo": True}, {"_id": 0},

@@ -12,14 +12,14 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send } from "lucide-react";
+import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore } from "lucide-react";
 import { toast } from "sonner";
 
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
-    { key: "banche", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
+    { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
-    { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
@@ -86,6 +86,16 @@ function Sezione({ section }) {
         try {
             await api.delete(`${section.endpoint}/${id}`);
             toast.success("Eliminato"); load();
+            if (section.key === "conti-cassa") refreshTipiPagamento();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+
+    const quickUpdate = async (item, patch) => {
+        try {
+            await api.put(`${section.endpoint}/${item.id}`, { ...item, ...patch });
+            toast.success(patch.attivo === false ? "Archiviato: lo storico resta intatto" : "Aggiornato");
+            load();
+            if (section.key === "conti-cassa") refreshTipiPagamento();
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
@@ -123,7 +133,10 @@ function Sezione({ section }) {
                         <FormDialog
                             section={section}
                             editing={editing}
-                            onClose={() => { setOpen(false); setEditing(null); load(); }}
+                            onClose={() => {
+                                setOpen(false); setEditing(null); load();
+                                if (section.key === "conti-cassa") refreshTipiPagamento();
+                            }}
                         />
                     </Dialog>
                 </div>
@@ -131,7 +144,7 @@ function Sezione({ section }) {
 
             <Card className="border-slate-200 overflow-hidden">
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> :
-                    <ListaSezione section={section} list={list} onEdit={setEditing} onDelete={elimina} />
+                    <ListaSezione section={section} list={list} onEdit={setEditing} onDelete={elimina} onQuickUpdate={quickUpdate} />
                 }
             </Card>
         </div>
@@ -139,33 +152,6 @@ function Sezione({ section }) {
 }
 
 function ListaSezione({ section, list, onEdit, onDelete }) {
-    if (section.key === "banche") {
-        const fmtEurLocal = (n) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(Number(n) || 0);
-        return (
-            <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>ABI</th><th>IBAN</th><th className="text-right">Saldo iniziale</th><th className="text-center" title="Conto usato per incassi in direzione compagnia">Direzione</th><th>Note</th><th></th></tr></thead>
-                <tbody>
-                    {list.map((b) => (
-                        <tr key={b.id}>
-                            <td className="font-medium">{b.nome}</td>
-                            <td className="num text-xs">{b.codice_abi || "-"}</td>
-                            <td className="num text-xs">{b.iban_agenzia || "-"}</td>
-                            <td className="num text-right">{fmtEurLocal(b.saldo_iniziale || 0)}</td>
-                            <td className="text-center">
-                                {b.is_incassi_direzione
-                                    ? <span className="badge badge-info" title="Contabilizza titoli pagati in direzione">Direzione ✓</span>
-                                    : <span className="text-slate-300 text-xs">—</span>}
-                            </td>
-                            <td className="text-xs text-slate-500">{b.note || ""}</td>
-                            <td className="text-right">
-                                <RowActions onEdit={() => onEdit(b)} onDelete={() => onDelete(b.id)} label="banca" />
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        );
-    }
     if (section.key === "conti-cassa") {
         return (
             <table className="tbl w-full">
@@ -177,32 +163,22 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                             <td><span className="badge badge-neutral">{c.tipo}</span></td>
                             <td className="num text-xs">{c.iban || "-"}</td>
                             <td className="num text-right">{Number(c.saldo_iniziale || 0).toFixed(2)}</td>
-                            <td>{c.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td>{c.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">archiviato</span>}</td>
                             <td>{c.nascondi_prima_nota ? <span className="badge badge-warning">nascosto</span> : <span className="text-slate-400 text-xs">—</span>}</td>
                             <td>{c.escludi_da_liquidita ? <span className="badge badge-warning">escluso</span> : <span className="text-slate-400 text-xs">—</span>}</td>
                             <td className="text-right">
-                                <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="conto" />
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        );
-    }
-    if (section.key === "tipi-pagamento") {
-        return (
-            <table className="tbl w-full">
-                <thead><tr><th>Label</th><th>Modalità</th><th>Conto deposito</th><th className="text-right">Ordine</th><th>Attivo</th><th></th></tr></thead>
-                <tbody>
-                    {list.map((t) => (
-                        <tr key={t.id}>
-                            <td className="font-semibold uppercase">{t.label}</td>
-                            <td className="text-xs"><span className="badge badge-neutral">{t.modalita_codice}</span></td>
-                            <td className="text-xs text-slate-600">{t.conto_id ? <span className="num font-mono text-[10px]">{t.conto_id.slice(0,8)}</span> : <span className="italic text-slate-400">—</span>}</td>
-                            <td className="num text-right">{t.ordine}</td>
-                            <td>{t.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
-                            <td className="text-right">
-                                <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} label="tipo pagamento" />
+                                <div className="flex items-center justify-end gap-1">
+                                    <button
+                                        type="button"
+                                        title={c.attivo ? "Archivia (dismissione senza perdere lo storico)" : "Riattiva"}
+                                        onClick={() => onQuickUpdate(c, { attivo: !c.attivo })}
+                                        data-testid={`conto-toggle-attivo-${c.id}`}
+                                        className="p-1.5 rounded hover:bg-slate-100 text-slate-500"
+                                    >
+                                        {c.attivo ? <Archive size={14} /> : <ArchiveRestore size={14} />}
+                                    </button>
+                                    <RowActions onEdit={() => onEdit(c)} onDelete={() => onDelete(c.id)} label="conto" />
+                                </div>
                             </td>
                         </tr>
                     ))}
@@ -423,10 +399,8 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
 }
 
 const SECTION_FORMS = {
-    "banche": BancaForm,
     "conti-cassa": ContoForm,
     "mezzi-pagamento": MezzoPagamentoForm,
-    "tipi-pagamento": TipoPagamentoForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
     "tipologie-sinistri": TipologiaSinistroForm,
@@ -520,38 +494,9 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
     );
 }
 
-function BancaForm({ section, editing, onClose }) {
-    return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", codice_abi: "", iban_agenzia: "", referente: "", note: "", saldo_iniziale: 0, attiva: true, is_incassi_direzione: false }}
-        fields={(f, set) => (
-            <>
-                <div><Label>Nome banca *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="banca-nome" /></div>
-                <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Codice ABI</Label><Input value={f.codice_abi || ""} onChange={(e) => set("codice_abi", e.target.value)} data-testid="banca-abi" /></div>
-                    <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} data-testid="banca-ref" /></div>
-                </div>
-                <div><Label>IBAN agenzia</Label><Input value={f.iban_agenzia || ""} onChange={(e) => set("iban_agenzia", e.target.value.toUpperCase())} placeholder="IT60 X054 2811 1010..." data-testid="banca-iban" /></div>
-                <div><Label>Saldo iniziale (€)</Label><Input type="number" step="0.01" value={f.saldo_iniziale || 0} onChange={(e) => set("saldo_iniziale", parseFloat(e.target.value) || 0)} data-testid="banca-saldo" /></div>
-                <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} data-testid="banca-note" /></div>
-                <label className="flex items-center gap-2 mt-2 p-3 bg-sky-50 border border-sky-200 rounded cursor-pointer hover:bg-sky-100 transition-colors">
-                    <input type="checkbox" checked={!!f.is_incassi_direzione}
-                        onChange={(e) => set("is_incassi_direzione", e.target.checked)}
-                        data-testid="banca-direzione" className="w-4 h-4" />
-                    <div className="flex-1">
-                        <div className="text-sm font-medium text-sky-900">🏢 Conto Incassi Direzione</div>
-                        <div className="text-xs text-sky-700">Conto virtuale per i titoli pagati direttamente in compagnia (entrata fittizia).</div>
-                    </div>
-                </label>
-            </>
-        )}
-    />;
-}
-
 function ContoForm({ section, editing, onClose }) {
-    const [banche, setBanche] = useState([]);
-    useEffect(() => { api.get("/librerie/banche").then((r) => setBanche(r.data)); }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", tipo: "banca", banca_id: "", iban: "", saldo_iniziale: 0, ordine: 0, attivo: true, nascondi_prima_nota: false, escludi_da_liquidita: false }}
+        defaults={{ nome: "", tipo: "banca", iban: "", saldo_iniziale: 0, ordine: 0, attivo: true, nascondi_prima_nota: false, escludi_da_liquidita: false }}
         fields={(f, set) => (
             <>
                 <div><Label>Nome conto *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
@@ -570,14 +515,12 @@ function ContoForm({ section, editing, onClose }) {
                             </SelectContent>
                         </Select>
                     </div>
-                    <div>
-                        <Label>Banca collegata</Label>
-                        <Select value={f.banca_id || ""} onValueChange={(v) => set("banca_id", v)}>
-                            <SelectTrigger><SelectValue placeholder="-" /></SelectTrigger>
-                            <SelectContent>
-                                {banche.map((b) => <SelectItem key={b.id} value={b.id}>{b.nome}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                    <div className="flex items-end pb-1">
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={f.attivo !== false}
+                                onChange={(e) => set("attivo", e.target.checked)} />
+                            Attivo
+                        </label>
                     </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
@@ -616,103 +559,6 @@ function ContoForm({ section, editing, onClose }) {
                 </div>
             </>
         )}
-    />;
-}
-
-function TipoPagamentoForm({ section, editing, onClose }) {
-    const [modalita, setModalita] = useState([]);
-    const [conti, setConti] = useState([]);
-    useEffect(() => {
-        api.get("/librerie/mezzi-pagamento").then((r) => setModalita(r.data || []));
-        api.get("/librerie/conti-cassa", { params: { attivi: true } })
-            .then((r) => setConti(r.data || []));
-    }, []);
-    return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{
-            label: "", modalita_codice: "", conto_id: "",
-            ordine: 0, attivo: true, note: "",
-        }}
-        fields={(f, set) => {
-            const autoLabel = () => {
-                const mod = modalita.find((m) => m.codice === f.modalita_codice);
-                const conto = conti.find((c) => c.id === f.conto_id);
-                const lbl = [mod?.label || mod?.codice || "", conto?.nome || ""]
-                    .filter(Boolean).join(" ").toUpperCase();
-                set("label", lbl);
-            };
-            return (
-                <>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <Label>Modalità *</Label>
-                            <select
-                                className="w-full border rounded h-9 px-2 text-sm"
-                                value={f.modalita_codice || ""}
-                                onChange={(e) => set("modalita_codice", e.target.value)}
-                                data-testid="tp-modalita"
-                            >
-                                <option value="">— seleziona —</option>
-                                {modalita.map((m) => (
-                                    <option key={m.codice} value={m.codice}>{m.label}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div>
-                            <Label>Conto deposito</Label>
-                            <select
-                                className="w-full border rounded h-9 px-2 text-sm"
-                                value={f.conto_id || ""}
-                                onChange={(e) => set("conto_id", e.target.value)}
-                                data-testid="tp-conto"
-                            >
-                                <option value="">— nessuno —</option>
-                                {conti.map((c) => (
-                                    <option key={c.id} value={c.id}>{c.nome}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-                    <div>
-                        <div className="flex items-center justify-between mb-1">
-                            <Label>Label visualizzata *</Label>
-                            <button
-                                type="button" onClick={autoLabel}
-                                className="text-[10px] text-sky-700 hover:text-sky-900 underline"
-                                data-testid="tp-auto-label"
-                            >Auto-componi</button>
-                        </div>
-                        <Input
-                            placeholder="es. BONIFICO BPER SONDRIO"
-                            value={f.label || ""}
-                            onChange={(e) => set("label", e.target.value)}
-                            data-testid="tp-label"
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <Label>Ordine</Label>
-                            <Input type="number" value={f.ordine || 0}
-                                onChange={(e) => set("ordine", parseInt(e.target.value, 10) || 0)}
-                            />
-                        </div>
-                        <div className="flex items-end">
-                            <label className="flex items-center gap-2 text-sm">
-                                <input
-                                    type="checkbox"
-                                    checked={f.attivo !== false}
-                                    onChange={(e) => set("attivo", e.target.checked)}
-                                />
-                                Attivo
-                            </label>
-                        </div>
-                    </div>
-                    <div>
-                        <Label>Note</Label>
-                        <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} />
-                    </div>
-                </>
-            );
-        }}
     />;
 }
 

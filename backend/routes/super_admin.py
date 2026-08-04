@@ -351,6 +351,18 @@ async def create_agenzia(body: AgenziaNuovaBody, request: Request,
     await raw_db.tenants.insert_one(tenant)
     tenant.pop("_id", None)
 
+    # Seed conti/banche di default per il nuovo tenant (dropdown pagamenti)
+    from db_models import ContoCassa
+    for c in [
+        {"nome": "Cassa Contanti", "tipo": "cassa", "ordine": 1},
+        {"nome": "Assegni", "tipo": "cassa", "ordine": 2},
+        {"nome": "Banca", "tipo": "banca", "ordine": 3},
+        {"nome": "Pagamento Direzione", "tipo": "rid", "ordine": 4},
+    ]:
+        doc = ContoCassa(**c).model_dump()
+        doc["agenzia_tenant_id"] = tenant["id"]
+        await raw_db.conti_cassa.insert_one(doc)
+
     # Crea utente admin iniziale se fornito
     if body.admin_email and body.admin_password:
         from auth import hash_password

@@ -1,0 +1,48 @@
+{
+  "summary": "Iter 39 — Testato migrazione tipi_pagamento -> conti_cassa. Backend: 11/11 test PASS (lista conti_cassa, CRUD, brogliaccio, incasso titolo con nome conto, Pagamento Direzione is_direzione=true, risoluzione legacy 'BONIFICO BPER SONDRIO', movimento manuale, multi-tenant demo con 4 default). Frontend: tab 'Conti / Banche' presente con data-testid=lib-tab-conti-cassa, 'Tipi pagamento' rimosso, CRUD funzionante (nuovo + salva + elimina). Trovato 1 BUG CRITICO: crash 'Select.Item must have a value prop that is not an empty string' quando esiste un conto con nome vuoto (backend accetta POST con nome='' senza validazione). Trovato 1 BUG CRITICO indipendente in POST /polizze: AttributeError 'Polizza' object has no attribute 'premio_totale' a server.py:2545.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/polizze", "issue": "AttributeError: 'Polizza' object has no attribute 'premio_totale' in server.py:2545 (alert_dispatcher payload). Impedisce la creazione di polizze via API. Regressione indipendente dal task corrente, ma bloccante per QA end-to-end.", "priority": "HIGH"},
+      {"endpoint": "POST /api/librerie/conti-cassa", "issue": "Nessuna validazione del campo 'nome': accetta stringa vuota o mancante, creando un conto fantasma che rompe l'app frontend (crash <Select.Item value=''/>).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/contabilita/movimenti", "issue": "Nessun filtro per titolo_id/polizza_id: impossibile recuperare movimenti di un titolo lato API senza scaricare l'intero elenco. Filtri disponibili: solo dal/al/tipo/anagrafica_id."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SelectTipoPagamento (SelectItem)", "issue": "Se esiste un conto_cassa attivo con nome=='' (creato dal backend senza validazione), il render del dropdown esplode con 'A <Select.Item /> must have a value prop that is not an empty string'. Necessario filtrare `items.filter(c => c.nome?.trim())` in useTipiPagamento.js o in SelectTipoPagamento.jsx.", "selector": "[data-testid=\"mov-tipo-pagamento-select\"] / SelectTipoPagamento", "priority": "HIGH"},
+      {"component": "NuovoMovimentoDialog date picker", "issue": "Usa <input type='date'> del browser invece del calendario shadcn; incoerente col resto dell'app.", "selector": "input[type='date'] in Nuovo movimento contabile", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Librerie / Conti / Banche", "issues": ["Tab 'Conti / Banche' funzionante; tabella mostra i 9 conti previsti con tipi (cassa/banca/rid/altro)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter39_conti_cassa_migration.py",
+    "/app/test_reports/pytest/iter39.xml"
+  ],
+  "action_items": [
+    "FIX BACKEND: aggiungere validazione a POST/PUT /api/librerie/conti-cassa: `if not body.get('nome','').strip(): raise HTTPException(400, 'Nome obbligatorio')`.",
+    "FIX FRONTEND: in SelectTipoPagamento e/o useTipiPagamento filtrare conti con nome vuoto per evitare <SelectItem value=''> che manda in crash tutta la pagina.",
+    "FIX BACKEND (indipendente): rimuovere/rinominare `obj.premio_totale` in server.py:2545 (create_polizza dispatch) -> usare `obj.premio_lordo` oppure computare la somma. Attualmente rompe POST /api/polizze.",
+    "OPZIONALE: aggiungere filtro `titolo_id`/`polizza_id` a GET /api/contabilita/movimenti per QA e debugging."
+  ],
+  "critical_code_review_comments": [
+    "server.py:2545 usa `obj.premio_totale` che non esiste sul model Polizza — bug regressivo.",
+    "routes/librerie.py::create_conto non valida `nome` (Pydantic model ContoCassa deve avere `nome: str` con `min_length=1` oppure endpoint deve rifiutare vuoto).",
+    "shared.resolve_conto_cassa: il match `regex ^{escape(mezzo)}$` funziona anche con stringhe con spazi. Buona nuova strategia (nome conto → legacy tipi_pagamento label → mezzi_pagamento code → tipo fallback → any). Coperto dai test.",
+    "server.py incassa_titolo (line 3443): `is_direzione = 'direzione' in mezzo.lower()`. Questo fa match anche per nomi tipo 'DIREZIONE MILANO' se creati in futuro. Considerare match esatto sul nome conto tipo=='direzione'/nome specifico."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter39_conti_cassa_migration.py (nuovo file)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "80% (Librerie OK, dialog OK dopo cleanup; blocking bug su empty conto)"},
+  "test_credentials": "admin@assicura.it/Admin123!, jacopo@admin.it/Admin123! (tenant demo)",
+  "seed_data_creation": "Nessun seed permanente. Durante il test: (1) creato+eliminato un conto TEST_CONTO_* (CRUD), (2) accidentalmente creato un conto con nome vuoto via UI form (SUCCESSIVAMENTE ELIMINATO manualmente via curl id=dd82c76e-7f57-40a2-b80a-60150d67a712), (3) incassati 3 titoli esistenti in stato 'da_incassare' (ora stato='incassato' con mezzo_pagamento=BPER Sondrio / Pagamento Direzione / BONIFICO BPER SONDRIO). NB: potrebbero essere titoli reali del tenant principale — se necessario ripristinarli via admin.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Test cases importanti: dropdown mov-tipo-pagamento-select in NuovoMovimentoDialog (Contabilità → Nuovo movimento). Testid conferma: [data-testid='lib-tab-conti-cassa', 'lib-new-conti-cassa', 'lib-save-conti-cassa', 'mov-new-button', 'mov-tipo-pagamento-select', 'mov-save-button']. Il tab 'Tipi pagamento' NON esiste, 'Modalità pagamento' (mezzi_pagamento) invece SI'. Backend prod tenant conti attesi: Cassa Contanti, Assegni, BPER Sondrio, Intesa Sanpaolo, Credit Agricole, Pagamento Direzione, BPER VILLA, PRELIEVO SOCI, AGOS. Tenant demo (jacopo@admin.it): default include Cassa Contanti, Assegni, Pagamento Direzione — verificato multi-tenant isolation (nessun conto principale leaked).",
+  "rca of the issue": "BUG SelectItem empty value: causa root = ContoCassa model accetta nome vuoto (default o non validato) + endpoint POST /librerie/conti-cassa non valida body. Il frontend useTipiPagamento mappa label=nome e passa a <SelectItem value={label}/> senza filtro. Radix UI Select vieta value=''. Mitigazione: filtro difensivo in FE + validazione server-side. BUG premio_totale: modello Polizza ha premio_lordo/netto/tasse/imposte/ssn ma non premio_totale; qualcuno ha assunto esista. Mitigazione: sostituire con `obj.premio_lordo` o calcolare on-the-fly."
+}

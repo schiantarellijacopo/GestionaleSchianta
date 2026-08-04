@@ -8345,8 +8345,7 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
 from routes import librerie as _librerie_router  # noqa: E402
 api.include_router(_librerie_router.router)
 _seed_mezzi_pagamento = _librerie_router._seed_mezzi_pagamento  # backward-compat
-_seed_tipi_pagamento = _librerie_router._seed_tipi_pagamento
-_seed_conti_deposito_estesi = _librerie_router._seed_conti_deposito_estesi
+
 
 
 
@@ -10795,11 +10794,6 @@ async def startup():
             {"nome": "Pagamento Direzione", "tipo": "rid", "ordine": 6},
         ]):
             await db.conti_cassa.insert_one(ContoCassa(**c).model_dump())
-
-    # Seed conti deposito estesi (BPER VILLA, AGOS, ecc.) — idempotente
-    await _seed_conti_deposito_estesi()
-    # Seed tipi pagamento (combinazione modalità × conto) — solo se vuoto
-    await _seed_tipi_pagamento()
 
     # migrazione idempotente conti cassa: rinomina legacy + disattiva PayPal
     await db.conti_cassa.update_one(

@@ -123,8 +123,15 @@ def _build_riga_totale_giornata(tg: dict, conti_cassa: list) -> list:
 def _calcola_larghezze(n_conti: int) -> list:
     page_w = landscape(A4)[0] - 16 * mm
     fixed_w = 18 * mm * 5
-    conti_w = max(15 * mm, (page_w - fixed_w - 70 * mm) / max(1, n_conti))
-    descr_w = page_w - fixed_w - conti_w * n_conti
+    n = max(1, n_conti)
+    conti_w = max(15 * mm, (page_w - fixed_w - 70 * mm) / n)
+    descr_w = page_w - fixed_w - conti_w * n
+    # Con molti conti attivi descr_w diventerebbe negativo (crash reportlab):
+    # riduci la larghezza colonne conto per garantire una descrizione minima.
+    descr_min = 40 * mm
+    if descr_w < descr_min:
+        conti_w = max(8 * mm, (page_w - fixed_w - descr_min) / n)
+        descr_w = max(20 * mm, page_w - fixed_w - conti_w * n)
     return [descr_w] + [18 * mm] * 5 + [conti_w] * n_conti
 
 

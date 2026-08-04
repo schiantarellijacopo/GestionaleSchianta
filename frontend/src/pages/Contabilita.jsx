@@ -269,7 +269,10 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
     const [tipiPag, setTipiPag] = useState([]);
     useEffect(() => {
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
-        api.get("/librerie/tipi-pagamento", { params: { attivi: true } }).then((r) => setTipiPag(r.data));
+        api.get("/librerie/conti-cassa", { params: { attivi: true } })
+            .then((r) => setTipiPag((r.data || [])
+                .filter((c) => !c.nascondi_prima_nota)
+                .map((c) => ({ id: c.id, label: c.nome, conto_id: c.id }))));
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 

@@ -34,6 +34,20 @@ def _libreria_routes(coll_name: str, model_cls: type, ruoli_modifica: tuple[str,
     return None
 
 
+async def _usi_pagamento(conto_id: Optional[str] = None, labels: Optional[list[str]] = None) -> int:
+    """Conta i movimenti/titoli che usano un conto (per id) o un'etichetta di pagamento."""
+    ors: list[dict] = []
+    if conto_id:
+        ors.append({"conto_cassa_id": conto_id})
+    for lbl in labels or []:
+        if lbl:
+            ors.append({"mezzo_pagamento": {"$regex": f"^{re.escape(lbl)}$", "$options": "i"}})
+    if not ors:
+        return 0
+    return (await db.movimenti.count_documents({"$or": ors})
+            + await db.titoli.count_documents({"$or": ors}))
+
+
 # --- BANCHE ---
 @router.get("/librerie/banche")
 async def list_banche(user: dict = Depends(current_user)) -> list[dict]:
@@ -60,6 +74,13 @@ async def update_banca(bid: str, body: dict, user: dict = Depends(require_user("
 
 @router.delete("/librerie/banche/{bid}")
 async def delete_banca(bid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    banca = await db.banche.find_one({"id": bid}, {"_id": 0})
+    if not banca:
+        raise HTTPException(404, "Banca non trovata")
+    usi = await _usi_pagamento(labels=[banca.get("nome")])
+    if usi > 0:
+        raise HTTPException(400, f"'{banca.get('nome')}' è usata in {usi} movimenti/titoli dello storico: "
+                                 "non può essere eliminata. Archiviala disattivandola.")
     await db.banche.delete_one({"id": bid})
     await log_attivita(user, "delete", "banca", bid)
     return {"ok": True}
@@ -190,6 +211,8 @@ async def applica_mapping_garanzie(user: dict = Depends(require_user("admin"))) 
 
 @router.post("/librerie/conti-cassa", status_code=201)
 async def create_conto(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    if not (body.get("nome") or "").strip():
+        raise HTTPException(400, "Nome conto obbligatorio")
     obj = ContoCassa(**body)
     await db.conti_cassa.insert_one(obj.model_dump())
     await log_attivita(user, "create", "conto_cassa", obj.id, obj.nome)
@@ -208,6 +231,13 @@ async def update_conto(cid: str, body: dict, user: dict = Depends(require_user("
 
 @router.delete("/librerie/conti-cassa/{cid}")
 async def delete_conto(cid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    conto = await db.conti_cassa.find_one({"id": cid}, {"_id": 0})
+    if not conto:
+        raise HTTPException(404, "Conto non trovato")
+    usi = await _usi_pagamento(conto_id=cid, labels=[conto.get("nome")])
+    if usi > 0:
+        raise HTTPException(400, f"'{conto.get('nome')}' è usato in {usi} movimenti/titoli dello storico: "
+                                 "non può essere eliminato. Archivialo impostando Attivo = no.")
     await db.conti_cassa.delete_one({"id": cid})
     await log_attivita(user, "delete", "conto_cassa", cid)
     return {"ok": True}
@@ -267,9 +297,14 @@ async def update_mezzo_pagamento(mid: str, body: MezzoPagamentoBody, user: dict 
 
 @router.delete("/librerie/mezzi-pagamento/{mid}")
 async def delete_mezzo_pagamento(mid: str, user: dict = Depends(require_user("admin"))) -> dict:
-    res = await db.mezzi_pagamento.delete_one({"id": mid})
-    if res.deleted_count == 0:
+    mezzo = await db.mezzi_pagamento.find_one({"id": mid}, {"_id": 0})
+    if not mezzo:
         raise HTTPException(404, "Mezzo non trovato")
+    usi = await _usi_pagamento(labels=[mezzo.get("codice"), mezzo.get("label")])
+    if usi > 0:
+        raise HTTPException(400, f"'{mezzo.get('label')}' è usato in {usi} movimenti/titoli dello storico: "
+                                 "non può essere eliminato. Disattivalo per archiviarlo.")
+    await db.mezzi_pagamento.delete_one({"id": mid})
     return {"ok": True}
 
 
@@ -585,9 +620,14 @@ async def update_tipo_pagamento(tid: str, body: TipoPagamentoBody,
 
 @router.delete("/librerie/tipi-pagamento/{tid}")
 async def delete_tipo_pagamento(tid: str, user: dict = Depends(require_user("admin"))) -> dict:
-    res = await db.tipi_pagamento.delete_one({"id": tid})
-    if res.deleted_count == 0:
+    tipo = await db.tipi_pagamento.find_one({"id": tid}, {"_id": 0})
+    if not tipo:
         raise HTTPException(404, "Tipo pagamento non trovato")
+    usi = await _usi_pagamento(labels=[tipo.get("label")])
+    if usi > 0:
+        raise HTTPException(400, f"'{tipo.get('label')}' è usato in {usi} movimenti/titoli dello storico: "
+                                 "non può essere eliminato. Disattivalo per archiviarlo.")
+    await db.tipi_pagamento.delete_one({"id": tid})
     await log_attivita(user, "delete", "tipo_pagamento", tid)
     return {"ok": True}
 
