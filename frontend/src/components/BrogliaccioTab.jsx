@@ -332,9 +332,12 @@ export default function BrogliaccioTab() {
                                         const stickyCls = ci === 0
                                             ? `sticky left-[220px] z-10 ${bgRow} border-r-4 border-amber-400`
                                             : "border-r-2 border-slate-200";
+                                        // Direzione fittizia: colore ROSSO + asterisco su Totale
+                                        const isFittizio = r.is_direzione && (col.key === "totale" || col.key === "direzione");
+                                        const overrideCls = isFittizio ? "text-rose-600" : cls;
                                         return (
-                                            <td key={col.key} className={`num text-right px-2 ${stickyCls} ${cls} font-medium`}>
-                                                {fmt(v)}
+                                            <td key={col.key} className={`num text-right px-2 ${stickyCls} ${overrideCls} font-medium`} title={isFittizio ? "Entrata fittizia — pagamento in direzione (nessun cash reale)" : ""}>
+                                                {fmt(v)}{isFittizio && v !== 0 ? " *" : ""}
                                             </td>
                                         );
                                     })}

@@ -3500,7 +3500,9 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         data_movimento=data_incasso,
         tipo="entrata",
         categoria="incasso_premio_direzione" if is_direzione else "incasso_premio",
-        importo=0.0 if is_direzione else importo_pagato,
+        # In direzione: importo=LORDO (entrata fittizia). L'esclusione da banche
+        # avviene via is_direzione=True nel _compute_brogliaccio.
+        importo=importo_pagato,
         descrizione=(
             f"Incasso IN DIREZIONE (fittizio) titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
             if is_direzione else
@@ -3517,7 +3519,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         is_direzione=is_direzione,
         note=(
             "Pagamento effettuato dal cliente direttamente in direzione compagnia. "
-            "Nessun movimento di cassa/banca — solo provvigioni maturate."
+            "Entrata fittizia: nessun cash flow su banche/cassa — solo provvigioni maturate."
             if is_direzione else
             ((f"Sconto applicato: €{sconto_applicato:.2f}"
               + (f" — {motivo_sconto}" if motivo_sconto else "")) if sconto_applicato > 0 else None)
@@ -4887,13 +4889,15 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_crediti = quota_cred
         elif is_entrata and (cat == "incasso_premio_direzione" or is_dir):
             # PAGAMENTO IN DIREZIONE — cliente paga direttamente in compagnia.
-            # Riconosciuto sia da categoria dedicata sia da flag is_direzione=True
-            # (retro-compat con movimenti pre-esistenti categorizzati incasso_premio).
+            # Il premio è "entrata fittizia" (nessun cash reale) ma deve comparire
+            # in ENTRATE (Totale) per riflettere il volume totale gestito.
+            # Il frontend rende in ROSSO/asterisco per distinguerlo.
             provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
+            c_totale = importo               # ENTRATE = LORDO (fittizia)
             c_provv = provv_riga
-            c_direzione = provv_riga
-            c_saldo = -provv_riga  # compagnia mi deve le provvigioni
-            # NON tocca TOTALE, NON tocca banche/cassa
+            c_direzione = importo            # colonna dedicata = LORDO, non provv
+            c_saldo = -provv_riga            # compagnia mi deve le provvigioni
+            # NON tocca banche/cassa (per_conto vuoto grazie a is_dir check sotto)
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
