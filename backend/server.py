@@ -3527,6 +3527,17 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     )
     await db.movimenti.insert_one(mov_in.model_dump())
 
+    # Cleanup: un titolo incassato non deve lasciare righe "anticipo" orfane in
+    # Prima Nota (copertura contestuale o precedente). Skip giornate già chiuse.
+    async for _om in db.movimenti.find(
+        {"titolo_id": tid, "categoria": "anticipo"},
+        {"_id": 0, "id": 1, "data_movimento": 1},
+    ):
+        _ch = await db.chiusure_giorno.find_one({"data": _om["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
+        if _ch and not _ch.get("riaperta_at"):
+            continue
+        await db.movimenti.delete_one({"id": _om["id"]})
+
     # aggiorna anagrafica con ultimo mezzo di pagamento usato
     if pol and pol.get("contraente_id"):
         await db.anagrafiche.update_one(
@@ -4602,7 +4613,7 @@ async def create_movimento(body: dict, user=Depends(require_user("admin", "colla
     obj = MovimentoContabile(**body)
     # Risolvi il conto dal tipo pagamento se non fornito (i saldi conti/liquidità
     # si muovono solo se il movimento è agganciato a un conto_cassa_id).
-    if not obj.conto_cassa_id and not obj.is_direzione and obj.mezzo_pagamento:
+    if not obj.conto_cassa_id and not obj.is_direzione and obj.mezzo_pagamento and obj.categoria != "ritenuta_compagnia":
         obj.conto_cassa_id = await _resolve_conto_cassa(obj.mezzo_pagamento, fallback_any=False)
     await db.movimenti.insert_one(obj.model_dump())
     await log_attivita(user, "create", "movimento", obj.id, f"€{obj.importo} {obj.descrizione}")
@@ -4918,10 +4929,10 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             c_totale = importo
             c_crediti = importo
         elif is_entrata and cat == "provvigioni":
-            # Rappel (sovraprovvigione fittizia): NON in Entrate, va in colonna Rappel.
-            # Riduce il saldo verso la compagnia (avere fittizio).
+            # Rappel (sovraprovvigione): NON in Entrate e NON in Provvigioni.
+            # Va SOLO in colonna Rappel: se positivo riduce il saldo verso compagnia,
+            # se negativo lo alimenta (c_saldo = -importo funziona per entrambi i segni).
             c_totale = 0.0
-            c_provv = importo
             c_rappel = importo
             c_saldo = -importo
         elif is_entrata and cat == "giroconto":
@@ -4933,9 +4944,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             if cat == "giroconto":
                 c_totale = 0.0
             elif cat in CATS_RIMESSE:
-                # Versamento compagnia: NON va in TOTALE, solo in Rimesse + Banca uscita.
+                # Versamento compagnia: NON va in TOTALE; va in Rimesse + Banca uscita
+                # e riduce la colonna SALDO (debito verso compagnia in meno).
                 c_totale = 0.0
                 c_rimesse = importo
+                c_saldo = -importo
             elif cat in CATS_ANTICIPI:
                 c_totale = 0.0
                 c_crediti = -importo
@@ -4947,6 +4960,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_totale = 0.0
                 c_ritenuta = ritenuta_riga
                 c_spese = importo  # netto banca uscita
+            elif cat == "ritenuta_compagnia":
+                # Ritenuta trattenuta dalla compagnia: NON è una spesa reale.
+                # Alimenta solo il SALDO (riduce il debito verso compagnia). Nessun cash flow.
+                c_totale = 0.0
+                c_saldo = -importo
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.
@@ -5061,6 +5079,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     cum_entrate = 0.0; cum_provv = 0.0; cum_sospesi = 0.0
     cum_rimesse = 0.0; cum_sconti = 0.0; cum_spese = 0.0; cum_saldo = 0.0
+    cum_ritenute_comp = 0.0
+    cum_rappel = 0.0
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
@@ -5071,7 +5091,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         if is_e and cat == "incasso_premio":
             cum_entrate += importo
         if is_e and cat == "provvigioni":
-            cum_provv += importo  # rappel
+            cum_rappel += importo  # rappel: NON in provvigioni, riduce/alimenta il saldo cassa
         if is_e and cat == "incasso_premio":
             provv_riga = float(m.get("provvigioni") or 0)
             quota_sc = float(m.get("quota_sconto") or 0)
@@ -5090,6 +5110,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             cum_sospesi += importo
         elif (not is_e) and cat == "pagamento_compagnia":
             cum_rimesse += importo
+        elif (not is_e) and cat == "ritenuta_compagnia":
+            # Ritenuta compagnia: non è spesa, riduce solo il saldo cassa compagnie
+            cum_ritenute_comp += importo
         elif (not is_e) and cat == "anticipo":
             cum_sospesi -= importo
         elif not is_e:
@@ -5104,7 +5127,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         "rimesse": round(cum_rimesse, 2),
         "sconti": round(cum_sconti, 2),
         "spese": round(cum_spese, 2),
-        "saldo_cassa": round(cum_saldo - cum_rimesse, 2),
+        "saldo_cassa": round(cum_saldo - cum_rimesse - cum_ritenute_comp - cum_rappel, 2),
+        "rappel": round(cum_rappel, 2),
     }
 
     # Override 'crediti' (KPI Sospesi) con la stessa fonte della pagina /titoli/sospesi:
@@ -5196,15 +5220,26 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rimesse = rim_agg[0]["tot"] if rim_agg else 0.0
+        # ritenute trattenute dalla compagnia (riducono il saldo da versare)
+        rit_agg = await db.movimenti.aggregate([
+            {"$match": {
+                "compagnia_id": cid,
+                "tipo": "uscita",
+                "categoria": "ritenuta_compagnia",
+                "data_movimento": {"$lte": fino_a},
+            }},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        ritenute = rit_agg[0]["tot"] if rit_agg else 0.0
         # rappel cumulativi per questa compagnia (riducono il saldo da versare)
         rap_agg = await db.rappel.aggregate([
             {"$match": {"compagnia_id": cid, "data": {"$lte": fino_a}}},
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rappel = rap_agg[0]["tot"] if rap_agg else 0.0
-        # saldo = (premi - provv) se trattiene else premi  ;  meno rimesse  ; meno rappel
+        # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; meno ritenute
         saldo_dovuto = (incassi - provv) if trattiene else incassi
-        saldo_residuo = saldo_dovuto - rimesse - rappel
+        saldo_residuo = saldo_dovuto - rimesse - rappel - ritenute
         if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
@@ -5216,6 +5251,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             "saldo_dovuto": round(saldo_dovuto, 2),
             "rimesse_pagate": round(rimesse, 2),
             "rappel": round(rappel, 2),
+            "ritenute": round(ritenute, 2),
             "saldo_cassa": round(saldo_residuo, 2),
         })
     # ordina per saldo_cassa descendente (le più "da pagare" in cima)
@@ -8361,6 +8397,7 @@ from routes import librerie as _librerie_router  # noqa: E402
 api.include_router(_librerie_router.router)
 _seed_mezzi_pagamento = _librerie_router._seed_mezzi_pagamento  # backward-compat
 _seed_tipi_pagamento = _librerie_router._seed_tipi_pagamento
+_seed_voci_bilancio = _librerie_router._seed_voci_bilancio
 
 
 
@@ -10800,6 +10837,8 @@ async def startup():
     await _seed_mezzi_pagamento()
     # Seed tipi pagamento (combinazione modalità × conto) — solo se vuoto
     await _seed_tipi_pagamento()
+    # Seed voci di bilancio (mini-bilancio Cervello) — solo se vuoto
+    await _seed_voci_bilancio()
 
     # seed librerie (banche, conti cassa, rami) - solo se vuote
     if await db.conti_cassa.count_documents({}) == 0:

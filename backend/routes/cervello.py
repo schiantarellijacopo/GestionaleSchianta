@@ -388,3 +388,252 @@ async def list_bilanci(user=Depends(require_user("admin"))) -> list[dict]:
         {}, {"_id": 0, "raw": 0},
     ).sort("uploaded_at", -1).to_list(50)
     return items
+
+
+# ============= MINI BILANCIO PERIODICO =============
+_MB_AUTO_RICAVI = [
+    ("provvigioni_attive", "Provvigioni Attive"),
+    ("rappel", "Rappel / Incentivi Direzione"),
+    ("storni_ricavi", "Spese Istruttoria / Storni Ricavi"),
+]
+_MB_AUTO_COSTI = [
+    ("storni_rivalse", "Storni Provvigionali / Rivalse"),
+    ("provvigioni_passive", "Provvigioni Passive Collaboratori"),
+    ("spese_varie", "Spese Generali / Varie"),
+]
+_MB_EXCLUDE = {
+    "giroconto", "anticipo", "pagamento_compagnia",
+    "setup_iniziale_banca", "setup_iniziale_compagnia_dare", "setup_iniziale_compagnia_avere",
+}
+
+
+def _mb_classify(m: dict, voci_map: dict) -> list[tuple[str, str, float]]:
+    """Riclassifica un movimento di Prima Nota -> [(sezione, key, importo)]."""
+    vid = m.get("voce_bilancio_id")
+    imp = float(m.get("importo") or 0)
+    if vid and vid in voci_map:
+        return [(voci_map[vid]["tipo"], vid, imp)]
+    cat = m.get("categoria") or ""
+    tipo = m.get("tipo") or ""
+    if cat in _MB_EXCLUDE:
+        return []
+    out: list[tuple[str, str, float]] = []
+    if cat in ("incasso_premio", "incasso_premio_direzione"):
+        prov = float(m.get("provvigioni") or 0)
+        if prov:
+            out.append(("ricavo", "provvigioni_attive", prov))
+        sconto = float(m.get("quota_sconto") or 0)
+        if sconto:
+            out.append(("costo", "storni_rivalse", sconto))
+        return out
+    if cat == "provvigioni":
+        if tipo == "entrata":
+            return [("ricavo", "rappel", imp)]
+        return [("costo", "provvigioni_passive", imp)]
+    if cat in ("ritenuta_compagnia",):
+        # Partita di giro col saldo compagnia: non è costo del CE
+        return []
+    if cat in ("sconto_cliente", "rimborso_cliente"):
+        return [("costo", "storni_rivalse", imp)]
+    if cat == "spese_amministrative":
+        return [("costo", "spese_varie", imp)]
+    # generiche
+    if tipo == "entrata":
+        return [("ricavo", "storni_ricavi", imp)]
+    if tipo == "uscita":
+        return [("costo", "spese_varie", imp)]
+    return []
+
+
+async def _mb_compute(dal: str, al: str) -> dict:
+    voci = await db.voci_bilancio.find({}, {"_id": 0}).sort([("ordine", 1), ("nome", 1)]).to_list(300)
+    voci_map = {v["id"]: v for v in voci}
+    righe: dict[str, dict] = {}
+    for key, nome in _MB_AUTO_RICAVI:
+        righe[key] = {"key": key, "voce": nome, "sezione": "ricavo", "auto": True, "totale": 0.0, "mensile": {}}
+    for key, nome in _MB_AUTO_COSTI:
+        righe[key] = {"key": key, "voce": nome, "sezione": "costo", "auto": True, "totale": 0.0, "mensile": {}}
+    for v in voci:
+        righe[v["id"]] = {"key": v["id"], "voce": v["nome"], "sezione": v["tipo"], "auto": False, "totale": 0.0, "mensile": {}}
+
+    cur = db.movimenti.find(
+        {"data_movimento": {"$gte": dal, "$lte": al}},
+        {"_id": 0, "tipo": 1, "categoria": 1, "importo": 1, "provvigioni": 1,
+         "quota_sconto": 1, "voce_bilancio_id": 1, "data_movimento": 1},
+    )
+    async for m in cur:
+        mese = (m.get("data_movimento") or "")[:7]
+        for sez, key, amount in _mb_classify(m, voci_map):
+            if not amount or key not in righe:
+                continue
+            r = righe[key]
+            r["totale"] += amount
+            r["mensile"][mese] = r["mensile"].get(mese, 0.0) + amount
+
+    ricavi = [r for r in righe.values() if r["sezione"] == "ricavo"]
+    costi = [r for r in righe.values() if r["sezione"] == "costo"]
+    tot_r = sum(r["totale"] for r in ricavi)
+    tot_c = sum(r["totale"] for r in costi)
+
+    # --- Stato patrimoniale: saldi conti in tempo reale (cumulato fino ad `al`)
+    saldi_conti = []
+    async for cc in db.conti_cassa.find({"attivo": True}, {"_id": 0, "id": 1, "nome": 1, "tipo": 1, "saldo_iniziale": 1, "ordine": 1}).sort("ordine", 1):
+        agg = await db.movimenti.aggregate([
+            {"$match": {"conto_cassa_id": cc["id"], "data_movimento": {"$lte": al}, "is_direzione": {"$ne": True}}},
+            {"$group": {"_id": None, "e": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                        "u": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+        ]).to_list(1)
+        e = agg[0]["e"] if agg else 0.0
+        u = agg[0]["u"] if agg else 0.0
+        saldi_conti.append({"id": cc["id"], "nome": cc["nome"], "tipo": cc.get("tipo"),
+                            "saldo": round(float(cc.get("saldo_iniziale") or 0) + e - u, 2)})
+
+    # --- Debiti v/compagnia: premi incassati (netto provvigioni) - versamenti, cumulato
+    comp_map = {c["id"]: c.get("nome") or "?" async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "nome": 1})}
+    deb_agg = await db.movimenti.aggregate([
+        {"$match": {"data_movimento": {"$lte": al}, "categoria": {"$in": ["incasso_premio", "incasso_premio_direzione", "pagamento_compagnia", "ritenuta_compagnia"]}}},
+        {"$group": {"_id": "$compagnia_id",
+                    "incassato_netto": {"$sum": {"$cond": [
+                        {"$in": ["$categoria", ["incasso_premio", "incasso_premio_direzione"]]},
+                        {"$subtract": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$provvigioni", 0]}]}, 0]}},
+                    "versato": {"$sum": {"$cond": [{"$in": ["$categoria", ["pagamento_compagnia", "ritenuta_compagnia"]]}, {"$ifNull": ["$importo", 0]}, 0]}}}},
+    ]).to_list(100)
+    debiti = []
+    for d in deb_agg:
+        saldo = round(float(d["incassato_netto"]) - float(d["versato"]), 2)
+        if abs(saldo) < 0.005 and not d["_id"]:
+            continue
+        debiti.append({"compagnia_id": d["_id"], "compagnia": comp_map.get(d["_id"], "Senza compagnia"), "saldo": saldo})
+    debiti.sort(key=lambda x: -abs(x["saldo"]))
+
+    rit_agg = await db.movimenti.aggregate([
+        {"$match": {"data_movimento": {"$lte": al}, "ritenuta_acconto": {"$gt": 0}}},
+        {"$group": {"_id": None, "tot": {"$sum": "$ritenuta_acconto"}}},
+    ]).to_list(1)
+    ritenute_erario = round(float(rit_agg[0]["tot"]) if rit_agg else 0.0, 2)
+
+    return {
+        "dal": dal, "al": al,
+        "ricavi": ricavi, "costi": costi,
+        "totale_ricavi": round(tot_r, 2), "totale_costi": round(tot_c, 2),
+        "risultato": round(tot_r - tot_c, 2),
+        "saldi_conti": saldi_conti,
+        "totale_liquidita": round(sum(s["saldo"] for s in saldi_conti), 2),
+        "debiti_compagnie": debiti,
+        "totale_debiti_compagnie": round(sum(d["saldo"] for d in debiti), 2),
+        "ritenute_erario": ritenute_erario,
+    }
+
+
+@router.get("/mini-bilancio")
+async def mini_bilancio(dal: str, al: str, user=Depends(current_user)) -> dict:
+    return await _mb_compute(dal, al)
+
+
+@router.get("/mini-bilancio/dettaglio")
+async def mini_bilancio_dettaglio(key: str, dal: str, al: str, user=Depends(current_user)) -> dict:
+    voci_map = {v["id"]: v async for v in db.voci_bilancio.find({}, {"_id": 0})}
+    rows = []
+    cur = db.movimenti.find(
+        {"data_movimento": {"$gte": dal, "$lte": al}},
+        {"_id": 0, "id": 1, "data_movimento": 1, "tipo": 1, "categoria": 1, "importo": 1,
+         "provvigioni": 1, "quota_sconto": 1, "voce_bilancio_id": 1, "descrizione": 1, "mezzo_pagamento": 1},
+    ).sort("data_movimento", -1)
+    async for m in cur:
+        for sez, k, amount in _mb_classify(m, voci_map):
+            if k == key and amount:
+                rows.append({
+                    "id": m.get("id"), "data": m.get("data_movimento"),
+                    "descrizione": m.get("descrizione"), "categoria": m.get("categoria"),
+                    "mezzo_pagamento": m.get("mezzo_pagamento"), "importo": round(amount, 2),
+                })
+    return {"key": key, "rows": rows, "totale": round(sum(r["importo"] for r in rows), 2)}
+
+
+@router.get("/mini-bilancio/export")
+async def mini_bilancio_export(dal: str, al: str, formato: str = "pdf", user=Depends(current_user)):
+    from fastapi.responses import Response
+    data = await _mb_compute(dal, al)
+    if formato == "xlsx":
+        import openpyxl
+        from openpyxl.styles import Font
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Conto Economico"
+        ws.append([f"MINI BILANCIO {dal} → {al}"]); ws["A1"].font = Font(bold=True, size=13)
+        ws.append([])
+        ws.append(["RICAVI", "Importo €"]); ws[f"A{ws.max_row}"].font = Font(bold=True)
+        for r in data["ricavi"]:
+            if r["totale"]: ws.append([r["voce"], round(r["totale"], 2)])
+        ws.append(["TOTALE RICAVI", data["totale_ricavi"]]); ws[f"A{ws.max_row}"].font = Font(bold=True)
+        ws.append([])
+        ws.append(["COSTI", "Importo €"]); ws[f"A{ws.max_row}"].font = Font(bold=True)
+        for r in data["costi"]:
+            if r["totale"]: ws.append([r["voce"], round(r["totale"], 2)])
+        ws.append(["TOTALE COSTI", data["totale_costi"]]); ws[f"A{ws.max_row}"].font = Font(bold=True)
+        ws.append([])
+        ws.append(["RISULTATO ECONOMICO", data["risultato"]]); ws[f"A{ws.max_row}"].font = Font(bold=True, size=12)
+        ws.column_dimensions["A"].width = 42; ws.column_dimensions["B"].width = 16
+        ws2 = wb.create_sheet("Stato Patrimoniale")
+        ws2.append(["SALDI FINANZIARI (al " + al + ")", "Saldo €"]); ws2["A1"].font = Font(bold=True)
+        for s in data["saldi_conti"]: ws2.append([s["nome"], s["saldo"]])
+        ws2.append(["TOTALE LIQUIDITÀ", data["totale_liquidita"]]); ws2[f"A{ws2.max_row}"].font = Font(bold=True)
+        ws2.append([])
+        ws2.append(["DEBITI V/COMPAGNIA", "Saldo €"]); ws2[f"A{ws2.max_row}"].font = Font(bold=True)
+        for d in data["debiti_compagnie"]: ws2.append([d["compagnia"], d["saldo"]])
+        ws2.append(["TOTALE DA VERSARE", data["totale_debiti_compagnie"]]); ws2[f"A{ws2.max_row}"].font = Font(bold=True)
+        ws2.append(["Ritenute d'Acconto & Erario", data["ritenute_erario"]])
+        ws2.column_dimensions["A"].width = 42; ws2.column_dimensions["B"].width = 16
+        buf = io.BytesIO(); wb.save(buf)
+        return Response(buf.getvalue(),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename=mini_bilancio_{dal}_{al}.xlsx"})
+    # PDF
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    styles = getSampleStyleSheet()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=14 * mm, bottomMargin=14 * mm)
+    fe = lambda v: f"{v:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    el = [Paragraph(f"<b>MINI BILANCIO PERIODICO</b> — {dal} → {al}", styles["Title"]), Spacer(1, 6)]
+
+    def tbl(title, rows, tot_label, tot, color):
+        data_rows = [[title, "Importo"]] + [[r["voce"], fe(r["totale"])] for r in rows if r["totale"]]
+        data_rows.append([tot_label, fe(tot)])
+        t = Table(data_rows, colWidths=[120 * mm, 45 * mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), color),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.whitesmoke),
+        ]))
+        return t
+
+    el.append(tbl("RICAVI", data["ricavi"], "TOTALE RICAVI", data["totale_ricavi"], colors.HexColor("#047857")))
+    el.append(Spacer(1, 8))
+    el.append(tbl("COSTI", data["costi"], "TOTALE COSTI", data["totale_costi"], colors.HexColor("#b91c1c")))
+    el.append(Spacer(1, 8))
+    ris = Table([[f"RISULTATO ECONOMICO (Utile/Perdita)", fe(data["risultato"])]], colWidths=[120 * mm, 45 * mm])
+    ris.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 10),
+                             ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
+                             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#e0f2fe"))]))
+    el.append(ris)
+    el.append(Spacer(1, 12))
+    el.append(Paragraph("<b>STATO PATRIMONIALE & RECAP FINANZIARIO</b>", styles["Heading2"]))
+    sp_rows = [{"voce": s["nome"], "totale": s["saldo"]} for s in data["saldi_conti"]]
+    el.append(tbl(f"SALDI FINANZIARI (al {al})", sp_rows, "TOTALE LIQUIDITÀ", data["totale_liquidita"], colors.HexColor("#0369a1")))
+    el.append(Spacer(1, 8))
+    deb_rows = [{"voce": d["compagnia"], "totale": d["saldo"]} for d in data["debiti_compagnie"]]
+    deb_rows.append({"voce": "Ritenute d'Acconto & Erario", "totale": data["ritenute_erario"]})
+    el.append(tbl("DEBITI V/COMPAGNIA (Partite di giro)", deb_rows, "TOTALE DA VERSARE",
+                  data["totale_debiti_compagnie"] + data["ritenute_erario"], colors.HexColor("#7c3aed")))
+    doc.build(el)
+    return Response(buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename=mini_bilancio_{dal}_{al}.pdf"})

@@ -21,6 +21,7 @@ const SECTIONS = [
     { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
+    { key: "voci-bilancio", label: "Voci di bilancio", icon: <Wallet size={14} />, endpoint: "/librerie/voci-bilancio" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
@@ -201,6 +202,26 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
                             <td>{t.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} label="tipo pagamento" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
+    if (section.key === "voci-bilancio") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Nome</th><th>Tipo</th><th className="text-right">Ordine</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((v) => (
+                        <tr key={v.id}>
+                            <td className="font-medium">{v.nome}</td>
+                            <td>{v.tipo === "ricavo" ? <span className="badge badge-success">Ricavo</span> : <span className="badge badge-danger">Costo</span>}</td>
+                            <td className="num text-right">{v.ordine}</td>
+                            <td>{v.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(v)} onDelete={() => onDelete(v.id)} label="voce di bilancio" />
                             </td>
                         </tr>
                     ))}
@@ -424,6 +445,7 @@ const SECTION_FORMS = {
     "conti-cassa": ContoForm,
     "mezzi-pagamento": MezzoPagamentoForm,
     "tipi-pagamento": TipoPagamentoForm,
+    "voci-bilancio": VoceBilancioForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
     "tipologie-sinistri": TipologiaSinistroForm,
@@ -679,6 +701,36 @@ function TipoPagamentoForm({ section, editing, onClose }) {
                 </>
             );
         }}
+    />;
+}
+
+function VoceBilancioForm({ section, editing, onClose }) {
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ nome: "", tipo: "costo", ordine: 0, attivo: true, note: "" }}
+        fields={(f, set) => (
+            <>
+                <div><Label>Nome voce *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="vb-nome" placeholder="es. Stipendi" /></div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <Label>Tipo</Label>
+                        <select className="w-full border rounded h-9 px-2 text-sm" value={f.tipo || "costo"}
+                            onChange={(e) => set("tipo", e.target.value)} data-testid="vb-tipo">
+                            <option value="costo">Costo</option>
+                            <option value="ricavo">Ricavo</option>
+                        </select>
+                    </div>
+                    <div>
+                        <Label>Ordine</Label>
+                        <Input type="number" value={f.ordine || 0} onChange={(e) => set("ordine", parseInt(e.target.value, 10) || 0)} />
+                    </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm mt-1">
+                    <input type="checkbox" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} />
+                    Attivo
+                </label>
+                <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+            </>
+        )}
     />;
 }
 

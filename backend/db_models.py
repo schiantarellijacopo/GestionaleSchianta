@@ -562,6 +562,8 @@ class MovimentoContabile(BaseDoc):
     conto_cassa_id: Optional[str] = None
     mezzo_pagamento: Optional[str] = None
     numero_documento: Optional[str] = None
+    # Voce di bilancio (Librerie → Voci di bilancio) per il mini-bilancio Cervello
+    voce_bilancio_id: Optional[str] = None
     provvigioni: float = 0.0
     # Split brogliaccio per incassi premio: quota_provvigione = parte agenzia,
     # quota_saldo = parte da versare alla compagnia. Calcolato automaticamente al
@@ -701,6 +703,15 @@ class ContoCassa(BaseDoc):
     #   liquidità (immediata e postera).
     nascondi_prima_nota: bool = False
     escludi_da_liquidita: bool = False
+
+
+class VoceBilancio(BaseDoc):
+    """Voce di bilancio (es. Stipendi, Affitto) per il mini-bilancio Cervello."""
+    nome: str
+    tipo: Literal["costo", "ricavo"] = "costo"
+    ordine: int = 0
+    attivo: bool = True
+    note: Optional[str] = None
 
 
 class TipoPagamento(BaseDoc):

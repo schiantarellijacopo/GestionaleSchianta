@@ -265,13 +265,16 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
         conto_cassa_id: "",
         mezzo_pagamento: "",
         numero_documento: "",
+        voce_bilancio_id: "",
     });
     const [conti, setConti] = useState([]);
     const [tipiPag, setTipiPag] = useState([]);
+    const [vociBil, setVociBil] = useState([]);
     useEffect(() => {
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
         api.get("/librerie/tipi-pagamento", { params: { attivi: true } })
             .then((r) => setTipiPag((r.data || []).filter((t) => (t.label || "").trim())));
+        api.get("/librerie/voci-bilancio", { params: { attivi: true } }).then((r) => setVociBil(r.data || []));
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -287,6 +290,7 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                 conto_cassa_id: tp?.conto_id || f.conto_cassa_id || null,
             };
             if (!payload.anagrafica_id) delete payload.anagrafica_id;
+            if (!payload.voce_bilancio_id) delete payload.voce_bilancio_id;
             await api.post("/contabilita/movimenti", payload);
             toast.success("Movimento registrato"); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
@@ -344,7 +348,19 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div className="col-span-2"><Label>N. documento</Label><Input value={f.numero_documento} onChange={(e) => set("numero_documento", e.target.value)} /></div>
+                <div>
+                    <Label>Voce di bilancio (mini-bilancio)</Label>
+                    <Select value={f.voce_bilancio_id || ""} onValueChange={(v) => set("voce_bilancio_id", v === "none" ? "" : v)}>
+                        <SelectTrigger data-testid="mov-voce-bilancio-select"><SelectValue placeholder="Automatica" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="none">Automatica (da causale)</SelectItem>
+                            {vociBil.map((v) => (
+                                <SelectItem key={v.id} value={v.id}>{v.nome} {v.tipo === "ricavo" ? "· Ricavo" : "· Costo"}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div><Label>N. documento</Label><Input value={f.numero_documento} onChange={(e) => set("numero_documento", e.target.value)} /></div>
             </div>
             <DialogFooter>
                 <Button data-testid="mov-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">Registra</Button>

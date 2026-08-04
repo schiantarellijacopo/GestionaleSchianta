@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import MiniBilancioTab from "@/components/MiniBilancioTab";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Brain, Save, Upload, TrendingUp, Trophy, PieChart, Wallet, Users, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -47,11 +48,13 @@ export default function Cervello() {
                     <TabsTrigger value="top" data-testid="tab-top"><Trophy size={14} className="mr-1" /> Top Clienti</TabsTrigger>
                     <TabsTrigger value="seg" data-testid="tab-seg"><PieChart size={14} className="mr-1" /> Segmentazione</TabsTrigger>
                     <TabsTrigger value="costi" data-testid="tab-costi"><Wallet size={14} className="mr-1" /> Costi & Bilancio</TabsTrigger>
+                    <TabsTrigger value="minibilancio" data-testid="tab-minibilancio"><TrendingUp size={14} className="mr-1" /> Mini Bilancio</TabsTrigger>
                 </TabsList>
                 <TabsContent value="pl"><ContoEconomicoTab anno={anno} /></TabsContent>
                 <TabsContent value="top"><TopClientiTab anno={anno} /></TabsContent>
                 <TabsContent value="seg"><SegmentazioneTab /></TabsContent>
                 <TabsContent value="costi"><CostiBilancioTab anno={anno} /></TabsContent>
+                <TabsContent value="minibilancio"><MiniBilancioTab /></TabsContent>
             </Tabs>
         </div>
     );

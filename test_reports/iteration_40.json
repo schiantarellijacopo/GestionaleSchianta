@@ -1,0 +1,36 @@
+{
+  "summary": "Iter40 — Testato Mini Bilancio Periodico (Cervello), Voci di bilancio (Librerie), cleanup anticipo orfano su incasso titolo, risoluzione conto_cassa da mezzo_pagamento, e regole classificazione Brogliaccio. Backend: 12/12 pytest PASS. Frontend: tutti gli elementi UI critici trovati e funzionanti (tab Mini Bilancio con preset che aggiornano numeri, drill-down dialog, Nuovo movimento con selettore voce_bilancio, tab Voci di bilancio con CRUD funzionante, 14 voci seed, badge Costo/Ricavo). Regressione: 19 tipi_pagamento presenti, tab 'Tipi pagamento' + 'Modalità pagamento' + 'Conti/Banche' + 'Voci di bilancio' tutti visibili in Librerie.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Mini Bilancio drill-down dialog", "issues": ["Warning React accessibility: 'Missing Description or aria-describedby={undefined} for DialogContent' — solo warning, non bloccante. Aggiungere <DialogDescription> nel drill-down dialog per accessibilità."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter40_minibilancio_incasso_cleanup.py",
+    "/app/test_reports/pytest/iter40.xml"
+  ],
+  "action_items": [
+    "OPZIONALE: aggiungere <DialogDescription> ai DialogContent (Cervello Mini Bilancio drill + Contabilità Nuovo movimento) per silenziare warning Radix e migliorare accessibilità."
+  ],
+  "critical_code_review_comments": [
+    "cervello.py::_mb_compute — la query `db.movimenti.aggregate([...compagnia_id...])` per debiti compagnie non è filtrata per tenant tramite `data_movimento >= dal`: usa solo `<= al` (cumulato). Correcto per stato patrimoniale ma da confermare che sia coerente col resto del sistema multi-tenant (i movimenti sono già isolati da DB per tenant?).",
+    "server.py:3536 cleanup anticipi — il match esatto su `data_movimento` in `chiusure_giorno` funziona ma se ci sono più chiusure con lo stesso `data` (edge case) prende la prima. Usa find_one senza ordering; da confermare che chiusure_giorno abbia unique index su `data`.",
+    "cervello.py::_mb_classify per movimenti generici (entrata/uscita senza categoria specifica) li mette in `storni_ricavi`/`spese_varie` — questo può confondere: un movimento di uscita generico non è necessariamente una spesa generale. Considerare di NON classificare movimenti senza voce_bilancio_id esplicita se categoria non è tra quelle note (attuale comportamento potrebbe gonfiare i costi)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter40_minibilancio_incasso_cleanup.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (tutti i data-testid trovati, preset e drill funzionanti, CRUD voce di bilancio OK)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Test crea/cancella: (1) anagrafica TEST_ITER40_*, (2) polizza TEST_ITER40_*, (3) titolo test + movimento anticipo + movimento incasso, (4) movimenti TEST_ITER40_CONTANTI, (5) voce_bilancio TEST_STIP_* e TEST_VOCE_*, (6) TEST_UI_VOCE_ITER40 creata via UI e ripulita via API. Tutti i dati cleanup a fine test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Mini Bilancio (data-testid: tab-minibilancio, mini-bilancio-tab, mb-preset-{oggi,mese,trimestre,anno,custom}, mb-dal, mb-al, mb-risultato, mb-liquidita, mb-debiti, mb-ritenute-erario, mb-voce-<key>, mb-drill-dialog, mb-export-pdf, mb-export-xlsx). Endpoint: /api/cervello/mini-bilancio, /dettaglio?key=..., /export?formato=pdf|xlsx. Voci di bilancio: /api/librerie/voci-bilancio CRUD, seed 14 voci (12 costi + 2 ricavi). Contabilità Nuovo movimento include mov-voce-bilancio-select. Regole Brogliaccio verificate. NB: il tab 'Tipi pagamento' esiste come label ma il data-testid usa 'tipi-pagamento' (verificare esattamente): visibile a schermo ma i test hanno cercato varianti con underscore.",
+  "rca of the issue": "Nessun bug bloccante riscontrato in questa iterazione. La feature Mini Bilancio è completa e coerente (backend calcoli, drill-down consistente col mini-bilancio, export PDF/XLSX validi). Il cleanup anticipi orfani post-incasso funziona correttamente (verificato con test end-to-end: crea titolo → bulk-copertura → incassa → anticipo eliminato). Risoluzione conto_cassa da mezzo_pagamento (CONTANTI → Cassa Contanti, BONIFICO INTESA → Intesa Sanpaolo) su POST e PUT movimento funziona."
+}

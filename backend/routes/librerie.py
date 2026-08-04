@@ -19,6 +19,7 @@ from db_models import (
     _now_iso, _uid,
     AziendaConfig, Banca, ContattoCompagnia, ContoCassa, MezzoPagamento,
     ProdottoLibreria, RamoLibreria, SchemaProvvigionale, TipoPagamento,
+    VoceBilancio,
     default_mora_for_ramo,
 )
 from auth import current_user, require_user
@@ -640,6 +641,65 @@ async def delete_tipo_pagamento(tid: str, user: dict = Depends(require_user("adm
     await db.tipi_pagamento.delete_one({"id": tid})
     await log_attivita(user, "delete", "tipo_pagamento", tid)
     return {"ok": True}
+
+
+# --- VOCI DI BILANCIO (mini-bilancio Cervello) ---
+@router.get("/librerie/voci-bilancio")
+async def list_voci_bilancio(
+    attivi: bool = False,
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    flt: dict = {}
+    if attivi:
+        flt["attivo"] = True
+    return await db.voci_bilancio.find(flt, {"_id": 0}).sort([("tipo", 1), ("ordine", 1), ("nome", 1)]).to_list(500)
+
+
+@router.post("/librerie/voci-bilancio", status_code=201)
+async def create_voce_bilancio(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    if not (body.get("nome") or "").strip():
+        raise HTTPException(400, "Nome voce obbligatorio")
+    obj = VoceBilancio(**body)
+    await db.voci_bilancio.insert_one(obj.model_dump())
+    await log_attivita(user, "create", "voce_bilancio", obj.id, obj.nome)
+    return obj.model_dump()
+
+
+@router.put("/librerie/voci-bilancio/{vid}")
+async def update_voce_bilancio(vid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    if "nome" in body and not (body.get("nome") or "").strip():
+        raise HTTPException(400, "Nome voce obbligatorio")
+    body["updated_at"] = _now_iso()
+    res = await db.voci_bilancio.update_one({"id": vid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Voce non trovata")
+    await log_attivita(user, "update", "voce_bilancio", vid)
+    return strip_mongo_id(await db.voci_bilancio.find_one({"id": vid}, {"_id": 0}))
+
+
+@router.delete("/librerie/voci-bilancio/{vid}")
+async def delete_voce_bilancio(vid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    res = await db.voci_bilancio.delete_one({"id": vid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Voce non trovata")
+    await log_attivita(user, "delete", "voce_bilancio", vid)
+    return {"ok": True}
+
+
+async def _seed_voci_bilancio() -> None:
+    """Idempotente: crea le voci di bilancio di default se la collezione è vuota."""
+    if await db.voci_bilancio.count_documents({}) > 0:
+        return
+    costi = [
+        "Stipendi", "Contributi / INPS", "Affitto", "Utenze", "Marketing",
+        "Consulenze", "Tasse e imposte", "Software / Gestionali", "Cancelleria",
+        "Carburante / Trasferte", "Altro costo",
+    ]
+    ricavi = ["Consulenze attive", "Altro ricavo"]
+    for i, nome in enumerate(costi):
+        await db.voci_bilancio.insert_one(VoceBilancio(nome=nome, tipo="costo", ordine=i + 1).model_dump())
+    for i, nome in enumerate(ricavi):
+        await db.voci_bilancio.insert_one(VoceBilancio(nome=nome, tipo="ricavo", ordine=i + 1).model_dump())
 
 
 async def _seed_conti_deposito_estesi() -> None:
