@@ -41,12 +41,24 @@ Agente assicurativo italiano + collaboratori + dipendenti + clienti.
 - **Automotive**: token OK, richiede "Codice Cliente" configurato lato account (402 attualmente).
 - **Imprese/Company**: 406 "API not enabled" → richiede attivazione prodotto sulla console.
 
+## Implementato — Sessione 04/08 (fork)
+
+### ✅ Migrazione "Tipi pagamento" → Conti / Banche (conti_cassa)
+- **Dati**: movimenti dei conti legacy `CONTANTI BPER` (81), `BONIFICO` (41), `PayPal/Online` (1) migrati su **BPER Sondrio** (ora 150 mov); duplicati `CONTANTI` e `PAGAMENTI IN DIREZIONE` eliminati (script: `/app/memory/migrate_conti_2026-08-04.py`).
+- **Backend**: `shared.resolve_conto_cassa` risolve il conto per NOME (case-insensitive) → fallback label legacy `tipi_pagamento` → mezzi_pagamento → primo attivo. Seed legacy `_seed_tipi_pagamento`/`_seed_conti_deposito_estesi` rimossi dallo startup. Validazione `nome` obbligatorio su POST/PUT conti-cassa. Fix `premio_totale` → `premio_lordo` in POST /polizze (server.py:2545).
+- **Frontend**: `SelectTipoPagamento` + `useTipiPagamento` ora elencano i conti_cassa attivi (value = nome conto, filtrati nascondi_prima_nota e nomi vuoti). Librerie: tab "Conti / Banche" punta a `/librerie/conti-cassa` (ContoForm), tab "Tipi pagamento" rimosso, BancaForm/TipoPagamentoForm eliminati. `Contabilita.jsx` NuovoMovimentoDialog deriva conto_cassa_id direttamente dal conto scelto.
+- **Multi-tenant**: nuovi tenant ricevono 4 conti default alla creazione (super_admin.create_agenzia); tenant esistenti senza conti seedati (demo jacopo incluso).
+- **Testing**: testing_agent iter_39 — backend 11/11 PASS (incasso per nome conto, Pagamento in Direzione is_direzione=true senza cash flow banche, legacy label, multi-tenant isolation, CRUD, brogliaccio). Bug trovati e fixati (SelectItem vuoto, validazione nome, premio_totale). 9 titoli reali incassati dai test ripristinati a `da_incassare` con i relativi movimenti rimossi.
+- **NB**: collezioni `tipi_pagamento` e `banche` restano in DB solo come legacy (nessuna UI, endpoint /librerie/banche e /librerie/tipi-pagamento ancora esposti per retrocompatibilità).
+
 ## Backlog priorità
 
 ### P0 — Prossime sessioni
 - Fix widget Documenti Mancanti: dropdown "Tutti i collaboratori" + bottone "📎 Allega" inline + campo Note/Sollecito.
 - RCA sostituzione: stessa targa eredita libretto | targa diversa richiede libretto+atto vendita mancanti.
 - Modulo Asset/Patrimonio Cliente: mappa Leaflet + geocoding + PDF reporting.
+- Avatar auto-crop bypass: upload CI da "Sostituisci Documento" non passa per pipeline OCR volto.
+- Setup Iniziale: aggiungere categorie `setup_iniziale_*` a MovimentoCategoria (db_models.py).
 
 ### P1
 - Tool call ReAct multi-step per Copilot (auto-follow-up query concatenate).
