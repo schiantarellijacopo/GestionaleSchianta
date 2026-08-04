@@ -52,7 +52,7 @@ function loadVisible(key, defaultAllVisible) {
     return defaultAllVisible;
 }
 
-export default function BrogliaccioTab() {
+export default function BrogliaccioTab({ refreshKey }) {
     const [data, setData] = useState(today());
     const [b, setB] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -77,7 +77,7 @@ export default function BrogliaccioTab() {
     const load = () => {
         api.get("/contabilita/brogliaccio", { params: { data } }).then((r) => setB(r.data));
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [data]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [data, refreshKey]);
     useEffect(() => {
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setContiCassa(r.data || []));
     }, []);

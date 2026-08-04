@@ -85,7 +85,7 @@ function KpiCard({ k, onClick }) {
     );
 }
 
-export default function KpiBar({ sezione, title, description }) {
+export default function KpiBar({ sezione, title, description, refreshKey }) {
     const navigate = useNavigate();
     const [data, setData] = useState(null);
     const [open, setOpen] = useState(false);
@@ -98,7 +98,7 @@ export default function KpiBar({ sezione, title, description }) {
             // silent: KPI section è informativa, no toast invasivo
         }
     };
-    useEffect(() => { load(); }, [sezione]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [sezione, refreshKey]);
 
     if (!data) return null;
     const allKpi = [...(data.default || []), ...(data.custom || [])];

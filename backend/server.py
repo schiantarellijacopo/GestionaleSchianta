@@ -4600,6 +4600,10 @@ async def create_movimento(body: dict, user=Depends(require_user("admin", "colla
     # Lock: blocco inserimento in giornata di Prima Nota chiusa.
     await assert_giornata_aperta(body.get("data_movimento"), azione="inserire un movimento nel giorno")
     obj = MovimentoContabile(**body)
+    # Risolvi il conto dal tipo pagamento se non fornito (i saldi conti/liquidità
+    # si muovono solo se il movimento è agganciato a un conto_cassa_id).
+    if not obj.conto_cassa_id and not obj.is_direzione and obj.mezzo_pagamento:
+        obj.conto_cassa_id = await _resolve_conto_cassa(obj.mezzo_pagamento, fallback_any=False)
     await db.movimenti.insert_one(obj.model_dump())
     await log_attivita(user, "create", "movimento", obj.id, f"€{obj.importo} {obj.descrizione}")
     return obj.model_dump()
@@ -4671,6 +4675,11 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
     if cur and cur.get("chiusura_id"):
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per modificare")
     body["updated_at"] = _now_iso()
+    # Se cambia il tipo pagamento senza indicare il conto, riallinea il conto.
+    if body.get("mezzo_pagamento") and not body.get("conto_cassa_id"):
+        rc = await _resolve_conto_cassa(body["mezzo_pagamento"], fallback_any=False)
+        if rc:
+            body["conto_cassa_id"] = rc
     res = await db.movimenti.update_one({"id": mid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Movimento non trovato")

@@ -303,15 +303,15 @@ async def _stats_prima_nota(scope_filter: dict) -> list[dict]:
     today = datetime.now()
     first_day = today.replace(day=1).strftime("%Y-%m-%d")
     pipeline = [
-        {"$match": {"data": {"$gte": first_day}, **scope_filter}},
+        {"$match": {"data_movimento": {"$gte": first_day}, **scope_filter}},
         {"$group": {
             "_id": None,
-            "entrate": {"$sum": {"$cond": [{"$gt": ["$importo", 0]}, "$importo", 0]}},
-            "uscite": {"$sum": {"$cond": [{"$lt": ["$importo", 0]}, "$importo", 0]}},
+            "entrate": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+            "uscite": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}},
             "n": {"$sum": 1},
         }},
     ]
-    r = await db.movimenti_contabili.aggregate(pipeline).to_list(1)
+    r = await db.movimenti.aggregate(pipeline).to_list(1)
     r = r[0] if r else {"entrate": 0, "uscite": 0, "n": 0}
     entrate = _eur(r["entrate"])
     uscite = _eur(abs(r["uscite"]))
@@ -346,7 +346,7 @@ async def _resolve_custom_kpi(custom: dict) -> dict:
     params = custom.get("filtro_params") or {}
     collection_map = {
         "polizze": db.polizze, "titoli": db.titoli, "sinistri": db.sinistri,
-        "avvisi": db.titoli, "prima_nota": db.movimenti_contabili,
+        "avvisi": db.titoli, "prima_nota": db.movimenti,
     }
     coll = collection_map.get(sezione)
     if coll is None:

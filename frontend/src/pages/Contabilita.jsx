@@ -30,6 +30,7 @@ export default function Contabilita() {
     const [open, setOpen] = useState(false);
     const [giroOpen, setGiroOpen] = useState(false);
     const [conti, setConti] = useState([]);
+    const [refreshTick, setRefreshTick] = useState(0);
 
     const load = () => {
         const params = {};
@@ -60,7 +61,7 @@ export default function Contabilita() {
                                     <ArrowLeftRight size={16} className="mr-1" /> Giroconto
                                 </Button>
                             </DialogTrigger>
-                            <GirocontoDialog conti={conti} onClose={() => { setGiroOpen(false); load(); }} />
+                            <GirocontoDialog conti={conti} onClose={() => { setGiroOpen(false); load(); setRefreshTick((t) => t + 1); }} />
                         </Dialog>
                         <Dialog open={open} onOpenChange={setOpen}>
                             <DialogTrigger asChild>
@@ -68,13 +69,13 @@ export default function Contabilita() {
                                     <Plus size={16} className="mr-1" /> Nuovo movimento
                                 </Button>
                             </DialogTrigger>
-                            <NuovoMovimentoDialog anagrafiche={anagrafiche} onClose={() => { setOpen(false); load(); }} />
+                            <NuovoMovimentoDialog anagrafiche={anagrafiche} onClose={() => { setOpen(false); load(); setRefreshTick((t) => t + 1); }} />
                         </Dialog>
                     </div>
                 }
             />
 
-            <KpiBar sezione="prima_nota" />
+            <KpiBar sezione="prima_nota" refreshKey={refreshTick} />
 
             <Tabs defaultValue="brogliaccio">
                 <TabsList className="bg-slate-100">
@@ -86,7 +87,7 @@ export default function Contabilita() {
                 </TabsList>
 
                 <TabsContent value="brogliaccio">
-                    <BrogliaccioTab />
+                    <BrogliaccioTab refreshKey={refreshTick} />
                 </TabsContent>
 
                 <TabsContent value="storico">
