@@ -673,6 +673,11 @@ class Banca(BaseDoc):
     referente: Optional[str] = None
     note: Optional[str] = None
     attiva: bool = True
+    # Flag: se True, questa "banca" è il conto virtuale usato per gli incassi in
+    # direzione (pagamento in direzione compagnia). Utile per raggruppare in Prima
+    # Nota tutti i titoli pagati direttamente in direzione senza mescolarli alle
+    # banche reali.
+    is_incassi_direzione: bool = False
 
 
 class ContoCassa(BaseDoc):

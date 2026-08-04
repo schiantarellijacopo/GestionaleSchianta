@@ -143,13 +143,18 @@ function ListaSezione({ section, list, onEdit, onDelete }) {
     if (section.key === "banche") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>ABI</th><th>Referente</th><th>Note</th><th></th></tr></thead>
+                <thead><tr><th>Nome</th><th>ABI</th><th>Referente</th><th className="text-center" title="Conto usato per incassi in direzione compagnia">Direzione</th><th>Note</th><th></th></tr></thead>
                 <tbody>
                     {list.map((b) => (
                         <tr key={b.id}>
                             <td className="font-medium">{b.nome}</td>
                             <td className="num text-xs">{b.codice_abi || "-"}</td>
                             <td>{b.referente || "-"}</td>
+                            <td className="text-center">
+                                {b.is_incassi_direzione
+                                    ? <span className="badge badge-info" title="Contabilizza titoli pagati in direzione">Direzione ✓</span>
+                                    : <span className="text-slate-300 text-xs">—</span>}
+                            </td>
                             <td className="text-xs text-slate-500">{b.note || ""}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(b)} onDelete={() => onDelete(b.id)} label="banca" />
@@ -516,15 +521,24 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
 
 function BancaForm({ section, editing, onClose }) {
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", codice_abi: "", referente: "", note: "", attiva: true }}
+        defaults={{ nome: "", codice_abi: "", referente: "", note: "", attiva: true, is_incassi_direzione: false }}
         fields={(f, set) => (
             <>
-                <div><Label>Nome banca *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
+                <div><Label>Nome banca *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="banca-nome" /></div>
                 <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Codice ABI</Label><Input value={f.codice_abi || ""} onChange={(e) => set("codice_abi", e.target.value)} /></div>
-                    <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} /></div>
+                    <div><Label>Codice ABI</Label><Input value={f.codice_abi || ""} onChange={(e) => set("codice_abi", e.target.value)} data-testid="banca-abi" /></div>
+                    <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} data-testid="banca-ref" /></div>
                 </div>
-                <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+                <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} data-testid="banca-note" /></div>
+                <label className="flex items-center gap-2 mt-2 p-3 bg-sky-50 border border-sky-200 rounded cursor-pointer hover:bg-sky-100 transition-colors">
+                    <input type="checkbox" checked={!!f.is_incassi_direzione}
+                        onChange={(e) => set("is_incassi_direzione", e.target.checked)}
+                        data-testid="banca-direzione" className="w-4 h-4" />
+                    <div className="flex-1">
+                        <div className="text-sm font-medium text-sky-900">🏢 Conto Incassi Direzione</div>
+                        <div className="text-xs text-sky-700">Spunta se questa "banca" è il conto virtuale usato per contabilizzare i titoli pagati dal cliente direttamente in compagnia. I movimenti qui saranno trattati come entrata fittizia (nessun cash flow reale) e mostrati nella colonna dedicata "Incassi Direzione" della Prima Nota.</div>
+                    </div>
+                </label>
             </>
         )}
     />;
