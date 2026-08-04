@@ -17,8 +17,7 @@ import { toast } from "sonner";
 
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
-    { key: "banche", label: "Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
-    { key: "conti-cassa", label: "Conti deposito", icon: <Wallet size={14} />, endpoint: "/librerie/conti-cassa" },
+    { key: "banche", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/banche" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
@@ -141,15 +140,17 @@ function Sezione({ section }) {
 
 function ListaSezione({ section, list, onEdit, onDelete }) {
     if (section.key === "banche") {
+        const fmtEurLocal = (n) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(Number(n) || 0);
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>ABI</th><th>Referente</th><th className="text-center" title="Conto usato per incassi in direzione compagnia">Direzione</th><th>Note</th><th></th></tr></thead>
+                <thead><tr><th>Nome</th><th>ABI</th><th>IBAN</th><th className="text-right">Saldo iniziale</th><th className="text-center" title="Conto usato per incassi in direzione compagnia">Direzione</th><th>Note</th><th></th></tr></thead>
                 <tbody>
                     {list.map((b) => (
                         <tr key={b.id}>
                             <td className="font-medium">{b.nome}</td>
                             <td className="num text-xs">{b.codice_abi || "-"}</td>
-                            <td>{b.referente || "-"}</td>
+                            <td className="num text-xs">{b.iban_agenzia || "-"}</td>
+                            <td className="num text-right">{fmtEurLocal(b.saldo_iniziale || 0)}</td>
                             <td className="text-center">
                                 {b.is_incassi_direzione
                                     ? <span className="badge badge-info" title="Contabilizza titoli pagati in direzione">Direzione ✓</span>
@@ -521,7 +522,7 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
 
 function BancaForm({ section, editing, onClose }) {
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", codice_abi: "", referente: "", note: "", attiva: true, is_incassi_direzione: false }}
+        defaults={{ nome: "", codice_abi: "", iban_agenzia: "", referente: "", note: "", saldo_iniziale: 0, attiva: true, is_incassi_direzione: false }}
         fields={(f, set) => (
             <>
                 <div><Label>Nome banca *</Label><Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} data-testid="banca-nome" /></div>
@@ -529,6 +530,8 @@ function BancaForm({ section, editing, onClose }) {
                     <div><Label>Codice ABI</Label><Input value={f.codice_abi || ""} onChange={(e) => set("codice_abi", e.target.value)} data-testid="banca-abi" /></div>
                     <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} data-testid="banca-ref" /></div>
                 </div>
+                <div><Label>IBAN agenzia</Label><Input value={f.iban_agenzia || ""} onChange={(e) => set("iban_agenzia", e.target.value.toUpperCase())} placeholder="IT60 X054 2811 1010..." data-testid="banca-iban" /></div>
+                <div><Label>Saldo iniziale (€)</Label><Input type="number" step="0.01" value={f.saldo_iniziale || 0} onChange={(e) => set("saldo_iniziale", parseFloat(e.target.value) || 0)} data-testid="banca-saldo" /></div>
                 <div><Label>Note</Label><Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} data-testid="banca-note" /></div>
                 <label className="flex items-center gap-2 mt-2 p-3 bg-sky-50 border border-sky-200 rounded cursor-pointer hover:bg-sky-100 transition-colors">
                     <input type="checkbox" checked={!!f.is_incassi_direzione}
@@ -536,7 +539,7 @@ function BancaForm({ section, editing, onClose }) {
                         data-testid="banca-direzione" className="w-4 h-4" />
                     <div className="flex-1">
                         <div className="text-sm font-medium text-sky-900">🏢 Conto Incassi Direzione</div>
-                        <div className="text-xs text-sky-700">Spunta se questa "banca" è il conto virtuale usato per contabilizzare i titoli pagati dal cliente direttamente in compagnia. I movimenti qui saranno trattati come entrata fittizia (nessun cash flow reale) e mostrati nella colonna dedicata "Incassi Direzione" della Prima Nota.</div>
+                        <div className="text-xs text-sky-700">Conto virtuale per i titoli pagati direttamente in compagnia (entrata fittizia).</div>
                     </div>
                 </label>
             </>
