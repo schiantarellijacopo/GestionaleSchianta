@@ -542,7 +542,7 @@ class Sinistro(BaseDoc):
 # =============== CONTABILITA ===============
 MovimentoTipo = Literal["entrata", "uscita"]
 MovimentoCategoria = Literal[
-    "incasso_premio", "pagamento_compagnia", "provvigioni",
+    "incasso_premio", "incasso_premio_direzione", "pagamento_compagnia", "provvigioni",
     "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto",
     "sconto_cliente", "altro",
 ]
@@ -571,6 +571,10 @@ class MovimentoContabile(BaseDoc):
     quota_credito: float = 0.0  # quando il movimento rappresenta una rata a credito
     quota_spesa: float = 0.0    # spese specifiche (es. bolli, oneri)
     quota_sconto: float = 0.0   # eventuale sconto applicato
+    # Flag: pagamento effettuato dal cliente direttamente in compagnia.
+    # I movimenti con is_direzione=True NON vanno sommati nelle colonne banche/cassa
+    # della Prima Nota; contano solo per le provvigioni maturate.
+    is_direzione: bool = False
     note: Optional[str] = None
     # chiusura giornaliera prima nota
     chiusura_id: Optional[str] = None

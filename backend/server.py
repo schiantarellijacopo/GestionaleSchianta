@@ -3438,6 +3438,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     # Lock: non si può incassare in una giornata di Prima Nota chiusa.
     await assert_giornata_aperta(data_incasso, azione="incassare nel giorno (Prima Nota chiusa)")
     mezzo = body.get("mezzo_pagamento") or "bonifico"
+    # Rileva "pagamento in direzione" (case-insensitive) — cliente paga direttamente in compagnia
+    is_direzione = "direzione" in (mezzo or "").lower()
     conto_id = body.get("conto_cassa_id")
     if not conto_id:
         conto_id = await _resolve_conto_cassa(mezzo)
@@ -3462,6 +3464,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             "importo_pagato": importo_pagato,
             "sconto_applicato": sconto_applicato,
             "motivo_sconto": motivo_sconto if sconto_applicato > 0 else None,
+            "pagamento_in_direzione": is_direzione,
             "updated_at": _now_iso(),
         }},
     )
@@ -3495,19 +3498,29 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
-        categoria="incasso_premio",
-        importo=importo_pagato,
-        descrizione=f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}" + nota_residuo,
+        categoria="incasso_premio_direzione" if is_direzione else "incasso_premio",
+        importo=0.0 if is_direzione else importo_pagato,
+        descrizione=(
+            f"Incasso IN DIREZIONE (fittizio) titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
+            if is_direzione else
+            f"Incasso titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
+        ) + nota_residuo,
         polizza_id=titolo["polizza_id"],
         titolo_id=tid,
         anagrafica_id=pol.get("contraente_id") if pol else None,
         compagnia_id=pol.get("compagnia_id") if pol else None,
-        conto_cassa_id=conto_id,
+        conto_cassa_id=None if is_direzione else conto_id,
         mezzo_pagamento=mezzo,
         provvigioni=titolo.get("provvigioni", 0.0),
-        quota_sconto=sconto_applicato,
-        note=(f"Sconto applicato: €{sconto_applicato:.2f}"
-              + (f" — {motivo_sconto}" if motivo_sconto else "")) if sconto_applicato > 0 else None,
+        quota_sconto=0.0 if is_direzione else sconto_applicato,
+        is_direzione=is_direzione,
+        note=(
+            "Pagamento effettuato dal cliente direttamente in direzione compagnia. "
+            "Nessun movimento di cassa/banca — solo provvigioni maturate."
+            if is_direzione else
+            ((f"Sconto applicato: €{sconto_applicato:.2f}"
+              + (f" — {motivo_sconto}" if motivo_sconto else "")) if sconto_applicato > 0 else None)
+        ),
     )
     await db.movimenti.insert_one(mov_in.model_dump())
 
