@@ -221,6 +221,8 @@ async def create_conto(body: dict, user: dict = Depends(require_user("admin", "c
 
 @router.put("/librerie/conti-cassa/{cid}")
 async def update_conto(cid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    if "nome" in body and not (body.get("nome") or "").strip():
+        raise HTTPException(400, "Nome conto obbligatorio")
     body["updated_at"] = _now_iso()
     res = await db.conti_cassa.update_one({"id": cid}, {"$set": body})
     if res.matched_count == 0:

@@ -66,3 +66,13 @@ File: `/app/memory/test_credentials.md`
 - dipendente@assicura.it / Dipendente123!
 - cliente@assicura.it / Cliente123!
 - superadmin@assicura.it / Superadmin123!
+
+## Sessione 2026-08-04 — Unificazione pagamenti sotto conti_cassa (COMPLETATA)
+- Migrazione approvata dall'utente: eliminati conti legacy CONTANTI BPER (81 mov) e BONIFICO (41 mov) → BPER Sondrio; PayPal/Online eliminato; duplicati CONTANTI / PAGAMENTI IN DIREZIONE fusi in Cassa Contanti / Pagamento Direzione. Script: /app/backend/scripts/migrazione_conti_unificati.py (mezzo_pagamento normalizzati ai nomi conto; codici import BON/CC/SDD/SEC/giroconto intatti).
+- Dropdown pagamenti (SelectTipoPagamento + useTipiPagamento) ora attinge SOLO da /librerie/conti-cassa?attivi=true (valore = nome conto). resolve_conto_cassa risolve per nome (poi legacy tipi_pagamento, mezzi, fallback).
+- Librerie: tab "Conti / Banche" unificata su conti_cassa; tab "Tipi pagamento" rimossa; "Modalità pagamento" mantenuta.
+- REGOLA UTENTE implementata: conti/banche/tipi/mezzi usati nello storico NON eliminabili (400 con messaggio) → solo archiviazione (pulsante archivia/riattiva in tabella, data-testid conto-toggle-attivo-{id}). Helper _usi_pagamento in routes/librerie.py.
+- Fix: validazione nome conto obbligatorio (POST/PUT), filtro FE conti senza nome, pdf_brogliaccio._calcola_larghezze clamp (chiusura-giorno 500 con >12 conti risolto — bug critico iter38), POST /polizze premio_totale→premio_lordo, filtri titolo_id/polizza_id su GET /contabilita/movimenti.
+- Test: iteration_39.json — backend 11/11 PASS, frontend OK; fix post-report verificati via curl.
+- Nota: is_direzione resta rilevato da "direzione" nel nome conto scelto ("Pagamento Direzione"); NON rinominare quel conto.
+- Fuori scope (LOW, non fatto): date picker nativo in NuovoMovimentoDialog.

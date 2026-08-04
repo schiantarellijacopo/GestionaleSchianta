@@ -12,7 +12,9 @@ const _fetch = () => {
     if (_inflight) return _inflight;
     _inflight = api.get("/librerie/conti-cassa", { params: { attivi: true } })
         .then((r) => {
-            _cache = (r.data || []).map((c) => ({ id: c.id, label: c.nome, tipo: c.tipo }));
+            _cache = (r.data || [])
+                .filter((c) => !c.nascondi_prima_nota && (c.nome || "").trim())
+                .map((c) => ({ ...c, label: c.nome, conto_id: c.id }));
             _subs.forEach((cb) => cb(_cache));
             return _cache;
         })

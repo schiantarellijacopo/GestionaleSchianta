@@ -2542,7 +2542,7 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
         "ramo": obj.ramo,
         "data_effetto": obj.effetto,
         "scadenza": obj.scadenza,
-        "premio_totale": obj.premio_totale,
+        "premio_totale": obj.premio_lordo,
         "link": f"/polizze/{obj.id}",
     })
     return obj.model_dump()
@@ -4076,6 +4076,8 @@ async def list_movimenti(
     al: Optional[str] = None,
     tipo: Optional[str] = None,
     anagrafica_id: Optional[str] = None,
+    titolo_id: Optional[str] = None,
+    polizza_id: Optional[str] = None,
     limit: int = 50000,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
@@ -4084,6 +4086,10 @@ async def list_movimenti(
         flt["tipo"] = tipo
     if anagrafica_id:
         flt["anagrafica_id"] = anagrafica_id
+    if titolo_id:
+        flt["titolo_id"] = titolo_id
+    if polizza_id:
+        flt["polizza_id"] = polizza_id
     if dal or al:
         cond = {}
         if dal:
