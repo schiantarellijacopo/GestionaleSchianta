@@ -511,6 +511,10 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
     tipi_pagamento/compagnie/collaboratori), gli utenti admin del tenant
     (se mantieni_admin=True).
 
+    SAFETY NET: prima di cancellare crea un dump JSON gzip di tutte le
+    collezioni impattate, salvato in /app/backups/{tid}_{timestamp}.json.gz.
+    Scaricabile via GET /api/super-admin/backups/{filename}.
+
     Richiede la password custode (server-side) per prevenire disastri.
     """
     _ensure_super_admin(user)
@@ -528,7 +532,6 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant non trovato")
 
-    # Doppio-check opzionale: se il chiamante fornisce la ragione sociale deve combaciare
     if body.conferma_ragione_sociale:
         if body.conferma_ragione_sociale.strip().lower() != (tenant.get("ragione_sociale") or "").strip().lower():
             raise HTTPException(
@@ -536,7 +539,68 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
                 detail="Ragione sociale di conferma non corrisponde",
             )
 
-    # Esegui delete su tutte le collezioni operative del tenant
+    # ================================================================
+    # 🛟 BACKUP JSON GZIP prima del reset
+    # ================================================================
+    import gzip
+    import json as _json
+    import os as _os
+    from datetime import datetime as _dt
+    from bson import ObjectId
+
+    def _json_default(o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, (_dt,)):
+            return o.isoformat()
+        return str(o)
+
+    backup_dir = "/app/backups"
+    _os.makedirs(backup_dir, exist_ok=True)
+    timestamp = _dt.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() else "_" for c in (tenant.get("ragione_sociale") or "tenant"))[:40]
+    backup_filename = f"reset_{safe_name}_{tid[:8]}_{timestamp}.json.gz"
+    backup_path = _os.path.join(backup_dir, backup_filename)
+    backup_data: dict = {
+        "meta": {
+            "tenant_id": tid,
+            "ragione_sociale": tenant.get("ragione_sociale"),
+            "timestamp": _now_iso(),
+            "eseguito_da": user.get("email") or user.get("id"),
+            "mantieni_admin": body.mantieni_admin,
+        },
+        "collections": {},
+    }
+    for coll_name in _RESET_COLLECTIONS:
+        try:
+            docs = await raw_db[coll_name].find({"agenzia_tenant_id": tid}, {"_id": 0}).to_list(100000)
+            if docs:
+                backup_data["collections"][coll_name] = docs
+        except Exception:
+            pass
+    # Aggiungi anche gli utenti che stiamo per cancellare
+    if body.mantieni_admin:
+        users_filt = {"agenzia_tenant_id": tid, "role": {"$nin": ["admin", "super_admin"]}}
+    else:
+        users_filt = {"agenzia_tenant_id": tid, "role": {"$ne": "super_admin"}}
+    users_bak = await raw_db.users.find(users_filt, {"_id": 0}).to_list(10000)
+    if users_bak:
+        backup_data["collections"]["users_deleted"] = users_bak
+    # Scrivi gzipped JSON
+    try:
+        with gzip.open(backup_path, "wt", encoding="utf-8") as gz:
+            _json.dump(backup_data, gz, ensure_ascii=False, default=_json_default)
+        backup_size_kb = round(_os.path.getsize(backup_path) / 1024, 1)
+    except Exception as e:
+        # Se il backup fallisce ABORT — non procedere col reset
+        raise HTTPException(
+            status_code=500,
+            detail=f"Backup fallito, reset annullato: {e}",
+        )
+
+    # ================================================================
+    # DELETE
+    # ================================================================
     dettaglio: dict[str, int] = {}
     for coll_name in _RESET_COLLECTIONS:
         try:
@@ -546,35 +610,24 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
         except Exception as e:
             dettaglio[f"{coll_name}_err"] = str(e)[:100]
 
-    # Utenti: mantieni solo gli admin (o cancella tutti se mantieni_admin=False)
-    if body.mantieni_admin:
-        # elimina utenti non-admin
-        res_u = await raw_db.users.delete_many({
-            "agenzia_tenant_id": tid,
-            "role": {"$nin": ["admin", "super_admin"]},
-        })
-    else:
-        res_u = await raw_db.users.delete_many({
-            "agenzia_tenant_id": tid,
-            "role": {"$ne": "super_admin"},  # mai cancellare super_admin
-        })
+    res_u = await raw_db.users.delete_many(users_filt)
     if res_u.deleted_count > 0:
         dettaglio["users"] = res_u.deleted_count
 
-    # Marca il tenant come "resettato"
     await raw_db.tenants.update_one(
         {"id": tid},
         {"$set": {
             "ultimo_reset_dati": _now_iso(),
             "reset_effettuato_da": user.get("id"),
+            "ultimo_backup_reset": backup_filename,
             "updated_at": _now_iso(),
         }},
     )
 
     await log_action(user=user, action_type="TENANT_DATA_RESET",
                      target_agency_id=tid, target_agency_name=tenant.get("ragione_sociale"),
-                     details=f"Reset dati: {sum(dettaglio.values())} record eliminati. "
-                             f"mantieni_admin={body.mantieni_admin}",
+                     details=f"Reset dati: {sum(v for v in dettaglio.values() if isinstance(v, int))} record eliminati. "
+                             f"Backup: {backup_filename} ({backup_size_kb} KB)",
                      request=request)
 
     return {
@@ -582,7 +635,49 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
         "tenant": tenant.get("ragione_sociale"),
         "totale_record_eliminati": sum(v for v in dettaglio.values() if isinstance(v, int)),
         "dettaglio": dettaglio,
+        "backup": {
+            "filename": backup_filename,
+            "size_kb": backup_size_kb,
+            "download_url": f"/api/super-admin/backups/{backup_filename}",
+        },
     }
+
+
+@router.get("/backups")
+async def list_backups(user=Depends(require_user("admin"))) -> list[dict]:
+    """Lista tutti i backup di reset disponibili sul server."""
+    _ensure_super_admin(user)
+    import os as _os
+    backup_dir = "/app/backups"
+    if not _os.path.exists(backup_dir):
+        return []
+    files = []
+    for fn in sorted(_os.listdir(backup_dir), reverse=True):
+        if fn.endswith(".json.gz"):
+            fp = _os.path.join(backup_dir, fn)
+            st = _os.stat(fp)
+            files.append({
+                "filename": fn,
+                "size_kb": round(st.st_size / 1024, 1),
+                "created_at": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                "download_url": f"/api/super-admin/backups/{fn}",
+            })
+    return files
+
+
+@router.get("/backups/{filename}")
+async def download_backup(filename: str, user=Depends(require_user("admin"))):
+    """Scarica un backup gzipped."""
+    from fastapi.responses import FileResponse
+    _ensure_super_admin(user)
+    import os as _os
+    # Guardia path traversal
+    if "/" in filename or ".." in filename or not filename.endswith(".json.gz"):
+        raise HTTPException(status_code=400, detail="Nome file non valido")
+    fp = _os.path.join("/app/backups", filename)
+    if not _os.path.exists(fp):
+        raise HTTPException(status_code=404, detail="Backup non trovato")
+    return FileResponse(fp, media_type="application/gzip", filename=filename)
 
 
 # ---------------------------------------------------------------------------
