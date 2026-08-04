@@ -571,6 +571,7 @@ class MovimentoContabile(BaseDoc):
     quota_credito: float = 0.0  # quando il movimento rappresenta una rata a credito
     quota_spesa: float = 0.0    # spese specifiche (es. bolli, oneri)
     quota_sconto: float = 0.0   # eventuale sconto applicato
+    ritenuta_acconto: float = 0.0   # ritenuta d'acconto trattenuta (solo per uscite provv. collab)
     # Flag: pagamento effettuato dal cliente direttamente in compagnia.
     # I movimenti con is_direzione=True NON vanno sommati nelle colonne banche/cassa
     # della Prima Nota; contano solo per le provvigioni maturate.

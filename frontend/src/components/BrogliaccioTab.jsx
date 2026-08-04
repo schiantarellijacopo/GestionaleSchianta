@@ -9,12 +9,16 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Loading } from "@/components/Shared";
-import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle, Pencil, Trash2 } from "lucide-react";
+import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle, Pencil, Trash2, Settings2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import {
     Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
+import {
+    Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -23,6 +27,30 @@ const fmt = (n, withZero = false) => {
     if (!withZero && n === 0) return "";
     return fmtEur(n);
 };
+
+// Colonne fisse configurabili (visibilità gestita da localStorage)
+const FIXED_COLS = [
+    { key: "totale", label: "Totale", default: true },
+    { key: "provv", label: "Provvigioni", default: true },
+    { key: "saldo", label: "Saldo", default: true },
+    { key: "crediti", label: "Sospesi", default: true },
+    { key: "ritenuta", label: "Ritenuta", default: true },
+    { key: "rappel", label: "Rappel", default: true },
+    { key: "rimesse", label: "Rimesse E/C", default: true },
+    { key: "direzione", label: "Incassi Direzione", default: true },
+    { key: "spese", label: "Spese", default: true },
+];
+
+const LS_KEY_COLS = "brogliaccio_cols_v2";
+const LS_KEY_BANKS = "brogliaccio_banks_v2";
+
+function loadVisible(key, defaultAllVisible) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (raw) return JSON.parse(raw);
+    } catch { /* noop */ }
+    return defaultAllVisible;
+}
 
 export default function BrogliaccioTab() {
     const [data, setData] = useState(today());
@@ -35,6 +63,16 @@ export default function BrogliaccioTab() {
     const [storico, setStorico] = useState([]);
     const [editMov, setEditMov] = useState(null);  // movimento aperto in modifica
     const [contiCassa, setContiCassa] = useState([]);
+    // Visibilità colonne (persistente localStorage)
+    const [visibleCols, setVisibleCols] = useState(() =>
+        loadVisible(LS_KEY_COLS,
+            Object.fromEntries(FIXED_COLS.map((c) => [c.key, c.default]))));
+    const [visibleBanks, setVisibleBanks] = useState(() =>
+        loadVisible(LS_KEY_BANKS, {}));
+
+    // Persist
+    useEffect(() => { try { localStorage.setItem(LS_KEY_COLS, JSON.stringify(visibleCols)); } catch { /* noop */ } }, [visibleCols]);
+    useEffect(() => { try { localStorage.setItem(LS_KEY_BANKS, JSON.stringify(visibleBanks)); } catch { /* noop */ } }, [visibleBanks]);
 
     const load = () => {
         api.get("/contabilita/brogliaccio", { params: { data } }).then((r) => setB(r.data));
@@ -115,6 +153,15 @@ export default function BrogliaccioTab() {
     if (!b) return <div className="mt-4"><Loading /></div>;
 
     const conti = b.conti_cassa || [];
+    // Inizializza banks visibility (default: tutte visibili)
+    const banksState = { ...visibleBanks };
+    conti.forEach((c) => {
+        if (banksState[c.id] === undefined) banksState[c.id] = true;
+    });
+    const isColVisible = (key) => visibleCols[key] !== false;
+    const isBankVisible = (id) => banksState[id] !== false;
+    const visibleFixed = FIXED_COLS.filter((c) => isColVisible(c.key));
+    const visibleConti = conti.filter((c) => isBankVisible(c.id));
 
     return (
         <div className="mt-4 space-y-4" data-testid="brogliaccio-tab">
@@ -176,6 +223,46 @@ export default function BrogliaccioTab() {
                         <Button variant="outline" onClick={showStorico} data-testid="brogliaccio-storico">
                             <History size={14} className="mr-1" /> Storico
                         </Button>
+
+                        {/* Column toggle */}
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline" data-testid="brogliaccio-cols">
+                                    <Settings2 size={14} className="mr-1" /> Colonne
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-64 max-h-[70vh] overflow-y-auto" align="end">
+                                <div className="space-y-1">
+                                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1 flex items-center gap-1">
+                                        <Eye size={11} /> Colonne fisse
+                                    </div>
+                                    {FIXED_COLS.map((c) => (
+                                        <label key={c.key} className="flex items-center gap-2 text-sm px-1 py-1 rounded hover:bg-slate-50 cursor-pointer">
+                                            <Checkbox
+                                                checked={isColVisible(c.key)}
+                                                onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, [c.key]: v === true }))}
+                                                data-testid={`col-toggle-${c.key}`}
+                                            />
+                                            {c.label}
+                                        </label>
+                                    ))}
+                                    <div className="border-t border-slate-200 my-2" />
+                                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1 flex items-center gap-1">
+                                        <EyeOff size={11} /> Banche / Conti cassa
+                                    </div>
+                                    {conti.map((c) => (
+                                        <label key={c.id} className="flex items-center gap-2 text-sm px-1 py-1 rounded hover:bg-slate-50 cursor-pointer">
+                                            <Checkbox
+                                                checked={isBankVisible(c.id)}
+                                                onCheckedChange={(v) => setVisibleBanks((prev) => ({ ...prev, [c.id]: v === true }))}
+                                                data-testid={`bank-toggle-${c.id}`}
+                                            />
+                                            <span className="truncate">{c.nome}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </PopoverContent>
+                        </Popover>
                     </div>
                 </div>
             </Card>
@@ -192,14 +279,19 @@ export default function BrogliaccioTab() {
                         <thead>
                             <tr className="bg-slate-900 text-white">
                                 <th className="text-left px-2 py-2 sticky left-0 top-0 z-40 bg-slate-900 border-r-2 border-slate-500 min-w-[220px] w-[220px]">Descrizione</th>
-                                <th className="text-right px-2 py-2 sticky left-[220px] top-0 z-40 bg-slate-900 border-r-2 border-slate-500 min-w-[110px] w-[110px]">Totale</th>
-                                <th className="text-right px-2 py-2 sticky left-[330px] top-0 z-40 bg-slate-900 border-r-4 border-amber-400 min-w-[100px] w-[100px]">Provv</th>
-                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Saldo</th>
-                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Sospesi</th>
-                                <th className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">Spese</th>
-                                {conti.map((c) => (
+                                {visibleFixed.map((col, i) => (
+                                    <th key={col.key}
+                                        className={`text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 whitespace-nowrap ${
+                                            i === 0 ? "sticky left-[220px] z-40 border-r-4 border-amber-400 min-w-[110px] w-[110px]"
+                                                    : "border-r-2 border-slate-500"
+                                        }`}
+                                        data-testid={`brog-th-${col.key}`}>
+                                        {col.label}
+                                    </th>
+                                ))}
+                                {visibleConti.map((c) => (
                                     <th key={c.id} className="text-right px-2 py-2 sticky top-0 z-30 bg-slate-900 whitespace-nowrap border-r-2 border-slate-500" title={c.nome}>
-                                        {c.nome}
+                                        🏦 {c.nome}
                                     </th>
                                 ))}
                                 <th className="w-10 text-center px-2 py-2 sticky top-0 z-30 bg-slate-900 border-r-2 border-slate-500">All.</th>
@@ -209,11 +301,24 @@ export default function BrogliaccioTab() {
                         <tbody>
                             {b.righe.map((r, idx) => {
                                 const bgRow = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
+                                const colorFor = (key, v) => {
+                                    if (key === "totale") return v >= 0 ? "text-emerald-700" : "text-rose-700";
+                                    if (key === "provv") return "text-sky-700";
+                                    if (key === "saldo") return v < 0 ? "text-rose-700" : "";
+                                    if (key === "crediti") return v > 0 ? "text-amber-700" : v < 0 ? "text-emerald-700" : "";
+                                    if (key === "spese") return "text-rose-600";
+                                    if (key === "ritenuta") return v > 0 ? "text-purple-700" : "";
+                                    if (key === "direzione") return v > 0 ? "text-teal-700" : "";
+                                    if (key === "rappel") return v > 0 ? "text-indigo-700" : "";
+                                    if (key === "rimesse") return v > 0 ? "text-violet-700" : "";
+                                    return "";
+                                };
                                 return (
                                 <tr key={r.id} className={`${bgRow} hover:bg-sky-50/60`} data-testid={`brog-row-${r.id}`}>
                                     <td className={`px-2 py-1.5 sticky left-0 z-10 ${bgRow} border-r-2 border-slate-300`}>
                                         <div className="font-medium text-slate-800">
                                             {r.contraente || r.descrizione || "—"}
+                                            {r.is_direzione && <span className="ml-2 text-[9px] bg-teal-100 text-teal-800 px-1 py-0.5 rounded font-mono">DIREZIONE</span>}
                                         </div>
                                         <div className="text-[10px] text-slate-500 flex flex-wrap gap-x-2">
                                             {r.numero_polizza && <span className="num">N. {r.numero_polizza}</span>}
@@ -221,12 +326,19 @@ export default function BrogliaccioTab() {
                                             {!r.numero_polizza && !r.compagnia && r.contraente && r.descrizione && <span>{r.descrizione}</span>}
                                         </div>
                                     </td>
-                                    <td className={`num text-right px-2 sticky left-[220px] z-10 ${bgRow} border-r-2 border-slate-300 ${r.totale >= 0 ? "text-emerald-700" : "text-rose-700"} font-medium`}>{fmt(r.totale)}</td>
-                                    <td className={`num text-right px-2 sticky left-[330px] z-10 ${bgRow} border-r-4 border-amber-400 text-sky-700`}>{fmt(r.provv)}</td>
-                                    <td className={`num text-right px-2 border-r-2 border-slate-200 font-medium ${r.saldo < 0 ? "text-rose-700" : ""}`}>{fmt(r.saldo)}</td>
-                                    <td className={`num text-right px-2 border-r-2 border-slate-200 ${r.crediti > 0 ? "text-amber-700" : r.crediti < 0 ? "text-emerald-700" : ""}`}>{fmt(r.crediti)}</td>
-                                    <td className="num text-right px-2 border-r-2 border-slate-200 text-rose-600">{fmt(r.spese)}</td>
-                                    {conti.map((c) => {
+                                    {visibleFixed.map((col, ci) => {
+                                        const v = r[col.key];
+                                        const cls = colorFor(col.key, v);
+                                        const stickyCls = ci === 0
+                                            ? `sticky left-[220px] z-10 ${bgRow} border-r-4 border-amber-400`
+                                            : "border-r-2 border-slate-200";
+                                        return (
+                                            <td key={col.key} className={`num text-right px-2 ${stickyCls} ${cls} font-medium`}>
+                                                {fmt(v)}
+                                            </td>
+                                        );
+                                    })}
+                                    {visibleConti.map((c) => {
                                         const v = r.per_conto?.[c.id];
                                         return (
                                             <td key={c.id} className={`num text-right px-2 border-r-2 border-slate-200 ${v > 0 ? "text-emerald-600" : v < 0 ? "text-rose-600" : "text-slate-300"}`}>
@@ -272,12 +384,17 @@ export default function BrogliaccioTab() {
                             {b.totali_giornata && (
                                 <tr className="bg-amber-100 font-bold border-t-2 border-slate-900">
                                     <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">TOTALE GIORNATA</td>
-                                    <td className="num text-right px-2 sticky left-[220px] z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.totale, true)}</td>
-                                    <td className="num text-right px-2 sticky left-[330px] z-10 bg-amber-100 border-r-4 border-amber-500 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.provv, true)}</td>
-                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.saldo, true)}</td>
-                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.crediti, true)}</td>
-                                    <td className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">{fmt(b.totali_giornata.spese, true)}</td>
-                                    {conti.map((c) => (
+                                    {visibleFixed.map((col, ci) => {
+                                        const stickyCls = ci === 0
+                                            ? "sticky left-[220px] z-10 bg-amber-100 border-r-4 border-amber-500"
+                                            : "border-r-2 border-slate-400";
+                                        return (
+                                            <td key={col.key} className={`num text-right px-2 ${stickyCls} border-t-2 border-t-slate-900`}>
+                                                {fmt(b.totali_giornata[col.key], true)}
+                                            </td>
+                                        );
+                                    })}
+                                    {visibleConti.map((c) => (
                                         <td key={c.id} className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">
                                             {fmt(b.totali_giornata.per_conto?.[c.id], true)}
                                         </td>

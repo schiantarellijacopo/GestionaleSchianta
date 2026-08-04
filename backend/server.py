@@ -663,6 +663,7 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
         descrizione=f"Pagamento provvigioni a {collab.get('name')} - periodo {periodo_dal} / {periodo_al}{descr_extra}",
         conto_cassa_id=conto_id,
         mezzo_pagamento=body.get("mezzo_pagamento", "bonifico"),
+        ritenuta_acconto=ritenuta,
         note=(f"Lordo {lordo:.2f} - rit. {ritenuta:.2f} - contributi {contributi:.2f} + voci {tot_voci:.2f} = netto {netto:.2f}"),
     )
     await db.movimenti.insert_one(mov.model_dump())
@@ -4835,7 +4836,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     righe = []
     tot = {"totale": 0.0, "provv": 0.0, "saldo": 0.0,
-           "crediti": 0.0, "spese": 0.0, "sconti": 0.0, "rimesse": 0.0}
+           "crediti": 0.0, "spese": 0.0, "sconti": 0.0, "rimesse": 0.0,
+           "ritenuta": 0.0, "direzione": 0.0, "rappel": 0.0}
     per_conto_tot: dict = {c["id"]: 0.0 for c in conti}
 
     CATS_ANTICIPI = ("anticipo",)  # sospesi/anticipi
@@ -4847,10 +4849,13 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         is_entrata = (m["tipo"] == "entrata")
         importo = float(m.get("importo") or 0)
         signed = importo if is_entrata else -importo
+        is_dir = bool(m.get("is_direzione"))
+        ritenuta_riga = float(m.get("ritenuta_acconto") or 0)
 
         # default
         c_totale = 0.0; c_provv = 0.0; c_saldo = 0.0
         c_crediti = 0.0; c_spese = 0.0; c_sconti = 0.0; c_rimesse = 0.0
+        c_ritenuta = 0.0; c_direzione = 0.0; c_rappel = 0.0
 
         compagnia_riga = _compagnia_di(m)
         polizza_riga = polizze_map.get(m.get("polizza_id"))
@@ -4888,45 +4893,48 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             quota_cred = float(m.get("quota_credito") or 0)
             if quota_cred > 0:
                 c_crediti = quota_cred
+        elif is_entrata and cat == "incasso_premio_direzione":
+            # PAGAMENTO IN DIREZIONE — cliente paga direttamente in compagnia.
+            # Nessun cash flow su nostra cassa/banca. Solo provvigioni maturate.
+            provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
+            c_provv = provv_riga
+            c_direzione = provv_riga  # colonna dedicata "Incassi Direzione"
+            c_saldo = -provv_riga  # compagnia mi deve le provvigioni
+            # Non tocca TOTALE, non tocca banche
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
             c_crediti = importo
         elif is_entrata and cat == "provvigioni":
-            # Rappel (sovraprovvigione fittizia): NON in Entrate, va in Provvigioni.
+            # Rappel (sovraprovvigione fittizia): NON in Entrate, va in colonna Rappel.
             # Riduce il saldo verso la compagnia (avere fittizio).
             c_totale = 0.0
             c_provv = importo
+            c_rappel = importo
             c_saldo = -importo
         elif is_entrata and cat == "giroconto":
-            # Giroconto IN-side: NON in Entrate (è solo un trasferimento interno).
-            # Il movimento di banca è già contabilizzato nella colonna conto specifico.
             c_totale = 0.0
         elif is_entrata:
-            # Altre entrate generiche (rimborsi, voci manuali, sconti positivi):
-            # NON contano in Entrate (la regola è: ENTRATE = solo polizze/titoli/appendici).
-            # Mostriamo l'importo come informativo ma c_totale resta 0.
             c_totale = 0.0
         else:
             # USCITE
             if cat == "giroconto":
-                # Giroconto OUT-side: NON va in TOTALE (è solo un trasferimento interno).
-                # La banca uscita è già contabilizzata in per_conto.
                 c_totale = 0.0
             elif cat in CATS_RIMESSE:
                 # Versamento compagnia: NON va in TOTALE, solo in Rimesse + Banca uscita.
-                # Riduce il saldo da versare alla compagnia (gestito da _compagnia_estratto_data).
                 c_totale = 0.0
                 c_rimesse = importo
             elif cat in CATS_ANTICIPI:
-                # Restituzione anticipo: NON va in TOTALE, solo in colonna Sospesi (negativa).
                 c_totale = 0.0
                 c_crediti = -importo
             elif cat == "provvigioni":
-                # Pagamento provvigioni a collaboratore: NON va in TOTALE.
-                # Solo in Spese + Banca uscita.
+                # Pagamento provvigioni a collaboratore:
+                # importo = NETTO pagato (già al netto di ritenuta+contributi).
+                # ritenuta_acconto → colonna Ritenuta separata (NON in Spese).
+                # Il netto residuo in Spese.
                 c_totale = 0.0
-                c_spese = importo
+                c_ritenuta = ritenuta_riga
+                c_spese = importo  # netto banca uscita
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.
@@ -4937,7 +4945,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
         # Per conto cassa
         per_conto = {}
-        if m.get("conto_cassa_id"):
+        # Escludi movimenti IN DIREZIONE dalle colonne banche (nessun cash flow)
+        if m.get("conto_cassa_id") and not is_dir:
             per_conto[m["conto_cassa_id"]] = signed
             per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + signed
 
@@ -4951,6 +4960,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "compagnia": (compagnia_riga or {}).get("ragione_sociale"),
             "compagnia_id": (compagnia_riga or {}).get("id"),
             "trattiene_provvigioni": (compagnia_riga or {}).get("trattiene_provvigioni"),
+            "is_direzione": is_dir,
             "totale": c_totale,
             "provv": c_provv,
             "saldo": c_saldo,
@@ -4958,6 +4968,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "spese": c_spese,
             "sconti": c_sconti,
             "rimesse": c_rimesse,
+            "ritenuta": c_ritenuta,
+            "direzione": c_direzione,
+            "rappel": c_rappel,
             "per_conto": per_conto,
             "conto_cassa_id": m.get("conto_cassa_id"),
             "mezzo_pagamento": m.get("mezzo_pagamento"),
@@ -4971,6 +4984,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         tot["spese"] += c_spese
         tot["sconti"] += c_sconti
         tot["rimesse"] += c_rimesse
+        tot["ritenuta"] += c_ritenuta
+        tot["direzione"] += c_direzione
+        tot["rappel"] += c_rappel
 
     # arricchimento allegati count
     ids = [r["id"] for r in righe]
