@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -99,6 +99,7 @@ function AgenzieTab() {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
     const [showNew, setShowNew] = useState(false);
+    const [editAgenzia, setEditAgenzia] = useState(null);
 
     const load = () => {
         setLoading(true);
@@ -119,6 +120,39 @@ function AgenzieTab() {
 
     return (
         <div>
+            {/* Demo Credentials — quick reference per QA/test */}
+            <div className="mb-4 border border-sky-200 bg-sky-50/60 rounded-lg p-3" data-testid="sa-demo-credentials">
+                <div className="flex items-center gap-2 mb-2">
+                    <Users size={14} className="text-sky-700" />
+                    <div className="text-xs font-semibold text-sky-800 uppercase tracking-wider">Account Demo — tenant principale (assicura)</div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {[
+                        { role: "Admin", email: "admin@assicura.it", pass: "Admin123!", color: "violet" },
+                        { role: "Collaboratore", email: "collaboratore@assicura.it", pass: "Collab123!", color: "sky" },
+                        { role: "Dipendente", email: "dipendente@assicura.it", pass: "Dipendente123!", color: "amber" },
+                        { role: "Cliente", email: "cliente@assicura.it", pass: "Cliente123!", color: "emerald" },
+                    ].map((c) => (
+                        <div key={c.email} className="bg-white border border-slate-200 rounded-md p-2 text-xs flex items-start gap-2"
+                            data-testid={`demo-cred-${c.role.toLowerCase()}`}>
+                            <span className={`inline-block text-[9px] uppercase font-semibold px-1.5 py-0.5 rounded text-${c.color}-700 bg-${c.color}-100`}>{c.role}</span>
+                            <div className="flex-1 min-w-0">
+                                <button type="button" onClick={() => { navigator.clipboard.writeText(c.email); toast.success("Email copiata"); }}
+                                    className="font-mono text-slate-700 truncate block hover:text-violet-700 text-left"
+                                    title="Click per copiare">
+                                    {c.email}
+                                </button>
+                                <button type="button" onClick={() => { navigator.clipboard.writeText(c.pass); toast.success("Password copiata"); }}
+                                    className="font-mono text-slate-500 truncate block hover:text-violet-700 text-left"
+                                    title="Click per copiare">
+                                    🔑 {c.pass}
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
             <div className="flex justify-between items-center mb-3">
                 <h2 className="text-sm font-semibold text-slate-700">{items.length} agenzie registrate</h2>
                 <button onClick={() => setShowNew(true)}
@@ -178,6 +212,12 @@ function AgenzieTab() {
                                             <Pause size={14} />
                                         </button>
                                     )}
+                                    <button onClick={() => setEditAgenzia(a)}
+                                        title="Modifica agenzia"
+                                        className="p-1 text-slate-600 hover:bg-slate-100 rounded"
+                                        data-testid={`sa-edit-${a.id}`}>
+                                        <Pencil size={14} />
+                                    </button>
                                     <button onClick={() => azione(a.id, "estendi-prova", "Prova estesa +30gg")}
                                         title="Estendi prova"
                                         className="p-1 text-sky-600 hover:bg-sky-50 rounded"
@@ -191,6 +231,7 @@ function AgenzieTab() {
                 </table>
             </div>
             {showNew && <NuovaAgenziaDialog onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
+            {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
         </div>
     );
 }
@@ -274,6 +315,118 @@ function FormField({ label, value, onChange, type = "text", testid }) {
             <input type={type} value={value} onChange={(e) => onChange(e.target.value)}
                 data-testid={testid}
                 className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none" />
+        </div>
+    );
+}
+
+function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
+    const [f, setF] = useState({
+        ragione_sociale: agenzia.ragione_sociale || "",
+        partita_iva: agenzia.partita_iva || "",
+        codice_fiscale: agenzia.codice_fiscale || "",
+        referente: agenzia.referente || "",
+        email: agenzia.email || "",
+        telefono: agenzia.telefono || "",
+        indirizzo: agenzia.indirizzo || "",
+        citta: agenzia.citta || "",
+        provincia: agenzia.provincia || "",
+        piano: agenzia.piano || "trial",
+        stato_abbonamento: agenzia.stato_abbonamento || "in_prova",
+        prezzo_mensile_eur: agenzia.prezzo_mensile_eur ?? 99,
+        max_utenti: agenzia.max_utenti ?? 5,
+        note: agenzia.note || "",
+    });
+    const [saving, setSaving] = useState(false);
+
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const body = { ...f };
+            body.prezzo_mensile_eur = parseFloat(body.prezzo_mensile_eur) || 0;
+            body.max_utenti = parseInt(body.max_utenti) || 1;
+            await api.patch(`/super-admin/agenzie/${agenzia.id}`, body);
+            toast.success("Agenzia aggiornata");
+            onSaved();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore aggiornamento");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <form onSubmit={save} className="p-6">
+                    <h3 className="text-lg font-semibold mb-1">Modifica Agenzia</h3>
+                    <p className="text-xs text-slate-500 mb-4">Tenant ID: <span className="font-mono">{agenzia.id}</span> · Tipo: <b>{agenzia.tipo}</b></p>
+
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-2">Anagrafica</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <FormField label="Ragione sociale *" value={f.ragione_sociale} onChange={(v) => set("ragione_sociale", v)} testid="ea-ragione" />
+                        <FormField label="Referente" value={f.referente} onChange={(v) => set("referente", v)} testid="ea-referente" />
+                        <FormField label="P.IVA" value={f.partita_iva} onChange={(v) => set("partita_iva", v)} testid="ea-piva" />
+                        <FormField label="Codice fiscale" value={f.codice_fiscale} onChange={(v) => set("codice_fiscale", v)} testid="ea-cf" />
+                        <FormField label="Email" value={f.email} onChange={(v) => set("email", v)} testid="ea-email" />
+                        <FormField label="Telefono" value={f.telefono} onChange={(v) => set("telefono", v)} testid="ea-tel" />
+                        <FormField label="Indirizzo" value={f.indirizzo} onChange={(v) => set("indirizzo", v)} testid="ea-indirizzo" />
+                        <div className="grid grid-cols-2 gap-2">
+                            <FormField label="Città" value={f.citta} onChange={(v) => set("citta", v)} testid="ea-citta" />
+                            <FormField label="Prov." value={f.provincia} onChange={(v) => set("provincia", v.toUpperCase())} testid="ea-prov" />
+                        </div>
+                    </div>
+
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-4">Abbonamento</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Piano</label>
+                            <select value={f.piano} onChange={(e) => set("piano", e.target.value)}
+                                data-testid="ea-piano"
+                                className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
+                                <option value="trial">Trial</option>
+                                <option value="starter">Starter</option>
+                                <option value="pro">Pro</option>
+                                <option value="enterprise">Enterprise</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-600 block mb-1">Stato</label>
+                            <select value={f.stato_abbonamento} onChange={(e) => set("stato_abbonamento", e.target.value)}
+                                data-testid="ea-stato"
+                                className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
+                                <option value="in_prova">In prova</option>
+                                <option value="attiva">Attiva</option>
+                                <option value="sospesa">Sospesa</option>
+                                <option value="scaduta">Scaduta</option>
+                                <option value="cancellata">Cancellata</option>
+                            </select>
+                        </div>
+                        <FormField label="Prezzo €/mese" value={f.prezzo_mensile_eur} onChange={(v) => set("prezzo_mensile_eur", v)} type="number" testid="ea-prezzo" />
+                        <FormField label="Max utenti" value={f.max_utenti} onChange={(v) => set("max_utenti", v)} type="number" testid="ea-max-utenti" />
+                    </div>
+
+                    <div className="mt-4">
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Note interne</label>
+                        <textarea value={f.note} onChange={(e) => set("note", e.target.value)}
+                            data-testid="ea-note"
+                            rows={2}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md" />
+                    </div>
+
+                    <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-200">
+                        <button type="button" onClick={onClose}
+                            className="px-4 py-2 text-sm border border-slate-300 rounded-md hover:bg-slate-50" data-testid="ea-cancel">
+                            Annulla
+                        </button>
+                        <button type="submit" disabled={saving}
+                            className="px-4 py-2 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-md disabled:opacity-50" data-testid="ea-save">
+                            {saving ? "Salvataggio…" : "Salva modifiche"}
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     );
 }
