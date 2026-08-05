@@ -8012,10 +8012,17 @@ async def whatsapp_bulk_avvisi_titoli(
 
     # Se è indicato un modello dalla libreria, si usa il suo corpo come intro
     # (i placeholder cliente_nome/totale/numero_titoli vengono comunque resolti).
+    # Se non è indicato NIENTE, si cerca il template WhatsApp marcato come "default"
+    # nella libreria — così l'utente può cambiare il testo standard dalla UI
+    # senza toccare il codice.
     modello_libreria: dict | None = None
     if body.get("modello_id"):
         modello_libreria = await db.template_modelli.find_one(
             {"id": body["modello_id"]}, {"_id": 0},
+        )
+    if not modello_libreria:
+        modello_libreria = await db.template_modelli.find_one(
+            {"tipo": "whatsapp", "default": True, "attivo": True}, {"_id": 0},
         )
 
     intro = (body.get("messaggio_intro") or
@@ -8027,7 +8034,7 @@ async def whatsapp_bulk_avvisi_titoli(
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
     pols = {p["id"]: p async for p in db.polizze.find(
         {"id": {"$in": pol_ids}},
-        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "prodotto": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
     anas = {a["id"]: a async for a in db.anagrafiche.find(
@@ -8046,6 +8053,16 @@ async def whatsapp_bulk_avvisi_titoli(
         if p.get("contraente_id"):
             bucket[p["contraente_id"]].append({**t, "_pol": p})
 
+    def _fmt_scad(s: str | None) -> str:
+        """Converte ``YYYY-MM-DD`` in ``DD-MM-YYYY`` per l'esposizione al cliente."""
+        if not s or len(str(s)) < 10:
+            return "-"
+        try:
+            y, m, d = str(s)[:10].split("-")
+            return f"{d}-{m}-{y}"
+        except ValueError:
+            return str(s)[:10]
+
     from routes.whatsapp_evo import send_text_via_evolution
     inviati, skipped = 0, []
     for cid, ts in bucket.items():
@@ -8061,18 +8078,32 @@ async def whatsapp_bulk_avvisi_titoli(
         tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
         righe = "\n".join(
             f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
-            f"scad. {t.get('scadenza') or '-'} — € {float(t.get('importo_lordo') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            f"scad. {_fmt_scad(t.get('scadenza'))} — € {float(t.get('importo_lordo') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             for t in ts[:15]
         )
         totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         if modello_libreria:
-            # Render con placeholder cliente_nome/totale/numero_titoli + append righe
+            # Render con placeholder cliente_nome/totale/numero_titoli + append righe.
+            # Per numero_polizza/prodotto/ramo prendiamo il primo titolo del bucket
+            # (se il cliente ha più titoli, i dettagli completi sono nell'elenco righe).
+            first_pol = ts[0].get("_pol") if ts else {}
+            prodotto_val = first_pol.get("prodotto") or first_pol.get("ramo") or ""
+            first_scad = _fmt_scad((ts[0] or {}).get("scadenza")) if ts else ""
             from routes.modelli import render_text as _rt
             base_msg = _rt(modello_libreria.get("corpo") or "", {
                 "cliente_nome": nome, "cliente": nome,
                 "totale": totale_fmt, "numero_titoli": str(len(ts)),
+                "numero_polizza": first_pol.get("numero_polizza") or "",
+                "prodotto": prodotto_val,
+                "ramo": first_pol.get("ramo") or "",
+                "data_scadenza": first_scad, "scadenza": first_scad,
             })
-            msg = base_msg + "\n\n" + righe + ("\n… e altri" if len(ts) > 15 else "")
+            # Non appendiamo l'elenco righe se il testo del modello sembra
+            # già "completo" (contiene {totale} → l'utente ha già scritto tutto).
+            if "{totale}" in (modello_libreria.get("corpo") or ""):
+                msg = base_msg
+            else:
+                msg = base_msg + "\n\n" + righe + ("\n… e altri" if len(ts) > 15 else "")
         else:
             msg = (intro.replace("{cliente}", nome) + "\n" + righe +
                    ("\n… e altri" if len(ts) > 15 else "") +
@@ -8160,8 +8191,30 @@ async def invia_bulk_auto(
         mod_email = await db.template_modelli.find_one({"id": body["modello_email_id"]}, {"_id": 0})
     if body.get("modello_sms_id"):
         mod_sms = await db.template_modelli.find_one({"id": body["modello_sms_id"]}, {"_id": 0})
+    # Fallback al modello "default" della libreria per ogni canale non specificato.
+    # Così l'utente può centralizzare la modifica dei testi in Librerie → Gestioni Modelli
+    # senza dover selezionare a mano il modello ad ogni invio.
+    if not mod_wa:
+        mod_wa = await db.template_modelli.find_one(
+            {"tipo": "whatsapp", "default": True, "attivo": True}, {"_id": 0})
+    if not mod_email:
+        mod_email = await db.template_modelli.find_one(
+            {"tipo": "email", "default": True, "attivo": True}, {"_id": 0})
+    if not mod_sms:
+        mod_sms = await db.template_modelli.find_one(
+            {"tipo": "sms", "default": True, "attivo": True}, {"_id": 0})
 
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    def _fmt_scad_giorno(s: str | None) -> str:
+        """Converte ``YYYY-MM-DD`` in ``DD-MM-YYYY``."""
+        if not s or len(str(s)) < 10:
+            return "-"
+        try:
+            y, m, d = str(s)[:10].split("-")
+            return f"{d}-{m}-{y}"
+        except ValueError:
+            return str(s)[:10]
 
     inviati = {"whatsapp": 0, "email": 0, "sms": 0}
     dettaglio: list[dict] = []
@@ -8172,11 +8225,18 @@ async def invia_bulk_auto(
         nome = a.get("ragione_sociale") or "Cliente"
         tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
         totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        first_pol = ts[0].get("_pol") if ts else {}
+        # data_scadenza: quella del primo titolo (formato DD-MM-YYYY)
+        first_scad = _fmt_scad_giorno((ts[0] or {}).get("scadenza")) if ts else ""
         ctx = {"cliente_nome": nome, "cliente": nome,
-               "totale": totale_fmt, "numero_titoli": str(len(ts))}
+               "totale": totale_fmt, "numero_titoli": str(len(ts)),
+               "numero_polizza": first_pol.get("numero_polizza") or "",
+               "prodotto": first_pol.get("prodotto") or first_pol.get("ramo") or "",
+               "ramo": first_pol.get("ramo") or "",
+               "data_scadenza": first_scad, "scadenza": first_scad}
         righe_txt = "\n".join(
             f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
-            f"scad. {t.get('scadenza') or '-'} — € {float(t.get('importo_lordo') or 0):,.2f}"
+            f"scad. {_fmt_scad_giorno(t.get('scadenza'))} — € {float(t.get('importo_lordo') or 0):,.2f}"
             .replace(",", "X").replace(".", ",").replace("X", ".")
             for t in ts[:15]
         )

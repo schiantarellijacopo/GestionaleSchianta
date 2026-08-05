@@ -430,16 +430,17 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
 async function openWA(g) {
     const cell = g.contraente_cellulare?.replace(/[^\d+]/g, "");
     if (!cell) { toast.error("Nessun cellulare"); return; }
-    const tot = g.titoli.reduce((s, t) => s + (t.importo_lordo || 0), 0);
-    const msg = `Buongiorno ${g.contraente_nome || ""}, le segnaliamo ${g.titoli.length} titolo/i scaduti per un totale di ${tot.toFixed(2)} €. La invitiamo a contattarci.`;
     try {
-        await api.post("/avvisi/whatsapp-invia", {
-            destinatario: cell, messaggio: msg,
-            contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
+        // Usa il bulk-titoli con UN solo cliente: il backend carica automaticamente
+        // il modello WhatsApp "default" della libreria "Gestioni Modelli" e ne
+        // renderizza i placeholder ({cliente_nome}, {totale}, {numero_titoli}, ...).
+        // Passa ignora_preferenze=true perché è un click esplicito dell'operatore.
+        const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", {
             titoli_ids: g.titoli.map((t) => t.id),
-            oggetto: "Sollecito titoli scaduti", tipo: "sollecito_titoli", importo: tot,
+            ignora_preferenze: true,
         });
-        toast.success("WhatsApp inviato al cliente ✓");
+        if (r.data?.inviati > 0) toast.success("WhatsApp inviato al cliente ✓ (modello libreria)");
+        else toast.error(r.data?.skipped?.[0]?.motivo || "Invio non riuscito");
     } catch (e) {
         toast.error(e.response?.data?.detail || "Invio WhatsApp fallito");
     }
