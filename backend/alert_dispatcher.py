@@ -395,11 +395,21 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
     # context per template
     base_ctx = dict(payload)
     canali = rule.get("canali") or []
+
+    # Se la regola punta a un modello della libreria "Gestioni Modelli",
+    # lo carichiamo UNA volta sola: i suoi oggetto/corpo hanno precedenza
+    # sui template inline della regola (rule.template_oggetto/corpo).
+    modello_libreria: Optional[dict] = None
+    mid = rule.get("template_modello_id")
+    if mid:
+        modello_libreria = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
     for dest in destinatari:
         ctx_dest = dict(base_ctx)
         ctx_dest["nome"] = dest.get("label") or ""
-        oggetto = render_template(rule.get("template_oggetto") or rule.get("nome") or "", ctx_dest)
-        corpo = render_template(rule.get("template_corpo") or "", ctx_dest)
+        og_src = (modello_libreria or {}).get("oggetto") or rule.get("template_oggetto") or rule.get("nome") or ""
+        cp_src = (modello_libreria or {}).get("corpo") or rule.get("template_corpo") or ""
+        oggetto = render_template(og_src, ctx_dest)
+        corpo = render_template(cp_src, ctx_dest)
         ctx_dest["oggetto"] = oggetto
         ctx_dest["corpo"] = corpo
         ctx_dest["link"] = payload.get("link")

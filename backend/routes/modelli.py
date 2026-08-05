@@ -271,6 +271,43 @@ def _fmt_date_doc(s) -> str:
     return f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else s
 
 
+async def _load_logo_bytes(az: dict) -> Optional[bytes]:
+    """Carica il logo dell'agenzia come bytes.
+
+    Prova prima da ``logo_storage_path`` (file locale), poi da ``logo_url``
+    (data URL base64 o URL remoto). Ritorna None se non esiste o è illeggibile.
+    """
+    import base64
+    import pathlib
+    # 1) file locale
+    p = az.get("logo_storage_path")
+    if p:
+        try:
+            path = pathlib.Path(p)
+            if path.exists() and path.is_file():
+                return path.read_bytes()
+        except OSError:
+            pass
+    # 2) URL: data:image/...;base64,XXX oppure http(s)
+    url = az.get("logo_url") or ""
+    if url.startswith("data:"):
+        try:
+            b64 = url.split(",", 1)[1]
+            return base64.b64decode(b64)
+        except (ValueError, IndexError):
+            return None
+    if url.startswith(("http://", "https://")):
+        try:
+            import httpx  # type: ignore
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    return r.content
+        except Exception:
+            return None
+    return None
+
+
 async def build_context(cliente_id: Optional[str] = None,
                          polizza_id: Optional[str] = None,
                          extra: Optional[dict] = None) -> dict:
@@ -339,6 +376,62 @@ class GeneraDocBody(BaseModel):
     formato: str = "pdf"  # pdf | docx
 
 
+class PreviewBody(BaseModel):
+    tipo: str = "email"
+    oggetto: Optional[str] = None
+    corpo: str = ""
+    sezioni: list[dict] = []
+    cliente_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+    extra: dict = {}
+
+
+@router.post("/librerie/modelli/preview")
+async def preview_modello(body: PreviewBody, user: dict = Depends(current_user)) -> dict:
+    """Rende un modello con placeholder → testo compilato (senza salvare).
+
+    Usato dall'editor "Gestioni Modelli" per l'anteprima live durante la
+    modifica del template. Se ``cliente_id``/``polizza_id`` non sono forniti,
+    usa dati di esempio così l'utente vede come apparirà il messaggio finale.
+    """
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra)
+    # Se non abbiamo cliente reale, popoliamo con dati di esempio realistici
+    # per rendere l'anteprima più utile durante la creazione del modello.
+    if not body.cliente_id:
+        ctx.setdefault("cliente_nome", "Mario Rossi")
+        ctx.setdefault("cliente_cellulare", "+39 333 1234567")
+        ctx.setdefault("cliente_email", "mario.rossi@example.com")
+        ctx.setdefault("cliente_indirizzo", "Via Roma 12, 23100 Sondrio")
+    if not body.polizza_id:
+        ctx.setdefault("numero_polizza", "POL-2026-000123")
+        ctx.setdefault("ramo", "RCA")
+        ctx.setdefault("data_scadenza", "31/12/2026")
+        ctx.setdefault("premio_lordo", "1.240,50 €")
+        ctx.setdefault("compagnia_nome", "AXA Assicurazioni")
+    ctx.setdefault("numero_titoli", "1")
+    ctx.setdefault("totale", "1.240,50 €")
+    ctx.setdefault("importo_abbuono", "50,00 €")
+    ctx.setdefault("numero_titolo", "T-2026-4587")
+
+    return {
+        "tipo": body.tipo,
+        "oggetto": render_text(body.oggetto or "", ctx),
+        "corpo": render_text(body.corpo or "", ctx),
+        "sezioni": [
+            {
+                "titolo": render_text(str(s.get("titolo") or ""), ctx),
+                "contenuto": render_text(str(s.get("contenuto") or ""), ctx),
+                "attiva": s.get("attiva", True),
+            }
+            for s in (body.sezioni or [])
+        ],
+        "context_sample": {k: v for k, v in ctx.items() if k in (
+            "cliente_nome", "numero_polizza", "ramo", "data_scadenza",
+            "premio_lordo", "totale", "azienda_nome",
+        )},
+    }
+
+
 @router.post("/librerie/modelli/{mid}/genera")
 async def genera_documento(mid: str, body: GeneraDocBody,
                            user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
@@ -358,15 +451,33 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     az_nome = ctx.get("azienda_nome") or ""
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
 
+    # Logo agenzia (Librerie → Azienda → logo_url o logo_storage_path)
+    az_full = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    logo_bytes: Optional[bytes] = await _load_logo_bytes(az_full)
+
     if body.formato == "docx":
         import io
         from docx import Document
-        from docx.shared import Pt
+        from docx.shared import Pt, Inches
         doc = Document()
+        if logo_bytes:
+            try:
+                header_p = doc.add_paragraph()
+                run = header_p.add_run()
+                run.add_picture(io.BytesIO(logo_bytes), width=Inches(1.6))
+            except Exception:
+                pass  # logo corrotto → skip senza rompere il documento
         if az_nome:
             h = doc.add_paragraph(az_nome)
             h.runs[0].bold = True
             h.runs[0].font.size = Pt(14)
+        # Contatti agenzia (piccoli, dopo la ragione sociale)
+        contatti = " · ".join(x for x in [
+            ctx.get("azienda_indirizzo"), ctx.get("azienda_telefono"), ctx.get("azienda_email"),
+        ] if x)
+        if contatti:
+            p_c = doc.add_paragraph(contatti)
+            p_c.runs[0].font.size = Pt(9)
         doc.add_paragraph(ctx.get("data_oggi") or "")
         doc.add_heading(titolo, level=1)
         for para in corpo.split("\n\n"):
@@ -386,17 +497,42 @@ async def genera_documento(mid: str, body: GeneraDocBody,
 
     # PDF
     import io
-    from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.lib import colors as rl_colors
     styles = getSampleStyleSheet()
     buf = io.BytesIO()
-    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm)
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=15 * mm, bottomMargin=18 * mm)
     el = []
-    if az_nome:
-        el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
+    # Intestazione: logo (sinistra) + ragione sociale + contatti (destra)
+    contatti = "<br/>".join(x for x in [
+        ctx.get("azienda_indirizzo"), ctx.get("azienda_telefono"), ctx.get("azienda_email"),
+    ] if x)
+    header_right = f"<para align='right'><b>{az_nome}</b><br/><font size='8'>{contatti}</font></para>"
+    if logo_bytes:
+        try:
+            img = Image(io.BytesIO(logo_bytes), width=40 * mm, height=20 * mm, kind="proportional")
+            head_tbl = Table(
+                [[img, Paragraph(header_right, styles["Normal"])]],
+                colWidths=[45 * mm, 135 * mm],
+            )
+            head_tbl.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#5b21b6")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            el.append(head_tbl)
+        except Exception:
+            if az_nome:
+                el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
+    else:
+        if az_nome:
+            el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
+            if contatti:
+                el.append(Paragraph(f"<font size='8'>{contatti}</font>", styles["Normal"]))
+    el.append(Spacer(1, 6))
     el.append(Paragraph(ctx.get("data_oggi") or "", styles["Normal"]))
     el.append(Spacer(1, 10))
     el.append(Paragraph(f"<b>{titolo}</b>", styles["Heading1"]))

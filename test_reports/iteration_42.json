@@ -1,0 +1,30 @@
+{
+  "summary": "Iter42 - Integrazione Gestione Modelli con Alert & Automazioni + Avvisi. Testato: CRUD /api/librerie/modelli (list seed default, create con auto-detect placeholders, update ricalcola placeholders, delete admin-only). Endpoint /preview (rende dati fittizi Mario Rossi/POL-2026-000123). Endpoint /genera formato pdf/docx (con logo agenzia, magic bytes verificati). Alert-rules POST/PUT accettano e persistono template_modello_id. dispatch_rule (in-process) usa modello_libreria con precedenza su template_oggetto/template_corpo inline. Bulk WhatsApp /avvisi/whatsapp-invia-bulk-titoli accetta modello_id senza validation error. Normalizzazione numero: 10 cifre inizia con 3 → prefisso 39 aggiunto; numero già con prefisso lasciato invariato; numero vuoto → ok=False senza chiamata Evolution. Regressione: /alert-rules GET, backward-compat con solo template_oggetto/corpo, /avvisi/whatsapp-invia singolo continua a funzionare. Backend: 18/18 pytest PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter42_modelli_alert_integration.py",
+    "/app/test_reports/pytest/iter42.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/modelli.py::preview_modello (~L397): build_context viene chiamato SEMPRE anche se cliente_id/polizza_id sono None. In quel caso fa 2 query MongoDB inutili (azienda_config.find_one + skip find_one clienti). OK per ora ma se preview viene chiamato molto frequentemente durante l'editing (auto-preview on-change), considerare short-circuit se entrambi None e caching di azienda_config.",
+    "routes/modelli.py::genera_documento (~L458 docx branch): il blocco `except Exception: pass` sul logo silenzia qualsiasi errore (anche quelli non-logo, es. python-docx bug). Meglio catchare specificamente PIL/UnidentifiedImageError o loggare l'errore per non nascondere problemi.",
+    "routes/modelli.py::_load_logo_bytes (~L306): `except Exception: return None` è troppo generico per il branch httpx (nasconde network/DNS/timeout). Loggare il warning almeno.",
+    "routes/modelli.py::render_text (~L256): usa regex greedy per {nome}. Se il corpo contiene JSON con {\"k\":\"v\"} nel template, potrebbe fare match indesiderati. Il regex `[a-z_][a-z0-9_]*` limita ma non blocca gli spazi tra graffe. Nel dubbio, escape delle graffe non-placeholder o richiedere sintassi doppia {{ }} come Jinja.",
+    "alert_dispatcher.py::dispatch_rule (~L403-405): il modello_libreria è caricato una volta ma nessun controllo che sia `attivo`. Se un admin disattiva un modello ma la regola punta ancora a quel mid, verrà comunque usato. Considerare filtro {attivo: True} oppure invalidare la rule se il modello è inattivo.",
+    "server.py::whatsapp_bulk_avvisi_titoli (~L8043): usa modello.corpo come intro ma il modello WhatsApp default usa già placeholder {numero_titoli}/{totale}, poi APPENDE le righe dettagliate. Duplicazione informativa possibile. Considerare rendere le righe opzionali o passare `render_full=true/false` nel body.",
+    "server.py::whatsapp_bulk_avvisi_titoli (~L8056): nessun sleep/rate-limit tra invii (già segnalato in iter41, ancora valido). Su bulk >30 contraenti rischio ban WhatsApp.",
+    "routes/whatsapp_evo.py::send_text_via_evolution (~L829-839): normalizzazione IT hardcoded (prefisso 39, 10 cifre inizia con 3). Un utente estero con numero locale simile potrebbe subire normalizzazione errata. Meglio configurabile o basato su tenant.locale_default."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter42_modelli_alert_integration.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "n/a (backend only)"},
+  "test_credentials": "admin@assicura.it / Admin123! (letto da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Test crea/cancella (con prefisso TEST_iter42_): ~6 modelli libreria, ~3 alert_rules. Cleanup automatico via fixture teardown (verificato: 0 residui TEST_ in /api/librerie/modelli e /api/alert-rules dopo la run). Anche gli alert_events generati dal test dispatch_rule vengono eliminati.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Endpoint verificati: GET/POST/PUT/DELETE /api/librerie/modelli (auto-detect placeholder dal corpo+oggetto+sezioni). POST /api/librerie/modelli/preview (dati fittizi: Mario Rossi/POL-2026-000123/31-12-2026/1.240,50€/AXA). POST /api/librerie/modelli/{id}/genera formato=pdf → magic %PDF, size>1KB, media_type application/pdf; formato=docx → magic PK, media_type wordprocessingml, size>1KB. POST/PUT /api/alert-rules con template_modello_id (persistito e leggibile via GET). dispatch_rule in-process: quando rule.template_modello_id è settato, gli alert_events hanno oggetto/corpo dal modello NON dai template_oggetto/template_corpo inline (verificato con marker univoci). POST /api/avvisi/whatsapp-invia-bulk-titoli con {titoli_ids, modello_id} - body accettato (400 se lista vuota, 404 se titoli inesistenti, no 422). send_text_via_evolution: '3465708351' → number='393465708351', '393465708351' → invariato, '' → ok:False no-call. NON eseguiti test WhatsApp reali (rispettata istruzione: WhatsApp già validato via curl manuale su 393465708351). Motor async DB tests richiedono monkeypatch di TenantAwareCollection.find_one per by-passare tenant scoping e event-loop già chiuso tra tests. Doverosa nota: pytest-asyncio 1.4 installata durante il test (aggiunta a requirements? verificare in build).",
+  "rca of the issue": "Nessun bug bloccante. Tutti i test PASS. Fix minori applicati al test file durante lo sviluppo: (1) load_dotenv da /app/backend/.env per far trovare MONGO_URL negli import in-process (altrimenti KeyError); (2) monkeypatch di TenantAwareCollection.find_one invece di sostituire attributo su TenantAwareDB (che usa __slots__); (3) test send_text riscritti self-contained (fake instance, no dipendenza da whatsapp_instances reali) per evitare RuntimeError('Event loop is closed') tra test async in loop diversi."
+}

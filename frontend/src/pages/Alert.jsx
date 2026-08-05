@@ -701,11 +701,19 @@ function RuleEditor({ rule, onClose }) {
     const isNew = !rule.id;
     const [f, setF] = useState({ ...rule });
     const [collaboratori, setCollaboratori] = useState([]);
+    const [modelliLibreria, setModelliLibreria] = useState([]);
     useEffect(() => {
         api.get("/auth/users").then((r) => {
             setCollaboratori((r.data || []).filter(
                 (u) => ["admin", "collaboratore", "dipendente"].includes(u.role) && u.attivo !== false,
             ));
+        }).catch(() => {});
+        // Carica i modelli disponibili dalla libreria (Email/WhatsApp/SMS)
+        api.get("/librerie/modelli").then((r) => {
+            const items = (r.data || []).filter((m) =>
+                ["email", "whatsapp", "sms"].includes(m.tipo) && m.attivo !== false,
+            );
+            setModelliLibreria(items);
         }).catch(() => {});
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -736,6 +744,7 @@ function RuleEditor({ rule, onClose }) {
                 altri_collaboratori_user_ids: f.altri_collaboratori_user_ids || [],
                 template_oggetto: f.template_oggetto,
                 template_corpo: f.template_corpo,
+                template_modello_id: f.template_modello_id || null,
             };
             if (isNew) {
                 await api.post(`/alert-rules`, payload);
@@ -919,13 +928,61 @@ function RuleEditor({ rule, onClose }) {
                             </div>
                         )}
                     </div>
+                    <div className="bg-violet-50/60 border border-violet-200 rounded-md p-3" data-testid="rule-modello-picker">
+                        <div className="flex items-center justify-between">
+                            <Label className="text-xs font-semibold text-violet-900 uppercase tracking-wide flex items-center gap-1.5">
+                                <Library size={12} /> Modello dalla libreria (opzionale)
+                            </Label>
+                            <Link to="/librerie" target="_blank" className="text-[10px] text-violet-700 underline hover:text-violet-900 inline-flex items-center gap-1">
+                                Gestisci modelli <ExternalLink size={10} />
+                            </Link>
+                        </div>
+                        <div className="text-[11px] text-slate-600 mt-1 mb-2">
+                            Se selezioni un modello, i suoi <strong>oggetto</strong> e <strong>corpo</strong> hanno priorità sui template inline qui sotto. Utile per riusare lo stesso testo su più regole/canali.
+                        </div>
+                        <Select value={f.template_modello_id || "none"} onValueChange={(v) => set("template_modello_id", v === "none" ? null : v)}>
+                            <SelectTrigger className="h-9" data-testid="rule-modello-select">
+                                <SelectValue placeholder="Nessuno (usa template inline)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">— Nessuno (usa template inline) —</SelectItem>
+                                {(() => {
+                                    const byTipo = { email: [], whatsapp: [], sms: [] };
+                                    (modelliLibreria || []).forEach((m) => {
+                                        if (byTipo[m.tipo]) byTipo[m.tipo].push(m);
+                                    });
+                                    const out = [];
+                                    Object.entries(byTipo).forEach(([tipo, arr]) => {
+                                        arr.forEach((m) => {
+                                            out.push(
+                                                <SelectItem key={m.id} value={m.id}>
+                                                    <span className="uppercase text-[10px] mr-1.5 text-slate-500">{tipo}</span>
+                                                    {m.nome}
+                                                    {m.default && <span className="ml-1 text-[9px] text-violet-700 font-bold">·default·</span>}
+                                                </SelectItem>,
+                                            );
+                                        });
+                                    });
+                                    return out.length ? out : (
+                                        <SelectItem value="empty" disabled>Nessun modello in libreria</SelectItem>
+                                    );
+                                })()}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     <div>
                         <Label>Oggetto template <span className="text-[10px] text-slate-500">— placeholder: {"{nome}, {numero_polizza}, {numero_sinistro}, {importo_lordo}, {scadenza}, ..."}</span></Label>
-                        <Input value={f.template_oggetto || ""} onChange={(e) => set("template_oggetto", e.target.value)} data-testid="rule-oggetto" />
+                        <Input value={f.template_oggetto || ""} onChange={(e) => set("template_oggetto", e.target.value)} data-testid="rule-oggetto" disabled={!!f.template_modello_id} />
                     </div>
                     <div>
                         <Label>Corpo template</Label>
-                        <Textarea rows={6} value={f.template_corpo || ""} onChange={(e) => set("template_corpo", e.target.value)} data-testid="rule-corpo" />
+                        <Textarea rows={6} value={f.template_corpo || ""} onChange={(e) => set("template_corpo", e.target.value)} data-testid="rule-corpo" disabled={!!f.template_modello_id} />
+                        {f.template_modello_id && (
+                            <div className="text-[11px] text-violet-700 mt-1">
+                                ⓘ Testo disabilitato: la regola userà il modello selezionato sopra.
+                            </div>
+                        )}
                     </div>
                 </div>
                 <DialogFooter>

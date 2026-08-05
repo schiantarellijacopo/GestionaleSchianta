@@ -7982,11 +7982,24 @@ async def whatsapp_bulk_avvisi_titoli(
 ):
     """Invia UN messaggio WhatsApp per contraente con l'elenco dei suoi titoli scaduti.
 
-    body: { titoli_ids: [str], messaggio_intro?: str }
+    body: {
+        titoli_ids: [str],
+        messaggio_intro?: str,
+        modello_id?: str,          # se presente usa il template dalla libreria
+    }
     """
     titoli_ids = body.get("titoli_ids") or []
     if not titoli_ids:
         raise HTTPException(400, "titoli_ids obbligatorio (lista)")
+
+    # Se è indicato un modello dalla libreria, si usa il suo corpo come intro
+    # (i placeholder cliente_nome/totale/numero_titoli vengono comunque resolti).
+    modello_libreria: dict | None = None
+    if body.get("modello_id"):
+        modello_libreria = await db.template_modelli.find_one(
+            {"id": body["modello_id"]}, {"_id": 0},
+        )
+
     intro = (body.get("messaggio_intro") or
              "Buongiorno {cliente}, le ricordiamo i seguenti titoli in scadenza/arretrati:")
 
@@ -8026,10 +8039,20 @@ async def whatsapp_bulk_avvisi_titoli(
             f"scad. {t.get('scadenza') or '-'} — € {float(t.get('importo_lordo') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             for t in ts[:15]
         )
-        msg = (intro.replace("{cliente}", nome) + "\n" + righe +
-               ("\n… e altri" if len(ts) > 15 else "") +
-               f"\nTotale: € {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") +
-               "\nLa invitiamo a contattare l'agenzia. Grazie!")
+        totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        if modello_libreria:
+            # Render con placeholder cliente_nome/totale/numero_titoli + append righe
+            from routes.modelli import render_text as _rt
+            base_msg = _rt(modello_libreria.get("corpo") or "", {
+                "cliente_nome": nome, "cliente": nome,
+                "totale": totale_fmt, "numero_titoli": str(len(ts)),
+            })
+            msg = base_msg + "\n\n" + righe + ("\n… e altri" if len(ts) > 15 else "")
+        else:
+            msg = (intro.replace("{cliente}", nome) + "\n" + righe +
+                   ("\n… e altri" if len(ts) > 15 else "") +
+                   f"\nTotale: {totale_fmt}" +
+                   "\nLa invitiamo a contattare l'agenzia. Grazie!")
         r = await send_text_via_evolution(cell, msg)
         await db.storico_avvisi.insert_one({
             "id": str(uuid.uuid4()), "canale": "whatsapp", "contraente_id": cid,

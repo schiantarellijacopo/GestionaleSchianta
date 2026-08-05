@@ -3560,6 +3560,22 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     };
     const delSezione = (i) => set("sezioni", (f.sezioni || []).filter((_, idx) => idx !== i));
 
+    // Anteprima live: chiama /librerie/modelli/preview con debounce
+    const [preview, setPreview] = useState({ oggetto: "", corpo: "" });
+    const [showPreview, setShowPreview] = useState(true);
+    useEffect(() => {
+        const t = setTimeout(async () => {
+            try {
+                const r = await api.post("/librerie/modelli/preview", {
+                    tipo: f.tipo, oggetto: f.oggetto || "",
+                    corpo: f.corpo || "", sezioni: f.sezioni || [],
+                });
+                setPreview(r.data);
+            } catch { /* silent — è solo anteprima */ }
+        }, 300);
+        return () => clearTimeout(t);
+    }, [f.tipo, f.oggetto, f.corpo, f.sezioni]);
+
     return (
         <Dialog open onOpenChange={(o) => !o && onClose(false)}>
             <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="modello-form">
@@ -3708,9 +3724,53 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                     )}
 
                     <div>
-                        <Label>Note interne</Label>
+                        <div className="flex items-center justify-between">
+                            <Label>Note interne</Label>
+                            <button
+                                type="button"
+                                onClick={() => setShowPreview((v) => !v)}
+                                className="text-[11px] text-violet-700 hover:text-violet-900 underline"
+                                data-testid="modello-toggle-preview"
+                            >
+                                {showPreview ? "Nascondi anteprima" : "Mostra anteprima live"}
+                            </button>
+                        </div>
                         <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} placeholder="Promemoria d'uso interno" data-testid="modello-note" />
                     </div>
+
+                    {showPreview && (
+                        <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-lg p-3" data-testid="modello-preview">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                                <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">
+                                    Anteprima live · dati fittizi (Mario Rossi, POL-2026-000123, ecc.)
+                                </span>
+                            </div>
+                            {isEmail && preview.oggetto && (
+                                <div className="bg-white border border-slate-200 rounded p-2 mb-2">
+                                    <span className="text-[10px] uppercase font-bold text-slate-500">Oggetto</span>
+                                    <div className="text-sm font-semibold text-slate-900">{preview.oggetto}</div>
+                                </div>
+                            )}
+                            {isPdf && preview.oggetto && (
+                                <div className="mb-2 text-sm font-semibold text-slate-900">{preview.oggetto}</div>
+                            )}
+                            <div className="bg-white border border-slate-200 rounded p-3 whitespace-pre-wrap text-sm text-slate-800 leading-relaxed max-h-80 overflow-y-auto"
+                                data-testid="modello-preview-corpo">
+                                {preview.corpo || <span className="text-slate-400 italic">(inizia a scrivere il corpo per vedere l&apos;anteprima)</span>}
+                            </div>
+                            {isPdf && (preview.sezioni || []).length > 0 && (
+                                <div className="mt-2 space-y-2">
+                                    {preview.sezioni.filter((s) => s.attiva).map((s, i) => (
+                                        <div key={i} className="bg-white border border-violet-200 rounded p-2">
+                                            {s.titolo && <div className="text-xs font-bold text-violet-900 mb-1">{s.titolo}</div>}
+                                            <div className="text-xs text-slate-700 whitespace-pre-wrap">{s.contenuto}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>

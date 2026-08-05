@@ -566,12 +566,27 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
     const [sending, setSending] = useState(false);
     const [sendingWa, setSendingWa] = useState(false);
     const [generatingPdf, setGeneratingPdf] = useState(false);
+    // Modelli WhatsApp dalla libreria (opzionale, sostituisce l'intro custom)
+    const [modelliWa, setModelliWa] = useState([]);
+    const [modelloWaId, setModelloWaId] = useState("");
+    useEffect(() => {
+        api.get("/librerie/modelli", { params: { tipo: "whatsapp" } })
+            .then((r) => {
+                const items = (r.data || []).filter((m) => m.attivo !== false);
+                setModelliWa(items);
+                // Preseleziona il default (se presente)
+                const def = items.find((m) => m.default);
+                if (def) setModelloWaId(def.id);
+            }).catch(() => {});
+    }, []);
 
     const inviaWa = async () => {
         if (!window.confirm(`Inviare un messaggio WhatsApp REALE a ogni contraente dei ${titoli_ids.length} titoli selezionati?`)) return;
         setSendingWa(true);
         try {
-            const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", { titoli_ids });
+            const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", {
+                titoli_ids, modello_id: modelloWaId || undefined,
+            });
             const sk = r.data.skipped?.length || 0;
             toast.success(`WhatsApp inviati: ${r.data.inviati}${sk ? ` · ${sk} saltati` : ""}`);
             onClose();
@@ -628,6 +643,27 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                     <div>
                         <label className="text-xs font-medium">Corpo lettera (modificabile)</label>
                         <Textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={10} className="text-sm" data-testid="bulk-corpo" />
+                    </div>
+                    <div className="bg-emerald-50/60 border border-emerald-200 rounded-md p-2.5" data-testid="bulk-wa-modello-picker">
+                        <label className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wide flex items-center gap-1.5 mb-1">
+                            <MessageCircle size={12} /> Modello WhatsApp (per invio bulk WA)
+                        </label>
+                        <select
+                            className="w-full h-9 px-2 text-sm border border-emerald-200 rounded bg-white"
+                            value={modelloWaId}
+                            onChange={(e) => setModelloWaId(e.target.value)}
+                            data-testid="bulk-wa-modello-select"
+                        >
+                            <option value="">— Testo predefinito automatico —</option>
+                            {modelliWa.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                    {m.nome}{m.default ? " · default" : ""}
+                                </option>
+                            ))}
+                        </select>
+                        <div className="text-[10px] text-slate-600 mt-1">
+                            Se scegli un modello, viene usato il suo corpo (con placeholder {"{cliente_nome}, {totale}, {numero_titoli}"}) al posto dell&apos;intro standard.
+                        </div>
                     </div>
                 </div>
                 <DialogFooter className="sm:justify-between">

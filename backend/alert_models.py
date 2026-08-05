@@ -76,9 +76,14 @@ class AlertRule(BaseDoc):
     # User IDs dei collaboratori da notificare quando il destinatario è
     # "altri_collaboratori" (es. gestore sinistri, back-office, ecc.).
     altri_collaboratori_user_ids: list[str] = Field(default_factory=list)
-    # template
+    # template (inline nella regola)
     template_oggetto: Optional[str] = None
     template_corpo: Optional[str] = None
+    # Se valorizzato: id di un TemplateModello (libreria "Gestioni Modelli")
+    # da usare al posto di template_oggetto/template_corpo. La libreria è
+    # gestita in Librerie → Gestioni Modelli e permette di riusare lo stesso
+    # testo su più regole/canali (Email/WhatsApp/SMS).
+    template_modello_id: Optional[str] = None
     # filtri condizionali (es. {"ramo": "Auto", "min_importo": 1000})
     condizioni: dict = Field(default_factory=dict)
     # stato

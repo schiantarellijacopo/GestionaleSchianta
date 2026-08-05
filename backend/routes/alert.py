@@ -76,6 +76,7 @@ class AlertRulePatch(BaseModel):
     altri_collaboratori_user_ids: Optional[list[str]] = None
     template_oggetto: Optional[str] = None
     template_corpo: Optional[str] = None
+    template_modello_id: Optional[str] = None
     condizioni: Optional[dict] = None
     soglia_giorni: Optional[int] = None
     cron: Optional[str] = None
