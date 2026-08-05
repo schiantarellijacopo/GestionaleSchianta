@@ -72,3 +72,31 @@ Usare integration_expert prima di implementare.
 
 ## Credenziali test
 - Admin: admin@assicura.it / Admin123! — Demo tenant: jacopo@admin.it / Admin123!
+
+## 🆕 Sessione 05/08/2026 — Integrazione Modelli + Fix Cassa Sospesi
+
+### ✅ Completato
+- **Gestione Modelli ↔ Alert/Automazioni**: `AlertRule.template_modello_id` (backend `alert_models.py`, `routes/alert.py`, `alert_dispatcher.py`) + selettore in `Alert.jsx` che disabilita i template inline quando è selezionato un modello dalla libreria.
+- **Gestione Modelli ↔ Avvisi bulk WhatsApp**: `POST /api/avvisi/whatsapp-invia-bulk-titoli` accetta `modello_id` opzionale; UI `BulkAvvisoDialog` con select modelli WhatsApp + preselezione default.
+- **Anteprima live**: nuovo endpoint `POST /api/librerie/modelli/preview` (render placeholder con dati fittizi: Mario Rossi, POL-2026-000123). Pannello anteprima live nel `ModelloFormDialog` (Librerie) con toggle.
+- **Logo agenzia nei PDF/Word**: helper `_load_logo_bytes(azienda_config)` supporta `logo_storage_path` (file), `logo_url` (data-URL o http). PDF con intestazione a bande (logo + ragione sociale + contatti). DOCX con logo in alto.
+- **Numero WhatsApp normalizzato**: `send_text_via_evolution` aggiunge automaticamente prefisso `39` se il numero ha 10 cifre e inizia con `3` (cellulari italiani).
+- **TEST WhatsApp REALE inviato** al `+39 346 570 8351` via istanza `agenzia-jacopoooo` — 2 messaggi consegnati con successo (uno con prefisso, uno con normalizzazione).
+- **Backend testing_agent**: 18/18 PASS (iter 42).
+
+### 🔴 FIX critico Prima Nota — Cassa contanti con sospesi
+- **Bug**: per movimento `incasso_premio` con `quota_credito > 0` (sospeso), la colonna Cassa Contanti mostrava l'importo intero (es. 300€) anziché il netto realmente incassato (280€).
+- **Fix** in `_compute_brogliaccio` (server.py):
+  - Per movimenti `incasso_premio` in entrata: `cash_reale = importo - quota_credito` prima di aggiornare `per_conto`/`per_conto_tot`.
+  - Riepilogo conti cassa: `imp_precedente` ora sottrae `sum(quota_credito)` dei movimenti storici incasso_premio (aggregation MongoDB con `$cond`).
+- **Verificato** sullo screenshot: Rossi Marco 300€ → Cassa 280€, Sospesi 20€. Totale giornata Cassa -840€ (era -820€).
+
+### 📌 Prossimi task backlog
+- P1: Avatar auto-crop bypass su upload alternativi (routes/documenti_inbox.py)
+- P1: `setup_iniziale_*` in `MovimentoCategoria` (db_models.py) per Setup Iniziale
+- P1: RCA sostituzione logica (extras_p1p2.py)
+- P1: Widget Documenti Mancanti — inline attach + filtro collaboratori
+- P1: Modulo Asset/Patrimonio (Leaflet + PDF)
+- P2: Google Drive integration
+- P3: Refactor server.py (>11k righe → routers modulari)
+

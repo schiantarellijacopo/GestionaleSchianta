@@ -4977,11 +4977,22 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                     c_sconti = importo
 
         # Per conto cassa
+        # Nota: per un incasso_premio con sospeso (quota_credito) il cash REALE
+        # entrato in cassa è (importo - quota_credito): il cliente paga solo il
+        # differenziale, il resto resta a credito. Stesso principio non si applica
+        # allo sconto (quota_sconto): lo sconto è a carico agenzia → l'importo
+        # incassato in cassa È GIÀ il netto, mentre "totale" viene ricostruito
+        # aggiungendo quota_sconto per riflettere il lordo di polizza.
         per_conto = {}
         # Escludi movimenti IN DIREZIONE dalle colonne banche (nessun cash flow)
         if m.get("conto_cassa_id") and not is_dir:
-            per_conto[m["conto_cassa_id"]] = signed
-            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + signed
+            cash_reale = importo
+            if is_entrata and cat == "incasso_premio":
+                quota_cred_cash = float(m.get("quota_credito") or 0)
+                cash_reale = max(0.0, importo - quota_cred_cash)
+            cassa_signed = cash_reale if is_entrata else -cash_reale
+            per_conto[m["conto_cassa_id"]] = cassa_signed
+            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + cassa_signed
 
         riga = {
             "id": m["id"],
@@ -5036,17 +5047,24 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                        "per_conto": {k: round(v, 2) for k, v in per_conto_tot.items()}}
 
     # 3) Riepilogo conti cassa: saldo precedente, giornata, totale periodo
+    # NB: dal saldo precedente sottraiamo la somma di 'quota_credito' dei movimenti
+    # 'incasso_premio' su quel conto — il sospeso NON è mai entrato in cassa.
     conti_riepilogo = []
     for c in conti:
         prev = await db.movimenti.aggregate([
             {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}}},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
-                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}},
+                        "sosp": {"$sum": {"$cond": [
+                            {"$and": [{"$eq": ["$tipo", "entrata"]},
+                                      {"$eq": ["$categoria", "incasso_premio"]}]},
+                            {"$ifNull": ["$quota_credito", 0]}, 0]}}}},
         ]).to_list(1)
         prev_in = prev[0]["in"] if prev else 0
         prev_out = prev[0]["out"] if prev else 0
-        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out
+        prev_sosp = prev[0].get("sosp", 0) if prev else 0
+        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out - prev_sosp
         imp_giornata = per_conto_tot.get(c["id"], 0.0)
         conti_riepilogo.append({
             "id": c["id"],
