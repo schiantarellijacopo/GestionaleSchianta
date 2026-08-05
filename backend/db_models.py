@@ -343,6 +343,17 @@ class Anagrafica(BaseDoc):
     consenso_marketing_sms: bool = False
     consenso_marketing_email: bool = False
 
+    # === PREFERENZE CANALE OPERATIVO ===
+    # Distinte dai consensi marketing sopra: qui si esprime SU QUALE CANALE il cliente
+    # vuole ricevere comunicazioni operative (avvisi scadenza, promemoria titoli,
+    # aggiornamenti sinistri...). Vengono usati come filtro dal modulo "Invio Massa".
+    # Auto-attivate lato UI: se inserisci il cellulare → flag_whatsapp/sms=True,
+    # se inserisci email → flag_email=True. Sempre modificabili dall'utente.
+    canale_whatsapp: bool = False
+    canale_sms: bool = False
+    canale_email: bool = False
+    usa_app: bool = False  # cliente ha scaricato e usa l'app mobile dell'agenzia
+
     # === CONTI CORRENTI (multi-IBAN con banca auto-risolta da ABI) ===
     conti_correnti: List[dict] = Field(default_factory=list)
     # [{iban, banca_ragione_sociale, banca_abi, banca_cab, banca_bic, intestazione,

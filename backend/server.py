@@ -8032,8 +8032,12 @@ async def whatsapp_bulk_avvisi_titoli(
     ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
     anas = {a["id"]: a async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}},
-        {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "telefono": 1},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "telefono": 1,
+         "canale_whatsapp": 1},
     )}
+    # Se True (default): salta i contraenti che NON hanno il flag canale_whatsapp attivo.
+    # Passa "ignora_preferenze": true per forzare l'invio a tutti (uso amministrativo).
+    rispetta_pref = not body.get("ignora_preferenze", False)
 
     from collections import defaultdict
     bucket: dict = defaultdict(list)
@@ -8050,6 +8054,9 @@ async def whatsapp_bulk_avvisi_titoli(
         nome = a.get("ragione_sociale") or "cliente"
         if not cell:
             skipped.append({"contraente": nome, "motivo": "cellulare mancante"})
+            continue
+        if rispetta_pref and a.get("canale_whatsapp") is False:
+            skipped.append({"contraente": nome, "motivo": "canale WhatsApp non abilitato dal cliente"})
             continue
         tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
         righe = "\n".join(
@@ -8090,6 +8097,186 @@ async def whatsapp_bulk_avvisi_titoli(
     return {"inviati": inviati, "skipped": skipped}
 
 
+@api.post("/avvisi/invia-bulk-auto")
+async def invia_bulk_auto(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invio automatico multicanale: per ogni contraente sceglie il canale in
+    base alle sue preferenze (flag ``canale_whatsapp``/``canale_email``/``canale_sms``
+    salvate in Anagrafica).
+
+    Priorità di default: WhatsApp → Email → SMS. Se il cliente ha più flag attivi,
+    va sul primo disponibile secondo la priorità (parametro ``priorita`` opzionale).
+
+    body: {
+        titoli_ids: [str],
+        modello_whatsapp_id?: str,   # modello WA dalla libreria
+        modello_email_id?: str,      # modello Email dalla libreria
+        modello_sms_id?: str,        # modello SMS dalla libreria
+        priorita?: ["whatsapp","email","sms"]   # ordine di scelta canale
+    }
+
+    Ritorna: {inviati_per_canale:{whatsapp,email,sms}, skipped:[...],
+              dettaglio: [{contraente, canale_usato, esito}]}
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio")
+    priorita = body.get("priorita") or ["whatsapp", "email", "sms"]
+    priorita = [c for c in priorita if c in ("whatsapp", "email", "sms")]
+    if not priorita:
+        priorita = ["whatsapp", "email", "sms"]
+
+    # Carica dati necessari
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000)
+    if not titoli:
+        raise HTTPException(404, "Nessun titolo trovato")
+    pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1},
+    )}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cellulare": 1, "telefono": 1, "email": 1,
+         "canale_whatsapp": 1, "canale_email": 1, "canale_sms": 1, "usa_app": 1},
+    )}
+
+    from collections import defaultdict
+    bucket: dict = defaultdict(list)
+    for t in titoli:
+        p = pols.get(t.get("polizza_id"), {})
+        if p.get("contraente_id"):
+            bucket[p["contraente_id"]].append({**t, "_pol": p})
+
+    # Prepara helpers per rendering
+    from routes.modelli import render_text as _rt
+    from routes.whatsapp_evo import send_text_via_evolution
+    mod_wa = mod_email = mod_sms = None
+    if body.get("modello_whatsapp_id"):
+        mod_wa = await db.template_modelli.find_one({"id": body["modello_whatsapp_id"]}, {"_id": 0})
+    if body.get("modello_email_id"):
+        mod_email = await db.template_modelli.find_one({"id": body["modello_email_id"]}, {"_id": 0})
+    if body.get("modello_sms_id"):
+        mod_sms = await db.template_modelli.find_one({"id": body["modello_sms_id"]}, {"_id": 0})
+
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    inviati = {"whatsapp": 0, "email": 0, "sms": 0}
+    dettaglio: list[dict] = []
+    skipped: list[dict] = []
+
+    for cid, ts in bucket.items():
+        a = anas.get(cid, {})
+        nome = a.get("ragione_sociale") or "Cliente"
+        tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
+        totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        ctx = {"cliente_nome": nome, "cliente": nome,
+               "totale": totale_fmt, "numero_titoli": str(len(ts))}
+        righe_txt = "\n".join(
+            f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
+            f"scad. {t.get('scadenza') or '-'} — € {float(t.get('importo_lordo') or 0):,.2f}"
+            .replace(",", "X").replace(".", ",").replace("X", ".")
+            for t in ts[:15]
+        )
+
+        # Scelta canale: primo della priorità che è abilitato E ha il recapito
+        cell = (a.get("cellulare") or a.get("telefono") or "").strip()
+        email_addr = (a.get("email") or "").strip()
+        canale_scelto = None
+        for canale in priorita:
+            if canale == "whatsapp" and a.get("canale_whatsapp") and cell:
+                canale_scelto = "whatsapp"
+                break
+            if canale == "email" and a.get("canale_email") and email_addr and az.get("smtp_host"):
+                canale_scelto = "email"
+                break
+            if canale == "sms" and a.get("canale_sms") and cell:
+                canale_scelto = "sms"
+                break
+
+        if not canale_scelto:
+            skipped.append({
+                "contraente": nome,
+                "motivo": "Nessun canale abilitato con recapito disponibile",
+                "flags": {
+                    "wa": bool(a.get("canale_whatsapp")), "em": bool(a.get("canale_email")),
+                    "sms": bool(a.get("canale_sms")),
+                    "ha_cell": bool(cell), "ha_email": bool(email_addr),
+                },
+            })
+            continue
+
+        try:
+            esito_ok = False
+            if canale_scelto == "whatsapp":
+                base = _rt((mod_wa or {}).get("corpo") or
+                           "Buongiorno {cliente_nome}, le ricordiamo i seguenti titoli in scadenza/arretrati:", ctx)
+                msg = base + "\n" + righe_txt + f"\nTotale: {totale_fmt}"
+                r = await send_text_via_evolution(cell, msg)
+                esito_ok = r.get("ok", False)
+                await db.storico_avvisi.insert_one({
+                    "id": str(uuid.uuid4()), "canale": "whatsapp", "contraente_id": cid,
+                    "contraente_nome": nome, "destinatario": cell, "target": cell,
+                    "titoli_ids": [t["id"] for t in ts], "oggetto": "Sollecito titoli scaduti",
+                    "messaggio": msg, "tipo": "sollecito_titoli", "importo": tot,
+                    "esito": "inviato" if esito_ok else f"errore: {r.get('error')}",
+                    "sent_at": _now_iso(), "operatore_id": user.get("id"),
+                    "operatore_nome": user.get("name") or user.get("email"),
+                })
+            elif canale_scelto == "email":
+                from avvisi_scadenze import _invia_email as _send_mail
+                corpo_lettera = _rt((mod_email or {}).get("corpo") or _CORPO_LETTERA_DEFAULT, ctx)
+                soggetto = _rt((mod_email or {}).get("oggetto") or "Promemoria pagamento polizza/e", ctx)
+                text, html = _render_avviso_titoli_email(
+                    ragione_sociale=nome, corpo_lettera=corpo_lettera, titoli=ts, azienda=az,
+                )
+                _send_mail(az, email_addr, soggetto, text, html)
+                esito_ok = True
+                await db.storico_avvisi.insert_one({
+                    "id": str(uuid.uuid4()), "canale": "email", "contraente_id": cid,
+                    "contraente_nome": nome, "destinatario": email_addr, "target": email_addr,
+                    "titoli_ids": [t["id"] for t in ts], "oggetto": soggetto, "soggetto": soggetto,
+                    "messaggio": text, "tipo": "sollecito_titoli", "importo": tot,
+                    "esito": "inviato", "sent_at": _now_iso(),
+                    "operatore_id": user.get("id"),
+                    "operatore_nome": user.get("name") or user.get("email"),
+                })
+            elif canale_scelto == "sms":
+                # Se non c'è integrazione SMS configurata, marca come sospeso
+                base = _rt((mod_sms or {}).get("corpo") or
+                           "Ciao {cliente_nome}, hai {numero_titoli} titolo/i in scadenza per {totale}. Contatta l'agenzia.", ctx)
+                msg = base[:459]  # limite SMS
+                # TODO: integrazione SMS reale (Twilio/Skebby). Per ora simula insert storico
+                await db.storico_avvisi.insert_one({
+                    "id": str(uuid.uuid4()), "canale": "sms", "contraente_id": cid,
+                    "contraente_nome": nome, "destinatario": cell, "target": cell,
+                    "titoli_ids": [t["id"] for t in ts], "oggetto": "SMS avviso scadenza",
+                    "messaggio": msg, "tipo": "sollecito_titoli", "importo": tot,
+                    "esito": "in_coda_sms", "sent_at": _now_iso(),
+                    "operatore_id": user.get("id"),
+                    "operatore_nome": user.get("name") or user.get("email"),
+                })
+                esito_ok = True
+
+            if esito_ok:
+                inviati[canale_scelto] += 1
+            dettaglio.append({"contraente": nome, "canale": canale_scelto,
+                              "esito": "ok" if esito_ok else "errore"})
+        except Exception as e:
+            skipped.append({"contraente": nome, "motivo": f"{canale_scelto}: {e}"})
+
+    await log_attivita(user, "avvisi_bulk_auto", "avvisi", None,
+                       f"wa={inviati['whatsapp']} em={inviati['email']} sms={inviati['sms']}")
+    return {
+        "inviati_per_canale": inviati,
+        "skipped": skipped,
+        "dettaglio": dettaglio,
+        "totale_inviati": sum(inviati.values()),
+    }
+
+
 @api.post("/avvisi/invia-bulk-titoli")
 async def invia_bulk_avvisi_titoli(
     body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
@@ -8127,8 +8314,9 @@ async def invia_bulk_avvisi_titoli(
     ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
     anas = {a["id"]: a async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}},
-        {"_id": 0, "id": 1, "ragione_sociale": 1, "email": 1},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "email": 1, "canale_email": 1},
     )}
+    rispetta_pref = not body.get("ignora_preferenze", False)
 
     # raggruppa titoli per contraente
     from collections import defaultdict

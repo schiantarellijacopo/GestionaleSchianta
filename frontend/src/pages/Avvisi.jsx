@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Bell, Mail, MessageCircle, Smartphone, FileText, Receipt,
-    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search, Printer,
+    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search, Printer, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -586,6 +586,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
         try {
             const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", {
                 titoli_ids, modello_id: modelloWaId || undefined,
+                ignora_preferenze: true, // dal bottone "Invia WhatsApp" l'operatore forza il canale
             });
             const sk = r.data.skipped?.length || 0;
             toast.success(`WhatsApp inviati: ${r.data.inviati}${sk ? ` · ${sk} saltati` : ""}`);
@@ -593,6 +594,29 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore invio WhatsApp");
         } finally { setSendingWa(false); }
+    };
+
+    const [sendingAuto, setSendingAuto] = useState(false);
+    const inviaAuto = async () => {
+        if (!window.confirm(`Invio AUTOMATICO: il sistema sceglierà per ogni cliente il canale (WhatsApp/Email/SMS) in base ai flag di preferenza salvati nella sua anagrafica.\n\nProseguire con ${titoli_ids.length} titoli?`)) return;
+        setSendingAuto(true);
+        try {
+            const r = await api.post("/avvisi/invia-bulk-auto", {
+                titoli_ids,
+                modello_whatsapp_id: modelloWaId || undefined,
+                priorita: ["whatsapp", "email", "sms"],
+            });
+            const inv = r.data.inviati_per_canale || {};
+            const sk = r.data.skipped?.length || 0;
+            const parts = [];
+            if (inv.whatsapp) parts.push(`${inv.whatsapp} WhatsApp`);
+            if (inv.email) parts.push(`${inv.email} Email`);
+            if (inv.sms) parts.push(`${inv.sms} SMS`);
+            toast.success(`Inviati: ${parts.join(" · ") || "0"}${sk ? ` · ${sk} saltati` : ""}`);
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio automatico");
+        } finally { setSendingAuto(false); }
     };
 
     const invia = async () => {
@@ -668,7 +692,16 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                 </div>
                 <DialogFooter className="sm:justify-between">
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-end">
+                        <Button
+                            onClick={inviaAuto}
+                            disabled={sending || generatingPdf || sendingWa || sendingAuto}
+                            className="bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 text-white font-semibold shadow-lg"
+                            data-testid="bulk-auto"
+                        >
+                            <Zap size={14} className="mr-1" />
+                            {sendingAuto ? "Invio in corso…" : "🚀 Invia in AUTOMATICO (canale per cliente)"}
+                        </Button>
                         <Button
                             variant="outline"
                             onClick={scaricaPdf}
@@ -687,7 +720,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                             className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                         >
                             <MessageCircle size={14} className="mr-1" />
-                            {sendingWa ? "Invio WA…" : "Invia WhatsApp"}
+                            {sendingWa ? "Invio WA…" : "Solo WhatsApp"}
                         </Button>
                         <Button
                             onClick={invia}
@@ -696,7 +729,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                             data-testid="bulk-confirm"
                         >
                             <Mail size={14} className="mr-1" />
-                            {sending ? "Invio…" : "Invia email"}
+                            {sending ? "Invio…" : "Solo Email"}
                         </Button>
                     </div>
                 </DialogFooter>

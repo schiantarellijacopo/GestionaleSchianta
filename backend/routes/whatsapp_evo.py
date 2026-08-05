@@ -826,12 +826,18 @@ async def archive_message_media(
 async def send_text_via_evolution(number: str, text: str, instance_name: Optional[str] = None) -> dict:
     """Invio best-effort: usa l'istanza indicata o la prima connessa del tenant.
 
-    Normalizza il numero: se non ha un prefisso internazionale (10 cifre e
-    inizia con 3 → cellulare italiano) aggiunge automaticamente ``39``.
+    Normalizza il numero, tollerando questi formati di input:
+      - ``+39 346 570 8351``  → ``393465708351``
+      - ``0039 346 570 8351`` → ``393465708351``  (doppio zero → strip)
+      - ``346 570 8351``      → ``393465708351``  (10 cifre IT → aggiunge 39)
+      - ``393465708351``      → lasciato invariato
     """
     to_clean = "".join(c for c in str(number or "") if c.isdigit())
     if not to_clean:
         return {"ok": False, "error": "numero non valido"}
+    # Strip prefisso internazionale a doppio zero (00 39... → 39...)
+    if to_clean.startswith("00"):
+        to_clean = to_clean[2:]
     # Normalizzazione prefisso Italia: 10 cifre e inizia con 3 → cellulare IT
     if len(to_clean) == 10 and to_clean.startswith("3"):
         to_clean = "39" + to_clean

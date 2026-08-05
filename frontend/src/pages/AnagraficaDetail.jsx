@@ -433,9 +433,32 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
                 <div><Label>Inizio contribuzione</Label><Input type="date" value={f.data_inizio_contribuzione || ""} onChange={(e) => set("data_inizio_contribuzione", e.target.value)} /></div>
                 <div><Label>Settimane contributive</Label><Input type="number" value={f.settimane_contributive || ""} onChange={(e) => set("settimane_contributive", parseInt(e.target.value) || null)} /></div>
-                <div><Label>Email</Label><Input value={f.email || ""} onChange={(e) => set("email", e.target.value)} /></div>
+                <div><Label>Email</Label>
+                    <Input
+                        value={f.email || ""}
+                        onChange={(e) => set("email", e.target.value)}
+                        onBlur={(e) => {
+                            // auto-flag canale_email quando l'email viene compilata
+                            if (e.target.value && f.canale_email === undefined) set("canale_email", true);
+                        }}
+                        data-testid="anag-email"
+                    />
+                </div>
                 <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
-                <div><Label>Cellulare</Label><Input value={f.cellulare || ""} onChange={(e) => set("cellulare", e.target.value)} /></div>
+                <div><Label>Cellulare</Label>
+                    <Input
+                        value={f.cellulare || ""}
+                        onChange={(e) => set("cellulare", e.target.value)}
+                        onBlur={(e) => {
+                            // auto-flag WhatsApp + SMS quando il cellulare viene compilato
+                            if (e.target.value) {
+                                if (f.canale_whatsapp === undefined) set("canale_whatsapp", true);
+                                if (f.canale_sms === undefined) set("canale_sms", true);
+                            }
+                        }}
+                        data-testid="anag-cellulare"
+                    />
+                </div>
                 <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value)} /></div>
                 <div>
                     <Label>Preferenza pagamento</Label>
@@ -480,6 +503,65 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Comune</Label><Input value={f.comune || ""} onChange={(e) => set("comune", e.target.value)} /></div>
                 <div><Label>Provincia</Label><Input maxLength={2} value={f.provincia || ""} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
                 <div><Label>CAP</Label><Input value={f.cap || ""} onChange={(e) => set("cap", e.target.value)} /></div>
+
+                {/* === PREFERENZE CANALE DI COMUNICAZIONE (4 flag) === */}
+                <div className="col-span-2">
+                    <Label className="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-1.5 block">
+                        Preferenze canale comunicazione — usati dall&apos;invio massa avvisi
+                    </Label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {[
+                            { k: "canale_whatsapp", label: "WhatsApp",
+                              hint: f.cellulare ? f.cellulare : "richiede cellulare",
+                              disabled: !f.cellulare, icon: "💬",
+                              activeCls: "bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300",
+                              checkboxCls: "bg-emerald-600 border-emerald-600" },
+                            { k: "canale_email", label: "Email",
+                              hint: f.email ? f.email : "richiede email",
+                              disabled: !f.email, icon: "✉️",
+                              activeCls: "bg-sky-50 border-sky-400 ring-1 ring-sky-300",
+                              checkboxCls: "bg-sky-600 border-sky-600" },
+                            { k: "canale_sms", label: "SMS",
+                              hint: f.cellulare ? f.cellulare : "richiede cellulare",
+                              disabled: !f.cellulare, icon: "📱",
+                              activeCls: "bg-violet-50 border-violet-400 ring-1 ring-violet-300",
+                              checkboxCls: "bg-violet-600 border-violet-600" },
+                            { k: "usa_app", label: "Usa App",
+                              hint: "cliente ha app installata",
+                              disabled: false, icon: "📲",
+                              activeCls: "bg-amber-50 border-amber-400 ring-1 ring-amber-300",
+                              checkboxCls: "bg-amber-600 border-amber-600" },
+                        ].map((flag) => {
+                            const active = !!f[flag.k];
+                            const cls = active ? flag.activeCls
+                                               : "bg-white border-slate-200 hover:border-slate-400";
+                            return (
+                                <button
+                                    key={flag.k}
+                                    type="button"
+                                    disabled={flag.disabled}
+                                    onClick={() => set(flag.k, !active)}
+                                    className={`text-left rounded-lg border-2 p-2.5 transition-all ${cls} ${flag.disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                                    data-testid={`anag-flag-${flag.k}`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-lg leading-none">{flag.icon}</span>
+                                            <span className="text-sm font-semibold text-slate-900">{flag.label}</span>
+                                        </div>
+                                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${active ? flag.checkboxCls : "bg-white border-slate-300"}`}>
+                                            {active && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
+                                        </div>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 mt-1 truncate" title={flag.hint}>{flag.hint}</div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1.5">
+                        ℹ&#65039; Quando inserisci cellulare/email i flag corrispondenti vengono attivati automaticamente. Puoi disattivarli manualmente su richiesta del cliente.
+                    </div>
+                </div>
                 <div>
                     <Label>Tipologia lavoratore</Label>
                     <Select value={f.tipologia_lavoratore || "__none__"} onValueChange={(v) => set("tipologia_lavoratore", v === "__none__" ? null : v)}>
