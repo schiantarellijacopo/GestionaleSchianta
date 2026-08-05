@@ -4907,7 +4907,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             c_spese = quota_sc
             c_sconti = quota_sc
             if trattiene:
-                c_saldo = importo - provv_riga
+                # Il saldo verso compagnia è sul LORDO (lo sconto è a carico agenzia)
+                c_saldo = lordo_riga - provv_riga
             else:
                 c_saldo = -provv_riga
             quota_cred = float(m.get("quota_credito") or 0)
@@ -5091,7 +5092,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         # Rappel (entrata cat=provvigioni) -> in PROVVIGIONI, non in Entrate
         # Tutte le altre entrate generiche NON contano in Entrate
         if is_e and cat == "incasso_premio":
-            cum_entrate += importo
+            cum_entrate += importo + float(m.get("quota_sconto") or 0)  # LORDO
         if is_e and cat == "provvigioni":
             cum_rappel += importo  # rappel: NON in provvigioni, riduce/alimenta il saldo cassa
         if is_e and cat == "incasso_premio":
@@ -5103,7 +5104,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 ccid = polizze_map.get(m["polizza_id"], {}).get("compagnia_id")
             trattiene = (comp_map.get(ccid) or {}).get("trattiene_provvigioni", True)
             cum_provv += provv_riga
-            cum_saldo += (importo - provv_riga) if trattiene else (-provv_riga)
+            # saldo verso compagnia sul LORDO (lo sconto è a carico agenzia)
+            cum_saldo += (importo + quota_sc - provv_riga) if trattiene else (-provv_riga)
             # Sconto cliente memorizzato sulla riga: alimenta sia Sconti che Spese
             if quota_sc > 0:
                 cum_sconti += quota_sc
@@ -5205,7 +5207,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                     "data_movimento": {"$lte": fino_a},
                 }},
                 {"$group": {"_id": None,
-                            "tot": {"$sum": "$importo"},
+                            "tot": {"$sum": {"$add": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$quota_sconto", 0]}]}},
                             "provv": {"$sum": "$provvigioni"}}},
             ]).to_list(1)
             if agg:
@@ -7942,8 +7944,17 @@ async def avvisi_whatsapp_invia(
     """
     dest = (body.get("destinatario") or "").strip()
     msg = (body.get("messaggio") or "").strip()
-    if not dest or not msg:
-        raise HTTPException(400, "destinatario e messaggio obbligatori")
+    if not dest:
+        raise HTTPException(400, "destinatario obbligatorio")
+    if not msg:
+        # usa il modello WhatsApp default (Gestioni Modelli) coi dati del cliente
+        from routes.modelli import build_context, render_text
+        tpl = await db.template_modelli.find_one(
+            {"tipo": "whatsapp", "default": True, "attivo": True}, {"_id": 0, "corpo": 1})
+        if not tpl:
+            raise HTTPException(400, "messaggio mancante e nessun modello WhatsApp default in Gestioni Modelli")
+        ctx = await build_context(body.get("contraente_id"), body.get("polizza_id"), body.get("contesto") or {})
+        msg = render_text(tpl["corpo"], ctx)
     from routes.whatsapp_evo import send_text_via_evolution
     r = await send_text_via_evolution(dest, msg)
     await db.storico_avvisi.insert_one({

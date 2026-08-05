@@ -3055,6 +3055,7 @@ const MODELLI_TIPI = [
     { v: "email", label: "Email" },
     { v: "whatsapp", label: "WhatsApp" },
     { v: "sms", label: "SMS" },
+    { v: "word", label: "Word · Documento" },
     { v: "pdf_avviso", label: "PDF · Avviso scadenza" },
     { v: "pdf_lettera_abbuono", label: "PDF · Lettera di Abbuono" },
     { v: "pdf_brogliaccio", label: "PDF · Brogliaccio" },
@@ -3188,6 +3189,11 @@ const MODELLI_GRUPPI = [
         descr: "Documenti PDF (avvisi, lettere, brogliacci) generati dal sistema.",
         tipi: ["pdf_avviso", "pdf_lettera_abbuono", "pdf_brogliaccio", "pdf_diagnosi", "pdf_prima_nota", "pdf_altro"],
     },
+    {
+        key: "word", label: "Word", icon: "FileText", color: "sky",
+        descr: "Documenti Word (DOCX) generabili coi dati di cliente e polizza — lettere, moduli, comunicazioni.",
+        tipi: ["word"],
+    },
 ];
 
 function ModelliSezione() {
@@ -3196,6 +3202,7 @@ function ModelliSezione() {
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState("");
+    const [azione, setAzione] = useState(null); // {modello, mode: 'doc'|'wa'}
 
     const load = () => api.get("/librerie/modelli").then((r) => setItems(r.data || []));
     useEffect(() => { load(); }, []);
@@ -3329,6 +3336,13 @@ function ModelliSezione() {
                                     </button>
                                 </div>
                                 <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1 flex-wrap">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setAzione({ modello: m, mode: m.tipo === "whatsapp" ? "wa" : "doc" }); }}
+                                        className="text-[10px] font-medium px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-700 transition-colors"
+                                        data-testid={`modello-usa-${m.id}`}
+                                    >
+                                        {m.tipo === "whatsapp" ? "📲 Invia WhatsApp" : m.tipo === "word" ? "📄 Genera Word" : m.tipo === "email" ? "📄 Genera PDF" : "📄 Genera documento"}
+                                    </button>
                                     {(m.placeholders || []).slice(0, 4).map((p) => (
                                         <span key={p} className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
                                             {`{${p}}`}
@@ -3357,7 +3371,124 @@ function ModelliSezione() {
                     onClose={(reload) => { setOpen(false); setEditing(null); if (reload) load(); }}
                 />
             )}
+            {azione && <UsaModelloDialog modello={azione.modello} mode={azione.mode} onClose={() => setAzione(null)} />}
         </Card>
+    );
+}
+
+function UsaModelloDialog({ modello, mode, onClose }) {
+    const [q, setQ] = useState("");
+    const [risultati, setRisultati] = useState([]);
+    const [cliente, setCliente] = useState(null);
+    const [polizze, setPolizze] = useState([]);
+    const [polizzaId, setPolizzaId] = useState("");
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+        if (!q || q.length < 2 || cliente) { setRisultati([]); return; }
+        const t = setTimeout(() => {
+            api.get("/anagrafiche", { params: { q, limit: 8 } })
+                .then((r) => setRisultati(Array.isArray(r.data) ? r.data : r.data.items || []));
+        }, 300);
+        return () => clearTimeout(t);
+    }, [q, cliente]);
+
+    useEffect(() => {
+        if (!cliente) { setPolizze([]); setPolizzaId(""); return; }
+        api.get("/polizze", { params: { contraente_id: cliente.id, limit: 50 } })
+            .then((r) => setPolizze(Array.isArray(r.data) ? r.data : r.data.items || []))
+            .catch(() => setPolizze([]));
+    }, [cliente]);
+
+    const genera = async (formato) => {
+        setBusy(true);
+        try {
+            const r = await api.post(`/librerie/modelli/${modello.id}/genera`,
+                { cliente_id: cliente?.id, polizza_id: polizzaId || null, formato },
+                { responseType: "blob" });
+            const url = URL.createObjectURL(r.data);
+            if (formato === "docx") {
+                const a = document.createElement("a");
+                a.href = url; a.download = `${modello.nome || "documento"}.docx`; a.click();
+            } else {
+                window.open(url, "_blank", "noopener");
+            }
+            URL.revokeObjectURL(url);
+        } catch (e) { toast.error("Errore generazione documento"); }
+        setBusy(false);
+    };
+
+    const inviaWa = async () => {
+        if (!cliente) { toast.error("Seleziona un cliente"); return; }
+        if (!window.confirm(`Inviare il messaggio WhatsApp REALE a ${cliente.ragione_sociale}?`)) return;
+        setBusy(true);
+        try {
+            await api.post(`/librerie/modelli/${modello.id}/invia-whatsapp`,
+                { cliente_id: cliente.id, polizza_id: polizzaId || null });
+            toast.success("WhatsApp inviato ✓");
+            onClose();
+        } catch (e) { toast.error(e.response?.data?.detail || "Invio fallito"); }
+        setBusy(false);
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid="usa-modello-dialog">
+                <DialogHeader>
+                    <DialogTitle>{mode === "wa" ? "📲 Invia WhatsApp" : "📄 Genera documento"} — {modello.nome}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div>
+                        <Label>Cliente</Label>
+                        {cliente ? (
+                            <div className="flex items-center justify-between border rounded px-3 py-2 text-sm bg-sky-50">
+                                <span className="font-medium">{cliente.ragione_sociale}</span>
+                                <button className="text-xs text-sky-700 underline" onClick={() => { setCliente(null); setQ(""); }}>cambia</button>
+                            </div>
+                        ) : (
+                            <>
+                                <Input placeholder="Cerca cliente…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="usa-modello-cliente-search" />
+                                {risultati.length > 0 && (
+                                    <div className="border rounded mt-1 max-h-40 overflow-y-auto divide-y">
+                                        {risultati.map((a) => (
+                                            <button key={a.id} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-sky-50"
+                                                onClick={() => setCliente(a)} data-testid={`usa-modello-cliente-${a.id}`}>
+                                                {a.ragione_sociale} <span className="text-xs text-slate-400">{a.cellulare || a.telefono || ""}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                    {cliente && polizze.length > 0 && (
+                        <div>
+                            <Label>Polizza (opzionale, per i placeholder polizza)</Label>
+                            <select className="w-full border rounded h-9 px-2 text-sm" value={polizzaId}
+                                onChange={(e) => setPolizzaId(e.target.value)} data-testid="usa-modello-polizza">
+                                <option value="">— nessuna —</option>
+                                {polizze.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.numero_polizza} · {p.ramo} · scad. {p.scadenza}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button variant="outline" onClick={onClose}>Annulla</Button>
+                        {mode === "wa" ? (
+                            <Button onClick={inviaWa} disabled={busy || !cliente} className="bg-emerald-600 hover:bg-emerald-700" data-testid="usa-modello-invia-wa">
+                                {busy ? "Invio…" : "Invia WhatsApp"}
+                            </Button>
+                        ) : (
+                            <>
+                                <Button variant="outline" onClick={() => genera("pdf")} disabled={busy} data-testid="usa-modello-pdf">PDF</Button>
+                                <Button onClick={() => genera("docx")} disabled={busy} className="bg-sky-700 hover:bg-sky-800" data-testid="usa-modello-word">Word (.docx)</Button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     );
 }
 

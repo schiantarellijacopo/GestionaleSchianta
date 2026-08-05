@@ -1462,6 +1462,7 @@ ModelloTipo = Literal[
     "email",            # corpo + oggetto per invio email
     "whatsapp",         # testo per WhatsApp (wa.me link o Twilio)
     "sms",              # testo per SMS
+    "word",             # documento Word (DOCX) generabile con dati cliente/polizza
     "pdf_avviso",       # PDF di sollecito scadenza
     "pdf_lettera_abbuono",  # PDF Lettera di Abbuono
     "pdf_brogliaccio",  # PDF Brogliaccio

@@ -375,7 +375,13 @@ _WA_TPL_TITOLO_DEFAULT = (
 async def _invia_whatsapp_clienti(az: dict, scadenze: dict) -> dict[str, Any]:
     """Invia un promemoria WhatsApp a ogni cliente con polizza/titolo in scadenza."""
     from routes.whatsapp_evo import send_text_via_evolution
-    tpl_pol = az.get("notifica_scadenze_whatsapp_template") or _WA_TPL_POLIZZA_DEFAULT
+    from routes.modelli import render_text
+    from database import db as _db
+    # priorità: template azienda -> modello default libreria (Gestioni Modelli) -> hardcoded
+    tpl_lib = await _db.template_modelli.find_one(
+        {"tipo": "whatsapp", "default": True, "attivo": True}, {"_id": 0, "corpo": 1})
+    tpl_pol = (az.get("notifica_scadenze_whatsapp_template")
+               or (tpl_lib or {}).get("corpo") or _WA_TPL_POLIZZA_DEFAULT)
     tpl_tit = az.get("notifica_scadenze_whatsapp_template_titoli") or _WA_TPL_TITOLO_DEFAULT
     instance = az.get("notifica_scadenze_whatsapp_instance") or None
     max_invii = int(az.get("notifica_scadenze_whatsapp_max") or 50)  # anti-ban WhatsApp
@@ -394,14 +400,19 @@ async def _invia_whatsapp_clienti(az: dict, scadenze: dict) -> dict[str, Any]:
         if key in dedup:
             return
         dedup.add(key)
-        msg = tpl.format(
-            cliente=record.get("contraente_nome") or "cliente",
-            polizza=record.get("numero_polizza") or "-",
-            ramo=record.get("ramo") or "-",
-            scadenza=_fmt_date(record.get("scadenza")),
-            importo=_fmt_eur(record.get(importo_key)),
-            compagnia=record.get("compagnia_nome") or "-",
-        )
+        msg = render_text(tpl, {
+            "cliente": record.get("contraente_nome") or "cliente",
+            "cliente_nome": record.get("contraente_nome") or "cliente",
+            "polizza": record.get("numero_polizza") or "-",
+            "numero_polizza": record.get("numero_polizza") or "-",
+            "ramo": record.get("ramo") or "-",
+            "scadenza": _fmt_date(record.get("scadenza")),
+            "importo": _fmt_eur(record.get(importo_key)),
+            "totale": _fmt_eur(record.get(importo_key)),
+            "numero_titoli": 1,
+            "compagnia": record.get("compagnia_nome") or "-",
+            "azienda_nome": az.get("ragione_sociale") or "",
+        })
         r = await send_text_via_evolution(num, msg, instance_name=instance)
         if r.get("ok"):
             inviati += 1

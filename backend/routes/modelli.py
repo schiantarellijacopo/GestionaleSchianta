@@ -246,3 +246,209 @@ async def seed_default_models() -> None:
         body = ModelloBody(**{k: v for k, v in d.items() if k in ModelloBody.model_fields})
         doc["placeholders"] = _autodetect_placeholders(body)
         await db.template_modelli.insert_one(doc)
+
+
+# ============================================================
+# Rendering + generazione documenti (PDF / Word) + invio WhatsApp
+# ============================================================
+def render_text(text: str, ctx: dict) -> str:
+    """Sostituisce i placeholder {nome} in modo sicuro (mancanti → lasciati)."""
+    return _PLACEHOLDER_RE.sub(lambda m: str(ctx.get(m.group(1), m.group(0))), text or "")
+
+
+def _fmt_eur_doc(v) -> str:
+    try:
+        return f"{float(v):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _fmt_date_doc(s) -> str:
+    if not s:
+        return "-"
+    s = str(s)[:10]
+    parts = s.split("-")
+    return f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else s
+
+
+async def build_context(cliente_id: Optional[str] = None,
+                         polizza_id: Optional[str] = None,
+                         extra: Optional[dict] = None) -> dict:
+    """Contesto placeholder standard: azienda + cliente + polizza."""
+    from datetime import date
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    ctx: dict = {
+        "azienda_nome": az.get("ragione_sociale") or az.get("nome") or "",
+        "azienda_indirizzo": az.get("indirizzo") or "",
+        "azienda_telefono": az.get("telefono") or "",
+        "azienda_email": az.get("email") or "",
+        "data_oggi": date.today().strftime("%d/%m/%Y"),
+    }
+    p = None
+    if polizza_id:
+        p = await db.polizze.find_one({"id": polizza_id}, {"_id": 0})
+    if p:
+        comp = await db.compagnie.find_one({"id": p.get("compagnia_id")}, {"_id": 0, "nome": 1}) or {}
+        ctx.update({
+            "numero_polizza": p.get("numero_polizza") or "-",
+            "ramo": p.get("ramo") or "-",
+            "prodotto": p.get("prodotto") or "-",
+            "stato_polizza": p.get("stato") or "-",
+            "scadenza": _fmt_date_doc(p.get("scadenza")),
+            "data_scadenza": _fmt_date_doc(p.get("scadenza")),
+            "effetto": _fmt_date_doc(p.get("effetto")),
+            "data_effetto": _fmt_date_doc(p.get("effetto")),
+            "premio": _fmt_eur_doc(p.get("premio_lordo")),
+            "premio_lordo": _fmt_eur_doc(p.get("premio_lordo")),
+            "importo": _fmt_eur_doc(p.get("premio_lordo")),
+            "compagnia": comp.get("nome") or "-",
+            "compagnia_nome": comp.get("nome") or "-",
+        })
+        cliente_id = cliente_id or p.get("contraente_id")
+    if cliente_id:
+        a = await db.anagrafiche.find_one({"id": cliente_id}, {"_id": 0})
+        if a:
+            nome = a.get("ragione_sociale") or f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip()
+            indirizzo = ", ".join(x for x in [a.get("indirizzo"), a.get("cap"), a.get("citta")] if x)
+            ctx.update({
+                "cliente": nome, "cliente_nome": nome,
+                "cliente_cognome": a.get("cognome") or "",
+                "cliente_indirizzo": indirizzo,
+                "cliente_comune": a.get("citta") or "-",
+                "cliente_cap": a.get("cap") or "-",
+                "cliente_provincia": a.get("provincia") or "-",
+                "cliente_cf": a.get("codice_fiscale") or a.get("partita_iva") or "-",
+                "cliente_codice_fiscale": a.get("codice_fiscale") or "-",
+                "cliente_partita_iva": a.get("partita_iva") or "-",
+                "cliente_email": a.get("email") or "-",
+                "cliente_telefono": a.get("telefono") or "-",
+                "cliente_cellulare": a.get("cellulare") or a.get("telefono") or "-",
+                "cliente_data_nascita": _fmt_date_doc(a.get("data_nascita")),
+                "cliente_luogo_nascita": a.get("luogo_nascita") or "-",
+                "cliente_professione": a.get("professione") or a.get("attivita") or "-",
+                "cliente_iban": a.get("iban") or "-",
+            })
+    ctx.update(extra or {})
+    return ctx
+
+
+class GeneraDocBody(BaseModel):
+    cliente_id: Optional[str] = None
+    polizza_id: Optional[str] = None
+    extra: dict = {}
+    formato: str = "pdf"  # pdf | docx
+
+
+@router.post("/librerie/modelli/{mid}/genera")
+async def genera_documento(mid: str, body: GeneraDocBody,
+                           user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Genera un documento PDF o Word dal modello, compilato coi dati reali."""
+    from fastapi.responses import Response
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra)
+    titolo = render_text(m.get("oggetto") or m.get("nome") or "Documento", ctx)
+    corpo = render_text(m.get("corpo") or "", ctx)
+    sezioni = [
+        {"titolo": render_text(str(s.get("titolo") or ""), ctx),
+         "contenuto": render_text(str(s.get("contenuto") or ""), ctx)}
+        for s in (m.get("sezioni") or []) if s.get("attiva", True)
+    ]
+    az_nome = ctx.get("azienda_nome") or ""
+    fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
+
+    if body.formato == "docx":
+        import io
+        from docx import Document
+        from docx.shared import Pt
+        doc = Document()
+        if az_nome:
+            h = doc.add_paragraph(az_nome)
+            h.runs[0].bold = True
+            h.runs[0].font.size = Pt(14)
+        doc.add_paragraph(ctx.get("data_oggi") or "")
+        doc.add_heading(titolo, level=1)
+        for para in corpo.split("\n\n"):
+            doc.add_paragraph(para)
+        for s in sezioni:
+            if s["titolo"]:
+                doc.add_heading(s["titolo"], level=2)
+            for para in s["contenuto"].split("\n\n"):
+                doc.add_paragraph(para)
+        buf = io.BytesIO()
+        doc.save(buf)
+        return Response(
+            buf.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={fname}.docx"},
+        )
+
+    # PDF
+    import io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    styles = getSampleStyleSheet()
+    buf = io.BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm)
+    el = []
+    if az_nome:
+        el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
+    el.append(Paragraph(ctx.get("data_oggi") or "", styles["Normal"]))
+    el.append(Spacer(1, 10))
+    el.append(Paragraph(f"<b>{titolo}</b>", styles["Heading1"]))
+    el.append(Spacer(1, 6))
+    for para in corpo.split("\n\n"):
+        el.append(Paragraph(para.replace("\n", "<br/>"), styles["Normal"]))
+        el.append(Spacer(1, 6))
+    for s in sezioni:
+        if s["titolo"]:
+            el.append(Spacer(1, 8))
+            el.append(Paragraph(f"<b>{s['titolo']}</b>", styles["Heading3"]))
+        for para in s["contenuto"].split("\n\n"):
+            el.append(Paragraph(para.replace("\n", "<br/>"), styles["Normal"]))
+            el.append(Spacer(1, 4))
+    pdf.build(el)
+    return Response(buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={fname}.pdf"})
+
+
+class InviaWaModelloBody(BaseModel):
+    cliente_id: Optional[str] = None
+    numero: Optional[str] = None
+    polizza_id: Optional[str] = None
+    extra: dict = {}
+
+
+@router.post("/librerie/modelli/{mid}/invia-whatsapp")
+async def invia_modello_whatsapp(mid: str, body: InviaWaModelloBody,
+                                 user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    """Invia il modello via WhatsApp (Evolution API) al cliente/numero indicato."""
+    import uuid as _uuid
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra)
+    dest = (body.numero or ctx.get("cliente_cellulare") or "").strip()
+    if not dest or dest == "-":
+        raise HTTPException(400, "Nessun numero: il cliente non ha cellulare in anagrafica")
+    msg = render_text(m.get("corpo") or "", ctx)
+    from routes.whatsapp_evo import send_text_via_evolution
+    r = await send_text_via_evolution(dest, msg)
+    await db.storico_avvisi.insert_one({
+        "id": str(_uuid.uuid4()), "canale": "whatsapp",
+        "contraente_id": body.cliente_id, "contraente_nome": ctx.get("cliente_nome"),
+        "polizza_id": body.polizza_id, "destinatario": dest, "target": dest,
+        "oggetto": m.get("nome"), "soggetto": m.get("nome"), "messaggio": msg,
+        "tipo": "modello_whatsapp",
+        "esito": "inviato" if r.get("ok") else f"errore: {r.get('error')}",
+        "sent_at": _now_iso(), "operatore_id": user.get("id"),
+        "operatore_nome": user.get("name") or user.get("email"),
+    })
+    if not r.get("ok"):
+        raise HTTPException(400, f"Invio WhatsApp fallito: {r.get('error')}")
+    await log_attivita(user, "whatsapp_modello", "modello", mid, f"→ {dest}")
+    return {"ok": True, "instance": r.get("instance_name"), "anteprima": msg[:200]}
