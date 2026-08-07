@@ -8105,14 +8105,26 @@ async def whatsapp_bulk_avvisi_titoli(
             def _fmt_row(t):
                 p = t.get("_pol") or {}
                 imp = float(t.get("importo_lordo") or 0)
-                return _rt_riga(_riga_tpl, {
+                targa = p.get("targa") or ""
+                out = _rt_riga(_riga_tpl, {
                     "numero_polizza": p.get("numero_polizza") or "-",
                     "ramo": p.get("ramo") or "-",
                     "prodotto": p.get("prodotto") or p.get("ramo") or "-",
-                    "targa": p.get("targa") or "",
+                    "targa": targa,
                     "scadenza": _fmt_scad(t.get("scadenza")),
                     "importo": f"{imp:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 })
+                # Placeholder condizionale: se la polizza non è veicolo (nessuna targa),
+                # rimuoviamo eventuali separatori orfani rimasti attorno a {targa} vuota.
+                # Es: "→ 123 · RC · " → "→ 123 · RC"
+                if not targa:
+                    import re as _re
+                    # Rimuove: doppi separatori (·, --, ,), spazi doppi, trailing separator
+                    out = _re.sub(r"\s+·\s+·\s+", " · ", out)
+                    out = _re.sub(r"\s+[·\-,]\s*$", "", out)
+                    out = _re.sub(r"\s+\[\s*\]", "", out)  # rimuove [ ] vuote
+                    out = _re.sub(r"\s{2,}", " ", out).strip()
+                return out
             righe = "\n".join(_fmt_row(t) for t in ts[:15])
         else:
             def _default_row(t):
