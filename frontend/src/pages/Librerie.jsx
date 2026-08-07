@@ -4239,6 +4239,7 @@ function CloudStorageSezione() {
     const [connections, setConnections] = useState([]);
     const [busy, setBusy] = useState(false);
     const [folderDialog, setFolderDialog] = useState(null); // { provider, currentFolderId }
+    const [credDialog, setCredDialog] = useState(null);     // { provider }
     const [searchParams, setSearchParams] = useSearchParams();
 
     const load = async () => {
@@ -4256,7 +4257,6 @@ function CloudStorageSezione() {
 
     useEffect(() => {
         load();
-        // Se l'utente torna dal redirect OAuth, mostra toast di conferma
         if (searchParams.get("cloud") === "connected") {
             const p = searchParams.get("provider");
             toast.success(`Account ${p === "google_drive" ? "Google Drive" : "OneDrive"} collegato con successo`);
@@ -4271,7 +4271,6 @@ function CloudStorageSezione() {
         setBusy(true);
         try {
             const r = await api.get(`/librerie/cloud-storage/oauth-url?provider=${provider}`);
-            // Redirect direttamente all'authorize URL del provider
             window.location.href = r.data.authorize_url;
         } catch (e) {
             toast.error(errMsg(e));
@@ -4288,9 +4287,16 @@ function CloudStorageSezione() {
             load();
         } catch (e) {
             toast.error(errMsg(e));
-        } finally {
-            setBusy(false);
-        }
+        } finally { setBusy(false); }
+    };
+
+    const deleteCredentials = async (provider) => {
+        if (!window.confirm(`Rimuovere le credenziali OAuth per ${provider === "google_drive" ? "Google Drive" : "OneDrive"}? Tutti gli account collegati usando queste credenziali verranno scollegati.`)) return;
+        try {
+            await api.delete(`/librerie/cloud-storage/admin-config?provider=${provider}`);
+            toast.success("Credenziali OAuth rimosse");
+            load();
+        } catch (e) { toast.error(errMsg(e)); }
     };
 
     if (!configStatus) return <Loading />;
@@ -4299,21 +4305,25 @@ function CloudStorageSezione() {
 
     return (
         <div className="space-y-4" data-testid="lib-cloud-storage">
-            {/* Info encryption */}
+            {/* Info encryption + isolamento tenant */}
             <Card className="p-3 bg-emerald-50 border-emerald-200 flex items-start gap-2">
                 <Shield size={16} className="text-emerald-600 mt-0.5" />
                 <div className="text-xs text-emerald-900">
-                    <strong>Sicurezza:</strong> i refresh token OAuth sono cifrati con AES/Fernet prima di essere salvati.
-                    Ogni tenant ha i propri account isolati. React non riceve mai le credenziali.
+                    <strong>Sicurezza multi-tenant:</strong> le credenziali OAuth e i refresh token sono cifrati con
+                    AES/Fernet prima di essere salvati. Ogni agenzia ha il suo cloud isolato — un Drive collegato dalla
+                    tua agenzia non è mai visibile ad altre agenzie della piattaforma.
+                    <div className="mt-1 text-emerald-800">
+                        Agenzia corrente: <code className="bg-white px-1 rounded">{configStatus.tenant_id}</code>
+                    </div>
                 </div>
             </Card>
 
             {/* Card provider */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
-                    { key: "google_drive", name: "Google Drive", color: "from-blue-500 to-yellow-500",
+                    { key: "google_drive", name: "Google Drive",
                       logo: "https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" },
-                    { key: "onedrive", name: "Microsoft OneDrive", color: "from-sky-500 to-sky-700",
+                    { key: "onedrive", name: "Microsoft OneDrive",
                       logo: "https://upload.wikimedia.org/wikipedia/commons/3/3c/Microsoft_Office_OneDrive_%282019%E2%80%93present%29.svg" },
                 ].map((p) => {
                     const cfg = configStatus[p.key];
@@ -4327,14 +4337,20 @@ function CloudStorageSezione() {
                                     <div className="text-[11px] text-slate-500 mt-0.5">
                                         {conn ? (
                                             <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
-                                                <CheckCircle2 size={11} /> Collegato
+                                                <CheckCircle2 size={11} /> Collegato per l&apos;intera agenzia
                                                 {conn.connected_at && ` · dal ${new Date(conn.connected_at).toLocaleDateString("it-IT")}`}
                                             </span>
                                         ) : cfg.configured ? (
-                                            <span className="text-slate-500">Non ancora collegato</span>
+                                            <span className="text-slate-500">
+                                                Pronto per il collegamento · Client ID: <code className="text-[10px]">{cfg.client_id_masked}</code>
+                                                {" · "}
+                                                <span className="text-[10px] text-slate-400">
+                                                    fonte: {cfg.source === "db" ? "inserita dall'admin agenzia" : "config di piattaforma"}
+                                                </span>
+                                            </span>
                                         ) : (
                                             <span className="inline-flex items-center gap-1 text-amber-700">
-                                                <AlertTriangle size={11} /> Provider non configurato dall&apos;admin
+                                                <AlertTriangle size={11} /> Credenziali OAuth non ancora inserite
                                             </span>
                                         )}
                                     </div>
@@ -4352,7 +4368,7 @@ function CloudStorageSezione() {
                                 </div>
                             )}
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {conn ? (
                                     <>
                                         <Button size="sm" variant="outline"
@@ -4368,13 +4384,28 @@ function CloudStorageSezione() {
                                             <XCircle size={12} className="mr-1" /> Scollega
                                         </Button>
                                     </>
-                                ) : (
+                                ) : cfg.configured ? (
                                     <Button size="sm"
                                             onClick={() => connectProvider(p.key)}
-                                            disabled={busy || !cfg.configured}
+                                            disabled={busy}
                                             className="bg-sky-700 hover:bg-sky-800"
                                             data-testid={`btn-connect-${p.key}`}>
                                         <ExternalLink size={12} className="mr-1" /> Collega {p.name}
+                                    </Button>
+                                ) : null}
+                                <Button size="sm" variant="ghost"
+                                        onClick={() => setCredDialog({ provider: p.key, existing: cfg.configured })}
+                                        className="text-slate-600 hover:bg-slate-100"
+                                        data-testid={`btn-creds-${p.key}`}>
+                                    <Pencil size={12} className="mr-1" />
+                                    {cfg.configured && cfg.source === "db" ? "Modifica Client ID/Secret" : "Inserisci Client ID/Secret"}
+                                </Button>
+                                {cfg.configured && cfg.source === "db" && (
+                                    <Button size="sm" variant="ghost"
+                                            onClick={() => deleteCredentials(p.key)}
+                                            className="text-rose-600 hover:bg-rose-50"
+                                            data-testid={`btn-del-creds-${p.key}`}>
+                                        <Trash2 size={12} className="mr-1" /> Rimuovi credenziali
                                     </Button>
                                 )}
                             </div>
@@ -4383,46 +4414,51 @@ function CloudStorageSezione() {
                 })}
             </div>
 
-            {/* Setup instructions se non configurato */}
-            {(!configStatus.google_drive.configured || !configStatus.onedrive.configured) && (
-                <Card className="p-4 bg-amber-50 border-amber-200">
-                    <div className="flex items-start gap-2 mb-2">
-                        <AlertTriangle size={16} className="text-amber-600 mt-0.5" />
-                        <div className="font-semibold text-amber-900 text-sm">
-                            Configurazione admin richiesta
-                        </div>
+            {/* Guida rapida configurazione OAuth per admin agenzia */}
+            <Card className="p-4 bg-sky-50 border-sky-200">
+                <div className="flex items-start gap-2 mb-2">
+                    <AlertTriangle size={16} className="text-sky-700 mt-0.5" />
+                    <div className="font-semibold text-sky-900 text-sm">
+                        Come ottenere le tue credenziali OAuth (ogni agenzia usa le proprie)
                     </div>
-                    <div className="text-xs text-amber-900 space-y-2 ml-6">
-                        <div>
-                            Per attivare i provider Cloud Storage, l&apos;amministratore deve:
-                        </div>
-                        <ol className="list-decimal list-inside space-y-1.5 text-[11px]">
-                            {!configStatus.google_drive.configured && (
-                                <li>
-                                    <strong>Google Drive:</strong> creare un progetto su <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer" className="underline text-sky-700">Google Cloud Console</a>,
-                                    abilitare <em>Drive API</em>, creare un OAuth Client Web e aggiungere le variabili
-                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">GOOGLE_DRIVE_CLIENT_ID</code> e
-                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">GOOGLE_DRIVE_CLIENT_SECRET</code> in <code>backend/.env</code>
-                                </li>
-                            )}
-                            {!configStatus.onedrive.configured && (
-                                <li>
-                                    <strong>OneDrive:</strong> registrare un&apos;app su <a href="https://entra.microsoft.com" target="_blank" rel="noreferrer" className="underline text-sky-700">Microsoft Entra</a>,
-                                    scope <code className="text-[10px]">Files.ReadWrite offline_access</code>, aggiungere
-                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">MS_ONEDRIVE_CLIENT_ID</code> e
-                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">MS_ONEDRIVE_CLIENT_SECRET</code> in <code>backend/.env</code>
-                                </li>
-                            )}
-                            <li>
-                                <strong>Redirect URI</strong> da configurare nel provider:
-                                <div className="bg-white p-1.5 rounded mt-1 font-mono text-[10px] break-all border border-amber-200">
-                                    {configStatus.google_drive.redirect_uri || "(BACKEND_PUBLIC_URL non impostato)"}
-                                </div>
-                            </li>
+                </div>
+                <div className="text-xs text-sky-900 space-y-2 ml-6">
+                    <div>
+                        <strong>Google Drive:</strong>
+                        <ol className="list-decimal list-inside space-y-1 mt-1 text-[11px]">
+                            <li>Vai su <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer" className="underline text-sky-700">Google Cloud Console</a> → crea un nuovo progetto</li>
+                            <li>Abilita <em>Google Drive API</em> dalla libreria API</li>
+                            <li>Crea un <em>OAuth 2.0 Client ID</em> di tipo &quot;Web application&quot;</li>
+                            <li>Inserisci il <em>Redirect URI</em> qui sotto</li>
+                            <li>Incolla Client ID e Client Secret nel pulsante &quot;Inserisci Client ID/Secret&quot;</li>
                         </ol>
                     </div>
-                </Card>
-            )}
+                    <div>
+                        <strong>Microsoft OneDrive:</strong>
+                        <ol className="list-decimal list-inside space-y-1 mt-1 text-[11px]">
+                            <li>Vai su <a href="https://entra.microsoft.com" target="_blank" rel="noreferrer" className="underline text-sky-700">Microsoft Entra</a> → App registrations → New registration</li>
+                            <li>Redirect URI (tipo Web): quello sotto</li>
+                            <li>In &quot;API permissions&quot; aggiungi <code>Files.ReadWrite offline_access User.Read</code></li>
+                            <li>In &quot;Certificates &amp; secrets&quot; crea un nuovo client secret</li>
+                            <li>Incolla Application (client) ID e Client Secret nell&apos;apposito pulsante</li>
+                        </ol>
+                    </div>
+                    <div className="pt-1">
+                        <strong>Redirect URI</strong> (identico per entrambi):
+                        <div className="bg-white p-1.5 rounded mt-1 font-mono text-[10px] break-all border border-sky-200 flex items-center justify-between gap-2">
+                            <span>{configStatus.google_drive.redirect_uri}</span>
+                            <Button size="sm" variant="ghost" className="h-6 text-[10px] shrink-0"
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(configStatus.google_drive.redirect_uri);
+                                        toast.success("Copiato negli appunti");
+                                    }}
+                                    data-testid="btn-copy-redirect">
+                                Copia
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </Card>
 
             {/* Dialog scelta cartella */}
             {folderDialog && (
@@ -4433,7 +4469,93 @@ function CloudStorageSezione() {
                     onSaved={() => { setFolderDialog(null); load(); }}
                 />
             )}
+            {/* Dialog inserimento credenziali */}
+            {credDialog && (
+                <OAuthCredentialsDialog
+                    provider={credDialog.provider}
+                    existing={credDialog.existing}
+                    onClose={() => setCredDialog(null)}
+                    onSaved={() => { setCredDialog(null); load(); }}
+                />
+            )}
         </div>
+    );
+}
+
+function OAuthCredentialsDialog({ provider, existing, onClose, onSaved }) {
+    const [clientId, setClientId] = useState("");
+    const [clientSecret, setClientSecret] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [showSecret, setShowSecret] = useState(false);
+    const providerName = provider === "google_drive" ? "Google Drive" : "Microsoft OneDrive";
+
+    const save = async () => {
+        if (!clientId.trim() || !clientSecret.trim()) {
+            toast.error("Client ID e Client Secret sono obbligatori");
+            return;
+        }
+        setSaving(true);
+        try {
+            const fd = new FormData();
+            fd.append("provider", provider);
+            fd.append("client_id", clientId.trim());
+            fd.append("client_secret", clientSecret.trim());
+            await api.post("/librerie/cloud-storage/admin-config", fd);
+            toast.success(`Credenziali ${providerName} salvate (cifrate AES/Fernet)`);
+            onSaved?.();
+        } catch (e) {
+            toast.error(errMsg(e));
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid={`dialog-oauth-creds-${provider}`}>
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Shield size={16} /> Credenziali OAuth — {providerName}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded p-2 text-[11px] text-amber-900">
+                        <strong>Riservato all&apos;admin dell&apos;agenzia.</strong> Queste credenziali sono cifrate con AES/Fernet
+                        prima di essere salvate nel database e valgono solo per questa agenzia. Non condividerle mai
+                        con altri utenti.
+                    </div>
+                    <div>
+                        <Label className="text-xs">Client ID {existing && <span className="text-slate-400">(già presente — inserire per aggiornare)</span>}</Label>
+                        <Input value={clientId} onChange={(e) => setClientId(e.target.value)}
+                               placeholder={provider === "google_drive" ? "es. 1122334455-abc.apps.googleusercontent.com" : "es. 11111111-2222-3333-4444-555555555555"}
+                               data-testid={`oauth-client-id-${provider}`}
+                               autoComplete="off" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Client Secret {existing && <span className="text-slate-400">(già presente — inserire per aggiornare)</span>}</Label>
+                        <div className="relative">
+                            <Input type={showSecret ? "text" : "password"}
+                                   value={clientSecret}
+                                   onChange={(e) => setClientSecret(e.target.value)}
+                                   placeholder={provider === "google_drive" ? "es. GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx" : "es. Q~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+                                   data-testid={`oauth-client-secret-${provider}`}
+                                   autoComplete="off"
+                                   className="pr-16" />
+                            <button type="button"
+                                    onClick={() => setShowSecret(!showSecret)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-sky-700 hover:underline">
+                                {showSecret ? "Nascondi" : "Mostra"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700"
+                            data-testid={`btn-save-creds-${provider}`}>
+                        {saving ? "Salvataggio…" : "Salva credenziali (cifrate)"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

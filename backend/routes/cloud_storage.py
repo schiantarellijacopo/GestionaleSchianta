@@ -84,15 +84,65 @@ def _tenant_id(user: dict) -> str:
     return user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
 
 
+async def _load_tenant_config(tenant_id: str, provider: str) -> dict:
+    """Carica config OAuth per tenant: prima cerca in MongoDB, poi fallback su ENV.
+
+    Consente all'admin di ogni agenzia di configurare le proprie credenziali OAuth
+    dall'interfaccia (Librerie → Cloud Storage → Configurazione admin), senza dover
+    modificare il file .env.
+    """
+    doc = await db.cloud_oauth_configs.find_one(
+        {"tenant_id": tenant_id, "provider": provider},
+    )
+    if doc and doc.get("client_id") and doc.get("client_secret_enc"):
+        return {
+            "client_id": doc["client_id"],
+            "client_secret": _dec(doc["client_secret_enc"]),
+            "source": "db",
+        }
+    # Fallback su ENV
+    if provider == "google_drive":
+        if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+            return {"client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET, "source": "env"}
+    elif provider == "onedrive":
+        if MS_CLIENT_ID and MS_CLIENT_SECRET:
+            return {"client_id": MS_CLIENT_ID, "client_secret": MS_CLIENT_SECRET, "source": "env"}
+    return {}
+
+
+async def _provider_cfg_async(provider: str, tenant_id: str) -> dict:
+    """Ritorna la config OAuth per il provider richiesto (versione async con tenant)."""
+    creds = await _load_tenant_config(tenant_id, provider)
+    if not creds:
+        label = "Google Drive" if provider == "google_drive" else "OneDrive"
+        raise HTTPException(
+            501,
+            f"{label} non configurato per questa agenzia. Vai su Librerie → "
+            f"Cloud Storage → Configurazione admin e incolla Client ID e Client Secret.",
+        )
+    if provider == "google_drive":
+        return {
+            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_url": "https://oauth2.googleapis.com/token",
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "scope": G_SCOPE,
+        }
+    base = f"https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0"
+    return {
+        "auth_url": f"{base}/authorize",
+        "token_url": f"{base}/token",
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+        "scope": M_SCOPE,
+    }
+
+
 def _provider_cfg(provider: str) -> dict:
-    """Ritorna la config OAuth per il provider richiesto."""
+    """Legacy sync helper — usa solo ENV. Preferire _provider_cfg_async."""
     if provider == "google_drive":
         if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-            raise HTTPException(
-                501,
-                "Google Drive non configurato. Aggiungi GOOGLE_DRIVE_CLIENT_ID e "
-                "GOOGLE_DRIVE_CLIENT_SECRET in backend/.env (vedi Librerie → Cloud Storage → istruzioni)",
-            )
+            raise HTTPException(501, "Google Drive non configurato")
         return {
             "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_url": "https://oauth2.googleapis.com/token",
@@ -102,11 +152,7 @@ def _provider_cfg(provider: str) -> dict:
         }
     if provider == "onedrive":
         if not MS_CLIENT_ID or not MS_CLIENT_SECRET:
-            raise HTTPException(
-                501,
-                "OneDrive non configurato. Aggiungi MS_ONEDRIVE_CLIENT_ID e "
-                "MS_ONEDRIVE_CLIENT_SECRET in backend/.env",
-            )
+            raise HTTPException(501, "OneDrive non configurato")
         base = f"https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0"
         return {
             "auth_url": f"{base}/authorize",
@@ -115,7 +161,7 @@ def _provider_cfg(provider: str) -> dict:
             "client_secret": MS_CLIENT_SECRET,
             "scope": M_SCOPE,
         }
-    raise HTTPException(400, "Provider non valido: usa 'google_drive' o 'onedrive'")
+    raise HTTPException(400, "Provider non valido")
 
 
 # ============================================================
@@ -123,18 +169,83 @@ def _provider_cfg(provider: str) -> dict:
 # ============================================================
 @router.get("/config-status")
 async def config_status(user=Depends(current_user)):
-    """Ritorna lo stato di configurazione dei provider (per l'UI Librerie)."""
+    """Ritorna lo stato di configurazione dei provider per l'agenzia dell'utente.
+
+    Cerca prima le credenziali salvate in DB (per il tenant), poi fallback su ENV.
+    """
+    tenant = _tenant_id(user)
+    g_cfg = await _load_tenant_config(tenant, "google_drive")
+    m_cfg = await _load_tenant_config(tenant, "onedrive")
     return {
         "google_drive": {
-            "configured": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
+            "configured": bool(g_cfg),
+            "source": g_cfg.get("source") if g_cfg else None,
+            "client_id_masked": _mask(g_cfg.get("client_id")) if g_cfg else None,
             "redirect_uri": REDIRECT_URI,
         },
         "onedrive": {
-            "configured": bool(MS_CLIENT_ID and MS_CLIENT_SECRET),
+            "configured": bool(m_cfg),
+            "source": m_cfg.get("source") if m_cfg else None,
+            "client_id_masked": _mask(m_cfg.get("client_id")) if m_cfg else None,
             "redirect_uri": REDIRECT_URI,
         },
         "encryption_configured": bool(ENC_KEY),
+        "tenant_id": tenant,
     }
+
+
+def _mask(v: Optional[str]) -> Optional[str]:
+    if not v:
+        return None
+    return v[:8] + "…" + v[-4:] if len(v) > 15 else v[:4] + "…"
+
+
+@router.post("/admin-config")
+async def save_admin_config(
+    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    user=Depends(current_user),
+):
+    """Salva/aggiorna le credenziali OAuth per l'agenzia (solo admin dell'agenzia).
+
+    Le credenziali sono cifrate con Fernet prima di essere salvate.
+    Una volta salvate, tutti gli utenti dell'agenzia possono collegare il proprio
+    account cloud usando queste credenziali (ma la connessione è unica per agenzia).
+    """
+    if (user.get("role") or "").lower() not in ("admin", "superadmin"):
+        raise HTTPException(403, "Solo gli amministratori dell'agenzia possono configurare le credenziali OAuth")
+    cid = (client_id or "").strip()
+    sec = (client_secret or "").strip()
+    if not cid or not sec:
+        raise HTTPException(400, "client_id e client_secret sono obbligatori")
+    tenant = _tenant_id(user)
+    await db.cloud_oauth_configs.update_one(
+        {"tenant_id": tenant, "provider": provider},
+        {"$set": {
+            "client_id": cid,
+            "client_secret_enc": _enc(sec),
+            "updated_at": _now().isoformat(),
+            "updated_by": user.get("email") or user.get("id"),
+        }},
+        upsert=True,
+    )
+    return {"ok": True, "provider": provider, "client_id_masked": _mask(cid)}
+
+
+@router.delete("/admin-config")
+async def delete_admin_config(
+    provider: str = Query(..., regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Rimuove le credenziali OAuth salvate per l'agenzia (torna al fallback ENV)."""
+    if (user.get("role") or "").lower() not in ("admin", "superadmin"):
+        raise HTTPException(403, "Solo gli amministratori dell'agenzia possono rimuovere le credenziali OAuth")
+    tenant = _tenant_id(user)
+    await db.cloud_oauth_configs.delete_one({"tenant_id": tenant, "provider": provider})
+    # Rimuove anche eventuali connessioni attive di quell'agenzia (ora invalide)
+    await db.cloud_connections.delete_many({"tenant_id": tenant, "provider": provider})
+    return {"ok": True, "provider": provider}
 
 
 @router.get("/oauth-url")
@@ -145,11 +256,12 @@ async def oauth_url(
     """Genera l'authorize URL con un `state` random legato al tenant/utente."""
     if not REDIRECT_URI:
         raise HTTPException(500, "BACKEND_PUBLIC_URL non configurato in backend/.env")
-    cfg = _provider_cfg(provider)
+    tenant = _tenant_id(user)
+    cfg = await _provider_cfg_async(provider, tenant)
     state = secrets.token_urlsafe(32)
     await db.cloud_oauth_states.insert_one({
         "_id": state,
-        "tenant_id": _tenant_id(user),
+        "tenant_id": tenant,
         "user_id": user.get("id"),
         "provider": provider,
         "expires_at": _now() + timedelta(minutes=10),
@@ -176,7 +288,12 @@ async def oauth_url(
 @router.get("/callback")
 async def oauth_callback(code: str = Query(...), state: str = Query(...),
                          error: Optional[str] = Query(None)):
-    """Callback OAuth: scambia il code per il refresh_token e lo salva."""
+    """Callback OAuth: scambia il code per il refresh_token e lo salva.
+
+    Il collegamento è per AGENZIA (tenant), non per utente. Il primo utente della
+    stessa agenzia che completa OAuth diventa il "proprietario del cloud aziendale".
+    Se un altro utente della stessa agenzia connette lo stesso provider, sovrascrive.
+    """
     if error:
         raise HTTPException(400, f"OAuth error: {error}")
     st = await db.cloud_oauth_states.find_one_and_delete({"_id": state})
@@ -185,7 +302,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
     if st["expires_at"] < _now():
         raise HTTPException(400, "state scaduto — riprova")
     provider = st["provider"]
-    cfg = _provider_cfg(provider)
+    cfg = await _provider_cfg_async(provider, st["tenant_id"])
     async with httpx.AsyncClient(timeout=30) as x:
         r = await x.post(cfg["token_url"], data={
             "client_id": cfg["client_id"],
@@ -200,11 +317,9 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
     t = r.json()
     refresh = t.get("refresh_token")
     if not refresh:
-        # Se non c'è il refresh (utente che ricollega su Google senza revoca), usa il vecchio
+        # Se non c'è il refresh (utente che ricollega senza revoca), usa il vecchio
         old = await db.cloud_connections.find_one({
-            "tenant_id": st["tenant_id"],
-            "user_id": st["user_id"],
-            "provider": provider,
+            "tenant_id": st["tenant_id"], "provider": provider,
         })
         if old:
             refresh = _dec(old["refresh_token"])
@@ -213,17 +328,18 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
             400,
             "Nessun refresh_token restituito. Revoca l'accesso dall'account provider e riprova.",
         )
+    # UPSERT per tenant (1 drive per agenzia)
     await db.cloud_connections.update_one(
-        {"tenant_id": st["tenant_id"], "user_id": st["user_id"], "provider": provider},
+        {"tenant_id": st["tenant_id"], "provider": provider},
         {"$set": {
             "refresh_token": _enc(refresh),
             "scopes": t.get("scope", cfg["scope"]),
             "connected_at": _now().isoformat(),
+            "connected_by": st["user_id"],
             "folder_id": None,
         }},
         upsert=True,
     )
-    # Redirect al frontend Librerie
     frontend_target = (FRONTEND_URL or BACKEND_PUBLIC_URL).rstrip("/")
     return RedirectResponse(
         f"{frontend_target}/librerie?cloud=connected&provider={provider}",
@@ -232,24 +348,20 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
 
 
 async def _fresh_access_token(provider: str, connection: dict) -> str:
-    """Refresh dell'access_token via refresh_token. Se il provider fa rotation,
-    salva il nuovo refresh_token in DB."""
-    cfg = _provider_cfg(provider)
+    """Refresh dell'access_token via refresh_token."""
+    tenant = connection["tenant_id"]
+    cfg = await _provider_cfg_async(provider, tenant)
     async with httpx.AsyncClient(timeout=30) as x:
         r = await x.post(cfg["token_url"], data={
             "client_id": cfg["client_id"],
             "client_secret": cfg["client_secret"],
             "refresh_token": _dec(connection["refresh_token"]),
             "grant_type": "refresh_token",
-            "scope": cfg["scope"],
         })
     if r.status_code in (400, 401):
         # Token revocato: rimuovi la connessione
-        await db.cloud_connections.delete_one({"_id": connection.get("_id")}) if connection.get("_id") else None
         await db.cloud_connections.delete_one({
-            "tenant_id": connection["tenant_id"],
-            "user_id": connection["user_id"],
-            "provider": provider,
+            "tenant_id": tenant, "provider": provider,
         })
         raise HTTPException(401, "Cloud account disconnesso — ricollega dall'UI")
     r.raise_for_status()
@@ -257,8 +369,7 @@ async def _fresh_access_token(provider: str, connection: dict) -> str:
     if data.get("refresh_token"):
         # MS ruota i refresh token — aggiorna atomically
         await db.cloud_connections.update_one(
-            {"tenant_id": connection["tenant_id"], "user_id": connection["user_id"],
-             "provider": provider},
+            {"tenant_id": tenant, "provider": provider},
             {"$set": {"refresh_token": _enc(data["refresh_token"])}},
         )
     return data["access_token"]
@@ -266,12 +377,12 @@ async def _fresh_access_token(provider: str, connection: dict) -> str:
 
 @router.get("/status")
 async def status(user=Depends(current_user)):
-    """Ritorna le connessioni attive del tenant/utente."""
+    """Ritorna le connessioni attive dell'agenzia (1 max per provider)."""
     tenant = _tenant_id(user)
     rows = db.cloud_connections.find(
-        {"tenant_id": tenant, "user_id": user.get("id")},
+        {"tenant_id": tenant},
         {"_id": 0, "provider": 1, "folder_id": 1, "folder_name": 1,
-         "connected_at": 1, "scopes": 1},
+         "connected_at": 1, "scopes": 1, "connected_by": 1},
     )
     connections = [
         {
@@ -280,10 +391,11 @@ async def status(user=Depends(current_user)):
             "folder_id": r.get("folder_id"),
             "folder_name": r.get("folder_name"),
             "connected_at": r.get("connected_at"),
+            "connected_by": r.get("connected_by"),
         }
         async for r in rows
     ]
-    return {"connections": connections}
+    return {"connections": connections, "tenant_id": tenant}
 
 
 @router.delete("/disconnect")
@@ -291,17 +403,13 @@ async def disconnect(
     provider: str = Query(..., regex="^(google_drive|onedrive)$"),
     user=Depends(current_user),
 ):
+    tenant = _tenant_id(user)
+    if (user.get("role") or "").lower() not in ("admin", "superadmin"):
+        raise HTTPException(403, "Solo gli amministratori dell'agenzia possono scollegare il cloud")
     await db.cloud_connections.delete_one({
-        "tenant_id": _tenant_id(user),
-        "user_id": user.get("id"),
-        "provider": provider,
+        "tenant_id": tenant, "provider": provider,
     })
     return {"disconnected": provider}
-
-
-class SetFolderBody:
-    """Utility per parsare form data del set-folder."""
-    pass
 
 
 @router.post("/set-folder")
@@ -311,9 +419,9 @@ async def set_folder(
     folder_name: Optional[str] = Form(None),
     user=Depends(current_user),
 ):
-    """Salva la cartella di destinazione (o root se folder_id=None)."""
+    """Salva la cartella di destinazione (o root se folder_id=None). Per l'intera agenzia."""
     r = await db.cloud_connections.update_one(
-        {"tenant_id": _tenant_id(user), "user_id": user.get("id"), "provider": provider},
+        {"tenant_id": _tenant_id(user), "provider": provider},
         {"$set": {"folder_id": folder_id or None, "folder_name": folder_name or None}},
     )
     if r.matched_count == 0:
@@ -329,9 +437,7 @@ async def list_folders(
 ):
     """Lista le cartelle dell'account (per la selezione destinazione)."""
     conn = await db.cloud_connections.find_one({
-        "tenant_id": _tenant_id(user),
-        "user_id": user.get("id"),
-        "provider": provider,
+        "tenant_id": _tenant_id(user), "provider": provider,
     })
     if not conn:
         raise HTTPException(409, "Account non collegato")
@@ -369,11 +475,9 @@ async def upload_file(
     folder_id: Optional[str] = Form(None),
     user=Depends(current_user),
 ):
-    """Carica un file PDF sul cloud storage collegato del tenant."""
+    """Carica un file PDF sul cloud storage dell'agenzia."""
     conn = await db.cloud_connections.find_one({
-        "tenant_id": _tenant_id(user),
-        "user_id": user.get("id"),
-        "provider": provider,
+        "tenant_id": _tenant_id(user), "provider": provider,
     })
     if not conn:
         raise HTTPException(409, "Account non collegato per questo provider")
@@ -423,7 +527,7 @@ async def upload_file(
                          json={"item": {"@microsoft.graph.conflictBehavior": "replace"}})
         r.raise_for_status()
         upload_url = r.json()["uploadUrl"]
-        chunk = 10 * 320 * 1024   # 3.2 MB — multiplo di 320 KiB
+        chunk = 10 * 320 * 1024
         pos = 0
         last: Optional[dict] = None
         while pos < len(data):
