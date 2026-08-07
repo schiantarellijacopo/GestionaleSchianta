@@ -28,27 +28,35 @@ const ALL_COLUMNS = [
     { k: "cliente_nome", label: "Cliente", w: 200 },
     { k: "polizza_numero", label: "Polizza", w: 140 },
     { k: "compagnia_nome", label: "Compagnia", w: 140 },
+    { k: "operatore_nome", label: "Operatore", w: 140 },
     { k: "polizza_ramo", label: "Ramo", w: 110 },
-    { k: "polizza_targa", label: "Targa / Bene", w: 100 },
-    { k: "data_decorrenza", label: "Decorrenza", w: 100 },
-    { k: "scadenza", label: "Scadenza", w: 100 },
-    { k: "confronto_premio", label: "Premio prec. / attuale", w: 180 },
-    { k: "tipo_rinnovo", label: "Tipo Rinnovo", w: 110 },
-    { k: "mezzo_pagamento", label: "Pagamento", w: 130 },
-    { k: "variazione_badge", label: "Stato / Variazione", w: 170 },
-    { k: "sinistri_badge", label: "Sinistri 12m", w: 90 },
-    { k: "importo_netto", label: "Netto (€)", w: 90 },
-    { k: "provvigioni", label: "Provv. (€)", w: 90 },
+    { k: "data_decorrenza", label: "Data Decorrenza", w: 110 },
+    { k: "scadenza", label: "Data Scadenza", w: 110 },
+    { k: "premio_precedente", label: "Premio '25", w: 90 },
+    { k: "importo_lordo", label: "Premio '26", w: 90 },
+    { k: "tipo_rinnovo", label: "Tipo Rinnovo", w: 100 },
+    { k: "mezzo_pagamento", label: "Metodo Pagamento", w: 140 },
+    { k: "variazione_badge", label: "Stato / Variazione", w: 180 },
+    { k: "note_carico", label: "Note", w: 180 },
+    { k: "motivo_mancanza", label: "Alert", w: 140 },
+    { k: "note_storiche", label: "Collaboratori (Storiche)", w: 180 },
+    { k: "sinistri_badge", label: "Sinistri ultimo anno", w: 110 },
+    { k: "provvigioni", label: "Provv. agenzia", w: 100 },
+    { k: "provvigioni_collab", label: "Provv. collaboratore", w: 110 },
+    { k: "importo_netto", label: "Premio netto", w: 100 },
+    { k: "imposte", label: "Tasse", w: 90 },
+    { k: "servizio_sanitario", label: "Servizio sanitario", w: 100 },
+    { k: "polizza_targa", label: "Targa", w: 100 },
     { k: "frazionamento", label: "Frazionam.", w: 100 },
-    { k: "operatore_nome", label: "Operatore", w: 130 },
-    { k: "note_carico", label: "Note / Alert", w: 220 },
+    { k: "confronto_premio", label: "Premio prec./attuale", w: 170 },
     { k: "azioni", label: "Azioni", w: 80 },
 ];
 const DEFAULT_VISIBLE = ["stato_carico", "cliente_nome", "polizza_numero",
-    "compagnia_nome", "polizza_ramo", "data_decorrenza", "scadenza",
-    "confronto_premio", "tipo_rinnovo", "mezzo_pagamento",
-    "variazione_badge", "note_carico", "azioni"];
-const LS_COLS = "carichi_mensili.visible_cols.v1";
+    "compagnia_nome", "operatore_nome", "polizza_ramo", "data_decorrenza", "scadenza",
+    "premio_precedente", "importo_lordo", "tipo_rinnovo", "mezzo_pagamento",
+    "variazione_badge", "note_carico", "polizza_targa", "azioni"];
+const LS_COLS = "carichi_mensili.visible_cols.v2";
+const LS_ORDER = "carichi_mensili.col_order.v1";
 
 const MOTIVI = ["Disdettata", "Mezzo Venduto", "Cliente Trasferito", "Voltura", "Sostituita"];
 
@@ -67,7 +75,19 @@ export default function CarichiMensili() {
         try { return JSON.parse(localStorage.getItem(LS_COLS)) || DEFAULT_VISIBLE; }
         catch { return DEFAULT_VISIBLE; }
     });
+    const [columnOrder, setColumnOrder] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(LS_ORDER));
+            if (Array.isArray(saved) && saved.length > 0) {
+                // Aggiungi colonne nuove non presenti in saved (backward compat)
+                const missing = ALL_COLUMNS.map((c) => c.k).filter((k) => !saved.includes(k));
+                return [...saved, ...missing];
+            }
+        } catch { /* fallthrough */ }
+        return ALL_COLUMNS.map((c) => c.k);
+    });
     const [colToggleOpen, setColToggleOpen] = useState(false);
+    const [dragKey, setDragKey] = useState(null);
 
     const load = async () => {
         try {
@@ -88,6 +108,26 @@ export default function CarichiMensili() {
     useEffect(() => {
         localStorage.setItem(LS_COLS, JSON.stringify(visible));
     }, [visible]);
+    useEffect(() => {
+        localStorage.setItem(LS_ORDER, JSON.stringify(columnOrder));
+    }, [columnOrder]);
+
+    // Colonne ordinate secondo columnOrder (fallback a ordine originale)
+    const orderedColumns = useMemo(() => {
+        const byKey = Object.fromEntries(ALL_COLUMNS.map((c) => [c.k, c]));
+        return columnOrder.map((k) => byKey[k]).filter(Boolean);
+    }, [columnOrder]);
+
+    const moveColumn = (fromKey, toKey) => {
+        if (fromKey === toKey) return;
+        const next = [...columnOrder];
+        const fromIdx = next.indexOf(fromKey);
+        const toIdx = next.indexOf(toKey);
+        if (fromIdx < 0 || toIdx < 0) return;
+        next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, fromKey);
+        setColumnOrder(next);
+    };
 
     const filtered = useMemo(() => {
         if (!rows) return [];
@@ -262,7 +302,7 @@ export default function CarichiMensili() {
                                             data-testid="check-all"
                                         />
                                     </th>
-                                    {ALL_COLUMNS.filter((c) => isVisible(c.k)).map((c) => (
+                                    {orderedColumns.filter((c) => isVisible(c.k)).map((c) => (
                                         <th key={c.k} className="p-2 text-left font-semibold text-slate-700 uppercase tracking-wide"
                                             style={{ minWidth: c.w }}>{c.label}</th>
                                     ))}
@@ -275,6 +315,7 @@ export default function CarichiMensili() {
                                         checked={selected.has(r.id)}
                                         onCheck={() => toggleOne(r.id)}
                                         onDelete={() => eliminaOne(r.id)}
+                                        orderedColumns={orderedColumns}
                                         isVisible={isVisible}
                                     />
                                 ))}
@@ -306,21 +347,35 @@ export default function CarichiMensili() {
             {colToggleOpen && (
                 <Dialog open onOpenChange={(o) => !o && setColToggleOpen(false)}>
                     <DialogContent className="max-w-md" data-testid="dialog-columns">
-                        <DialogHeader><DialogTitle>Personalizza colonne</DialogTitle></DialogHeader>
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {ALL_COLUMNS.map((c) => (
-                                <label key={c.k} className="flex items-center gap-2 text-sm">
+                        <DialogHeader><DialogTitle>Personalizza colonne — trascina per riordinare</DialogTitle></DialogHeader>
+                        <div className="space-y-1 max-h-96 overflow-y-auto">
+                            {orderedColumns.map((c) => (
+                                <div
+                                    key={c.k}
+                                    draggable
+                                    onDragStart={() => setDragKey(c.k)}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={() => { if (dragKey) moveColumn(dragKey, c.k); setDragKey(null); }}
+                                    className={`flex items-center gap-2 text-sm p-1.5 rounded border ${
+                                        dragKey === c.k ? "opacity-50 border-violet-400 bg-violet-50" : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                                    } cursor-move`}
+                                    data-testid={`col-drag-${c.k}`}
+                                >
+                                    <span className="text-slate-400 text-xs cursor-grab select-none">⋮⋮</span>
                                     <Checkbox
                                         checked={visible.includes(c.k)}
                                         onCheckedChange={() => toggleCol(c.k)}
                                         data-testid={`col-toggle-${c.k}`}
                                     />
-                                    {c.label}
-                                </label>
+                                    <span className="flex-1">{c.label}</span>
+                                </div>
                             ))}
                         </div>
                         <DialogFooter>
-                            <Button variant="outline" onClick={() => setVisible(DEFAULT_VISIBLE)}>
+                            <Button variant="outline" onClick={() => {
+                                setVisible(DEFAULT_VISIBLE);
+                                setColumnOrder(ALL_COLUMNS.map((c) => c.k));
+                            }}>
                                 Ripristina default
                             </Button>
                             <Button onClick={() => setColToggleOpen(false)}>Chiudi</Button>
