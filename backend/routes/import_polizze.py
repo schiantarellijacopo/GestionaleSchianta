@@ -319,7 +319,14 @@ async def execute_import_polizze(
             pol_data["contraente_id"] = contraente_id
             pol_data["compagnia_id"] = compagnia_id
             pol_data.setdefault("effetto", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-            pol_data.setdefault("scadenza", pol_data["effetto"])
+            if not pol_data.get("scadenza"):
+                # Default: 1 anno dopo l'effetto (polizza annuale standard)
+                try:
+                    from datetime import datetime as _dt
+                    eff = _dt.strptime(pol_data["effetto"], "%Y-%m-%d")
+                    pol_data["scadenza"] = eff.replace(year=eff.year + 1).strftime("%Y-%m-%d")
+                except Exception:
+                    pol_data["scadenza"] = pol_data["effetto"]
             pol_data.setdefault("ramo", "GENERALE")
             pol_data.setdefault("collaboratore_id", user.get("id"))
             pol_data.setdefault("fonte", "import_ania")

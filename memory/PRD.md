@@ -100,3 +100,56 @@ Usare integration_expert prima di implementare.
 - P2: Google Drive integration
 - P3: Refactor server.py (>11k righe → routers modulari)
 
+
+---
+
+## Iterazione 48 (Feb 2026) — Carichi Mensili smart + Import multi-sezione + Cloud Storage
+
+### ✅ P0 Carichi Mensili — Celle dinamiche + Deduzione AI variazioni
+- **Frontend** (`CarichiMensili.jsx`): `TitoloRow` refactorato con dizionario `CELL_RENDERERS`. Le celle ora seguono l'ordine di `orderedColumns` (drag&drop delle colonne funzionante).
+- **Backend** (`carichi_mensili.py`): logica di deduzione **deterministica** basata su dati CRM. Nuovi campi risposta per ogni riga:
+  - `variazione_badge`: "🔄 Sostituita", "🛑 Disdettata", "⏸ Sospesa" oltre a Aumento/Riduzione/Nuova
+  - `variazione_dettaglio`: spiegazione (es. "Sostituita da polizza XYZ effetto 2026-03-01")
+  - `note_carico`: preserva manuale + appende deduzione automatica prefissata da 🤖
+  - `note_storiche`: nomi dei collaboratori storici dai `provvigioni_operatori`
+  - `servizio_sanitario`: da `polizza.premio_ssn`
+  - `provvigioni_collab`: somma quote destinate agli operatori
+  - `polizza_stato`, `motivo_mancanza` dedotto
+
+### ✅ Import Excel/CSV multi-sezione
+- Nuovi router `routes/import_polizze.py` e `routes/import_sinistri.py` con:
+  - `POST /api/import/{polizze|sinistri}/preview` (auto-mapping degli header con similarity ≥0.6)
+  - `POST /api/import/{polizze|sinistri}/execute` (policy skip/overwrite/create_only)
+  - Risoluzione automatica di `contraente_id` (via CF/P.IVA), `compagnia_id`, `polizza_id`
+  - Default intelligente: se manca la scadenza, calcola +1 anno dall'effetto
+- Nuovo componente frontend `ImportExcelDialog.jsx` riusabile (wizard 3 step: upload → mapping → risultato)
+- Pulsanti "Importa Excel/CSV" aggiunti in `/anagrafiche`, `/polizze`, `/sinistri`
+- Testato con auto-mapping al 100% di confidence su header italiani standard
+
+### ✅ Cloud Storage: Google Drive + Microsoft OneDrive
+- Nuovo router `routes/cloud_storage.py` con OAuth 2.0 authorization code flow:
+  - `GET /api/librerie/cloud-storage/config-status`
+  - `GET /api/librerie/cloud-storage/oauth-url?provider=...`
+  - `GET /api/librerie/cloud-storage/callback` (redirect al frontend)
+  - `GET /api/librerie/cloud-storage/status`
+  - `GET /api/librerie/cloud-storage/folders?provider=...&parent_id=...`
+  - `POST /api/librerie/cloud-storage/set-folder`
+  - `POST /api/librerie/cloud-storage/upload` (multipart Google Drive, upload session OneDrive per file >4MB)
+  - `DELETE /api/librerie/cloud-storage/disconnect`
+- **Sicurezza multi-tenant**: refresh token cifrati con Fernet (AES-128), isolamento per `tenant_id` in tutte le query.
+- Nuova sezione **"Cloud Storage (Drive/OneDrive)"** in `/librerie` con:
+  - Card Google Drive e Microsoft OneDrive
+  - Folder picker (breadcrumb-based navigation)
+  - Setup instructions per admin (Google Cloud Console + Microsoft Entra + Redirect URI)
+- ENV richieste (in `backend/.env`): `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `MS_ONEDRIVE_CLIENT_ID`, `MS_ONEDRIVE_CLIENT_SECRET`, `CLOUD_STORAGE_ENCRYPTION_KEY` (auto-generata), `BACKEND_PUBLIC_URL`
+- **Testing**: 10/10 backend + frontend 100% (iter 48 pytest). Il flow OAuth reale sarà attivabile appena l'utente fornirà i Client ID/Secret dei provider.
+
+### 📌 Backlog aggiornato
+- P0: Attivazione reale Google Drive/OneDrive (attesa credenziali OAuth utente)
+- P1: Avatar auto-crop bypass su upload alternativi (routes/documenti_inbox.py)
+- P1: `setup_iniziale_*` in `MovimentoCategoria`
+- P1: RCA sostituzione logica (extras_p1p2.py)
+- P1: Modulo Asset/Patrimonio (Leaflet + PDF)
+- P2: Sincronizzazione automatica PDF polizze → Cloud collegato
+- P3: Refactor server.py (>11k righe)
+
