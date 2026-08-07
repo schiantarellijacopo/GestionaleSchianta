@@ -3155,6 +3155,7 @@ const PLACEHOLDERS_DOC = [
     { k: "numero_titoli", desc: "Numero titoli", cat: "Totali" },
     { k: "numero_polizze", desc: "Numero polizze", cat: "Totali" },
     { k: "numero_sinistri", desc: "Numero sinistri", cat: "Totali" },
+    { k: "elenco_titoli", desc: "Elenco righe titoli formattato (multi-riga)", cat: "Totali" },
     // === Sistema / Date ===
     { k: "data_oggi", desc: "Data odierna (gg-mm-aaaa)", cat: "Sistema" },
     { k: "ora_oggi", desc: "Ora odierna (HH:MM)", cat: "Sistema" },

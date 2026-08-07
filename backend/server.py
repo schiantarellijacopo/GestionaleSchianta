@@ -8034,7 +8034,8 @@ async def whatsapp_bulk_avvisi_titoli(
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
     pols = {p["id"]: p async for p in db.polizze.find(
         {"id": {"$in": pol_ids}},
-        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "prodotto": 1},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1,
+         "prodotto": 1, "targa": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
     anas = {a["id"]: a async for a in db.anagrafiche.find(
@@ -8054,12 +8055,12 @@ async def whatsapp_bulk_avvisi_titoli(
             bucket[p["contraente_id"]].append({**t, "_pol": p})
 
     def _fmt_scad(s: str | None) -> str:
-        """Converte ``YYYY-MM-DD`` in ``DD-MM-YYYY`` per l'esposizione al cliente."""
+        """Converte ``YYYY-MM-DD`` in ``DD/MM/YYYY`` per l'esposizione al cliente."""
         if not s or len(str(s)) < 10:
             return "-"
         try:
             y, m, d = str(s)[:10].split("-")
-            return f"{d}-{m}-{y}"
+            return f"{d}/{m}/{y}"
         except ValueError:
             return str(s)[:10]
 
@@ -8089,6 +8090,9 @@ async def whatsapp_bulk_avvisi_titoli(
             first_pol = ts[0].get("_pol") if ts else {}
             prodotto_val = first_pol.get("prodotto") or first_pol.get("ramo") or ""
             first_scad = _fmt_scad((ts[0] or {}).get("scadenza")) if ts else ""
+            # {elenco_titoli}: se l'utente lo mette nel modello, viene sostituito
+            # con l'elenco delle righe (una per titolo). Altrimenti nulla.
+            elenco_txt = righe + ("\n… e altri" if len(ts) > 15 else "")
             from routes.modelli import render_text as _rt
             base_msg = _rt(modello_libreria.get("corpo") or "", {
                 "cliente_nome": nome, "cliente": nome,
@@ -8096,14 +8100,18 @@ async def whatsapp_bulk_avvisi_titoli(
                 "numero_polizza": first_pol.get("numero_polizza") or "",
                 "prodotto": prodotto_val,
                 "ramo": first_pol.get("ramo") or "",
+                "targa": first_pol.get("targa") or "",
                 "data_scadenza": first_scad, "scadenza": first_scad,
+                "elenco_titoli": elenco_txt,
             })
-            # Non appendiamo l'elenco righe se il testo del modello sembra
-            # già "completo" (contiene {totale} → l'utente ha già scritto tutto).
-            if "{totale}" in (modello_libreria.get("corpo") or ""):
+            # Se il modello ha {elenco_titoli} → è già dentro, non ripetere.
+            # Se ha {totale} ma non {elenco_titoli} → il testo è "self-contained" senza righe.
+            # Se non ha né l'uno né l'altro → append backward-compat.
+            corpo_orig = modello_libreria.get("corpo") or ""
+            if "{elenco_titoli}" in corpo_orig or "{totale}" in corpo_orig:
                 msg = base_msg
             else:
-                msg = base_msg + "\n\n" + righe + ("\n… e altri" if len(ts) > 15 else "")
+                msg = base_msg + "\n\n" + elenco_txt
         else:
             msg = (intro.replace("{cliente}", nome) + "\n" + righe +
                    ("\n… e altri" if len(ts) > 15 else "") +
@@ -8174,6 +8182,18 @@ async def invia_bulk_auto(
          "canale_whatsapp": 1, "canale_email": 1, "canale_sms": 1, "usa_app": 1},
     )}
 
+    # Serve anche prodotto/targa nell'endpoint auto: ri-carichiamo la proiezione
+    # completa delle polizze già in mappa "pols" (viene passata al bucket)
+    pol_ids_all = list(pols.keys())
+    if pol_ids_all:
+        async for p in db.polizze.find(
+            {"id": {"$in": pol_ids_all}},
+            {"_id": 0, "id": 1, "prodotto": 1, "targa": 1},
+        ):
+            if p["id"] in pols:
+                pols[p["id"]]["prodotto"] = p.get("prodotto")
+                pols[p["id"]]["targa"] = p.get("targa")
+
     from collections import defaultdict
     bucket: dict = defaultdict(list)
     for t in titoli:
@@ -8207,12 +8227,12 @@ async def invia_bulk_auto(
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
 
     def _fmt_scad_giorno(s: str | None) -> str:
-        """Converte ``YYYY-MM-DD`` in ``DD-MM-YYYY``."""
+        """Converte ``YYYY-MM-DD`` in ``DD/MM/YYYY``."""
         if not s or len(str(s)) < 10:
             return "-"
         try:
             y, m, d = str(s)[:10].split("-")
-            return f"{d}-{m}-{y}"
+            return f"{d}/{m}/{y}"
         except ValueError:
             return str(s)[:10]
 
@@ -8226,20 +8246,23 @@ async def invia_bulk_auto(
         tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
         totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         first_pol = ts[0].get("_pol") if ts else {}
-        # data_scadenza: quella del primo titolo (formato DD-MM-YYYY)
+        # data_scadenza: quella del primo titolo (formato DD/MM/YYYY)
         first_scad = _fmt_scad_giorno((ts[0] or {}).get("scadenza")) if ts else ""
-        ctx = {"cliente_nome": nome, "cliente": nome,
-               "totale": totale_fmt, "numero_titoli": str(len(ts)),
-               "numero_polizza": first_pol.get("numero_polizza") or "",
-               "prodotto": first_pol.get("prodotto") or first_pol.get("ramo") or "",
-               "ramo": first_pol.get("ramo") or "",
-               "data_scadenza": first_scad, "scadenza": first_scad}
         righe_txt = "\n".join(
             f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
             f"scad. {_fmt_scad_giorno(t.get('scadenza'))} — € {float(t.get('importo_lordo') or 0):,.2f}"
             .replace(",", "X").replace(".", ",").replace("X", ".")
             for t in ts[:15]
         )
+        elenco_txt = righe_txt + ("\n… e altri" if len(ts) > 15 else "")
+        ctx = {"cliente_nome": nome, "cliente": nome,
+               "totale": totale_fmt, "numero_titoli": str(len(ts)),
+               "numero_polizza": first_pol.get("numero_polizza") or "",
+               "prodotto": first_pol.get("prodotto") or first_pol.get("ramo") or "",
+               "ramo": first_pol.get("ramo") or "",
+               "targa": first_pol.get("targa") or "",
+               "data_scadenza": first_scad, "scadenza": first_scad,
+               "elenco_titoli": elenco_txt}
 
         # Scelta canale: primo della priorità che è abilitato E ha il recapito
         cell = (a.get("cellulare") or a.get("telefono") or "").strip()
@@ -8271,9 +8294,15 @@ async def invia_bulk_auto(
         try:
             esito_ok = False
             if canale_scelto == "whatsapp":
-                base = _rt((mod_wa or {}).get("corpo") or
-                           "Buongiorno {cliente_nome}, le ricordiamo i seguenti titoli in scadenza/arretrati:", ctx)
-                msg = base + "\n" + righe_txt + f"\nTotale: {totale_fmt}"
+                corpo_wa = (mod_wa or {}).get("corpo") or \
+                    "Buongiorno {cliente_nome}, le ricordiamo i seguenti titoli in scadenza:\n\n{elenco_titoli}\n\nTotale: {totale}"
+                base = _rt(corpo_wa, ctx)
+                # Backward-compat: se il modello non contiene {elenco_titoli} né {totale}
+                # aggiungiamo comunque l'elenco (così i modelli vecchi non risultano tronchi).
+                if "{elenco_titoli}" not in corpo_wa and "{totale}" not in corpo_wa:
+                    msg = base + "\n" + righe_txt + f"\nTotale: {totale_fmt}"
+                else:
+                    msg = base
                 r = await send_text_via_evolution(cell, msg)
                 esito_ok = r.get("ok", False)
                 await db.storico_avvisi.insert_one({

@@ -412,6 +412,9 @@ async def preview_modello(body: PreviewBody, user: dict = Depends(current_user))
     ctx.setdefault("totale", "1.240,50 €")
     ctx.setdefault("importo_abbuono", "50,00 €")
     ctx.setdefault("numero_titolo", "T-2026-4587")
+    ctx.setdefault("targa", "AB123CD")
+    ctx.setdefault("elenco_titoli",
+        "• Polizza POL-2026-000123 (RCA) — scad. 27/07/2026 — € 1.240,50")
 
     return {
         "tipo": body.tipo,
