@@ -387,18 +387,162 @@ export default function CarichiMensili() {
     );
 }
 
-function TitoloRow({ r, checked, onCheck, onDelete, isVisible }) {
-    const stato = r.stato_carico || "validato";
-    const statoBadge = {
-        in_attesa: "bg-sky-100 text-sky-800",
-        validato: "bg-emerald-100 text-emerald-800",
-        annullato_carico: "bg-slate-100 text-slate-600 line-through",
-    }[stato] || "bg-slate-100";
-    const prevPrem = r.premio_precedente;
-    const currPrem = Number(r.importo_lordo || 0);
-    const deltaEuro = prevPrem != null ? (currPrem - prevPrem) : null;
-    const deltaPct = (prevPrem && prevPrem > 0) ? ((currPrem - prevPrem) / prevPrem) * 100 : null;
+// Dizionario di renderers per ciascuna colonna: la chiave corrisponde a ALL_COLUMNS[i].k
+// e la funzione ritorna il contenuto della cella. In questo modo la Row può renderizzare
+// dinamicamente le celle nell'ordine di `orderedColumns` scelto dall'utente (drag&drop).
+const CELL_RENDERERS = {
+    stato_carico: (r) => {
+        const stato = r.stato_carico || "validato";
+        const cls = {
+            in_attesa: "bg-sky-100 text-sky-800",
+            validato: "bg-emerald-100 text-emerald-800",
+            annullato_carico: "bg-slate-100 text-slate-600 line-through",
+        }[stato] || "bg-slate-100";
+        return (
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${cls}`}>
+                {stato === "in_attesa" ? "In Attesa" : stato === "validato" ? "Validato" : "Annullato"}
+            </span>
+        );
+    },
+    cliente_nome: (r) => <span className="font-medium text-slate-900">{r.cliente_nome || "-"}</span>,
+    polizza_numero: (r) => (
+        <div className="font-mono text-[11px]">
+            <div className="flex items-center gap-1">
+                {r.bloccato && <Lock size={11} className="text-amber-600" title={r.motivo_blocco} />}
+                {r.polizza_numero || "-"}
+            </div>
+            {r.numero_titolo && <div className="text-slate-400 text-[10px]">Q: {r.numero_titolo}</div>}
+        </div>
+    ),
+    compagnia_nome: (r) => <span className="text-[11px]">{r.compagnia_nome || "-"}</span>,
+    operatore_nome: (r) => <span className="text-[11px]">{r.operatore_nome || "-"}</span>,
+    polizza_ramo: (r) => <span className="text-[11px] uppercase text-slate-600">{r.polizza_ramo || "-"}</span>,
+    data_decorrenza: (r) => <span className="font-mono text-[11px]">{fmtIt(r.data_decorrenza)}</span>,
+    scadenza: (r) => <span className="font-mono">{fmtIt(r.scadenza)}</span>,
+    premio_precedente: (r) => (
+        <span className="font-mono text-[11px] text-slate-600">
+            {r.premio_precedente != null ? `€${Number(r.premio_precedente).toFixed(2)}` : "-"}
+        </span>
+    ),
+    importo_lordo: (r) => (
+        <span className="font-mono text-[11px] font-semibold">
+            €{Number(r.importo_lordo || 0).toFixed(2)}
+        </span>
+    ),
+    tipo_rinnovo: (r) => (
+        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold uppercase">
+            {r.tipo_rinnovo === "rinnovo" ? "QR"
+                : r.tipo_rinnovo === "prima_emissione" ? "PE"
+                : r.tipo_rinnovo === "regolazione" ? "REG"
+                : (r.tipo_rinnovo || "-")}
+        </span>
+    ),
+    mezzo_pagamento: (r) => <span className="text-[11px]">{r.mezzo_pagamento || "-"}</span>,
+    variazione_badge: (r) => (
+        r.variazione_badge ? (
+            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                r.variazione_badge?.startsWith("🛑") ? "bg-rose-100 text-rose-800"
+                : r.variazione_badge?.startsWith("🔻") ? "bg-emerald-100 text-emerald-800"
+                : r.variazione_badge?.startsWith("🟢") ? "bg-sky-100 text-sky-800"
+                : r.variazione_badge?.startsWith("🔄") ? "bg-amber-100 text-amber-800"
+                : r.variazione_badge?.startsWith("⏸") ? "bg-slate-200 text-slate-800"
+                : "bg-violet-100 text-violet-800"
+            }`} title={r.variazione_dettaglio || ""}>{r.variazione_badge}</span>
+        ) : (
+            <span className="text-slate-400 text-[11px]">-</span>
+        )
+    ),
+    note_carico: (r) => (
+        <span className="text-[11px] text-slate-600 max-w-[220px] truncate inline-block align-middle"
+              title={r.note_carico || r.motivo_mancanza || ""}>
+            {r.motivo_mancanza && <span className="text-rose-700 font-semibold">{r.motivo_mancanza}: </span>}
+            {r.note_carico || "-"}
+        </span>
+    ),
+    motivo_mancanza: (r) => (
+        r.motivo_mancanza ? (
+            <span className="inline-block px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-semibold">
+                <AlertTriangle size={9} className="inline mr-0.5" /> {r.motivo_mancanza}
+            </span>
+        ) : (
+            <span className="text-slate-400 text-[11px]">-</span>
+        )
+    ),
+    note_storiche: (r) => (
+        <span className="text-[11px] text-slate-600 max-w-[220px] truncate inline-block align-middle"
+              title={r.note_storiche || ""}>
+            {r.note_storiche || "-"}
+        </span>
+    ),
+    sinistri_badge: (r) => (
+        r.sinistri_ultimi_12m > 0 ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800"
+                  title={`${r.sinistri_ultimi_12m} sinistri negli ultimi 12 mesi`}>
+                <AlertTriangle size={10} /> {r.sinistri_ultimi_12m}
+            </span>
+        ) : (
+            <span className="text-[10px] text-emerald-600">✅</span>
+        )
+    ),
+    provvigioni: (r) => (
+        <span className="font-mono text-violet-700 text-[11px]">
+            {Number(r.provvigioni || 0).toFixed(2)}
+        </span>
+    ),
+    provvigioni_collab: (r) => (
+        <span className="font-mono text-fuchsia-700 text-[11px]">
+            {r.provvigioni_collab != null ? Number(r.provvigioni_collab).toFixed(2) : "-"}
+        </span>
+    ),
+    importo_netto: (r) => (
+        <span className="font-mono text-[11px]">{Number(r.importo_netto || 0).toFixed(2)}</span>
+    ),
+    imposte: (r) => (
+        <span className="font-mono text-[11px]">{Number(r.imposte || 0).toFixed(2)}</span>
+    ),
+    servizio_sanitario: (r) => (
+        <span className="font-mono text-[11px]">
+            {r.servizio_sanitario != null ? Number(r.servizio_sanitario).toFixed(2) : "-"}
+        </span>
+    ),
+    polizza_targa: (r) => <span className="font-mono">{r.polizza_targa || "-"}</span>,
+    frazionamento: (r) => <span className="uppercase text-[10px]">{r.frazionamento || "-"}</span>,
+    confronto_premio: (r) => {
+        const prevPrem = r.premio_precedente;
+        const currPrem = Number(r.importo_lordo || 0);
+        if (prevPrem == null) return <span className="text-slate-400 text-[11px]">— nuova —</span>;
+        const deltaEuro = currPrem - prevPrem;
+        const deltaPct = prevPrem > 0 ? (deltaEuro / prevPrem) * 100 : null;
+        return (
+            <div className="flex items-center gap-1 text-[11px]">
+                <span className="text-slate-500 line-through">€{Number(prevPrem).toFixed(2)}</span>
+                <span className="font-semibold">→ €{currPrem.toFixed(2)}</span>
+                {deltaPct != null && (
+                    <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
+                        deltaEuro > 0 ? "text-rose-700" : deltaEuro < 0 ? "text-emerald-700" : "text-slate-500"
+                    }`}>
+                        {deltaEuro > 0 ? <TrendingUp size={10} /> : deltaEuro < 0 ? <TrendingDown size={10} /> : null}
+                        {deltaPct > 0 ? "+" : ""}{deltaPct.toFixed(1)}%
+                    </span>
+                )}
+            </div>
+        );
+    },
+    azioni: (r, { onDelete }) => (
+        <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-rose-600 hover:bg-rose-50"
+                    onClick={onDelete}
+                    disabled={r.bloccato}
+                    title={r.bloccato ? r.motivo_blocco : "Elimina titolo"}
+                    data-testid={`btn-del-${r.id}`}>
+                🗑
+            </Button>
+        </div>
+    ),
+};
 
+function TitoloRow({ r, checked, onCheck, onDelete, orderedColumns, isVisible }) {
+    const stato = r.stato_carico || "validato";
     return (
         <tr className={`border-b border-slate-100 hover:bg-slate-50/70 ${r.bloccato ? "bg-amber-50/30" : ""}`}
             data-testid={`row-${r.id}`}>
@@ -407,137 +551,14 @@ function TitoloRow({ r, checked, onCheck, onDelete, isVisible }) {
                           disabled={stato !== "in_attesa"}
                           data-testid={`check-${r.id}`} />
             </td>
-            {isVisible("stato_carico") && (
-                <td className="p-2">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${statoBadge}`}>
-                        {stato === "in_attesa" ? "In Attesa" : stato === "validato" ? "Validato" : "Annullato"}
-                    </span>
-                </td>
-            )}
-            {isVisible("cliente_nome") && (
-                <td className="p-2 font-medium text-slate-900">{r.cliente_nome || "-"}</td>
-            )}
-            {isVisible("polizza_numero") && (
-                <td className="p-2 font-mono text-[11px]">
-                    <div className="flex items-center gap-1">
-                        {r.bloccato && <Lock size={11} className="text-amber-600" title={r.motivo_blocco} />}
-                        {r.polizza_numero || "-"}
-                    </div>
-                    {r.numero_titolo && <div className="text-slate-400 text-[10px]">Q: {r.numero_titolo}</div>}
-                </td>
-            )}
-            {isVisible("compagnia_nome") && (
-                <td className="p-2 text-[11px]">{r.compagnia_nome || "-"}</td>
-            )}
-            {isVisible("polizza_ramo") && (
-                <td className="p-2 text-[11px] uppercase text-slate-600">{r.polizza_ramo || "-"}</td>
-            )}
-            {isVisible("compagnia_ramo") && (
-                <td className="p-2">
-                    <div className="font-medium">{r.compagnia_nome || "-"}</div>
-                    <div className="text-slate-400 text-[10px] uppercase">{r.polizza_ramo || "-"}</div>
-                </td>
-            )}
-            {isVisible("polizza_targa") && (
-                <td className="p-2 font-mono">{r.polizza_targa || "-"}</td>
-            )}
-            {isVisible("data_decorrenza") && (
-                <td className="p-2 font-mono text-[11px]">{fmtIt(r.data_decorrenza)}</td>
-            )}
-            {isVisible("scadenza") && (
-                <td className="p-2 font-mono">{fmtIt(r.scadenza)}</td>
-            )}
-            {isVisible("tipo_rinnovo") && (
-                <td className="p-2 text-[11px] uppercase">
-                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
-                        {r.tipo_rinnovo === "rinnovo" ? "QR"
-                            : r.tipo_rinnovo === "prima_emissione" ? "PE"
-                            : r.tipo_rinnovo === "regolazione" ? "REG"
-                            : (r.tipo_rinnovo || "-")}
-                    </span>
-                </td>
-            )}
-            {isVisible("variazione_badge") && (
-                <td className="p-2 text-[11px]">
-                    {r.variazione_badge ? (
-                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                            r.variazione_badge?.startsWith("🛑") ? "bg-rose-100 text-rose-800"
-                            : r.variazione_badge?.startsWith("🔻") ? "bg-emerald-100 text-emerald-800"
-                            : r.variazione_badge?.startsWith("🟢") ? "bg-sky-100 text-sky-800"
-                            : "bg-violet-100 text-violet-800"
-                        }`}>{r.variazione_badge}</span>
-                    ) : (
-                        <span className="text-slate-400">-</span>
-                    )}
-                </td>
-            )}
-            {isVisible("mezzo_pagamento") && (
-                <td className="p-2 text-[11px]">{r.mezzo_pagamento || "-"}</td>
-            )}
-            {isVisible("sinistri_badge") && (
-                <td className="p-2">
-                    {r.sinistri_ultimi_12m > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800"
-                              title={`${r.sinistri_ultimi_12m} sinistri negli ultimi 12 mesi`}>
-                            <AlertTriangle size={10} /> {r.sinistri_ultimi_12m}
-                        </span>
-                    ) : (
-                        <span className="text-[10px] text-emerald-600">✅</span>
-                    )}
-                </td>
-            )}
-            {isVisible("confronto_premio") && (
-                <td className="p-2">
-                    {prevPrem == null ? (
-                        <span className="text-slate-400 text-[11px]">— nuova —</span>
-                    ) : (
-                        <div className="flex items-center gap-1 text-[11px]">
-                            <span className="text-slate-500 line-through">€{prevPrem.toFixed(2)}</span>
-                            <span className="font-semibold">→ €{currPrem.toFixed(2)}</span>
-                            {deltaPct != null && (
-                                <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
-                                    deltaEuro > 0 ? "text-rose-700" : deltaEuro < 0 ? "text-emerald-700" : "text-slate-500"
-                                }`}>
-                                    {deltaEuro > 0 ? <TrendingUp size={10} /> : deltaEuro < 0 ? <TrendingDown size={10} /> : null}
-                                    {deltaPct > 0 ? "+" : ""}{deltaPct.toFixed(1)}%
-                                </span>
-                            )}
-                        </div>
-                    )}
-                </td>
-            )}
-            {isVisible("importo_netto") && (
-                <td className="p-2 text-right font-mono">{Number(r.importo_netto || 0).toFixed(2)}</td>
-            )}
-            {isVisible("provvigioni") && (
-                <td className="p-2 text-right font-mono text-violet-700">{Number(r.provvigioni || 0).toFixed(2)}</td>
-            )}
-            {isVisible("frazionamento") && (
-                <td className="p-2 uppercase text-[10px]">{r.frazionamento || "-"}</td>
-            )}
-            {isVisible("operatore_nome") && (
-                <td className="p-2 text-[11px]">{r.operatore_nome || "-"}</td>
-            )}
-            {isVisible("note_carico") && (
-                <td className="p-2 text-[11px] text-slate-600 max-w-[220px] truncate"
-                    title={r.note_carico || r.motivo_mancanza || ""}>
-                    {r.motivo_mancanza && <span className="text-rose-700 font-semibold">{r.motivo_mancanza}: </span>}
-                    {r.note_carico || "-"}
-                </td>
-            )}
-            {isVisible("azioni") && (
-                <td className="p-2">
-                    <div className="flex items-center gap-1">
-                        <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-rose-600 hover:bg-rose-50"
-                                onClick={onDelete}
-                                disabled={r.bloccato}
-                                title={r.bloccato ? r.motivo_blocco : "Elimina titolo"}
-                                data-testid={`btn-del-${r.id}`}>
-                            🗑
-                        </Button>
-                    </div>
-                </td>
-            )}
+            {orderedColumns.filter((c) => isVisible(c.k)).map((c) => {
+                const renderer = CELL_RENDERERS[c.k];
+                return (
+                    <td key={c.k} className="p-2 align-middle" data-testid={`cell-${c.k}-${r.id}`}>
+                        {renderer ? renderer(r, { onDelete }) : (r[c.k] != null ? String(r[c.k]) : "-")}
+                    </td>
+                );
+            })}
         </tr>
     );
 }
