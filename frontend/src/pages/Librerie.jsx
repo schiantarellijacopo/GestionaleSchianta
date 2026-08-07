@@ -13,11 +13,13 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
+    { key: "cloud-storage", label: "Cloud Storage (Drive/OneDrive)", icon: <Cloud size={14} />, endpoint: "/librerie/cloud-storage", custom: true },
     { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
@@ -64,6 +66,7 @@ export default function Librerie() {
                 {SECTIONS.map((s) => (
                     <TabsContent key={s.key} value={s.key} className="mt-4">
                         {s.key === "azienda" ? <AziendaSezione />
+                            : s.key === "cloud-storage" ? <CloudStorageSezione />
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
@@ -4220,6 +4223,315 @@ function PermessiMatrixDialog({ profilo, aree, onClose }) {
                     <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
                     <Button onClick={save} disabled={saving} className="bg-violet-700 hover:bg-violet-800" data-testid="profilo-save">
                         {saving ? "Salvataggio…" : (profilo.id ? "Aggiorna" : "Crea profilo")}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+// ============================================================
+// Sezione Cloud Storage (Google Drive + Microsoft OneDrive)
+// ============================================================
+function CloudStorageSezione() {
+    const [configStatus, setConfigStatus] = useState(null);
+    const [connections, setConnections] = useState([]);
+    const [busy, setBusy] = useState(false);
+    const [folderDialog, setFolderDialog] = useState(null); // { provider, currentFolderId }
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    const load = async () => {
+        try {
+            const [cfg, st] = await Promise.all([
+                api.get("/librerie/cloud-storage/config-status"),
+                api.get("/librerie/cloud-storage/status"),
+            ]);
+            setConfigStatus(cfg.data);
+            setConnections(st.data.connections || []);
+        } catch (e) {
+            toast.error("Errore caricamento cloud storage: " + errMsg(e));
+        }
+    };
+
+    useEffect(() => {
+        load();
+        // Se l'utente torna dal redirect OAuth, mostra toast di conferma
+        if (searchParams.get("cloud") === "connected") {
+            const p = searchParams.get("provider");
+            toast.success(`Account ${p === "google_drive" ? "Google Drive" : "OneDrive"} collegato con successo`);
+            searchParams.delete("cloud");
+            searchParams.delete("provider");
+            setSearchParams(searchParams, { replace: true });
+        }
+        // eslint-disable-next-line
+    }, []);
+
+    const connectProvider = async (provider) => {
+        setBusy(true);
+        try {
+            const r = await api.get(`/librerie/cloud-storage/oauth-url?provider=${provider}`);
+            // Redirect direttamente all'authorize URL del provider
+            window.location.href = r.data.authorize_url;
+        } catch (e) {
+            toast.error(errMsg(e));
+            setBusy(false);
+        }
+    };
+
+    const disconnectProvider = async (provider) => {
+        if (!window.confirm(`Scollegare l'account ${provider === "google_drive" ? "Google Drive" : "OneDrive"}? I file già caricati resteranno sul cloud.`)) return;
+        setBusy(true);
+        try {
+            await api.delete(`/librerie/cloud-storage/disconnect?provider=${provider}`);
+            toast.success("Account scollegato");
+            load();
+        } catch (e) {
+            toast.error(errMsg(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    if (!configStatus) return <Loading />;
+
+    const getConn = (p) => connections.find((c) => c.provider === p);
+
+    return (
+        <div className="space-y-4" data-testid="lib-cloud-storage">
+            {/* Info encryption */}
+            <Card className="p-3 bg-emerald-50 border-emerald-200 flex items-start gap-2">
+                <Shield size={16} className="text-emerald-600 mt-0.5" />
+                <div className="text-xs text-emerald-900">
+                    <strong>Sicurezza:</strong> i refresh token OAuth sono cifrati con AES/Fernet prima di essere salvati.
+                    Ogni tenant ha i propri account isolati. React non riceve mai le credenziali.
+                </div>
+            </Card>
+
+            {/* Card provider */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                    { key: "google_drive", name: "Google Drive", color: "from-blue-500 to-yellow-500",
+                      logo: "https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg" },
+                    { key: "onedrive", name: "Microsoft OneDrive", color: "from-sky-500 to-sky-700",
+                      logo: "https://upload.wikimedia.org/wikipedia/commons/3/3c/Microsoft_Office_OneDrive_%282019%E2%80%93present%29.svg" },
+                ].map((p) => {
+                    const cfg = configStatus[p.key];
+                    const conn = getConn(p.key);
+                    return (
+                        <Card key={p.key} className="p-4" data-testid={`cloud-card-${p.key}`}>
+                            <div className="flex items-start gap-3 mb-3">
+                                <img src={p.logo} alt={p.name} className="w-10 h-10 object-contain" />
+                                <div className="flex-1">
+                                    <div className="font-semibold text-slate-900 text-sm">{p.name}</div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">
+                                        {conn ? (
+                                            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                                                <CheckCircle2 size={11} /> Collegato
+                                                {conn.connected_at && ` · dal ${new Date(conn.connected_at).toLocaleDateString("it-IT")}`}
+                                            </span>
+                                        ) : cfg.configured ? (
+                                            <span className="text-slate-500">Non ancora collegato</span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 text-amber-700">
+                                                <AlertTriangle size={11} /> Provider non configurato dall&apos;admin
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {conn && conn.folder_name && (
+                                <div className="text-[11px] text-slate-600 mb-2 flex items-center gap-1">
+                                    <FolderOpen size={11} /> Cartella: <strong>{conn.folder_name}</strong>
+                                </div>
+                            )}
+                            {conn && !conn.folder_name && (
+                                <div className="text-[11px] text-slate-500 italic mb-2">
+                                    Cartella: root del drive (default)
+                                </div>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                                {conn ? (
+                                    <>
+                                        <Button size="sm" variant="outline"
+                                                onClick={() => setFolderDialog({ provider: p.key, currentFolderId: conn.folder_id })}
+                                                data-testid={`btn-folder-${p.key}`}>
+                                            <FolderOpen size={12} className="mr-1" /> Scegli cartella
+                                        </Button>
+                                        <Button size="sm" variant="outline"
+                                                onClick={() => disconnectProvider(p.key)}
+                                                disabled={busy}
+                                                className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                                                data-testid={`btn-disconnect-${p.key}`}>
+                                            <XCircle size={12} className="mr-1" /> Scollega
+                                        </Button>
+                                    </>
+                                ) : (
+                                    <Button size="sm"
+                                            onClick={() => connectProvider(p.key)}
+                                            disabled={busy || !cfg.configured}
+                                            className="bg-sky-700 hover:bg-sky-800"
+                                            data-testid={`btn-connect-${p.key}`}>
+                                        <ExternalLink size={12} className="mr-1" /> Collega {p.name}
+                                    </Button>
+                                )}
+                            </div>
+                        </Card>
+                    );
+                })}
+            </div>
+
+            {/* Setup instructions se non configurato */}
+            {(!configStatus.google_drive.configured || !configStatus.onedrive.configured) && (
+                <Card className="p-4 bg-amber-50 border-amber-200">
+                    <div className="flex items-start gap-2 mb-2">
+                        <AlertTriangle size={16} className="text-amber-600 mt-0.5" />
+                        <div className="font-semibold text-amber-900 text-sm">
+                            Configurazione admin richiesta
+                        </div>
+                    </div>
+                    <div className="text-xs text-amber-900 space-y-2 ml-6">
+                        <div>
+                            Per attivare i provider Cloud Storage, l&apos;amministratore deve:
+                        </div>
+                        <ol className="list-decimal list-inside space-y-1.5 text-[11px]">
+                            {!configStatus.google_drive.configured && (
+                                <li>
+                                    <strong>Google Drive:</strong> creare un progetto su <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer" className="underline text-sky-700">Google Cloud Console</a>,
+                                    abilitare <em>Drive API</em>, creare un OAuth Client Web e aggiungere le variabili
+                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">GOOGLE_DRIVE_CLIENT_ID</code> e
+                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">GOOGLE_DRIVE_CLIENT_SECRET</code> in <code>backend/.env</code>
+                                </li>
+                            )}
+                            {!configStatus.onedrive.configured && (
+                                <li>
+                                    <strong>OneDrive:</strong> registrare un&apos;app su <a href="https://entra.microsoft.com" target="_blank" rel="noreferrer" className="underline text-sky-700">Microsoft Entra</a>,
+                                    scope <code className="text-[10px]">Files.ReadWrite offline_access</code>, aggiungere
+                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">MS_ONEDRIVE_CLIENT_ID</code> e
+                                    <code className="bg-white px-1 py-0.5 rounded ml-1 text-[10px]">MS_ONEDRIVE_CLIENT_SECRET</code> in <code>backend/.env</code>
+                                </li>
+                            )}
+                            <li>
+                                <strong>Redirect URI</strong> da configurare nel provider:
+                                <div className="bg-white p-1.5 rounded mt-1 font-mono text-[10px] break-all border border-amber-200">
+                                    {configStatus.google_drive.redirect_uri || "(BACKEND_PUBLIC_URL non impostato)"}
+                                </div>
+                            </li>
+                        </ol>
+                    </div>
+                </Card>
+            )}
+
+            {/* Dialog scelta cartella */}
+            {folderDialog && (
+                <FolderPickerDialog
+                    provider={folderDialog.provider}
+                    currentFolderId={folderDialog.currentFolderId}
+                    onClose={() => setFolderDialog(null)}
+                    onSaved={() => { setFolderDialog(null); load(); }}
+                />
+            )}
+        </div>
+    );
+}
+
+function FolderPickerDialog({ provider, currentFolderId, onClose, onSaved }) {
+    const [folders, setFolders] = useState(null);
+    const [breadcrumb, setBreadcrumb] = useState([{ id: null, name: "Root" }]);
+    const [saving, setSaving] = useState(false);
+
+    const loadFolders = async (parentId) => {
+        setFolders(null);
+        try {
+            const r = await api.get(`/librerie/cloud-storage/folders`, {
+                params: { provider, parent_id: parentId || undefined },
+            });
+            setFolders(r.data.folders || []);
+        } catch (e) {
+            toast.error("Errore lettura cartelle: " + errMsg(e));
+            setFolders([]);
+        }
+    };
+    useEffect(() => { loadFolders(null); /* eslint-disable-next-line */ }, []);
+
+    const enterFolder = (f) => {
+        setBreadcrumb([...breadcrumb, f]);
+        loadFolders(f.id);
+    };
+    const goBack = (idx) => {
+        const bc = breadcrumb.slice(0, idx + 1);
+        setBreadcrumb(bc);
+        loadFolders(bc[bc.length - 1].id);
+    };
+
+    const saveFolder = async (folder) => {
+        setSaving(true);
+        try {
+            const fd = new FormData();
+            fd.append("provider", provider);
+            fd.append("folder_id", folder?.id || "");
+            fd.append("folder_name", folder?.name || "");
+            await api.post("/librerie/cloud-storage/set-folder", fd);
+            toast.success(folder ? `Cartella impostata: ${folder.name}` : "Impostata su root");
+            onSaved?.();
+        } catch (e) {
+            toast.error(errMsg(e));
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid="dialog-folder-picker">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <FolderOpen size={16} /> Scegli cartella di destinazione — {provider === "google_drive" ? "Google Drive" : "OneDrive"}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="text-xs text-slate-600 mb-2">
+                    Breadcrumb: {breadcrumb.map((b, i) => (
+                        <span key={i}>
+                            <button
+                                onClick={() => goBack(i)}
+                                className="text-sky-700 hover:underline"
+                            >{b.name}</button>
+                            {i < breadcrumb.length - 1 && <span className="mx-1 text-slate-400">/</span>}
+                        </span>
+                    ))}
+                </div>
+                <div className="border rounded max-h-72 overflow-y-auto">
+                    {folders === null ? (
+                        <div className="p-4 text-center text-xs text-slate-500">Caricamento…</div>
+                    ) : folders.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-500">Nessuna sottocartella</div>
+                    ) : folders.map((f) => (
+                        <div
+                            key={f.id}
+                            className="flex items-center justify-between p-2 border-b border-slate-100 hover:bg-slate-50"
+                            data-testid={`folder-item-${f.id}`}
+                        >
+                            <button
+                                onClick={() => enterFolder(f)}
+                                className="flex items-center gap-2 text-xs text-slate-800 flex-1 text-left"
+                            >
+                                <FolderOpen size={13} className="text-amber-600" />
+                                <span>{f.name}</span>
+                            </button>
+                            <Button size="sm" variant="ghost"
+                                    onClick={() => saveFolder(f)}
+                                    disabled={saving}
+                                    className="h-7 text-[11px] text-emerald-700 hover:bg-emerald-50">
+                                Usa questa
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button variant="ghost" onClick={() => saveFolder(null)}
+                            disabled={saving}>
+                        Usa root del drive
                     </Button>
                 </DialogFooter>
             </DialogContent>

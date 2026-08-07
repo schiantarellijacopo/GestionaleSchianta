@@ -12,10 +12,11 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
+import ImportExcelDialog from "@/components/ImportExcelDialog";
 
 // Colori per categoria
 const CAT_BADGE = {
@@ -37,6 +38,7 @@ export default function Anagrafiche() {
     const [networks, setNetworks] = useState({});
     const [kpiDialogOpen, setKpiDialogOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null); // anagrafica da eliminare
+    const [importOpen, setImportOpen] = useState(false);
     // filtri da URL (dashboard task)
     const compleannoFilter = searchParams.get("compleanno"); // "oggi" | "settimana" | "mese"
     const docFilter = searchParams.get("doc"); // "scaduti" | "in_scadenza"
@@ -149,14 +151,22 @@ export default function Anagrafiche() {
                 subtitle="Persone fisiche e giuridiche presenti a portafoglio"
                 actions={
                     canCreate && (
-                        <Dialog open={open} onOpenChange={setOpen}>
-                            <DialogTrigger asChild>
-                                <Button data-testid="anagrafica-new-button" className="bg-sky-700 hover:bg-sky-800">
-                                    <Plus size={16} className="mr-1" /> Nuova anagrafica
-                                </Button>
-                            </DialogTrigger>
-                            <NuovaAnagraficaDialog onClose={() => { setOpen(false); load(); }} />
-                        </Dialog>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline"
+                                    onClick={() => setImportOpen(true)}
+                                    data-testid="anagrafica-import-button"
+                                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                                <Upload size={16} className="mr-1" /> Importa Excel/CSV
+                            </Button>
+                            <Dialog open={open} onOpenChange={setOpen}>
+                                <DialogTrigger asChild>
+                                    <Button data-testid="anagrafica-new-button" className="bg-sky-700 hover:bg-sky-800">
+                                        <Plus size={16} className="mr-1" /> Nuova anagrafica
+                                    </Button>
+                                </DialogTrigger>
+                                <NuovaAnagraficaDialog onClose={() => { setOpen(false); load(); }} />
+                            </Dialog>
+                        </div>
                     )
                 }
             />
@@ -333,6 +343,14 @@ export default function Anagrafiche() {
                 target={deleteTarget}
                 onClose={() => setDeleteTarget(null)}
                 onDeleted={() => { setDeleteTarget(null); load(); }}
+            />
+            <ImportExcelDialog
+                open={importOpen}
+                onClose={() => setImportOpen(false)}
+                onSuccess={() => load()}
+                entity="anagrafiche"
+                title="Importa Anagrafiche da Excel/CSV"
+                required={[]}
             />
         </div>
     );

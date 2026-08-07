@@ -19,10 +19,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import {
-    Plus, Search, Filter, X, Printer, FileText, FileSpreadsheet, ChevronDown, ChevronUp,
+    Plus, Search, Filter, X, Printer, FileText, FileSpreadsheet, ChevronDown, ChevronUp, Upload,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import ImportExcelDialog from "@/components/ImportExcelDialog";
 
 const STATI = [
     { v: "aperto", l: "Aperti" },
@@ -47,6 +48,7 @@ export default function Sinistri() {
     const [tipologie, setTipologie] = useState([]);
     const [showFilters, setShowFilters] = useState(false);
     const [open, setOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
 
     const [filters, setFilters] = useState({
         q: "", stato: initialStato, compagnia_id: "all", ramo: "all",
@@ -111,14 +113,22 @@ export default function Sinistri() {
                 title="Sinistri"
                 subtitle="Denunce di sinistro · filtri estesi · stampa elenco"
                 actions={canCreate && (
-                    <Dialog open={open} onOpenChange={setOpen}>
-                        <DialogTrigger asChild>
-                            <Button data-testid="sinistro-new-button" className="bg-sky-700 hover:bg-sky-800">
-                                <Plus size={16} className="mr-1" /> Nuova denuncia
-                            </Button>
-                        </DialogTrigger>
-                        <NuovoSinistroDialog onClose={() => { setOpen(false); load(); }} />
-                    </Dialog>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline"
+                                onClick={() => setImportOpen(true)}
+                                data-testid="sinistro-import-button"
+                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                            <Upload size={16} className="mr-1" /> Importa Excel/CSV
+                        </Button>
+                        <Dialog open={open} onOpenChange={setOpen}>
+                            <DialogTrigger asChild>
+                                <Button data-testid="sinistro-new-button" className="bg-sky-700 hover:bg-sky-800">
+                                    <Plus size={16} className="mr-1" /> Nuova denuncia
+                                </Button>
+                            </DialogTrigger>
+                            <NuovoSinistroDialog onClose={() => { setOpen(false); load(); }} />
+                        </Dialog>
+                    </div>
                 )}
             />
 
@@ -278,6 +288,15 @@ export default function Sinistri() {
                     </table>
                 )}
             </div>
+            {/* Dialog import Excel/CSV per Sinistri */}
+            <ImportExcelDialog
+                open={importOpen}
+                onClose={() => setImportOpen(false)}
+                onSuccess={() => load()}
+                entity="sinistri"
+                title="Importa Sinistri da Excel/CSV"
+                required={["numero_sinistro", "numero_polizza"]}
+            />
         </div>
     );
 }

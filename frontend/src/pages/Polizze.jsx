@@ -14,11 +14,12 @@ import {
 } from "@/components/ui/dialog";
 import {
     Search, Plus, ScanLine, Filter, X, Printer, FileSpreadsheet, FileText,
-    ChevronDown, ChevronUp, Car,
+    ChevronDown, ChevronUp, Car, Upload,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import KpiBar from "@/components/KpiBar";
+import ImportExcelDialog from "@/components/ImportExcelDialog";
 
 const PRESETS = [
     { key: "tutti", label: "Tutte" },
@@ -58,6 +59,7 @@ export default function Polizze() {
     const [rami, setRami] = useState([]);
     const [utenti, setUtenti] = useState([]);
     const [open, setOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
     const [showFilters, setShowFilters] = useState(false);
     const [filters, setFilters] = useState(INITIAL_FILTERS);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
@@ -131,14 +133,22 @@ export default function Polizze() {
                 title="Polizze"
                 subtitle="Portafoglio polizze - filtri, presets ed esportazioni"
                 actions={canCreate && (
-                    <Dialog open={open} onOpenChange={setOpen}>
-                        <DialogTrigger asChild>
-                            <Button data-testid="polizza-new-button" className="bg-sky-700 hover:bg-sky-800">
-                                <Plus size={16} className="mr-1" /> Nuova polizza
-                            </Button>
-                        </DialogTrigger>
-                        <NuovaPolizzaDialog onClose={() => { setOpen(false); load(); }} />
-                    </Dialog>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline"
+                                onClick={() => setImportOpen(true)}
+                                data-testid="polizza-import-button"
+                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                            <Upload size={16} className="mr-1" /> Importa Excel/CSV
+                        </Button>
+                        <Dialog open={open} onOpenChange={setOpen}>
+                            <DialogTrigger asChild>
+                                <Button data-testid="polizza-new-button" className="bg-sky-700 hover:bg-sky-800">
+                                    <Plus size={16} className="mr-1" /> Nuova polizza
+                                </Button>
+                            </DialogTrigger>
+                            <NuovaPolizzaDialog onClose={() => { setOpen(false); load(); }} />
+                        </Dialog>
+                    </div>
                 )}
             />
 
@@ -330,6 +340,15 @@ export default function Polizze() {
                     </div>
                 </div>
             </div>
+            {/* Dialog import Excel/CSV per Polizze */}
+            <ImportExcelDialog
+                open={importOpen}
+                onClose={() => setImportOpen(false)}
+                onSuccess={() => load()}
+                entity="polizze"
+                title="Importa Polizze da Excel/CSV"
+                required={["numero_polizza"]}
+            />
         </div>
     );
 }

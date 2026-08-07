@@ -1,0 +1,30 @@
+{
+  "summary": "Iterazione 48 - Testing end-to-end (backend + frontend) di: (1) enrichment Carichi Mensili con nuovi campi, (2) Import Excel/CSV per Polizze/Sinistri/Anagrafiche, (3) UI Cloud Storage (Google Drive + OneDrive) in Librerie. Backend: 10/10 test pytest passano (~4s). Frontend: verificato su 1920x1080 che tutti i pulsanti import (polizza-import-button, sinistro-import-button, anagrafica-import-button) sono visibili, cliccabili e aprono un Dialog step-1 upload. Tab 'Cloud Storage (Drive/OneDrive)' in /librerie mostra: 2 card (Google Drive + Microsoft OneDrive) con banner verde di sicurezza AES/Fernet, entrambe con label 'Provider non configurato dall'admin', banner ambra 'Configurazione admin richiesta' con istruzioni (Google Cloud Console + Microsoft Entra) e Redirect URI copiabile (https://whatsapp-crm-146.preview.emergentagent.com/api/librerie/cloud-storage/callback). Pagina /carichi-mensili: dialog 'Personalizza colonne — trascina per riordinare' apre e mostra 11 colonne (Stato, Cliente, Polizza, Compagnia, Operatore, Ramo, Data Decorrenza, Data Scadenza, Premio '25, Premio '26, …) con icona drag ⋮⋮ (55 hits cursor-move/GripVertical) — ordine di default corretto.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_48.py",
+    "/app/test_reports/pytest/iter48_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "cloud_storage.py::_fresh_access_token — la logica di refresh salva sempre lo scope originale ma alcuni provider (Microsoft) restituiscono scope diversi (offline_access viene rimosso dal token endpoint). Considerare di NON forzare 'scope' nel body del refresh grant per MS (non è obbligatorio in RFC 6749 §6).",
+    "cloud_storage.py — GOOGLE_CLIENT_ID/SECRET vengono letti a module-load time. Se l'admin aggiorna backend/.env a runtime, serve un restart supervisor. Documentato ma OK per MVP.",
+    "cloud_storage.py::disconnect — è idempotente (delete_one non fallisce se 0 match) ma non ritorna informazione se qualcosa è stato effettivamente rimosso. Considerare di ritornare deleted_count per UI feedback.",
+    "import_polizze.py::execute_import_polizze — legge il file una sola volta (buon punto, la preview ricalcola). Il fallback `pol_data.setdefault('scadenza', pol_data['effetto'])` è pericoloso: se il file ha solo la data effetto e non la scadenza, si crea una polizza con scadenza = effetto (durata 0 giorni). Meglio richiedere obbligatoriamente scadenza o calcolare +1 anno.",
+    "import_polizze.py::_row_to_polizza — canonical 'stato' inferisce 'attiva' come default anche quando la cella è vuota/ambigua. Se il file ha una colonna 'Stato' con valori come 'in emissione', diventa 'attiva' silenziosamente. Aggiungere log o mantenere il valore raw come warning.",
+    "carichi_mensili.py enrichment — la logica di deduzione stato polizza (annullata/sospesa/sostituita) fa 3+ query async in serie per ogni riga (find polizza, find polizza sostitutiva, find annullamento). Con 100+ righe per pagina impatta la latenza (~200-500ms). Considerare aggregazione con $lookup su polizze."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_48.py",
+    "/app/test_reports/iteration_48.json",
+    "/app/test_reports/pytest/iter48_results.xml"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna seed persistente. Test import polizze usa CSV in-memory con CF fittizi (RSSMRA80A01H501U, VRDNNA75B41H501X) → 'contraente non trovato' come atteso (comportamento corretto secondo agent-to-agent context note). Test sinistri idem.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints tutti verdi. GET /api/carichi-mensili ritorna {totale, righe:[...]} (NON una lista pura). L'enrichment ha tutti i campi richiesti (variazione_badge='🆕 Nuova', variazione_dettaglio, note_storiche, servizio_sanitario, provvigioni_collab, polizza_stato). POST /api/import/polizze/preview auto-mappa 9/9 header del CSV di riferimento con confidence ≥0.6 (test_polizze.csv). POST /api/import/sinistri/preview auto-mappa 4/4 header (Numero Sinistro, Data Avvenimento, Riserva, Liquidazione). Cloud Storage: config-status ritorna encryption_configured=true, google_drive.configured=false, onedrive.configured=false; oauth-url risponde 501 con messaggio chiaro; disconnect è idempotente (200); status ritorna {connections:[]}. UI: tutti i data-testid richiesti presenti e funzionanti. NON è stato testato OAuth reale (credenziali non fornite come da nota).",
+  "rca of the issue": "N/A - nessun bug rilevato in questa iterazione."
+}

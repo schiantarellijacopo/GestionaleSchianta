@@ -165,7 +165,12 @@ async def lista_carichi_mensili(
         {"id": {"$in": pol_ids}},
         {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
          "targa": 1, "frazionamento": 1, "contraente_id": 1, "compagnia_id": 1,
-         "premio_lordo": 1},
+         "premio_lordo": 1, "premio_ssn": 1, "stato": 1,
+         "data_annullamento": 1, "motivo_annullamento": 1,
+         "data_sospensione": 1, "riattivazione_prevista": 1,
+         "sostituita_da_polizza_id": 1, "sostituisce_polizza": 1,
+         "provvigioni_operatori": 1, "collaboratore_id": 1,
+         "note_interne": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values()})
     anas = {a["id"]: a["ragione_sociale"] async for a in db.anagrafiche.find(
@@ -186,11 +191,29 @@ async def lista_carichi_mensili(
     ]).to_list(1000)
     sin_map = {s["_id"]: s["n"] for s in sin_agg}
 
-    # Utenti (per campo operatore)
-    coll_ids = list({t.get("collaboratore_id") for t in titoli if t.get("collaboratore_id")})
+    # Utenti (per campo operatore) - includo anche i collaboratori storici delle polizze
+    coll_ids = {t.get("collaboratore_id") for t in titoli if t.get("collaboratore_id")}
+    for p in pols.values():
+        for op in (p.get("provvigioni_operatori") or []):
+            if op.get("operatore_id"):
+                coll_ids.add(op["operatore_id"])
+        if p.get("collaboratore_id"):
+            coll_ids.add(p["collaboratore_id"])
     users = {u["id"]: (u.get("name") or u.get("email") or "-")
              async for u in db.users.find(
-                 {"id": {"$in": coll_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
+                 {"id": {"$in": list(coll_ids)}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
+
+    # Lookup polizze sostitutive (se una polizza è stata sostituita, mostra il numero della nuova)
+    sostit_ids = list({p.get("sostituita_da_polizza_id") for p in pols.values()
+                       if p.get("sostituita_da_polizza_id")})
+    sostit_map: dict = {}
+    if sostit_ids:
+        async for sp in db.polizze.find(
+            {"id": {"$in": sostit_ids}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "effetto": 1, "premio_lordo": 1},
+        ):
+            sostit_map[sp["id"]] = sp
+
 
     rows = []
     for t in titoli:
@@ -200,9 +223,52 @@ async def lista_carichi_mensili(
         prev = t.get("premio_precedente")
         curr = float(t.get("importo_lordo") or 0)
         variazione_badge = None
+        variazione_dettaglio = None
         variazione_delta_euro = None
         variazione_delta_pct = None
-        if prev is not None and prev > 0:
+        note_auto = None      # nota dedotta automaticamente (non sovrascrive note_carico manuali)
+        motivo_dedotto = None # motivo_mancanza dedotto (se non già settato manualmente)
+
+        # ============================================================
+        # DEDUZIONE INTELLIGENTE (deterministica) - stato polizza
+        # ============================================================
+        pol_stato = (p.get("stato") or "attiva").lower()
+
+        # 1) Polizza SOSTITUITA (esiste sostituita_da_polizza_id)
+        if p.get("sostituita_da_polizza_id"):
+            sp = sostit_map.get(p["sostituita_da_polizza_id"], {})
+            variazione_badge = "🔄 Sostituita"
+            variazione_dettaglio = (
+                f"Sostituita da polizza {sp.get('numero_polizza', 'N/A')}"
+                + (f" (effetto {sp.get('effetto', '-')})" if sp.get("effetto") else "")
+            )
+            motivo_dedotto = "Sostituita"
+            note_auto = f"Polizza sostituita da {sp.get('numero_polizza', 'nuova polizza')}"
+
+        # 2) Polizza ANNULLATA / DISDETTATA
+        elif pol_stato in ("annullata", "disdettata", "cessata"):
+            variazione_badge = "🛑 Disdettata"
+            motivo_ann = p.get("motivo_annullamento") or "senza motivo specificato"
+            data_ann = p.get("data_annullamento") or "-"
+            variazione_dettaglio = f"Polizza annullata il {data_ann}: {motivo_ann}"
+            motivo_dedotto = "Disdettata"
+            note_auto = f"Disdettata dal {data_ann} — {motivo_ann}"
+
+        # 3) Polizza SOSPESA
+        elif pol_stato == "sospesa" or p.get("data_sospensione"):
+            variazione_badge = "⏸ Sospesa"
+            data_sosp = p.get("data_sospensione") or "-"
+            riatt = p.get("riattivazione_prevista")
+            variazione_dettaglio = (
+                f"Sospesa dal {data_sosp}"
+                + (f" · riattivazione prevista {riatt}" if riatt else "")
+            )
+            motivo_dedotto = "Sospesa"
+            note_auto = (f"Polizza sospesa dal {data_sosp}"
+                         + (f", riatt. {riatt}" if riatt else ""))
+
+        # 4) Variazione premio (solo se polizza attiva → non ha senso mostrare aumenti su disdette)
+        elif prev is not None and prev > 0:
             delta = curr - prev
             pct = (delta / prev) * 100
             variazione_delta_euro = round(delta, 2)
@@ -211,10 +277,66 @@ async def lista_carichi_mensili(
                 variazione_badge = "🟢 Regolare"
             elif delta > 0:
                 variazione_badge = f"🛑 Aumento (+€{delta:.2f})"
+                variazione_dettaglio = f"Premio aumentato di €{delta:.2f} ({pct:+.1f}%) rispetto al titolo precedente"
+                # Deduzione motivo aumento (indizi non certi ma utili)
+                if pct >= 30:
+                    note_auto = f"⚠️ Aumento significativo (+{pct:.0f}%): verificare cambio classe BM, guida esperta, sinistri o nuove garanzie"
+                elif pct >= 10:
+                    note_auto = f"Aumento medio (+{pct:.1f}%): possibile ricalcolo BM/CU o adeguamento tariffario"
             else:
                 variazione_badge = f"🔻 Riduzione ({delta:.2f}€)"
+                variazione_dettaglio = f"Premio ridotto di €{abs(delta):.2f} ({pct:+.1f}%)"
+                if pct <= -20:
+                    note_auto = f"Riduzione significativa ({pct:.0f}%): possibile rinegoziazione, calo garanzie o BM migliorato"
         elif prev is None:
             variazione_badge = "🆕 Nuova"
+            variazione_dettaglio = "Prima quietanza su questa polizza (nessun premio precedente)"
+
+        # ============================================================
+        # Collaboratori storici (dai provvigioni_operatori della polizza)
+        # ============================================================
+        note_storiche = ""
+        provv_operatori = p.get("provvigioni_operatori") or []
+        if provv_operatori:
+            nomi_collab = []
+            for op in provv_operatori:
+                nome = op.get("operatore_nome") or users.get(op.get("operatore_id"), "")
+                if nome and nome not in nomi_collab:
+                    nomi_collab.append(nome)
+            if nomi_collab:
+                note_storiche = " · ".join(nomi_collab[:3])
+                if len(nomi_collab) > 3:
+                    note_storiche += f" +{len(nomi_collab) - 3}"
+
+        # ============================================================
+        # Provvigioni collaboratore (esclude quota agenzia)
+        # ============================================================
+        provv_collab = None
+        if provv_operatori:
+            # Somma delle provvigioni destinate agli operatori (non alla struttura)
+            try:
+                provv_collab = round(sum(float(op.get("provvigione") or 0)
+                                         + float(op.get("provvigione_addizionali") or 0)
+                                         for op in provv_operatori), 2)
+            except (TypeError, ValueError):
+                provv_collab = None
+
+        # ============================================================
+        # Servizio sanitario (SSN) - dalla polizza
+        # ============================================================
+        servizio_sanitario = p.get("premio_ssn")
+
+        # ============================================================
+        # Note finali: preserva sempre note_carico manuale + append auto
+        # ============================================================
+        note_manuale = t.get("note_carico")
+        note_finale = None
+        if note_manuale and note_auto:
+            note_finale = f"{note_manuale}  |  🤖 {note_auto}"
+        elif note_manuale:
+            note_finale = note_manuale
+        elif note_auto:
+            note_finale = f"🤖 {note_auto}"
 
         rows.append({
             **t,
@@ -222,6 +344,7 @@ async def lista_carichi_mensili(
             "polizza_ramo": p.get("ramo"),
             "polizza_prodotto": p.get("prodotto"),
             "polizza_targa": p.get("targa"),
+            "polizza_stato": pol_stato,
             "frazionamento": p.get("frazionamento") or "annuale",
             "data_decorrenza": t.get("effetto"),  # alias per la tabella
             "tipo_rinnovo": t.get("tipo") or "rinnovo",
@@ -232,8 +355,15 @@ async def lista_carichi_mensili(
             "bloccato": bloccato,
             "motivo_blocco": motivo,
             "variazione_badge": variazione_badge,
+            "variazione_dettaglio": variazione_dettaglio,
             "variazione_delta_euro": variazione_delta_euro,
             "variazione_delta_pct": variazione_delta_pct,
+            # Nuovi campi enrichment richiesti
+            "note_carico": note_finale,
+            "note_storiche": note_storiche,
+            "servizio_sanitario": servizio_sanitario,
+            "provvigioni_collab": provv_collab,
+            "motivo_mancanza": t.get("motivo_mancanza") or motivo_dedotto,
         })
     return {"totale": len(rows), "righe": rows}
 
