@@ -1,0 +1,21 @@
+{
+  "summary": "Testing iteration 44: verificati (a) FIX #4 template_riga applicato in invio bulk WhatsApp (visibile nel messaggio del diario '→ 184643240 · RC Auto · FP778SV'); (b) FEATURE #2 UI Diario Cliente con pulsanti Visualizza + Rimanda funzionanti; (c) FEATURE #3 preview modelli con {azienda_iban} risolto correttamente; (d) FEATURE #1 selettore collaboratori presente nel dialog di tutte e 3 le card (Polizze/Veicoli/Anagrafiche); (e) REGRESSION: voci diario di tipo documento/nota NON mostrano i pulsanti Visualizza/Rimanda.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_44.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AnagraficaDetail.jsx è ora ~1710 righe - considerare split in file separati (DiarioTab, VisualizzaMessaggioDialog, IntervistaTab) per manutenibilità (>700 LOC threshold)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_44.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna. Usato ARSHAD HUSSNAIN (id 756628b6-9bf2-457e-9de1-688a30166c9f) con 2 voci sollecito WhatsApp già in diario.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "5/5 test backend pytest passano (test_iteration_44.py). UI test Playwright: dialog VisualizzaMessaggio carica oggetto+dest+corpo pre-compilati; POST /api/diario/{id}/rimanda ritorna 200; nessun errore console (solo 401 pre-login ignorabili). Modello WA default (id b0c78bef-9688-4687-b5a4-02c597c776eb) contiene ancora template_riga='→ {numero_polizza} · {ramo} · {targa}' come atteso.",
+  "rca of the issue": "N/A - nessun issue trovato in questa iterazione."
+}

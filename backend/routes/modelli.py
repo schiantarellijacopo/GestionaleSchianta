@@ -31,6 +31,7 @@ class ModelloBody(BaseModel):
     oggetto: Optional[str] = None
     corpo: str = ""
     sezioni: list[dict] = []
+    template_riga: Optional[str] = None
     categoria: Optional[str] = None
     default: bool = False
     attivo: bool = True

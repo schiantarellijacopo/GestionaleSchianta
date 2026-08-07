@@ -1090,6 +1090,7 @@ function DiarioTab({ anagrafica_id, canEdit }) {
     const [list, setList] = useState(null);
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [viewingMsg, setViewingMsg] = useState(null);  // dialog "visualizza + rimanda"
     const load = () => api.get(`/anagrafiche/${anagrafica_id}/diario`).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
 
@@ -1097,6 +1098,9 @@ function DiarioTab({ anagrafica_id, canEdit }) {
         try { await api.delete(`/diario/${id}`); toast.success("Eliminato"); load(); }
         catch { toast.error("Errore"); }
     };
+
+    // Voci di comunicazione (payload.storico_avvisi_id presente) sono rimandabili
+    const isComunicazione = (v) => !!(v.payload && v.payload.storico_avvisi_id);
 
     return (
         <div className="mt-4">
@@ -1118,17 +1122,49 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                     <ul className="divide-y divide-slate-100">
                         {list.map((v) => {
                             const tipo = DIARIO_TIPI.find((t) => t.v === v.tipo) || DIARIO_TIPI[4];
+                            const isCom = isComunicazione(v);
+                            const canale = v.payload?.canale;
                             return (
                                 <li key={v.id} className="px-4 py-3 hover:bg-slate-50 flex gap-3" data-testid={`diario-${v.id}`}>
                                     <div className="w-9 h-9 rounded-full bg-sky-50 text-sky-700 flex items-center justify-center shrink-0">{tipo.i}</div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="font-medium text-sm">{v.titolo}</div>
-                                            <span className="badge badge-neutral">{tipo.l}</span>
+                                            <div className="flex items-center gap-1">
+                                                {canale && (
+                                                    <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                                                        canale === "whatsapp" ? "bg-emerald-100 text-emerald-800" :
+                                                        canale === "email" ? "bg-sky-100 text-sky-800" :
+                                                        canale === "sms" ? "bg-violet-100 text-violet-800" :
+                                                        "bg-slate-100 text-slate-700"
+                                                    }`}>{canale}</span>
+                                                )}
+                                                <span className="badge badge-neutral">{tipo.l}</span>
+                                            </div>
                                         </div>
-                                        {v.descrizione && <div className="text-xs text-slate-600 mt-1 whitespace-pre-line">{v.descrizione}</div>}
-                                        <div className="text-[11px] text-slate-400 mt-2 num">
-                                            {fmtDate(v.data_evento)} · {v.autore_nome || "—"}
+                                        {v.descrizione && <div className="text-xs text-slate-600 mt-1 whitespace-pre-line line-clamp-2">{v.descrizione}</div>}
+                                        <div className="text-[11px] text-slate-400 mt-2 num flex items-center gap-2 flex-wrap">
+                                            <span>{fmtDate(v.data_evento)} · {v.autore_nome || "—"}</span>
+                                            {isCom && (
+                                                <>
+                                                    <button
+                                                        onClick={() => setViewingMsg(v)}
+                                                        className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
+                                                        data-testid={`diario-view-${v.id}`}
+                                                    >
+                                                        👁 Visualizza
+                                                    </button>
+                                                    {(canale === "whatsapp" || canale === "email") && (
+                                                        <button
+                                                            onClick={() => setViewingMsg({ ...v, _autoRimanda: false })}
+                                                            className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium"
+                                                            data-testid={`diario-resend-${v.id}`}
+                                                        >
+                                                            ↻ Rimanda
+                                                        </button>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                     <RowActions onEdit={canEdit ? () => setEditing(v) : null} onDelete={() => elimina(v.id)} label="voce" />
@@ -1138,7 +1174,122 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                     </ul>
                 )}
             </Card>
+            {viewingMsg && (
+                <VisualizzaMessaggioDialog voce={viewingMsg} onClose={() => { setViewingMsg(null); load(); }} />
+            )}
         </div>
+    );
+}
+
+function VisualizzaMessaggioDialog({ voce, onClose }) {
+    const [data, setData] = useState(null);
+    const [rimandaLoading, setRimandaLoading] = useState(false);
+    const [dest, setDest] = useState("");
+    const [msg, setMsg] = useState("");
+
+    useEffect(() => {
+        api.get(`/diario/${voce.id}/messaggio`).then((r) => {
+            setData(r.data);
+            setDest(r.data.destinatario || "");
+            setMsg(r.data.messaggio || "");
+        }).catch((e) => toast.error(e.response?.data?.detail || "Errore caricamento messaggio"));
+    }, [voce.id]);
+
+    const rimanda = async () => {
+        if (!window.confirm(`Rimandare questo messaggio ${data.canale?.toUpperCase()} a ${dest}?`)) return;
+        setRimandaLoading(true);
+        try {
+            const r = await api.post(`/diario/${voce.id}/rimanda`, {
+                destinatario_override: dest !== data.destinatario ? dest : undefined,
+                messaggio_override: msg !== data.messaggio ? msg : undefined,
+            });
+            if (r.data.ok) toast.success(`Messaggio rimandato · esito: ${r.data.esito}`);
+            else toast.error(`Rimando fallito: ${r.data.esito}`);
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore rimando");
+        } finally { setRimandaLoading(false); }
+    };
+
+    if (!data) {
+        return (
+            <Dialog open onOpenChange={(o) => !o && onClose()}>
+                <DialogContent className="max-w-2xl" data-testid="diario-view-dialog">
+                    <DialogHeader><DialogTitle>Caricamento…</DialogTitle></DialogHeader>
+                </DialogContent>
+            </Dialog>
+        );
+    }
+
+    const canale = data.canale || voce.payload?.canale;
+    const canaleColor = canale === "whatsapp" ? "emerald" : canale === "email" ? "sky" : "violet";
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="diario-view-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded bg-${canaleColor}-100 text-${canaleColor}-800`}>
+                            {canale || voce.tipo}
+                        </span>
+                        {voce.titolo}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div className="text-[11px] text-slate-500 flex items-center gap-3 flex-wrap">
+                        <span>📅 {fmtDate(data.sent_at || voce.data_evento)}</span>
+                        <span>👤 {voce.autore_nome || "Sistema"}</span>
+                        {data.esito && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                data.esito === "inviato" ? "bg-emerald-100 text-emerald-800" :
+                                data.esito?.startsWith("errore") ? "bg-rose-100 text-rose-800" :
+                                "bg-amber-100 text-amber-800"
+                            }`}>{data.esito}</span>
+                        )}
+                    </div>
+                    {data.oggetto && (
+                        <div>
+                            <Label className="text-xs">Oggetto</Label>
+                            <Input value={data.oggetto} readOnly className="bg-slate-50" />
+                        </div>
+                    )}
+                    <div>
+                        <Label className="text-xs">Destinatario {data.rimandabile && "(modificabile per rimandare)"}</Label>
+                        <Input
+                            value={dest}
+                            onChange={(e) => setDest(e.target.value)}
+                            disabled={!data.rimandabile}
+                            className="font-mono"
+                            data-testid="diario-view-dest"
+                        />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Contenuto messaggio {data.rimandabile && "(modificabile)"}</Label>
+                        <Textarea
+                            value={msg}
+                            onChange={(e) => setMsg(e.target.value)}
+                            disabled={!data.rimandabile}
+                            rows={12}
+                            className="font-mono text-xs whitespace-pre-wrap"
+                            data-testid="diario-view-msg"
+                        />
+                    </div>
+                </div>
+                <DialogFooter className="sm:justify-between">
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                    {data.rimandabile && (
+                        <Button
+                            onClick={rimanda}
+                            disabled={rimandaLoading}
+                            className={`bg-${canaleColor}-600 hover:bg-${canaleColor}-700`}
+                            data-testid="diario-view-resend-btn"
+                        >
+                            {rimandaLoading ? "Invio…" : `↻ Rimanda via ${canale?.toUpperCase()}`}
+                        </Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
