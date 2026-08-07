@@ -1,0 +1,29 @@
+{
+  "summary": "Iterazione 46 verificata end-to-end: (1) Import Excel/CSV con 3 step: preview restituisce headers+suggested_mapping fuzzy corretto (Numero Polizza→polizza_numero, Cliente→cliente_nome, Scadenza→scadenza, Premio Lordo→importo_lordo) sia con separatore ';' che ','; apply crea titoli quando polizza esiste e riporta errore 'Polizza non trovata' quando no. Validazioni 400 corrette per mapping senza polizza_numero e mapping_json invalido. (2) Filtri date custom (dal/al) sovrascrivono correttamente il range_filter: la GET emessa è /api/carichi-mensili?stato_carico=tutti&dal=2026-01-01&al=2026-12-31 SENZA parametro range_filter (verificato via network intercept). (3) Nuove colonne tabella: Decorrenza, Tipo Rinnovo, Compagnia, Ramo, Pagamento, Premio prec./attuale tutte renderizzate; header 'Stato / Variazione' presente (nota: con spazi attorno al '/', non 'Stato/Variazione'). Badge 🆕 Nuova visualizzato correttamente. (4) Backend GET carichi-mensili include variazione_badge, data_decorrenza, tipo_rinnovo in ogni riga. Regressioni non rilevate: filter-stato, btn-columns, btn-replica, dialog-annulla, mapping-* tutti presenti.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CarichiMensili header colonna variazione", "issues": ["Label esatta è 'Stato / Variazione' (con spazi) mentre il review request menziona 'Stato/Variazione'. Puramente cosmetico — nessun bug funzionale."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_46.py",
+    "/app/test_reports/pytest/iter46_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "carichi_mensili.py::import_apply legge il file due volte (client → preview, client → apply). Se un utente cambia il file tra i due step, il mapping suggerito potrebbe non corrispondere più. Considerare cache temporanea (GridFS o hash del file) per garantire coerenza tra preview e apply.",
+    "import_apply non usa un lock/transazione: se lo stesso file viene applicato due volte in rapida successione si creerebbero titoli duplicati. Aggiungere un check per import_batch_id o per (polizza_id, scadenza) prima dell'insert.",
+    "_to_iso_date accetta solo DD/MM/YYYY o ISO; formati come 'YYYY/MM/DD' o date Excel numeriche non stringate possono passare come None e generare l'errore 'Scadenza mancante'. openpyxl con data_only=True dovrebbe già dare datetime, ma le celle stringa con formati alternativi verrebbero saltate silenziosamente."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_46.py", "/app/test_reports/iteration_46.json"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna seed persistente. I test import/apply usano POL-NON-ESISTE-XYZ per l'errore case e la prima polizza reale dal DB per lo happy path (senza cleanup — il titolo creato entra in stato_carico=in_attesa ma con scadenza 2026-06-30).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "11/11 pytest passano in 2.7s. UI verificata su 1920x1080: filtri date custom emettono GET con dal/al senza range_filter, dialog import 3-step funzionante (mapping fuzzy corretto, step 2 mostra 'Importa 1 righe', apply button presente). Badge 🆕 Nuova visibile nelle righe (tutte 'Nuova' perché premio_precedente=null nel seed corrente). Per testare '🛑 Aumento'/'🔻 Riduzione' usare POST /carichi-mensili/replica-manuale su polizza con titoli storici. Nota: il label del header 'variazione_badge' è 'Stato / Variazione' con spazi.",
+  "rca of the issue": "N/A - nessun bug funzionale rilevato."
+}

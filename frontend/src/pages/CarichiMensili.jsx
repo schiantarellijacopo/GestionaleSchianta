@@ -20,29 +20,34 @@ import {
 import { Label } from "@/components/ui/label";
 import {
     Filter, CheckCircle2, XCircle, RotateCw, Search,
-    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns,
+    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload,
 } from "lucide-react";
 
 const ALL_COLUMNS = [
     { k: "stato_carico", label: "Stato", w: 90 },
-    { k: "polizza_numero", label: "N. Polizza / Quietanza", w: 160 },
     { k: "cliente_nome", label: "Cliente", w: 200 },
-    { k: "compagnia_ramo", label: "Compagnia / Ramo", w: 180 },
-    { k: "polizza_targa", label: "Targa / Bene", w: 110 },
+    { k: "polizza_numero", label: "Polizza", w: 140 },
+    { k: "compagnia_nome", label: "Compagnia", w: 140 },
+    { k: "polizza_ramo", label: "Ramo", w: 110 },
+    { k: "polizza_targa", label: "Targa / Bene", w: 100 },
+    { k: "data_decorrenza", label: "Decorrenza", w: 100 },
     { k: "scadenza", label: "Scadenza", w: 100 },
-    { k: "mezzo_pagamento", label: "Pagamento", w: 100 },
+    { k: "confronto_premio", label: "Premio prec. / attuale", w: 180 },
+    { k: "tipo_rinnovo", label: "Tipo Rinnovo", w: 110 },
+    { k: "mezzo_pagamento", label: "Pagamento", w: 130 },
+    { k: "variazione_badge", label: "Stato / Variazione", w: 170 },
     { k: "sinistri_badge", label: "Sinistri 12m", w: 90 },
-    { k: "confronto_premio", label: "Premio Vecc. vs Nuovo", w: 170 },
     { k: "importo_netto", label: "Netto (€)", w: 90 },
     { k: "provvigioni", label: "Provv. (€)", w: 90 },
     { k: "frazionamento", label: "Frazionam.", w: 100 },
     { k: "operatore_nome", label: "Operatore", w: 130 },
-    { k: "note_carico", label: "Note / Motivo", w: 220 },
-    { k: "azioni", label: "Azioni", w: 130 },
+    { k: "note_carico", label: "Note / Alert", w: 220 },
+    { k: "azioni", label: "Azioni", w: 80 },
 ];
-const DEFAULT_VISIBLE = ["stato_carico", "polizza_numero", "cliente_nome",
-    "compagnia_ramo", "polizza_targa", "scadenza", "sinistri_badge",
-    "confronto_premio", "importo_netto", "provvigioni", "note_carico", "azioni"];
+const DEFAULT_VISIBLE = ["stato_carico", "cliente_nome", "polizza_numero",
+    "compagnia_nome", "polizza_ramo", "data_decorrenza", "scadenza",
+    "confronto_premio", "tipo_rinnovo", "mezzo_pagamento",
+    "variazione_badge", "note_carico", "azioni"];
 const LS_COLS = "carichi_mensili.visible_cols.v1";
 
 const MOTIVI = ["Disdettata", "Mezzo Venduto", "Cliente Trasferito", "Voltura", "Sostituita"];
@@ -51,10 +56,13 @@ export default function CarichiMensili() {
     const [rows, setRows] = useState(null);
     const [q, setQ] = useState("");
     const [range, setRange] = useState("mese_corrente");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
     const [statoCarico, setStatoCarico] = useState("in_attesa");
     const [selected, setSelected] = useState(new Set());
     const [replicaOpen, setReplicaOpen] = useState(false);
     const [annullaOpen, setAnnullaOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
     const [visible, setVisible] = useState(() => {
         try { return JSON.parse(localStorage.getItem(LS_COLS)) || DEFAULT_VISIBLE; }
         catch { return DEFAULT_VISIBLE; }
@@ -63,9 +71,11 @@ export default function CarichiMensili() {
 
     const load = async () => {
         try {
-            const r = await api.get("/carichi-mensili", {
-                params: { stato_carico: statoCarico, range_filter: range },
-            });
+            const params = { stato_carico: statoCarico };
+            // Se ci sono date esplicite, hanno priorità sul range preset
+            if (dal && al) { params.dal = dal; params.al = al; }
+            else if (range !== "tutti") params.range_filter = range;
+            const r = await api.get("/carichi-mensili", { params });
             setRows(r.data.righe || []);
             setSelected(new Set());
         } catch (e) {
@@ -73,7 +83,7 @@ export default function CarichiMensili() {
             setRows([]);
         }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al]);
 
     useEffect(() => {
         localStorage.setItem(LS_COLS, JSON.stringify(visible));
@@ -138,6 +148,10 @@ export default function CarichiMensili() {
                     <p className="text-sm text-slate-500">Import selettivo dei titoli in scadenza + vaglio operatore</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => setImportOpen(true)} data-testid="btn-import-excel"
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                        <Upload size={14} className="mr-1" /> Importa Excel/CSV
+                    </Button>
                     <Button variant="outline" onClick={() => setColToggleOpen(true)} data-testid="btn-columns">
                         <Columns size={14} className="mr-1" /> Personalizza colonne
                     </Button>
@@ -148,41 +162,61 @@ export default function CarichiMensili() {
             </div>
 
             {/* Filtri */}
-            <Card className="p-3 mb-3 flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1">
-                    <Filter size={14} className="text-slate-500" />
-                    <span className="text-xs text-slate-600 uppercase font-semibold tracking-wide">Filtri</span>
+            <Card className="p-3 mb-3 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                        <Filter size={14} className="text-slate-500" />
+                        <span className="text-xs text-slate-600 uppercase font-semibold tracking-wide">Filtri</span>
+                    </div>
+                    {["mese_corrente", "mese_successivo", "tutti"].map((r) => (
+                        <Button
+                            key={r} size="sm" variant={range === r && !dal ? "default" : "outline"}
+                            onClick={() => { setRange(r); setDal(""); setAl(""); }} data-testid={`filter-range-${r}`}
+                            className={range === r && !dal ? "bg-violet-600 hover:bg-violet-700" : ""}
+                        >
+                            {r === "mese_corrente" ? "Mese corrente" : r === "mese_successivo" ? "Mese successivo" : "Tutti"}
+                        </Button>
+                    ))}
+                    <div className="w-px h-6 bg-slate-200 mx-1" />
+                    {[
+                        { k: "in_attesa", l: "🔵 In attesa" },
+                        { k: "validato", l: "✅ Validati" },
+                        { k: "annullato_carico", l: "❌ Annullati" },
+                        { k: "tutti", l: "Tutti" },
+                    ].map((s) => (
+                        <Button
+                            key={s.k} size="sm" variant={statoCarico === s.k ? "default" : "outline"}
+                            onClick={() => setStatoCarico(s.k)} data-testid={`filter-stato-${s.k}`}
+                            className={statoCarico === s.k ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                        >{s.l}</Button>
+                    ))}
+                    <div className="flex-1" />
+                    <div className="relative">
+                        <Search size={14} className="absolute left-2 top-2.5 text-slate-400" />
+                        <Input
+                            value={q} onChange={(e) => setQ(e.target.value)}
+                            placeholder="Cerca cliente/polizza/targa…"
+                            className="pl-7 w-64 h-9" data-testid="search-carichi"
+                        />
+                    </div>
                 </div>
-                {["mese_corrente", "mese_successivo", "tutti"].map((r) => (
-                    <Button
-                        key={r} size="sm" variant={range === r ? "default" : "outline"}
-                        onClick={() => setRange(r)} data-testid={`filter-range-${r}`}
-                        className={range === r ? "bg-violet-600 hover:bg-violet-700" : ""}
-                    >
-                        {r === "mese_corrente" ? "Mese corrente" : r === "mese_successivo" ? "Mese successivo" : "Tutti"}
-                    </Button>
-                ))}
-                <div className="w-px h-6 bg-slate-200 mx-1" />
-                {[
-                    { k: "in_attesa", l: "🔵 In attesa" },
-                    { k: "validato", l: "✅ Validati" },
-                    { k: "annullato_carico", l: "❌ Annullati" },
-                    { k: "tutti", l: "Tutti" },
-                ].map((s) => (
-                    <Button
-                        key={s.k} size="sm" variant={statoCarico === s.k ? "default" : "outline"}
-                        onClick={() => setStatoCarico(s.k)} data-testid={`filter-stato-${s.k}`}
-                        className={statoCarico === s.k ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                    >{s.l}</Button>
-                ))}
-                <div className="flex-1" />
-                <div className="relative">
-                    <Search size={14} className="absolute left-2 top-2.5 text-slate-400" />
-                    <Input
-                        value={q} onChange={(e) => setQ(e.target.value)}
-                        placeholder="Cerca cliente/polizza/targa…"
-                        className="pl-7 w-64 h-9" data-testid="search-carichi"
-                    />
+                {/* Range date custom (override preset) */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Range date scadenza:</span>
+                    <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)}
+                           className="w-40 h-8 text-xs" data-testid="filter-date-dal" placeholder="Da" />
+                    <span className="text-[11px] text-slate-500">→</span>
+                    <Input type="date" value={al} onChange={(e) => setAl(e.target.value)}
+                           className="w-40 h-8 text-xs" data-testid="filter-date-al" placeholder="A" />
+                    {(dal || al) && (
+                        <Button size="sm" variant="ghost" onClick={() => { setDal(""); setAl(""); }}
+                                className="h-8 text-xs text-slate-600">
+                            <XCircle size={12} className="mr-1" /> Reset date
+                        </Button>
+                    )}
+                    <span className="text-[10px] text-slate-400 ml-2">
+                        {(dal && al) ? "🎯 Filtro date attivo (override preset)" : "Preset mese attivo — imposta le date per il range custom"}
+                    </span>
                 </div>
             </Card>
 
@@ -264,6 +298,10 @@ export default function CarichiMensili() {
                     onClose={() => { setAnnullaOpen(false); load(); }}
                 />
             )}
+            {/* Dialog: import Excel/CSV con auto-mapping */}
+            {importOpen && (
+                <ImportExcelDialog onClose={() => { setImportOpen(false); load(); }} />
+            )}
             {/* Dialog: personalizza colonne */}
             {colToggleOpen && (
                 <Dialog open onOpenChange={(o) => !o && setColToggleOpen(false)}>
@@ -321,6 +359,9 @@ function TitoloRow({ r, checked, onCheck, onDelete, isVisible }) {
                     </span>
                 </td>
             )}
+            {isVisible("cliente_nome") && (
+                <td className="p-2 font-medium text-slate-900">{r.cliente_nome || "-"}</td>
+            )}
             {isVisible("polizza_numero") && (
                 <td className="p-2 font-mono text-[11px]">
                     <div className="flex items-center gap-1">
@@ -330,8 +371,11 @@ function TitoloRow({ r, checked, onCheck, onDelete, isVisible }) {
                     {r.numero_titolo && <div className="text-slate-400 text-[10px]">Q: {r.numero_titolo}</div>}
                 </td>
             )}
-            {isVisible("cliente_nome") && (
-                <td className="p-2 font-medium text-slate-900">{r.cliente_nome || "-"}</td>
+            {isVisible("compagnia_nome") && (
+                <td className="p-2 text-[11px]">{r.compagnia_nome || "-"}</td>
+            )}
+            {isVisible("polizza_ramo") && (
+                <td className="p-2 text-[11px] uppercase text-slate-600">{r.polizza_ramo || "-"}</td>
             )}
             {isVisible("compagnia_ramo") && (
                 <td className="p-2">
@@ -342,8 +386,35 @@ function TitoloRow({ r, checked, onCheck, onDelete, isVisible }) {
             {isVisible("polizza_targa") && (
                 <td className="p-2 font-mono">{r.polizza_targa || "-"}</td>
             )}
+            {isVisible("data_decorrenza") && (
+                <td className="p-2 font-mono text-[11px]">{fmtIt(r.data_decorrenza)}</td>
+            )}
             {isVisible("scadenza") && (
                 <td className="p-2 font-mono">{fmtIt(r.scadenza)}</td>
+            )}
+            {isVisible("tipo_rinnovo") && (
+                <td className="p-2 text-[11px] uppercase">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                        {r.tipo_rinnovo === "rinnovo" ? "QR"
+                            : r.tipo_rinnovo === "prima_emissione" ? "PE"
+                            : r.tipo_rinnovo === "regolazione" ? "REG"
+                            : (r.tipo_rinnovo || "-")}
+                    </span>
+                </td>
+            )}
+            {isVisible("variazione_badge") && (
+                <td className="p-2 text-[11px]">
+                    {r.variazione_badge ? (
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            r.variazione_badge?.startsWith("🛑") ? "bg-rose-100 text-rose-800"
+                            : r.variazione_badge?.startsWith("🔻") ? "bg-emerald-100 text-emerald-800"
+                            : r.variazione_badge?.startsWith("🟢") ? "bg-sky-100 text-sky-800"
+                            : "bg-violet-100 text-violet-800"
+                        }`}>{r.variazione_badge}</span>
+                    ) : (
+                        <span className="text-slate-400">-</span>
+                    )}
+                </td>
             )}
             {isVisible("mezzo_pagamento") && (
                 <td className="p-2 text-[11px]">{r.mezzo_pagamento || "-"}</td>
@@ -487,7 +558,7 @@ function ReplicaDialog({ onClose }) {
                         <Label>Scadenza nuovo titolo (opzionale — calcolata auto se vuota)</Label>
                         <Input type="date" value={scad} onChange={(e) => setScad(e.target.value)} />
                         <div className="text-[10px] text-slate-500 mt-1">
-                            Se vuoto, il sistema aggiunge il periodo del frazionamento all'ultima scadenza.
+                            Se vuoto, il sistema aggiunge il periodo del frazionamento all&apos;ultima scadenza.
                         </div>
                     </div>
                 </div>
@@ -553,4 +624,177 @@ function fmtIt(iso) {
     if (!iso || iso.length < 10) return "-";
     const [y, m, d] = iso.slice(0, 10).split("-");
     return `${d}/${m}/${y}`;
+}
+
+function ImportExcelDialog({ onClose }) {
+    const [file, setFile] = useState(null);
+    const [preview, setPreview] = useState(null);   // {headers, sample_rows, suggested_mapping, total_rows}
+    const [mapping, setMapping] = useState({});
+    const [step, setStep] = useState(1);            // 1=upload, 2=mapping, 3=risultato
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+
+    const doPreview = async () => {
+        if (!file) { toast.error("Seleziona un file .xlsx o .csv"); return; }
+        setLoading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const r = await api.post("/carichi-mensili/import/preview", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setPreview(r.data);
+            setMapping({ ...r.data.suggested_mapping });
+            setStep(2);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore lettura file");
+        } finally { setLoading(false); }
+    };
+
+    const doImport = async () => {
+        if (!mapping.polizza_numero) {
+            toast.error("Devi mappare almeno il campo 'polizza_numero'");
+            return;
+        }
+        setLoading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("mapping_json", JSON.stringify(mapping));
+            const r = await api.post("/carichi-mensili/import/apply", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setResult(r.data);
+            setStep(3);
+            toast.success(`Import completato: ${r.data.creati} titoli creati`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore import");
+        } finally { setLoading(false); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto" data-testid="dialog-import-excel">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Upload size={16} /> Importa Titoli da Excel/CSV
+                        <span className="text-xs text-slate-500 font-normal ml-2">Step {step} di 3</span>
+                    </DialogTitle>
+                </DialogHeader>
+
+                {step === 1 && (
+                    <div className="space-y-3">
+                        <div className="bg-sky-50 border border-sky-200 rounded p-2 text-xs text-sky-900">
+                            📄 Carica un file <strong>.xlsx</strong>, <strong>.xls</strong> o <strong>.csv</strong> ricevuto dalla compagnia. Il sistema leggerà le intestazioni e ti proporrà un mapping automatico verso i campi CRM.
+                        </div>
+                        <Input
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            onChange={(e) => setFile(e.target.files?.[0] || null)}
+                            data-testid="import-file-input"
+                        />
+                        {file && <div className="text-xs text-slate-600">Selezionato: <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)</div>}
+                    </div>
+                )}
+
+                {step === 2 && preview && (
+                    <div className="space-y-3">
+                        <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs text-emerald-900">
+                            ✅ File letto correttamente: <strong>{preview.total_rows}</strong> righe · <strong>{preview.headers.length}</strong> colonne. Verifica il mapping suggerito qui sotto e correggi se necessario.
+                        </div>
+                        <div className="overflow-x-auto max-h-64">
+                            <table className="w-full text-xs">
+                                <thead className="bg-slate-100 sticky top-0">
+                                    <tr>
+                                        <th className="p-1.5 text-left font-semibold text-slate-700">Campo CRM</th>
+                                        <th className="p-1.5 text-left font-semibold text-slate-700">Colonna nel file</th>
+                                        <th className="p-1.5 text-left font-semibold text-slate-500 text-[10px]">Esempio (prima riga)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(preview.campi_crm_disponibili || []).map((campo) => (
+                                        <tr key={campo} className="border-b border-slate-100">
+                                            <td className="p-1.5 font-mono text-[11px] font-semibold">
+                                                {campo}
+                                                {campo === "polizza_numero" && <span className="text-rose-500 ml-1">*</span>}
+                                            </td>
+                                            <td className="p-1.5">
+                                                <select
+                                                    value={mapping[campo] || ""}
+                                                    onChange={(e) => setMapping({ ...mapping, [campo]: e.target.value || null })}
+                                                    className="w-full text-xs border rounded h-7 px-1.5"
+                                                    data-testid={`mapping-${campo}`}
+                                                >
+                                                    <option value="">— non mappato —</option>
+                                                    {preview.headers.map((h) => (
+                                                        <option key={h} value={h}>{h}</option>
+                                                    ))}
+                                                </select>
+                                            </td>
+                                            <td className="p-1.5 text-[10px] text-slate-500 max-w-[200px] truncate">
+                                                {mapping[campo] && preview.sample_rows[0]
+                                                    ? String(preview.sample_rows[0][mapping[campo]] ?? "")
+                                                    : "-"}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="text-[10px] text-slate-500">* Il campo <code>polizza_numero</code> è obbligatorio per abbinare i titoli alle polizze del CRM.</div>
+                    </div>
+                )}
+
+                {step === 3 && result && (
+                    <div className="space-y-3">
+                        <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
+                            <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
+                            <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
+                                <div><span className="text-slate-500">Totali letti:</span> <strong>{result.totale_letti}</strong></div>
+                                <div><span className="text-emerald-700">Creati:</span> <strong>{result.creati}</strong></div>
+                                <div><span className="text-amber-700">Saltati:</span> <strong>{result.saltati}</strong></div>
+                            </div>
+                        </div>
+                        {(result.errori || []).length > 0 && (
+                            <div className="bg-rose-50 border border-rose-200 rounded p-2 max-h-40 overflow-y-auto">
+                                <div className="text-xs font-semibold text-rose-900 mb-1">⚠ {result.errori.length} errori:</div>
+                                {result.errori.slice(0, 10).map((e, i) => (
+                                    <div key={i} className="text-[10px] text-rose-800">
+                                        Riga {e.riga}: {e.polizza && `[${e.polizza}] `}{e.errore}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="text-xs text-slate-600">
+                            I titoli sono ora in stato <strong>&quot;In Attesa&quot;</strong>. Filtrali e valida quelli approvati per promuoverli allo scadenziario ufficiale.
+                        </div>
+                    </div>
+                )}
+
+                <DialogFooter>
+                    {step === 1 && (
+                        <>
+                            <Button variant="outline" onClick={onClose}>Annulla</Button>
+                            <Button onClick={doPreview} disabled={!file || loading}
+                                    className="bg-sky-700 hover:bg-sky-800" data-testid="btn-import-preview">
+                                {loading ? "Analisi…" : "Analizza file →"}
+                            </Button>
+                        </>
+                    )}
+                    {step === 2 && (
+                        <>
+                            <Button variant="outline" onClick={() => setStep(1)}>← Indietro</Button>
+                            <Button onClick={doImport} disabled={loading || !mapping.polizza_numero}
+                                    className="bg-emerald-600 hover:bg-emerald-700" data-testid="btn-import-apply">
+                                {loading ? "Import in corso…" : `Importa ${preview?.total_rows || 0} righe`}
+                            </Button>
+                        </>
+                    )}
+                    {step === 3 && (
+                        <Button onClick={onClose} className="bg-sky-700 hover:bg-sky-800">Chiudi</Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
 }

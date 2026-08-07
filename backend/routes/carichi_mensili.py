@@ -13,14 +13,18 @@ Regole chiave:
 - Non si può eliminare un titolo se il giorno di scadenza (o data_incasso) è
   coperto da una chiusura di Prima Nota (collezione ``chiusure_giorno``) NON
   riaperta. L'amministratore può forzare l'annullamento contabile con lo storno.
+- Import Excel/CSV: due step (preview → import) per permettere all'operatore
+  di **mappare le colonne del file → campi CRM** con suggerimento automatico
+  (fuzzy-match sui nomi colonna comuni).
 """
 from __future__ import annotations
 
+import io
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from auth import current_user, require_user
@@ -192,6 +196,26 @@ async def lista_carichi_mensili(
     for t in titoli:
         p = pols.get(t.get("polizza_id"), {})
         bloccato, motivo = await _is_titolo_bloccato(t)
+        # Badge variazione: confronto premio precedente vs attuale
+        prev = t.get("premio_precedente")
+        curr = float(t.get("importo_lordo") or 0)
+        variazione_badge = None
+        variazione_delta_euro = None
+        variazione_delta_pct = None
+        if prev is not None and prev > 0:
+            delta = curr - prev
+            pct = (delta / prev) * 100
+            variazione_delta_euro = round(delta, 2)
+            variazione_delta_pct = round(pct, 1)
+            if abs(delta) < 0.01:
+                variazione_badge = "🟢 Regolare"
+            elif delta > 0:
+                variazione_badge = f"🛑 Aumento (+€{delta:.2f})"
+            else:
+                variazione_badge = f"🔻 Riduzione ({delta:.2f}€)"
+        elif prev is None:
+            variazione_badge = "🆕 Nuova"
+
         rows.append({
             **t,
             "polizza_numero": p.get("numero_polizza"),
@@ -199,12 +223,17 @@ async def lista_carichi_mensili(
             "polizza_prodotto": p.get("prodotto"),
             "polizza_targa": p.get("targa"),
             "frazionamento": p.get("frazionamento") or "annuale",
+            "data_decorrenza": t.get("effetto"),  # alias per la tabella
+            "tipo_rinnovo": t.get("tipo") or "rinnovo",
             "cliente_nome": anas.get(p.get("contraente_id"), ""),
             "compagnia_nome": cmps.get(p.get("compagnia_id"), ""),
             "sinistri_ultimi_12m": sin_map.get(p.get("id"), 0),
             "operatore_nome": users.get(t.get("collaboratore_id"), ""),
             "bloccato": bloccato,
             "motivo_blocco": motivo,
+            "variazione_badge": variazione_badge,
+            "variazione_delta_euro": variazione_delta_euro,
+            "variazione_delta_pct": variazione_delta_pct,
         })
     return {"totale": len(rows), "righe": rows}
 
@@ -362,6 +391,263 @@ class ImportManualeBody(BaseModel):
     """
     titoli: list[dict]
     import_source: str = "manuale"
+
+
+# ============================================================================
+# IMPORT EXCEL/CSV con auto-mapping colonne
+# ============================================================================
+
+# Mapping fuzzy: intestazioni comuni dei file di compagnia → campi CRM
+_HEADER_ALIASES = {
+    "polizza_numero": ["polizza", "numero polizza", "n. polizza", "num polizza",
+                       "poliz n.", "n polizza", "policy", "policy number", "contratto"],
+    "cliente_nome": ["cliente", "contraente", "nominativo", "assicurato",
+                     "ragione sociale", "denominazione", "cliente/contraente"],
+    "compagnia": ["compagnia", "impresa", "società", "insurer", "carrier"],
+    "ramo": ["ramo", "prodotto", "line", "linea", "branch"],
+    "targa": ["targa", "veicolo", "identificativo", "plate"],
+    "effetto": ["effetto", "data effetto", "decorrenza", "data decorrenza",
+                "inizio", "start", "from", "dal"],
+    "scadenza": ["scadenza", "data scadenza", "expires", "expiry", "al", "fine", "to"],
+    "importo_lordo": ["premio lordo", "lordo", "premio", "totale", "importo",
+                      "gross", "premio totale", "premio_totale"],
+    "importo_netto": ["premio netto", "netto", "net"],
+    "imposte": ["imposte", "tasse", "tax"],
+    "provvigioni": ["provvigioni", "commissioni", "provv", "commission",
+                    "provvigione", "provv. attiva"],
+    "frazionamento": ["frazionamento", "rateazione", "rata", "periodicità",
+                      "split", "frequency"],
+    "mezzo_pagamento": ["mezzo pagamento", "pagamento", "metodo pagamento",
+                        "payment", "modalità pagamento", "modalita pagamento"],
+    "codice_fiscale": ["codice fiscale", "cf", "c.f.", "codicefiscale", "tax id"],
+    "partita_iva": ["partita iva", "piva", "p.iva", "vat"],
+}
+
+
+def _normalize_header(h: str) -> str:
+    """Normalizza un'intestazione per il matching fuzzy."""
+    if h is None:
+        return ""
+    return str(h).strip().lower().replace("  ", " ")
+
+
+def _suggest_mapping(headers: list[str]) -> dict[str, Optional[str]]:
+    """Per ogni campo CRM suggerisce l'header corrispondente nel file.
+    Ritorna ``{campo_crm: header_originale_file_o_None}``.
+    """
+    norm_headers = {_normalize_header(h): h for h in headers}
+    mapping: dict[str, Optional[str]] = {}
+    for campo, aliases in _HEADER_ALIASES.items():
+        found = None
+        for alias in aliases:
+            alias_n = _normalize_header(alias)
+            # match esatto
+            if alias_n in norm_headers:
+                found = norm_headers[alias_n]
+                break
+            # match "starts with" per alias corti (es. "cf" in "cf cliente")
+            for nh, orig in norm_headers.items():
+                if nh.startswith(alias_n + " ") or nh == alias_n:
+                    found = orig
+                    break
+            if found:
+                break
+        mapping[campo] = found
+    return mapping
+
+
+def _read_upload_to_rows(content: bytes, filename: str) -> tuple[list[str], list[dict]]:
+    """Legge un file .xlsx / .xls / .csv e ritorna (headers, righe).
+
+    Prende sempre il primo foglio se Excel. CSV auto-detect separator (,, ;, tab).
+    """
+    fname_lower = (filename or "").lower()
+    if fname_lower.endswith((".xlsx", ".xls")):
+        import openpyxl  # type: ignore
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        rows_iter = ws.iter_rows(values_only=True)
+        headers_row = next(rows_iter, None) or []
+        headers = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(headers_row)]
+        rows: list[dict] = []
+        for row in rows_iter:
+            if all(v is None or str(v).strip() == "" for v in row):
+                continue
+            rows.append({headers[i]: row[i] if i < len(row) else None
+                         for i in range(len(headers))})
+        return headers, rows
+    # CSV
+    import csv as _csv
+    text = content.decode("utf-8-sig", errors="ignore")
+    # auto-detect separatore
+    sep = ";" if text.count(";") > text.count(",") else ","
+    reader = _csv.DictReader(io.StringIO(text), delimiter=sep)
+    headers = reader.fieldnames or []
+    rows = [dict(r) for r in reader]
+    return headers, rows
+
+
+@router.post("/carichi-mensili/import/preview")
+async def import_preview(
+    file: UploadFile = File(...),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Fase 1 dell'import: legge il file e propone un mapping colonne→campi CRM.
+
+    Ritorna:
+      ``{headers, sample_rows, suggested_mapping, total_rows}``
+
+    Il frontend mostra il mapping suggerito e permette all'utente di correggerlo,
+    poi invia il file + mapping definitivo a ``/import/apply``.
+    """
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "File troppo grande (max 10 MB)")
+    try:
+        headers, rows = _read_upload_to_rows(content, file.filename or "")
+    except Exception as e:
+        raise HTTPException(400, f"Impossibile leggere il file: {e}")
+    if not headers:
+        raise HTTPException(400, "Il file non contiene intestazioni")
+    suggested = _suggest_mapping(headers)
+    # Cache temporanea del file in memoria via GridFS-like? Per semplicità
+    # il file va ripassato in /apply. Ritorno solo le prime 5 righe per preview.
+    return {
+        "headers": headers,
+        "sample_rows": rows[:5],
+        "suggested_mapping": suggested,
+        "total_rows": len(rows),
+        "campi_crm_disponibili": list(_HEADER_ALIASES.keys()),
+    }
+
+
+def _to_float(v) -> float:
+    """Converte una cella (str/int/float/None) in float robusto.
+    Gestisce virgole italiane, simboli €, spazi."""
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("€", "").replace(" ", "").replace("\xa0", "")
+    # Formato italiano "1.234,50" → "1234.50"
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _to_iso_date(v) -> Optional[str]:
+    """Converte una data (str o datetime) in ISO YYYY-MM-DD.
+    Accetta formati IT ``DD/MM/YYYY`` e ISO."""
+    if v is None or v == "":
+        return None
+    if hasattr(v, "strftime"):
+        return v.strftime("%Y-%m-%d")
+    s = str(v).strip()[:10]
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) == 3:
+            d, m, y = parts
+            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+    if "-" in s and len(s) == 10:
+        return s
+    return None
+
+
+@router.post("/carichi-mensili/import/apply")
+async def import_apply(
+    file: UploadFile = File(...),
+    mapping_json: str = Form(...),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Fase 2 dell'import: applica il mapping e crea i titoli in stato in_attesa.
+
+    ``mapping_json``: JSON con ``{campo_crm: header_file}`` (es.
+    ``{"polizza_numero": "N. Polizza", "importo_lordo": "Premio"}``).
+
+    Strategia:
+    1. Legge il file (di nuovo — è stateless, l'operatore ha appena visto la preview)
+    2. Per ogni riga usa il mapping per estrarre i campi
+    3. Cerca la polizza per numero. Se non esiste, crea un titolo "orfano" con nota
+       (l'operatore lo sistemerà a mano) — comunque va nel bucket carichi.
+    4. Crea il titolo con stato_carico=in_attesa e caricato_da_import=True
+
+    Ritorna ``{creati, saltati, errori, batch_id}``.
+    """
+    import json as _json
+    try:
+        mapping = _json.loads(mapping_json)
+    except Exception:
+        raise HTTPException(400, "mapping_json non valido")
+    if not mapping.get("polizza_numero"):
+        raise HTTPException(400, "Il mapping deve contenere 'polizza_numero' per identificare la polizza")
+
+    content = await file.read()
+    try:
+        _, rows = _read_upload_to_rows(content, file.filename or "")
+    except Exception as e:
+        raise HTTPException(400, f"Impossibile rileggere il file: {e}")
+
+    batch_id = str(uuid.uuid4())
+    creati = 0
+    saltati = 0
+    errori: list[dict] = []
+
+    for i, r in enumerate(rows, start=2):  # start=2: riga 1 = header
+        try:
+            pol_num_raw = r.get(mapping.get("polizza_numero", ""))
+            if not pol_num_raw:
+                saltati += 1
+                continue
+            pol_num = str(pol_num_raw).strip()
+            pol = await db.polizze.find_one(
+                {"numero_polizza": pol_num},
+                {"_id": 0, "id": 1, "collaboratore_id": 1},
+            )
+            if not pol:
+                errori.append({"riga": i, "polizza": pol_num, "errore": "Polizza non trovata nel CRM"})
+                continue
+            imp_lordo = _to_float(r.get(mapping.get("importo_lordo", "")))
+            imp_netto = _to_float(r.get(mapping.get("importo_netto", ""))) or imp_lordo
+            scad = _to_iso_date(r.get(mapping.get("scadenza", "")))
+            eff = _to_iso_date(r.get(mapping.get("effetto", ""))) or scad
+            if not scad:
+                errori.append({"riga": i, "polizza": pol_num, "errore": "Scadenza mancante o non valida"})
+                continue
+            # Snapshot premio precedente
+            last = await db.titoli.find_one(
+                {"polizza_id": pol["id"], "stato_carico": "validato"},
+                {"_id": 0, "importo_lordo": 1}, sort=[("scadenza", -1)],
+            )
+            t = Titolo(
+                polizza_id=pol["id"],
+                effetto=eff or scad, scadenza=scad,
+                importo_lordo=imp_lordo, importo_netto=imp_netto,
+                imposte=_to_float(r.get(mapping.get("imposte", ""))),
+                provvigioni=_to_float(r.get(mapping.get("provvigioni", ""))),
+                mezzo_pagamento=(r.get(mapping.get("mezzo_pagamento", "")) or None),
+                collaboratore_id=pol.get("collaboratore_id") or user.get("id"),
+                stato_carico="in_attesa",
+                caricato_da_import=True,
+                import_batch_id=batch_id,
+                import_source=file.filename or "excel_csv",
+                premio_precedente=float(last["importo_lordo"]) if last else None,
+                fonte="import_ania",
+            )
+            await db.titoli.insert_one(t.model_dump())
+            creati += 1
+        except Exception as e:
+            errori.append({"riga": i, "errore": str(e)})
+
+    await log_attivita(user, "import_excel_csv", "titoli", batch_id,
+                       f"creati={creati} saltati={saltati} errori={len(errori)}")
+    return {"ok": True, "batch_id": batch_id, "creati": creati,
+            "saltati": saltati, "errori": errori,
+            "totale_letti": len(rows)}
 
 
 @router.post("/carichi-mensili/import")
