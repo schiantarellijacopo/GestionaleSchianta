@@ -596,10 +596,13 @@ async def import_apply(
     creati = 0
     saltati = 0
     errori: list[dict] = []
+    unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
+    header_pol = mapping.get("polizza_numero", "")
+    header_cliente = mapping.get("cliente_nome", "")
 
     for i, r in enumerate(rows, start=2):  # start=2: riga 1 = header
         try:
-            pol_num_raw = r.get(mapping.get("polizza_numero", ""))
+            pol_num_raw = r.get(header_pol)
             if not pol_num_raw:
                 saltati += 1
                 continue
@@ -609,7 +612,56 @@ async def import_apply(
                 {"_id": 0, "id": 1, "collaboratore_id": 1},
             )
             if not pol:
-                errori.append({"riga": i, "polizza": pol_num, "errore": "Polizza non trovata nel CRM"})
+                # Polizza non trovata → cerca candidati per abbinamento manuale
+                cliente_str = str(r.get(header_cliente) or "").strip()
+                suggerimenti: list[dict] = []
+                if cliente_str:
+                    # Match fuzzy sul nome cliente (case-insensitive)
+                    import re as _re
+                    q_norm = _re.escape(cliente_str.split()[0]) if cliente_str else ""
+                    if q_norm:
+                        async for a in db.anagrafiche.find(
+                            {"ragione_sociale": {"$regex": q_norm, "$options": "i"}},
+                            {"_id": 0, "id": 1, "ragione_sociale": 1},
+                        ).limit(5):
+                            async for p in db.polizze.find(
+                                {"contraente_id": a["id"]},
+                                {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "targa": 1},
+                            ).limit(5):
+                                suggerimenti.append({
+                                    **p, "cliente_nome": a["ragione_sociale"],
+                                })
+                # Match anche per numero simile (contains) come fallback
+                if len(suggerimenti) < 3 and len(pol_num) >= 4:
+                    async for p in db.polizze.find(
+                        {"numero_polizza": {"$regex": pol_num[:6], "$options": "i"}},
+                        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "targa": 1,
+                         "contraente_id": 1},
+                    ).limit(5):
+                        if p["id"] not in {s["id"] for s in suggerimenti}:
+                            a = await db.anagrafiche.find_one(
+                                {"id": p.get("contraente_id")},
+                                {"_id": 0, "ragione_sociale": 1},
+                            )
+                            suggerimenti.append({
+                                **p, "cliente_nome": (a or {}).get("ragione_sociale") or "-",
+                            })
+                # Ritorna la riga con dati normalizzati per il match manuale
+                imp_lordo = _to_float(r.get(mapping.get("importo_lordo", "")))
+                scad = _to_iso_date(r.get(mapping.get("scadenza", "")))
+                eff = _to_iso_date(r.get(mapping.get("effetto", ""))) or scad
+                unmatched.append({
+                    "riga": i,
+                    "polizza_numero_file": pol_num,
+                    "cliente_file": cliente_str,
+                    "scadenza": scad,
+                    "effetto": eff,
+                    "importo_lordo": imp_lordo,
+                    "importo_netto": _to_float(r.get(mapping.get("importo_netto", ""))) or imp_lordo,
+                    "provvigioni": _to_float(r.get(mapping.get("provvigioni", ""))),
+                    "mezzo_pagamento": r.get(mapping.get("mezzo_pagamento", "")) or None,
+                    "suggerimenti": suggerimenti[:5],
+                })
                 continue
             imp_lordo = _to_float(r.get(mapping.get("importo_lordo", "")))
             imp_netto = _to_float(r.get(mapping.get("importo_netto", ""))) or imp_lordo
@@ -644,10 +696,74 @@ async def import_apply(
             errori.append({"riga": i, "errore": str(e)})
 
     await log_attivita(user, "import_excel_csv", "titoli", batch_id,
-                       f"creati={creati} saltati={saltati} errori={len(errori)}")
+                       f"creati={creati} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
     return {"ok": True, "batch_id": batch_id, "creati": creati,
-            "saltati": saltati, "errori": errori,
+            "saltati": saltati, "unmatched": unmatched, "errori": errori,
             "totale_letti": len(rows)}
+
+
+class ManualMatchBody(BaseModel):
+    """Corpo per il match manuale post-import.
+
+    Per ogni riga rimasta orfana l'operatore sceglie una polizza esistente
+    dai suggerimenti (o cerca a mano). Il backend crea il titolo con quella
+    polizza + i dati già estratti dal file.
+    """
+    batch_id: str
+    matches: list[dict]  # [{polizza_id, effetto, scadenza, importo_lordo, ...}]
+
+
+@router.post("/carichi-mensili/import/match-manual")
+async def import_match_manual(
+    body: ManualMatchBody,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Fase 3 (opzionale) dell'import: crea i titoli per le righe che l'operatore
+    ha abbinato manualmente a polizze esistenti."""
+    if not body.matches:
+        return {"ok": True, "creati": 0}
+    creati = 0
+    errori = []
+    for m in body.matches:
+        try:
+            pol_id = m.get("polizza_id")
+            if not pol_id:
+                continue
+            pol = await db.polizze.find_one(
+                {"id": pol_id}, {"_id": 0, "id": 1, "collaboratore_id": 1},
+            )
+            if not pol:
+                errori.append({"polizza_id": pol_id, "errore": "polizza scomparsa"})
+                continue
+            last = await db.titoli.find_one(
+                {"polizza_id": pol_id, "stato_carico": "validato"},
+                {"_id": 0, "importo_lordo": 1}, sort=[("scadenza", -1)],
+            )
+            imp_lordo = float(m.get("importo_lordo") or 0)
+            t = Titolo(
+                polizza_id=pol_id,
+                effetto=m.get("effetto") or m.get("scadenza"),
+                scadenza=m.get("scadenza"),
+                importo_lordo=imp_lordo,
+                importo_netto=float(m.get("importo_netto") or 0) or imp_lordo,
+                provvigioni=float(m.get("provvigioni") or 0),
+                mezzo_pagamento=m.get("mezzo_pagamento") or None,
+                collaboratore_id=pol.get("collaboratore_id") or user.get("id"),
+                stato_carico="in_attesa",
+                caricato_da_import=True,
+                import_batch_id=body.batch_id,
+                import_source="excel_csv_manual_match",
+                premio_precedente=float(last["importo_lordo"]) if last else None,
+                fonte="import_ania",
+                note_carico=f"Abbinamento manuale post-import (file: {m.get('polizza_numero_file') or 'n/d'})",
+            )
+            await db.titoli.insert_one(t.model_dump())
+            creati += 1
+        except Exception as e:
+            errori.append({"errore": str(e)})
+    await log_attivita(user, "import_manual_match", "titoli", body.batch_id,
+                       f"creati={creati} errori={len(errori)}")
+    return {"ok": True, "creati": creati, "errori": errori}
 
 
 @router.post("/carichi-mensili/import")

@@ -665,10 +665,41 @@ function ImportExcelDialog({ onClose }) {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setResult(r.data);
-            setStep(3);
-            toast.success(`Import completato: ${r.data.creati} titoli creati`);
+            // Se ci sono righe orfane vai allo step 2.5 (match manuale), altrimenti step 3 finale
+            if ((r.data.unmatched || []).length > 0) {
+                setStep(2.5);
+                // Pre-popola matches: nessuna polizza selezionata di default
+                setManualMatches((r.data.unmatched || []).map((u) => ({
+                    ...u, polizza_id: null,
+                })));
+            } else {
+                setStep(3);
+                toast.success(`Import completato: ${r.data.creati} titoli creati`);
+            }
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore import");
+        } finally { setLoading(false); }
+    };
+
+    const [manualMatches, setManualMatches] = useState([]);
+    const doManualMatch = async () => {
+        const scelti = manualMatches.filter((m) => m.polizza_id);
+        if (scelti.length === 0) {
+            // Nessun abbinamento manuale → salta e vai al risultato
+            setStep(3);
+            return;
+        }
+        setLoading(true);
+        try {
+            const r = await api.post("/carichi-mensili/import/match-manual", {
+                batch_id: result.batch_id, matches: scelti,
+            });
+            toast.success(`${r.data.creati} titoli aggiuntivi creati con abbinamento manuale`);
+            setResult({ ...result, creati: result.creati + r.data.creati,
+                        creati_manuale: r.data.creati });
+            setStep(3);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore match manuale");
         } finally { setLoading(false); }
     };
 
@@ -678,7 +709,14 @@ function ImportExcelDialog({ onClose }) {
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Upload size={16} /> Importa Titoli da Excel/CSV
-                        <span className="text-xs text-slate-500 font-normal ml-2">Step {step} di 3</span>
+                        <span className="text-xs text-slate-500 font-normal ml-2">
+                            Step {step === 2.5 ? "2.5" : Math.floor(step)} · {
+                                step === 1 ? "Carica file" :
+                                step === 2 ? "Mappa colonne" :
+                                step === 2.5 ? "Abbina polizze mancanti" :
+                                "Risultato"
+                            }
+                        </span>
                     </DialogTitle>
                 </DialogHeader>
 
@@ -745,15 +783,77 @@ function ImportExcelDialog({ onClose }) {
                     </div>
                 )}
 
+                {step === 2.5 && (
+                    <div className="space-y-3">
+                        <div className="bg-amber-50 border-2 border-amber-300 rounded p-2.5">
+                            <div className="font-bold text-amber-900 text-sm">⚠️ Abbinamento manuale polizze</div>
+                            <div className="text-xs text-amber-800 mt-1">
+                                <strong>{manualMatches.length}</strong> righe del file hanno un numero polizza <strong>NON trovato</strong> nel CRM.
+                                Scegli la polizza corretta dai suggerimenti oppure lascia &quot;— non abbinare —&quot; per scartarla.
+                            </div>
+                        </div>
+                        <div className="max-h-96 overflow-y-auto space-y-2">
+                            {manualMatches.map((u, idx) => (
+                                <div key={idx} className="border border-slate-200 rounded p-2 bg-white">
+                                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                                        <div className="text-[11px]">
+                                            <span className="font-mono font-bold">{u.polizza_numero_file}</span>
+                                            {u.cliente_file && <span className="text-slate-600 ml-2">· {u.cliente_file}</span>}
+                                            <span className="text-slate-400 ml-2">
+                                                scad. {u.scadenza ? fmtIt(u.scadenza) : "-"} · € {(u.importo_lordo || 0).toFixed(2)}
+                                            </span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-500">riga {u.riga}</span>
+                                    </div>
+                                    <select
+                                        value={u.polizza_id || ""}
+                                        onChange={(e) => {
+                                            const next = [...manualMatches];
+                                            next[idx] = { ...next[idx], polizza_id: e.target.value || null };
+                                            setManualMatches(next);
+                                        }}
+                                        className="w-full text-xs border rounded h-8 px-2"
+                                        data-testid={`manual-match-${idx}`}
+                                    >
+                                        <option value="">— non abbinare (scarta questa riga) —</option>
+                                        {(u.suggerimenti || []).map((s) => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.numero_polizza} · {s.ramo || "-"}
+                                                {s.targa ? ` [${s.targa}]` : ""}
+                                                {s.cliente_nome ? ` · ${s.cliente_nome}` : ""}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {(u.suggerimenti || []).length === 0 && (
+                                        <div className="text-[10px] text-slate-500 mt-1 italic">
+                                            Nessun suggerimento trovato. La riga verrà scartata.
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                            💡 Il sistema ha già creato <strong>{result?.creati || 0}</strong> titoli abbinati automaticamente.
+                            Qui puoi recuperare le righe con polizza non trovata scegliendo manualmente.
+                        </div>
+                    </div>
+                )}
+
                 {step === 3 && result && (
                     <div className="space-y-3">
                         <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
                             <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
-                            <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
-                                <div><span className="text-slate-500">Totali letti:</span> <strong>{result.totale_letti}</strong></div>
+                            <div className="grid grid-cols-4 gap-2 mt-2 text-sm">
+                                <div><span className="text-slate-500">Letti:</span> <strong>{result.totale_letti}</strong></div>
                                 <div><span className="text-emerald-700">Creati:</span> <strong>{result.creati}</strong></div>
                                 <div><span className="text-amber-700">Saltati:</span> <strong>{result.saltati}</strong></div>
+                                <div><span className="text-rose-700">Orfani:</span> <strong>{(result.unmatched || []).length}</strong></div>
                             </div>
+                            {result.creati_manuale > 0 && (
+                                <div className="mt-2 text-xs text-emerald-800">
+                                    ↳ inclusi <strong>{result.creati_manuale}</strong> abbinati manualmente
+                                </div>
+                            )}
                         </div>
                         {(result.errori || []).length > 0 && (
                             <div className="bg-rose-50 border border-rose-200 rounded p-2 max-h-40 overflow-y-auto">
@@ -787,6 +887,15 @@ function ImportExcelDialog({ onClose }) {
                             <Button onClick={doImport} disabled={loading || !mapping.polizza_numero}
                                     className="bg-emerald-600 hover:bg-emerald-700" data-testid="btn-import-apply">
                                 {loading ? "Import in corso…" : `Importa ${preview?.total_rows || 0} righe`}
+                            </Button>
+                        </>
+                    )}
+                    {step === 2.5 && (
+                        <>
+                            <Button variant="ghost" onClick={() => setStep(3)}>Salta abbinamento →</Button>
+                            <Button onClick={doManualMatch} disabled={loading}
+                                    className="bg-amber-600 hover:bg-amber-700" data-testid="btn-import-manual-match">
+                                {loading ? "Salvo…" : `Abbina ${manualMatches.filter((m) => m.polizza_id).length} righe →`}
                             </Button>
                         </>
                     )}
