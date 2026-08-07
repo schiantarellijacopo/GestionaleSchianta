@@ -60,6 +60,8 @@ M_SCOPE = "openid profile offline_access Files.ReadWrite User.Read"
 # Ogni categoria è una tupla (path_segments, descrizione).
 STANDARD_FOLDER_STRUCTURE: dict = {
     "root": ["Assicura CRM"],
+    "inbox": ["Assicura CRM", "INBOX"],
+    "da_smistare": ["Assicura CRM", "Da smistare manualmente"],
     "contraenti": ["Assicura CRM", "Contraenti"],
     "contraente_privacy": ["Assicura CRM", "Contraenti", "{cliente}", "Privacy"],
     "contraente_identita": ["Assicura CRM", "Contraenti", "{cliente}", "Carta d'Identità"],
@@ -78,8 +80,11 @@ STANDARD_FOLDER_STRUCTURE: dict = {
     "contabilita_provvigioni": ["Assicura CRM", "Contabilità", "Provvigioni Collaboratori", "{anno}"],
 }
 
-# Categorie che vengono create SUBITO al primo setup (senza placeholder {cliente}/{polizza}).
-INIT_CATEGORIES = ["root", "contraenti", "polizze", "quietanze", "sinistri", "contabilita"]
+# Categorie che vengono create SUBITO al primo setup (senza placeholder).
+INIT_CATEGORIES = [
+    "root", "inbox", "da_smistare", "contraenti", "polizze",
+    "quietanze", "sinistri", "contabilita",
+]
 
 _fernet: Optional[Fernet] = None
 
@@ -836,3 +841,35 @@ async def create_folder_manual(
     safe = _sanitize_folder_name(name)
     fid = await _create_folder(provider, token, safe, parent_id)
     return {"ok": True, "id": fid, "name": safe}
+
+
+# ============================================================
+# OCR NOTTURNO — trigger manuale + history
+# ============================================================
+@router.post("/scan-now")
+async def scan_inbox_now(
+    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Trigger MANUALE dello scan OCR della cartella INBOX (per test o urgenze).
+
+    In produzione lo scan gira automaticamente ogni ora dalle 22:00 alle 06:00 UTC.
+    """
+    tenant = _tenant_id(user)
+    from cloud_ocr_scanner import scan_tenant_inbox
+    report = await scan_tenant_inbox(db, tenant, provider, manual=True)
+    return report
+
+
+@router.get("/scan-history")
+async def scan_history(
+    limit: int = Query(20, ge=1, le=100),
+    user=Depends(current_user),
+):
+    """History degli ultimi run dello scanner OCR notturno."""
+    tenant = _tenant_id(user)
+    rows = db.cloud_scan_history.find(
+        {"tenant_id": tenant},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(limit)
+    return {"runs": [r async for r in rows]}

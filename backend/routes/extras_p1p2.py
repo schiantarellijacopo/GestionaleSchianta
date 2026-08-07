@@ -269,6 +269,80 @@ async def list_applicazioni(polizza_id: str, user=Depends(current_user)) -> list
     return items
 
 
+
+@router.get("/libro-matricola/polizze")
+async def list_libro_matricola_polizze(
+    q: Optional[str] = None,
+    stato: Optional[str] = None,  # attivo | cessato | tutti
+    user=Depends(current_user),
+) -> list[dict]:
+    """Lista delle POLIZZE libro matricola con conteggio applicazioni e riepilogo.
+
+    Restituisce ogni polizza-madre con:
+    - dati polizza (numero, ramo, contraente, effetto, scadenza, premio)
+    - array `applicazioni` con le applicazioni collegate
+    - conteggi (totale, attive, cessate)
+    - premio_totale (somma premi applicazioni)
+    """
+    from datetime import datetime as _dt
+    flt: dict = {"is_libro_matricola": True}
+    if q and q.strip():
+        rx = {"$regex": q.strip(), "$options": "i"}
+        flt["$or"] = [{"numero_polizza": rx}, {"ramo": rx}, {"prodotto": rx}]
+    polizze = await db.polizze.find(flt, {
+        "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+        "contraente_id": 1, "compagnia_id": 1, "effetto": 1, "scadenza": 1,
+        "premio_lordo": 1, "stato": 1, "frazionamento": 1,
+    }).sort("effetto", -1).to_list(500)
+    if not polizze:
+        return []
+
+    pol_ids = [p["id"] for p in polizze]
+    # Batch applicazioni
+    apps_by_pol: dict = {pid: [] for pid in pol_ids}
+    async for a in db.applicazioni_matricola.find(
+        {"polizza_id": {"$in": pol_ids}}, {"_id": 0},
+    ).sort("data_inserimento", -1):
+        apps_by_pol.setdefault(a["polizza_id"], []).append(a)
+
+    # Anagrafiche + compagnie
+    cont_ids = list({p.get("contraente_id") for p in polizze if p.get("contraente_id")})
+    comp_ids = list({p.get("compagnia_id") for p in polizze if p.get("compagnia_id")})
+    cont_map: dict = {}
+    async for a in db.anagrafiche.find(
+        {"id": {"$in": cont_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
+    ):
+        cont_map[a["id"]] = (a.get("ragione_sociale")
+                             or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+    comp_map = {c["id"]: c.get("ragione_sociale")
+                async for c in db.compagnie.find(
+                    {"id": {"$in": comp_ids}},
+                    {"_id": 0, "id": 1, "ragione_sociale": 1})}
+
+    result = []
+    for p in polizze:
+        apps = apps_by_pol.get(p["id"], [])
+        attive = [a for a in apps if not a.get("data_cessazione")]
+        cessate = [a for a in apps if a.get("data_cessazione")]
+        if stato == "attivo" and not attive:
+            continue
+        if stato == "cessato" and not cessate:
+            continue
+        premio_tot = sum(float(a.get("premio_lordo") or 0) for a in apps)
+        result.append({
+            **p,
+            "contraente_nome": cont_map.get(p.get("contraente_id"), "-"),
+            "compagnia_nome": comp_map.get(p.get("compagnia_id"), "-"),
+            "applicazioni": apps,
+            "n_applicazioni_totali": len(apps),
+            "n_applicazioni_attive": len(attive),
+            "n_applicazioni_cessate": len(cessate),
+            "premio_applicazioni_totale": round(premio_tot, 2),
+        })
+    return result
+
+
 @router.get("/libro-matricola")
 async def list_all_libro_matricola(
     q: Optional[str] = None,
