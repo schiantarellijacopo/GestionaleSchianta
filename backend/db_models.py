@@ -1024,11 +1024,21 @@ class Allegato(BaseDoc):
 class DiarioVoce(BaseDoc):
     anagrafica_id: str
     data_evento: str  # YYYY-MM-DD
-    tipo: Literal["telefonata", "incontro", "email", "whatsapp", "chat", "documento", "nota", "altro"] = "nota"
+    tipo: Literal[
+        "telefonata", "incontro", "email", "whatsapp", "chat", "documento", "nota",
+        # Comunicazioni tracciate automaticamente dal sistema:
+        "avviso_scadenza", "sollecito_pagamento", "sinistro_apertura",
+        "email_in", "sms",
+        "altro",
+    ] = "nota"
     titolo: str
     descrizione: Optional[str] = None
     autore_id: Optional[str] = None
     autore_nome: Optional[str] = None
+    # Link a record correlato (usato per "Visualizza" e "Rimanda" nel diario)
+    # Esempi: {"storico_avvisi_id": "...", "canale": "whatsapp", "destinatario": "+39..."}
+    # oppure {"sinistro_id": "...", "numero_sinistro": "..."}
+    payload: dict = Field(default_factory=dict)
 
 
 # =============== CHAT INTERNA ===============
@@ -1499,6 +1509,14 @@ class TemplateModello(BaseDoc):
     corpo: str = ""                                 # text / html / markdown
     sezioni: List[dict] = Field(default_factory=list)  # per PDF multi-sezione (avvisi): [{titolo, contenuto, ordine, attiva}]
     placeholders: List[str] = Field(default_factory=list)  # documentazione (auto-rilevati)
+    # Template per singola riga dell'elenco titoli (placeholder {elenco_titoli}).
+    # Se presente, ogni titolo del cliente viene formattato con questo template.
+    # Placeholder disponibili nel template_riga: {numero_polizza}, {ramo},
+    # {prodotto}, {targa}, {scadenza}, {importo}, {compagnia_nome}.
+    # NB: la placeholder {targa} viene sostituita con stringa vuota se la polizza
+    # non è di ramo veicolo — l'utente può usare condizionali testuali del tipo
+    # "•  {numero_polizza} {targa} — scad. {scadenza} — € {importo}".
+    template_riga: Optional[str] = None
     categoria: Optional[str] = None                 # raggruppamento UI (es. "scadenze", "marketing", "fiscale")
     default: bool = False                           # marcato come modello predefinito per il tipo
     attivo: bool = True

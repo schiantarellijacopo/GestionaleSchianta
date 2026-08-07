@@ -91,8 +91,15 @@ async def log_attivita(utente: dict, azione: str, entita: str,
 
 
 async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
-                             descrizione: str | None = None, autore: dict | None = None) -> None:
-    """Crea automaticamente una voce di diario sull'anagrafica cliente."""
+                             descrizione: str | None = None,
+                             autore: dict | None = None,
+                             payload: dict | None = None) -> None:
+    """Crea automaticamente una voce di diario sull'anagrafica cliente.
+
+    ``payload`` (opzionale) collega la voce a un record esterno (storico avvisi,
+    sinistro, ecc.) così l'UI può offrire "Visualizza contenuto" e "Rimanda"
+    sulla stessa voce senza duplicare i dati.
+    """
     if not anagrafica_id:
         return
     voce = DiarioVoce(
@@ -101,8 +108,57 @@ async def log_diario_cliente(anagrafica_id: str, tipo: str, titolo: str,
         tipo=tipo, titolo=titolo, descrizione=descrizione,
         autore_id=autore.get("id") if autore else None,
         autore_nome=autore.get("name") if autore else "Sistema",
+        payload=payload or {},
     )
     await db.diario.insert_one(voce.model_dump())
+
+
+async def log_storico_e_diario(
+    *, canale: str, contraente_id: Optional[str], contraente_nome: Optional[str],
+    destinatario: str, messaggio: str, oggetto: Optional[str] = None,
+    titoli_ids: Optional[list] = None, tipo_avviso: str = "comunicazione",
+    importo: float = 0.0, esito: str = "inviato",
+    operatore: Optional[dict] = None,
+    diario_tipo: str = "whatsapp", diario_titolo: Optional[str] = None,
+) -> str:
+    """Salva la comunicazione in ``db.storico_avvisi`` E in ``db.diario`` del
+    cliente, con link bidirezionale (il payload del diario contiene ``storico_id``).
+
+    Ritorna l'id del record di storico creato (usabile per "Visualizza/Rimanda").
+    """
+    import uuid
+    storico_id = str(uuid.uuid4())
+    await db.storico_avvisi.insert_one({
+        "id": storico_id, "canale": canale, "contraente_id": contraente_id,
+        "contraente_nome": contraente_nome, "destinatario": destinatario,
+        "target": destinatario, "titoli_ids": titoli_ids or [],
+        "oggetto": oggetto or diario_titolo or "Comunicazione",
+        "soggetto": oggetto or diario_titolo or "Comunicazione",
+        "messaggio": messaggio, "tipo": tipo_avviso, "importo": importo,
+        "esito": esito, "sent_at": _now_iso(),
+        "operatore_id": (operatore or {}).get("id"),
+        "operatore_nome": (operatore or {}).get("name") or (operatore or {}).get("email"),
+    })
+    if contraente_id:
+        # Descrizione breve per la timeline (max ~200 char di anteprima messaggio)
+        preview = (messaggio or "")[:200]
+        if len(messaggio or "") > 200:
+            preview += "…"
+        await log_diario_cliente(
+            anagrafica_id=contraente_id,
+            tipo=diario_tipo,
+            titolo=diario_titolo or f"{canale.upper()}: {oggetto or 'Comunicazione'}",
+            descrizione=preview,
+            autore=operatore,
+            payload={
+                "storico_avvisi_id": storico_id,
+                "canale": canale,
+                "destinatario": destinatario,
+                "esito": esito,
+                "tipo_avviso": tipo_avviso,
+            },
+        )
+    return storico_id
 
 
 # ---------------------------------------------------------------------------

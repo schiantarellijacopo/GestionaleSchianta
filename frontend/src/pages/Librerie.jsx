@@ -3535,6 +3535,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 tipo: f.tipo, nome: f.nome.trim(),
                 oggetto: f.oggetto || null, corpo: f.corpo || "",
                 sezioni: f.sezioni || [],
+                template_riga: f.template_riga || null,
                 categoria: f.categoria || null, default: !!f.default,
                 attivo: f.attivo !== false, note: f.note || null,
             };
@@ -3570,12 +3571,13 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 const r = await api.post("/librerie/modelli/preview", {
                     tipo: f.tipo, oggetto: f.oggetto || "",
                     corpo: f.corpo || "", sezioni: f.sezioni || [],
+                    template_riga: f.template_riga || null,
                 });
                 setPreview(r.data);
             } catch { /* silent — è solo anteprima */ }
         }, 300);
         return () => clearTimeout(t);
-    }, [f.tipo, f.oggetto, f.corpo, f.sezioni]);
+    }, [f.tipo, f.oggetto, f.corpo, f.sezioni, f.template_riga]);
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose(false)}>
@@ -3636,6 +3638,36 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             Usa <code className="bg-slate-100 px-1 rounded">{"{placeholder}"}</code> per dati dinamici (vedi pulsanti sotto).
                         </div>
                     </div>
+
+                    {/* Formato riga elenco titoli: visibile solo se il corpo contiene {elenco_titoli} */}
+                    {(f.corpo || "").includes("{elenco_titoli}") && (
+                        <div className="bg-amber-50 border border-amber-300 rounded-md p-3" data-testid="modello-template-riga">
+                            <Label className="text-xs font-semibold text-amber-900 uppercase tracking-wide flex items-center gap-1.5 mb-1">
+                                📋 Formato riga elenco titoli (opzionale)
+                            </Label>
+                            <div className="text-[11px] text-slate-700 mb-2">
+                                Ogni titolo del cliente verrà formattato con questo template. Placeholder disponibili:
+                                <code className="mx-1 bg-white px-1 rounded">{"{numero_polizza}"}</code>
+                                <code className="mx-1 bg-white px-1 rounded">{"{ramo}"}</code>
+                                <code className="mx-1 bg-white px-1 rounded">{"{prodotto}"}</code>
+                                <code className="mx-1 bg-white px-1 rounded">{"{targa}"}</code>
+                                <code className="mx-1 bg-white px-1 rounded">{"{scadenza}"}</code>
+                                <code className="mx-1 bg-white px-1 rounded">{"{importo}"}</code>
+                            </div>
+                            <Textarea
+                                rows={2}
+                                value={f.template_riga || ""}
+                                onChange={(e) => set("template_riga", e.target.value)}
+                                className="font-mono text-xs bg-white"
+                                placeholder="• Polizza {numero_polizza} ({ramo}) — scad. {scadenza} — € {importo}"
+                                data-testid="modello-template-riga-input"
+                            />
+                            <div className="text-[10px] text-amber-800 mt-1 space-y-0.5">
+                                <div>💡 Se lasci vuoto viene usato il formato di default (con targa in [ ] se la polizza è RCA).</div>
+                                <div>💡 Esempio con targa: <code className="bg-white px-1 rounded">• {"{numero_polizza}"} · {"{prodotto}"} {"{targa}"} — {"{scadenza}"} — € {"{importo}"}</code></div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="bg-slate-50 border border-slate-200 rounded-md p-2">
                         <Label className="text-[11px] uppercase tracking-wider text-slate-500">Inserisci placeholder (clicca per inserire)</Label>

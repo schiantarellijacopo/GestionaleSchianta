@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only testing of DocumentiMancantiWidget bug fixes. All 3 fixes verified working: (1) External dropdown 'Tutti i collaboratori' now populated with 10 options (9 users + 'Tutti'); (2) Dialog contains 'missing-dialog-collab-filter' select with same 10 options; (3) Attach button opens file picker and successfully POSTs to /api/allegati with correct params (entita_tipo=polizza, categoria=polizza) — returned 201 and toast 'Documento caricato — test.pdf' shown.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ListaMancantiDialog", "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent (a11y minor)"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DocumentiMancantiWidget.jsx: `filtered.map(renderRow)` renders all 500 items without virtualization — noted 500 attach buttons in DOM. Consider virtualized list or pagination for performance.",
+    "Add DialogDescription (or aria-describedby) to DialogContent to fix a11y warning."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Widget fixes on /app/frontend/src/components/DocumentiMancantiWidget.jsx confirmed. GET /api/auth/users returns 9 users; POST /api/allegati with query params succeeds (201). Both external and dialog collab filters populated identically. Attach flow works end-to-end (file picker → POST → toast success)."
+}

@@ -381,6 +381,7 @@ class PreviewBody(BaseModel):
     oggetto: Optional[str] = None
     corpo: str = ""
     sezioni: list[dict] = []
+    template_riga: Optional[str] = None
     cliente_id: Optional[str] = None
     polizza_id: Optional[str] = None
     extra: dict = {}
@@ -413,8 +414,28 @@ async def preview_modello(body: PreviewBody, user: dict = Depends(current_user))
     ctx.setdefault("importo_abbuono", "50,00 €")
     ctx.setdefault("numero_titolo", "T-2026-4587")
     ctx.setdefault("targa", "AB123CD")
-    ctx.setdefault("elenco_titoli",
-        "• Polizza POL-2026-000123 (RCA) — scad. 27/07/2026 — € 1.240,50")
+    # Se l'utente ha definito un template_riga custom, lo applichiamo a 3 titoli fittizi
+    if body.template_riga:
+        _rows_data = [
+            {"numero_polizza": "184643240", "ramo": "RC Auto", "prodotto": "Active Auto",
+             "targa": "AB123CD", "scadenza": "27/07/2026", "importo": "1.240,50"},
+            {"numero_polizza": "1001797290", "ramo": "TUTELA_LEGALE", "prodotto": "Tutela Legale",
+             "targa": "", "scadenza": "23/06/2026", "importo": "10,00"},
+            {"numero_polizza": "182260076", "ramo": "RCA", "prodotto": "Active Auto Business",
+             "targa": "CD456EF", "scadenza": "29/07/2026", "importo": "637,50"},
+        ]
+        ctx["elenco_titoli"] = "\n".join(render_text(body.template_riga, r) for r in _rows_data)
+    else:
+        ctx.setdefault("elenco_titoli",
+            "• Polizza 184643240 (RC Auto) [AB123CD] — scad. 27/07/2026 — € 1.240,50\n"
+            "• Polizza 1001797290 (TUTELA_LEGALE) — scad. 23/06/2026 — € 10,00\n"
+            "• Polizza 182260076 (RCA) [CD456EF] — scad. 29/07/2026 — € 637,50")
+    # Placeholder agenzia (letti dalla config)
+    az_cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    ctx.setdefault("azienda_iban", az_cfg.get("iban") or "IT00 X 00000 00000 000000000000")
+    ctx.setdefault("azienda_telefono", az_cfg.get("telefono") or "+39 0342 000000")
+    ctx.setdefault("azienda_email", az_cfg.get("email") or "info@agenzia.it")
+    ctx.setdefault("azienda_indirizzo", az_cfg.get("indirizzo") or "Via Roma 1, 23100 Sondrio")
 
     return {
         "tipo": body.tipo,

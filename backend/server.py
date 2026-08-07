@@ -3951,10 +3951,30 @@ async def create_sinistro(body: dict, user=Depends(require_user("admin", "collab
     await log_attivita(user, "create", "sinistro", obj.id, f"Sinistro {obj.numero_sinistro}")
     # Alert: sinistro aperto
     pol = await db.polizze.find_one({"id": obj.polizza_id}, {"_id": 0, "numero_polizza": 1, "ramo": 1, "contraente_id": 1, "collaboratore_id": 1}) if obj.polizza_id else None
+    # Traccia nel diario cliente (apertura sinistro)
+    contr_id = (pol or {}).get("contraente_id")
+    if contr_id:
+        await log_diario_cliente(
+            anagrafica_id=contr_id,
+            tipo="sinistro_apertura",
+            titolo=f"Sinistro aperto · N. {obj.numero_sinistro or obj.id[:8]}",
+            descrizione=(
+                f"Polizza {(pol or {}).get('numero_polizza') or '-'} ({(pol or {}).get('ramo') or '-'}) · "
+                f"Data avvenimento: {obj.data_avvenimento or '-'}"
+                + (f" · {obj.descrizione[:100]}" if obj.descrizione else "")
+            ),
+            autore=user,
+            payload={
+                "sinistro_id": obj.id,
+                "numero_sinistro": obj.numero_sinistro,
+                "polizza_id": obj.polizza_id,
+                "link": f"/sinistri/{obj.id}",
+            },
+        )
     from alert_dispatcher import safe_dispatch
     await safe_dispatch("sinistro.aperto", {
         "entita_tipo": "sinistro", "entita_id": obj.id,
-        "anagrafica_id": (pol or {}).get("contraente_id"),
+        "anagrafica_id": contr_id,
         "polizza_id": obj.polizza_id,
         "collaboratore_id": (pol or {}).get("collaboratore_id"),
         "numero_sinistro": obj.numero_sinistro,
@@ -8077,11 +8097,34 @@ async def whatsapp_bulk_avvisi_titoli(
             skipped.append({"contraente": nome, "motivo": "canale WhatsApp non abilitato dal cliente"})
             continue
         tot = sum(float(t.get("importo_lordo") or 0) for t in ts)
-        righe = "\n".join(
-            f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
-            f"scad. {_fmt_scad(t.get('scadenza'))} — € {float(t.get('importo_lordo') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            for t in ts[:15]
-        )
+        # Formattazione riga elenco: usa il template_riga del modello se presente,
+        # altrimenti default con targa opzionale (solo se la polizza ha una targa).
+        _riga_tpl = (modello_libreria or {}).get("template_riga") or ""
+        if _riga_tpl:
+            from routes.modelli import render_text as _rt_riga
+            def _fmt_row(t):
+                p = t.get("_pol") or {}
+                imp = float(t.get("importo_lordo") or 0)
+                return _rt_riga(_riga_tpl, {
+                    "numero_polizza": p.get("numero_polizza") or "-",
+                    "ramo": p.get("ramo") or "-",
+                    "prodotto": p.get("prodotto") or p.get("ramo") or "-",
+                    "targa": p.get("targa") or "",
+                    "scadenza": _fmt_scad(t.get("scadenza")),
+                    "importo": f"{imp:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                })
+            righe = "\n".join(_fmt_row(t) for t in ts[:15])
+        else:
+            def _default_row(t):
+                p = t.get("_pol") or {}
+                targa = p.get("targa") or ""
+                targa_part = f" [{targa}]" if targa else ""
+                imp = float(t.get("importo_lordo") or 0)
+                return (f"• Polizza {p.get('numero_polizza') or '-'} "
+                        f"({p.get('ramo') or '-'}){targa_part} — "
+                        f"scad. {_fmt_scad(t.get('scadenza'))} — € "
+                        f"{imp:,.2f}").replace(",", "X").replace(".", ",").replace("X", ".")
+            righe = "\n".join(_default_row(t) for t in ts[:15])
         totale_fmt = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         if modello_libreria:
             # Render con placeholder cliente_nome/totale/numero_titoli + append righe.
@@ -8093,6 +8136,8 @@ async def whatsapp_bulk_avvisi_titoli(
             # {elenco_titoli}: se l'utente lo mette nel modello, viene sostituito
             # con l'elenco delle righe (una per titolo). Altrimenti nulla.
             elenco_txt = righe + ("\n… e altri" if len(ts) > 15 else "")
+            # Dati agenzia (per placeholder {azienda_iban}, {azienda_nome}, ecc.)
+            az_cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
             from routes.modelli import render_text as _rt
             base_msg = _rt(modello_libreria.get("corpo") or "", {
                 "cliente_nome": nome, "cliente": nome,
@@ -8103,6 +8148,12 @@ async def whatsapp_bulk_avvisi_titoli(
                 "targa": first_pol.get("targa") or "",
                 "data_scadenza": first_scad, "scadenza": first_scad,
                 "elenco_titoli": elenco_txt,
+                "azienda_nome": az_cfg.get("ragione_sociale") or "",
+                "azienda_iban": az_cfg.get("iban") or "",
+                "azienda_telefono": az_cfg.get("telefono") or "",
+                "azienda_email": az_cfg.get("email") or "",
+                "azienda_indirizzo": az_cfg.get("indirizzo") or "",
+                "azienda_pec": az_cfg.get("pec") or "",
             })
             # Se il modello ha {elenco_titoli} → è già dentro, non ripetere.
             # Se ha {totale} ma non {elenco_titoli} → il testo è "self-contained" senza righe.
@@ -8118,16 +8169,18 @@ async def whatsapp_bulk_avvisi_titoli(
                    f"\nTotale: {totale_fmt}" +
                    "\nLa invitiamo a contattare l'agenzia. Grazie!")
         r = await send_text_via_evolution(cell, msg)
-        await db.storico_avvisi.insert_one({
-            "id": str(uuid.uuid4()), "canale": "whatsapp", "contraente_id": cid,
-            "contraente_nome": nome, "destinatario": cell, "target": cell,
-            "titoli_ids": [t["id"] for t in ts], "oggetto": "Sollecito titoli scaduti",
-            "soggetto": "Sollecito titoli scaduti", "messaggio": msg,
-            "tipo": "sollecito_titoli", "importo": tot,
-            "esito": "inviato" if r.get("ok") else f"errore: {r.get('error')}",
-            "sent_at": _now_iso(), "operatore_id": user.get("id"),
-            "operatore_nome": user.get("name") or user.get("email"),
-        })
+        from shared import log_storico_e_diario
+        await log_storico_e_diario(
+            canale="whatsapp", contraente_id=cid, contraente_nome=nome,
+            destinatario=cell, messaggio=msg,
+            oggetto="Sollecito titoli scaduti",
+            titoli_ids=[t["id"] for t in ts],
+            tipo_avviso="sollecito_titoli", importo=tot,
+            esito="inviato" if r.get("ok") else f"errore: {r.get('error')}",
+            operatore=user,
+            diario_tipo="sollecito_pagamento",
+            diario_titolo=f"WhatsApp · Sollecito {len(ts)} titolo/i · €{tot:,.2f}",
+        )
         if r.get("ok"):
             inviati += 1
         else:
@@ -8249,11 +8302,27 @@ async def invia_bulk_auto(
         # data_scadenza: quella del primo titolo (formato DD/MM/YYYY)
         first_scad = _fmt_scad_giorno((ts[0] or {}).get("scadenza")) if ts else ""
         righe_txt = "\n".join(
-            f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'}) — "
+            f"• Polizza {t['_pol'].get('numero_polizza') or '-'} ({t['_pol'].get('ramo') or '-'})"
+            f"{' [' + t['_pol'].get('targa') + ']' if t['_pol'].get('targa') else ''} — "
             f"scad. {_fmt_scad_giorno(t.get('scadenza'))} — € {float(t.get('importo_lordo') or 0):,.2f}"
             .replace(",", "X").replace(".", ",").replace("X", ".")
             for t in ts[:15]
         )
+        # Se il modello WA ha template_riga, usalo per ogni riga
+        _riga_tpl_auto = (mod_wa or {}).get("template_riga") or ""
+        if _riga_tpl_auto:
+            def _fmt_row_auto(t):
+                p = t.get("_pol") or {}
+                imp = float(t.get("importo_lordo") or 0)
+                return _rt(_riga_tpl_auto, {
+                    "numero_polizza": p.get("numero_polizza") or "-",
+                    "ramo": p.get("ramo") or "-",
+                    "prodotto": p.get("prodotto") or p.get("ramo") or "-",
+                    "targa": p.get("targa") or "",
+                    "scadenza": _fmt_scad_giorno(t.get("scadenza")),
+                    "importo": f"{imp:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                })
+            righe_txt = "\n".join(_fmt_row_auto(t) for t in ts[:15])
         elenco_txt = righe_txt + ("\n… e altri" if len(ts) > 15 else "")
         ctx = {"cliente_nome": nome, "cliente": nome,
                "totale": totale_fmt, "numero_titoli": str(len(ts)),
@@ -8262,7 +8331,13 @@ async def invia_bulk_auto(
                "ramo": first_pol.get("ramo") or "",
                "targa": first_pol.get("targa") or "",
                "data_scadenza": first_scad, "scadenza": first_scad,
-               "elenco_titoli": elenco_txt}
+               "elenco_titoli": elenco_txt,
+               "azienda_nome": az.get("ragione_sociale") or "",
+               "azienda_iban": az.get("iban") or "",
+               "azienda_telefono": az.get("telefono") or "",
+               "azienda_email": az.get("email") or "",
+               "azienda_indirizzo": az.get("indirizzo") or "",
+               "azienda_pec": az.get("pec") or ""}
 
         # Scelta canale: primo della priorità che è abilitato E ha il recapito
         cell = (a.get("cellulare") or a.get("telefono") or "").strip()
@@ -8305,15 +8380,17 @@ async def invia_bulk_auto(
                     msg = base
                 r = await send_text_via_evolution(cell, msg)
                 esito_ok = r.get("ok", False)
-                await db.storico_avvisi.insert_one({
-                    "id": str(uuid.uuid4()), "canale": "whatsapp", "contraente_id": cid,
-                    "contraente_nome": nome, "destinatario": cell, "target": cell,
-                    "titoli_ids": [t["id"] for t in ts], "oggetto": "Sollecito titoli scaduti",
-                    "messaggio": msg, "tipo": "sollecito_titoli", "importo": tot,
-                    "esito": "inviato" if esito_ok else f"errore: {r.get('error')}",
-                    "sent_at": _now_iso(), "operatore_id": user.get("id"),
-                    "operatore_nome": user.get("name") or user.get("email"),
-                })
+                from shared import log_storico_e_diario
+                await log_storico_e_diario(
+                    canale="whatsapp", contraente_id=cid, contraente_nome=nome,
+                    destinatario=cell, messaggio=msg, oggetto="Sollecito titoli scaduti",
+                    titoli_ids=[t["id"] for t in ts],
+                    tipo_avviso="sollecito_titoli", importo=tot,
+                    esito="inviato" if esito_ok else f"errore: {r.get('error')}",
+                    operatore=user,
+                    diario_tipo="sollecito_pagamento",
+                    diario_titolo=f"WhatsApp · Sollecito {len(ts)} titolo/i · €{tot:,.2f}",
+                )
             elif canale_scelto == "email":
                 from avvisi_scadenze import _invia_email as _send_mail
                 corpo_lettera = _rt((mod_email or {}).get("corpo") or _CORPO_LETTERA_DEFAULT, ctx)
@@ -8323,30 +8400,32 @@ async def invia_bulk_auto(
                 )
                 _send_mail(az, email_addr, soggetto, text, html)
                 esito_ok = True
-                await db.storico_avvisi.insert_one({
-                    "id": str(uuid.uuid4()), "canale": "email", "contraente_id": cid,
-                    "contraente_nome": nome, "destinatario": email_addr, "target": email_addr,
-                    "titoli_ids": [t["id"] for t in ts], "oggetto": soggetto, "soggetto": soggetto,
-                    "messaggio": text, "tipo": "sollecito_titoli", "importo": tot,
-                    "esito": "inviato", "sent_at": _now_iso(),
-                    "operatore_id": user.get("id"),
-                    "operatore_nome": user.get("name") or user.get("email"),
-                })
+                from shared import log_storico_e_diario
+                await log_storico_e_diario(
+                    canale="email", contraente_id=cid, contraente_nome=nome,
+                    destinatario=email_addr, messaggio=text, oggetto=soggetto,
+                    titoli_ids=[t["id"] for t in ts],
+                    tipo_avviso="sollecito_titoli", importo=tot,
+                    esito="inviato", operatore=user,
+                    diario_tipo="avviso_scadenza",
+                    diario_titolo=f"Email · {soggetto}",
+                )
             elif canale_scelto == "sms":
                 # Se non c'è integrazione SMS configurata, marca come sospeso
                 base = _rt((mod_sms or {}).get("corpo") or
                            "Ciao {cliente_nome}, hai {numero_titoli} titolo/i in scadenza per {totale}. Contatta l'agenzia.", ctx)
                 msg = base[:459]  # limite SMS
                 # TODO: integrazione SMS reale (Twilio/Skebby). Per ora simula insert storico
-                await db.storico_avvisi.insert_one({
-                    "id": str(uuid.uuid4()), "canale": "sms", "contraente_id": cid,
-                    "contraente_nome": nome, "destinatario": cell, "target": cell,
-                    "titoli_ids": [t["id"] for t in ts], "oggetto": "SMS avviso scadenza",
-                    "messaggio": msg, "tipo": "sollecito_titoli", "importo": tot,
-                    "esito": "in_coda_sms", "sent_at": _now_iso(),
-                    "operatore_id": user.get("id"),
-                    "operatore_nome": user.get("name") or user.get("email"),
-                })
+                from shared import log_storico_e_diario
+                await log_storico_e_diario(
+                    canale="sms", contraente_id=cid, contraente_nome=nome,
+                    destinatario=cell, messaggio=msg, oggetto="SMS avviso scadenza",
+                    titoli_ids=[t["id"] for t in ts],
+                    tipo_avviso="sollecito_titoli", importo=tot,
+                    esito="in_coda_sms", operatore=user,
+                    diario_tipo="sms",
+                    diario_titolo=f"SMS · Avviso {len(ts)} titolo/i",
+                )
                 esito_ok = True
 
             if esito_ok:
@@ -9729,6 +9808,114 @@ async def update_diario(did: str, body: dict, user=Depends(require_user("admin",
 async def delete_diario(did: str, user=Depends(require_user("admin", "collaboratore"))):
     await db.diario.delete_one({"id": did})
     return {"ok": True}
+
+
+@api.get("/diario/{did}/messaggio")
+async def get_diario_messaggio(did: str, user=Depends(current_user)):
+    """Recupera il contenuto originale della comunicazione collegata a una voce
+    di diario (usa payload.storico_avvisi_id per fare il fetch da ``storico_avvisi``).
+
+    Ritorna ``{ok, canale, oggetto, messaggio, destinatario, esito, sent_at,
+    rimandabile: bool}``. Se la voce non è una comunicazione (es. nota manuale
+    del collaboratore) ritorna ``{ok: True, rimandabile: False, ...}``.
+    """
+    voce = await db.diario.find_one({"id": did}, {"_id": 0})
+    if not voce:
+        raise HTTPException(404, "Voce diario non trovata")
+    payload = voce.get("payload") or {}
+    storico_id = payload.get("storico_avvisi_id")
+    if not storico_id:
+        # Voce del diario che non è una comunicazione (nota, incontro, ecc.)
+        return {
+            "ok": True, "rimandabile": False,
+            "voce": {k: voce.get(k) for k in ("titolo", "descrizione", "data_evento",
+                                              "tipo", "autore_nome")},
+        }
+    st = await db.storico_avvisi.find_one({"id": storico_id}, {"_id": 0})
+    if not st:
+        return {"ok": True, "rimandabile": False, "voce": voce}
+    return {
+        "ok": True,
+        "rimandabile": st.get("canale") in ("whatsapp", "email"),
+        "canale": st.get("canale"),
+        "oggetto": st.get("oggetto") or st.get("soggetto"),
+        "messaggio": st.get("messaggio"),
+        "destinatario": st.get("destinatario") or st.get("target"),
+        "esito": st.get("esito"),
+        "sent_at": st.get("sent_at"),
+        "titoli_ids": st.get("titoli_ids") or [],
+        "voce": {k: voce.get(k) for k in ("id", "titolo", "descrizione",
+                                          "data_evento", "tipo", "autore_nome")},
+    }
+
+
+@api.post("/diario/{did}/rimanda")
+async def rimanda_diario_messaggio(
+    did: str, body: dict | None = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Reinvia la comunicazione originale collegata a una voce del diario.
+
+    body opzionale: ``{destinatario_override, messaggio_override}`` — se
+    presenti sovrascrivono i valori originali (utile per correggere un numero
+    sbagliato o aggiornare il testo prima del reinvio).
+
+    Ritorna ``{ok, new_storico_id, esito}``. Crea automaticamente una NUOVA
+    voce di diario etichettata come reinvio (per non perdere lo storico).
+    """
+    body = body or {}
+    voce = await db.diario.find_one({"id": did}, {"_id": 0})
+    if not voce:
+        raise HTTPException(404, "Voce diario non trovata")
+    storico_id = (voce.get("payload") or {}).get("storico_avvisi_id")
+    if not storico_id:
+        raise HTTPException(400, "Questa voce non è collegata a una comunicazione rimandabile")
+    st = await db.storico_avvisi.find_one({"id": storico_id}, {"_id": 0})
+    if not st:
+        raise HTTPException(404, "Comunicazione originale non trovata (potrebbe essere stata cancellata)")
+    canale = st.get("canale")
+    dest = body.get("destinatario_override") or st.get("destinatario") or st.get("target")
+    msg = body.get("messaggio_override") or st.get("messaggio") or ""
+    oggetto = st.get("oggetto") or st.get("soggetto") or "Comunicazione"
+    if not dest:
+        raise HTTPException(400, "Destinatario mancante nella comunicazione originale")
+    esito = "inviato"
+    try:
+        if canale == "whatsapp":
+            from routes.whatsapp_evo import send_text_via_evolution
+            r = await send_text_via_evolution(dest, msg)
+            if not r.get("ok"):
+                esito = f"errore: {r.get('error')}"
+        elif canale == "email":
+            az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+            if not az.get("smtp_host"):
+                raise HTTPException(503, "SMTP non configurato in Librerie/Azienda")
+            from avvisi_scadenze import _invia_email as _send_mail
+            _send_mail(az, dest, oggetto, msg, msg.replace("\n", "<br/>"))
+        elif canale == "sms":
+            # SMS: TODO integrazione reale, per ora coda
+            esito = "in_coda_sms"
+        else:
+            raise HTTPException(400, f"Canale '{canale}' non rimandabile automaticamente")
+    except HTTPException:
+        raise
+    except Exception as e:
+        esito = f"errore: {e}"
+
+    from shared import log_storico_e_diario
+    new_id = await log_storico_e_diario(
+        canale=canale, contraente_id=st.get("contraente_id"),
+        contraente_nome=st.get("contraente_nome"),
+        destinatario=dest, messaggio=msg, oggetto=f"[REINVIO] {oggetto}",
+        titoli_ids=st.get("titoli_ids"),
+        tipo_avviso=st.get("tipo") or "rimando",
+        importo=float(st.get("importo") or 0),
+        esito=esito, operatore=user,
+        diario_tipo=voce.get("tipo") or "nota",
+        diario_titolo=f"↻ Reinvio {canale.upper()} · {oggetto}",
+    )
+    await log_attivita(user, "rimanda", "diario", did, f"canale={canale} esito={esito}")
+    return {"ok": esito == "inviato", "new_storico_id": new_id, "esito": esito}
 
 
 # ============================================================

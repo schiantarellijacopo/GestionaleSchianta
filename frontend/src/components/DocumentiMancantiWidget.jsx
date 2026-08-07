@@ -29,7 +29,7 @@ export default function DocumentiMancantiWidget() {
     };
 
     useEffect(() => {
-        api.get("/utenti").then((r) => setCollaboratori(
+        api.get("/auth/users").then((r) => setCollaboratori(
             (r.data || []).filter((u) => ["admin", "collaboratore", "dipendente"].includes(u.role))
         )).catch(() => setCollaboratori([]));
         api.get("/insights/documenti-mancanti/note").then((r) => {
@@ -76,6 +76,8 @@ export default function DocumentiMancantiWidget() {
                     tipo={open} data={data} collNome={collNome}
                     note={note} setNote={setNote} onReload={reload}
                     onClose={() => setOpen(null)}
+                    collabId={collabId} setCollabId={setCollabId}
+                    collaboratori={collaboratori}
                 />
             )}
         </Card>
@@ -192,7 +194,8 @@ function ItemRow({ id, tipo, primary, secondary, badge, icon: Icon, colorClass, 
 }
 
 
-function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, onClose }) {
+function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, onClose,
+                              collabId, setCollabId, collaboratori }) {
     const [q, setQ] = useState("");
     const [uploadingId, setUploadingId] = useState(null);
 
@@ -328,9 +331,23 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
                         <button onClick={onClose}><X size={16} /></button>
                     </DialogTitle>
                 </DialogHeader>
-                <div className="flex items-center gap-2 print:hidden">
+                <div className="flex items-center gap-2 print:hidden flex-wrap">
                     <Input value={q} onChange={(e) => setQ(e.target.value)}
-                        placeholder="Cerca…" className="flex-1" data-testid="missing-search" />
+                        placeholder="Cerca…" className="flex-1 min-w-[180px]" data-testid="missing-search" />
+                    {collaboratori && setCollabId && (
+                        <select
+                            value={collabId || ""}
+                            onChange={(e) => { setCollabId(e.target.value); }}
+                            className="text-xs border border-slate-300 rounded px-2 py-1.5 bg-white h-9"
+                            data-testid="missing-dialog-collab-filter"
+                            title="Filtra per collaboratore"
+                        >
+                            <option value="">Tutti i collaboratori</option>
+                            {(collaboratori || []).map((c) => (
+                                <option key={c.id} value={c.id}>{c.name || c.email}</option>
+                            ))}
+                        </select>
+                    )}
                     <Button size="sm" variant="outline" onClick={stampa} data-testid="missing-print">
                         <Printer size={13} className="mr-1" /> Stampa
                     </Button>
