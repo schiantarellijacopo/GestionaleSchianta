@@ -508,6 +508,19 @@ class Titolo(BaseDoc):
     pagamento_in_direzione: bool = False   # premio pagato direttamente in compagnia (no cassa)
     fonte: Literal["manuale", "import_ania"] = "manuale"
 
+    # === Estensioni Modulo "Carichi Mensili / Quietanzamento" ===
+    # Stato del carico: workflow separato dallo stato di incasso.
+    #   - "validato" (default): titolo attivo, visibile nello scadenziario ufficiale
+    #   - "in_attesa": titolo importato ma da vagliare (visibile solo in Carichi Mensili)
+    #   - "annullato_carico": titolo scartato dall'operatore in fase di vaglio
+    stato_carico: Literal["validato", "in_attesa", "annullato_carico"] = "validato"
+    caricato_da_import: bool = False
+    import_batch_id: Optional[str] = None  # id del batch di import (raggruppa i titoli caricati insieme)
+    import_source: Optional[str] = None    # es. "allianz_202608.xlsx" o "manuale_replica"
+    note_carico: Optional[str] = None      # note libere del vaglio
+    motivo_mancanza: Optional[str] = None  # se annullato: "Disdettata", "Mezzo Venduto", "Voltura", "Sostituita", ecc.
+    premio_precedente: Optional[float] = None  # snapshot del premio del titolo precedente stessa polizza (per confronto)
+
 
 # =============== SINISTRI ===============
 SinistroStato = Literal["aperto", "in_istruttoria", "liquidato", "chiuso_senza_seguito", "respinto"]

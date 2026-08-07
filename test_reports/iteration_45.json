@@ -1,0 +1,22 @@
+{
+  "summary": "Iterazione 45 verificata: (1) modulo NUOVO Carichi Mensili/Quietanzamento pienamente funzionante — page-carichi-mensili renderizza, filtri stato+range OK, dialog replica OK, column toggle persiste in localStorage 'carichi_mensili.visible_cols.v1'. (2) FIX placeholder insertion nel corpo modello WhatsApp: {elenco_titoli} e {targa} vengono inseriti al punto del cursore (testato con cursore in posizione 5 → 'Ciao {elenco_titoli}mondo test' e posizione 1 → 'A{targa}B'). (3) Pannello placeholder in evidenza (verde smeraldo + viola) presente con testid ph-featured-elenco_titoli/ph-featured-targa. (4) Backend endpoints: GET /api/carichi-mensili ritorna righe arricchite con tutti i campi richiesti (cliente_nome, compagnia_nome, polizza_targa, sinistri_ultimi_12m, operatore_nome, bloccato, motivo_blocco). POST /valida, /annulla, /replica-manuale funzionanti con validazioni corrette (400 payload vuoto, 404 polizza inesistente).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_45.py",
+    "/app/test_reports/pytest/iter45_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Librerie.jsx è ora ~4230 righe (>>700 threshold): il refactor in moduli separati (SezioneAzienda, WhatsAppSection, GestioniModelli, ModelloEditor) è sempre più urgente per manutenibilità.",
+    "carichi_mensili.py: _is_titolo_bloccato considera bloccato solo titoli in stato 'incassato/coperto/stornato'. Se un titolo è ancora 'da_incassare' ma la Prima Nota del giorno di scadenza è già chiusa, la cancellazione è comunque permessa. Verificare se questo è il comportamento voluto (probabilmente sì, dato che non è ancora consolidato in cassa)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_45.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna persistente. Durante i test valida/annulla vengono creati titoli via replica-manuale e poi ripuliti (delete). Test fixture sample_polizza usa la prima riga di GET /carichi-mensili?stato_carico=tutti.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "13/13 pytest passano. UI verificata su viewport 1920x1080: (a) navigazione /carichi-mensili OK con voce sidebar 'Carichi Mensili' + icona PackageCheck; (b) tutti i data-testid presenti: page-carichi-mensili, filter-range-*, filter-stato-*, btn-columns, btn-replica, dialog-replica, dialog-annulla, col-toggle-*, check-*; (c) btn-valida/btn-annulla appaiono SOLO se selected.size>0 (bulk bar) — comportamento corretto; (d) localStorage key 'carichi_mensili.visible_cols.v1' persiste array delle colonne visibili; (e) placeholder insertion nel textarea corpoRef del dialog WA modello inserisce {elenco_titoli}/{targa} al cursore (verificato con selectionStart=5 e 1). Nessun errore console rilevante (solo 401 pre-login ignorabili).",
+  "rca of the issue": "N/A"
+}

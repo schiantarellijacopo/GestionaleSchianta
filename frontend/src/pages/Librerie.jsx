@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -3523,8 +3523,30 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
 
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    // Ref al textarea corpo per inserimento placeholder nel punto del cursore
+    const corpoRef = useRef(null);
+
     const insertPlaceholder = (ph) => {
-        set("corpo", (f.corpo || "") + `{${ph}}`);
+        const token = `{${ph}}`;
+        const ta = corpoRef.current;
+        if (ta && typeof ta.selectionStart === "number") {
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd ?? start;
+            const cur = f.corpo || "";
+            const next = cur.slice(0, start) + token + cur.slice(end);
+            set("corpo", next);
+            // Sposta il cursore dopo il placeholder inserito (frame successivo)
+            setTimeout(() => {
+                if (corpoRef.current) {
+                    const pos = start + token.length;
+                    corpoRef.current.focus();
+                    corpoRef.current.setSelectionRange(pos, pos);
+                }
+            }, 0);
+        } else {
+            // fallback: appende in coda se non abbiamo la ref
+            set("corpo", (f.corpo || "") + token);
+        }
     };
 
     const save = async () => {
@@ -3628,6 +3650,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                     <div>
                         <Label>Corpo del messaggio</Label>
                         <Textarea
+                            ref={corpoRef}
                             value={f.corpo || ""} onChange={(e) => set("corpo", e.target.value)}
                             rows={isPdf ? 8 : 6}
                             className="font-mono text-xs"
@@ -3635,7 +3658,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             data-testid="modello-corpo"
                         />
                         <div className="text-[10px] text-slate-500 mt-1">
-                            Usa <code className="bg-slate-100 px-1 rounded">{"{placeholder}"}</code> per dati dinamici (vedi pulsanti sotto).
+                            Usa <code className="bg-slate-100 px-1 rounded">{"{placeholder}"}</code> per dati dinamici — <strong>posiziona il cursore</strong> dove vuoi inserire, poi clicca il placeholder qui sotto.
                         </div>
                     </div>
 
@@ -3671,6 +3694,37 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
 
                     <div className="bg-slate-50 border border-slate-200 rounded-md p-2">
                         <Label className="text-[11px] uppercase tracking-wider text-slate-500">Inserisci placeholder (clicca per inserire)</Label>
+
+                        {/* Placeholder in evidenza per messaggi multi-titolo */}
+                        <div className="mt-2 bg-gradient-to-r from-emerald-50 to-violet-50 border-2 border-emerald-300 rounded p-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 mb-1.5">
+                                📋 Elenco polizze (in evidenza)
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => insertPlaceholder("elenco_titoli")}
+                                    className="text-left px-2 py-1.5 rounded border border-emerald-400 bg-white hover:bg-emerald-100 hover:border-emerald-600 shadow-sm"
+                                    data-testid="ph-featured-elenco_titoli"
+                                >
+                                    <div className="font-mono text-[11px] font-bold text-emerald-900">{"{elenco_titoli}"}</div>
+                                    <div className="text-[10px] text-slate-600 mt-0.5">Inserisce l&apos;elenco di TUTTE le polizze del cliente (con targa se presente)</div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => insertPlaceholder("targa")}
+                                    className="text-left px-2 py-1.5 rounded border border-violet-400 bg-white hover:bg-violet-100 hover:border-violet-600 shadow-sm"
+                                    data-testid="ph-featured-targa"
+                                >
+                                    <div className="font-mono text-[11px] font-bold text-violet-900">{"{targa}"}</div>
+                                    <div className="text-[10px] text-slate-600 mt-0.5">Targa della prima polizza (vuoto se non RCA)</div>
+                                </button>
+                            </div>
+                            <div className="text-[10px] text-emerald-800 mt-2">
+                                💡 Posiziona il cursore nel corpo dove vuoi l&apos;elenco, poi clicca <code className="bg-white px-1 rounded">{"{elenco_titoli}"}</code>. Il formato di ogni riga si personalizza nel pannello arancione qui sopra.
+                            </div>
+                        </div>
+
                         <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
                             {Object.entries(
                                 PLACEHOLDERS_DOC.reduce((acc, p) => {

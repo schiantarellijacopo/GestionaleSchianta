@@ -42,6 +42,7 @@ import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
 import TitoliSospesi from "@/pages/TitoliSospesi";
 import Marketing from "@/pages/Marketing";
 import Avvisi from "@/pages/Avvisi";
+import CarichiMensili from "@/pages/CarichiMensili";
 import RubricaCompagnie from "@/pages/RubricaCompagnie";
 import Rappel from "@/pages/Rappel";
 import Agenzie from "@/pages/Agenzie";
@@ -136,6 +137,14 @@ function App() {
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
                                         <Avvisi />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/carichi-mensili"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <CarichiMensili />
                                     </ProtectedRoute>
                                 }
                             />
