@@ -91,9 +91,10 @@ def test_allegati_have_required_fields(ocr_allegati_snapshot):
         assert a["fonte"] == "cloud_ocr_scan"
         # visibile_cliente coherence (allineato al banner UI PolizzaDetail/AnagraficaDetail)
         VISIBILI = ("carta_identita", "patente", "passaporto", "codice_fiscale", "privacy",
+                    "tessera_sanitaria", "visura_camerale", "rid",
                     "polizza", "condizioni", "quietanza", "libretto_pagamento",
                     "libretto_circolazione", "atto_vendita")
-        INTERNI = ("bonifico", "rid", "visura_camerale", "estratto_conto",
+        INTERNI = ("bonifico", "estratto_conto",
                    "denuncia", "altro", "preventivo", "appunti")
         if a["categoria"] in VISIBILI:
             assert a["visibile_cliente"] is True, f"{a['id']} ({a['categoria']}) dovrebbe essere visibile al cliente"
