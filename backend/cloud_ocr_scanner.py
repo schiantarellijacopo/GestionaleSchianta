@@ -71,6 +71,10 @@ INBOX_SUBFOLDERS_MAP = {
     "atto vendita":         "atto_vendita",
     "quietanze":            "quietanza",
     "quietanza":            "quietanza",
+    # ── Libro Matricola (certificati assicurativi per veicoli) ────────
+    "libro matricola applicazioni": "polizza_frontespizio",
+    "libro matricola":              "polizza_frontespizio",
+    "certificati assicurativi":     "polizza_frontespizio",
     # ── Sinistri / Contabilità ────────────────────────────────────────
     "denunce sinistro":     "denuncia_sinistro",
     "denunce":              "denuncia_sinistro",
@@ -89,6 +93,7 @@ INBOX_SUBFOLDERS_TO_CREATE = [
     "Visura Camerale", "Mandato SDD", "Privacy",
     "Polizze", "Condizioni", "Quietanze",
     "Libretti", "Atto di Vendita",
+    "Libro Matricola Applicazioni",
     "Denunce Sinistro", "Estratti Conto", "Bonifici",
 ]
 
