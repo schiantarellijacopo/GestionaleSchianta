@@ -41,7 +41,7 @@ CLASSIFY_PROMPT = """Sei un classificatore esperto di documenti per un CRM assic
 Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido con questa struttura:
 
 {
-  "tipo_documento": "carta_identita | patente | passaporto | codice_fiscale | privacy | polizza_frontespizio | quietanza | denuncia_sinistro | estratto_conto_compagnia | bonifico | rid | altro",
+  "tipo_documento": "carta_identita | patente | passaporto | codice_fiscale | privacy | polizza_frontespizio | quietanza | denuncia_sinistro | estratto_conto_compagnia | bonifico | rid | libretto_circolazione | visura_camerale | altro",
   "confidenza": "alta | media | bassa",
   "dati_estratti": {
     "codice_fiscale": "16 caratteri uppercase o null",
@@ -116,6 +116,18 @@ Solo se il documento è CHIARAMENTE una polizza assicurativa:
 ★ MODULO PRIVACY (tipo_documento="privacy"):
   - "INFORMATIVA PRIVACY" / "TRATTAMENTO DATI PERSONALI" / "GDPR"
   - Firma richiesta
+
+★ LIBRETTO DI CIRCOLAZIONE (tipo_documento="libretto_circolazione"):
+  - "CARTA DI CIRCOLAZIONE" / "LIBRETTO"
+  - Ministero delle Infrastrutture / Motorizzazione
+  - Dati veicolo: targa, telaio, marca, modello, potenza, cilindrata
+  - Dati intestatario
+
+★ VISURA CAMERALE (tipo_documento="visura_camerale"):
+  - "CAMERA DI COMMERCIO" / "VISURA" / "REGISTRO IMPRESE"
+  - Denominazione azienda, P.IVA, codice REA
+  - Data iscrizione, sede legale, capitale sociale
+  - Elenco soci/amministratori
 
 ===================================================================
 REGOLE DI ESTRAZIONE DATI:
@@ -241,6 +253,10 @@ async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -
         hint = "\n\n💡 HINT: il nome file suggerisce MODULO PRIVACY."
     elif any(k in fname_lower for k in ["cf_", "codice_fisc", "tesserino"]):
         hint = "\n\n💡 HINT: il nome file suggerisce TESSERINO CODICE FISCALE."
+    elif any(k in fname_lower for k in ["libretto", "carta_circ", "circolazione"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce LIBRETTO DI CIRCOLAZIONE."
+    elif any(k in fname_lower for k in ["visura", "camera_comm", "camerale", "cciaa"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce VISURA CAMERALE."
 
     prompt_final = CLASSIFY_PROMPT + hint + f"\n\nNome file per contesto: '{filename}'"
 
@@ -428,6 +444,8 @@ def _route_document(classification: dict, ana: Optional[dict],
         "passaporto": ("contraente_identita", "cliente"),
         "codice_fiscale": ("contraente_codice_fiscale", "cliente"),
         "privacy": ("contraente_privacy", "cliente"),
+        "visura_camerale": ("contraente_altri", "cliente"),
+        "libretto_circolazione": ("polizza_documenti", "polizza"),
         "polizza_frontespizio": ("polizza_documenti", "polizza"),
         "quietanza": ("quietanze_anno", "anno"),
         "denuncia_sinistro": ("sinistro_specifico", "sinistro"),
@@ -680,6 +698,18 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     }
     await db.cloud_documents.insert_one(doc_record)
 
+    # ★ Se abbinato → crea ANCHE l'allegato nel CRM così il file compare in
+    # Anagrafiche → tab Documenti (categoria carta_identita/patente/ecc.)
+    if category != "da_smistare" and ana:
+        try:
+            await _create_crm_attachment(
+                db, tenant_id, name, file_bytes, mime,
+                classification, ana, pol, sin,
+            )
+        except Exception as e:
+            logger.warning("Creazione allegato CRM fallita per %s: %s", name, e)
+
+
     # Se NON abbinato → porta il file anche nella pagina Documenti Inbox del CRM
     # in modo che l'utente lo trovi ed possa smistarlo manualmente decidendo il target.
     inbox_id: Optional[str] = None
@@ -747,6 +777,88 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         "matched_sinistro": (sin or {}).get("numero_sinistro"),
         "inbox_id": inbox_id,   # se presente, l'utente lo troverà in Documenti Inbox
     }
+
+
+async def _create_crm_attachment(
+    db, tenant_id: str, filename: str, file_bytes: bytes, mime: str,
+    classification: dict, ana: Optional[dict], pol: Optional[dict],
+    sin: Optional[dict],
+) -> None:
+    """Crea record `allegati` nel CRM collegato all'entità corretta così il file
+    appare nella tab Documenti dell'anagrafica/polizza/sinistro.
+    """
+    import uuid, os as _os
+    import storage as obj_storage
+
+    tipo_doc = (classification.get("tipo_documento") or "altro").lower()
+    CAT_MAP = {
+        "carta_identita": ("anagrafica", "carta_identita"),
+        "patente": ("anagrafica", "patente"),
+        "passaporto": ("anagrafica", "passaporto"),
+        "codice_fiscale": ("anagrafica", "codice_fiscale"),
+        "privacy": ("anagrafica", "privacy"),
+        "visura_camerale": ("anagrafica", "visura_camerale"),
+        "libretto_circolazione": ("polizza", "libretto_circolazione"),
+        "polizza_frontespizio": ("polizza", "polizza"),
+        "quietanza": ("polizza", "quietanza"),
+        "denuncia_sinistro": ("sinistro", "denuncia"),
+        "estratto_conto_compagnia": ("compagnia", "estratto_conto"),
+        "bonifico": ("anagrafica", "bonifico"),
+        "rid": ("anagrafica", "rid"),
+    }
+    entita_tipo, categoria = CAT_MAP.get(tipo_doc, ("anagrafica", "altro"))
+    entita_id = None
+    if entita_tipo == "anagrafica" and ana:
+        entita_id = ana["id"]
+    elif entita_tipo == "polizza" and pol:
+        entita_id = pol["id"]
+    elif entita_tipo == "sinistro" and sin:
+        entita_id = sin["id"]
+    if not entita_id and ana:
+        entita_id = ana["id"]
+        entita_tipo = "anagrafica"
+    if not entita_id:
+        return
+
+    allegato_id = str(uuid.uuid4())
+    # Deduplica: se esiste già lo stesso allegato (entità + nome + fonte), skip
+    existing = await db.allegati.find_one({
+        "entita_tipo": entita_tipo,
+        "entita_id": entita_id,
+        "nome_file": filename,
+        "fonte": "cloud_ocr_scan",
+        "is_deleted": {"$ne": True},
+    }, {"_id": 0, "id": 1})
+    if existing:
+        logger.info("Allegato già presente, skip duplicato: %s", filename)
+        return
+    ext = (filename or "doc").rsplit(".", 1)[-1].lower() or "bin"
+    storage_path = f"{_os.environ.get('APP_NAME', 'assicura')}/allegati/{allegato_id}.{ext}"
+    try:
+        obj_storage.put_object(storage_path, file_bytes, mime)
+    except Exception as e:
+        logger.warning("put_object per allegato %s fallito: %s", allegato_id, e)
+        return
+
+    allegato = {
+        "id": allegato_id,
+        "tenant_id": tenant_id if tenant_id != "default" else None,
+        "entita_tipo": entita_tipo,
+        "entita_id": entita_id,
+        "categoria": categoria,
+        "nome_file": filename,
+        "content_type": mime,
+        "size": len(file_bytes),
+        "storage_path": storage_path,
+        "descrizione": f"Importato automaticamente da Google Drive OCR ({tipo_doc})",
+        "fonte": "cloud_ocr_scan",
+        "visibile_al_cliente": categoria in ("carta_identita", "patente", "passaporto",
+                                              "codice_fiscale", "privacy"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "is_deleted": False,
+    }
+    await db.allegati.insert_one(allegato)
 
 
 async def _push_to_manual_inbox(

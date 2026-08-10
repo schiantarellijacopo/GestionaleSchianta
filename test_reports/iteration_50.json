@@ -1,0 +1,29 @@
+{
+  "summary": "Verified bug fix for OCR scanner CRM attachment creation. All 8 backend tests PASS. DB has 5 allegati with fonte='cloud_ocr_scan' (1 carta_identita on anagrafica, 4 polizza on polizza). API /api/allegati?entita_tipo=...&entita_id=... correctly returns each OCR-generated attachment with correct entita_tipo, categoria, visibile_al_cliente flags. CAT_MAP in cloud_ocr_scanner.py covers all 13 document types with correct entita_tipo/categoria mapping. Bug is FIXED: files ora compaiono nella tab Documenti dell'anagrafica/polizza.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/librerie/cloud-storage/archivio", "issue": "Ritorna 0 items per admin@assicura.it (tenant_id=null) mentre i doc reali sono nel tenant 'tenant-principale-schiantarelli'. L'archivio è tenant-scoped: probabilmente atteso, ma un super-admin non riesce a vedere l'archivio cross-tenant. Da verificare se comportamento intenzionale."},
+      {"endpoint": "collection allegati (polizza duplicati)", "issue": "Sono presenti 4 allegati identici (stessa polizza ee4470e9, stesso nome_file 'POLIZZA FIRMATA - 184643360.pdf'). Lo scanner probabilmente non deduplica quando incontra lo stesso file più volte in INBOX o su ri-esecuzioni. Considerare unique index su (entita_tipo, entita_id, nome_file, fonte) oppure controllo pre-insert."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter50_cloud_ocr_allegati.py", "/app/test_reports/pytest/iter50_results.xml"],
+  "action_items": [
+    "Considerare deduplica in _create_crm_attachment (evitare 4 record identici della stessa polizza)",
+    "Verificare se /api/librerie/cloud-storage/archivio dovrebbe essere accessibile ai super-admin cross-tenant"
+  ],
+  "critical_code_review_comments": [
+    "cloud_ocr_scanner.py _create_crm_attachment: OK per struttura. Manca però controllo dedup (nome_file+entita_id+fonte già esistente) prima di insert_one -> 4 duplicati riscontrati nel DB",
+    "list_allegati (server.py:9976) NON filtra per tenant_id: qualunque utente autenticato con conoscenza dell'entita_id può leggere allegati di altri tenant. Rischio multi-tenancy leak.",
+    "CAT_MAP completa e coerente: tutti i 13 tipi mappati correttamente su entita_tipo/categoria."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested"},
+  "test_credentials": "admin@assicura.it / Admin123! (tenant_id=None)",
+  "seed_data_creation": "Nessuna. Usati i 5 allegati fonte='cloud_ocr_scan' già presenti nel DB (tenant-principale-schiantarelli).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il fix per il bug 'file OCR non compaiono nella tab Documenti dell'anagrafica' è verificato funzionante via API /api/allegati. Test suite in /app/backend/tests/test_iter50_cloud_ocr_allegati.py usabile come regression. Due minor items da valutare: deduplica allegati OCR e filtro tenant su list_allegati.",
+  "rca of the issue": "Prima del fix, lo scanner OCR spostava solo il file sul Drive ma non creava record `allegati` nel CRM, quindi la tab Documenti risultava vuota. Il fix aggiunge la chiamata _create_crm_attachment in _process_file (line 705) che crea il record allegato con entita_tipo/entita_id corretti in base a CAT_MAP (line 794-808). Verificato che GET /api/allegati ritorna l'allegato sull'anagrafica giusta per tutti e 5 gli allegati OCR presenti nel DB."
+}
