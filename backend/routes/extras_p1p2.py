@@ -129,8 +129,48 @@ async def documenti_mancanti(
     tot_anagrafiche = len(anagrafiche_senza_ci_all)
     anagrafiche_senza_ci = anagrafiche_senza_ci_all[:LIMIT]
 
-    # Arricchisci con contraente_nome per le polizze
-    cid_set = list({p.get("contraente_id") for p in polizze_senza + veicoli_senza if p.get("contraente_id")})
+    # === 4. SOSTITUZIONI VEICOLO SENZA ATTO DI VENDITA/DEMOLIZIONE/ESPORTAZIONE ===
+    # Cerchiamo applicazioni libro matricola con stato annullata/sostituita e
+    # tipo_cessazione che richiede un documento, ma senza allegato collegato.
+    CATEGORIE_ATTO_MAP = {
+        "venduta": ["atto_vendita", "certificato_proprieta"],
+        "demolita": ["certificato_demolizione", "atto_vendita"],
+        "esportata": ["documento_esportazione", "certificato_radiazione", "atto_vendita"],
+        "sostituita": ["atto_vendita"],
+        "cessata_leasing": ["cessazione_leasing"],
+    }
+    sost_flt: dict = {
+        "stato": {"$in": ["annullata", "sostituita"]},
+        "tipo_cessazione": {"$in": list(CATEGORIE_ATTO_MAP.keys())},
+    }
+    sostituzioni = await db.applicazioni.find(sost_flt, {
+        "_id": 0, "id": 1, "targa": 1, "polizza_id": 1, "tipo_cessazione": 1,
+        "data_esclusione": 1, "data_cessazione": 1, "intestatario": 1,
+    }).to_list(20000)
+    sostituzioni_senza_atto = []
+    if sostituzioni:
+        # Costruisco set di app_id con allegato adeguato
+        for s in sostituzioni:
+            cats = CATEGORIE_ATTO_MAP.get(s["tipo_cessazione"], ["atto_vendita"])
+            # Cerco allegato con la categoria giusta e collegato all'applicazione
+            has_atto = await db.allegati.find_one({
+                "applicazione_matricola_id": s["id"],
+                "categoria": {"$in": cats},
+                "is_deleted": {"$ne": True},
+            }, {"_id": 0, "id": 1})
+            if not has_atto:
+                # Enrich con polizza & contraente
+                pol = await db.polizze.find_one({"id": s["polizza_id"]}, {"_id": 0, "numero_polizza": 1, "contraente_id": 1})
+                if pol:
+                    s["polizza_numero"] = pol.get("numero_polizza")
+                    s["contraente_id"] = pol.get("contraente_id")
+                sostituzioni_senza_atto.append(s)
+    tot_sostituzioni = len(sostituzioni_senza_atto)
+    sostituzioni_senza_atto_list = sostituzioni_senza_atto[:LIMIT]
+
+    # Arricchisci con contraente_nome per le polizze + sostituzioni
+    all_cids = [p.get("contraente_id") for p in polizze_senza + veicoli_senza + sostituzioni_senza_atto_list if p.get("contraente_id")]
+    cid_set = list(set(all_cids))
     if cid_set:
         ana_map = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
                    async for a in db.anagrafiche.find(
@@ -138,17 +178,19 @@ async def documenti_mancanti(
                        {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})}
     else:
         ana_map = {}
-    for p in polizze_senza + veicoli_senza:
+    for p in polizze_senza + veicoli_senza + sostituzioni_senza_atto_list:
         p["contraente_nome"] = ana_map.get(p.get("contraente_id"), "—")
 
     return {
         "polizze_senza_allegato": polizze_senza,
         "veicoli_senza_libretto": veicoli_senza,
         "anagrafiche_senza_ci": anagrafiche_senza_ci,
+        "sostituzioni_senza_atto": sostituzioni_senza_atto_list,
         "totali": {
             "polizze": tot_polizze,
             "veicoli": tot_veicoli,
             "anagrafiche": tot_anagrafiche,
+            "sostituzioni_veicolo": tot_sostituzioni,
         },
     }
 

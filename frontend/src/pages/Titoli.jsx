@@ -610,10 +610,11 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                     const residuo = Math.max(0, lordo - importo);
                     const tipo_ch = residuo > 0 ? (pt.tipo_chiusura || "sconto") : "sconto";
                     try {
+                        // conto_cassa_id derivato dal backend a partire dal tipo pagamento
                         await api.post(`/titoli/${t.id}/incassa`, {
                             data_incasso: dataIncasso,
                             mezzo_pagamento: mezzo,
-                            conto_cassa_id: contoId || null,
+                            conto_cassa_id: null,
                             importo_pagato: importo,
                             tipo_chiusura: tipo_ch,
                         });
@@ -753,21 +754,6 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                         <Label className="text-xs">Tipo pagamento</Label>
                                         <SelectTipoPagamento value={mezzo} onChange={setMezzo} testid="bulk-mezzo" />
                                     </div>
-                                </div>
-                                <div>
-                                    <Label className="text-xs">Conto cassa</Label>
-                                    <Select
-                                        value={contoId || "__none__"}
-                                        onValueChange={(v) => setContoId(v === "__none__" ? "" : v)}
-                                    >
-                                        <SelectTrigger data-testid="bulk-conto"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="__none__">— nessuno —</SelectItem>
-                                            {(conti || []).map((c) => (
-                                                <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
                                 </div>
                                 <div className="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-900">
                                     <strong>Modifica l&apos;importo riga per riga:</strong> sotto puoi editare il pagato di ciascun titolo. Se &lt; premio scegli sconto o sospeso (residuo).

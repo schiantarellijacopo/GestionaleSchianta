@@ -174,6 +174,41 @@ PRESETS: list[dict] = [
         "template_oggetto": "Polizza {numero_polizza} scaduta da 15 giorni — copertura cessata",
         "template_corpo": "Gentile {cliente_nome}, la polizza {numero_polizza} risulta scaduta dal {scadenza} ed è ora priva di copertura.",
     },
+    # ─────────────────────────────────────────────────────────────────────
+    # SOLLECITI DOCUMENTI VEICOLO MANCANTI (Atto Vendita/Demolizione/Esportazione)
+    # Il ciclo si CHIUDE automaticamente quando il documento viene caricato
+    # (il preset filtra le applicazioni con `applicazione_matricola_id` senza allegato)
+    # ─────────────────────────────────────────────────────────────────────
+    {
+        "preset_key": "documento_veicolo_mancante_3g",
+        "nome": "Documento veicolo mancante — sollecito dopo 3 giorni",
+        "descrizione": "Primo sollecito al cliente per atto vendita/demolizione/esportazione mancante 3 giorni dopo la cessazione veicolo.",
+        "tipo": "schedule", "schedule_kind": "documento_veicolo_mancante",
+        "cron": "0 9 * * *", "soglia_giorni": 3,
+        "canali": ["inapp", "email"], "destinatari": ["cliente", "collaboratore"],
+        "template_oggetto": "Documento mancante per targa {targa}",
+        "template_corpo": "Gentile {cliente_nome},\n\nla polizza {numero_polizza} è stata sostituita/cessata sul veicolo targa {targa} il {data_cessazione}.\n\nPer completare la pratica ci serve il documento di {tipo_cessazione} (Atto di Vendita, Certificato di Demolizione o Documento di Esportazione).\n\nPuò caricarlo direttamente dal link: {upload_link}\n\nUn cordiale saluto",
+    },
+    {
+        "preset_key": "documento_veicolo_mancante_5g",
+        "nome": "Documento veicolo mancante — sollecito dopo 5 giorni",
+        "descrizione": "Secondo sollecito multi-canale (email + WhatsApp) a 5 giorni dalla cessazione.",
+        "tipo": "schedule", "schedule_kind": "documento_veicolo_mancante",
+        "cron": "0 9 * * *", "soglia_giorni": 5,
+        "canali": ["inapp", "email", "whatsapp"], "destinatari": ["cliente", "collaboratore"],
+        "template_oggetto": "Sollecito: manca il documento del veicolo {targa}",
+        "template_corpo": "Gentile {cliente_nome},\n\nle ricordiamo che manca ancora il documento di {tipo_cessazione} per il veicolo {targa} (polizza {numero_polizza}).\n\nCaricalo qui: {upload_link}",
+    },
+    {
+        "preset_key": "documento_veicolo_mancante_7g",
+        "nome": "Documento veicolo mancante — sollecito finale dopo 7 giorni",
+        "descrizione": "Sollecito finale multi-canale (email + WhatsApp + SMS) a 7 giorni.",
+        "tipo": "schedule", "schedule_kind": "documento_veicolo_mancante",
+        "cron": "0 9 * * *", "soglia_giorni": 7,
+        "canali": ["inapp", "email", "whatsapp", "sms"], "destinatari": ["cliente", "collaboratore", "admin"],
+        "template_oggetto": "Ultimo sollecito: documento veicolo {targa} indispensabile",
+        "template_corpo": "Gentile {cliente_nome},\n\nè indispensabile ricevere il documento di {tipo_cessazione} per il veicolo {targa} (polizza {numero_polizza}) per non lasciare pendenze aperte.\n\nCarica il documento entro 24h: {upload_link}",
+    },
 ]
 
 

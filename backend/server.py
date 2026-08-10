@@ -6227,6 +6227,39 @@ async def get_veicolo_by_targa(
     return {"veicolo": v, "polizze_collegate": pol}
 
 
+@api.post("/veicoli", status_code=201)
+async def create_veicolo(
+    body: dict,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Crea al volo un veicolo (usato da TargaSearchWithLentina quando la
+    targa non è ancora in archivio). Ritorna il veicolo creato."""
+    targa = (body.get("targa") or "").upper().strip()
+    if not targa or len(targa) < 4:
+        raise HTTPException(400, "Targa non valida")
+    # Se esiste già, la ritorno (idempotente)
+    existing = await db.veicoli.find_one({"targa": targa}, {"_id": 0})
+    if existing:
+        return existing
+    doc = {
+        "id": str(uuid.uuid4()),
+        "targa": targa,
+        "marca": body.get("marca") or None,
+        "modello": body.get("modello") or None,
+        "telaio": (body.get("telaio") or "").upper() or None,
+        "proprietario": body.get("proprietario") or None,
+        "anno_immatricolazione": body.get("anno_immatricolazione") or None,
+        "created_by": user.get("id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": user.get("tenant_id"),
+    }
+    await db.veicoli.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "create", "veicolo", doc["id"],
+                       f"Creato veicolo {targa} al volo (marca={doc.get('marca')})")
+    return doc
+
+
 @api.delete("/veicoli/{vid}")
 async def delete_veicolo(vid: str, user=Depends(require_user("admin"))):
     await db.veicoli.delete_one({"id": vid})
