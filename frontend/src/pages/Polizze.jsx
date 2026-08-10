@@ -4,6 +4,7 @@ import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
+import IconForRamo from "@/components/IconForRamo";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -290,7 +291,13 @@ export default function Polizze() {
                                     <td className="text-xs">{p.contraente_nome || "—"}</td>
                                     <td className="text-xs text-slate-600">{p.compagnia_nome || "—"}</td>
                                     <td className="text-xs text-slate-600">{p.collaboratore_nome ? <CollaboratoreCell nome={p.collaboratore_nome} avatarUrl={p.collaboratore_avatar_url} /> : "—"}</td>
-                                    <td><span className="badge badge-neutral">{p.ramo}</span>
+                                    <td>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="inline-flex w-6 h-6 rounded-md items-center justify-center bg-slate-100 text-slate-600" title={p.ramo}>
+                                                <IconForRamo ramo={p.ramo} size={13} />
+                                            </span>
+                                            <span className="badge badge-neutral">{p.ramo}</span>
+                                        </div>
                                         {p.catastrofale && (
                                             <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded font-bold" title="Garanzia catastrofale (terremoto/alluvione)">🌊 CAT</span>
                                         )}

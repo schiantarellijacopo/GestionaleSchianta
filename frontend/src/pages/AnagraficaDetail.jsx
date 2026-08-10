@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
+import IconForRamo from "@/components/IconForRamo";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -645,7 +646,12 @@ function PolizzeTab({ polizze, filter, onClearFilter }) {
                             <tr key={p.id}>
                                 <td><Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline">{p.numero_polizza}</Link></td>
                                 <td>{p.compagnia_nome}</td>
-                                <td>{p.ramo}</td>
+                                <td>
+                                    <div className="flex items-center gap-1.5">
+                                        <IconForRamo ramo={p.ramo} size={14} className="text-slate-500" />
+                                        <span>{p.ramo}</span>
+                                    </div>
+                                </td>
                                 <td><StatusBadge stato={p.stato} /></td>
                                 <td className="num">{fmtDate(p.effetto)}</td>
                                 <td className="num">{fmtDate(p.scadenza)}</td>

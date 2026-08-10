@@ -377,15 +377,11 @@ function ProfiloView({ cliente }) {
     );
 }
 
-// Etichette ramo → icona lucide (Car per RCA/CVT, Home per casa, Heart per vita/salute, Shield per resto)
-function IconForRamo({ ramo, size = 20, className = "" }) {
-    const r = (ramo || "").toUpperCase();
-    if (/(RCA|CVT|AUTO|MOTO|VEICOL)/.test(r)) return <Car size={size} className={className} />;
-    if (/(CASA|ABITAZ|IMMOBIL|CONDOM)/.test(r)) return <Home size={size} className={className} />;
-    if (/(VITA|SALUTE|MALATT|INFORTU|SANIT)/.test(r)) return <Heart size={size} className={className} />;
-    if (/(IMPRE|COMMERC|ARTIG|AZIEND)/.test(r)) return <Building2 size={size} className={className} />;
-    return <Shield size={size} className={className} />;
-}
+import IconForRamoShared from "@/components/IconForRamo";
+// eslint-disable-next-line no-unused-vars
+const IconForRamo = ({ ramo, size = 20, className = "" }) => (
+    <IconForRamoShared ramo={ramo} size={size} className={className} />
+);
 
 // ─── POLIZZE ──────────────────────────────────────────────────────────
 function PolizzeView() {
@@ -463,6 +459,8 @@ function Loading() {
 
 function PolizzaCard({ p, oggi }) {
     const [openApps, setOpenApps] = useState(false);
+    const [openDocs, setOpenDocs] = useState(false);
+    const [docs, setDocs] = useState(null);
     const scaduta = p.scadenza && p.scadenza < oggi;
     const inScadenza = !scaduta && p.scadenza && p.scadenza <= addDaysISO(oggi, 60);
     const statoBadge = p.stato === "annullata" ? { l: "ANNULLATA", c: "bg-slate-200 text-slate-700" }
@@ -471,6 +469,19 @@ function PolizzaCard({ p, oggi }) {
         : scaduta ? { l: "SCADUTA", c: "bg-rose-100 text-rose-700" }
         : inScadenza ? { l: "IN SCADENZA", c: "bg-amber-100 text-amber-800" }
         : { l: "ATTIVA", c: "bg-emerald-100 text-emerald-700" };
+
+    const toggleDocs = async () => {
+        const next = !openDocs;
+        setOpenDocs(next);
+        if (next && docs === null) {
+            try {
+                const r = await clientApi.get("/allegati/by-entita",
+                    { params: { entita_tipo: "polizza", entita_id: p.id } });
+                setDocs(r.data);
+            } catch { setDocs([]); }
+        }
+    };
+
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-shadow">
             {/* Header colorato con ramo icon */}
@@ -530,15 +541,22 @@ function PolizzaCard({ p, oggi }) {
                     </div>
                 )}
 
-                {/* Meta info */}
+                {/* Azioni + toggle documenti */}
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
                     {p.n_allegati > 0 && (
-                        <span className="inline-flex items-center gap-1 bg-slate-100 px-2 py-1 rounded">
-                            <FolderOpen size={11} /> {p.n_allegati} allegat{p.n_allegati === 1 ? "o" : "i"}
-                        </span>
+                        <button onClick={toggleDocs}
+                                data-testid={`polizza-docs-toggle-${p.id}`}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all ${
+                                    openDocs
+                                        ? "bg-violet-600 text-white shadow"
+                                        : "bg-violet-50 text-violet-700 hover:bg-violet-100"
+                                }`}>
+                            <FolderOpen size={12} /> {p.n_allegati} allegat{p.n_allegati === 1 ? "o" : "i"}
+                            <ChevronRight size={12} className={`transition-transform ${openDocs ? "rotate-90" : ""}`} />
+                        </button>
                     )}
                     {p.n_sinistri > 0 && (
-                        <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 px-2 py-1 rounded">
+                        <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 px-2 py-1 rounded font-semibold">
                             <AlertCircle size={11} /> {p.n_sinistri} sinistr{p.n_sinistri === 1 ? "o" : "i"}
                         </span>
                     )}
@@ -550,6 +568,15 @@ function PolizzaCard({ p, oggi }) {
                     </button>
                 </div>
 
+                {/* Sezione documenti espansa */}
+                {openDocs && (
+                    <div className="bg-violet-50/50 rounded-xl p-3 space-y-1.5 border border-violet-100">
+                        {docs === null ? <div className="text-xs text-slate-400 py-2">Caricamento…</div>
+                          : docs.length === 0 ? <div className="text-xs text-slate-400 py-2">Nessun documento condiviso dall&apos;agenzia</div>
+                          : docs.map((d) => <AllegatoRow key={d.id} d={d} />)}
+                    </div>
+                )}
+
                 {p.is_libro_matricola && (p.applicazioni?.length || 0) > 0 && (
                     <div className="pt-2 border-t border-slate-100">
                         <button onClick={() => setOpenApps(!openApps)}
@@ -558,19 +585,99 @@ function PolizzaCard({ p, oggi }) {
                             <ChevronRight size={12} className={`transition ${openApps ? "rotate-90" : ""}`} />
                         </button>
                         {openApps && (
-                            <div className="mt-2 space-y-1 max-h-72 overflow-y-auto">
+                            <div className="mt-2 space-y-1.5 max-h-96 overflow-y-auto">
                                 {p.applicazioni.filter((a) => (a.stato || "attiva") === "attiva").map((a) => (
-                                    <div key={a.id} className="text-xs bg-slate-50 rounded p-2 flex flex-wrap gap-2 items-center">
-                                        <span className="font-mono font-bold text-violet-700">{a.targa}</span>
-                                        <span className="text-slate-600">{[a.marca, a.modello].filter(Boolean).join(" ")}</span>
-                                        {a.intestatario && <span className="text-slate-400">· {a.intestatario}</span>}
-                                    </div>
+                                    <VeicoloRow key={a.id} a={a} />
                                 ))}
                             </div>
                         )}
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+// Riga singolo allegato (nome + tipo + download)
+function AllegatoRow({ d, small }) {
+    const ext = (d.nome_file || "").split(".").pop()?.toLowerCase();
+    const isImg = /^(jpg|jpeg|png|webp|heic|gif)$/.test(ext);
+    const isPdf = ext === "pdf";
+    const color = isPdf ? "bg-red-100 text-red-600" :
+                  isImg ? "bg-sky-100 text-sky-600" :
+                  "bg-slate-100 text-slate-600";
+    return (
+        <a href={`${API}/allegati/${d.id}/download?token=${localStorage.getItem("portale_token")}`}
+           target="_blank" rel="noreferrer"
+           className={`flex items-center gap-2 bg-white rounded-lg hover:shadow-sm transition-shadow border border-slate-100 ${small ? "px-2 py-1.5" : "px-3 py-2"}`}
+           data-testid={`allegato-${d.id}`}>
+            <div className={`${small ? "w-7 h-7" : "w-8 h-8"} rounded-md ${color} flex items-center justify-center shrink-0`}>
+                <FolderOpen size={small ? 12 : 14} />
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className={`${small ? "text-[11px]" : "text-xs"} font-medium text-slate-800 truncate`}>{d.nome_file}</div>
+                <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                    <span className="uppercase">{d.categoria || (isPdf ? "PDF" : isImg ? "immagine" : "documento")}</span>
+                    {d.created_at && <span>· {fmtDate(d.created_at)}</span>}
+                </div>
+            </div>
+            <Download size={12} className="text-violet-600 shrink-0" />
+        </a>
+    );
+}
+
+// Riga veicolo (targa + modello + documenti espandibili)
+function VeicoloRow({ a }) {
+    const [openDocs, setOpenDocs] = useState(false);
+    const [docs, setDocs] = useState(null);
+    const toggleDocs = async () => {
+        const next = !openDocs;
+        setOpenDocs(next);
+        if (next && docs === null) {
+            try {
+                const r = await clientApi.get("/allegati/by-entita",
+                    { params: { entita_tipo: "applicazione_matricola", entita_id: a.id } });
+                setDocs(r.data);
+            } catch { setDocs([]); }
+        }
+    };
+    return (
+        <div className="bg-white rounded-lg border border-slate-100 overflow-hidden">
+            <div className="p-2.5 flex flex-wrap gap-2 items-center">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0 shadow-sm">
+                    <Car size={14} className="text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-violet-700 text-sm">{a.targa}</span>
+                        {a.classe_veicolo && (
+                            <span className="text-[10px] uppercase text-slate-400 tracking-wider">{a.classe_veicolo}</span>
+                        )}
+                    </div>
+                    <div className="text-xs text-slate-600 truncate">
+                        {[a.marca, a.modello].filter(Boolean).join(" ") || "—"}
+                        {a.intestatario && <span className="text-slate-400"> · {a.intestatario}</span>}
+                    </div>
+                </div>
+                <button onClick={toggleDocs}
+                        data-testid={`veicolo-docs-${a.id}`}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                            openDocs
+                                ? "bg-violet-600 text-white shadow"
+                                : "bg-violet-50 text-violet-700 hover:bg-violet-100"
+                        }`}>
+                    <FolderOpen size={10} />
+                    documenti
+                    <ChevronRight size={10} className={`transition-transform ${openDocs ? "rotate-90" : ""}`} />
+                </button>
+            </div>
+            {openDocs && (
+                <div className="border-t border-slate-100 bg-violet-50/40 p-2 space-y-1">
+                    {docs === null ? <div className="text-[10px] text-slate-400 py-1 text-center">Caricamento…</div>
+                      : docs.length === 0 ? <div className="text-[10px] text-slate-500 py-1 text-center">Nessun documento (libretto/atto vendita/…)</div>
+                      : docs.map((d) => <AllegatoRow key={d.id} d={d} small />)}
+                </div>
+            )}
         </div>
     );
 }

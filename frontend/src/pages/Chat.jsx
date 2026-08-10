@@ -79,26 +79,44 @@ export default function Chat() {
     };
 
     return (
-        <div data-testid="chat-page">
-            <PageHeader title="Chat" subtitle="Conversazioni interne staff/clienti + WhatsApp Business" />
+        <div data-testid="chat-page" className="space-y-4">
+            {/* Hero header con gradiente */}
+            <div className="rounded-2xl bg-gradient-to-br from-slate-800 via-slate-900 to-black text-white p-6 shadow-xl relative overflow-hidden">
+                <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-sky-500/20 blur-3xl" />
+                <div className="absolute -left-8 -bottom-8 w-40 h-40 rounded-full bg-emerald-500/20 blur-2xl" />
+                <div className="relative flex items-start gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shadow-lg">
+                        <MessageSquare size={28} />
+                    </div>
+                    <div className="flex-1">
+                        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Centro Comunicazioni</h1>
+                        <p className="text-sm text-slate-300 mt-1">
+                            Chat interna staff · Portale Clienti · WhatsApp Business — tutto in un unico posto
+                        </p>
+                    </div>
+                </div>
+            </div>
 
             <Tabs defaultValue="interna" className="mt-3">
-                <TabsList data-testid="chat-tabs">
-                    <TabsTrigger value="interna" data-testid="chat-tab-interna">
+                <TabsList data-testid="chat-tabs" className="bg-white p-1 rounded-xl shadow-sm border border-slate-200 h-auto">
+                    <TabsTrigger value="interna" data-testid="chat-tab-interna"
+                                 className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-sky-500 data-[state=active]:to-blue-600 data-[state=active]:text-white rounded-lg px-4 py-2 transition-all">
                         <MessageSquare size={14} className="mr-1.5" /> Chat interna
                     </TabsTrigger>
-                    <TabsTrigger value="portale" data-testid="chat-tab-portale">
-                        <UserCircle2 size={14} className="mr-1.5 text-sky-600" /> Portale Clienti
+                    <TabsTrigger value="portale" data-testid="chat-tab-portale"
+                                 className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-cyan-500 data-[state=active]:to-sky-600 data-[state=active]:text-white rounded-lg px-4 py-2 transition-all">
+                        <UserCircle2 size={14} className="mr-1.5" /> Portale Clienti
                     </TabsTrigger>
-                    <TabsTrigger value="whatsapp" data-testid="chat-tab-whatsapp">
-                        <MessageCircle size={14} className="mr-1.5 text-emerald-600" /> WhatsApp
+                    <TabsTrigger value="whatsapp" data-testid="chat-tab-whatsapp"
+                                 className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white rounded-lg px-4 py-2 transition-all">
+                        <MessageCircle size={14} className="mr-1.5" /> WhatsApp
                     </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="interna" className="mt-3">
-            <Card className="border-slate-200 overflow-hidden" style={{ height: "calc(100vh - 260px)" }}>
+            <Card className="border-slate-200 overflow-hidden shadow-md rounded-2xl" style={{ height: "calc(100vh - 320px)" }}>
                 <div className="grid grid-cols-12 h-full">
-                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto" data-testid="chat-contatti-list">
+                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="chat-contatti-list">
                         {contatti === null ? <Loading /> : contatti.length === 0 ? <Empty message="Nessun contatto" /> : (
                             <ul className="divide-y divide-slate-100">
                                 {contatti.map((c) => (
@@ -106,24 +124,28 @@ export default function Chat() {
                                         key={c.id}
                                         onClick={() => setSel(c)}
                                         data-testid={`chat-contact-${c.id}`}
-                                        className={`px-4 py-3 cursor-pointer hover:bg-slate-50 ${sel?.id === c.id ? "bg-sky-50 border-l-2 border-sky-600" : ""}`}
+                                        className={`px-3 py-2.5 cursor-pointer transition-all rounded-lg mx-2 my-0.5 ${sel?.id === c.id ? "bg-gradient-to-r from-sky-100 to-blue-50 shadow-sm" : "hover:bg-slate-50"}`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-medium">
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white shadow ${
+                                                sel?.id === c.id
+                                                    ? "bg-gradient-to-br from-sky-500 to-blue-600"
+                                                    : "bg-gradient-to-br from-slate-400 to-slate-500"
+                                            }`}>
                                                 {(c.name || "?").charAt(0).toUpperCase()}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-medium text-slate-900 truncate flex items-center justify-between gap-2">
+                                                <div className="text-sm font-semibold text-slate-900 truncate flex items-center justify-between gap-2">
                                                     <span className="truncate">{c.name}</span>
                                                     {c.unread > 0 && (
-                                                        <span className="bg-sky-600 text-white rounded-full text-[10px] px-1.5 py-0.5 min-w-[18px] text-center" data-testid={`unread-${c.id}`}>
+                                                        <span className="bg-gradient-to-br from-rose-500 to-red-600 text-white rounded-full text-[10px] px-1.5 py-0.5 min-w-[20px] text-center shadow-sm" data-testid={`unread-${c.id}`}>
                                                             {c.unread}
                                                         </span>
                                                     )}
                                                 </div>
-                                                <div className="text-xs text-slate-500 truncate">
-                                                    {c.role}{" "}
-                                                    {c.ultimo_messaggio?.testo && `· ${c.ultimo_messaggio.testo.slice(0, 30)}`}
+                                                <div className="text-xs text-slate-500 truncate flex items-center gap-1">
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{c.role}</span>
+                                                    {c.ultimo_messaggio?.testo && <span className="opacity-70">· {c.ultimo_messaggio.testo.slice(0, 30)}</span>}
                                                     {c.ultimo_messaggio?.allegato_nome && !c.ultimo_messaggio?.testo && (
                                                         <span className="inline-flex items-center gap-1"><Paperclip size={10} />Allegato</span>
                                                     )}
@@ -146,18 +168,28 @@ export default function Chat() {
                             </div>
                         ) : (
                             <>
-                                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
-                                    <div className="font-medium text-slate-900">{sel.name}</div>
-                                    <div className="text-xs text-slate-500">{sel.email} · {sel.role}</div>
+                                <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold shadow">
+                                        {(sel.name || "?").charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-bold text-slate-900 truncate">{sel.name}</div>
+                                        <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                            {sel.email} · <span className="uppercase tracking-wider font-semibold text-[10px]">{sel.role}</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 bg-slate-50">
+                                <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 bg-gradient-to-br from-slate-50 via-white to-sky-50/30">
                                     {msgs.length === 0 ? (
                                         <div className="text-center text-slate-400 text-sm py-8">Nessun messaggio. Scrivi qualcosa!</div>
                                     ) : msgs.map((m) => {
                                         const mine = m.mittente_id === user.id;
                                         return (
                                             <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
-                                                <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${mine ? "bg-sky-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                                <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${mine
+                                                    ? "bg-gradient-to-br from-sky-500 to-blue-600 text-white rounded-br-md"
+                                                    : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"}`}>
                                                     {m.testo && <div className="whitespace-pre-wrap break-words">{m.testo}</div>}
                                                     {m.allegato_id && (
                                                         <ChatAttachment
@@ -205,6 +237,7 @@ export default function Chat() {
                                         size="icon"
                                         onClick={() => fileInputRef.current?.click()}
                                         data-testid="chat-attach-button"
+                                        className="rounded-full hover:bg-sky-50 hover:border-sky-300 hover:text-sky-600 transition-colors"
                                         title="Allega file (max 25 MB)"
                                     >
                                         <Paperclip size={14} />
@@ -214,12 +247,13 @@ export default function Chat() {
                                         placeholder="Scrivi un messaggio..."
                                         value={text}
                                         onChange={(e) => setText(e.target.value)}
+                                        className="rounded-full border-slate-200 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                                     />
                                     <Button
                                         type="submit"
                                         disabled={sending || (!text.trim() && !file)}
                                         data-testid="chat-send-button"
-                                        className="bg-sky-700 hover:bg-sky-800"
+                                        className="bg-gradient-to-br from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 rounded-full shadow-md hover:shadow-lg transition-all"
                                     >
                                         <Send size={14} />
                                     </Button>
@@ -513,7 +547,7 @@ function WhatsAppInbox() {
                 </div>
             )}
 
-            <Card className="border-slate-200 overflow-hidden" style={{ height: "calc(100vh - 300px)" }}>
+            <Card className="border-slate-200 overflow-hidden shadow-md rounded-2xl" style={{ height: "calc(100vh - 320px)" }}>
                 {reconnecting && (
                     <div className="bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-xs text-amber-800 flex items-center gap-2">
                         <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
@@ -522,7 +556,7 @@ function WhatsAppInbox() {
                 )}
                 <div className="grid grid-cols-12 h-full">
                     {/* Lista chat */}
-                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto" data-testid="wa-chats-list">
+                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="wa-chats-list">
                         <div className="px-3 py-2 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                             <div className="text-xs font-medium text-slate-700">
                                 Conversazioni ({chats.length})
@@ -620,7 +654,9 @@ function WhatsAppInbox() {
                                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
                                     {msgs.map((m) => (
                                         <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
-                                            <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${m.direction === "out" ? "bg-emerald-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                            <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${m.direction === "out"
+                                                ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-br-md"
+                                                : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"}`}>
                                                 <MessageAttachment msg={m} />
                                                 {m.text && (
                                                     <div className="whitespace-pre-wrap break-words">{m.text}</div>
@@ -648,6 +684,7 @@ function WhatsAppInbox() {
                                         type="button" variant="outline" size="icon"
                                         onClick={() => fileInputRef.current?.click()}
                                         disabled={uploadingFile}
+                                        className="rounded-full hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-600 transition-colors"
                                         title="Allega file (max 15 MB) — la didascalia è il testo qui a fianco"
                                         data-testid="wa-attach-button"
                                     >
@@ -657,10 +694,13 @@ function WhatsAppInbox() {
                                         value={text}
                                         onChange={(e) => setText(e.target.value)}
                                         placeholder={uploadingFile ? "Invio allegato…" : "Scrivi un messaggio WhatsApp..."}
+                                        className="rounded-full border-slate-200 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                                         data-testid="wa-msg-input"
                                         disabled={uploadingFile}
                                     />
-                                    <Button type="submit" disabled={sending || uploadingFile || !text.trim()} className="bg-emerald-600 hover:bg-emerald-700" data-testid="wa-msg-send">
+                                    <Button type="submit" disabled={sending || uploadingFile || !text.trim()}
+                                            className="bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 rounded-full shadow-md hover:shadow-lg transition-all"
+                                            data-testid="wa-msg-send">
                                         <Send size={14} />
                                     </Button>
                                 </form>
@@ -775,9 +815,9 @@ function ChatPortaleAdmin() {
     };
 
     return (
-        <Card className="border-slate-200 overflow-hidden" style={{ height: "calc(100vh - 260px)" }}>
+        <Card className="border-slate-200 overflow-hidden shadow-md rounded-2xl" style={{ height: "calc(100vh - 320px)" }}>
             <div className="grid grid-cols-12 h-full">
-                <div className="col-span-4 border-r border-slate-200 overflow-y-auto" data-testid="chat-portale-lista">
+                <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="chat-portale-lista">
                     {clienti === null ? <Loading /> : clienti.length === 0 ? (
                         <Empty message="Nessun cliente ha ancora scritto dal portale" />
                     ) : (
@@ -830,7 +870,7 @@ function ChatPortaleAdmin() {
                                 <a href={`/anagrafiche/${sel.anagrafica_id}`}
                                    className="text-xs text-sky-700 hover:underline">Apri anagrafica →</a>
                             </div>
-                            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 bg-slate-50">
+                            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 bg-gradient-to-br from-slate-50 via-white to-sky-50/30">
                                 {msgs.length === 0 ? (
                                     <div className="text-center text-slate-400 text-sm py-8">
                                         Nessun messaggio ancora
@@ -839,7 +879,9 @@ function ChatPortaleAdmin() {
                                     const mine = m.direzione === "out";  // agenzia
                                     return (
                                         <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-portale-${m.id}`}>
-                                            <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${mine ? "bg-sky-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                            <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm shadow-sm ${mine
+                                                ? "bg-gradient-to-br from-cyan-500 to-sky-600 text-white rounded-br-md"
+                                                : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"}`}>
                                                 {m.testo && <div className="whitespace-pre-wrap break-words">{m.testo}</div>}
                                                 {m.allegato_id && (
                                                     <button onClick={() => downloadAllegato(m.allegato_id, m.allegato_nome)}
@@ -873,15 +915,17 @@ function ChatPortaleAdmin() {
                                        onChange={(e) => setFile(e.target.files?.[0] || null)}
                                        data-testid="chat-portale-file" />
                                 <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}
+                                        className="rounded-full hover:bg-cyan-50 hover:border-cyan-300 hover:text-cyan-600 transition-colors"
                                         data-testid="chat-portale-attach" title="Allega file">
                                     <Paperclip size={14} />
                                 </Button>
                                 <Input placeholder="Rispondi al cliente…" value={text}
                                        onChange={(e) => setText(e.target.value)}
+                                       className="rounded-full border-slate-200 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
                                        data-testid="chat-portale-input" />
                                 <Button type="submit" disabled={sending || (!text.trim() && !file)}
                                         data-testid="chat-portale-send"
-                                        className="bg-sky-700 hover:bg-sky-800">
+                                        className="bg-gradient-to-br from-cyan-500 to-sky-600 hover:from-cyan-600 hover:to-sky-700 rounded-full shadow-md">
                                     <Send size={14} />
                                 </Button>
                             </form>

@@ -308,6 +308,103 @@ async def list_titoli(cliente=Depends(current_cliente)):
 # ============================================================
 # DOCUMENTI (allegati visibili) + Upload rapido
 # ============================================================
+@router.get("/allegati/by-entita")
+async def allegati_by_entita(
+    entita_tipo: str, entita_id: str,
+    cliente=Depends(current_cliente),
+):
+    """Allegati visibili al cliente filtrati per entità (polizza/titolo/veicolo/sinistro).
+
+    Verifica che l'entità appartenga al cliente prima di rispondere.
+    """
+    from server import db
+    if entita_tipo not in ("polizza", "titolo", "applicazione_matricola", "sinistro", "anagrafica"):
+        raise HTTPException(400, "entita_tipo non ammesso")
+    # Verifica ownership
+    if entita_tipo == "polizza":
+        p = await db.polizze.find_one({"id": entita_id, "contraente_id": cliente["id"]},
+                                       {"_id": 0, "id": 1})
+        if not p:
+            raise HTTPException(404, "Polizza non trovata")
+    elif entita_tipo == "titolo":
+        t = await db.titoli.find_one({"id": entita_id}, {"_id": 0, "polizza_id": 1})
+        if not t:
+            raise HTTPException(404, "Titolo non trovato")
+        p = await db.polizze.find_one({"id": t["polizza_id"], "contraente_id": cliente["id"]},
+                                        {"_id": 0, "id": 1})
+        if not p:
+            raise HTTPException(403, "Non autorizzato")
+    elif entita_tipo == "applicazione_matricola":
+        app = await db.applicazioni.find_one({"id": entita_id}, {"_id": 0, "polizza_id": 1})
+        if not app:
+            raise HTTPException(404, "Applicazione non trovata")
+        p = await db.polizze.find_one({"id": app["polizza_id"], "contraente_id": cliente["id"]},
+                                        {"_id": 0, "id": 1})
+        if not p:
+            raise HTTPException(403, "Non autorizzato")
+    elif entita_tipo == "sinistro":
+        s = await db.sinistri.find_one({"id": entita_id, "contraente_id": cliente["id"]},
+                                         {"_id": 0, "id": 1})
+        if not s:
+            raise HTTPException(404, "Sinistro non trovato")
+    elif entita_tipo == "anagrafica" and entita_id != cliente["id"]:
+        raise HTTPException(403, "Non autorizzato")
+
+    items = await db.allegati.find({
+        "entita_tipo": entita_tipo,
+        "entita_id": entita_id,
+        "visibile_cliente": True,
+        "is_deleted": {"$ne": True},
+    }, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@router.get("/allegati/{allegato_id}/download")
+async def portale_allegato_download(allegato_id: str, cliente=Depends(current_cliente)):
+    """Download di un qualsiasi allegato visibile al cliente.
+
+    Verifica che l'allegato sia collegato a un'entità (polizza/titolo/veicolo/sinistro/anagrafica)
+    appartenente al cliente e che ``visibile_cliente=true``.
+    """
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+    al = await db.allegati.find_one(
+        {"id": allegato_id, "visibile_cliente": True, "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not al:
+        raise HTTPException(404, "Allegato non trovato")
+    # Ownership check
+    et, eid = al.get("entita_tipo"), al.get("entita_id")
+    authorized = False
+    if et == "anagrafica" and eid == cliente["id"]:
+        authorized = True
+    elif et == "polizza":
+        authorized = bool(await db.polizze.find_one({"id": eid, "contraente_id": cliente["id"]}, {"_id": 0, "id": 1}))
+    elif et == "titolo":
+        t = await db.titoli.find_one({"id": eid}, {"_id": 0, "polizza_id": 1})
+        if t:
+            authorized = bool(await db.polizze.find_one({"id": t["polizza_id"], "contraente_id": cliente["id"]}, {"_id": 0, "id": 1}))
+    elif et == "applicazione_matricola":
+        ap = await db.applicazioni.find_one({"id": eid}, {"_id": 0, "polizza_id": 1})
+        if ap:
+            authorized = bool(await db.polizze.find_one({"id": ap["polizza_id"], "contraente_id": cliente["id"]}, {"_id": 0, "id": 1}))
+    elif et == "sinistro":
+        authorized = bool(await db.sinistri.find_one({"id": eid, "contraente_id": cliente["id"]}, {"_id": 0, "id": 1}))
+    if not authorized:
+        raise HTTPException(403, "Non autorizzato")
+    try:
+        data, _ct = obj_storage.get_object(al["storage_path"])
+    except Exception as e:
+        raise HTTPException(503, f"Errore download: {e}")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=al.get("content_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{al.get("nome_file", "allegato")}"'},
+    )
+
+
 @router.get("/documenti")
 async def list_documenti(cliente=Depends(current_cliente)):
     from server import db
