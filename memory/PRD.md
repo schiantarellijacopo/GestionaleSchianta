@@ -1,5 +1,26 @@
 # Programma Assicurativo — PRD (aggiornato 04/08/2026)
 
+## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
+
+### Cosa è stato costruito/testato
+1. **Notifiche SMTP + WhatsApp Evolution API** (`notification_helpers.py`)
+   - `send_email(to,subject,body)` legge da `db.azienda_config` (Librerie → Azienda) o env fallback (SMTP_HOST/PORT/USER/PASSWORD/FROM)
+   - `send_whatsapp_message(cellulare, testo)` legge da `db.whatsapp_server_config` + prima istanza connessa
+   - Non sollevano mai eccezioni: `{ok, error?}` → l'endpoint invia-credenziali-portale è ora robusto
+   - Fix bug critico: server.py chiamava `send_email` e `send_whatsapp_message` che NON esistevano
+2. **Widget Dashboard "Richieste dal Portale Cliente"** (violet, primo task) → link `/richieste-cliente`, count = `db.richieste_cliente.count_documents({stato:'da_verificare'})`
+3. **Subdomain routing** (`PortaleSubdomainRedirect` in App.js): hostname `portale.` / `clienti.` / `portal.` o `REACT_APP_PORTALE_HOSTS` → auto-redirect a `/portale`
+4. **Template Welcome + Chat bidirezionale Portale ↔ Agenzia**
+   - Preset `welcome_portale` in catalogo Alert & Automazioni (personalizzabile)
+   - `invia-credenziali-portale` carica template da `db.alert_rules` con substitution `{nome}{link}{email}{tipo_credenziale}{password}`
+   - Chat: collection `db.chat_portale`, endpoint cliente `/api/portale/chat/messaggi`, admin `/api/chat-portale/{clienti,{aid}/messaggi,unread}`
+   - UI: nuovo tab "Portale Clienti" in `Chat.jsx` + sezione "Chat con l'agenzia" in `PortaleCliente.jsx`
+
+### Test iter_51: 18/18 backend pytest + tutti i flow frontend verificati
+Credenziali test: `marco.rossi@demo.it` / `RSSMRC75H10F205X` (CF) — anagrafica `93b73085-100f-4c78-883a-e6cefea49c72`
+
+
+
 ## Visione
 CRM completo per agenzie assicurative italiane multi-tenant: anagrafiche, polizze, titoli,
 Prima Nota/Brogliaccio con regole contabili rigorose, AI Copilot (Claude), OCR Gemini,

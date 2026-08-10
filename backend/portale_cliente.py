@@ -28,7 +28,6 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header
 
 router = APIRouter(prefix="/api/portale", tags=["portale-cliente"])
-
 JWT_ALG = "HS256"
 TOKEN_TTL_HOURS = 24
 
@@ -323,6 +322,63 @@ async def richiesta_modifica_anagrafica(body: dict, cliente=Depends(current_clie
     }
     await db.richieste_cliente.insert_one(rich)
     return {"ok": True, "richiesta_id": rich["id"], "messaggio": "Richiesta inviata all'agenzia"}
+
+
+# ============================================================
+# CHAT — messaggistica cliente ↔ agenzia
+# ============================================================
+# Utilizza collection `chat_portale` con campi:
+#   id, anagrafica_id, tenant_id, direzione ("in"|"out"),
+#   testo, mittente_admin_id (nullable), created_at, letto (bool)
+# ============================================================
+@router.get("/chat/messaggi")
+async def portale_chat_messaggi(limit: int = 500, cliente=Depends(current_cliente)):
+    """Ritorna l'intera cronologia chat del cliente con l'agenzia."""
+    from server import db
+    items = await db.chat_portale.find(
+        {"anagrafica_id": cliente["id"]}, {"_id": 0},
+    ).sort("created_at", 1).to_list(limit)
+    # marca i messaggi "out" (dall'agenzia) come letti dal cliente
+    await db.chat_portale.update_many(
+        {"anagrafica_id": cliente["id"], "direzione": "out", "letto": {"$ne": True}},
+        {"$set": {"letto": True, "letto_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return items
+
+
+@router.post("/chat/messaggi")
+async def portale_chat_invia(body: dict, cliente=Depends(current_cliente)):
+    """Il cliente invia un messaggio all'agenzia."""
+    from server import db
+    testo = (body or {}).get("testo", "").strip()
+    if not testo:
+        raise HTTPException(400, "Testo obbligatorio")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "anagrafica_id": cliente["id"],
+        "tenant_id": cliente.get("tenant_id"),
+        "cliente_nome": cliente.get("ragione_sociale") or cliente.get("cognome_nome")
+                        or f"{cliente.get('cognome','')} {cliente.get('nome','')}".strip(),
+        "direzione": "in",  # dal cliente all'agenzia
+        "mittente_admin_id": None,
+        "testo": testo[:4000],
+        "letto": False,  # letto dall'admin
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.chat_portale.insert_one(msg); msg.pop("_id", None)
+    return msg
+
+
+@router.get("/chat/unread")
+async def portale_chat_unread(cliente=Depends(current_cliente)):
+    """Numero messaggi non letti dall'agenzia verso il cliente."""
+    from server import db
+    n = await db.chat_portale.count_documents({
+        "anagrafica_id": cliente["id"],
+        "direzione": "out",
+        "letto": {"$ne": True},
+    })
+    return {"unread": n}
 
 
 # ============================================================

@@ -1,5 +1,6 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Layout from "@/components/Layout";
@@ -68,6 +69,7 @@ function App() {
         <div className="App">
             <AuthProvider>
                 <BrowserRouter>
+                    <PortaleSubdomainRedirect />
                     <Routes>
                         <Route path="/login" element={<Login />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
@@ -286,3 +288,36 @@ function App() {
 }
 
 export default App;
+
+/**
+ * PortaleSubdomainRedirect — Se l'app è servita su un hostname configurato
+ * per il portale cliente (es. portale.miaagenzia.it, clienti.miaagenzia.it),
+ * reindirizza automaticamente TUTTO il traffico a /portale.
+ *
+ * Configurazione tramite variabile d'ambiente:
+ *   REACT_APP_PORTALE_HOSTS = "portale.dominio.it,clienti.dominio.it"
+ * oppure il match automatico: hostname che inizia con "portale." o "clienti."
+ */
+function PortaleSubdomainRedirect() {
+    const location = useLocation();
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const host = (window.location.hostname || "").toLowerCase();
+        const configured = (process.env.REACT_APP_PORTALE_HOSTS || "")
+            .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const isPortaleHost =
+            configured.includes(host) ||
+            host.startsWith("portale.") ||
+            host.startsWith("clienti.") ||
+            host.startsWith("portal.");
+        if (!isPortaleHost) return;
+        const path = location.pathname || "/";
+        // Le route pubbliche che devono restare (upload-doc con token)
+        if (path.startsWith("/upload-doc")) return;
+        // Se non è già sotto /portale, redirect
+        if (!path.startsWith("/portale")) {
+            window.location.replace("/portale");
+        }
+    }, [location]);
+    return null;
+}

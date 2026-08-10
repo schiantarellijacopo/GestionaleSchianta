@@ -1,5 +1,36 @@
 # Programma Assicurativo - CHANGELOG
 
+
+## 2026-02-11 — Portale Cliente completato + Notifiche + Chat integrata
+
+### Feature "Portale Cliente" — configurazione multi-canale
+- **Helper unificati** `notification_helpers.py` con `send_email()` e `send_whatsapp_message()`:
+  - SMTP: legge config da `db.azienda_config` (Librerie → Azienda) o env fallback (`SMTP_HOST/PORT/USER/PASSWORD/FROM`)
+  - WhatsApp: legge Evolution API da `db.whatsapp_server_config` + prima istanza connessa in `db.whatsapp_instances`, env fallback `WHATSAPP_API_URL/API_KEY/INSTANCE`
+  - Entrambe non sollevano eccezioni: ritornano `{ok, error?}` così il chiamante può loggare in `notifiche_portale`
+  - Fix bug: gli endpoint di sollecito veicoli e credenziali portale importavano `send_email/send_whatsapp_message` da `server.py` che NON esistevano al livello modulo (era il motivo per cui l'invio credenziali fallisce sempre silenziosamente)
+
+### Dashboard: widget "Richieste dal Portale Cliente"
+- Nuovo task in `/api/dashboard/tasks` con `key="richieste_portale"` che conta `db.richieste_cliente` con `stato=da_verificare`
+- Link diretto a `/richieste-cliente`
+- Palette violet + icona `Inbox` (lucide-react)
+
+### Subdomain routing per Portale
+- Componente `PortaleSubdomainRedirect` in `App.js`: se hostname inizia con `portale.` / `clienti.` / `portal.` o compare in `REACT_APP_PORTALE_HOSTS`, redirige automaticamente tutte le route diverse da `/upload-doc` verso `/portale`
+
+### Template Welcome + Chat interna ↔ cliente
+- Nuovo preset `welcome_portale` in `alert_presets.PRESETS` (evento `portale.benvenuto`, canali email+whatsapp) → visibile e importabile dal catalogo Alert
+- Endpoint `POST /api/anagrafiche/{aid}/invia-credenziali-portale` ora carica il template personalizzato da `db.alert_rules` se esiste con `preset_key="welcome_portale"`, sostituisce `{nome}`, `{link}`, `{email}`, `{tipo_credenziale}`, `{password}` e ritorna anche gli errori dettagliati per SMTP/WA
+- **Chat Portale ↔ Agenzia** (collection `db.chat_portale`):
+  - Cliente (Portale): `GET/POST /api/portale/chat/messaggi`, `GET /api/portale/chat/unread` — nuova sezione "Chat con l'agenzia" in `PortaleCliente.jsx`
+  - Admin (CRM): `GET /api/chat-portale/clienti`, `GET/POST /api/chat-portale/{aid}/messaggi`, `GET /api/chat-portale/unread` — nuovo tab "Portale Clienti" in `Chat.jsx`
+  - Aggregate MongoDB permissivo su tenant_id null per compatibilità dati legacy/demo
+
+### File toccati
+- Backend: `notification_helpers.py` (nuovo), `server.py`, `portale_cliente.py`, `sollecito_veicoli.py`, `alert_presets.py`, `routes/dashboard.py`
+- Frontend: `App.js`, `pages/Dashboard.jsx`, `pages/Chat.jsx`, `pages/PortaleCliente.jsx`
+
+
 ## 2026-06-22 — fork 2 (sessione corrente)
 
 ### OCR polizza + estensione patente/passaporto + tag lavoratore

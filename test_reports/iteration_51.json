@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 51 - Comprehensive test of Portale Cliente + Chat Portale + Dashboard widget richieste_portale + Alert preset welcome_portale + invia-credenziali endpoint + Archivio Targhe public upload + Sollecito veicoli. Backend: 18/18 pytest passed. Frontend: all critical flows verified (dashboard task card, chat 3-tab layout, portale chat send/receive, libro-matricola page).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter51_portale_chat_dashboard.py",
+    "/app/test_reports/pytest/iter51.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "notification_helpers correctly returns {ok, error} without raising - endpoint /api/anagrafiche/{aid}/invia-credenziali-portale returns 200 with graceful error info when SMTP/Evolution not configured (verified).",
+    "GET /api/portale/chat/unread correctly returns 0 after client fetches messages (marks admin 'out' msgs as read).",
+    "Dashboard task 'richieste_portale' is first item with color=violet, url=/richieste-cliente, count reflects db.richieste_cliente.count_documents({stato:'da_verificare'})."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter51_portale_chat_dashboard.py (new)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (all data-testid flows verified)"},
+  "test_credentials": "admin@assicura.it/Admin123!, marco.rossi@demo.it/RSSMRC75H10F205X (anagrafica 93b73085-100f-4c78-883a-e6cefea49c72)",
+  "seed_data_creation": "Created richiesta_cliente (modifica telefono) + 2 chat messages cliente + 2 admin replies + 1 UI-sent message TEST_iter51_UI (all TEST_iter51-prefixed for easy cleanup).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 4 user-requested points implemented and verified: (1) invia-credenziali endpoint handles missing SMTP/Evolution gracefully returning email_errore/whatsapp_errore fields; (2) Dashboard widget richieste_portale (violet, testid task-richieste_portale) works and navigates to /richieste-cliente; (3) /portale routing works standalone (no subdomain needed in preview); (4) welcome_portale preset present in /api/alert-presets/catalog with canali=[email,whatsapp] and destinatari=[cliente], chat portale full bi-directional flow works including unread reset. Archivio Targhe: build_upload_token JWT verifies correctly against server (both use JWT_SECRET from backend/.env); public upload-doc/info endpoint returns 401 for missing/invalid tokens as expected."
+}

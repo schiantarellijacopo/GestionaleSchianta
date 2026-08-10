@@ -10,7 +10,7 @@ import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
     PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2 } from "lucide-react";
+import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2, Inbox } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -211,7 +211,7 @@ function DashboardTasks() {
     if (!tasks) return null;
 
     const iconMap = {
-        Cake, Gift, FileWarning, FileClock, AlertTriangle, CalendarClock, AlertOctagon, Wallet,
+        Cake, Gift, FileWarning, FileClock, AlertTriangle, CalendarClock, AlertOctagon, Wallet, Inbox,
     };
     const palette = {
         rose: "bg-rose-50 border-rose-200 text-rose-700",
@@ -221,6 +221,7 @@ function DashboardTasks() {
         orange: "bg-orange-50 border-orange-200 text-orange-700",
         blue: "bg-sky-50 border-sky-200 text-sky-700",
         emerald: "bg-emerald-50 border-emerald-200 text-emerald-700",
+        violet: "bg-violet-50 border-violet-200 text-violet-700",
     };
 
     // Mostra prima i task con count > 0, poi gli altri (consente comunque navigazione)

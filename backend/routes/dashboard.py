@@ -79,9 +79,14 @@ async def _conta_documenti(today_iso: str, in_30: str) -> tuple[int, int]:
 def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
                      n_doc_scaduti: int, n_doc_scad: int,
                      n_sospesi_old: int, n_pol_scad: int,
-                     n_sin_old: int, n_provv: int) -> list[dict]:
+                     n_sin_old: int, n_provv: int,
+                     n_richieste: int = 0) -> list[dict]:
     """Compone la lista dei task per la dashboard."""
     return [
+        {"key": "richieste_portale", "label": "Richieste dal Portale Cliente",
+         "icon": "Inbox", "color": "violet", "count": n_richieste,
+         "url": "/richieste-cliente",
+         "descrizione": "Modifiche anagrafica / documenti da approvare"},
         {"key": "compleanno_oggi", "label": "Compleanni di oggi",
          "icon": "Cake", "color": "rose", "count": n_comp_oggi,
          "url": "/anagrafiche?compleanno=oggi",
@@ -146,11 +151,15 @@ async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaborat
         "collaboratore_id": {"$ne": None},
     })
 
+    # Richieste dal Portale Cliente da verificare
+    n_richieste = await db.richieste_cliente.count_documents({"stato": "da_verificare"})
+
     return _build_task_list(
         n_comp_oggi=n_comp_oggi, n_comp_sett=n_comp_sett,
         n_doc_scaduti=n_doc_scaduti, n_doc_scad=n_doc_scad,
         n_sospesi_old=n_sospesi_old, n_pol_scad=n_pol_scad,
         n_sin_old=n_sin_old, n_provv=n_provv,
+        n_richieste=n_richieste,
     )
 
 

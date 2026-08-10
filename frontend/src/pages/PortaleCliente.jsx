@@ -12,7 +12,7 @@ import { toast, Toaster } from "sonner";
 import axios from "axios";
 import {
     User, FileText, Wallet, FolderOpen, AlertCircle, Phone,
-    Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car,
+    Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api/portale`;
@@ -31,6 +31,7 @@ const SEZIONI = [
     { key: "titoli",   label: "Titoli & Quietanze", icon: Wallet },
     { key: "documenti", label: "Documenti & Upload", icon: FolderOpen },
     { key: "sinistri", label: "I miei sinistri", icon: AlertCircle },
+    { key: "chat",     label: "Chat con l'agenzia", icon: MessageSquare },
     { key: "servizi",  label: "Servizi & Assistenza", icon: Phone },
 ];
 
@@ -102,6 +103,7 @@ export default function PortaleCliente() {
                     {sezione === "titoli" && <TitoliView />}
                     {sezione === "documenti" && <DocumentiView />}
                     {sezione === "sinistri" && <SinistriView />}
+                    {sezione === "chat" && <ChatView />}
                     {sezione === "servizi" && <ServiziView />}
                 </main>
             </div>
@@ -466,6 +468,82 @@ function EmptyState({ icon: Icon, testo }) {
         <div className="text-center py-16 text-slate-400">
             <Icon size={48} className="mx-auto mb-3 opacity-50" />
             <div>{testo}</div>
+        </div>
+    );
+}
+
+// ─── CHAT — messaggistica col cliente ↔ agenzia ─────────────────────
+function ChatView() {
+    const [msgs, setMsgs] = useState(null);
+    const [text, setText] = useState("");
+    const [sending, setSending] = useState(false);
+    const scrollRef = useState(null)[0];
+
+    const load = () => clientApi.get("/chat/messaggi").then((r) => setMsgs(r.data)).catch(() => setMsgs([]));
+    useEffect(() => {
+        load();
+        const t = setInterval(load, 8000);
+        return () => clearInterval(t);
+    }, []);
+
+    const invia = async (e) => {
+        e?.preventDefault();
+        if (!text.trim() || sending) return;
+        setSending(true);
+        try {
+            await clientApi.post("/chat/messaggi", { testo: text });
+            setText("");
+            load();
+        } catch (err) {
+            toast.error("Errore invio");
+        } finally { setSending(false); }
+    };
+
+    return (
+        <div className="space-y-4">
+            <h2 className="text-2xl font-bold text-slate-800">Chat con l&apos;agenzia</h2>
+            <div className="bg-white rounded-xl shadow-sm flex flex-col" style={{ height: "60vh", minHeight: 420 }}>
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50 rounded-t-xl">
+                    {msgs === null ? (
+                        <div className="text-center text-slate-400 py-8">Caricamento…</div>
+                    ) : msgs.length === 0 ? (
+                        <div className="text-center text-slate-400 py-8">
+                            <MessageSquare size={28} className="mx-auto mb-2 opacity-50" />
+                            Nessun messaggio. Scrivi alla tua agenzia!
+                        </div>
+                    ) : msgs.map((m) => {
+                        const mine = m.direzione === "in"; // dal cliente
+                        return (
+                            <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`chat-msg-${m.id}`}>
+                                <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${mine
+                                    ? "bg-sky-600 text-white"
+                                    : "bg-white border border-slate-200 text-slate-800"}`}>
+                                    <div className="whitespace-pre-wrap break-words">{m.testo}</div>
+                                    <div className={`text-[10px] mt-1 ${mine ? "text-sky-100" : "text-slate-400"}`}>
+                                        {!mine && m.mittente_admin_nome && (<span>{m.mittente_admin_nome} · </span>)}
+                                        {m.created_at ? new Date(m.created_at).toLocaleString("it-IT",
+                                            { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                <form onSubmit={invia} className="border-t border-slate-200 p-3 flex gap-2 bg-white rounded-b-xl">
+                    <input type="text" value={text} onChange={(e) => setText(e.target.value)}
+                           placeholder="Scrivi un messaggio…"
+                           className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none"
+                           data-testid="portale-chat-input" />
+                    <button type="submit" disabled={sending || !text.trim()}
+                            className="px-4 rounded-lg bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-40"
+                            data-testid="portale-chat-send">
+                        <Send size={16} />
+                    </button>
+                </form>
+            </div>
+            <div className="text-[11px] text-slate-400 text-center">
+                Ti risponderemo il prima possibile durante gli orari di apertura dell&apos;agenzia.
+            </div>
         </div>
     );
 }

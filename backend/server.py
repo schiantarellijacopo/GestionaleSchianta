@@ -54,6 +54,8 @@ import ania_importer
 import inps_calculator
 import successione_calc
 import reddito_calc
+# Helper email/whatsapp condivisi (usati dagli endpoint /portale e /solleciti)
+from notification_helpers import send_email, send_whatsapp_message  # noqa: F401
 import storage as obj_storage
 import pdf_report
 import pdf_diagnosi
@@ -11501,43 +11503,178 @@ async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin"
     base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
     link = f"{base_url}/portale" if base_url else "/portale"
     nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip() or "Cliente"
-    oggetto = "Benvenuto nel Portale — accedi alle tue polizze"
-    corpo = (
-        f"Gentile {nome},\n\n"
-        f"le abbiamo attivato il nostro Portale Cliente per accedere in autonomia a polizze, "
-        f"quietanze, documenti e sinistri.\n\n"
-        f"🔗 Accedi qui: {link}\n"
-        f"📧 Username: {email}\n"
-        f"🔑 Password iniziale: il tuo {'Codice Fiscale' if tipo == 'fisico' else 'Partita IVA'}\n\n"
-        f"Un cordiale saluto"
+    tipo_credenziale = "Codice Fiscale" if tipo == "fisico" else "Partita IVA"
+
+    # Carica template personalizzato (se esiste una regola preset_key="welcome_portale")
+    tenant_id = ana.get("tenant_id") or user.get("agenzia_tenant_id")
+    tpl_flt: dict = {"preset_key": "welcome_portale"}
+    if tenant_id:
+        tpl_flt["$or"] = [{"tenant_id": tenant_id}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}]
+    rule = await db.alert_rules.find_one(tpl_flt, {"_id": 0}) or {}
+    oggetto_tpl = rule.get("template_oggetto") or "Benvenuto nel Portale — accedi alle tue polizze"
+    corpo_tpl = rule.get("template_corpo") or (
+        "Gentile {nome},\n\n"
+        "le abbiamo attivato il nostro Portale Cliente per accedere in autonomia a polizze, "
+        "quietanze, documenti e sinistri.\n\n"
+        "🔗 Accedi qui: {link}\n"
+        "📧 Username: {email}\n"
+        "🔑 Password iniziale: il tuo {tipo_credenziale}\n\n"
+        "Un cordiale saluto"
     )
-    inviato_email = False
-    inviato_wa = False
-    try:
-        await send_email(email, oggetto, corpo)
-        inviato_email = True
-    except Exception:
-        pass
-    try:
-        if cellulare:
-            await send_whatsapp_message(cellulare, corpo)
-            inviato_wa = True
-    except Exception:
-        pass
+    subst = {
+        "{nome}": nome,
+        "{cliente_nome}": nome,
+        "{link}": link,
+        "{portale_link}": link,
+        "{email}": email,
+        "{username}": email,
+        "{tipo_credenziale}": tipo_credenziale,
+        "{password}": pwd,
+    }
+    oggetto = oggetto_tpl
+    corpo = corpo_tpl
+    for k, v in subst.items():
+        oggetto = oggetto.replace(k, str(v))
+        corpo = corpo.replace(k, str(v))
+
+    res_email = await send_email(email, oggetto, corpo)
+    res_wa = {"ok": False, "error": "cellulare mancante"}
+    if cellulare:
+        res_wa = await send_whatsapp_message(cellulare, corpo)
+
     await db.notifiche_portale.insert_one({
         "id": str(uuid.uuid4()),
         "tenant_id": ana.get("tenant_id"),
         "anagrafica_id": aid,
         "tipo": "welcome_portale",
-        "email_inviata": inviato_email,
-        "whatsapp_inviato": inviato_wa,
+        "email_inviata": bool(res_email.get("ok")),
+        "email_errore": res_email.get("error") if not res_email.get("ok") else None,
+        "whatsapp_inviato": bool(res_wa.get("ok")),
+        "whatsapp_errore": res_wa.get("error") if not res_wa.get("ok") else None,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     })
-    return {"ok": True, "email_inviata": inviato_email, "whatsapp_inviato": inviato_wa,
-            "email": email, "cellulare": cellulare if inviato_wa else None}
+    return {
+        "ok": bool(res_email.get("ok") or res_wa.get("ok")),
+        "email_inviata": bool(res_email.get("ok")),
+        "email_errore": res_email.get("error") if not res_email.get("ok") else None,
+        "whatsapp_inviato": bool(res_wa.get("ok")),
+        "whatsapp_errore": res_wa.get("error") if not res_wa.get("ok") else None,
+        "email": email,
+        "cellulare": cellulare,
+    }
 
 
 app.include_router(_extra)
+
+
+# ============================================================
+# CHAT PORTALE — Admin endpoints per rispondere ai clienti
+# ============================================================
+_chat_portale_router = APIRouter(prefix="/api/chat-portale", tags=["chat-portale"])
+
+
+@_chat_portale_router.get("/clienti")
+async def _cp_lista_clienti(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Elenca i clienti (anagrafiche) con conversazioni chat aperte + unread count.
+
+    Le anagrafiche mostrate sono quelle che hanno almeno un messaggio in
+    `chat_portale`. Aggrega ultimo messaggio e conteggio non letti (direzione=in
+    non letti dall'admin).
+    """
+    tid = user.get("agenzia_tenant_id")
+    match = {}
+    if tid:
+        # accetta messaggi con lo stesso tenant o senza tenant (dati legacy/demo)
+        match["$or"] = [{"tenant_id": tid}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}]
+    pipeline = [
+        {"$match": match},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$anagrafica_id",
+            "cliente_nome": {"$first": "$cliente_nome"},
+            "ultimo": {"$first": "$$ROOT"},
+            "unread": {"$sum": {"$cond": [
+                {"$and": [{"$eq": ["$direzione", "in"]}, {"$ne": ["$letto", True]}]}, 1, 0,
+            ]}},
+        }},
+        {"$sort": {"ultimo.created_at": -1}},
+        {"$limit": 500},
+    ]
+    out = []
+    async for r in db.chat_portale.aggregate(pipeline):
+        out.append({
+            "anagrafica_id": r["_id"],
+            "cliente_nome": r.get("cliente_nome") or "Cliente",
+            "unread": r.get("unread", 0),
+            "ultimo_messaggio": {
+                "testo": r["ultimo"].get("testo"),
+                "direzione": r["ultimo"].get("direzione"),
+                "created_at": r["ultimo"].get("created_at"),
+            } if r.get("ultimo") else None,
+        })
+    return out
+
+
+@_chat_portale_router.get("/{aid}/messaggi")
+async def _cp_get_messaggi(
+    aid: str, limit: int = 500,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Ritorna la cronologia chat con un cliente. Marca "in" come letti dall'admin."""
+    items = await db.chat_portale.find(
+        {"anagrafica_id": aid}, {"_id": 0},
+    ).sort("created_at", 1).to_list(limit)
+    await db.chat_portale.update_many(
+        {"anagrafica_id": aid, "direzione": "in", "letto": {"$ne": True}},
+        {"$set": {"letto": True, "letto_at": datetime.now(timezone.utc).isoformat(),
+                  "letto_da": user.get("id")}},
+    )
+    return items
+
+
+@_chat_portale_router.post("/{aid}/messaggi")
+async def _cp_invia(
+    aid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """L'admin/collaboratore invia una risposta al cliente via portale."""
+    testo = (body or {}).get("testo", "").strip()
+    if not testo:
+        raise HTTPException(400, "Testo obbligatorio")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1, "tenant_id": 1,
+                                                        "ragione_sociale": 1, "cognome_nome": 1,
+                                                        "cognome": 1, "nome": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "anagrafica_id": aid,
+        "tenant_id": ana.get("tenant_id"),
+        "cliente_nome": ana.get("ragione_sociale") or ana.get("cognome_nome")
+                        or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
+        "direzione": "out",  # dall'agenzia al cliente
+        "mittente_admin_id": user.get("id"),
+        "mittente_admin_nome": user.get("name"),
+        "testo": testo[:4000],
+        "letto": False,  # letto dal cliente
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.chat_portale.insert_one(msg); msg.pop("_id", None)
+    return msg
+
+
+@_chat_portale_router.get("/unread")
+async def _cp_unread(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Numero totale di messaggi non letti dai clienti verso l'agenzia."""
+    tid = user.get("agenzia_tenant_id")
+    flt = {"direzione": "in", "letto": {"$ne": True}}
+    if tid:
+        flt["tenant_id"] = tid
+    n = await db.chat_portale.count_documents(flt)
+    return {"unread": n}
+
+
+app.include_router(_chat_portale_router)
 
 app.add_middleware(
     CORSMiddleware,

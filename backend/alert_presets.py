@@ -209,6 +209,28 @@ PRESETS: list[dict] = [
         "template_oggetto": "Ultimo sollecito: documento veicolo {targa} indispensabile",
         "template_corpo": "Gentile {cliente_nome},\n\nè indispensabile ricevere il documento di {tipo_cessazione} per il veicolo {targa} (polizza {numero_polizza}) per non lasciare pendenze aperte.\n\nCarica il documento entro 24h: {upload_link}",
     },
+    # ─────────────────────────────────────────────────────────────────────
+    # PORTALE CLIENTE — messaggio di benvenuto (email + WhatsApp)
+    # Usato dall'endpoint POST /api/anagrafiche/{aid}/invia-credenziali-portale
+    # Variabili disponibili: {nome} {link} {email} {tipo_credenziale} {password}
+    # ─────────────────────────────────────────────────────────────────────
+    {
+        "preset_key": "welcome_portale",
+        "nome": "Benvenuto Portale Cliente",
+        "descrizione": "Messaggio di benvenuto inviato al cliente quando gli si attiva l'accesso al Portale (email + WhatsApp). Personalizzabile.",
+        "tipo": "evento", "evento": "portale.benvenuto",
+        "canali": ["email", "whatsapp"], "destinatari": ["cliente"],
+        "template_oggetto": "Benvenuto nel Portale — accedi alle tue polizze",
+        "template_corpo": (
+            "Gentile {nome},\n\n"
+            "le abbiamo attivato il nostro Portale Cliente per accedere in autonomia a polizze, "
+            "quietanze, documenti e sinistri.\n\n"
+            "🔗 Accedi qui: {link}\n"
+            "📧 Username: {email}\n"
+            "🔑 Password iniziale: il suo {tipo_credenziale}\n\n"
+            "Un cordiale saluto"
+        ),
+    },
 ]
 
 

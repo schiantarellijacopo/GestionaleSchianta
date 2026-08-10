@@ -278,11 +278,11 @@ async def run_sollecito_documento_veicolo(rule: dict, db) -> dict:
         # Invio effettivo via canali (delega ai worker esistenti se disponibili)
         try:
             if "email" in canali and ana.get("email"):
-                from server import send_email  # helper esistente
-                await send_email(ana["email"], oggetto, corpo)
+                from notification_helpers import send_email
+                await send_email(ana["email"], oggetto, corpo, tenant_id=tenant_id)
             if "whatsapp" in canali and ana.get("cellulare"):
-                from server import send_whatsapp_message  # helper Evolution API
-                await send_whatsapp_message(ana["cellulare"], corpo)
+                from notification_helpers import send_whatsapp_message
+                await send_whatsapp_message(ana["cellulare"], corpo, tenant_id=tenant_id)
             # SMS: se non c'è ancora un provider, lascio placeholder
         except Exception:
             pass  # errori di invio già loggati dai singoli helper

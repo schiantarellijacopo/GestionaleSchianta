@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Send, MessageSquare, Paperclip, X, Download, FileText, Image as ImageIcon, MessageCircle, Phone, RefreshCcw } from "lucide-react";
+import { Send, MessageSquare, Paperclip, X, Download, FileText, Image as ImageIcon, MessageCircle, Phone, RefreshCcw, UserCircle2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -85,6 +85,9 @@ export default function Chat() {
                 <TabsList data-testid="chat-tabs">
                     <TabsTrigger value="interna" data-testid="chat-tab-interna">
                         <MessageSquare size={14} className="mr-1.5" /> Chat interna
+                    </TabsTrigger>
+                    <TabsTrigger value="portale" data-testid="chat-tab-portale">
+                        <UserCircle2 size={14} className="mr-1.5 text-sky-600" /> Portale Clienti
                     </TabsTrigger>
                     <TabsTrigger value="whatsapp" data-testid="chat-tab-whatsapp">
                         <MessageCircle size={14} className="mr-1.5 text-emerald-600" /> WhatsApp
@@ -225,6 +228,10 @@ export default function Chat() {
                     </div>
                 </div>
             </Card>
+                </TabsContent>
+
+                <TabsContent value="portale" className="mt-3">
+                    <ChatPortaleAdmin />
                 </TabsContent>
 
                 <TabsContent value="whatsapp" className="mt-3">
@@ -697,5 +704,142 @@ function ChatAttachment({ allegato_id, nome, content_type, mine }) {
             <span className="text-xs truncate max-w-[180px]">{nome}</span>
             <Download size={12} className="opacity-60" />
         </a>
+    );
+}
+
+
+// =====================================================================
+// TAB PORTALE CLIENTI — Chat con i clienti che scrivono dal Portale
+// =====================================================================
+function ChatPortaleAdmin() {
+    const [clienti, setClienti] = useState(null);
+    const [sel, setSel] = useState(null);
+    const [msgs, setMsgs] = useState([]);
+    const [text, setText] = useState("");
+    const [sending, setSending] = useState(false);
+    const scrollRef = useRef();
+
+    const loadClienti = () => api.get("/chat-portale/clienti")
+        .then((r) => setClienti(r.data)).catch(() => setClienti([]));
+    const loadMsgs = (aid) => api.get(`/chat-portale/${aid}/messaggi`)
+        .then((r) => setMsgs(r.data));
+
+    useEffect(() => { loadClienti(); }, []);
+    useEffect(() => {
+        if (!sel) return;
+        loadMsgs(sel.anagrafica_id);
+        const t = setInterval(() => loadMsgs(sel.anagrafica_id), 5000);
+        return () => clearInterval(t);
+    }, [sel]);
+
+    useEffect(() => {
+        scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+    }, [msgs]);
+
+    const invia = async (e) => {
+        e?.preventDefault();
+        if (!text.trim() || !sel || sending) return;
+        setSending(true);
+        try {
+            await api.post(`/chat-portale/${sel.anagrafica_id}/messaggi`, { testo: text });
+            setText("");
+            loadMsgs(sel.anagrafica_id);
+            loadClienti();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore invio");
+        } finally { setSending(false); }
+    };
+
+    return (
+        <Card className="border-slate-200 overflow-hidden" style={{ height: "calc(100vh - 260px)" }}>
+            <div className="grid grid-cols-12 h-full">
+                <div className="col-span-4 border-r border-slate-200 overflow-y-auto" data-testid="chat-portale-lista">
+                    {clienti === null ? <Loading /> : clienti.length === 0 ? (
+                        <Empty message="Nessun cliente ha ancora scritto dal portale" />
+                    ) : (
+                        <ul className="divide-y divide-slate-100">
+                            {clienti.map((c) => (
+                                <li key={c.anagrafica_id}
+                                    onClick={() => setSel(c)}
+                                    data-testid={`chat-portale-${c.anagrafica_id}`}
+                                    className={`px-4 py-3 cursor-pointer hover:bg-slate-50 ${sel?.anagrafica_id === c.anagrafica_id ? "bg-sky-50 border-l-2 border-sky-600" : ""}`}>
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center text-sm font-medium">
+                                            {(c.cliente_nome || "?").charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-medium text-slate-900 truncate flex items-center justify-between gap-2">
+                                                <span className="truncate">{c.cliente_nome}</span>
+                                                {c.unread > 0 && (
+                                                    <span className="bg-sky-600 text-white rounded-full text-[10px] px-1.5 py-0.5 min-w-[18px] text-center">
+                                                        {c.unread}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-xs text-slate-500 truncate">
+                                                {c.ultimo_messaggio?.direzione === "in" ? "↩ " : "↪ "}
+                                                {c.ultimo_messaggio?.testo?.slice(0, 40)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                <div className="col-span-8 flex flex-col" data-testid="chat-portale-conv">
+                    {!sel ? (
+                        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+                            <div className="text-center">
+                                <UserCircle2 size={32} className="mx-auto mb-2 text-slate-300" />
+                                Seleziona un cliente per rispondere
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                                <div>
+                                    <div className="font-medium text-slate-900">{sel.cliente_nome}</div>
+                                    <div className="text-xs text-slate-500">Chat via Portale Cliente</div>
+                                </div>
+                                <a href={`/anagrafiche/${sel.anagrafica_id}`}
+                                   className="text-xs text-sky-700 hover:underline">Apri anagrafica →</a>
+                            </div>
+                            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2 bg-slate-50">
+                                {msgs.length === 0 ? (
+                                    <div className="text-center text-slate-400 text-sm py-8">
+                                        Nessun messaggio ancora
+                                    </div>
+                                ) : msgs.map((m) => {
+                                    const mine = m.direzione === "out";  // agenzia
+                                    return (
+                                        <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-portale-${m.id}`}>
+                                            <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${mine ? "bg-sky-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
+                                                <div className="whitespace-pre-wrap break-words">{m.testo}</div>
+                                                <div className={`text-[10px] mt-1 ${mine ? "text-sky-100" : "text-slate-400"}`}>
+                                                    {m.mittente_admin_nome ? `${m.mittente_admin_nome} · ` : ""}
+                                                    {new Date(m.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <form onSubmit={invia} className="border-t border-slate-200 p-3 flex gap-2 bg-white items-center">
+                                <Input placeholder="Rispondi al cliente…" value={text}
+                                       onChange={(e) => setText(e.target.value)}
+                                       data-testid="chat-portale-input" />
+                                <Button type="submit" disabled={sending || !text.trim()}
+                                        data-testid="chat-portale-send"
+                                        className="bg-sky-700 hover:bg-sky-800">
+                                    <Send size={14} />
+                                </Button>
+                            </form>
+                        </>
+                    )}
+                </div>
+            </div>
+        </Card>
     );
 }
