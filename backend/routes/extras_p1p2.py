@@ -540,7 +540,7 @@ async def migra_intestatari(
 
     # Scorri le applicazioni con intestatario testuale ma senza anagrafica_id
     filtro = {
-        "intestatario": {"$exists": True, "$ne": None, "$ne": ""},
+        "intestatario": {"$exists": True, "$nin": [None, ""]},
         "$or": [
             {"intestatario_anagrafica_id": {"$exists": False}},
             {"intestatario_anagrafica_id": None},
@@ -590,6 +590,148 @@ async def migra_intestatari(
                 })
 
     return stats
+
+
+@router.get("/libro-matricola/intestatari-ambigui")
+async def list_intestatari_ambigui(
+    user=Depends(require_user("admin", "collaboratore")),
+) -> list[dict]:
+    """Lista dei gruppi di applicazioni con intestatario ambiguo (>1 anagrafica
+    corrispondente al testo). Per ogni gruppo restituisce:
+      - `intestatario`: testo originale
+      - `n_applicazioni`: quante applicazioni sono da risolvere
+      - `applicazione_ids`: gli id delle applicazioni coinvolte
+      - `candidati`: elenco anagrafiche candidate (con CF/PIVA/città per distinguerle)
+    """
+    # Indice anagrafiche
+    anas = await db.anagrafiche.find(
+        {}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
+             "cognome_nome": 1, "codice_fiscale": 1, "partita_iva": 1,
+             "comune_residenza": 1, "provincia_residenza": 1, "tipo_soggetto": 1},
+    ).to_list(50000)
+    index: dict = {}
+    ana_by_id: dict = {}
+    for a in anas:
+        ana_by_id[a["id"]] = a
+        candidates = [
+            a.get("ragione_sociale"),
+            a.get("cognome_nome"),
+            f"{a.get('cognome') or ''} {a.get('nome') or ''}".strip(),
+            f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip(),
+        ]
+        for c in candidates:
+            key = _norm_intestatario(c)
+            if key:
+                index.setdefault(key, []).append(a["id"])
+    # Dedup ids
+    for k in list(index.keys()):
+        index[k] = list(dict.fromkeys(index[k]))
+
+    # Scorri le applicazioni senza anagrafica collegata e raggruppa per intestatario
+    apps = await db.applicazioni.find(
+        {"intestatario": {"$exists": True, "$nin": [None, ""]},
+         "$or": [
+             {"intestatario_anagrafica_id": {"$exists": False}},
+             {"intestatario_anagrafica_id": None},
+             {"intestatario_anagrafica_id": ""},
+         ]},
+        {"_id": 0, "id": 1, "intestatario": 1, "polizza_id": 1, "targa": 1},
+    ).to_list(100000)
+
+    gruppi: dict = {}  # {norm_key: {"intestatario": txt, "apps": [...], "candidati_ids": [...]}}
+    for app in apps:
+        key = _norm_intestatario(app.get("intestatario") or "")
+        if not key:
+            continue
+        ids = index.get(key, [])
+        if len(ids) <= 1:
+            continue  # non ambiguo (o non trovato)
+        g = gruppi.setdefault(key, {
+            "intestatario": app["intestatario"],
+            "apps": [],
+            "candidati_ids": ids,
+        })
+        g["apps"].append(app)
+
+    # Arricchisci i candidati con dati anagrafica
+    out: list = []
+    for key, g in gruppi.items():
+        candidati = []
+        for aid in g["candidati_ids"]:
+            a = ana_by_id.get(aid)
+            if not a:
+                continue
+            # Conta polizze/applicazioni già collegate a questa anagrafica
+            n_polizze = await db.polizze.count_documents({"contraente_id": aid})
+            n_apps = await db.applicazioni.count_documents({"intestatario_anagrafica_id": aid})
+            candidati.append({
+                "id": aid,
+                "label": a.get("ragione_sociale") or a.get("cognome_nome")
+                         or f"{a.get('cognome','')} {a.get('nome','')}".strip(),
+                "codice_fiscale": a.get("codice_fiscale"),
+                "partita_iva": a.get("partita_iva"),
+                "comune": a.get("comune_residenza"),
+                "provincia": a.get("provincia_residenza"),
+                "tipo_soggetto": a.get("tipo_soggetto"),
+                "n_polizze_collegate": n_polizze,
+                "n_applicazioni_collegate": n_apps,
+            })
+        out.append({
+            "intestatario": g["intestatario"],
+            "n_applicazioni": len(g["apps"]),
+            "applicazione_ids": [x["id"] for x in g["apps"]],
+            "polizze_esempio": list({x.get("polizza_id") for x in g["apps"] if x.get("polizza_id")})[:5],
+            "targhe_esempio": [x.get("targa") for x in g["apps"] if x.get("targa")][:5],
+            "candidati": candidati,
+        })
+    # Ordina per numero applicazioni desc (le più impattanti prima)
+    out.sort(key=lambda g: g["n_applicazioni"], reverse=True)
+    return out
+
+
+class RisolviAmbiguoBody(BaseModel):
+    intestatario: str
+    anagrafica_id: str
+    applicazione_ids: Optional[list[str]] = None  # se None → tutte quelle con questo intestatario
+
+
+@router.post("/libro-matricola/risolvi-ambiguo")
+async def risolvi_ambiguo(
+    body: RisolviAmbiguoBody,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Collega manualmente un intestatario ambiguo alla anagrafica scelta.
+    Se `applicazione_ids` è fornito, aggiorna solo quelle; altrimenti tutte le
+    applicazioni con lo stesso `intestatario` (case-insensitive) e senza collegamento."""
+    # Verifica esistenza anagrafica
+    ana = await db.anagrafiche.find_one({"id": body.anagrafica_id}, {"_id": 0, "id": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+
+    if body.applicazione_ids:
+        flt = {"id": {"$in": body.applicazione_ids}}
+    else:
+        # Match case-insensitive via regex sull'intero valore
+        rx = "^" + re.escape(body.intestatario.strip()) + "$"
+        flt = {
+            "intestatario": {"$regex": rx, "$options": "i"},
+            "$or": [
+                {"intestatario_anagrafica_id": {"$exists": False}},
+                {"intestatario_anagrafica_id": None},
+                {"intestatario_anagrafica_id": ""},
+            ],
+        }
+    res = await db.applicazioni.update_many(
+        flt,
+        {"$set": {"intestatario_anagrafica_id": body.anagrafica_id,
+                  "updated_at": _now_iso()}},
+    )
+    return {
+        "ok": True,
+        "aggiornate": res.modified_count,
+        "anagrafica_id": body.anagrafica_id,
+        "intestatario": body.intestatario,
+    }
 
 
 class CessazioneBody(BaseModel):

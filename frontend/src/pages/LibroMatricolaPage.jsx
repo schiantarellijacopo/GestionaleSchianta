@@ -34,6 +34,7 @@ export default function LibroMatricolaPage() {
     const [newAppPol, setNewAppPol] = useState(null);
     const [migrating, setMigrating] = useState(false);
     const [migrationReport, setMigrationReport] = useState(null);
+    const [ambiguousGroups, setAmbiguousGroups] = useState(null);
 
     const load = () => {
         const params = {};
@@ -121,6 +122,21 @@ export default function LibroMatricolaPage() {
                         className="text-[11px] border-violet-300 text-violet-700 hover:bg-violet-50"
                         data-testid="lm-migra-intestatari-btn">
                     <Building2 size={11} className="mr-1" /> {migrating ? "…" : "Migra intestatari → Anagrafiche"}
+                </Button>
+                <Button size="sm" variant="outline"
+                        onClick={async () => {
+                            try {
+                                const r = await api.get("/libro-matricola/intestatari-ambigui");
+                                if (!r.data || r.data.length === 0) {
+                                    toast.info("Nessun intestatario ambiguo da risolvere 🎉");
+                                    return;
+                                }
+                                setAmbiguousGroups(r.data);
+                            } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+                        }}
+                        className="text-[11px] border-amber-300 text-amber-700 hover:bg-amber-50"
+                        data-testid="lm-risolvi-ambigui-btn">
+                    <AlertTriangle size={11} className="mr-1" /> Risolvi ambigui
                 </Button>
                 <div className="text-xs text-slate-500 ml-auto font-mono">
                     {polizze?.length || 0} polizze
