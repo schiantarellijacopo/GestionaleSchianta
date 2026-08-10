@@ -993,6 +993,52 @@ async def _create_crm_attachment(
     if not entita_id:
         return
 
+    # ── Enrichment: applicazione_matricola_id (per polizze Libro Matricola)
+    # e link a titolo (per quietanze).
+    data_ocr = classification.get("dati_estratti") or {}
+    applicazione_matricola_id = None
+    titolo_id_for_quietanza = None
+
+    # 1) Se la polizza è Libro Matricola e c'è una targa → match applicazione
+    if pol and pol.get("is_libro_matricola") and data_ocr.get("targa"):
+        targa_up = data_ocr["targa"].upper().strip()
+        app = await db.applicazioni.find_one(
+            {"polizza_id": pol["id"], "targa": {"$regex": f"^{targa_up}$", "$options": "i"}},
+            {"_id": 0, "id": 1},
+        )
+        if app:
+            applicazione_matricola_id = app["id"]
+            logger.info("Libro Matricola: allegato collegato all'applicazione %s (targa %s)",
+                       app["id"], targa_up)
+
+    # 2) Se è una quietanza e la polizza è nota → prova a linkare al titolo
+    # (SOLO se il titolo è già `incassato` o `pendente` — ovvero pagato o in copertura).
+    if tipo_doc == "quietanza" and pol:
+        num_titolo = (data_ocr.get("numero_titolo") or "").strip()
+        data_pag = (data_ocr.get("data_pagamento") or "").strip()
+        titolo = None
+        if num_titolo:
+            titolo = await db.titoli.find_one(
+                {"polizza_id": pol["id"], "numero_titolo": num_titolo,
+                 "stato": {"$in": ["incassato", "pendente"]}},
+                {"_id": 0, "id": 1, "stato": 1},
+            )
+        if not titolo and data_pag:
+            # Match per periodo: data_pagamento cade tra effetto e scadenza del titolo
+            titolo = await db.titoli.find_one(
+                {"polizza_id": pol["id"],
+                 "data_effetto": {"$lte": data_pag},
+                 "data_scadenza": {"$gte": data_pag},
+                 "stato": {"$in": ["incassato", "pendente"]}},
+                {"_id": 0, "id": 1, "stato": 1},
+            )
+        if titolo:
+            # Sposta l'allegato dalla polizza al TITOLO specifico
+            titolo_id_for_quietanza = titolo["id"]
+            entita_tipo = "titolo"
+            entita_id = titolo["id"]
+            logger.info("Quietanza collegata al titolo %s (stato %s)", titolo["id"], titolo["stato"])
+
     allegato_id = str(uuid.uuid4())
     # Deduplica: se esiste già lo stesso allegato (entità + nome + fonte), skip
     existing = await db.allegati.find_one({
@@ -1025,6 +1071,9 @@ async def _create_crm_attachment(
         "storage_path": storage_path,
         "descrizione": f"Importato automaticamente da Google Drive OCR ({tipo_doc})",
         "fonte": "cloud_ocr_scan",
+        # Se il file è collegato a una specifica applicazione di libro matricola
+        # (matching per targa), lo colleghiamo qui così appare nella tab del veicolo.
+        "applicazione_matricola_id": applicazione_matricola_id,
         # Categorie visibili al cliente (allineato al banner UI PolizzaDetail/AnagraficaDetail):
         #  - Documenti identità/anagrafica (banner Anagrafica: "sempre visibili al cliente"):
         #    carta_identita, patente, passaporto, codice_fiscale, privacy,

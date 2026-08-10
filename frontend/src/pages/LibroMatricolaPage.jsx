@@ -194,6 +194,21 @@ export default function LibroMatricolaPage() {
                     onClose={() => setMigrationReport(null)}
                 />
             )}
+            {ambiguousGroups && (
+                <AmbiguiWizardDialog
+                    groups={ambiguousGroups}
+                    onResolved={(remaining) => {
+                        if (!remaining || remaining.length === 0) {
+                            toast.success("Tutti gli intestatari ambigui risolti 🎉");
+                            setAmbiguousGroups(null);
+                            load();
+                        } else {
+                            setAmbiguousGroups(remaining);
+                        }
+                    }}
+                    onClose={() => { setAmbiguousGroups(null); load(); }}
+                />
+            )}
         </div>
     );
 }
@@ -708,4 +723,139 @@ function MigrationReportDialog({ report, onConfirm, onClose }) {
         </Dialog>
     );
 }
+
+
+/** Wizard per risolvere manualmente gli intestatari ambigui (>1 anagrafica match).
+ * Mostra un gruppo alla volta con:
+ *  - il testo intestatario e il numero di applicazioni impattate
+ *  - le anagrafiche candidate con dati distintivi (CF/PIVA/città/n° polizze già collegate)
+ *  - selezione radio + "Applica a tutte" o "Salta questo gruppo"
+ */
+function AmbiguiWizardDialog({ groups, onResolved, onClose }) {
+    const [index, setIndex] = useState(0);
+    const [selectedId, setSelectedId] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const current = groups[index];
+
+    if (!current) return null;
+
+    const applica = async () => {
+        if (!selectedId) { toast.error("Seleziona un'anagrafica"); return; }
+        setBusy(true);
+        try {
+            const r = await api.post("/libro-matricola/risolvi-ambiguo", {
+                intestatario: current.intestatario,
+                anagrafica_id: selectedId,
+                applicazione_ids: current.applicazione_ids,
+            });
+            toast.success(`Collegate ${r.data.aggiornate} applicazioni a ${current.candidati.find(c => c.id === selectedId)?.label}`);
+            // Rimuovi il gruppo appena risolto
+            const remaining = groups.filter((_, i) => i !== index);
+            setSelectedId(null);
+            if (remaining.length === 0) {
+                onResolved([]);
+            } else {
+                // Passa al successivo (se era l'ultimo, torna al primo)
+                setIndex(i => Math.min(i, remaining.length - 1));
+                onResolved(remaining);
+            }
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore risoluzione"); }
+        finally { setBusy(false); }
+    };
+
+    const salta = () => {
+        setSelectedId(null);
+        if (index + 1 < groups.length) {
+            setIndex(index + 1);
+        } else {
+            toast.info("Fine gruppi da risolvere.");
+            onClose();
+        }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-3xl" data-testid="lm-ambigui-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <AlertTriangle className="text-amber-600" size={16} />
+                        Risolvi intestatari ambigui — {index + 1} / {groups.length}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+                        <div className="text-xs text-amber-700 uppercase tracking-wider mb-1">Intestatario da collegare</div>
+                        <div className="text-lg font-bold text-slate-800">{current.intestatario}</div>
+                        <div className="text-xs text-slate-600 mt-1">
+                            <b>{current.n_applicazioni}</b> applicazioni impattate
+                            {current.targhe_esempio?.length > 0 && (
+                                <> · Targhe esempio: <span className="font-mono">{current.targhe_esempio.slice(0, 4).join(", ")}
+                                {current.targhe_esempio.length > 4 && "…"}</span></>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs font-semibold text-slate-700 mb-2">
+                            Scegli l&apos;anagrafica corretta:
+                        </div>
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                            {current.candidati.map((c) => {
+                                const isSel = selectedId === c.id;
+                                const dettagli = [c.codice_fiscale, c.partita_iva, c.comune, c.provincia]
+                                    .filter(Boolean).join(" · ");
+                                return (
+                                    <button key={c.id}
+                                        onClick={() => setSelectedId(c.id)}
+                                        className={`w-full text-left border rounded p-3 transition ${
+                                            isSel ? "border-sky-500 bg-sky-50 ring-2 ring-sky-200" : "border-slate-200 hover:border-slate-400"
+                                        }`}
+                                        data-testid={`ambiguo-candidato-${c.id}`}>
+                                        <div className="flex items-start gap-2">
+                                            <input type="radio" checked={isSel} onChange={() => setSelectedId(c.id)}
+                                                   className="mt-1" readOnly />
+                                            <div className="flex-1">
+                                                <div className="font-semibold text-sm">{c.label}
+                                                    <span className="ml-2 text-[10px] text-slate-500 uppercase">
+                                                        {c.tipo_soggetto || "—"}
+                                                    </span>
+                                                </div>
+                                                {dettagli && (
+                                                    <div className="text-[11px] text-slate-500 mt-0.5 font-mono">{dettagli}</div>
+                                                )}
+                                                <div className="text-[10px] text-slate-500 mt-1 flex gap-3">
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <FileText size={10} /> {c.n_polizze_collegate} polizze
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <ClipboardList size={10} /> {c.n_applicazioni_collegate} applicazioni
+                                                    </span>
+                                                    <Link to={`/anagrafiche/${c.id}`} target="_blank"
+                                                          className="text-sky-700 hover:underline ml-auto">
+                                                        Apri scheda →
+                                                    </Link>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+                <DialogFooter className="flex-wrap gap-2">
+                    <Button variant="ghost" onClick={onClose}>Chiudi</Button>
+                    <Button variant="outline" onClick={salta} data-testid="ambiguo-salta">
+                        Salta questo →
+                    </Button>
+                    <Button onClick={applica} disabled={busy || !selectedId}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            data-testid="ambiguo-applica">
+                        {busy ? "…" : `Applica a tutte le ${current.n_applicazioni} applicazioni`}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
