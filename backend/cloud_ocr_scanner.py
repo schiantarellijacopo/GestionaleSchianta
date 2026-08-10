@@ -72,14 +72,50 @@ Regole:
 """
 
 
+async def _pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
+    """Converte la PRIMA PAGINA di un PDF in un PNG (da passare a Gemini Vision).
+
+    Uso pypdfium2 perché è già installato e non richiede poppler-utils.
+    """
+    import pypdfium2 as pdfium
+    from io import BytesIO
+    pdf = pdfium.PdfDocument(pdf_bytes)
+    if len(pdf) == 0:
+        raise ValueError("PDF vuoto")
+    page = pdf[0]
+    # Renderizza a 200 DPI (compromesso qualità/dimensione per Gemini)
+    pil_image = page.render(scale=200 / 72).to_pil()
+    # Se pagina troppo grande, ridimensiona (Gemini accetta max ~4MB)
+    max_dim = 2000
+    if max(pil_image.size) > max_dim:
+        ratio = max_dim / max(pil_image.size)
+        new_size = (int(pil_image.size[0] * ratio), int(pil_image.size[1] * ratio))
+        pil_image = pil_image.resize(new_size)
+    buf = BytesIO()
+    pil_image.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
 async def _classify_document(file_bytes: bytes, mime: str) -> dict:
-    """Chiama Gemini Vision per classificare + estrarre dati."""
+    """Chiama Gemini Vision per classificare + estrarre dati.
+
+    Se il file è PDF, converte la prima pagina in PNG (Gemini Vision accetta
+    solo immagini). File multi-pagina: viene classificata solo la prima.
+    """
     from emergentintegrations.llm.chat import (
         LlmChat, UserMessage, ImageContent, TextDelta, StreamDone,
     )
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise RuntimeError("EMERGENT_LLM_KEY non configurata")
+
+    # Conversione PDF → immagine se necessario
+    if mime == "application/pdf" or file_bytes[:4] == b"%PDF":
+        try:
+            file_bytes = await _pdf_to_image_bytes(file_bytes)
+        except Exception as e:
+            logger.warning("Conversione PDF→image fallita (%s): fallback su bytes originali", e)
+
     b64 = base64.b64encode(file_bytes).decode("ascii")
     img = ImageContent(image_base64=b64)
     chat = LlmChat(
@@ -99,6 +135,7 @@ async def _classify_document(file_bytes: bytes, mime: str) -> dict:
     raw = re.sub(r"```$", "", raw).strip()
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
+        logger.warning("Gemini classify: risposta senza JSON: %s", raw[:200])
         return {"tipo_documento": "altro", "confidenza": "bassa", "dati_estratti": {}}
     try:
         parsed = json.loads(match.group(0))
@@ -114,23 +151,31 @@ async def _classify_document(file_bytes: bytes, mime: str) -> dict:
 # MATCHING nel CRM
 # ============================================================
 async def _find_anagrafica(db, tenant_id: str, data: dict) -> Optional[dict]:
-    """Cerca l'anagrafica per CF/P.IVA."""
+    """Cerca l'anagrafica per CF/P.IVA (tenant-safe: matcha anche legacy senza tenant_id)."""
     cf = (data.get("codice_fiscale") or "").upper().strip()
     piva = (data.get("partita_iva") or "").strip()
-    q = {"tenant_id": tenant_id}
+    tenant_q = {"$or": [{"tenant_id": tenant_id}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}]}
     if cf:
         a = await db.anagrafiche.find_one(
-            {**q, "codice_fiscale": cf},
-            {"_id": 0, "id": 1, "cognome_nome": 1, "codice_fiscale": 1},
+            {**tenant_q, "codice_fiscale": cf},
+            {"_id": 0, "id": 1, "cognome_nome": 1, "cognome": 1, "nome": 1,
+             "ragione_sociale": 1, "codice_fiscale": 1},
         )
         if a:
+            a["cognome_nome"] = (a.get("cognome_nome")
+                                  or a.get("ragione_sociale")
+                                  or f"{a.get('cognome','')} {a.get('nome','')}".strip())
             return a
     if piva:
         a = await db.anagrafiche.find_one(
-            {**q, "partita_iva": piva},
-            {"_id": 0, "id": 1, "cognome_nome": 1, "partita_iva": 1},
+            {**tenant_q, "partita_iva": piva},
+            {"_id": 0, "id": 1, "cognome_nome": 1, "cognome": 1, "nome": 1,
+             "ragione_sociale": 1, "partita_iva": 1},
         )
         if a:
+            a["cognome_nome"] = (a.get("cognome_nome")
+                                  or a.get("ragione_sociale")
+                                  or f"{a.get('cognome','')} {a.get('nome','')}".strip())
             return a
     return None
 
@@ -139,22 +184,84 @@ async def _find_polizza(db, tenant_id: str, data: dict) -> Optional[dict]:
     """Cerca la polizza per numero_polizza o per targa."""
     num = (data.get("numero_polizza") or "").strip()
     targa = (data.get("targa") or "").upper().strip()
-    q = {"tenant_id": tenant_id}
+    tenant_q = {"$or": [{"tenant_id": tenant_id}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}]}
     if num:
         p = await db.polizze.find_one(
-            {**q, "numero_polizza": num},
+            {**tenant_q, "numero_polizza": num},
             {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "targa": 1},
         )
         if p:
             return p
     if targa:
         p = await db.polizze.find_one(
-            {**q, "targa": targa, "stato": {"$in": ["attiva", "sospesa"]}},
+            {**tenant_q, "targa": targa, "stato": {"$in": ["attiva", "sospesa"]}},
             {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "targa": 1},
         )
         if p:
             return p
     return None
+
+
+async def _find_or_create_anagrafica(db, tenant_id: str, data: dict) -> tuple:
+    """Cerca anagrafica per CF/P.IVA. Se non trovata E ci sono dati sufficienti,
+    la crea automaticamente e ritorna (anagrafica, was_created).
+
+    Ritorna: (ana | None, bool_created)
+    """
+    ana = await _find_anagrafica(db, tenant_id, data)
+    if ana:
+        return ana, False
+
+    cf = (data.get("codice_fiscale") or "").upper().strip()
+    piva = (data.get("partita_iva") or "").strip()
+    cognome = (data.get("cognome") or "").strip().upper()
+    nome = (data.get("nome") or "").strip().upper()
+
+    # Servono almeno CF (persona fisica) o P.IVA (giuridica) + un nome/ragione
+    if not (cf or piva):
+        return None, False
+    if not (cognome or nome):
+        return None, False
+
+    from uuid import uuid4
+    now = datetime.now(timezone.utc).isoformat()
+    is_persona_giuridica = bool(piva) and not cf
+    ana_id = str(uuid4())
+    doc = {
+        "id": ana_id,
+        "tenant_id": tenant_id if tenant_id != "default" else None,
+        "tipo": "persona_giuridica" if is_persona_giuridica else "persona_fisica",
+        "created_at": now, "updated_at": now,
+        "fonte": "ocr_cloud_drive",
+        "note_interne": "Anagrafica creata automaticamente dallo scan OCR notturno del Google Drive/OneDrive",
+    }
+    if is_persona_giuridica:
+        doc["ragione_sociale"] = cognome or nome  # in questo caso "cognome" è il nome ditta
+        doc["partita_iva"] = piva
+        doc["cognome_nome"] = doc["ragione_sociale"]
+        if cf:
+            doc["codice_fiscale"] = cf
+    else:
+        doc["cognome"] = cognome or "SCONOSCIUTO"
+        doc["nome"] = nome or ""
+        doc["cognome_nome"] = f"{doc['cognome']} {doc['nome']}".strip()
+        if cf:
+            doc["codice_fiscale"] = cf
+        if piva:
+            doc["partita_iva"] = piva
+        # Aggiungi data scadenza documento se estratta (per calendar reminder)
+        scad = data.get("data_scadenza")
+        if scad:
+            doc["scadenza_documento_identita"] = scad
+
+    try:
+        await db.anagrafiche.insert_one(doc)
+        # Rimuovi _id per output pulito
+        doc.pop("_id", None)
+        return doc, True
+    except Exception as e:
+        logger.warning("Impossibile creare anagrafica auto (CF=%s): %s", cf, e)
+        return None, False
 
 
 async def _find_sinistro(db, tenant_id: str, data: dict) -> Optional[dict]:
@@ -163,7 +270,8 @@ async def _find_sinistro(db, tenant_id: str, data: dict) -> Optional[dict]:
     if not num:
         return None
     return await db.sinistri.find_one(
-        {"tenant_id": tenant_id, "numero_sinistro": num},
+        {"$or": [{"tenant_id": tenant_id}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}],
+         "numero_sinistro": num},
         {"_id": 0, "id": 1, "polizza_id": 1, "contraente_id": 1, "numero_sinistro": 1},
     )
 
@@ -269,6 +377,7 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
 
     report = {
         "letti": len(files), "abbinati": 0, "in_attesa": 0,
+        "anagrafiche_create": 0,
         "errori": [], "entries": [], "provider": provider,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -281,6 +390,8 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
                 report["abbinati"] += 1
             else:
                 report["in_attesa"] += 1
+            if entry.get("anagrafica_creata"):
+                report["anagrafiche_create"] += 1
         except Exception as e:
             logger.exception("Errore processing file %s", f.get("name"))
             report["errori"].append({"file": f.get("name"), "error": str(e)[:200]})
@@ -404,8 +515,8 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
 
     data = classification.get("dati_estratti") or {}
 
-    # Match nel CRM
-    ana = await _find_anagrafica(db, tenant_id, data)
+    # Match nel CRM (crea anagrafica automaticamente se manca e ci sono dati sufficienti)
+    ana, anagrafica_creata = await _find_or_create_anagrafica(db, tenant_id, data)
     pol = await _find_polizza(db, tenant_id, data)
     sin = await _find_sinistro(db, tenant_id, data)
 
@@ -444,15 +555,20 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     # Se abbinato ad anagrafica → log nel Diario Cliente
     if ana:
         try:
+            titolo_diario = (f"👤 Anagrafica creata da OCR: {classification.get('tipo_documento', 'documento')}"
+                             if anagrafica_creata
+                             else f"📄 OCR notturno: {classification.get('tipo_documento', 'documento')}")
             await db.diario_voci.insert_one({
                 "tenant_id": tenant_id,
                 "anagrafica_id": ana["id"],
                 "tipo": "documento_ocr",
-                "titolo": f"📄 OCR notturno: {classification.get('tipo_documento', 'documento')}",
-                "descrizione": f"File '{name}' letto e archiviato in {' / '.join(dest_segments)}",
+                "titolo": titolo_diario,
+                "descrizione": (f"File '{name}' letto e archiviato in {' / '.join(dest_segments)}."
+                                + (" Anagrafica creata automaticamente dai dati estratti." if anagrafica_creata else "")),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "autore": "OCR Automatico",
-                "meta": {"file_id": file_id, "provider": provider},
+                "meta": {"file_id": file_id, "provider": provider,
+                         "anagrafica_creata": anagrafica_creata},
             })
         except Exception as e:
             logger.debug("Skip log diario: %s", e)
@@ -485,6 +601,8 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         "routed_to": category,
         "routed_path": " / ".join(dest_segments),
         "matched_anagrafica": (ana or {}).get("cognome_nome"),
+        "anagrafica_creata": anagrafica_creata,
+        "anagrafica_id": (ana or {}).get("id") if anagrafica_creata else None,
         "matched_polizza": (pol or {}).get("numero_polizza"),
         "matched_sinistro": (sin or {}).get("numero_sinistro"),
     }
