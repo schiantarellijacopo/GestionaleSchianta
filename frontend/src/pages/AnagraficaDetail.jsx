@@ -398,7 +398,23 @@ function DatiTab({ ana, canEdit, onReload }) {
 
     return (
         <Card className="p-6 border-slate-200 mt-4">
-            <h3 className="font-medium text-slate-900 mb-4">Modifica anagrafica</h3>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h3 className="font-medium text-slate-900">Modifica anagrafica</h3>
+                <button
+                    onClick={async () => {
+                        if (!window.confirm("Vuoi inviare le credenziali del Portale Cliente a questo cliente via Email + WhatsApp?")) return;
+                        try {
+                            const r = await api.post(`/anagrafiche/${f.id}/invia-credenziali-portale`);
+                            const canali = [r.data.email_inviata && "Email", r.data.whatsapp_inviato && "WhatsApp"].filter(Boolean).join(" + ");
+                            toast.success(`Credenziali inviate via ${canali || "nessun canale disponibile"}`);
+                        } catch (e) { toast.error(e.response?.data?.detail || "Errore invio"); }
+                    }}
+                    className="text-xs px-3 py-1.5 rounded border border-sky-300 text-sky-700 hover:bg-sky-50 font-medium"
+                    data-testid="invia-credenziali-portale-btn"
+                >
+                    📩 Invia credenziali Portale Cliente
+                </button>
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div><Label>Ragione sociale</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
                 <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>

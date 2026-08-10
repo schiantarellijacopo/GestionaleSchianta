@@ -10,6 +10,8 @@ import AnagraficaDetail from "@/pages/AnagraficaDetail";
 import Polizze from "@/pages/Polizze";
 import PolizzaDetail from "@/pages/PolizzaDetail";
 import PortaleCliente from "@/pages/PortaleCliente";
+import UploadDocPublic from "@/pages/UploadDocPublic";
+import RichiesteCliente from "@/pages/RichiesteCliente";
 import Titoli from "@/pages/Titoli";
 import TitoliStorici from "@/pages/TitoliStorici";
 import Alert from "@/pages/Alert";
@@ -70,6 +72,7 @@ function App() {
                         <Route path="/login" element={<Login />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
                         <Route path="/portale/*" element={<PortaleCliente />} />
+                        <Route path="/upload-doc" element={<UploadDocPublic />} />
 
                         {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}
                         <Route
@@ -94,6 +97,7 @@ function App() {
                             <Route path="/anagrafiche/:id" element={<AnagraficaDetail />} />
                             <Route path="/polizze" element={<Polizze />} />
                             <Route path="/polizze/:id" element={<PolizzaDetail />} />
+                            <Route path="/richieste-cliente" element={<RichiesteCliente />} />
                             <Route path="/titoli" element={<Titoli />} />
                             <Route path="/titoli-storici" element={<TitoliStorici />} />
                             <Route path="/alert" element={<Alert />} />

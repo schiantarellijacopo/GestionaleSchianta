@@ -11432,6 +11432,113 @@ app.include_router(_router_upload_public)
 from portale_cliente import router as _router_portale_cliente
 app.include_router(_router_portale_cliente)
 
+
+# ─── Router post-hoc con endpoint admin per gestire il portale ───
+_extra = APIRouter(prefix="/api")
+
+
+@_extra.get("/richieste-cliente")
+async def _list_richieste_cliente(
+    stato: Optional[str] = None,
+    tipo: Optional[str] = None,
+    limit: int = 200,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    flt: dict = {}
+    if stato: flt["stato"] = stato
+    if tipo: flt["tipo"] = tipo
+    tid = user.get("tenant_id")
+    if tid: flt["tenant_id"] = tid
+    items = await db.richieste_cliente.find(flt, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return items
+
+
+@_extra.post("/richieste-cliente/{rid}/approva")
+async def _approva_richiesta_cliente(rid: str, user=Depends(require_user("admin"))):
+    r = await db.richieste_cliente.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Richiesta non trovata")
+    if r.get("tipo") == "modifica_anagrafica" and r.get("modifiche_richieste"):
+        upd = {k: v for k, v in r["modifiche_richieste"].items() if v is not None}
+        if upd:
+            await db.anagrafiche.update_one({"id": r["cliente_id"]}, {"$set": upd})
+    await db.richieste_cliente.update_one(
+        {"id": rid},
+        {"$set": {"stato": "approvata", "approvata_da": user.get("id"),
+                  "approvata_il": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True}
+
+
+@_extra.post("/richieste-cliente/{rid}/rifiuta")
+async def _rifiuta_richiesta_cliente(rid: str, body: dict = None,
+                                       user=Depends(require_user("admin"))):
+    motivo = (body or {}).get("motivo", "")
+    r = await db.richieste_cliente.update_one(
+        {"id": rid},
+        {"$set": {"stato": "rifiutata", "motivo_rifiuto": motivo,
+                  "rifiutata_da": user.get("id"),
+                  "rifiutata_il": datetime.now(timezone.utc).isoformat()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, "Richiesta non trovata")
+    return {"ok": True}
+
+
+@_extra.post("/anagrafiche/{aid}/invia-credenziali-portale")
+async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin", "collaboratore"))):
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    email = ana.get("email")
+    cellulare = ana.get("cellulare")
+    if not email:
+        raise HTTPException(400, "Manca email del cliente")
+    tipo = ana.get("tipo_soggetto") or "fisico"
+    pwd = ana.get("codice_fiscale") if tipo == "fisico" else ana.get("partita_iva")
+    if not pwd:
+        raise HTTPException(400, "Manca CF/P.IVA per la password iniziale")
+    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    link = f"{base_url}/portale" if base_url else "/portale"
+    nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip() or "Cliente"
+    oggetto = "Benvenuto nel Portale — accedi alle tue polizze"
+    corpo = (
+        f"Gentile {nome},\n\n"
+        f"le abbiamo attivato il nostro Portale Cliente per accedere in autonomia a polizze, "
+        f"quietanze, documenti e sinistri.\n\n"
+        f"🔗 Accedi qui: {link}\n"
+        f"📧 Username: {email}\n"
+        f"🔑 Password iniziale: il tuo {'Codice Fiscale' if tipo == 'fisico' else 'Partita IVA'}\n\n"
+        f"Un cordiale saluto"
+    )
+    inviato_email = False
+    inviato_wa = False
+    try:
+        await send_email(email, oggetto, corpo)
+        inviato_email = True
+    except Exception:
+        pass
+    try:
+        if cellulare:
+            await send_whatsapp_message(cellulare, corpo)
+            inviato_wa = True
+    except Exception:
+        pass
+    await db.notifiche_portale.insert_one({
+        "id": str(uuid.uuid4()),
+        "tenant_id": ana.get("tenant_id"),
+        "anagrafica_id": aid,
+        "tipo": "welcome_portale",
+        "email_inviata": inviato_email,
+        "whatsapp_inviato": inviato_wa,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True, "email_inviata": inviato_email, "whatsapp_inviato": inviato_wa,
+            "email": email, "cellulare": cellulare if inviato_wa else None}
+
+
+app.include_router(_extra)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
