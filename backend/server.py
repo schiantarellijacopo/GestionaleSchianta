@@ -6646,7 +6646,7 @@ async def calcola_redditi_analisi(aid: str, user=Depends(current_user)):
 @api.post("/anagrafiche/{aid}/analisi/calcola-successione")
 async def calcola_successione_analisi(aid: str, user=Depends(current_user)):
     """Calcola quote di successione (intestata e quote di legittima) basandosi
-    sull'albero genealogico (parente_di) dell'anagrafica."""
+    sulle Relazioni (parente_di) dell'anagrafica."""
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})

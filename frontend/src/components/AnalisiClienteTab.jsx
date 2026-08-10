@@ -782,7 +782,7 @@ function SuccessioneTab({ anagrafica_id, dirty }) {
 
             <Card className="p-4 border-amber-200 bg-amber-50/30">
                 <div className="text-xs text-amber-900">
-                    <strong>Nota:</strong> il calcolo si basa sull&apos;<em>albero genealogico</em> della scheda anagrafica e sul Codice Civile italiano
+                    <strong>Nota:</strong> il calcolo si basa sulle <em>Relazioni</em> della scheda anagrafica e sul Codice Civile italiano
                     (artt. 565-586 successione legittima · artt. 536-553 quote di legittima). Non considera donazioni in vita,
                     legati testamentari o disposizioni speciali. Per scenari complessi consultare un notaio.
                 </div>

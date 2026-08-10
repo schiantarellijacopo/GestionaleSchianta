@@ -342,6 +342,18 @@ async def allegati_by_entita(
                                         {"_id": 0, "id": 1})
         if not p:
             raise HTTPException(403, "Non autorizzato")
+        # I documenti veicolo possono essere salvati come entita_tipo="applicazione_matricola"
+        # oppure come entita_tipo="polizza" + campo applicazione_matricola_id (wizard gestionale).
+        # Ritorno l'UNIONE dei due casi.
+        items = await db.allegati.find({
+            "$or": [
+                {"entita_tipo": "applicazione_matricola", "entita_id": entita_id},
+                {"applicazione_matricola_id": entita_id},
+            ],
+            "visibile_cliente": True,
+            "is_deleted": {"$ne": True},
+        }, {"_id": 0}).sort("created_at", -1).to_list(500)
+        return items
     elif entita_tipo == "sinistro":
         s = await db.sinistri.find_one({"id": entita_id, "contraente_id": cliente["id"]},
                                          {"_id": 0, "id": 1})

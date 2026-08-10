@@ -818,7 +818,7 @@ function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick, onDelete, c
                     <td colSpan={canDelete ? 10 : 9} className="px-12 py-4">
                         {net.collegati.length === 0 ? (
                             <div className="text-xs text-slate-500 italic">
-                                Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Albero genealogico.
+                                Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Relazione.
                             </div>
                         ) : (
                             <>

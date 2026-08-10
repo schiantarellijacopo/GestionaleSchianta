@@ -178,7 +178,7 @@ export default function AnagraficaDetail() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     <TabsTrigger value="dati" data-testid="tab-dati">Anagrafica</TabsTrigger>
-                    <TabsTrigger value="albero" data-testid="tab-albero">Albero genealogico</TabsTrigger>
+                    <TabsTrigger value="albero" data-testid="tab-albero">Relazione</TabsTrigger>
                     <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.length})</TabsTrigger>
                     <TabsTrigger value="conti-correnti" data-testid="tab-conti-correnti">🏦 Conti Correnti</TabsTrigger>
                     <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Profilazione & GDPR</TabsTrigger>

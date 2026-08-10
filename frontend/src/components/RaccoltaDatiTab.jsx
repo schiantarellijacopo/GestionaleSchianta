@@ -45,7 +45,7 @@ const SEZIONI = [
         icon: Heart,
         color: "pink",
         campi: [
-            { key: "albero_genealogico", label: "Albero genealogico (genitori, fratelli, coniuge, figli)", type: "textarea", rows: 3 },
+            { key: "albero_genealogico", label: "Relazione (genitori, fratelli, coniuge, figli)", type: "textarea", rows: 3 },
             { key: "convivente_nascita", label: "Coniuge/Convivente: data e luogo di nascita", type: "text" },
             { key: "figli_dati", label: "Figli: nomi, date e luoghi di nascita", type: "textarea", rows: 2 },
             { key: "chi_dipende_da_chi", label: "Riepilogo: chi dipende da chi", type: "textarea", rows: 2 },
