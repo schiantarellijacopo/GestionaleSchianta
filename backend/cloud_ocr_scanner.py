@@ -998,6 +998,7 @@ async def _create_crm_attachment(
     data_ocr = classification.get("dati_estratti") or {}
     applicazione_matricola_id = None
     titolo_id_for_quietanza = None
+    titolo_periodo_desc = None  # es. "Quietanza · periodo 17/07/2026 → 29/07/2026"
 
     # 1) Se la polizza è Libro Matricola e c'è una targa → match applicazione
     if pol and pol.get("is_libro_matricola") and data_ocr.get("targa"):
@@ -1022,7 +1023,8 @@ async def _create_crm_attachment(
             titolo = await db.titoli.find_one(
                 {"polizza_id": pol["id"], "numero_titolo": num_titolo,
                  "stato": {"$in": VALID_STATI}},
-                {"_id": 0, "id": 1, "stato": 1},
+                {"_id": 0, "id": 1, "stato": 1, "data_effetto": 1, "data_scadenza": 1,
+                 "numero_titolo": 1},
             )
         if not titolo and data_pag:
             titolo = await db.titoli.find_one(
@@ -1030,20 +1032,33 @@ async def _create_crm_attachment(
                  "data_effetto": {"$lte": data_pag},
                  "data_scadenza": {"$gte": data_pag},
                  "stato": {"$in": VALID_STATI}},
-                {"_id": 0, "id": 1, "stato": 1},
+                {"_id": 0, "id": 1, "stato": 1, "data_effetto": 1, "data_scadenza": 1,
+                 "numero_titolo": 1},
             )
         if not titolo:
             # Fallback: se la polizza ha UN SOLO titolo valido, prendi quello
             candidates = await db.titoli.find(
                 {"polizza_id": pol["id"], "stato": {"$in": VALID_STATI}},
-                {"_id": 0, "id": 1, "stato": 1},
+                {"_id": 0, "id": 1, "stato": 1, "data_effetto": 1, "data_scadenza": 1,
+                 "numero_titolo": 1},
             ).to_list(5)
             if len(candidates) == 1:
                 titolo = candidates[0]
         if titolo:
             titolo_id_for_quietanza = titolo["id"]
-            logger.info("Quietanza: verrà collegata anche al titolo %s (stato %s)",
-                       titolo["id"], titolo["stato"])
+            # Costruisci descrizione "Quietanza · periodo dd/mm/yyyy → dd/mm/yyyy"
+            def _fmt(d):
+                try:
+                    return f"{d[8:10]}/{d[5:7]}/{d[0:4]}" if d and len(d) >= 10 else d
+                except Exception:
+                    return d
+            periodo = ""
+            if titolo.get("data_effetto") and titolo.get("data_scadenza"):
+                periodo = f" · periodo {_fmt(titolo['data_effetto'])} → {_fmt(titolo['data_scadenza'])}"
+            num = titolo.get("numero_titolo")
+            titolo_periodo_desc = f"Quietanza{' n°' + num if num else ''}{periodo}"
+            logger.info("Quietanza: verrà collegata anche al titolo %s (%s)",
+                       titolo["id"], titolo_periodo_desc)
 
     allegato_id = str(uuid.uuid4())
     # Deduplica: se esiste già lo stesso allegato (entità + nome + fonte), skip

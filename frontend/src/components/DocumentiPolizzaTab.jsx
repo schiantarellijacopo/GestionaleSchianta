@@ -153,8 +153,8 @@ export default function DocumentiPolizzaTab({ polizzaId, canEdit = true, onAfter
                                         </span>
                                     )}
                                 </td>
-                                <td className="num text-right text-xs">{fmtBytes(it.size_bytes)}</td>
-                                <td className="num text-xs">{fmtDate(it.uploaded_at)}</td>
+                                <td className="num text-right text-xs">{fmtBytes(it.size ?? it.size_bytes)}</td>
+                                <td className="num text-xs">{fmtDate(it.created_at ?? it.uploaded_at)}</td>
                                 <td className="text-center">
                                     <div className="flex justify-center gap-1">
                                         <a
