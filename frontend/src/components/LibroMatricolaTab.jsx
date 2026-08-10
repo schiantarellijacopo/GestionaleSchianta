@@ -12,6 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Link } from "react-router-dom";
 import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2 } from "lucide-react";
 import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
@@ -300,7 +301,18 @@ export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisc
                             <td className="num text-right">{a.valore_veicolo ? fmtEur(a.valore_veicolo) : "—"}</td>
                             <td className="num whitespace-nowrap">{fmtDate(a.scadenza_leasing) || "—"}</td>
                             <td className="truncate max-w-[260px]">
-                                {a.intestatario || a.note || "—"}
+                                {a.intestatario_anagrafica_id ? (
+                                    <Link to={`/anagrafiche/${a.intestatario_anagrafica_id}`}
+                                          className="text-sky-700 hover:underline"
+                                          title="Apri anagrafica collegata"
+                                          data-testid={`lm-anagrafica-link-${a.id}`}>
+                                        {a.intestatario || a.note || "—"}
+                                    </Link>
+                                ) : (
+                                    <span title={a.intestatario ? "Nessuna anagrafica collegata (testo libero)" : ""}>
+                                        {a.intestatario || a.note || "—"}
+                                    </span>
+                                )}
                                 {a.motivo_annullamento && (
                                     <div className="text-[10px] text-rose-700 italic">Motivo: {a.motivo_annullamento}</div>
                                 )}
