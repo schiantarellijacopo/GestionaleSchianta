@@ -1107,15 +1107,17 @@ async def _create_crm_attachment(
     # ── Se è una quietanza collegabile a un titolo, DUPLICA l'allegato sul titolo
     # (stesso storage_path, così l'utente lo vede sia nella tab Documenti della
     # polizza sia con l'icona 📎 sulla riga del titolo nella lista Titoli).
+    # Skip se sul titolo esiste GIÀ un qualsiasi allegato (rispetta upload manuale).
     if titolo_id_for_quietanza:
-        existing_t = await db.allegati.find_one({
+        any_existing = await db.allegati.find_one({
             "entita_tipo": "titolo",
             "entita_id": titolo_id_for_quietanza,
-            "nome_file": filename,
-            "fonte": "cloud_ocr_scan",
             "is_deleted": {"$ne": True},
-        }, {"_id": 0, "id": 1})
-        if not existing_t:
+        }, {"_id": 0, "id": 1, "fonte": 1})
+        if any_existing:
+            logger.info("Titolo %s ha già un allegato (fonte=%s), skip duplicazione",
+                       titolo_id_for_quietanza, any_existing.get("fonte"))
+        else:
             allegato_titolo = {
                 **allegato,
                 "id": str(uuid.uuid4()),
