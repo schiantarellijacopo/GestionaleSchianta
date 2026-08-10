@@ -460,7 +460,9 @@ function Loading() {
 function PolizzaCard({ p, oggi }) {
     const [openApps, setOpenApps] = useState(false);
     const [openDocs, setOpenDocs] = useState(false);
+    const [openTitoli, setOpenTitoli] = useState(false);
     const [docs, setDocs] = useState(null);
+    const [titoli, setTitoli] = useState(null);
     const scaduta = p.scadenza && p.scadenza < oggi;
     const inScadenza = !scaduta && p.scadenza && p.scadenza <= addDaysISO(oggi, 60);
     const statoBadge = p.stato === "annullata" ? { l: "ANNULLATA", c: "bg-slate-200 text-slate-700" }
@@ -479,6 +481,17 @@ function PolizzaCard({ p, oggi }) {
                     { params: { entita_tipo: "polizza", entita_id: p.id } });
                 setDocs(r.data);
             } catch { setDocs([]); }
+        }
+    };
+
+    const toggleTitoli = async () => {
+        const next = !openTitoli;
+        setOpenTitoli(next);
+        if (next && titoli === null) {
+            try {
+                const r = await clientApi.get(`/polizze/${p.id}/titoli`);
+                setTitoli(r.data);
+            } catch { setTitoli([]); }
         }
     };
 
@@ -543,6 +556,16 @@ function PolizzaCard({ p, oggi }) {
 
                 {/* Azioni + toggle documenti */}
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+                    <button onClick={toggleTitoli}
+                            data-testid={`polizza-titoli-toggle-${p.id}`}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all ${
+                                openTitoli
+                                    ? "bg-emerald-600 text-white shadow"
+                                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                            }`}>
+                        <Wallet size={12} /> Titoli & Quietanze
+                        <ChevronRight size={12} className={`transition-transform ${openTitoli ? "rotate-90" : ""}`} />
+                    </button>
                     {p.n_allegati > 0 && (
                         <button onClick={toggleDocs}
                                 data-testid={`polizza-docs-toggle-${p.id}`}
@@ -551,7 +574,7 @@ function PolizzaCard({ p, oggi }) {
                                         ? "bg-violet-600 text-white shadow"
                                         : "bg-violet-50 text-violet-700 hover:bg-violet-100"
                                 }`}>
-                            <FolderOpen size={12} /> {p.n_allegati} allegat{p.n_allegati === 1 ? "o" : "i"}
+                            <FolderOpen size={12} /> {p.n_allegati} document{p.n_allegati === 1 ? "o" : "i"}
                             <ChevronRight size={12} className={`transition-transform ${openDocs ? "rotate-90" : ""}`} />
                         </button>
                     )}
@@ -564,9 +587,18 @@ function PolizzaCard({ p, oggi }) {
                         onClick={() => window.open(`${API}/polizze/${p.id}/pdf?token=${localStorage.getItem("portale_token")}`, "_blank")}
                         className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 hover:bg-sky-100 inline-flex items-center gap-1 font-medium"
                         data-testid={`polizza-pdf-${p.id}`}>
-                        <Download size={12} /> Scarica PDF
+                        <Download size={12} /> PDF Polizza
                     </button>
                 </div>
+
+                {/* Sezione titoli/quietanze espansa */}
+                {openTitoli && (
+                    <div className="bg-emerald-50/40 rounded-xl p-3 space-y-2 border border-emerald-100">
+                        {titoli === null ? <div className="text-xs text-slate-400 py-2 text-center">Caricamento…</div>
+                          : titoli.length === 0 ? <div className="text-xs text-slate-400 py-2 text-center">Nessun titolo</div>
+                          : titoli.map((t) => <TitoloMini key={t.id} t={t} oggi={oggi} />)}
+                    </div>
+                )}
 
                 {/* Sezione documenti espansa */}
                 {openDocs && (
@@ -598,8 +630,55 @@ function PolizzaCard({ p, oggi }) {
     );
 }
 
-// Riga singolo allegato (nome + tipo + download)
-function AllegatoRow({ d, small }) {
+// Riga compatta di un titolo dentro l'elenco storico di una polizza
+function TitoloMini({ t, oggi }) {
+    const [openQuiet, setOpenQuiet] = useState(false);
+    const arretrato = t.stato === "da_incassare" && (t.scadenza || "") < oggi;
+    const stato = arretrato ? { l: "ARRETRATO", c: "bg-rose-100 text-rose-800", ico: "⚠" }
+        : t.stato === "incassato" ? { l: "PAGATO", c: "bg-emerald-100 text-emerald-800", ico: "✓" }
+        : t.stato === "insoluto" ? { l: "INSOLUTO", c: "bg-rose-100 text-rose-800", ico: "✗" }
+        : t.stato === "annullato" ? { l: "ANNULLATO", c: "bg-slate-100 text-slate-600", ico: "—" }
+        : t.stato === "storno" ? { l: "STORNO", c: "bg-slate-100 text-slate-600", ico: "↺" }
+        : { l: "DA PAGARE", c: "bg-amber-100 text-amber-800", ico: "◷" };
+    return (
+        <div className="bg-white rounded-lg border border-emerald-100 overflow-hidden">
+            <div className="p-2.5 flex flex-wrap items-center gap-2">
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${stato.c}`}>
+                    {stato.ico} {stato.l}
+                </span>
+                <span className="text-xs text-slate-500">
+                    scad. <span className="font-semibold text-slate-700">{fmtDate(t.scadenza)}</span>
+                </span>
+                {t.data_incasso && (
+                    <span className="text-xs text-emerald-700">
+                        · pagato il <span className="font-semibold">{fmtDate(t.data_incasso)}</span>
+                    </span>
+                )}
+                <span className="ml-auto text-sm font-bold text-emerald-700">
+                    € {Number(t.importo_lordo || 0).toFixed(2)}
+                </span>
+                {t.n_allegati_cliente > 0 && (
+                    <button onClick={() => setOpenQuiet(!openQuiet)}
+                            data-testid={`titolo-quiet-${t.id}`}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                                openQuiet
+                                    ? "bg-emerald-600 text-white shadow"
+                                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                            }`}>
+                        <FolderOpen size={10} /> quietanza
+                        <ChevronRight size={10} className={`transition-transform ${openQuiet ? "rotate-90" : ""}`} />
+                    </button>
+                )}
+            </div>
+            {openQuiet && (t.quietanze || []).length > 0 && (
+                <div className="border-t border-slate-100 bg-emerald-50/40 p-2 space-y-1">
+                    {t.quietanze.map((d) => <AllegatoRow key={d.id} d={d} small />)}
+                </div>
+            )}
+        </div>
+    );
+}
+
     const ext = (d.nome_file || "").split(".").pop()?.toLowerCase();
     const isImg = /^(jpg|jpeg|png|webp|heic|gif)$/.test(ext);
     const isPdf = ext === "pdf";

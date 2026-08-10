@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Bell, Mail, MessageCircle, Smartphone, FileText, Receipt,
-    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search, Printer, Zap,
+    ChevronRight, ChevronDown, FolderOpen, History, Send, FileDown, Filter, Search, Printer, Zap, RefreshCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -201,8 +201,7 @@ export default function Avvisi() {
 
             <KpiBar sezione="avvisi" />
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <KpiCard icon={<FileText size={16} />} label="Polizze in scadenza" value={totali.polizze} accent="sky" />
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                 <KpiCard icon={<Receipt size={16} />} label="Titoli arretrati" value={totali.titoli} accent="rose" />
                 <KpiCard label="Contraenti coinvolti" value={totali.contraenti} accent="amber" />
                 <KpiCard label="Importi arretrati" value={fmtEur(totali.importi)} accent="emerald" monetary />
@@ -210,10 +209,7 @@ export default function Avvisi() {
 
             <div className="flex gap-2 mb-3 border-b border-slate-200">
                 <TabBtn active={tab === "titoli"} onClick={() => setTab("titoli")} testid="tab-avvisi-titoli">
-                    Titoli arretrati per contraente ({totali.contraenti})
-                </TabBtn>
-                <TabBtn active={tab === "polizze"} onClick={() => setTab("polizze")} testid="tab-avvisi-polizze">
-                    Polizze in scadenza ({totali.polizze})
+                    Titoli arretrati ({totali.contraenti})
                 </TabBtn>
                 <TabBtn active={tab === "storico"} onClick={() => setTab("storico")} testid="tab-avvisi-storico">
                     📋 Storico avvisi inviati
@@ -926,12 +922,28 @@ function StoricoAvvisiTab() {
     const [items, setItems] = useState(null);
     const [canale, setCanale] = useState("");
     const [q, setQ] = useState("");
+    const [busy, setBusy] = useState(null);
 
     const load = () => {
         const params = canale ? { canale, limit: 500 } : { limit: 500 };
         api.get("/storico-avvisi", { params }).then((r) => setItems(r.data || []));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [canale]);
+
+    const rimanda = async (avviso_id) => {
+        setBusy(avviso_id);
+        try {
+            const r = await api.post(`/storico-avvisi/${avviso_id}/rimanda`);
+            if (r.data?.ok) {
+                toast.success(`Avviso rimandato via ${r.data.canale || "canale"}`);
+            } else {
+                toast.error(r.data?.error || "Errore invio");
+            }
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore rimando");
+        } finally { setBusy(null); }
+    };
 
     if (!items) return <Loading />;
     const filtered = q.trim()
@@ -970,6 +982,7 @@ function StoricoAvvisiTab() {
                         <thead><tr>
                             <th>Inviato</th><th>Canale</th><th>Destinatario</th><th>Oggetto</th>
                             <th>Polizza</th><th className="text-right">Importo</th><th>Operatore</th>
+                            <th className="text-right w-28">Azioni</th>
                         </tr></thead>
                         <tbody>
                             {filtered.map((s, i) => (
@@ -987,6 +1000,19 @@ function StoricoAvvisiTab() {
                                     <td className="font-mono text-sky-700">{s.polizza_id ? s.polizza_id.slice(0, 8) : "—"}</td>
                                     <td className="num text-right font-mono">{s.importo ? fmtEur(s.importo) : "—"}</td>
                                     <td className="text-slate-500 text-[10px]">{s.operatore_nome || "—"}</td>
+                                    <td className="text-right">
+                                        {s.id && (
+                                            <button
+                                                onClick={() => rimanda(s.id)}
+                                                disabled={busy === s.id}
+                                                data-testid={`storico-rimanda-${i}`}
+                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 disabled:opacity-40 transition-colors"
+                                                title={`Rimanda via ${s.canale}`}
+                                            >
+                                                <RefreshCcw size={10} className={busy === s.id ? "animate-spin" : ""} /> {busy === s.id ? "…" : "Rimanda"}
+                                            </button>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

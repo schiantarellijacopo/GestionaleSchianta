@@ -308,6 +308,36 @@ async def list_titoli(cliente=Depends(current_cliente)):
 # ============================================================
 # DOCUMENTI (allegati visibili) + Upload rapido
 # ============================================================
+@router.get("/polizze/{polizza_id}/titoli")
+async def polizza_titoli(polizza_id: str, cliente=Depends(current_cliente)):
+    """Storico titoli (pagati + da pagare) di una specifica polizza del cliente.
+
+    Ogni titolo include eventuali allegati/quietanze visibili al cliente.
+    """
+    from server import db
+    p = await db.polizze.find_one(
+        {"id": polizza_id, "contraente_id": cliente["id"]},
+        {"_id": 0, "id": 1},
+    )
+    if not p:
+        raise HTTPException(404, "Polizza non trovata")
+    titoli = await db.titoli.find(
+        {"polizza_id": polizza_id}, {"_id": 0},
+    ).sort("scadenza", -1).to_list(2000)
+    # Enrichment: allegati/quietanze per ogni titolo
+    for t in titoli:
+        allegati = await db.allegati.find({
+            "entita_tipo": "titolo",
+            "entita_id": t["id"],
+            "visibile_cliente": True,
+            "is_deleted": {"$ne": True},
+        }, {"_id": 0, "id": 1, "nome_file": 1, "categoria": 1, "content_type": 1,
+              "created_at": 1}).sort("created_at", -1).to_list(20)
+        t["quietanze"] = allegati
+        t["n_allegati_cliente"] = len(allegati)
+    return titoli
+
+
 @router.get("/allegati/by-entita")
 async def allegati_by_entita(
     entita_tipo: str, entita_id: str,
@@ -326,6 +356,20 @@ async def allegati_by_entita(
                                        {"_id": 0, "id": 1})
         if not p:
             raise HTTPException(404, "Polizza non trovata")
+        # Esclude gli allegati specifici del veicolo (applicazione_matricola): quelli
+        # devono comparire solo nella card del veicolo, non nella polizza principale.
+        items = await db.allegati.find({
+            "entita_tipo": "polizza",
+            "entita_id": entita_id,
+            "visibile_cliente": True,
+            "is_deleted": {"$ne": True},
+            "$or": [
+                {"applicazione_matricola_id": {"$exists": False}},
+                {"applicazione_matricola_id": None},
+                {"applicazione_matricola_id": ""},
+            ],
+        }, {"_id": 0}).sort("created_at", -1).to_list(500)
+        return items
     elif entita_tipo == "titolo":
         t = await db.titoli.find_one({"id": entita_id}, {"_id": 0, "polizza_id": 1})
         if not t:

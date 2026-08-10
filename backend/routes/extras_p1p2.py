@@ -1218,6 +1218,57 @@ async def sposta_attivi_in_storico(user=Depends(require_user("admin"))) -> dict:
     return {"moved": moved}
 
 
+@router.post("/storico-avvisi/{avviso_id}/rimanda")
+async def rimanda_storico_avviso(
+    avviso_id: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Rimanda un avviso precedentemente inviato usando lo stesso canale e testo.
+
+    - email → nuovo invio SMTP con `send_email` (usa i template già inviati)
+    - whatsapp → nuovo invio Evolution API
+    - pdf/sms/pec → registra un nuovo record in storico (l'operatore lo genera manualmente)
+    Ritorna sempre un record clonato in storico con `rimandato_da_avviso_id` puntante all'originale.
+    """
+    orig = await db.storico_avvisi.find_one({"id": avviso_id}, {"_id": 0})
+    if not orig:
+        raise HTTPException(404, "Avviso non trovato")
+
+    canale = orig.get("canale")
+    esito = {"ok": False}
+    # invio effettivo per email/whatsapp
+    if canale == "email":
+        from notification_helpers import send_email
+        dest = orig.get("destinatario") or ""
+        if dest:
+            esito = await send_email(dest,
+                                       orig.get("oggetto") or orig.get("soggetto") or "Sollecito",
+                                       orig.get("messaggio") or "")
+    elif canale == "whatsapp":
+        from notification_helpers import send_whatsapp_message
+        dest = orig.get("destinatario") or ""
+        if dest:
+            esito = await send_whatsapp_message(dest, orig.get("messaggio") or "")
+    else:
+        # pdf/sms/pec → registra soltanto il tentativo (l'operatore lo consegna manualmente)
+        esito = {"ok": True}
+
+    new_id = str(uuid.uuid4())
+    clone = {**orig,
+             "id": new_id,
+             "sent_at": _now_iso(),
+             "operatore_id": user.get("id"),
+             "operatore_nome": user.get("name"),
+             "rimandato_da_avviso_id": avviso_id,
+             "rimando_ok": bool(esito.get("ok")),
+             "rimando_errore": esito.get("error") if not esito.get("ok") else None}
+    clone.pop("moved_to_storico_at", None)
+    clone.pop("moved_by", None)
+    await db.storico_avvisi.insert_one(clone)
+    return {"ok": bool(esito.get("ok")), "error": esito.get("error"),
+            "new_id": new_id, "canale": canale}
+
+
 class StoricoAvvisoBody(BaseModel):
     model_config = {"extra": "allow"}  # accetta campi extra dal frontend
     canale: str  # "email" | "whatsapp" | "sms" | "pec" | "pdf"
