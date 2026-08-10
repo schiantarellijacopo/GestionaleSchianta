@@ -36,6 +36,7 @@ import Attivita from "@/pages/Attivita";
 import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
+import ImpostazioniFirme from "@/pages/ImpostazioniFirme";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
 import Diario from "@/pages/Diario";
@@ -248,6 +249,11 @@ function App() {
                             <Route path="/librerie" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}>
                                     <Librerie />
+                                </ProtectedRoute>
+                            } />
+                            <Route path="/impostazioni/firme" element={
+                                <ProtectedRoute roles={["admin"]}>
+                                    <ImpostazioniFirme />
                                 </ProtectedRoute>
                             } />
                             <Route path="/whatsapp" element={

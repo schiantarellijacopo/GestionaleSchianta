@@ -1,6 +1,26 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-02-11 (parte 2) — Firma Elettronica Namirial + Estensioni Portale
+
+### 🖊 Firma Elettronica Avanzata (Namirial eSignAnyWhere v6)
+Adapter provider-neutrale con supporto 4 modalità: **OTP SMS · OTP Email · Grafometrica tablet FEA · Link remoto (WhatsApp/SMS/Email)**.
+- `backend/firma_provider.py`: SDK client eSAW v6 (`upload_pdf`, `create_envelope`, `get_status`, `download_signed_pdf`, `verify_webhook_signature`). Credenziali da `azienda_config.firma_*`.
+- `backend/firma_router.py`: endpoint `/api/firma/*` (crea/lista/dettaglio/scarica/webhook). Webhook dedup via SHA256, refresh status ufficiale, auto-download PDF firmato + audit trail come `allegato` (visibile cliente nel Portale).
+- `frontend/pages/ImpostazioniFirme.jsx`: pannello admin (sidebar "Amministrazione → Firma Elettronica").
+- Verificato: chiamata reale a `demo.esignanywhere.net/Api/v6/file/upload` risponde 401 con token fake (conferma client ben formato).
+
+### 🐛 Fix Portale Cliente
+- Documenti veicolo: lettura accetta sia `entita_tipo=applicazione_matricola` sia `entita_tipo=polizza+applicazione_matricola_id`
+- Login multi-anagrafica stessa email: itera anagrafiche e trova quella con CF/P.IVA che matcha
+- Storico Titoli/Quietanze inline nella PolizzaCard con quietanze scaricabili
+- Icona ramo automatica (Car/Home/Heart/Building2/Shield) condivisa fra Portale e gestionale principale
+
+### 📁 Storico Avvisi
+- Bottone **Rimanda** su ogni riga: reinvia email/WhatsApp con lo stesso testo, clone record con `rimandato_da_avviso_id`
+
+
+
 ## 2026-02-11 — Portale Cliente completato + Notifiche + Chat integrata
 
 ### Feature "Portale Cliente" — configurazione multi-canale

@@ -11822,6 +11822,12 @@ async def _cp_download_allegato(
 
 app.include_router(_chat_portale_router)
 
+# ============================================================
+# Firma elettronica (Namirial eSignAnyWhere v6) — provider-neutrale
+# ============================================================
+from firma_router import router as _firma_router  # noqa: E402
+app.include_router(_firma_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

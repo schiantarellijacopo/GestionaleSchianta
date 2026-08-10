@@ -1122,6 +1122,12 @@ class AziendaConfig(BaseDoc):
     logo_url: Optional[str] = None         # URL logo per stampe
     logo_storage_path: Optional[str] = None
     note_footer_stampe: Optional[str] = None
+    # Firma Elettronica (Namirial eSignAnyWhere v6)
+    firma_provider: Optional[str] = "namirial"
+    firma_base_url: Optional[str] = None       # https://demo.esignanywhere.net/Api/v6
+    firma_api_token: Optional[str] = None      # 64ch (segreto — non ritornato in GET dopo primo salvataggio)
+    firma_environment: Optional[str] = "sandbox"  # sandbox | production
+    firma_webhook_secret: Optional[str] = None   # HMAC secret opzionale
     # Commercialista (per invio prima nota chiusa)
     email_commercialista: Optional[str] = None
     nome_commercialista: Optional[str] = None
