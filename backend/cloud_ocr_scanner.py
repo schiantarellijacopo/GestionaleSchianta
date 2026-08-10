@@ -1012,15 +1012,17 @@ async def _create_crm_attachment(
                        app["id"], targa_up)
 
     # 2) Se è una quietanza e la polizza è nota → prova a linkare al titolo
-    # (SOLO se il titolo è già `incassato` o `pendente` — ovvero pagato o in copertura).
+    # Stati validi: da_incassare (quietanza emessa in attesa), incassato (già pagata),
+    # pendente (in copertura anticipata). Solo `stornato` viene escluso.
     if tipo_doc == "quietanza" and pol:
         num_titolo = (data_ocr.get("numero_titolo") or "").strip()
         data_pag = (data_ocr.get("data_pagamento") or "").strip()
+        VALID_STATI = ["da_incassare", "incassato", "pendente"]
         titolo = None
         if num_titolo:
             titolo = await db.titoli.find_one(
                 {"polizza_id": pol["id"], "numero_titolo": num_titolo,
-                 "stato": {"$in": ["incassato", "pendente"]}},
+                 "stato": {"$in": VALID_STATI}},
                 {"_id": 0, "id": 1, "stato": 1},
             )
         if not titolo and data_pag:
@@ -1029,9 +1031,18 @@ async def _create_crm_attachment(
                 {"polizza_id": pol["id"],
                  "data_effetto": {"$lte": data_pag},
                  "data_scadenza": {"$gte": data_pag},
-                 "stato": {"$in": ["incassato", "pendente"]}},
+                 "stato": {"$in": VALID_STATI}},
                 {"_id": 0, "id": 1, "stato": 1},
             )
+        if not titolo:
+            # Fallback: se la polizza ha UN SOLO titolo valido, prendi quello
+            candidates = await db.titoli.find(
+                {"polizza_id": pol["id"], "stato": {"$in": VALID_STATI}},
+                {"_id": 0, "id": 1, "stato": 1},
+            ).to_list(5)
+            if len(candidates) == 1:
+                titolo = candidates[0]
+                logger.info("Quietanza: fallback su unico titolo valido della polizza")
         if titolo:
             # Sposta l'allegato dalla polizza al TITOLO specifico
             titolo_id_for_quietanza = titolo["id"]
