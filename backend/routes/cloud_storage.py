@@ -877,3 +877,38 @@ async def scan_history(
         {"_id": 0},
     ).sort("created_at", -1).limit(limit)
     return {"runs": [r async for r in rows]}
+
+
+@router.get("/scan-summary")
+async def scan_summary(user=Depends(current_user)):
+    """Riepilogo dell'ultimo run + totali cumulativi (per widget dashboard/Inbox)."""
+    tenant = _tenant_id(user)
+    latest = await db.cloud_scan_history.find_one(
+        {"tenant_id": tenant}, {"_id": 0, "entries_summary": 0},
+        sort=[("created_at", -1)],
+    )
+    # Totali cumulativi tutti i tempi
+    pipeline = [
+        {"$match": {"tenant_id": tenant}},
+        {"$group": {
+            "_id": None,
+            "letti": {"$sum": "$letti"},
+            "abbinati": {"$sum": "$abbinati"},
+            "in_attesa": {"$sum": "$in_attesa"},
+            "anagrafiche_create": {"$sum": {"$ifNull": ["$anagrafiche_create", 0]}},
+            "runs": {"$sum": 1},
+        }},
+    ]
+    cumulative = None
+    async for c in db.cloud_scan_history.aggregate(pipeline):
+        cumulative = {k: v for k, v in c.items() if k != "_id"}
+    # File attualmente in "Da smistare" (documenti_inbox pending da cloud_ocr_scan)
+    pending_manual = await db.documenti_inbox.count_documents({
+        "fonte": "cloud_ocr_scan", "stato": "pending",
+    })
+    return {
+        "latest_run": latest,
+        "cumulative": cumulative or {"letti": 0, "abbinati": 0, "in_attesa": 0,
+                                     "anagrafiche_create": 0, "runs": 0},
+        "pending_manual_smistamento": pending_manual,
+    }

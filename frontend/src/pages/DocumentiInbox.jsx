@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Upload, FileText, Sparkles, CheckCircle2, X, Trash2, FileType2 } from "lucide-react";
 import { toast } from "sonner";
+import OcrScanWidget from "@/components/OcrScanWidget";
 
 const TIPO_BADGE = {
     carta_identita: { l: "Carta d'identità", c: "bg-sky-100 text-sky-700" },
@@ -84,6 +85,9 @@ export default function DocumentiInbox() {
                 title={<span className="flex items-center gap-2"><Sparkles className="text-violet-600" /> Documenti Inbox · OCR</span>}
                 subtitle="Carica foto/PDF di documenti → OCR classifica + auto-compila i dati nella sezione corretta"
             />
+
+            {/* Widget OCR scan Drive/OneDrive */}
+            <OcrScanWidget variant="full" onClickPending={() => { window.location.hash = "#pending"; load(); }} />
 
             {/* DROPZONE */}
             <Card className={`p-6 border-2 border-dashed transition-colors ${dragActive ? "border-violet-600 bg-violet-100" : "border-violet-300 bg-gradient-to-br from-violet-50/50 to-sky-50/30"}`}

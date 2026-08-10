@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, fmtEur, fmtNum } from "@/lib/api";
 import { PageHeader } from "@/components/Shared";
 import DocumentiMancantiWidget from "@/components/DocumentiMancantiWidget";
+import OcrScanWidget from "@/components/OcrScanWidget";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -71,6 +72,9 @@ export default function Dashboard() {
                 subtitle="Panoramica generale del portafoglio assicurativo"
             />
             <LinkUtiliCard />
+            <div className="mb-4">
+                <OcrScanWidget variant="compact" onClickPending={() => window.location.href = "/documenti-inbox"} />
+            </div>
             <div className="mb-6">
                 <DocumentiMancantiWidget />
             </div>

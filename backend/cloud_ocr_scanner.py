@@ -552,6 +552,18 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     }
     await db.cloud_documents.insert_one(doc_record)
 
+    # Se NON abbinato → porta il file anche nella pagina Documenti Inbox del CRM
+    # in modo che l'utente lo trovi ed possa smistarlo manualmente decidendo il target.
+    inbox_id: Optional[str] = None
+    if category == "da_smistare":
+        try:
+            inbox_id = await _push_to_manual_inbox(
+                db, tenant_id, name, file_bytes, mime,
+                classification, ana, pol, sin, file_id, provider,
+            )
+        except Exception as e:
+            logger.warning("Push to manual inbox fallito per %s: %s", name, e)
+
     # Se abbinato ad anagrafica → log nel Diario Cliente
     if ana:
         try:
@@ -605,7 +617,52 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         "anagrafica_id": (ana or {}).get("id") if anagrafica_creata else None,
         "matched_polizza": (pol or {}).get("numero_polizza"),
         "matched_sinistro": (sin or {}).get("numero_sinistro"),
+        "inbox_id": inbox_id,   # se presente, l'utente lo troverà in Documenti Inbox
     }
+
+
+async def _push_to_manual_inbox(
+    db, tenant_id: str, filename: str, file_bytes: bytes, mime: str,
+    classification: dict, ana: Optional[dict], pol: Optional[dict],
+    sin: Optional[dict], drive_file_id: str, provider: str,
+) -> str:
+    """Salva il file (che non è stato smistato automaticamente) nella pagina
+    'Documenti Inbox · OCR' del CRM. L'utente potrà poi decidere manualmente
+    l'anagrafica/polizza di destinazione dal frontend.
+    """
+    import uuid, os as _os
+    import storage as obj_storage
+
+    inbox_id = str(uuid.uuid4())
+    ext = (filename or "doc").rsplit(".", 1)[-1].lower() or "bin"
+    path = f"{_os.environ.get('APP_NAME', 'assicura')}/inbox/{inbox_id}.{ext}"
+    try:
+        obj_storage.put_object(path, file_bytes, mime)
+    except Exception as e:
+        logger.warning("put_object storage fallito: %s", e)
+        path = None
+
+    doc_inbox = {
+        "id": inbox_id,
+        "tenant_id": tenant_id if tenant_id != "default" else None,
+        "filename": filename,
+        "content_type": mime,
+        "size": len(file_bytes),
+        "storage_path": path,
+        "tipo_documento": classification.get("tipo_documento"),
+        "confidenza": classification.get("confidenza"),
+        "dati": classification.get("dati_estratti") or {},
+        "target_anagrafica": ana,
+        "target_polizza": pol,
+        "target_sinistro": sin,
+        "stato": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "fonte": "cloud_ocr_scan",
+        "cloud_file_id": drive_file_id,
+        "cloud_provider": provider,
+    }
+    await db.documenti_inbox.insert_one(doc_inbox)
+    return inbox_id
 
 
 # ============================================================
