@@ -83,18 +83,22 @@ def test_db_has_cloud_ocr_allegati(ocr_allegati_snapshot):
 
 def test_allegati_have_required_fields(ocr_allegati_snapshot):
     required = ["id", "entita_tipo", "entita_id", "categoria", "nome_file",
-                "storage_path", "is_deleted", "visibile_al_cliente", "fonte"]
+                "storage_path", "is_deleted", "visibile_cliente", "fonte"]
     for a in ocr_allegati_snapshot:
         for f in required:
             assert f in a, f"campo {f} mancante in {a.get('id')}"
         assert a["is_deleted"] is False
         assert a["fonte"] == "cloud_ocr_scan"
-        # visibile_al_cliente coherence
-        if a["categoria"] in ("carta_identita", "patente", "passaporto",
-                              "codice_fiscale", "privacy"):
-            assert a["visibile_al_cliente"] is True, f"{a['id']} dovrebbe essere visibile al cliente"
-        if a["categoria"] in ("bonifico", "rid"):
-            assert a["visibile_al_cliente"] is False, f"{a['id']} NON deve essere visibile al cliente"
+        # visibile_cliente coherence (allineato al banner UI PolizzaDetail/AnagraficaDetail)
+        VISIBILI = ("carta_identita", "patente", "passaporto", "codice_fiscale", "privacy",
+                    "polizza", "condizioni", "quietanza", "libretto_pagamento",
+                    "libretto_circolazione", "atto_vendita")
+        INTERNI = ("bonifico", "rid", "visura_camerale", "estratto_conto",
+                   "denuncia", "altro", "preventivo", "appunti")
+        if a["categoria"] in VISIBILI:
+            assert a["visibile_cliente"] is True, f"{a['id']} ({a['categoria']}) dovrebbe essere visibile al cliente"
+        if a["categoria"] in INTERNI:
+            assert a["visibile_cliente"] is False, f"{a['id']} ({a['categoria']}) NON deve essere visibile al cliente"
 
 
 # --------------------------------------------------------------------

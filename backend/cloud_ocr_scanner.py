@@ -852,8 +852,16 @@ async def _create_crm_attachment(
         "storage_path": storage_path,
         "descrizione": f"Importato automaticamente da Google Drive OCR ({tipo_doc})",
         "fonte": "cloud_ocr_scan",
-        "visibile_al_cliente": categoria in ("carta_identita", "patente", "passaporto",
-                                              "codice_fiscale", "privacy"),
+        # Categorie visibili al cliente (allineato al banner UI PolizzaDetail/AnagraficaDetail):
+        #  - Documenti identità: carta_identita, patente, passaporto, codice_fiscale, privacy
+        #  - Documenti polizza:  polizza, condizioni, quietanza, libretto_pagamento,
+        #                        libretto_circolazione, atto_vendita
+        # Restano interni: visura_camerale, bonifico, rid, estratto_conto, denuncia, altro
+        "visibile_cliente": categoria in (
+            "carta_identita", "patente", "passaporto", "codice_fiscale", "privacy",
+            "polizza", "condizioni", "quietanza", "libretto_pagamento",
+            "libretto_circolazione", "atto_vendita",
+        ),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "is_deleted": False,
