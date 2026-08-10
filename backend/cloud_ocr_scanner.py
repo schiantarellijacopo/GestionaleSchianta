@@ -35,6 +35,77 @@ _scheduler: Optional[AsyncIOScheduler] = None
 
 
 # ============================================================
+# MAPPA sottocartelle INBOX → tipo_documento (HINT FORTE)
+# ============================================================
+# Il nome della sottocartella dentro INBOX/ è la "categoria pre-classificata".
+# Se il file cade in una di queste cartelle, salta la classificazione AI
+# (o comunque la sovrascrive) e passa direttamente alla fase di estrazione dati.
+#
+# Nomi canonici (creati automaticamente da init-structure). Il matching è
+# case-insensitive e ignora spazi/apostrofi.
+INBOX_SUBFOLDERS_MAP = {
+    # ── Anagrafica ────────────────────────────────────────────────────
+    "carta d'identita":     "carta_identita",
+    "carta d'identità":     "carta_identita",
+    "carta identita":       "carta_identita",
+    "ci":                   "carta_identita",
+    "patente":              "patente",
+    "passaporto":           "passaporto",
+    "codice fiscale":       "codice_fiscale",
+    "cf":                   "codice_fiscale",
+    "tessera sanitaria":    "tessera_sanitaria",  # trattata come cf ai fini OCR
+    "visura camerale":      "visura_camerale",
+    "visura":               "visura_camerale",
+    "mandato sdd":          "rid",
+    "rid":                  "rid",
+    "privacy":              "privacy",
+    # ── Polizza ───────────────────────────────────────────────────────
+    "polizze":              "polizza_frontespizio",
+    "polizza":              "polizza_frontespizio",
+    "condizioni":           "condizioni",
+    "libretti":             "libretto_circolazione",
+    "libretto":             "libretto_circolazione",
+    "libretto circolazione": "libretto_circolazione",
+    "libretto pagamento":   "libretto_pagamento",
+    "atto di vendita":      "atto_vendita",
+    "atto vendita":         "atto_vendita",
+    "quietanze":            "quietanza",
+    "quietanza":            "quietanza",
+    # ── Sinistri / Contabilità ────────────────────────────────────────
+    "denunce sinistro":     "denuncia_sinistro",
+    "denunce":              "denuncia_sinistro",
+    "sinistri":             "denuncia_sinistro",
+    "estratti conto":       "estratto_conto_compagnia",
+    "estratto conto":       "estratto_conto_compagnia",
+    "bonifici":             "bonifico",
+    "bonifico":             "bonifico",
+}
+
+# Elenco delle sottocartelle da creare automaticamente dentro INBOX
+# (nomi canonici visualizzati all'utente)
+INBOX_SUBFOLDERS_TO_CREATE = [
+    "Carta d'Identità", "Patente", "Passaporto",
+    "Codice Fiscale", "Tessera Sanitaria",
+    "Visura Camerale", "Mandato SDD", "Privacy",
+    "Polizze", "Condizioni", "Quietanze",
+    "Libretti", "Atto di Vendita",
+    "Denunce Sinistro", "Estratti Conto", "Bonifici",
+]
+
+
+def _norm_folder_key(name: str) -> str:
+    """Normalizza un nome cartella per il match nella mappa (lower, no accenti extra)."""
+    return (name or "").strip().lower().replace("_", " ")
+
+
+def hint_from_folder_name(folder_name: Optional[str]) -> Optional[str]:
+    """Ritorna il tipo_documento se il nome cartella è mappato, altrimenti None."""
+    if not folder_name:
+        return None
+    return INBOX_SUBFOLDERS_MAP.get(_norm_folder_key(folder_name))
+
+
+# ============================================================
 # PROMPT Gemini per classificazione documento
 # ============================================================
 CLASSIFY_PROMPT = """Sei un classificatore esperto di documenti per un CRM assicurativo italiano.
@@ -515,8 +586,15 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
         parent = fid
     inbox_id = parent
 
-    # 2) Lista file in INBOX
-    files = await _list_files_in_folder(provider, token, inbox_id)
+    # 1b) Assicura le sottocartelle canoniche (Polizze, Quietanze, ecc.).
+    # Le creiamo sempre per rendere l'inserimento file più guidato all'utente.
+    try:
+        await _ensure_inbox_subfolders(provider, token, inbox_id)
+    except Exception as e:
+        logger.warning("Errore auto-creazione sottocartelle INBOX: %s", e)
+
+    # 2) Lista file in INBOX (root + sottocartelle di 1° livello, con hint categoria)
+    files = await _list_inbox_all_files(provider, token, inbox_id)
     if not files:
         return {"letti": 0, "abbinati": 0, "in_attesa": 0, "entries": [],
                 "provider": provider}
@@ -584,6 +662,79 @@ async def _list_files_in_folder(provider: str, token: str, folder_id: str) -> li
     ]
 
 
+async def _list_subfolders(provider: str, token: str, folder_id: str) -> list:
+    """Lista le sottocartelle dentro folder_id → [{id, name}, ...]."""
+    if provider == "google_drive":
+        q = (f"'{folder_id}' in parents and trashed=false "
+             f"and mimeType = 'application/vnd.google-apps.folder'")
+        async with httpx.AsyncClient(timeout=30) as x:
+            r = await x.get(
+                "https://www.googleapis.com/drive/v3/files",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"q": q, "fields": "files(id,name)", "pageSize": 100},
+            )
+        r.raise_for_status()
+        return r.json().get("files", [])
+    # OneDrive
+    url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
+    async with httpx.AsyncClient(timeout=30) as x:
+        r = await x.get(url, headers={"Authorization": f"Bearer {token}"},
+                        params={"$filter": "folder ne null",
+                                "$select": "id,name,folder"})
+    r.raise_for_status()
+    return [{"id": it["id"], "name": it["name"]} for it in r.json().get("value", [])]
+
+
+async def _list_inbox_all_files(provider: str, token: str, inbox_id: str) -> list:
+    """Ritorna TUTTI i file nell'INBOX (root + tutte le sottocartelle di 1° livello).
+
+    Ogni file è arricchito con:
+      - `_parent_folder_id`: id della cartella dove risiede (root INBOX o subfolder)
+      - `_parent_folder_name`: nome della cartella (None se root INBOX)
+      - `_hint_tipo`: tipo_documento suggerito dal nome cartella (o None)
+    """
+    all_files: list = []
+    # Root INBOX
+    root_files = await _list_files_in_folder(provider, token, inbox_id)
+    for f in root_files:
+        f["_parent_folder_id"] = inbox_id
+        f["_parent_folder_name"] = None
+        f["_hint_tipo"] = None
+        all_files.append(f)
+    # Sottocartelle 1° livello
+    subs = await _list_subfolders(provider, token, inbox_id)
+    for sub in subs:
+        sub_files = await _list_files_in_folder(provider, token, sub["id"])
+        hint = hint_from_folder_name(sub["name"])
+        for f in sub_files:
+            f["_parent_folder_id"] = sub["id"]
+            f["_parent_folder_name"] = sub["name"]
+            f["_hint_tipo"] = hint
+            all_files.append(f)
+    return all_files
+
+
+async def _ensure_inbox_subfolders(provider: str, token: str,
+                                    inbox_id: str) -> dict:
+    """Crea (se mancanti) le sottocartelle canoniche dentro INBOX.
+
+    Ritorna mappa {nome_canonico: folder_id}.
+    """
+    from routes.cloud_storage import _find_folder, _create_folder
+    created: dict = {}
+    for name in INBOX_SUBFOLDERS_TO_CREATE:
+        fid = await _find_folder(provider, token, name, inbox_id)
+        if not fid:
+            try:
+                fid = await _create_folder(provider, token, name, inbox_id)
+                logger.info("INBOX subfolder created: %s (%s)", name, fid)
+            except Exception as e:
+                logger.warning("Errore creazione sottocartella INBOX '%s': %s", name, e)
+                continue
+        created[name] = fid
+    return created
+
+
 async def _download_file(provider: str, token: str, file_id: str) -> bytes:
     """Scarica il contenuto del file."""
     if provider == "google_drive":
@@ -623,12 +774,22 @@ async def _move_file(provider: str, token: str, file_id: str,
 
 async def _process_file(db, provider: str, token: str, tenant_id: str,
                         f: dict) -> dict:
-    """Elabora un singolo file: download → OCR → match → sposta → log."""
+    """Elabora un singolo file: download → OCR → match → sposta → log.
+
+    Se `f` proviene da una sottocartella INBOX mappata (es. "Polizze",
+    "Quietanze", "Libretti"), il tipo_documento viene FORZATO dal nome
+    della cartella, saltando la classificazione AI (l'OCR estrae solo i
+    dati anagrafici/polizza necessari al matching).
+    """
     from routes.cloud_storage import _ensure_folder_path, _resolve_category_path
 
     file_id = f["id"]
     name = f.get("name", "unknown")
     mime = f.get("mimeType", "application/octet-stream")
+    # Hint della sottocartella INBOX (es. "Polizze" → tipo "polizza_frontespizio")
+    hint_tipo = f.get("_hint_tipo")
+    src_parent_id = f.get("_parent_folder_id")  # cartella origine per _move_file
+    src_folder_name = f.get("_parent_folder_name")
 
     # Skip file troppo grandi (>15MB)
     size = int(f.get("size") or 0)
@@ -642,10 +803,11 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         try:
             segments = await _resolve_category_path("da_smistare", {})
             parent = await _ensure_folder_path(provider, token, segments, tenant_id)
-            # Trova il parent originale (INBOX)
-            inbox_segments = await _resolve_category_path("inbox", {})
-            inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
-            await _move_file(provider, token, file_id, parent, inbox_id)
+            src_id = src_parent_id
+            if not src_id:
+                inbox_segments = await _resolve_category_path("inbox", {})
+                src_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
+            await _move_file(provider, token, file_id, parent, src_id)
         except Exception as e:
             logger.warning("Errore spostamento file non-supportato %s: %s", name, e)
         return {"file_id": file_id, "name": name,
@@ -659,6 +821,13 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         classification = {"tipo_documento": "altro", "confidenza": "bassa",
                           "dati_estratti": {}, "ocr_error": str(e)[:200]}
 
+    # 🎯 Se il file è in una sottocartella INBOX mappata, SOVRASCRIVI il tipo
+    # (folder-name = fonte di verità). Manteniamo dati_estratti dell'OCR.
+    if hint_tipo:
+        classification["tipo_documento"] = hint_tipo
+        classification.setdefault("confidenza", "alta")
+        classification["hint_source"] = f"inbox_subfolder:{src_folder_name}"
+
     data = classification.get("dati_estratti") or {}
 
     # Match nel CRM (crea anagrafica automaticamente se manca e ci sono dati sufficienti)
@@ -669,14 +838,18 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     # Routing
     category, ctx, related = _route_document(classification, ana, pol, sin)
 
-    # Ricalcola parent INBOX (per _move_file)
-    inbox_segments = await _resolve_category_path("inbox", {})
-    inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
+    # Origine per il move: se il file veniva da una sottocartella, usiamo quella.
+    # Altrimenti la root INBOX.
+    if src_parent_id:
+        src_id = src_parent_id
+    else:
+        inbox_segments = await _resolve_category_path("inbox", {})
+        src_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
     dest_segments = await _resolve_category_path(category, ctx)
     dest_id = await _ensure_folder_path(provider, token, dest_segments, tenant_id)
 
     try:
-        await _move_file(provider, token, file_id, dest_id, inbox_id)
+        await _move_file(provider, token, file_id, dest_id, src_id)
     except Exception as e:
         logger.warning("Errore move file %s: %s", name, e)
 

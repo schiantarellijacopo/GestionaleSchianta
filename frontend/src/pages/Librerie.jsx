@@ -4377,6 +4377,23 @@ function CloudStorageSezione() {
                                             <FolderOpen size={12} className="mr-1" /> Scegli cartella
                                         </Button>
                                         <Button size="sm" variant="outline"
+                                                onClick={async () => {
+                                                    try {
+                                                        setBusy(true);
+                                                        const fd = new FormData();
+                                                        fd.append("provider", p.key);
+                                                        const r = await api.post("/librerie/cloud-storage/ensure-inbox-subfolders", fd);
+                                                        const n = (r.data.subfolders || []).filter(x => x.id).length;
+                                                        toast.success(`Sottocartelle INBOX pronte (${n}): Polizze, Quietanze, Libretti, C.I., Patente, Visura, Mandato SDD, Privacy…`);
+                                                    } catch (e) { toast.error(errMsg(e)); }
+                                                    finally { setBusy(false); }
+                                                }}
+                                                disabled={busy}
+                                                className="border-violet-300 text-violet-700 hover:bg-violet-50"
+                                                data-testid={`btn-inbox-subs-${p.key}`}>
+                                            <FolderOpen size={12} className="mr-1" /> Crea sottocartelle INBOX
+                                        </Button>
+                                        <Button size="sm" variant="outline"
                                                 onClick={() => disconnectProvider(p.key)}
                                                 disabled={busy}
                                                 className="border-rose-300 text-rose-700 hover:bg-rose-50"

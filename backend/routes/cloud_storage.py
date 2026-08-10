@@ -739,6 +739,24 @@ async def init_structure(
             "structure_initialized_at": _now().isoformat(),
         }},
     )
+
+    # Crea anche le sottocartelle INBOX (Polizze, Quietanze, Libretti, ...)
+    # così l'utente può trascinare i file direttamente nella cartella corretta.
+    try:
+        from cloud_ocr_scanner import _ensure_inbox_subfolders
+        inbox_segments = await _resolve_category_path("inbox", {})
+        inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant)
+        inbox_subs = await _ensure_inbox_subfolders(provider, token, inbox_id)
+        for sub_name, sub_id in inbox_subs.items():
+            created_paths.append({
+                "category": f"inbox/{sub_name}",
+                "path": f"Assicura CRM/INBOX/{sub_name}",
+                "folder_id": sub_id,
+            })
+    except Exception as e:
+        # non blocca l'init: sono cartelle "hint", il flusso funziona anche senza
+        created_paths.append({"category": "inbox_subfolders", "error": str(e)[:200]})
+
     return {"ok": True, "provider": provider, "created": created_paths}
 
 
@@ -845,6 +863,43 @@ async def create_folder_manual(
     safe = _sanitize_folder_name(name)
     fid = await _create_folder(provider, token, safe, parent_id)
     return {"ok": True, "id": fid, "name": safe}
+
+
+@router.post("/ensure-inbox-subfolders")
+async def ensure_inbox_subfolders(
+    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Crea (se mancanti) le sottocartelle categorizzate dentro INBOX:
+    Polizze, Quietanze, Libretti, Carta d'Identità, Patente, Visura Camerale,
+    Mandato SDD, Privacy, Passaporto, Codice Fiscale, Tessera Sanitaria,
+    Condizioni, Atto di Vendita, Denunce Sinistro, Estratti Conto, Bonifici.
+
+    L'utente può trascinare i file dentro la sottocartella corretta:
+    lo scan OCR salterà la classificazione AI e userà direttamente la
+    categoria della cartella (l'AI estrae solo i dati anagrafici/polizza).
+    """
+    tenant = _tenant_id(user)
+    conn = await db.cloud_connections.find_one({
+        "tenant_id": tenant, "provider": provider,
+    })
+    if not conn:
+        raise HTTPException(409, "Account non collegato")
+    token = await _fresh_access_token(provider, conn)
+
+    inbox_segments = await _resolve_category_path("inbox", {})
+    inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant)
+
+    from cloud_ocr_scanner import _ensure_inbox_subfolders as _ensure_subs, INBOX_SUBFOLDERS_TO_CREATE
+    created = await _ensure_subs(provider, token, inbox_id)
+    return {
+        "ok": True, "provider": provider,
+        "inbox_id": inbox_id,
+        "subfolders": [
+            {"name": n, "id": created.get(n), "created": bool(created.get(n))}
+            for n in INBOX_SUBFOLDERS_TO_CREATE
+        ],
+    }
 
 
 # ============================================================

@@ -267,10 +267,11 @@ class ApplicazioneBody(BaseModel):
 
 @router.get("/libro-matricola/{polizza_id}/applicazioni")
 async def list_applicazioni(polizza_id: str, user=Depends(current_user)) -> list[dict]:
-    items = await db.applicazioni_matricola.find(
+    # Legge dalla collezione unica `applicazioni` (stessa usata dal tab della polizza)
+    items = await db.applicazioni.find(
         {"polizza_id": polizza_id}, {"_id": 0},
-    ).sort("data_inserimento", -1).to_list(2000)
-    # enrich con conteggio allegati
+    ).sort("numero", 1).to_list(5000)
+    # enrich con conteggio allegati collegati all'applicazione
     for a in items:
         a["n_allegati"] = await db.allegati.count_documents({
             "applicazione_matricola_id": a["id"], "is_deleted": {"$ne": True},
@@ -289,9 +290,10 @@ async def list_libro_matricola_polizze(
 
     Restituisce ogni polizza-madre con:
     - dati polizza (numero, ramo, contraente, effetto, scadenza, premio)
-    - array `applicazioni` con le applicazioni collegate
-    - conteggi (totale, attive, cessate)
-    - premio_totale (somma premi applicazioni)
+    - array `applicazioni` con le applicazioni collegate (leggendo dalla
+      collection unica `db.applicazioni` — stessa usata dalla PolizzaDetail).
+    - conteggi (totale, attive, cessate) basati su `stato` (attiva/sospesa vs annullata/sostituita)
+    - premio_totale (somma premi applicazioni attive)
     """
     from datetime import datetime as _dt
     flt: dict = {"is_libro_matricola": True}
@@ -307,11 +309,11 @@ async def list_libro_matricola_polizze(
         return []
 
     pol_ids = [p["id"] for p in polizze]
-    # Batch applicazioni
+    # Batch applicazioni: leggiamo dalla collezione UNICA `db.applicazioni`
     apps_by_pol: dict = {pid: [] for pid in pol_ids}
-    async for a in db.applicazioni_matricola.find(
+    async for a in db.applicazioni.find(
         {"polizza_id": {"$in": pol_ids}}, {"_id": 0},
-    ).sort("data_inserimento", -1):
+    ).sort("numero", 1):
         apps_by_pol.setdefault(a["polizza_id"], []).append(a)
 
     # Anagrafiche + compagnie
@@ -329,16 +331,31 @@ async def list_libro_matricola_polizze(
                     {"id": {"$in": comp_ids}},
                     {"_id": 0, "id": 1, "ragione_sociale": 1})}
 
+    ATTIVI_STATI = {"attiva", "sospesa"}
+    CESSATI_STATI = {"annullata", "sostituita"}
+
     result = []
     for p in polizze:
         apps = apps_by_pol.get(p["id"], [])
-        attive = [a for a in apps if not a.get("data_cessazione")]
-        cessate = [a for a in apps if a.get("data_cessazione")]
+        # Compat: gestisci sia `stato` (schema nuovo `applicazioni`) sia
+        # `data_cessazione` (schema legacy `applicazioni_matricola`).
+        def _is_attiva(a: dict) -> bool:
+            st = (a.get("stato") or "").lower()
+            if st in ATTIVI_STATI:
+                return True
+            if st in CESSATI_STATI:
+                return False
+            # fallback: cessata se ha data_cessazione o data_esclusione
+            return not (a.get("data_cessazione") or a.get("data_esclusione"))
+
+        attive = [a for a in apps if _is_attiva(a)]
+        cessate = [a for a in apps if not _is_attiva(a)]
         if stato == "attivo" and not attive:
             continue
         if stato == "cessato" and not cessate:
             continue
-        premio_tot = sum(float(a.get("premio_lordo") or 0) for a in apps)
+        premio_tot = sum(float(a.get("premio_lordo") or a.get("premio_annuo") or 0)
+                        for a in attive)
         result.append({
             **p,
             "contraente_nome": cont_map.get(p.get("contraente_id"), "-"),
@@ -361,22 +378,36 @@ async def list_all_libro_matricola(
     user=Depends(current_user),
 ) -> list[dict]:
     """Lista globale di TUTTE le applicazioni di libro matricola (per pagina standalone).
-    Arricchita con polizza_numero, contraente_nome, n_allegati."""
+    Arricchita con polizza_numero, contraente_nome, n_allegati.
+    Legge dalla collezione unica `db.applicazioni` (stessa usata dalla PolizzaDetail)."""
+    ATTIVI_STATI = ["attiva", "sospesa"]
+    CESSATI_STATI = ["annullata", "sostituita"]
     flt: dict = {}
     or_clauses: list = []
     if polizza_id: flt["polizza_id"] = polizza_id
     if stato == "cessato":
-        flt["data_cessazione"] = {"$ne": None, "$exists": True}
+        or_clauses.append([
+            {"stato": {"$in": CESSATI_STATI}},
+            {"data_esclusione": {"$ne": None, "$exists": True}},
+            {"data_cessazione": {"$ne": None, "$exists": True}},
+        ])
     elif stato == "attivo":
-        or_clauses.append([{"data_cessazione": None}, {"data_cessazione": {"$exists": False}}])
+        or_clauses.append([
+            {"stato": {"$in": ATTIVI_STATI}},
+            {"$and": [
+                {"stato": {"$exists": False}},
+                {"$or": [{"data_esclusione": None}, {"data_esclusione": {"$exists": False}}]},
+                {"$or": [{"data_cessazione": None}, {"data_cessazione": {"$exists": False}}]},
+            ]},
+        ])
     if q and q.strip():
         rx = {"$regex": q.strip(), "$options": "i"}
-        or_clauses.append([{"targa": rx}, {"descrizione_veicolo": rx}, {"telaio": rx}, {"matricola": rx}])
+        or_clauses.append([{"targa": rx}, {"descrizione_veicolo": rx}, {"telaio": rx}, {"matricola": rx}, {"intestatario": rx}])
     if len(or_clauses) == 1:
         flt["$or"] = or_clauses[0]
     elif len(or_clauses) > 1:
         flt["$and"] = [{"$or": o} for o in or_clauses]
-    items = await db.applicazioni_matricola.find(flt, {"_id": 0}).sort("data_inserimento", -1).limit(limit).to_list(limit)
+    items = await db.applicazioni.find(flt, {"_id": 0}).sort("numero", 1).limit(limit).to_list(limit)
     # enrich
     pol_ids = list({a.get("polizza_id") for a in items if a.get("polizza_id")})
     pols = {p["id"]: p async for p in db.polizze.find(
@@ -403,11 +434,35 @@ async def create_applicazione(
     body: ApplicazioneBody,
     user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
-    pol = await db.polizze.find_one({"id": body.polizza_id}, {"_id": 0, "id": 1, "is_libro_matricola": 1})
+    """Crea un'applicazione dalla pagina Libro Matricola.
+    Scrive nella collezione unica `db.applicazioni` (stessa della PolizzaDetail),
+    così l'inserimento resta visibile ovunque."""
+    pol = await db.polizze.find_one(
+        {"id": body.polizza_id}, {"_id": 0, "id": 1, "is_libro_matricola": 1},
+    )
     if not pol:
         raise HTTPException(404, "Polizza non trovata")
-    doc = {"id": str(uuid.uuid4()), **body.model_dump(), "created_at": _now_iso()}
-    await db.applicazioni_matricola.insert_one(doc); doc.pop("_id", None)
+    # progressivo `numero` come fa /polizze/{pid}/applicazioni
+    last = await db.applicazioni.find(
+        {"polizza_id": body.polizza_id}, {"_id": 0, "numero": 1},
+    ).sort("numero", -1).limit(1).to_list(1)
+    numero = (last[0]["numero"] + 1) if last and last[0].get("numero") else 100
+    payload = body.model_dump()
+    # normalizza campi cross-schema: data_inserimento → data_inclusione
+    if payload.get("data_inserimento") and not payload.get("data_inclusione"):
+        payload["data_inclusione"] = payload["data_inserimento"]
+    payload.pop("data_inserimento", None)
+    payload.pop("data_uscita", None)
+    payload.pop("premio_annuo", None)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "numero": numero,
+        "stato": "attiva",
+        **{k: v for k, v in payload.items() if v is not None},
+        "premio_lordo": float(getattr(body, "premio_annuo", 0) or 0),
+        "created_at": _now_iso(),
+    }
+    await db.applicazioni.insert_one(doc); doc.pop("_id", None)
     return doc
 
 
@@ -416,19 +471,24 @@ async def update_applicazione(
     aid: str, body: ApplicazioneBody,
     user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
-    res = await db.applicazioni_matricola.update_one(
-        {"id": aid}, {"$set": {**body.model_dump(), "updated_at": _now_iso()}},
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if payload.get("data_inserimento") and not payload.get("data_inclusione"):
+        payload["data_inclusione"] = payload["data_inserimento"]
+    payload.pop("data_inserimento", None)
+    payload.pop("data_uscita", None)
+    res = await db.applicazioni.update_one(
+        {"id": aid}, {"$set": {**payload, "updated_at": _now_iso()}},
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Applicazione non trovata")
-    return await db.applicazioni_matricola.find_one({"id": aid}, {"_id": 0})
+    return await db.applicazioni.find_one({"id": aid}, {"_id": 0})
 
 
 @router.delete("/libro-matricola/applicazioni/{aid}")
 async def delete_applicazione(
     aid: str, user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
-    res = await db.applicazioni_matricola.delete_one({"id": aid})
+    res = await db.applicazioni.delete_one({"id": aid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Applicazione non trovata")
     return {"ok": True}
@@ -446,11 +506,13 @@ async def annulla_applicazione(
     user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
     """Cessa un'applicazione (veicolo venduto/demolito/esportato/rubato/altro).
-    A differenza di delete, mantiene lo storico marcando data_cessazione + tipo_cessazione."""
-    res = await db.applicazioni_matricola.update_one(
+    Mantiene lo storico marcando stato='annullata' + data_esclusione + tipo_cessazione."""
+    res = await db.applicazioni.update_one(
         {"id": aid},
         {"$set": {
-            "data_cessazione": body.data_cessazione,
+            "stato": "annullata",
+            "data_esclusione": body.data_cessazione,
+            "data_cessazione": body.data_cessazione,  # compat
             "tipo_cessazione": body.tipo_cessazione,
             "motivo_cessazione": body.motivo_dettaglio,
             "cessata_da": user.get("id"),
@@ -460,7 +522,7 @@ async def annulla_applicazione(
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Applicazione non trovata")
-    return await db.applicazioni_matricola.find_one({"id": aid}, {"_id": 0})
+    return await db.applicazioni.find_one({"id": aid}, {"_id": 0})
 
 
 # ===========================================================
@@ -489,8 +551,8 @@ async def cerca_polizze_per_targa(
         "stato": 1, "contraente_id": 1, "scadenza": 1, "data_scadenza": 1,
         "compagnia_id": 1, "is_libro_matricola": 1,
     }).limit(50).to_list(50)
-    # applicazioni matricola con la stessa targa
-    applicazioni = await db.applicazioni_matricola.find(
+    # applicazioni matricola con la stessa targa (collezione unica)
+    applicazioni = await db.applicazioni.find(
         {"targa": {"$regex": f"^{re.escape(targa_clean)}$", "$options": "i"}},
         {"_id": 0},
     ).limit(50).to_list(50)
