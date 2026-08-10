@@ -3,11 +3,11 @@
 ## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
 
 ### Cosa è stato costruito/testato
-1. **Notifiche SMTP + WhatsApp Evolution API** (`notification_helpers.py`)
-   - `send_email(to,subject,body)` legge da `db.azienda_config` (Librerie → Azienda) o env fallback (SMTP_HOST/PORT/USER/PASSWORD/FROM)
-   - `send_whatsapp_message(cellulare, testo)` legge da `db.whatsapp_server_config` + prima istanza connessa
-   - Non sollevano mai eccezioni: `{ok, error?}` → l'endpoint invia-credenziali-portale è ora robusto
-   - Fix bug critico: server.py chiamava `send_email` e `send_whatsapp_message` che NON esistevano
+1. **Notifiche SMTP + WhatsApp — auto-collegate alle config esistenti** (`notification_helpers.py`)
+   - `send_email` usa `db.azienda_config.smtp_*` (già configurato: Gmail assicurazioni@schiantarelli.it)
+   - `send_whatsapp_message` delega a `routes.whatsapp_evo.send_text_via_evolution` (istanza di default letta da `azienda_config.notifica_scadenze_whatsapp_instance = "agenzia-jacopoooo"`)
+   - **Verificato end-to-end**: `invia-credenziali-portale` per Marco Rossi ritorna `email_inviata:true, whatsapp_inviato:true`
+   - Fix bug critico: server.py chiamava `send_email`/`send_whatsapp_message` che NON esistevano
 2. **Widget Dashboard "Richieste dal Portale Cliente"** (violet, primo task) → link `/richieste-cliente`, count = `db.richieste_cliente.count_documents({stato:'da_verificare'})`
 3. **Subdomain routing** (`PortaleSubdomainRedirect` in App.js): hostname `portale.` / `clienti.` / `portal.` o `REACT_APP_PORTALE_HOSTS` → auto-redirect a `/portale`
 4. **Template Welcome + Chat bidirezionale Portale ↔ Agenzia**

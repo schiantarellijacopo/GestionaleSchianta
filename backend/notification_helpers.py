@@ -104,25 +104,29 @@ async def send_whatsapp_message(
     tenant_id: Optional[str] = None,
     instance_name: Optional[str] = None,
 ) -> dict:
-    """Invia un messaggio WhatsApp via Evolution API. Non solleva mai."""
-    to_clean = _normalize_number(cellulare)
-    if not to_clean:
+    """Invia un messaggio WhatsApp via Evolution API.
+
+    Delega alla funzione ufficiale ``routes.whatsapp_evo.send_text_via_evolution``
+    (usata anche da avvisi_scadenze, alert_dispatcher, server chat) così condivide
+    normalizzazione numeri, fallback su istanza connessa e logging in ``whatsapp_messages``.
+
+    Se ``instance_name`` non è passato, prova a leggere l'istanza di default da
+    ``azienda_config.notifica_scadenze_whatsapp_instance`` (la stessa che l'utente
+    ha già configurato in Librerie → Azienda).
+    """
+    if not cellulare:
         return {"ok": False, "error": "numero cellulare non valido"}
-    server_url, api_key, cfg_instance = await _load_whatsapp_config()
-    inst = instance_name or cfg_instance
-    if not (server_url and api_key and inst):
-        return {"ok": False, "error": "Evolution API non configurata"}
+    if not instance_name:
+        try:
+            from database import db
+            az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+            instance_name = az.get("notifica_scadenze_whatsapp_instance") or None
+        except Exception:
+            instance_name = None
     try:
-        import httpx  # type: ignore
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            r = await client.post(
-                f"{server_url}/message/sendText/{inst}",
-                headers={"apikey": api_key, "Content-Type": "application/json"},
-                json={"number": to_clean, "text": (testo or "")[:2000]},
-            )
-        if r.status_code >= 400:
-            return {"ok": False, "error": f"Evolution API {r.status_code}: {r.text[:200]}"}
-        return {"ok": True}
+        from routes.whatsapp_evo import send_text_via_evolution
+        res = await send_text_via_evolution(cellulare, testo or "", instance_name=instance_name)
+        return res
     except Exception as e:
         logger.warning("Invio WhatsApp fallito: %s", e)
         return {"ok": False, "error": str(e)}
