@@ -361,6 +361,10 @@ function NuovaPolizzaDialog({ onClose }) {
     const [collaboratori, setCollaboratori] = useState([]);
     const [contraenteQuery, setContraenteQuery] = useState("");
     const [showContraenteList, setShowContraenteList] = useState(false);
+    // Oggetto contraente selezionato — memoria persistente indipendente dai risultati
+    // della ricerca (server-side): risolve il bug per cui il nome sparisce dopo la
+    // selezione se l'anagrafica non è più nei primi 50 risultati.
+    const [contraenteSel, setContraenteSel] = useState(null);
     const [ocrLoading, setOcrLoading] = useState(false);
     const ocrRef = useRef(null);
     const [polizzaFile, setPolizzaFile] = useState(null);
@@ -402,8 +406,13 @@ function NuovaPolizzaDialog({ onClose }) {
         api.get("/librerie/prodotti", { params }).then((r) => setProdotti(r.data || []));
     }, [f.ramo, f.compagnia_id]);
 
-    // Anagrafica selezionata (per mostrare nome nel campo di ricerca)
-    const contraenteSelezionato = ana.find((a) => a.id === f.contraente_id);
+    // Anagrafica selezionata (memoria persistente + fallback ricerca in lista)
+    const contraenteSelezionato = contraenteSel || ana.find((a) => a.id === f.contraente_id);
+    // Etichetta display: ragione_sociale (giuridica) / cognome_nome / cognome+nome (fisica)
+    const labelAna = (a) => a?.ragione_sociale
+        || a?.cognome_nome
+        || `${a?.cognome || ""} ${a?.nome || ""}`.trim()
+        || a?.codice_fiscale || a?.partita_iva || "—";
 
     // Lista filtrata = quanto restituito dal server (gia' filtrato per query con AND multi-token).
     const anaFiltrate = ana.slice(0, 50);
@@ -428,6 +437,7 @@ function NuovaPolizzaDialog({ onClose }) {
             const contrMatch = cfContr
                 ? ana.find((a) => a.codice_fiscale === cfContr || a.partita_iva === cfContr)
                 : null;
+            if (contrMatch) setContraenteSel(contrMatch);
             setF((p) => ({
                 ...p,
                 numero_polizza: d.numero_polizza || p.numero_polizza,
@@ -543,7 +553,7 @@ function NuovaPolizzaDialog({ onClose }) {
                             value={
                                 showContraenteList
                                     ? contraenteQuery
-                                    : (contraenteSelezionato?.ragione_sociale || contraenteQuery)
+                                    : (contraenteSelezionato ? labelAna(contraenteSelezionato) : contraenteQuery)
                             }
                             placeholder="Digita per cercare nome, CF, P.IVA..."
                             onChange={(e) => { setContraenteQuery(e.target.value); setShowContraenteList(true); }}
@@ -562,12 +572,13 @@ function NuovaPolizzaDialog({ onClose }) {
                                         className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-0"
                                         onMouseDown={() => {
                                             set("contraente_id", a.id);
+                                            setContraenteSel(a);
                                             setContraenteQuery("");
                                             setShowContraenteList(false);
                                         }}
                                         data-testid={`contraente-opt-${a.id}`}
                                     >
-                                        <div className="text-sm font-medium">{a.ragione_sociale}</div>
+                                        <div className="text-sm font-medium">{labelAna(a)}</div>
                                         <div className="text-[10px] text-slate-500">
                                             {a.codice_fiscale || a.partita_iva || "—"}
                                             {a.comune && ` · ${a.comune}`}
