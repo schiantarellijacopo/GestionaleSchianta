@@ -67,6 +67,15 @@ export default function CarichiMensili() {
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
     const [statoCarico, setStatoCarico] = useState("tutti");
+    // Filtri avanzati (collaboratore/compagnia/ramo/mezzo/tipo)
+    const [collabId, setCollabId] = useState("");
+    const [compagniaId, setCompagniaId] = useState("");
+    const [ramo, setRamo] = useState("");
+    const [mezzoPag, setMezzoPag] = useState("");
+    const [tipoRinn, setTipoRinn] = useState("");
+    const [collaboratori, setCollaboratori] = useState([]);
+    const [compagnie, setCompagnie] = useState([]);
+    const [rami, setRami] = useState([]);
     const [selected, setSelected] = useState(new Set());
     const [replicaOpen, setReplicaOpen] = useState(false);
     const [annullaOpen, setAnnullaOpen] = useState(false);

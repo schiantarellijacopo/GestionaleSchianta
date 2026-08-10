@@ -134,6 +134,10 @@ async def lista_carichi_mensili(
     range_filter: Optional[str] = Query(None, regex="^(mese_corrente|mese_successivo|tutti)$"),
     dal: Optional[str] = Query(None), al: Optional[str] = Query(None),
     collaboratore_id: Optional[str] = None,
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    mezzo_pagamento: Optional[str] = None,
+    tipo_rinnovo: Optional[str] = None,
     user=Depends(current_user),
 ):
     """Elenco titoli con informazioni arricchite per il modulo Carichi Mensili.
@@ -146,6 +150,11 @@ async def lista_carichi_mensili(
         match["stato_carico"] = stato_carico
     if collaboratore_id:
         match["collaboratore_id"] = collaboratore_id
+    if mezzo_pagamento:
+        match["mezzo_pagamento"] = mezzo_pagamento
+    if tipo_rinnovo:
+        # tipo_rinnovo su Titolo è il campo "tipo" (rinnovo/nuova/appendice/…)
+        match["tipo"] = tipo_rinnovo
 
     # Filtro data scadenza
     if range_filter == "mese_corrente":
@@ -156,6 +165,18 @@ async def lista_carichi_mensili(
         match["scadenza"] = {"$regex": f"^{mese}"}
     elif dal and al:
         match["scadenza"] = {"$gte": dal, "$lte": al}
+
+    # Prefiltro polizze se compagnia/ramo → riduce il set titoli
+    if compagnia_id or ramo:
+        pol_flt = {}
+        if compagnia_id:
+            pol_flt["compagnia_id"] = compagnia_id
+        if ramo:
+            pol_flt["ramo"] = ramo
+        pol_ids_pre = [p["id"] async for p in db.polizze.find(pol_flt, {"_id": 0, "id": 1})]
+        if not pol_ids_pre:
+            return {"totale": 0, "righe": []}
+        match["polizza_id"] = {"$in": pol_ids_pre}
 
     titoli = await db.titoli.find(match, {"_id": 0}).sort("scadenza", 1).limit(1000).to_list(1000)
 

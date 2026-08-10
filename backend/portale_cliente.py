@@ -119,6 +119,26 @@ async def login_cliente(body: dict):
 # ============================================================
 # PROFILO
 # ============================================================
+@router.get("/agenzia")
+async def get_agenzia_info(cliente=Depends(current_cliente)):
+    """Info dell'agenzia da mostrare nel Portale (logo + contatti + branding)."""
+    from server import db
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    return {
+        "ragione_sociale": az.get("ragione_sociale") or "La tua agenzia",
+        "logo_url": az.get("logo_url"),
+        "telefono": az.get("telefono"),
+        "email": az.get("email"),
+        "pec": az.get("pec"),
+        "indirizzo": az.get("indirizzo"),
+        "comune": az.get("comune"),
+        "provincia": az.get("provincia"),
+        "cap": az.get("cap"),
+        "sito_web": az.get("sito_web"),
+        "rui": az.get("rui"),
+    }
+
+
 @router.get("/me")
 async def get_me(cliente=Depends(current_cliente)):
     """Restituisce dati anagrafica cliente + nuclei collegati (se master)."""
