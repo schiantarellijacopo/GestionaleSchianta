@@ -66,7 +66,7 @@ export default function CarichiMensili() {
     const [range, setRange] = useState("mese_corrente");
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
-    const [statoCarico, setStatoCarico] = useState("in_attesa");
+    const [statoCarico, setStatoCarico] = useState("tutti");
     const [selected, setSelected] = useState(new Set());
     const [replicaOpen, setReplicaOpen] = useState(false);
     const [annullaOpen, setAnnullaOpen] = useState(false);
@@ -216,19 +216,6 @@ export default function CarichiMensili() {
                         >
                             {r === "mese_corrente" ? "Mese corrente" : r === "mese_successivo" ? "Mese successivo" : "Tutti"}
                         </Button>
-                    ))}
-                    <div className="w-px h-6 bg-slate-200 mx-1" />
-                    {[
-                        { k: "in_attesa", l: "🔵 In attesa" },
-                        { k: "validato", l: "✅ Validati" },
-                        { k: "annullato_carico", l: "❌ Annullati" },
-                        { k: "tutti", l: "Tutti" },
-                    ].map((s) => (
-                        <Button
-                            key={s.k} size="sm" variant={statoCarico === s.k ? "default" : "outline"}
-                            onClick={() => setStatoCarico(s.k)} data-testid={`filter-stato-${s.k}`}
-                            className={statoCarico === s.k ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                        >{s.l}</Button>
                     ))}
                     <div className="flex-1" />
                     <div className="relative">

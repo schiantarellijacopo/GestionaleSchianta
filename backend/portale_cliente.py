@@ -135,11 +135,28 @@ async def get_me(cliente=Depends(current_cliente)):
         "email": cliente.get("email"),
         "pec": cliente.get("pec"),
         "cellulare": cliente.get("cellulare"),
-        "indirizzo": cliente.get("indirizzo_residenza"),
-        "comune": cliente.get("comune_residenza"),
-        "provincia": cliente.get("provincia_residenza"),
-        "cap": cliente.get("cap_residenza"),
+        "telefono": cliente.get("telefono"),
+        # Indirizzo — priorità al campo diretto, poi al suffisso _residenza (compatibilità)
+        "indirizzo": cliente.get("indirizzo") or cliente.get("indirizzo_residenza"),
+        "comune": cliente.get("comune") or cliente.get("comune_residenza"),
+        "provincia": cliente.get("provincia") or cliente.get("provincia_residenza"),
+        "cap": cliente.get("cap") or cliente.get("cap_residenza"),
+        "nazione": cliente.get("nazione") or "ITALIA",
+        # Dati bancari
+        "iban": cliente.get("iban"),
+        "banca": cliente.get("banca"),
+        # Dati anagrafici (persona fisica)
+        "data_nascita": cliente.get("data_nascita"),
+        "comune_nascita": cliente.get("comune_nascita"),
+        "provincia_nascita": cliente.get("provincia_nascita"),
+        "sesso": cliente.get("sesso"),
+        "stato_civile": cliente.get("stato_civile"),
+        # Dati azienda (persona giuridica)
+        "sede_legale": cliente.get("sede_legale"),
+        "rea": cliente.get("rea"),
         "tipo_soggetto": cliente.get("tipo_soggetto"),
+        "professione": cliente.get("professione"),
+        "tipologia_lavoratore": cliente.get("tipologia_lavoratore"),
         "is_master": bool(cliente.get("is_master")),
         "nuclei_collegati": [],
     }
@@ -166,13 +183,14 @@ async def get_me(cliente=Depends(current_cliente)):
 @router.get("/polizze")
 async def list_polizze(cliente=Depends(current_cliente),
                        includi_storiche: bool = True):
-    """Elenco polizze del cliente. Include applicazioni libro matricola inline."""
+    """Elenco polizze del cliente. Include applicazioni libro matricola e stats titoli."""
     from server import db
     flt = {"contraente_id": cliente["id"]}
     polizze = await db.polizze.find(flt, {"_id": 0}).sort("scadenza", -1).to_list(500)
 
+    oggi = datetime.now(timezone.utc).date().isoformat()
     for p in polizze:
-        # Applicazioni Libro Matricola (visibili solo se polizza è LM)
+        # Applicazioni Libro Matricola
         p["applicazioni"] = []
         if p.get("is_libro_matricola"):
             apps = await db.applicazioni.find(
@@ -181,10 +199,37 @@ async def list_polizze(cliente=Depends(current_cliente),
             p["applicazioni"] = apps
         # Compagnia
         if p.get("compagnia_id"):
-            c = await db.compagnie.find_one({"id": p["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
+            c = await db.compagnie.find_one({"id": p["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1, "logo_url": 1})
             p["compagnia_nome"] = (c or {}).get("ragione_sociale")
+            p["compagnia_logo"] = (c or {}).get("logo_url")
+        # Statistiche titoli
+        n_da_pagare = await db.titoli.count_documents({"polizza_id": p["id"], "stato": "da_incassare"})
+        n_arretrati = await db.titoli.count_documents({
+            "polizza_id": p["id"], "stato": "da_incassare",
+            "scadenza": {"$lt": oggi}})
+        # Prossima quietanza
+        prox = await db.titoli.find_one(
+            {"polizza_id": p["id"], "stato": "da_incassare"},
+            {"_id": 0, "scadenza": 1, "importo_lordo": 1},
+            sort=[("scadenza", 1)],
+        )
+        p["stats_titoli"] = {
+            "da_pagare": n_da_pagare,
+            "arretrati": n_arretrati,
+            "prossima_scadenza": prox.get("scadenza") if prox else None,
+            "prossimo_importo": prox.get("importo_lordo") if prox else None,
+        }
+        # Allegati visibili
+        p["n_allegati"] = await db.allegati.count_documents({
+            "entita_tipo": "polizza", "entita_id": p["id"],
+            "visibile_cliente": True, "is_deleted": {"$ne": True},
+        })
+        # Sinistri collegati
+        p["n_sinistri"] = await db.sinistri.count_documents({"polizza_id": p["id"]})
+        # Stato semplificato
+        p["is_scaduta"] = (p.get("scadenza") or "") < oggi
+        p["is_attiva"] = p.get("stato") == "attiva"
     if not includi_storiche:
-        oggi = datetime.now(timezone.utc).date().isoformat()
         polizze = [p for p in polizze if (p.get("scadenza") or "") >= oggi]
     return polizze
 
@@ -195,15 +240,43 @@ async def list_polizze(cliente=Depends(current_cliente),
 @router.get("/titoli")
 async def list_titoli(cliente=Depends(current_cliente)):
     from server import db
-    pol_ids = [p["id"] async for p in db.polizze.find(
-        {"contraente_id": cliente["id"]}, {"_id": 0, "id": 1})]
-    if not pol_ids:
+    # Mappa polizza_id → {numero_polizza, ramo, prodotto, compagnia_nome, targa}
+    pol_map = {}
+    async for p in db.polizze.find(
+        {"contraente_id": cliente["id"]},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1,
+         "prodotto": 1, "targa": 1, "compagnia_id": 1},
+    ):
+        pol_map[p["id"]] = p
+    if not pol_map:
         return []
+    # Nomi compagnie
+    comp_ids = list({v.get("compagnia_id") for v in pol_map.values() if v.get("compagnia_id")})
+    comp_names = {c["id"]: c.get("ragione_sociale") async for c in db.compagnie.find(
+        {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})} if comp_ids else {}
+
     titoli = await db.titoli.find(
-        {"polizza_id": {"$in": pol_ids}}, {"_id": 0},
-    ).sort("data_scadenza", -1).to_list(2000)
-    # allegati visibili per ogni titolo
+        {"polizza_id": {"$in": list(pol_map.keys())}}, {"_id": 0},
+    ).sort("scadenza", -1).to_list(2000)
+    # Enrichment per ogni titolo
     for t in titoli:
+        p = pol_map.get(t.get("polizza_id"), {}) or {}
+        t["polizza_numero"] = p.get("numero_polizza")
+        t["polizza_ramo"] = p.get("ramo")
+        t["polizza_prodotto"] = p.get("prodotto")
+        t["polizza_targa"] = p.get("targa")
+        t["compagnia_nome"] = comp_names.get(p.get("compagnia_id"))
+        # Etichette stato user-friendly
+        stato_map = {
+            "da_incassare": "Da pagare",
+            "incassato": "Pagato",
+            "insoluto": "Arretrato",
+            "annullato": "Annullato",
+            "storno": "Storno",
+            "sospeso": "Sospeso",
+        }
+        t["stato_label"] = stato_map.get(t.get("stato"), t.get("stato"))
+        # Allegati visibili
         cnt = await db.allegati.count_documents({
             "entita_tipo": "titolo", "entita_id": t["id"],
             "visibile_cliente": True, "is_deleted": {"$ne": True},
@@ -297,6 +370,28 @@ async def list_sinistri(cliente=Depends(current_cliente)):
     items = await db.sinistri.find(
         {"contraente_id": cliente["id"]}, {"_id": 0},
     ).sort("data_denuncia", -1).to_list(500)
+    # Enrichment con dati polizza + compagnia
+    pol_ids = list({s.get("polizza_id") for s in items if s.get("polizza_id")})
+    pol_map = {}
+    if pol_ids:
+        async for p in db.polizze.find(
+            {"id": {"$in": pol_ids}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "targa": 1, "compagnia_id": 1},
+        ):
+            pol_map[p["id"]] = p
+    comp_ids = list({v.get("compagnia_id") for v in pol_map.values() if v.get("compagnia_id")})
+    comp_names = {c["id"]: c.get("ragione_sociale") async for c in db.compagnie.find(
+        {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})} if comp_ids else {}
+    for s in items:
+        p = pol_map.get(s.get("polizza_id"), {}) or {}
+        s["polizza_numero"] = p.get("numero_polizza")
+        s["polizza_ramo"] = p.get("ramo")
+        s["polizza_targa"] = p.get("targa")
+        s["compagnia_nome"] = comp_names.get(p.get("compagnia_id"))
+        s["n_allegati"] = await db.allegati.count_documents({
+            "entita_tipo": "sinistro", "entita_id": s["id"],
+            "visibile_cliente": True, "is_deleted": {"$ne": True},
+        })
     return items
 
 
