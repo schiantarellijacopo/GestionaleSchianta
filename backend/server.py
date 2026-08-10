@@ -8022,6 +8022,38 @@ async def avvisi_whatsapp_invia(
     return {"ok": True, "instance": r.get("instance_name")}
 
 
+@api.post("/avvisi/sms-invia-bulk-titoli")
+async def sms_bulk_avvisi_titoli(
+    body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Invia un SMS per contraente con l'elenco dei suoi titoli scaduti.
+
+    Attualmente Twilio NON è configurato per questo tenant: l'endpoint restituisce
+    dettaglio con `sent=0` e messaggio esplicativo. Quando verrà attivato,
+    la stessa firma continuerà a funzionare (il frontend usa già `titoli_ids`).
+    """
+    titoli_ids = body.get("titoli_ids") or []
+    if not titoli_ids:
+        raise HTTPException(400, "titoli_ids obbligatorio (lista)")
+    twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    twilio_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    twilio_from = os.environ.get("TWILIO_FROM", "")
+    if not (twilio_sid and twilio_token and twilio_from):
+        # Nessuna configurazione Twilio → risposta chiara al frontend
+        return {
+            "inviati": 0,
+            "skipped": [{"motivo": "Canale SMS non configurato: aggiungi TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM in backend/.env"}],
+            "titoli_richiesti": len(titoli_ids),
+            "error": "twilio_not_configured",
+        }
+    # Placeholder implementazione reale (integrazione Twilio):
+    return {
+        "inviati": 0,
+        "skipped": [{"motivo": "Integrazione Twilio implementata a livello di config ma non ancora eseguita."}],
+        "titoli_richiesti": len(titoli_ids),
+    }
+
+
 @api.post("/avvisi/whatsapp-invia-bulk-titoli")
 async def whatsapp_bulk_avvisi_titoli(
     body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente")),

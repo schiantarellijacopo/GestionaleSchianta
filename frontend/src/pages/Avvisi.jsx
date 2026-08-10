@@ -266,7 +266,37 @@ function TabBtn({ active, onClick, children, testid }) {
 
 function TitoliByContraente({ gruppi, onBulk, onEmail }) {
     const [expanded, setExpanded] = useState(new Set());
-    const [selTitoli, setSelTitoli] = useState(new Set());
+    // Di default TUTTI i titoli sono selezionati (regola utente).
+    // L'utente può poi deselezionare quelli che NON vuole includere nell'avviso.
+    const [selTitoli, setSelTitoli] = useState(() =>
+        new Set(gruppi.flatMap((g) => g.titoli.map((t) => t.id)))
+    );
+
+    // Ricalcola la selezione quando cambiano i gruppi (nuova risposta API)
+    useEffect(() => {
+        setSelTitoli((prev) => {
+            const allIds = gruppi.flatMap((g) => g.titoli.map((t) => t.id));
+            // Se nessuna selezione precedente o è la prima volta → seleziona tutti
+            if (prev.size === 0) return new Set(allIds);
+            // Altrimenti mantieni solo gli id ancora presenti
+            return new Set(allIds.filter((id) => prev.has(id)));
+        });
+        // eslint-disable-next-line
+    }, [gruppi]);
+
+    // Ritorna gli id dei titoli selezionati NEL gruppo `g`. Se l'utente non ha
+    // selezionato nessuno del gruppo, ritorna comunque tutti (fallback sicuro).
+    const idsSelectedInGroup = (g) => {
+        const sel = g.titoli.filter((t) => selTitoli.has(t.id));
+        if (sel.length === 0) return g.titoli.map((t) => t.id);
+        return sel.map((t) => t.id);
+    };
+    // Somma degli importi dei titoli selezionati nel gruppo (o totale se nessuno selezionato)
+    const totaleSelectedInGroup = (g) => {
+        const sel = g.titoli.filter((t) => selTitoli.has(t.id));
+        if (sel.length === 0) return g.totale;   // nessuna selezione = mostra totale gruppo
+        return sel.reduce((s, t) => s + (t.importo_lordo || 0), 0);
+    };
 
     const toggleExp = (k) => setExpanded((p) => {
         const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n;
@@ -360,34 +390,46 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                     <td className="text-xs num">{g.contraente_cellulare || "—"}</td>
                                     <td className="text-xs">{g.contraente_email || "—"}</td>
                                     <td className="text-xs text-slate-700">{mezzi}</td>
-                                    <td className="text-center text-xs font-medium">{g.titoli.length}</td>
-                                    <td className="num text-right font-semibold text-amber-700">{fmtEur(g.totale)}</td>
+                                    <td className="text-center text-xs font-medium">
+                                        {idsSelectedInGroup(g).length}
+                                        {idsSelectedInGroup(g).length < g.titoli.length && (
+                                            <span className="text-slate-400"> / {g.titoli.length}</span>
+                                        )}
+                                    </td>
+                                    <td className="num text-right font-semibold text-amber-700">
+                                        {fmtEur(totaleSelectedInGroup(g))}
+                                        {idsSelectedInGroup(g).length < g.titoli.length && (
+                                            <div className="text-[9px] text-slate-400 font-normal">
+                                                (tot. gruppo {fmtEur(g.totale)})
+                                            </div>
+                                        )}
+                                    </td>
                                     <td>
                                         <div className="flex justify-center gap-1">
                                             {hasMail && (
-                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Email"
-                                                    onClick={() => onEmail({ kind: "gruppo", gruppo: g })}
+                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Email SOLO titoli selezionati"
+                                                    onClick={() => onEmail({ kind: "gruppo", gruppo: g, titoli_ids: idsSelectedInGroup(g) })}
                                                     data-testid={`btn-email-${k}`}>
                                                     <Mail size={12} className="text-sky-700" />
                                                 </Button>
                                             )}
                                             {hasCell && (
-                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="WhatsApp"
-                                                    onClick={() => openWA(g)}
+                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="WhatsApp SOLO titoli selezionati"
+                                                    onClick={() => openWA(g, idsSelectedInGroup(g))}
                                                     data-testid={`btn-wa-${k}`}>
                                                     <MessageCircle size={12} className="text-emerald-600" />
                                                 </Button>
                                             )}
-                                            <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Genera PDF Avviso"
-                                                onClick={() => stampaPdfAvviso(g)}
+                                            <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="PDF Avviso SOLO titoli selezionati"
+                                                onClick={() => stampaPdfAvviso(g, idsSelectedInGroup(g))}
                                                 data-testid={`btn-pdf-${k}`}>
                                                 <Printer size={12} className="text-violet-700" />
                                             </Button>
                                             {hasCell && (
-                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="SMS (Twilio fine progetto)"
-                                                    onClick={() => toast.info("SMS via Twilio - in arrivo")}
+                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="SMS SOLO titoli selezionati"
+                                                    onClick={() => inviaSMS(g, idsSelectedInGroup(g))}
                                                     data-testid={`btn-sms-${k}`}>
-                                                    <Smartphone size={12} className="text-slate-400" />
+                                                    <Smartphone size={12} className="text-slate-600" />
                                                 </Button>
                                             )}
                                         </div>
@@ -427,44 +469,62 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
     );
 }
 
-async function openWA(g) {
+async function openWA(g, titoliIds) {
     const cell = g.contraente_cellulare?.replace(/[^\d+]/g, "");
     if (!cell) { toast.error("Nessun cellulare"); return; }
+    // Se non passati titoli specifici → tutti (comportamento retrocompatibile)
+    const ids = titoliIds && titoliIds.length ? titoliIds : g.titoli.map((t) => t.id);
     try {
-        // Usa il bulk-titoli con UN solo cliente: il backend carica automaticamente
-        // il modello WhatsApp "default" della libreria "Gestioni Modelli" e ne
-        // renderizza i placeholder ({cliente_nome}, {totale}, {numero_titoli}, ...).
-        // Passa ignora_preferenze=true perché è un click esplicito dell'operatore.
         const r = await api.post("/avvisi/whatsapp-invia-bulk-titoli", {
-            titoli_ids: g.titoli.map((t) => t.id),
+            titoli_ids: ids,
             ignora_preferenze: true,
         });
-        if (r.data?.inviati > 0) toast.success("WhatsApp inviato al cliente ✓ (modello libreria)");
+        if (r.data?.inviati > 0) toast.success(`WhatsApp inviato con ${ids.length} titoli ✓`);
         else toast.error(r.data?.skipped?.[0]?.motivo || "Invio non riuscito");
     } catch (e) {
         toast.error(e.response?.data?.detail || "Invio WhatsApp fallito");
     }
 }
 
-async function stampaPdfAvviso(g) {
+async function inviaSMS(g, titoliIds) {
+    const cell = g.contraente_cellulare?.replace(/[^\d+]/g, "");
+    if (!cell) { toast.error("Nessun cellulare"); return; }
+    const ids = titoliIds && titoliIds.length ? titoliIds : g.titoli.map((t) => t.id);
+    try {
+        const r = await api.post("/avvisi/sms-invia-bulk-titoli", {
+            titoli_ids: ids,
+            ignora_preferenze: true,
+        });
+        if (r.data?.inviati > 0) toast.success(`SMS inviato con ${ids.length} titoli ✓`);
+        else toast.error(r.data?.skipped?.[0]?.motivo
+                          || r.data?.error
+                          || "SMS: canale non configurato (Twilio) o preferenza cliente disattiva");
+    } catch (e) {
+        toast.error(e.response?.data?.detail || "SMS non disponibile");
+    }
+}
+
+async function stampaPdfAvviso(g, titoliIds) {
+    const ids = titoliIds && titoliIds.length ? titoliIds : g.titoli.map((t) => t.id);
     try {
         const r = await api.post("/avvisi/pdf", {
             contraente_id: g.contraente_id,
-            titoli_ids: g.titoli.map((t) => t.id),
+            titoli_ids: ids,
         }, { responseType: "blob" });
         const blob = new Blob([r.data], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank", "noopener");
-        // Registra nello storico anche il PDF generato
         try {
             await api.post("/storico-avvisi/registra", {
                 canale: "pdf", contraente_id: g.contraente_id, contraente_nome: g.contraente_nome,
-                titoli_ids: g.titoli.map((t) => t.id),
+                titoli_ids: ids,
                 oggetto: "PDF Avviso scadenza titoli", tipo: "pdf_avviso",
-                importo: g.titoli.reduce((s, t) => s + (t.importo_lordo || 0), 0),
+                importo: g.titoli
+                    .filter((t) => ids.includes(t.id))
+                    .reduce((s, t) => s + (t.importo_lordo || 0), 0),
             });
         } catch (_) { /* non bloccare */ }
-        toast.success("PDF avviso generato e registrato nello storico");
+        toast.success(`PDF avviso generato con ${ids.length} titoli`);
     } catch (e) {
         toast.error(e.response?.data?.detail || "Errore generazione PDF");
     }
@@ -743,6 +803,12 @@ function EmailDialog({ item, onClose }) {
     const isGruppo = item.kind === "gruppo";
     const g = item.gruppo;
     const p = item.polizza;
+    // titoli_ids passati (solo quelli selezionati) — fallback su tutti se assenti
+    const titoliIdsSelezionati = isGruppo
+        ? (item.titoli_ids && item.titoli_ids.length ? item.titoli_ids : g.titoli.map((t) => t.id))
+        : [];
+    const titoliDaInviare = isGruppo ? g.titoli.filter((t) => titoliIdsSelezionati.includes(t.id)) : [];
+    const totaleSelezionati = titoliDaInviare.reduce((s, t) => s + (t.importo_lordo || 0), 0);
     const [to, setTo] = useState(isGruppo ? (g.contraente_email || "") : (p.contraente_email || ""));
     const [soggetto, setSoggetto] = useState(isGruppo ? "Promemoria titoli in scadenza" : `Promemoria polizza ${p.numero_polizza}`);
     const [corpo, setCorpo] = useState(CORPO_DEFAULT);
@@ -754,7 +820,7 @@ function EmailDialog({ item, onClose }) {
         try {
             if (isGruppo) {
                 await api.post("/avvisi/invia-bulk-titoli", {
-                    titoli_ids: g.titoli.map((t) => t.id),
+                    titoli_ids: titoliIdsSelezionati,
                     soggetto, corpo_lettera: corpo,
                 });
             } else {
@@ -765,7 +831,7 @@ function EmailDialog({ item, onClose }) {
                     polizza_id: p.id, tipo_avviso: "email_polizza",
                 });
             }
-            toast.success("Email inviata");
+            toast.success(`Email inviata con ${isGruppo ? titoliIdsSelezionati.length : 1} titolo/i`);
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setSending(false); }
@@ -789,8 +855,14 @@ function EmailDialog({ item, onClose }) {
                         <Textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={10} className="text-sm" data-testid="email-corpo" />
                     </div>
                     {isGruppo && (
-                        <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded">
-                            La tabella con {g.titoli.length} titoli ({fmtEur(g.totale)}) sarà aggiunta automaticamente sotto al corpo.
+                        <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 p-2 rounded">
+                            📄 La tabella con <strong>{titoliIdsSelezionati.length} titol{titoliIdsSelezionati.length === 1 ? 'o' : 'i'} selezionat{titoliIdsSelezionati.length === 1 ? 'o' : 'i'}</strong>
+                            {" "}({fmtEur(totaleSelezionati)}) sarà inclusa automaticamente nell&apos;email.
+                            {titoliIdsSelezionati.length < g.titoli.length && (
+                                <div className="text-slate-500 mt-0.5">
+                                    ({g.titoli.length - titoliIdsSelezionati.length} titol{g.titoli.length - titoliIdsSelezionati.length === 1 ? 'o' : 'i'} escluso/i dall&apos;utente)
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
