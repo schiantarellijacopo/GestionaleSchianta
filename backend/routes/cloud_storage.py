@@ -52,7 +52,7 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL") or BACKEND_PUBLIC_URL
 
 REDIRECT_URI = f"{BACKEND_PUBLIC_URL}/api/librerie/cloud-storage/callback" if BACKEND_PUBLIC_URL else ""
 
-G_SCOPE = "https://www.googleapis.com/auth/drive.file"
+G_SCOPE = "https://www.googleapis.com/auth/drive"
 M_SCOPE = "openid profile offline_access Files.ReadWrite User.Read"
 
 # Struttura cartelle standard che il CRM crea automaticamente quando l'agenzia
@@ -330,7 +330,11 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
     st = await db.cloud_oauth_states.find_one_and_delete({"_id": state})
     if not st:
         raise HTTPException(400, "state non valido o già usato")
-    if st["expires_at"] < _now():
+    # MongoDB può restituire il datetime offset-naive: normalizza a UTC-aware per il confronto
+    exp = st["expires_at"]
+    if isinstance(exp, datetime) and exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp < _now():
         raise HTTPException(400, "state scaduto — riprova")
     provider = st["provider"]
     cfg = await _provider_cfg_async(provider, st["tenant_id"])

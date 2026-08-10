@@ -11582,6 +11582,15 @@ async def startup():
     except Exception as e:
         logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
 
+    # Scheduler: Cloud OCR notturno (ogni ora dalle 22 alle 06 UTC)
+    # Legge la cartella INBOX di ogni tenant collegato a Google Drive/OneDrive,
+    # classifica i file con Gemini Vision, li smista automaticamente.
+    try:
+        from cloud_ocr_scanner import start_scheduler as _cloud_ocr_start
+        _cloud_ocr_start(db)
+    except Exception as e:
+        logger.warning("Scheduler Cloud OCR non avviato: %s", e)
+
     # Seed modelli di default (idempotente)
     try:
         from routes.modelli import seed_default_models
