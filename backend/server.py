@@ -11428,6 +11428,10 @@ app.include_router(api)
 from sollecito_veicoli import router_public as _router_upload_public
 app.include_router(_router_upload_public)
 
+# Portale Cliente — self-service
+from portale_cliente import router as _router_portale_cliente
+app.include_router(_router_portale_cliente)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

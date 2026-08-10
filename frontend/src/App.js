@@ -9,6 +9,7 @@ import Anagrafiche from "@/pages/Anagrafiche";
 import AnagraficaDetail from "@/pages/AnagraficaDetail";
 import Polizze from "@/pages/Polizze";
 import PolizzaDetail from "@/pages/PolizzaDetail";
+import PortaleCliente from "@/pages/PortaleCliente";
 import Titoli from "@/pages/Titoli";
 import TitoliStorici from "@/pages/TitoliStorici";
 import Alert from "@/pages/Alert";
@@ -68,6 +69,7 @@ function App() {
                     <Routes>
                         <Route path="/login" element={<Login />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
+                        <Route path="/portale/*" element={<PortaleCliente />} />
 
                         {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}
                         <Route
