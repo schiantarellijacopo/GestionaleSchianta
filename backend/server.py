@@ -11424,6 +11424,10 @@ api.include_router(_copilot_router.router)
 
 app.include_router(api)
 
+# Router pubblico non autenticato per upload documenti veicolo via link cliente
+from sollecito_veicoli import router_public as _router_upload_public
+app.include_router(_router_upload_public)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

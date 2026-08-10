@@ -43,8 +43,8 @@ export default function DocumentiMancantiWidget() {
     useEffect(reload, [collabId]);
 
     if (!data || !data.totali) return null;
-    const { polizze, veicoli, anagrafiche } = data.totali;
-    const totale = polizze + veicoli + anagrafiche;
+    const { polizze, veicoli, anagrafiche, sostituzioni_veicolo = 0 } = data.totali;
+    const totale = polizze + veicoli + anagrafiche + sostituzioni_veicolo;
     const collNome = collaboratori.find((c) => c.id === collabId)?.name;
 
     return (
@@ -63,11 +63,13 @@ export default function DocumentiMancantiWidget() {
                     ))}
                 </select>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                 <CardMissing label="Polizze senza PDF" count={polizze} icon={FileText} color="rose"
                     onClick={() => polizze > 0 && setOpen("polizze")} testid="missing-polizze-card" />
                 <CardMissing label="Veicoli senza libretto" count={veicoli} icon={Car} color="amber"
                     onClick={() => veicoli > 0 && setOpen("veicoli")} testid="missing-veicoli-card" />
+                <CardMissing label="Sostit. senza atto" count={sostituzioni_veicolo} icon={FileWarning} color="orange"
+                    onClick={() => sostituzioni_veicolo > 0 && setOpen("sostituzioni")} testid="missing-sostituzioni-card" />
                 <CardMissing label="Anagrafiche senza C.I." count={anagrafiche} icon={IdCard} color="orange"
                     onClick={() => anagrafiche > 0 && setOpen("anagrafiche")} testid="missing-anagrafiche-card" />
             </div>
@@ -276,6 +278,29 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
                 note={note[v.id]}
                 onSaveNote={saveNota} onAttach={attachFile}
                 uploading={uploadingId === v.id}
+            />
+        );
+    } else if (tipo === "sostituzioni") {
+        items = data.sostituzioni_senza_atto || [];
+        title = "Sostituzioni veicolo senza atto (vendita/demolizione/esportazione)";
+        colonneCSV = [
+            ["Targa", (s) => s.targa || ""],
+            ["Motivo", (s) => s.tipo_cessazione || ""],
+            ["Data cessazione", (s) => s.data_esclusione || s.data_cessazione || ""],
+            ["Polizza", (s) => s.polizza_numero || ""],
+            ["Intestatario", (s) => s.intestatario || s.contraente_nome || ""],
+            ["Nota", (s) => note[s.id] || ""],
+        ];
+        renderRow = (s) => (
+            <ItemRow
+                key={s.id} id={s.id} tipo="sostituzioni"
+                primary={`[${s.targa}] Motivo: ${(s.tipo_cessazione || "—").toUpperCase()}`}
+                secondary={`Polizza ${s.polizza_numero || "—"} · ${s.intestatario || s.contraente_nome || ""} · Cess. ${s.data_esclusione || s.data_cessazione || "—"}`}
+                badge={s.tipo_cessazione}
+                icon={FileWarning} colorClass="text-orange-500"
+                note={note[s.id]}
+                onSaveNote={saveNota} onAttach={attachFile}
+                uploading={uploadingId === s.id}
             />
         );
     } else {

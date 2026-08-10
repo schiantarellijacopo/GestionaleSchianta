@@ -20,6 +20,7 @@ import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
+import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
@@ -825,18 +826,15 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                         <TabsContent value="veicolo">
                             <div className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold pt-3 pb-1">Dati veicolo</div>
                             <div className="grid grid-cols-2 gap-3 pb-3">
-                                <div><Label>Targa</Label><Input
-                                    value={f.targa}
-                                    onChange={(e) => set("targa", e.target.value.toUpperCase())}
-                                    onBlur={async (e) => {
-                                        const t = (e.target.value || "").trim().toUpperCase();
-                                        if (!t || t.length < 4) return;
-                                        try {
-                                            const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
-                                            const v = r.data?.veicolo;
-                                            if (v) {
-                                                setF((prev) => ({
-                                                    ...prev,
+                                <div className="col-span-2">
+                                    <TargaSearchWithLentina
+                                        value={f.targa}
+                                        showVehicleData={true}
+                                        onChange={(targa, v) => {
+                                            setF((prev) => ({
+                                                ...prev,
+                                                targa,
+                                                ...(v ? {
                                                     veicolo_marca: prev.veicolo_marca || v.marca || "",
                                                     veicolo_modello: prev.veicolo_modello || v.modello || "",
                                                     veicolo_alimentazione: prev.veicolo_alimentazione || v.alimentazione || "",
@@ -848,13 +846,11 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                                     veicolo_quintali: prev.veicolo_quintali || v.quintali || "",
                                                     telaio: prev.telaio || v.telaio || "",
                                                     veicolo_id: v.id,
-                                                }));
-                                                toast.success(`Veicolo trovato: ${v.marca || ""} ${v.modello || ""}`);
-                                            }
-                                        } catch { /* not found */ }
-                                    }}
-                                    data-testid="edit-pol-targa"
-                                /></div>
+                                                } : {}),
+                                            }));
+                                        }}
+                                    />
+                                </div>
                                 <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} data-testid="edit-pol-marca" /></div>
                                 <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} data-testid="edit-pol-modello" /></div>
                                 <div><Label>Tipo veicolo</Label><Input value={f.veicolo_tipo} onChange={(e) => set("veicolo_tipo", e.target.value)} /></div>

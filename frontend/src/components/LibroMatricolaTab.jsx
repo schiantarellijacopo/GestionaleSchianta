@@ -527,19 +527,68 @@ function SostituisciDialog({ polizzaId, applicazione, onClose }) {
         scadenza_leasing: applicazione.scadenza_leasing || "",
         data_inclusione: new Date().toISOString().slice(0, 10),
         motivo: "",
+        tipo_cessazione: "venduta",  // vendita | demolita | esportata | cessata_leasing
     });
+    const [attoFile, setAttoFile] = useState(null);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const [saving, setSaving] = useState(false);
 
+    const targaCambia = f.targa && f.targa.toUpperCase() !== (applicazione.targa || "").toUpperCase();
+    const richiedeAtto = targaCambia;
+
+    const CATEGORIE_ATTO = {
+        venduta:         "atto_vendita",
+        demolita:        "certificato_demolizione",
+        esportata:       "documento_esportazione",
+        cessata_leasing: "cessazione_leasing",
+    };
+
     const sostituisci = async () => {
         if (!f.targa) { toast.error("Targa nuovo veicolo obbligatoria"); return; }
+        if (richiedeAtto && !f.tipo_cessazione) {
+            toast.error("Scegli il motivo di cessazione del vecchio veicolo");
+            return;
+        }
+        if (richiedeAtto && !attoFile) {
+            if (!window.confirm(
+                `⚠️ Non hai caricato il documento di ${f.tipo_cessazione.toUpperCase()}.\n\n` +
+                `La sostituzione verrà comunque salvata e la pratica finirà tra i "Documenti Mancanti" della Dashboard.\n` +
+                `Il cliente riceverà solleciti automatici via Email/WhatsApp finché non carica il documento.\n\n` +
+                `Vuoi procedere senza caricare l'atto?`,
+            )) return;
+        }
         setSaving(true);
         try {
             const payload = { ...f };
             if (payload.valore_veicolo === "") delete payload.valore_veicolo;
             else payload.valore_veicolo = parseFloat(payload.valore_veicolo);
-            await api.post(`/polizze/${polizzaId}/applicazioni/${applicazione.id}/sostituisci`, payload);
-            toast.success("Applicazione sostituita");
+            const r = await api.post(
+                `/polizze/${polizzaId}/applicazioni/${applicazione.id}/sostituisci`,
+                payload,
+            );
+            // Upload atto se presente
+            if (richiedeAtto && attoFile) {
+                const fd = new FormData();
+                fd.append("file", attoFile);
+                fd.append("categoria", CATEGORIE_ATTO[f.tipo_cessazione] || "atto_vendita");
+                fd.append("entita_tipo", "polizza");
+                fd.append("entita_id", polizzaId);
+                fd.append("applicazione_matricola_id", applicazione.id);
+                fd.append("descrizione", `Atto ${f.tipo_cessazione} per targa ${applicazione.targa}`);
+                fd.append("visibile_cliente", "true");
+                try {
+                    await api.post("/allegati", fd, {
+                        headers: { "Content-Type": "multipart/form-data" },
+                    });
+                    toast.success("Sostituzione completata + atto caricato");
+                } catch (e) {
+                    toast.warning("Sostituzione salvata ma upload atto fallito. Ricaricalo dai Documenti Mancanti.");
+                }
+            } else if (richiedeAtto) {
+                toast.warning(`Sostituzione salvata. Manca il documento di ${f.tipo_cessazione} — pratica in "Documenti Mancanti"`);
+            } else {
+                toast.success("Applicazione sostituita (stessa targa, libretto ereditato)");
+            }
             onClose();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
@@ -558,17 +607,62 @@ function SostituisciDialog({ polizzaId, applicazione, onClose }) {
                 <div className="space-y-3 py-2">
                     <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
                         L&apos;applicazione corrente <strong>{applicazione.targa}</strong> verrà marcata come <em>sostituita</em>.
-                        Verrà creata una nuova applicazione con i dati ereditati (tariffa, intestatario, ecc.) sovrascritti dai campi qui sotto.
+                        Se cambia la targa, è <strong>obbligatorio</strong> specificare il motivo e caricare il documento ufficiale.
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                        <div><Label>Nuova targa *</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="sost-targa" /></div>
+                        <div><Label>Nuova targa *</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="sost-targa" className="font-mono uppercase" /></div>
                         <div><Label>Data inclusione nuova</Label><Input type="date" value={f.data_inclusione} onChange={(e) => set("data_inclusione", e.target.value)} /></div>
                         <div><Label>Marca</Label><Input value={f.marca} onChange={(e) => set("marca", e.target.value)} /></div>
                         <div><Label>Modello</Label><Input value={f.modello} onChange={(e) => set("modello", e.target.value)} /></div>
                         <div><Label>Valore veicolo €</Label><Input type="number" step="0.01" value={f.valore_veicolo} onChange={(e) => set("valore_veicolo", e.target.value)} /></div>
                         <div><Label>Scadenza leasing</Label><Input type="date" value={f.scadenza_leasing} onChange={(e) => set("scadenza_leasing", e.target.value)} /></div>
-                        <div className="col-span-2"><Label>Motivo sostituzione</Label><Input value={f.motivo} onChange={(e) => set("motivo", e.target.value)} placeholder="es. Cambio veicolo, leasing nuovo, ..." data-testid="sost-motivo" /></div>
                     </div>
+
+                    {richiedeAtto && (
+                        <div className="border border-rose-300 bg-rose-50 rounded p-3 space-y-3">
+                            <div className="text-xs font-semibold text-rose-800 uppercase tracking-wide flex items-center gap-2">
+                                <AlertTriangle size={14} /> Cambio targa — motivo cessazione e documento OBBLIGATORI
+                            </div>
+                            <div>
+                                <Label className="text-xs font-semibold">Motivo di cessazione della vecchia targa *</Label>
+                                <div className="grid grid-cols-2 gap-2 mt-1">
+                                    {[
+                                        { key: "venduta", label: "Vendita → Atto di Vendita" },
+                                        { key: "demolita", label: "Demolizione → Certificato Demolizione" },
+                                        { key: "esportata", label: "Esportazione → Doc. Esportazione" },
+                                        { key: "cessata_leasing", label: "Cessazione Leasing" },
+                                    ].map((opt) => (
+                                        <label key={opt.key}
+                                               className={`text-xs border rounded p-2 cursor-pointer transition ${f.tipo_cessazione === opt.key ? "border-rose-500 bg-white ring-2 ring-rose-200" : "border-slate-200 hover:border-slate-400"}`}>
+                                            <input type="radio" name="motivo-cessazione"
+                                                   checked={f.tipo_cessazione === opt.key}
+                                                   onChange={() => set("tipo_cessazione", opt.key)}
+                                                   className="mr-2" data-testid={`sost-motivo-${opt.key}`} />
+                                            {opt.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <Label className="text-xs font-semibold">Carica documento {(CATEGORIE_ATTO[f.tipo_cessazione] || "atto").replace(/_/g, " ")} (consigliato)</Label>
+                                <input type="file"
+                                       accept="application/pdf,image/*"
+                                       onChange={(e) => setAttoFile(e.target.files?.[0] || null)}
+                                       className="w-full text-xs border border-slate-200 rounded p-2 bg-white"
+                                       data-testid="sost-atto-file" />
+                                {attoFile && (
+                                    <div className="text-[10px] text-slate-500 mt-1">📄 {attoFile.name} · {(attoFile.size / 1024).toFixed(0)} KB</div>
+                                )}
+                                {!attoFile && (
+                                    <div className="text-[10px] text-rose-700 mt-1">
+                                        ⚠️ Se non lo carichi ora, il cliente riceverà solleciti automatici via Email/WhatsApp finché non lo invia
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    <div><Label>Note aggiuntive</Label><Input value={f.motivo} onChange={(e) => set("motivo", e.target.value)} placeholder="Note libere sulla sostituzione" data-testid="sost-motivo" /></div>
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
