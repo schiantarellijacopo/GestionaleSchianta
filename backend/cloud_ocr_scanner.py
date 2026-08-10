@@ -994,7 +994,7 @@ async def _create_crm_attachment(
         return
 
     # ── Enrichment: applicazione_matricola_id (per polizze Libro Matricola)
-    # e link a titolo (per quietanze).
+    # e titolo_id (per quietanze).
     data_ocr = classification.get("dati_estratti") or {}
     applicazione_matricola_id = None
     titolo_id_for_quietanza = None
@@ -1011,9 +1011,8 @@ async def _create_crm_attachment(
             logger.info("Libro Matricola: allegato collegato all'applicazione %s (targa %s)",
                        app["id"], targa_up)
 
-    # 2) Se è una quietanza e la polizza è nota → prova a linkare al titolo
-    # Stati validi: da_incassare (quietanza emessa in attesa), incassato (già pagata),
-    # pendente (in copertura anticipata). Solo `stornato` viene escluso.
+    # 2) Se è una quietanza e la polizza è nota → trova il TITOLO di riferimento
+    # (creerò un secondo allegato collegato al titolo per l'icona 📎 nella lista Titoli)
     if tipo_doc == "quietanza" and pol:
         num_titolo = (data_ocr.get("numero_titolo") or "").strip()
         data_pag = (data_ocr.get("data_pagamento") or "").strip()
@@ -1026,7 +1025,6 @@ async def _create_crm_attachment(
                 {"_id": 0, "id": 1, "stato": 1},
             )
         if not titolo and data_pag:
-            # Match per periodo: data_pagamento cade tra effetto e scadenza del titolo
             titolo = await db.titoli.find_one(
                 {"polizza_id": pol["id"],
                  "data_effetto": {"$lte": data_pag},
@@ -1042,13 +1040,10 @@ async def _create_crm_attachment(
             ).to_list(5)
             if len(candidates) == 1:
                 titolo = candidates[0]
-                logger.info("Quietanza: fallback su unico titolo valido della polizza")
         if titolo:
-            # Sposta l'allegato dalla polizza al TITOLO specifico
             titolo_id_for_quietanza = titolo["id"]
-            entita_tipo = "titolo"
-            entita_id = titolo["id"]
-            logger.info("Quietanza collegata al titolo %s (stato %s)", titolo["id"], titolo["stato"])
+            logger.info("Quietanza: verrà collegata anche al titolo %s (stato %s)",
+                       titolo["id"], titolo["stato"])
 
     allegato_id = str(uuid.uuid4())
     # Deduplica: se esiste già lo stesso allegato (entità + nome + fonte), skip
@@ -1108,6 +1103,27 @@ async def _create_crm_attachment(
         "is_deleted": False,
     }
     await db.allegati.insert_one(allegato)
+
+    # ── Se è una quietanza collegabile a un titolo, DUPLICA l'allegato sul titolo
+    # (stesso storage_path, così l'utente lo vede sia nella tab Documenti della
+    # polizza sia con l'icona 📎 sulla riga del titolo nella lista Titoli).
+    if titolo_id_for_quietanza:
+        existing_t = await db.allegati.find_one({
+            "entita_tipo": "titolo",
+            "entita_id": titolo_id_for_quietanza,
+            "nome_file": filename,
+            "fonte": "cloud_ocr_scan",
+            "is_deleted": {"$ne": True},
+        }, {"_id": 0, "id": 1})
+        if not existing_t:
+            allegato_titolo = {
+                **allegato,
+                "id": str(uuid.uuid4()),
+                "entita_tipo": "titolo",
+                "entita_id": titolo_id_for_quietanza,
+                "descrizione": f"Quietanza (collegata al titolo) — OCR automatico",
+            }
+            await db.allegati.insert_one(allegato_titolo)
 
 
 async def _push_to_manual_inbox(
