@@ -406,6 +406,34 @@ async def commit_import(db, file_bytes: bytes, filename: str,
             {"id": {"$in": veicoli_ids_da_aggiungere}}, {"_id": 0},
         ):
             veicoli_docs[v["id"]] = v
+
+        # ── Pre-carico l'indice anagrafiche per il MATCH automatico
+        # intestatario testo → anagrafica esistente. Chiave: nome normalizzato.
+        import re as _re
+        def _norm(s: str) -> str:
+            return _re.sub(r"\s+", " ", (s or "").strip().lower())
+        anag_index: dict = {}   # {norm_name: [ana_id, ...]}
+        async for a in db.anagrafiche.find(
+            {}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome_nome": 1,
+                 "cognome": 1, "nome": 1},
+        ):
+            candidates = [
+                a.get("ragione_sociale"),
+                a.get("cognome_nome"),
+                f"{a.get('cognome') or ''} {a.get('nome') or ''}".strip(),
+                f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip(),
+            ]
+            for c in candidates:
+                key = _norm(c)
+                if key:
+                    anag_index.setdefault(key, []).append(a["id"])
+        # Dedup ids per chiave
+        for k in list(anag_index.keys()):
+            anag_index[k] = list(dict.fromkeys(anag_index[k]))
+        stats["intestatari_collegati"] = 0
+        stats["intestatari_ambigui"] = 0
+        stats["intestatari_non_trovati"] = 0
+
         # Crea applicazione per ciascun veicolo (skip se già esiste su questa polizza)
         for vid in veicoli_ids_da_aggiungere:
             v = veicoli_docs.get(vid)
@@ -415,6 +443,19 @@ async def commit_import(db, file_bytes: bytes, filename: str,
                 {"polizza_id": polizza_id, "targa": v["targa"]},
                 {"_id": 0, "id": 1},
             )
+            intestatario_txt = v.get("proprietario") or ""
+            # 🔗 Match automatico intestatario → anagrafica
+            intestatario_anagrafica_id = None
+            if intestatario_txt:
+                key = _norm(intestatario_txt)
+                ids = anag_index.get(key, [])
+                if len(ids) == 1:
+                    intestatario_anagrafica_id = ids[0]
+                    stats["intestatari_collegati"] += 1
+                elif len(ids) > 1:
+                    stats["intestatari_ambigui"] += 1
+                else:
+                    stats["intestatari_non_trovati"] += 1
             app_data = {
                 "polizza_id": polizza_id,
                 "targa": v.get("targa") or "",
@@ -436,7 +477,8 @@ async def commit_import(db, file_bytes: bytes, filename: str,
                 "franchigia": v.get("franchigia") or 0.0,
                 "valore_veicolo": v.get("valore_assicurato") or v.get("valore_veicolo") or 0.0,
                 "valore_accessori": v.get("valore_accessori") or 0.0,
-                "intestatario": v.get("proprietario"),
+                "intestatario": intestatario_txt,
+                "intestatario_anagrafica_id": intestatario_anagrafica_id,
                 "provincia_intestatario": v.get("provincia"),
                 "massimali": str(v.get("massimale")) if v.get("massimale") else None,
                 "note": v.get("note"),

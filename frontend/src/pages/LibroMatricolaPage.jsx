@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
+import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import { ClipboardList, Car, Search, FileText, Paperclip, X, Ban, AlertTriangle, Plus, ChevronDown, ChevronRight, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,11 +26,14 @@ export default function LibroMatricolaPage() {
     const [polizze, setPolizze] = useState(null);
     const [q, setQ] = useState("");
     const [stato, setStato] = useState("all");
+    const [showStoriche, setShowStoriche] = useState(false);   // false = solo attive (default)
     const [expanded, setExpanded] = useState({});   // { polizza_id: bool }
     const [docsApp, setDocsApp] = useState(null);
     const [annullaApp, setAnnullaApp] = useState(null);
     const [conflictApp, setConflictApp] = useState(null);
     const [newAppPol, setNewAppPol] = useState(null);
+    const [migrating, setMigrating] = useState(false);
+    const [migrationReport, setMigrationReport] = useState(null);
 
     const load = () => {
         const params = {};
@@ -96,6 +100,28 @@ export default function LibroMatricolaPage() {
                         className="text-[11px]">
                     Comprimi tutte
                 </Button>
+                <Button size="sm" variant={showStoriche ? "default" : "outline"}
+                        onClick={() => setShowStoriche(s => !s)}
+                        className={`text-[11px] ${showStoriche ? "bg-slate-700 hover:bg-slate-800 text-white" : ""}`}
+                        data-testid="lm-toggle-storiche">
+                    {showStoriche ? "Nascondi storiche" : "Mostra storiche"}
+                </Button>
+                <Button size="sm" variant="outline"
+                        onClick={async () => {
+                            if (!window.confirm("Vuoi provare a collegare automaticamente gli intestatari delle applicazioni alle anagrafiche esistenti?\n\nPrima verrà mostrata un'anteprima (dry-run).")) return;
+                            setMigrating(true);
+                            try {
+                                const preview = await api.post("/libro-matricola/migra-intestatari?dry_run=true");
+                                setMigrationReport({ ...preview.data, phase: "preview" });
+                            } catch (e) {
+                                toast.error(e.response?.data?.detail || "Errore migrazione");
+                            } finally { setMigrating(false); }
+                        }}
+                        disabled={migrating}
+                        className="text-[11px] border-violet-300 text-violet-700 hover:bg-violet-50"
+                        data-testid="lm-migra-intestatari-btn">
+                    <Building2 size={11} className="mr-1" /> {migrating ? "…" : "Migra intestatari → Anagrafiche"}
+                </Button>
                 <div className="text-xs text-slate-500 ml-auto font-mono">
                     {polizze?.length || 0} polizze
                 </div>
@@ -112,6 +138,8 @@ export default function LibroMatricolaPage() {
                             key={p.id}
                             p={p}
                             expanded={!!expanded[p.id]}
+                            showStoriche={showStoriche}
+                            setShowStoriche={setShowStoriche}
                             onToggle={() => setExpanded({ ...expanded, [p.id]: !expanded[p.id] })}
                             onOpenDocs={setDocsApp}
                             onAnnullaApp={setAnnullaApp}
@@ -135,11 +163,26 @@ export default function LibroMatricolaPage() {
             {newAppPol && (
                 <NuovaApplicazioneDialog polizza={newAppPol} onClose={() => { setNewAppPol(null); load(); }} />
             )}
+            {migrationReport && (
+                <MigrationReportDialog report={migrationReport}
+                    onConfirm={async () => {
+                        try {
+                            setMigrating(true);
+                            const r = await api.post("/libro-matricola/migra-intestatari?dry_run=false");
+                            toast.success(`Collegate ${r.data.collegate} applicazioni · Ambigue ${r.data.ambigue} · Non trovate ${r.data.non_trovate}`);
+                            setMigrationReport(null);
+                            load();
+                        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+                        finally { setMigrating(false); }
+                    }}
+                    onClose={() => setMigrationReport(null)}
+                />
+            )}
         </div>
     );
 }
 
-function PolizzaMatricolaCard({ p, expanded, onToggle, onOpenDocs, onAnnullaApp, onConflictApp, onNewApp }) {
+function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onToggle, onOpenDocs, onAnnullaApp, onConflictApp, onNewApp }) {
     return (
         <Card className="overflow-hidden" data-testid={`polizza-lm-${p.id}`}>
             {/* Header polizza madre */}
@@ -193,52 +236,94 @@ function PolizzaMatricolaCard({ p, expanded, onToggle, onOpenDocs, onAnnullaApp,
             {/* Tabella applicazioni */}
             {expanded && (
                 <div className="p-0">
-                    {p.applicazioni.length === 0 ? (
-                        <div className="p-4 text-center text-xs text-slate-500 italic">
-                            Nessuna applicazione registrata su questa polizza —{" "}
-                            <button onClick={onNewApp} className="text-sky-700 hover:underline font-semibold"
-                                    data-testid={`btn-first-app-${p.id}`}>
-                                Aggiungi la prima
-                            </button>
-                        </div>
-                    ) : (
+                    {(() => {
+                        // Filtra storiche in base al toggle
+                        const appsFiltrate = showStoriche
+                            ? p.applicazioni
+                            : p.applicazioni.filter((a) => {
+                                const st = (a.stato || "").toLowerCase();
+                                if (["annullata", "sostituita"].includes(st)) return false;
+                                if (a.data_esclusione || a.data_cessazione) return false;
+                                return true;
+                            });
+                        if (appsFiltrate.length === 0) {
+                            return (
+                                <div className="p-4 text-center text-xs text-slate-500 italic">
+                                    {p.applicazioni.length === 0 ? (
+                                        <>Nessuna applicazione registrata su questa polizza —{" "}
+                                            <button onClick={onNewApp} className="text-sky-700 hover:underline font-semibold"
+                                                    data-testid={`btn-first-app-${p.id}`}>
+                                                Aggiungi la prima
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <>Nessuna applicazione attiva. <button onClick={() => setShowStoriche(true)}
+                                            className="text-sky-700 hover:underline font-semibold">Mostra storiche ({p.applicazioni.length})</button></>
+                                    )}
+                                </div>
+                            );
+                        }
+                        return (
                         <div className="overflow-x-auto">
                             <table className="w-full text-xs border-collapse">
                                 <thead className="bg-slate-100">
                                     <tr>
+                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">N°</th>
                                         <th className="px-2 py-1.5 text-left border-b border-slate-200">Inserim.</th>
                                         <th className="px-2 py-1.5 text-left border-b border-slate-200">Targa/Matr.</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Descrizione</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Telaio</th>
-                                        <th className="px-2 py-1.5 text-right border-b border-slate-200">Premio</th>
+                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Veicolo</th>
+                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Intestatario</th>
+                                        <th className="px-2 py-1.5 text-right border-b border-slate-200">Valore</th>
                                         <th className="px-2 py-1.5 text-left border-b border-slate-200">Stato</th>
                                         <th className="px-2 py-1.5 text-left border-b border-slate-200">Cessazione</th>
                                         <th className="px-2 py-1.5 text-center border-b border-slate-200">Azioni</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {p.applicazioni.map((a) => {
-                                        const isCessato = !!a.data_cessazione;
+                                    {appsFiltrate.map((a) => {
+                                        const st = (a.stato || "").toLowerCase();
+                                        const isCessato = ["annullata", "sostituita"].includes(st)
+                                            || !!(a.data_esclusione || a.data_cessazione);
+                                        const dataIns = a.data_inclusione || a.data_inserimento;
+                                        const dataCes = a.data_esclusione || a.data_cessazione;
+                                        const veicolo = [a.marca, a.modello, a.tipo_veicolo].filter(Boolean).join(" ")
+                                                        || a.descrizione_veicolo || a.descrizione || "—";
                                         // arricchisco l'app col contesto polizza (per i dialog)
                                         const aFull = { ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome };
                                         return (
                                             <tr key={a.id} data-testid={`app-row-${a.id}`}
                                                 className={`border-b border-slate-100 hover:bg-sky-50/40 ${isCessato ? "bg-rose-50/30 text-slate-500" : ""}`}>
-                                                <td className="px-2 py-1.5 font-mono">{a.data_inserimento || "—"}</td>
+                                                <td className="px-2 py-1.5 font-mono text-slate-500">{a.numero || "—"}</td>
+                                                <td className="px-2 py-1.5 font-mono">{dataIns || "—"}</td>
                                                 <td className="px-2 py-1.5 font-mono font-semibold text-sky-700">
                                                     {a.targa || a.matricola || "—"}
                                                 </td>
-                                                <td className="px-2 py-1.5">{a.descrizione_veicolo || a.descrizione || "—"}</td>
-                                                <td className="px-2 py-1.5 font-mono text-[10px] text-slate-500">{a.telaio || "—"}</td>
-                                                <td className="px-2 py-1.5 text-right font-mono">{fmtEur(a.premio_lordo || 0)}</td>
+                                                <td className="px-2 py-1.5">{veicolo}</td>
+                                                <td className="px-2 py-1.5">
+                                                    {a.intestatario_anagrafica_id ? (
+                                                        <Link to={`/anagrafiche/${a.intestatario_anagrafica_id}`}
+                                                              className="text-sky-700 hover:underline"
+                                                              title="Apri anagrafica collegata"
+                                                              data-testid={`app-anagrafica-link-${a.id}`}>
+                                                            {a.intestatario || "—"}
+                                                        </Link>
+                                                    ) : (
+                                                        <span className="text-slate-600" title="Nessuna anagrafica collegata">
+                                                            {a.intestatario || "—"}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right font-mono">
+                                                    {a.valore_veicolo ? fmtEur(a.valore_veicolo) : "—"}
+                                                </td>
                                                 <td className="px-2 py-1.5">
                                                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                                                         isCessato ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
                                                     }`}>
-                                                        {isCessato ? (a.tipo_cessazione || "cessato").toUpperCase() : "ATTIVO"}
+                                                        {isCessato ? ((a.tipo_cessazione || a.stato || "cessato").toUpperCase()) : "ATTIVO"}
                                                     </span>
                                                 </td>
-                                                <td className="px-2 py-1.5 font-mono">{a.data_cessazione || "—"}</td>
+                                                <td className="px-2 py-1.5 font-mono">{dataCes || "—"}</td>
                                                 <td className="px-2 py-1.5 text-center">
                                                     <div className="inline-flex items-center gap-1">
                                                         <button onClick={() => onOpenDocs(aFull)}
@@ -268,7 +353,8 @@ function PolizzaMatricolaCard({ p, expanded, onToggle, onOpenDocs, onAnnullaApp,
                                 </tbody>
                             </table>
                         </div>
-                    )}
+                        );
+                    })()}
                 </div>
             )}
         </Card>
@@ -434,6 +520,8 @@ function NuovaApplicazioneDialog({ polizza, onClose }) {
         telaio: "",
         descrizione_veicolo: "",
         premio_lordo: 0,
+        intestatario: "",
+        intestatario_anagrafica_id: null,
     });
     const [busy, setBusy] = useState(false);
 
@@ -505,6 +593,20 @@ function NuovaApplicazioneDialog({ polizza, onClose }) {
                                placeholder="es. Fiat Panda 1.2 - blu"
                                data-testid="new-app-descrizione" />
                     </div>
+                    <div className="col-span-2">
+                        <label className="text-xs font-medium text-slate-600 block mb-1">
+                            Intestatario · Anagrafica cliente
+                        </label>
+                        <IntestatarioAutocomplete
+                            value={form.intestatario}
+                            anagraficaId={form.intestatario_anagrafica_id}
+                            onChange={(name, anagraficaId) => setForm({
+                                ...form,
+                                intestatario: name,
+                                intestatario_anagrafica_id: anagraficaId,
+                            })}
+                        />
+                    </div>
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
@@ -518,3 +620,76 @@ function NuovaApplicazioneDialog({ polizza, onClose }) {
         </Dialog>
     );
 }
+
+
+
+
+/** Dialog di anteprima + conferma migrazione intestatari → anagrafiche. */
+function MigrationReportDialog({ report, onConfirm, onClose }) {
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-2xl" data-testid="lm-migration-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Building2 className="text-violet-600" size={16} />
+                        Anteprima migrazione intestatari → Anagrafiche
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                    <div className="grid grid-cols-4 gap-2">
+                        <div className="bg-slate-50 border border-slate-200 rounded p-2 text-center">
+                            <div className="text-[10px] uppercase text-slate-500">Totali</div>
+                            <div className="text-lg font-bold">{report.totali_da_migrare}</div>
+                        </div>
+                        <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-center">
+                            <div className="text-[10px] uppercase text-emerald-700">Collegate</div>
+                            <div className="text-lg font-bold text-emerald-700">{report.collegate}</div>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 rounded p-2 text-center">
+                            <div className="text-[10px] uppercase text-amber-700">Ambigue</div>
+                            <div className="text-lg font-bold text-amber-700">{report.ambigue}</div>
+                        </div>
+                        <div className="bg-rose-50 border border-rose-200 rounded p-2 text-center">
+                            <div className="text-[10px] uppercase text-rose-700">Non trovate</div>
+                            <div className="text-lg font-bold text-rose-700">{report.non_trovate}</div>
+                        </div>
+                    </div>
+                    {report.esempi_ambigui?.length > 0 && (
+                        <div>
+                            <div className="text-xs font-semibold text-amber-700 mb-1">
+                                ⚠️ Ambigue (più di 1 anagrafica corrisponde — verifica manuale):
+                            </div>
+                            <ul className="text-[11px] text-slate-600 max-h-40 overflow-y-auto bg-amber-50/40 border border-amber-100 rounded p-2 space-y-1">
+                                {report.esempi_ambigui.slice(0, 10).map((ex, i) => (
+                                    <li key={i}><b>{ex.intestatario}</b> — {ex.possibili_anagrafica_ids.length} candidate</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {report.esempi_non_trovati?.length > 0 && (
+                        <div>
+                            <div className="text-xs font-semibold text-rose-700 mb-1">
+                                ❌ Non trovate (nessuna anagrafica corrisponde):
+                            </div>
+                            <ul className="text-[11px] text-slate-600 max-h-32 overflow-y-auto bg-rose-50/40 border border-rose-100 rounded p-2 space-y-1">
+                                {report.esempi_non_trovati.slice(0, 10).map((ex, i) => (
+                                    <li key={i}>{ex.intestatario}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={onConfirm}
+                            className="bg-violet-600 hover:bg-violet-700 text-white"
+                            disabled={report.collegate === 0}
+                            data-testid="lm-migration-confirm">
+                        Conferma e collega {report.collegate} applicazioni
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+

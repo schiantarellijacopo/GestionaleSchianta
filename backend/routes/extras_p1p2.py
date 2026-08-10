@@ -263,6 +263,10 @@ class ApplicazioneBody(BaseModel):
     data_uscita: Optional[str] = None
     premio_annuo: float = 0
     note: Optional[str] = None
+    intestatario: Optional[str] = None
+    intestatario_anagrafica_id: Optional[str] = None
+    matricola: Optional[str] = None
+    descrizione_veicolo: Optional[str] = None
 
 
 @router.get("/libro-matricola/{polizza_id}/applicazioni")
@@ -492,6 +496,100 @@ async def delete_applicazione(
     if res.deleted_count == 0:
         raise HTTPException(404, "Applicazione non trovata")
     return {"ok": True}
+
+
+def _norm_intestatario(s: str) -> str:
+    """Normalizza un intestatario per il matching: lower + strip + collapsed spaces."""
+    import re as _re
+    return _re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+@router.post("/libro-matricola/migra-intestatari")
+async def migra_intestatari(
+    dry_run: bool = False,
+    user=Depends(require_user("admin")),
+) -> dict:
+    """Migrazione UNA-TANTUM: prova a collegare l'intestatario testuale delle
+    applicazioni esistenti all'anagrafica corrispondente in DB.
+
+    Match logic:
+      1) Confronto normalizzato (case+space insensitive) tra `intestatario` e
+         `ragione_sociale` / `f"{cognome} {nome}"` / `cognome_nome` delle anagrafiche.
+      2) Se ambiguo (>1 match) → skip e segnala verifica manuale.
+
+    Ritorna un report:
+      - totali, collegate, ambigue, non_trovate, esempi_da_verificare
+    """
+    # Carica tutte le anagrafiche una volta e costruisci un indice normalizzato
+    anas = await db.anagrafiche.find(
+        {}, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
+             "cognome_nome": 1},
+    ).to_list(50000)
+    index: dict = {}  # {norm_name: [anagrafica_id, ...]}
+    for a in anas:
+        candidates = [
+            a.get("ragione_sociale"),
+            a.get("cognome_nome"),
+            f"{a.get('cognome') or ''} {a.get('nome') or ''}".strip(),
+            f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip(),  # ordine inverso
+        ]
+        for c in candidates:
+            key = _norm_intestatario(c)
+            if key:
+                index.setdefault(key, []).append(a["id"])
+
+    # Scorri le applicazioni con intestatario testuale ma senza anagrafica_id
+    filtro = {
+        "intestatario": {"$exists": True, "$ne": None, "$ne": ""},
+        "$or": [
+            {"intestatario_anagrafica_id": {"$exists": False}},
+            {"intestatario_anagrafica_id": None},
+            {"intestatario_anagrafica_id": ""},
+        ],
+    }
+    apps = await db.applicazioni.find(filtro, {"_id": 0, "id": 1, "intestatario": 1}).to_list(100000)
+
+    stats = {
+        "totali_da_migrare": len(apps),
+        "collegate": 0,
+        "ambigue": 0,
+        "non_trovate": 0,
+        "esempi_ambigui": [],
+        "esempi_non_trovati": [],
+        "dry_run": dry_run,
+    }
+
+    for app in apps:
+        key = _norm_intestatario(app.get("intestatario") or "")
+        if not key:
+            stats["non_trovate"] += 1
+            continue
+        # dedup gli id trovati per la chiave
+        ids = list(dict.fromkeys(index.get(key, [])))
+        if len(ids) == 1:
+            stats["collegate"] += 1
+            if not dry_run:
+                await db.applicazioni.update_one(
+                    {"id": app["id"]},
+                    {"$set": {"intestatario_anagrafica_id": ids[0]}},
+                )
+        elif len(ids) > 1:
+            stats["ambigue"] += 1
+            if len(stats["esempi_ambigui"]) < 10:
+                stats["esempi_ambigui"].append({
+                    "applicazione_id": app["id"],
+                    "intestatario": app.get("intestatario"),
+                    "possibili_anagrafica_ids": ids,
+                })
+        else:
+            stats["non_trovate"] += 1
+            if len(stats["esempi_non_trovati"]) < 10:
+                stats["esempi_non_trovati"].append({
+                    "applicazione_id": app["id"],
+                    "intestatario": app.get("intestatario"),
+                })
+
+    return stats
 
 
 class CessazioneBody(BaseModel):

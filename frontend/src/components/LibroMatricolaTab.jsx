@@ -17,6 +17,7 @@ import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
+import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 
 export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     const [list, setList] = useState([]);
@@ -338,6 +339,7 @@ function ApplicazioneDialog({ polizzaId, initial, onClose }) {
         valore_residuo: initial.valore_residuo || "",
         valore_accessori: initial.valore_accessori || "",
         intestatario: initial.intestatario || "",
+        intestatario_anagrafica_id: initial.intestatario_anagrafica_id || null,
         provincia_intestatario: initial.provincia_intestatario || "",
         note: initial.note || "",
     });
@@ -432,8 +434,26 @@ function ApplicazioneDialog({ polizzaId, initial, onClose }) {
                     <div><Label>kW</Label><Input type="number" step="0.1" value={f.kw} onChange={(e) => set("kw", e.target.value)} /></div>
                     <div><Label>Cilindrata (cc)</Label><Input type="number" value={f.cilindrata} onChange={(e) => set("cilindrata", e.target.value)} /></div>
                     <div><Label>Posti</Label><Input type="number" value={f.posti} onChange={(e) => set("posti", e.target.value)} /></div>
-                    <div className="col-span-3 mt-2 text-xs uppercase tracking-wider text-slate-500 font-semibold">Intestatario / Note</div>
-                    <div className="col-span-2"><Label>Intestatario</Label><Input value={f.intestatario} onChange={(e) => set("intestatario", e.target.value)} /></div>
+                    <div className="col-span-3 mt-2 text-xs uppercase tracking-wider text-slate-500 font-semibold">Contraente / Intestatario</div>
+                    <div className="col-span-3">
+                        <Label>Contraente · cerca anagrafica</Label>
+                        <IntestatarioAutocomplete
+                            value={f.intestatario}
+                            anagraficaId={f.intestatario_anagrafica_id}
+                            onChange={(name, anagraficaId) => {
+                                set("intestatario", name);
+                                set("intestatario_anagrafica_id", anagraficaId);
+                            }}
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Se collegato ad un&apos;anagrafica, il cliente vedrà questa applicazione dal suo portale.
+                        </div>
+                    </div>
+                    <div className="col-span-2">
+                        <Label>Intestatario (testo libero)</Label>
+                        <Input value={f.intestatario} onChange={(e) => set("intestatario", e.target.value)}
+                               placeholder="Sincronizzato con il campo Contraente sopra" />
+                    </div>
                     <div><Label>Provincia</Label><Input value={f.provincia_intestatario} onChange={(e) => set("provincia_intestatario", e.target.value)} placeholder="MI, RM, …" /></div>
                     <div className="col-span-3"><Label>Note</Label><Input value={f.note} onChange={(e) => set("note", e.target.value)} /></div>
                 </div>
