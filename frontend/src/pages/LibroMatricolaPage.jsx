@@ -19,6 +19,7 @@ import { PageHeader, Loading, Empty } from "@/components/Shared";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
+import { ApplicazioniTable } from "@/components/LibroMatricolaTab";
 import { ClipboardList, Car, Search, FileText, Paperclip, X, Ban, AlertTriangle, Plus, ChevronDown, ChevronRight, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -214,6 +215,14 @@ export default function LibroMatricolaPage() {
 }
 
 function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onToggle, onOpenDocs, onAnnullaApp, onConflictApp, onNewApp }) {
+    const [innerQ, setInnerQ] = useState("");
+    const [sortBy, setSortBy] = useState("numero");   // numero | targa | intestatario | data | valore
+    const [sortDir, setSortDir] = useState("asc");
+    const changeSort = (col) => {
+        if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+        else { setSortBy(col); setSortDir("asc"); }
+    };
+    const sortIcon = (col) => sortBy === col ? (sortDir === "asc" ? " ▲" : " ▼") : "";
     return (
         <Card className="overflow-hidden" data-testid={`polizza-lm-${p.id}`}>
             {/* Header polizza madre */}
@@ -267,9 +276,23 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
             {/* Tabella applicazioni */}
             {expanded && (
                 <div className="p-0">
+                    {/* Barra ricerca + filtri interni */}
+                    <div className="p-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-2">
+                        <Input
+                            value={innerQ}
+                            onChange={(e) => setInnerQ(e.target.value)}
+                            placeholder="Cerca targa, intestatario, veicolo, matricola…"
+                            className="h-8 text-xs w-72"
+                            data-testid={`lm-card-search-${p.id}`}
+                        />
+                        <div className="text-[10px] text-slate-500 ml-auto">
+                            Ordinamento: {sortBy} {sortDir}
+                        </div>
+                    </div>
                     {(() => {
-                        // Filtra storiche in base al toggle
-                        const appsFiltrate = showStoriche
+                        // Filtra storiche + ricerca testuale
+                        const term = innerQ.trim().toLowerCase();
+                        let appsFiltrate = showStoriche
                             ? p.applicazioni
                             : p.applicazioni.filter((a) => {
                                 const st = (a.stato || "").toLowerCase();
@@ -277,6 +300,32 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
                                 if (a.data_esclusione || a.data_cessazione) return false;
                                 return true;
                             });
+                        if (term) {
+                            appsFiltrate = appsFiltrate.filter((a) => {
+                                const veic = [a.marca, a.modello, a.tipo_veicolo, a.descrizione_veicolo].filter(Boolean).join(" ");
+                                const hay = [
+                                    a.targa, a.matricola, a.intestatario, veic, a.telaio,
+                                    a.data_inclusione, a.data_esclusione, a.numero
+                                ].filter(Boolean).join(" ").toLowerCase();
+                                return hay.includes(term);
+                            });
+                        }
+                        // Sort
+                        const cmp = (a, b, key) => {
+                            const va = a[key] ?? "";
+                            const vb = b[key] ?? "";
+                            if (typeof va === "number" || typeof vb === "number") return (Number(va) || 0) - (Number(vb) || 0);
+                            return String(va).localeCompare(String(vb), "it", { sensitivity: "base" });
+                        };
+                        appsFiltrate = [...appsFiltrate].sort((a, b) => {
+                            let r = 0;
+                            if (sortBy === "numero") r = cmp(a, b, "numero");
+                            else if (sortBy === "targa") r = cmp(a, b, "targa");
+                            else if (sortBy === "intestatario") r = cmp(a, b, "intestatario");
+                            else if (sortBy === "data") r = cmp(a, b, "data_inclusione");
+                            else if (sortBy === "valore") r = cmp(a, b, "valore_veicolo");
+                            return sortDir === "asc" ? r : -r;
+                        });
                         if (appsFiltrate.length === 0) {
                             return (
                                 <div className="p-4 text-center text-xs text-slate-500 italic">
@@ -295,95 +344,30 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
                             );
                         }
                         return (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-xs border-collapse">
-                                <thead className="bg-slate-100">
-                                    <tr>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">N°</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Inserim.</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Targa/Matr.</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Veicolo</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Intestatario</th>
-                                        <th className="px-2 py-1.5 text-right border-b border-slate-200">Valore</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Stato</th>
-                                        <th className="px-2 py-1.5 text-left border-b border-slate-200">Cessazione</th>
-                                        <th className="px-2 py-1.5 text-center border-b border-slate-200">Azioni</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {appsFiltrate.map((a) => {
-                                        const st = (a.stato || "").toLowerCase();
-                                        const isCessato = ["annullata", "sostituita"].includes(st)
-                                            || !!(a.data_esclusione || a.data_cessazione);
-                                        const dataIns = a.data_inclusione || a.data_inserimento;
-                                        const dataCes = a.data_esclusione || a.data_cessazione;
-                                        const veicolo = [a.marca, a.modello, a.tipo_veicolo].filter(Boolean).join(" ")
-                                                        || a.descrizione_veicolo || a.descrizione || "—";
-                                        // arricchisco l'app col contesto polizza (per i dialog)
-                                        const aFull = { ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome };
-                                        return (
-                                            <tr key={a.id} data-testid={`app-row-${a.id}`}
-                                                className={`border-b border-slate-100 hover:bg-sky-50/40 ${isCessato ? "bg-rose-50/30 text-slate-500" : ""}`}>
-                                                <td className="px-2 py-1.5 font-mono text-slate-500">{a.numero || "—"}</td>
-                                                <td className="px-2 py-1.5 font-mono">{dataIns || "—"}</td>
-                                                <td className="px-2 py-1.5 font-mono font-semibold text-sky-700">
-                                                    {a.targa || a.matricola || "—"}
-                                                </td>
-                                                <td className="px-2 py-1.5">{veicolo}</td>
-                                                <td className="px-2 py-1.5">
-                                                    {a.intestatario_anagrafica_id ? (
-                                                        <Link to={`/anagrafiche/${a.intestatario_anagrafica_id}`}
-                                                              className="text-sky-700 hover:underline"
-                                                              title="Apri anagrafica collegata"
-                                                              data-testid={`app-anagrafica-link-${a.id}`}>
-                                                            {a.intestatario || "—"}
-                                                        </Link>
-                                                    ) : (
-                                                        <span className="text-slate-600" title="Nessuna anagrafica collegata">
-                                                            {a.intestatario || "—"}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-2 py-1.5 text-right font-mono">
-                                                    {a.valore_veicolo ? fmtEur(a.valore_veicolo) : "—"}
-                                                </td>
-                                                <td className="px-2 py-1.5">
-                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                                        isCessato ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
-                                                    }`}>
-                                                        {isCessato ? ((a.tipo_cessazione || a.stato || "cessato").toUpperCase()) : "ATTIVO"}
-                                                    </span>
-                                                </td>
-                                                <td className="px-2 py-1.5 font-mono">{dataCes || "—"}</td>
-                                                <td className="px-2 py-1.5 text-center">
-                                                    <div className="inline-flex items-center gap-1">
-                                                        <button onClick={() => onOpenDocs(aFull)}
-                                                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded border border-violet-300 text-violet-700 hover:bg-violet-50"
-                                                            data-testid={`app-docs-${a.id}`} title="Documenti">
-                                                            <Paperclip size={10} /> {a.n_allegati || 0}
-                                                        </button>
-                                                        {a.targa && (
-                                                            <button onClick={() => onConflictApp(aFull)}
-                                                                className="inline-flex items-center text-[10px] px-1.5 py-1 rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
-                                                                data-testid={`app-conflict-${a.id}`} title="Verifica altre polizze con stessa targa">
-                                                                <AlertTriangle size={10} />
-                                                            </button>
-                                                        )}
-                                                        {!isCessato && (
-                                                            <button onClick={() => onAnnullaApp(aFull)}
-                                                                className="inline-flex items-center text-[10px] px-1.5 py-1 rounded border border-rose-300 text-rose-700 hover:bg-rose-50"
-                                                                data-testid={`app-annulla-${a.id}`} title="Annulla applicazione">
-                                                                <Ban size={10} />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                        <ApplicazioniTable
+                            items={appsFiltrate}
+                            onEdit={(a) => {
+                                // La modifica completa avviene dentro la polizza (stesso dato)
+                                toast.info("Apro la polizza per modificare l'applicazione…");
+                                window.location.href = `/polizze/${p.id}?applicazione=${a.id}`;
+                            }}
+                            onDelete={async (a) => {
+                                if (!window.confirm(`Eliminare l'applicazione ${a.targa || a.matricola || a.numero}?`)) return;
+                                try {
+                                    await api.delete(`/libro-matricola/applicazioni/${a.id}`);
+                                    toast.success("Applicazione eliminata");
+                                    // ricarica la pagina padre
+                                    window.location.reload();
+                                } catch (e) { toast.error(e.response?.data?.detail || "Errore eliminazione"); }
+                            }}
+                            onSostituisci={(a) => {
+                                toast.info("Apro la polizza per la sostituzione veicolo…");
+                                window.location.href = `/polizze/${p.id}?applicazione=${a.id}&action=sostituisci`;
+                            }}
+                            onAnnulla={(a) => onAnnullaApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
+                            onDocs={(a) => onOpenDocs({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
+                            onConflict={(a) => onConflictApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
+                        />
                         );
                     })()}
                 </div>

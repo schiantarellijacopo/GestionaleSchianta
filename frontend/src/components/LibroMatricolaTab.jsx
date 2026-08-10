@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2 } from "lucide-react";
 import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
@@ -120,6 +120,44 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
                         <Upload size={14} className="mr-1" /> Importa Excel/CSV
                     </Button>
                     <Button
+                        size="sm" variant="outline"
+                        onClick={async () => {
+                            if (!window.confirm("Vuoi provare a collegare automaticamente gli intestatari alle anagrafiche? Prima verrà mostrata un'anteprima.")) return;
+                            try {
+                                const preview = await api.post("/libro-matricola/migra-intestatari?dry_run=true");
+                                if (window.confirm(`Anteprima: ${preview.data.collegate} collegate · ${preview.data.ambigue} ambigue · ${preview.data.non_trovate} non trovate.\n\nConfermi il collegamento delle ${preview.data.collegate} univoche?`)) {
+                                    const r = await api.post("/libro-matricola/migra-intestatari?dry_run=false");
+                                    toast.success(`Collegate ${r.data.collegate} applicazioni`);
+                                    load();
+                                }
+                            } catch (e) { toast.error(e.response?.data?.detail || "Errore migrazione"); }
+                        }}
+                        className="border-violet-300 text-violet-700 hover:bg-violet-50"
+                        data-testid="lm-tab-migra-intestatari"
+                    >
+                        <Building2 size={14} className="mr-1" /> Migra intestatari
+                    </Button>
+                    <Button
+                        size="sm" variant="outline"
+                        onClick={async () => {
+                            try {
+                                const r = await api.get("/libro-matricola/intestatari-ambigui");
+                                if (!r.data || r.data.length === 0) {
+                                    toast.info("Nessun intestatario ambiguo da risolvere 🎉");
+                                    return;
+                                }
+                                // Rimando l'utente alla pagina globale Libro Matricola per il wizard completo
+                                if (window.confirm(`Trovati ${r.data.length} gruppi ambigui. Aprire il wizard nella pagina globale Libro Matricola?`)) {
+                                    window.location.href = "/libro-matricola";
+                                }
+                            } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+                        }}
+                        className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                        data-testid="lm-tab-risolvi-ambigui"
+                    >
+                        <AlertTriangle size={14} className="mr-1" /> Risolvi ambigui
+                    </Button>
+                    <Button
                         size="sm" className="bg-sky-700 hover:bg-sky-800"
                         onClick={() => setEditing({ _new: true })}
                         data-testid="lm-new-btn"
@@ -213,7 +251,7 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     );
 }
 
-function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, onAnnulla, onDocs, onConflict, isStorico = false }) {
+export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, onAnnulla, onDocs, onConflict, isStorico = false }) {
     if (!items || items.length === 0) return null;
     return (
         <div className={isStorico ? "border-t border-slate-200 bg-amber-50/30" : ""}>
