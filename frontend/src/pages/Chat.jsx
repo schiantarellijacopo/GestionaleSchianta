@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -716,8 +717,10 @@ function ChatPortaleAdmin() {
     const [sel, setSel] = useState(null);
     const [msgs, setMsgs] = useState([]);
     const [text, setText] = useState("");
+    const [file, setFile] = useState(null);
     const [sending, setSending] = useState(false);
     const scrollRef = useRef();
+    const fileInputRef = useRef();
 
     const loadClienti = () => api.get("/chat-portale/clienti")
         .then((r) => setClienti(r.data)).catch(() => setClienti([]));
@@ -738,16 +741,37 @@ function ChatPortaleAdmin() {
 
     const invia = async (e) => {
         e?.preventDefault();
-        if (!text.trim() || !sel || sending) return;
+        if ((!text.trim() && !file) || !sel || sending) return;
         setSending(true);
         try {
-            await api.post(`/chat-portale/${sel.anagrafica_id}/messaggi`, { testo: text });
-            setText("");
+            if (file) {
+                const fd = new FormData();
+                fd.append("testo", text);
+                fd.append("file", file);
+                await api.post(`/chat-portale/${sel.anagrafica_id}/messaggi`, fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            } else {
+                await api.post(`/chat-portale/${sel.anagrafica_id}/messaggi`, { testo: text });
+            }
+            setText(""); setFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
             loadMsgs(sel.anagrafica_id);
             loadClienti();
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore invio");
         } finally { setSending(false); }
+    };
+
+    const downloadAllegato = async (allegatoId, nomeFile) => {
+        try {
+            const r = await api.get(`/chat-portale/allegato/${allegatoId}`, { responseType: "blob" });
+            const url = URL.createObjectURL(r.data);
+            const a = document.createElement("a");
+            a.href = url; a.download = nomeFile || "allegato";
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch { toast.error("Errore download"); }
     };
 
     return (
@@ -816,7 +840,16 @@ function ChatPortaleAdmin() {
                                     return (
                                         <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`} data-testid={`msg-portale-${m.id}`}>
                                             <div className={`max-w-[70%] px-3 py-2 rounded-lg text-sm ${mine ? "bg-sky-600 text-white" : "bg-white border border-slate-200 text-slate-800"}`}>
-                                                <div className="whitespace-pre-wrap break-words">{m.testo}</div>
+                                                {m.testo && <div className="whitespace-pre-wrap break-words">{m.testo}</div>}
+                                                {m.allegato_id && (
+                                                    <button onClick={() => downloadAllegato(m.allegato_id, m.allegato_nome)}
+                                                            className={`mt-1 inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ${mine
+                                                                ? "bg-sky-700 hover:bg-sky-800 text-white"
+                                                                : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}
+                                                            data-testid={`msg-portale-alleg-${m.allegato_id}`}>
+                                                        <Download size={12} /> {m.allegato_nome || "Allegato"}
+                                                    </button>
+                                                )}
                                                 <div className={`text-[10px] mt-1 ${mine ? "text-sky-100" : "text-slate-400"}`}>
                                                     {m.mittente_admin_nome ? `${m.mittente_admin_nome} · ` : ""}
                                                     {new Date(m.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}
@@ -826,11 +859,27 @@ function ChatPortaleAdmin() {
                                     );
                                 })}
                             </div>
+                            {file && (
+                                <div className="border-t border-slate-200 bg-sky-50 px-3 py-1.5 flex items-center justify-between text-xs">
+                                    <span className="text-sky-800 truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                                    <button type="button" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                                            className="text-slate-500 hover:text-rose-600">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
                             <form onSubmit={invia} className="border-t border-slate-200 p-3 flex gap-2 bg-white items-center">
+                                <input ref={fileInputRef} type="file" hidden accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                                       onChange={(e) => setFile(e.target.files?.[0] || null)}
+                                       data-testid="chat-portale-file" />
+                                <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()}
+                                        data-testid="chat-portale-attach" title="Allega file">
+                                    <Paperclip size={14} />
+                                </Button>
                                 <Input placeholder="Rispondi al cliente…" value={text}
                                        onChange={(e) => setText(e.target.value)}
                                        data-testid="chat-portale-input" />
-                                <Button type="submit" disabled={sending || !text.trim()}
+                                <Button type="submit" disabled={sending || (!text.trim() && !file)}
                                         data-testid="chat-portale-send"
                                         className="bg-sky-700 hover:bg-sky-800">
                                     <Send size={14} />

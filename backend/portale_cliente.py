@@ -80,26 +80,25 @@ async def login_cliente(body: dict):
     if not email or not password:
         raise HTTPException(400, "Email e password obbligatorie")
 
-    # Cerca anagrafica per email
-    ana = await db.anagrafiche.find_one(
+    # Cerca TUTTE le anagrafiche con quella email/PEC (possono esserci duplicati:
+    # es. familiari o soci che condividono email). Prova la password su ciascuna.
+    ana_list = await db.anagrafiche.find(
         {"$or": [{"email": {"$regex": f"^{email}$", "$options": "i"}},
                  {"pec": {"$regex": f"^{email}$", "$options": "i"}}]},
         {"_id": 0},
-    )
-    if not ana:
+    ).to_list(20)
+    if not ana_list:
         raise HTTPException(401, "Credenziali non valide")
 
-    # Verifica password: CF (privato) o P.IVA (azienda), o password_hash custom se impostata
-    valid = False
-    cf = _norm(ana.get("codice_fiscale"))
-    piva = _norm(ana.get("partita_iva"))
     pwd_norm = password.strip().upper()
-    if cf and pwd_norm == cf.upper():
-        valid = True
-    elif piva and pwd_norm == piva.upper():
-        valid = True
-    # (facoltativo) supporto password_hash personalizzata futura
-    if not valid:
+    ana = None
+    for a in ana_list:
+        cf = _norm(a.get("codice_fiscale"))
+        piva = _norm(a.get("partita_iva"))
+        if (cf and pwd_norm == cf.upper()) or (piva and pwd_norm == piva.upper()):
+            ana = a
+            break
+    if not ana:
         raise HTTPException(401, "Credenziali non valide")
 
     token = _issue_token(ana["id"], tenant_id=ana.get("tenant_id"))
@@ -347,22 +346,56 @@ async def portale_chat_messaggi(limit: int = 500, cliente=Depends(current_client
 
 
 @router.post("/chat/messaggi")
-async def portale_chat_invia(body: dict, cliente=Depends(current_cliente)):
-    """Il cliente invia un messaggio all'agenzia."""
-    from server import db
-    testo = (body or {}).get("testo", "").strip()
-    if not testo:
-        raise HTTPException(400, "Testo obbligatorio")
+async def portale_chat_invia(
+    testo: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    body: Optional[dict] = None,
+    cliente=Depends(current_cliente),
+):
+    """Il cliente invia un messaggio all'agenzia (con eventuale allegato)."""
+    from server import db, Allegato, obj_storage
+    testo_final = (testo or (body or {}).get("testo") or "").strip()
+    if not testo_final and not file:
+        raise HTTPException(400, "Testo o allegato obbligatorio")
+
+    allegato_id = allegato_nome = allegato_ct = None
+    if file:
+        data = await file.read()
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "File troppo grande (max 25 MB)")
+        ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "bin"
+        file_id = str(uuid.uuid4())
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/portale-chat/{cliente['id']}/{file_id}.{ext}"
+        ct = file.content_type or "application/octet-stream"
+        try:
+            result = obj_storage.put_object(path, data, ct)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        al = Allegato(
+            entita_tipo="anagrafica", entita_id=cliente["id"],
+            nome_file=file.filename, storage_path=result["path"],
+            content_type=ct, size=result.get("size", len(data)),
+            descrizione="Allegato chat cliente Portale",
+            autore_id=None,
+        )
+        await db.allegati.insert_one(al.model_dump())
+        allegato_id = al.id
+        allegato_nome = file.filename
+        allegato_ct = ct
+
     msg = {
         "id": str(uuid.uuid4()),
         "anagrafica_id": cliente["id"],
         "tenant_id": cliente.get("tenant_id"),
         "cliente_nome": cliente.get("ragione_sociale") or cliente.get("cognome_nome")
                         or f"{cliente.get('cognome','')} {cliente.get('nome','')}".strip(),
-        "direzione": "in",  # dal cliente all'agenzia
+        "direzione": "in",
         "mittente_admin_id": None,
-        "testo": testo[:4000],
-        "letto": False,  # letto dall'admin
+        "testo": testo_final[:4000],
+        "allegato_id": allegato_id,
+        "allegato_nome": allegato_nome,
+        "allegato_content_type": allegato_ct,
+        "letto": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.chat_portale.insert_one(msg); msg.pop("_id", None)
@@ -379,6 +412,37 @@ async def portale_chat_unread(cliente=Depends(current_cliente)):
         "letto": {"$ne": True},
     })
     return {"unread": n}
+
+
+@router.get("/chat/allegato/{allegato_id}")
+async def portale_chat_download_allegato(allegato_id: str, cliente=Depends(current_cliente)):
+    """Download di un allegato di chat inviato dall'agenzia al cliente (o viceversa).
+
+    Verifica che l'allegato appartenga a un messaggio della conversazione del cliente.
+    """
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+
+    # verifica che l'allegato appartenga alla chat del cliente
+    msg = await db.chat_portale.find_one(
+        {"anagrafica_id": cliente["id"], "allegato_id": allegato_id},
+        {"_id": 0},
+    )
+    if not msg:
+        raise HTTPException(404, "Allegato non trovato")
+    al = await db.allegati.find_one({"id": allegato_id}, {"_id": 0})
+    if not al:
+        raise HTTPException(404, "File non trovato")
+    try:
+        data, _ct = obj_storage.get_object(al["storage_path"])
+    except Exception as e:
+        raise HTTPException(503, f"Errore download: {e}")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=al.get("content_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{al.get("nome_file", "allegato")}"'},
+    )
 
 
 # ============================================================

@@ -7,12 +7,12 @@
  * Sezioni: Profilo · Polizze · Titoli · Documenti · Sinistri · Servizi
  * Le polizze Libro Matricola mostrano inline le applicazioni (targhe/veicoli).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { toast, Toaster } from "sonner";
 import axios from "axios";
 import {
     User, FileText, Wallet, FolderOpen, AlertCircle, Phone,
-    Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send,
+    Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send, Paperclip,
 } from "lucide-react";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api/portale`;
@@ -476,8 +476,10 @@ function EmptyState({ icon: Icon, testo }) {
 function ChatView() {
     const [msgs, setMsgs] = useState(null);
     const [text, setText] = useState("");
+    const [file, setFile] = useState(null);
     const [sending, setSending] = useState(false);
     const scrollRef = useState(null)[0];
+    const fileInputRef = useRef(null);
 
     const load = () => clientApi.get("/chat/messaggi").then((r) => setMsgs(r.data)).catch(() => setMsgs([]));
     useEffect(() => {
@@ -488,15 +490,36 @@ function ChatView() {
 
     const invia = async (e) => {
         e?.preventDefault();
-        if (!text.trim() || sending) return;
+        if ((!text.trim() && !file) || sending) return;
         setSending(true);
         try {
-            await clientApi.post("/chat/messaggi", { testo: text });
-            setText("");
+            if (file) {
+                const fd = new FormData();
+                fd.append("testo", text);
+                fd.append("file", file);
+                await clientApi.post("/chat/messaggi", fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            } else {
+                await clientApi.post("/chat/messaggi", { testo: text });
+            }
+            setText(""); setFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
             load();
         } catch (err) {
-            toast.error("Errore invio");
+            toast.error(err.response?.data?.detail || "Errore invio");
         } finally { setSending(false); }
+    };
+
+    const downloadAllegato = async (allegatoId, nomeFile) => {
+        try {
+            const r = await clientApi.get(`/chat/allegato/${allegatoId}`, { responseType: "blob" });
+            const url = URL.createObjectURL(r.data);
+            const a = document.createElement("a");
+            a.href = url; a.download = nomeFile || "allegato";
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+        } catch { toast.error("Errore download"); }
     };
 
     return (
@@ -518,7 +541,16 @@ function ChatView() {
                                 <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${mine
                                     ? "bg-sky-600 text-white"
                                     : "bg-white border border-slate-200 text-slate-800"}`}>
-                                    <div className="whitespace-pre-wrap break-words">{m.testo}</div>
+                                    {m.testo && <div className="whitespace-pre-wrap break-words">{m.testo}</div>}
+                                    {m.allegato_id && (
+                                        <button onClick={() => downloadAllegato(m.allegato_id, m.allegato_nome)}
+                                                className={`mt-1 inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ${mine
+                                                    ? "bg-sky-700 hover:bg-sky-800 text-white"
+                                                    : "bg-slate-100 hover:bg-slate-200 text-slate-700"}`}
+                                                data-testid={`chat-alleg-${m.allegato_id}`}>
+                                            <Download size={12} /> {m.allegato_nome || "Allegato"}
+                                        </button>
+                                    )}
                                     <div className={`text-[10px] mt-1 ${mine ? "text-sky-100" : "text-slate-400"}`}>
                                         {!mine && m.mittente_admin_nome && (<span>{m.mittente_admin_nome} · </span>)}
                                         {m.created_at ? new Date(m.created_at).toLocaleString("it-IT",
@@ -529,12 +561,30 @@ function ChatView() {
                         );
                     })}
                 </div>
+                {file && (
+                    <div className="border-t border-slate-200 bg-sky-50 px-3 py-2 flex items-center justify-between text-xs">
+                        <span className="text-sky-800 truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                        <button onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                                className="text-slate-500 hover:text-rose-600">
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
                 <form onSubmit={invia} className="border-t border-slate-200 p-3 flex gap-2 bg-white rounded-b-xl">
+                    <input ref={fileInputRef} type="file" hidden accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                           onChange={(e) => setFile(e.target.files?.[0] || null)}
+                           data-testid="portale-chat-file" />
+                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                            className="px-3 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-600"
+                            data-testid="portale-chat-attach"
+                            title="Allega file">
+                        <Paperclip size={16} />
+                    </button>
                     <input type="text" value={text} onChange={(e) => setText(e.target.value)}
                            placeholder="Scrivi un messaggio…"
                            className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none"
                            data-testid="portale-chat-input" />
-                    <button type="submit" disabled={sending || !text.trim()}
+                    <button type="submit" disabled={sending || (!text.trim() && !file)}
                             className="px-4 rounded-lg bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-40"
                             data-testid="portale-chat-send">
                         <Send size={16} />

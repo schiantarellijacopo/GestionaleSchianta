@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload, Send } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
@@ -39,6 +39,7 @@ export default function Anagrafiche() {
     const [kpiDialogOpen, setKpiDialogOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null); // anagrafica da eliminare
     const [importOpen, setImportOpen] = useState(false);
+    const [credMassivoOpen, setCredMassivoOpen] = useState(false);
     // filtri da URL (dashboard task)
     const compleannoFilter = searchParams.get("compleanno"); // "oggi" | "settimana" | "mese"
     const docFilter = searchParams.get("doc"); // "scaduti" | "in_scadenza"
@@ -152,6 +153,12 @@ export default function Anagrafiche() {
                 actions={
                     canCreate && (
                         <div className="flex items-center gap-2">
+                            <Button variant="outline"
+                                    onClick={() => setCredMassivoOpen(true)}
+                                    data-testid="anagrafica-invia-credenziali-massivo"
+                                    className="border-violet-300 text-violet-700 hover:bg-violet-50">
+                                <Send size={16} className="mr-1" /> Invia credenziali Portale
+                            </Button>
                             <Button variant="outline"
                                     onClick={() => setImportOpen(true)}
                                     data-testid="anagrafica-import-button"
@@ -352,9 +359,155 @@ export default function Anagrafiche() {
                 title="Importa Anagrafiche da Excel/CSV"
                 required={[]}
             />
+            <InviaCredenzialiPortaleDialog
+                open={credMassivoOpen}
+                onClose={() => setCredMassivoOpen(false)}
+            />
         </div>
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// InviaCredenzialiPortaleDialog — Invio massivo credenziali Portale Cliente
+// ─────────────────────────────────────────────────────────────────────
+function InviaCredenzialiPortaleDialog({ open, onClose }) {
+    const [filtri, setFiltri] = useState({
+        tipo_soggetto: "",
+        solo_con_polizze: true,
+        escludi_gia_invitati: true,
+    });
+    const [anteprima, setAnteprima] = useState(null);
+    const [esito, setEsito] = useState(null);
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+        if (!open) { setAnteprima(null); setEsito(null); }
+    }, [open]);
+
+    const body = () => ({
+        tipo_soggetto: filtri.tipo_soggetto || null,
+        solo_con_polizze: filtri.solo_con_polizze,
+        escludi_gia_invitati: filtri.escludi_gia_invitati,
+    });
+
+    const anteprimaCount = async () => {
+        setBusy(true);
+        try {
+            const r = await api.post("/anagrafiche/invia-credenziali-portale-massivo",
+                { ...body(), dry_run: true });
+            setAnteprima(r.data);
+            setEsito(null);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore anteprima");
+        } finally { setBusy(false); }
+    };
+
+    const invia = async () => {
+        if (!anteprima) return;
+        if (!window.confirm(`Confermi l'invio delle credenziali a ${anteprima.totale} clienti?`)) return;
+        setBusy(true);
+        try {
+            const r = await api.post("/anagrafiche/invia-credenziali-portale-massivo", body());
+            setEsito(r.data);
+            toast.success(`Inviate: ${r.data.inviate_ok} / ${r.data.totale}`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio massivo");
+        } finally { setBusy(false); }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+            <DialogContent className="max-w-2xl" data-testid="dialog-invio-cred-massivo">
+                <DialogHeader>
+                    <DialogTitle>Invia credenziali Portale Cliente</DialogTitle>
+                    <DialogDescription>
+                        Invia in blocco email + WhatsApp con link di accesso al Portale.
+                        Il testo è quello del preset <b>&quot;Benvenuto Portale Cliente&quot;</b> in Alert & Automazioni.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label className="text-xs">Tipo cliente</Label>
+                            <Select value={filtri.tipo_soggetto || "all"} onValueChange={(v) => setFiltri((f) => ({ ...f, tipo_soggetto: v === "all" ? "" : v }))}>
+                                <SelectTrigger data-testid="cred-filter-tipo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Tutti</SelectItem>
+                                    <SelectItem value="fisico">Persone fisiche</SelectItem>
+                                    <SelectItem value="giuridico">Aziende</SelectItem>
+                                    <SelectItem value="condominio">Condomini</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2 pt-5">
+                            <label className="flex items-center gap-2 text-sm">
+                                <input type="checkbox" checked={filtri.solo_con_polizze}
+                                       onChange={(e) => setFiltri((f) => ({ ...f, solo_con_polizze: e.target.checked }))}
+                                       data-testid="cred-filter-conpolizze" />
+                                <span>Solo con polizze attive/sospese</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                                <input type="checkbox" checked={filtri.escludi_gia_invitati}
+                                       onChange={(e) => setFiltri((f) => ({ ...f, escludi_gia_invitati: e.target.checked }))}
+                                       data-testid="cred-filter-escludi" />
+                                <span>Escludi chi ha già ricevuto la welcome</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                        <Button variant="outline" onClick={anteprimaCount} disabled={busy}
+                                data-testid="cred-anteprima-btn">
+                            <Search size={14} className="mr-1" /> Anteprima destinatari
+                        </Button>
+                        {anteprima && (
+                            <Button onClick={invia} disabled={busy || anteprima.totale === 0}
+                                    className="bg-violet-700 hover:bg-violet-800"
+                                    data-testid="cred-invio-btn">
+                                <Send size={14} className="mr-1" /> Invia a {anteprima.totale} clienti
+                            </Button>
+                        )}
+                    </div>
+
+                    {anteprima && !esito && (
+                        <div className="bg-violet-50 border border-violet-200 rounded p-3 text-sm" data-testid="cred-anteprima-box">
+                            <div className="font-medium text-violet-900">
+                                Trovati {anteprima.totale} clienti con email valida
+                            </div>
+                            {anteprima.esempi?.length > 0 && (
+                                <div className="mt-2 text-xs text-slate-700">
+                                    Esempi:{" "}
+                                    {anteprima.esempi.slice(0, 5).map((x) => x.nome).join(", ")}
+                                    {anteprima.totale > 5 && `, +${anteprima.totale - 5} altri…`}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {esito && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm space-y-1" data-testid="cred-esito-box">
+                            <div className="font-medium text-emerald-900">
+                                ✓ Inviate: {esito.inviate_ok} · ✗ Errori: {esito.inviate_ko} · Totale: {esito.totale}
+                            </div>
+                            {esito.inviate_ko > 0 && (
+                                <div className="text-xs text-slate-600">
+                                    Alcune anagrafiche hanno errori (email non valida, SMTP/WA irraggiungibile…).
+                                    Vedi log in <Link to="/richieste-cliente" className="underline">Notifiche portale</Link>.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
 function KpiCard({ icon, color, label, n, premio, testid, onClick }) {
     const palettes = {

@@ -227,7 +227,8 @@ PRESETS: list[dict] = [
             "quietanze, documenti e sinistri.\n\n"
             "🔗 Accedi qui: {link}\n"
             "📧 Username: {email}\n"
-            "🔑 Password iniziale: il suo {tipo_credenziale}\n\n"
+            "🔑 Password iniziale: {password} (il suo {tipo_credenziale})\n\n"
+            "Le consigliamo di cambiare la password al primo accesso.\n\n"
             "Un cordiale saluto"
         ),
     },

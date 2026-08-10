@@ -11487,25 +11487,28 @@ async def _rifiuta_richiesta_cliente(rid: str, body: dict = None,
     return {"ok": True}
 
 
-@_extra.post("/anagrafiche/{aid}/invia-credenziali-portale")
-async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin", "collaboratore"))):
-    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
-    if not ana:
-        raise HTTPException(404, "Anagrafica non trovata")
+async def _do_invia_credenziali_portale_one(ana: dict, user: dict) -> dict:
+    """Invia le credenziali del Portale a UN cliente. Non solleva mai.
+
+    Ritorna dict {ok, email_inviata, whatsapp_inviato, email_errore?, whatsapp_errore?, motivo_skip?}.
+    """
     email = ana.get("email")
     cellulare = ana.get("cellulare")
-    if not email:
-        raise HTTPException(400, "Manca email del cliente")
     tipo = ana.get("tipo_soggetto") or "fisico"
     pwd = ana.get("codice_fiscale") if tipo == "fisico" else ana.get("partita_iva")
+    aid = ana.get("id")
+    if not email:
+        return {"ok": False, "motivo_skip": "email mancante", "anagrafica_id": aid}
     if not pwd:
-        raise HTTPException(400, "Manca CF/P.IVA per la password iniziale")
-    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+        return {"ok": False, "motivo_skip": "CF/P.IVA mancante", "anagrafica_id": aid}
+    base_url = (
+        os.environ.get("PUBLIC_BASE_URL")
+        or os.environ.get("BACKEND_PUBLIC_URL")
+        or ""
+    ).rstrip("/")
     link = f"{base_url}/portale" if base_url else "/portale"
     nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip() or "Cliente"
     tipo_credenziale = "Codice Fiscale" if tipo == "fisico" else "Partita IVA"
-
-    # Carica template personalizzato (se esiste una regola preset_key="welcome_portale")
     tenant_id = ana.get("tenant_id") or user.get("agenzia_tenant_id")
     tpl_flt: dict = {"preset_key": "welcome_portale"}
     if tenant_id:
@@ -11518,30 +11521,23 @@ async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin"
         "quietanze, documenti e sinistri.\n\n"
         "🔗 Accedi qui: {link}\n"
         "📧 Username: {email}\n"
-        "🔑 Password iniziale: il tuo {tipo_credenziale}\n\n"
+        "🔑 Password iniziale: {password} (il suo {tipo_credenziale})\n\n"
+        "Le consigliamo di cambiare la password al primo accesso.\n\n"
         "Un cordiale saluto"
     )
     subst = {
-        "{nome}": nome,
-        "{cliente_nome}": nome,
-        "{link}": link,
-        "{portale_link}": link,
-        "{email}": email,
-        "{username}": email,
-        "{tipo_credenziale}": tipo_credenziale,
-        "{password}": pwd,
+        "{nome}": nome, "{cliente_nome}": nome, "{link}": link, "{portale_link}": link,
+        "{email}": email, "{username}": email, "{tipo_credenziale}": tipo_credenziale, "{password}": pwd,
     }
     oggetto = oggetto_tpl
     corpo = corpo_tpl
     for k, v in subst.items():
         oggetto = oggetto.replace(k, str(v))
         corpo = corpo.replace(k, str(v))
-
     res_email = await send_email(email, oggetto, corpo)
     res_wa = {"ok": False, "error": "cellulare mancante"}
     if cellulare:
         res_wa = await send_whatsapp_message(cellulare, corpo)
-
     await db.notifiche_portale.insert_one({
         "id": str(uuid.uuid4()),
         "tenant_id": ana.get("tenant_id"),
@@ -11555,6 +11551,7 @@ async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin"
     })
     return {
         "ok": bool(res_email.get("ok") or res_wa.get("ok")),
+        "anagrafica_id": aid,
         "email_inviata": bool(res_email.get("ok")),
         "email_errore": res_email.get("error") if not res_email.get("ok") else None,
         "whatsapp_inviato": bool(res_wa.get("ok")),
@@ -11562,6 +11559,99 @@ async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin"
         "email": email,
         "cellulare": cellulare,
     }
+
+
+@_extra.post("/anagrafiche/{aid}/invia-credenziali-portale")
+async def _invia_credenziali_portale(aid: str, user=Depends(require_user("admin", "collaboratore"))):
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    if not ana.get("email"):
+        raise HTTPException(400, "Manca email del cliente")
+    tipo = ana.get("tipo_soggetto") or "fisico"
+    pwd = ana.get("codice_fiscale") if tipo == "fisico" else ana.get("partita_iva")
+    if not pwd:
+        raise HTTPException(400, "Manca CF/P.IVA per la password iniziale")
+    return await _do_invia_credenziali_portale_one(ana, user)
+
+
+@_extra.post("/anagrafiche/invia-credenziali-portale-massivo")
+async def _invia_credenziali_portale_massivo(
+    body: dict, user=Depends(require_user("admin", "collaboratore")),
+):
+    """Invia le credenziali del Portale a un elenco di anagrafiche filtrate.
+
+    Body:
+    - ``ids``: lista di anagrafica_id (se presente ha priorità sul filtro)
+    - ``tipo_soggetto``: "fisico" | "giuridico" | "condominio" | null (tutti)
+    - ``solo_con_polizze``: bool (default true) — esclude anagrafiche senza polizze attive
+    - ``escludi_gia_invitati``: bool (default true) — esclude chi ha già ricevuto la welcome
+    - ``limit``: int (default 500)
+    - ``dry_run``: bool — se true ritorna solo il conteggio senza inviare
+    """
+    ids = body.get("ids") or None
+    tipo_soggetto = body.get("tipo_soggetto")
+    solo_con_polizze = bool(body.get("solo_con_polizze", True))
+    escludi_gia_invitati = bool(body.get("escludi_gia_invitati", True))
+    limit = int(body.get("limit") or 500)
+    dry_run = bool(body.get("dry_run"))
+
+    tid = user.get("agenzia_tenant_id")
+    flt: dict = {"email": {"$nin": [None, ""]}}
+    if ids:
+        flt["id"] = {"$in": list(ids)}
+    if tipo_soggetto:
+        flt["tipo_soggetto"] = tipo_soggetto
+    if tid:
+        # tenant match o legacy senza tenant
+        flt["$or"] = [{"tenant_id": tid}, {"tenant_id": None}, {"tenant_id": {"$exists": False}}]
+
+    proj = {"_id": 0, "id": 1, "email": 1, "cellulare": 1, "codice_fiscale": 1,
+            "partita_iva": 1, "tipo_soggetto": 1, "tenant_id": 1,
+            "cognome": 1, "nome": 1, "ragione_sociale": 1}
+    tutte = await db.anagrafiche.find(flt, proj).limit(limit).to_list(limit)
+
+    # opzionale: solo anagrafiche con almeno una polizza attiva
+    if solo_con_polizze:
+        aids_con_polizze = set()
+        cursor = db.polizze.find({"contraente_id": {"$in": [a["id"] for a in tutte]},
+                                   "stato": {"$in": ["attiva", "sospesa"]}}, {"_id": 0, "contraente_id": 1})
+        async for p in cursor:
+            aids_con_polizze.add(p.get("contraente_id"))
+        tutte = [a for a in tutte if a["id"] in aids_con_polizze]
+
+    # opzionale: escludi chi ha già ricevuto la welcome
+    if escludi_gia_invitati:
+        already = set()
+        async for n in db.notifiche_portale.find(
+            {"tipo": "welcome_portale", "anagrafica_id": {"$in": [a["id"] for a in tutte]}},
+            {"_id": 0, "anagrafica_id": 1},
+        ):
+            already.add(n.get("anagrafica_id"))
+        tutte = [a for a in tutte if a["id"] not in already]
+
+    if dry_run:
+        return {"totale": len(tutte), "dry_run": True,
+                "esempi": [{"id": a["id"], "email": a["email"],
+                            "nome": a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()}
+                           for a in tutte[:10]]}
+
+    inviate_ok = 0
+    inviate_ko = 0
+    esiti = []
+    for ana in tutte:
+        try:
+            r = await _do_invia_credenziali_portale_one(ana, user)
+            if r.get("ok"):
+                inviate_ok += 1
+            else:
+                inviate_ko += 1
+            esiti.append(r)
+        except Exception as e:
+            inviate_ko += 1
+            esiti.append({"ok": False, "anagrafica_id": ana.get("id"), "motivo_skip": str(e)[:150]})
+    return {"totale": len(tutte), "inviate_ok": inviate_ok, "inviate_ko": inviate_ko,
+            "dry_run": False, "esiti": esiti[:100]}
 
 
 app.include_router(_extra)
@@ -11634,29 +11724,61 @@ async def _cp_get_messaggi(
 
 @_chat_portale_router.post("/{aid}/messaggi")
 async def _cp_invia(
-    aid: str, body: dict,
+    aid: str,
+    testo: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    body: Optional[dict] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """L'admin/collaboratore invia una risposta al cliente via portale."""
-    testo = (body or {}).get("testo", "").strip()
-    if not testo:
-        raise HTTPException(400, "Testo obbligatorio")
+    """L'admin/collaboratore invia una risposta al cliente via portale (con allegato opzionale)."""
+    testo_final = (testo or (body or {}).get("testo") or "").strip()
+    if not testo_final and not file:
+        raise HTTPException(400, "Testo o allegato obbligatorio")
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1, "tenant_id": 1,
                                                         "ragione_sociale": 1, "cognome_nome": 1,
                                                         "cognome": 1, "nome": 1})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
+
+    allegato_id = allegato_nome = allegato_ct = None
+    if file:
+        data = await file.read()
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "File troppo grande (max 25 MB)")
+        ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "bin"
+        file_id = str(uuid.uuid4())
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/portale-chat/{aid}/{file_id}.{ext}"
+        ct = file.content_type or "application/octet-stream"
+        try:
+            result = obj_storage.put_object(path, data, ct)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        al = Allegato(
+            entita_tipo="anagrafica", entita_id=aid,
+            nome_file=file.filename, storage_path=result["path"],
+            content_type=ct, size=result.get("size", len(data)),
+            descrizione=f"Allegato chat portale da {user.get('name')}",
+            autore_id=user.get("id"),
+        )
+        await db.allegati.insert_one(al.model_dump())
+        allegato_id = al.id
+        allegato_nome = file.filename
+        allegato_ct = ct
+
     msg = {
         "id": str(uuid.uuid4()),
         "anagrafica_id": aid,
         "tenant_id": ana.get("tenant_id"),
         "cliente_nome": ana.get("ragione_sociale") or ana.get("cognome_nome")
                         or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
-        "direzione": "out",  # dall'agenzia al cliente
+        "direzione": "out",
         "mittente_admin_id": user.get("id"),
         "mittente_admin_nome": user.get("name"),
-        "testo": testo[:4000],
-        "letto": False,  # letto dal cliente
+        "testo": testo_final[:4000],
+        "allegato_id": allegato_id,
+        "allegato_nome": allegato_nome,
+        "allegato_content_type": allegato_ct,
+        "letto": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.chat_portale.insert_one(msg); msg.pop("_id", None)
@@ -11672,6 +11794,30 @@ async def _cp_unread(user=Depends(require_user("admin", "collaboratore", "dipend
         flt["tenant_id"] = tid
     n = await db.chat_portale.count_documents(flt)
     return {"unread": n}
+
+
+@_chat_portale_router.get("/allegato/{allegato_id}")
+async def _cp_download_allegato(
+    allegato_id: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Download di un allegato di chat portale (admin side)."""
+    import io
+    msg = await db.chat_portale.find_one({"allegato_id": allegato_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Allegato non trovato")
+    al = await db.allegati.find_one({"id": allegato_id}, {"_id": 0})
+    if not al:
+        raise HTTPException(404, "File non trovato")
+    try:
+        data, _ct = obj_storage.get_object(al["storage_path"])
+    except Exception as e:
+        raise HTTPException(503, f"Errore download: {e}")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=al.get("content_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{al.get("nome_file", "allegato")}"'},
+    )
 
 
 app.include_router(_chat_portale_router)

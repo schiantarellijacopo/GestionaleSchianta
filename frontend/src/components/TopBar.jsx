@@ -5,6 +5,7 @@ import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, Us
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
+import ChatPortaleBell from "./ChatPortaleBell";
 import MarketplaceDrawer from "./MarketplaceDrawer";
 import TicketDialog from "./TicketDialog";
 
@@ -192,6 +193,7 @@ export default function TopBar() {
             </div>
 
             <NotificheBell />
+            <ChatPortaleBell />
 
             {/* Marketplace button */}
             <button
