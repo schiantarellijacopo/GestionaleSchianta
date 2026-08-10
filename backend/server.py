@@ -4918,20 +4918,27 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
         if is_entrata and cat == "incasso_premio" and not is_dir:
             # Premio lordo polizza (path normale, NO direzione)
+            # REGOLA CONTABILE (utente):
+            #   TOTALE (Entrata) = PREMIO LORDO del titolo = importo pagato + sospeso + sconto
+            #   PROVV            = provvigioni maturate (sul lordo)
+            #   SALDO compagnia  = LORDO - PROVV  (se trattiene provvigioni)
+            #   CREDITI/Sospesi  = quota lasciata a sospeso (cliente pagherà dopo)
+            #   Cassa/Banca      = solo il cash reale entrato (importo)
             provv_riga = float(m.get("provvigioni") or m.get("quota_provvigione") or 0)
             trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
             quota_sc = float(m.get("quota_sconto") or 0)
-            lordo_riga = importo + quota_sc
+            quota_cred = float(m.get("quota_credito") or 0)
+            # LORDO = cash incassato + sospeso + sconto (ricostruisce il totale titolo)
+            lordo_riga = importo + quota_sc + quota_cred
             c_totale = lordo_riga
             c_provv = provv_riga
             c_spese = quota_sc
             c_sconti = quota_sc
             if trattiene:
-                # Il saldo verso compagnia è sul LORDO (lo sconto è a carico agenzia)
+                # Il saldo verso compagnia è sul LORDO netto provvigioni (regola fissa)
                 c_saldo = lordo_riga - provv_riga
             else:
                 c_saldo = -provv_riga
-            quota_cred = float(m.get("quota_credito") or 0)
             if quota_cred > 0:
                 c_crediti = quota_cred
         elif is_entrata and (cat == "incasso_premio_direzione" or is_dir):
@@ -5003,13 +5010,14 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         # allo sconto (quota_sconto): lo sconto è a carico agenzia → l'importo
         # incassato in cassa È GIÀ il netto, mentre "totale" viene ricostruito
         # aggiungendo quota_sconto per riflettere il lordo di polizza.
+        # Cassa/Banca: registra SOLO il cash reale effettivamente entrato.
+        # Per gli incasso_premio con sospeso: `importo` del movimento è già il netto
+        # pagato dal cliente (es. 400€), mentre il lordo del titolo (480€) e il
+        # sospeso (80€) sono ricostruiti sopra per popolare TOTALE e CREDITI.
+        # Escludi movimenti IN DIREZIONE dalle colonne banche (nessun cash flow reale).
         per_conto = {}
-        # Escludi movimenti IN DIREZIONE dalle colonne banche (nessun cash flow)
         if m.get("conto_cassa_id") and not is_dir:
-            cash_reale = importo
-            if is_entrata and cat == "incasso_premio":
-                quota_cred_cash = float(m.get("quota_credito") or 0)
-                cash_reale = max(0.0, importo - quota_cred_cash)
+            cash_reale = importo   # importo del movimento = cash effettivo in cassa
             cassa_signed = cash_reale if is_entrata else -cash_reale
             per_conto[m["conto_cassa_id"]] = cassa_signed
             per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + cassa_signed

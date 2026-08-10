@@ -33,11 +33,14 @@ async def documenti_mancanti(
     """Ritorna le liste di entità senza documenti essenziali, filtrabile per collaboratore.
     - polizze senza PDF/allegato polizza
     - anagrafiche senza carta d'identità o documento equivalente
-    - polizze veicolo senza libretto allegato."""
-    LIMIT = 500
+    - polizze veicolo senza libretto allegato.
+
+    Il conteggio (`totali`) è quello REALE (non limitato dalla paginazione delle liste)
+    così quando l'utente allega un documento il badge diminuisce immediatamente.
+    """
+    LIMIT = 500  # max righe per lista (paginazione UI)
 
     # === 1. POLIZZE SENZA ALLEGATO ===
-    # Sono "attive" o "in corso" da almeno 1 giorno (date_effetto <= today)
     today = _now_iso()[:10]
     pol_filter = {
         "stato": {"$in": ["attiva", "in_corso", "in corso", "vigente"]},
@@ -51,61 +54,65 @@ async def documenti_mancanti(
     polizze = await db.polizze.find(pol_filter, {
         "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
         "contraente_id": 1, "scadenza": 1, "effetto": 1, "targa": 1,
-    }).limit(2000).to_list(2000)
+    }).to_list(20000)
     if polizze:
         pol_ids = [p["id"] for p in polizze]
-        # Trova polizze CHE HANNO almeno un allegato (categoria polizza o "polizza" o "contratto")
         pol_con_allegato = set()
         async for a in db.allegati.find(
-            {"entita_tipo": "polizza", "entita_id": {"$in": pol_ids}},
-            {"_id": 0, "entita_id": 1, "categoria": 1, "nome_file": 1},
+            {"entita_tipo": "polizza", "entita_id": {"$in": pol_ids},
+             "is_deleted": {"$ne": True}},
+            {"_id": 0, "entita_id": 1},
         ):
             pol_con_allegato.add(a["entita_id"])
-        polizze_senza = [p for p in polizze if p["id"] not in pol_con_allegato][:LIMIT]
+        polizze_senza_all = [p for p in polizze if p["id"] not in pol_con_allegato]
     else:
-        polizze_senza = []
+        polizze_senza_all = []
+    tot_polizze = len(polizze_senza_all)
+    polizze_senza = polizze_senza_all[:LIMIT]
 
     # === 2. POLIZZE VEICOLO SENZA LIBRETTO ===
     veicolo_filter = {
         **pol_filter,
         "$and": [{"targa": {"$ne": None, "$exists": True}}, {"targa": {"$ne": ""}}],
     }
-    # Rimuovi $or duplicato se presente
     veicoli = await db.polizze.find(veicolo_filter, {
         "_id": 0, "id": 1, "numero_polizza": 1, "targa": 1,
         "contraente_id": 1, "veicolo_marca": 1, "veicolo_modello": 1,
-    }).limit(2000).to_list(2000)
+    }).to_list(20000)
     if veicoli:
         v_ids = [v["id"] for v in veicoli]
         v_con_libretto = set()
         async for a in db.allegati.find(
             {"entita_tipo": "polizza", "entita_id": {"$in": v_ids},
+             "is_deleted": {"$ne": True},
              "$or": [{"categoria": "libretto_circolazione"}, {"categoria": "libretto"},
                      {"nome_file": {"$regex": "libretto", "$options": "i"}}]},
             {"_id": 0, "entita_id": 1},
         ):
             v_con_libretto.add(a["entita_id"])
-        veicoli_senza = [v for v in veicoli if v["id"] not in v_con_libretto][:LIMIT]
+        veicoli_senza_all = [v for v in veicoli if v["id"] not in v_con_libretto]
     else:
-        veicoli_senza = []
+        veicoli_senza_all = []
+    tot_veicoli = len(veicoli_senza_all)
+    veicoli_senza = veicoli_senza_all[:LIMIT]
 
     # === 3. ANAGRAFICHE SENZA CARTA D'IDENTITÀ ===
     ana_filter = {"tipo": {"$ne": "persona_giuridica"}}
     if is_client:
         ana_filter["id"] = user.get("anagrafica_id")
-    # Se filtra per collaboratore: solo anagrafiche con almeno 1 polizza assegnata a lui
     if collaboratore_id:
         coll_ana_ids = await db.polizze.distinct("contraente_id", {"collaboratore_id": collaboratore_id})
         ana_filter["id"] = {"$in": coll_ana_ids} if not is_client else user.get("anagrafica_id")
     anagrafiche = await db.anagrafiche.find(ana_filter, {
         "_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
         "cellulare": 1, "email": 1,
-    }).limit(2000).to_list(2000)
+    }).to_list(20000)
     if anagrafiche:
         a_ids = [a["id"] for a in anagrafiche]
         a_con_ci = set()
         async for a in db.allegati.find(
             {"entita_tipo": "anagrafica", "entita_id": {"$in": a_ids},
+             "is_deleted": {"$ne": True},
              "$or": [
                  {"categoria": "documento_identita"},
                  {"categoria": "carta_identita"},
@@ -116,9 +123,11 @@ async def documenti_mancanti(
             {"_id": 0, "entita_id": 1},
         ):
             a_con_ci.add(a["entita_id"])
-        anagrafiche_senza_ci = [a for a in anagrafiche if a["id"] not in a_con_ci][:LIMIT]
+        anagrafiche_senza_ci_all = [a for a in anagrafiche if a["id"] not in a_con_ci]
     else:
-        anagrafiche_senza_ci = []
+        anagrafiche_senza_ci_all = []
+    tot_anagrafiche = len(anagrafiche_senza_ci_all)
+    anagrafiche_senza_ci = anagrafiche_senza_ci_all[:LIMIT]
 
     # Arricchisci con contraente_nome per le polizze
     cid_set = list({p.get("contraente_id") for p in polizze_senza + veicoli_senza if p.get("contraente_id")})
@@ -137,9 +146,9 @@ async def documenti_mancanti(
         "veicoli_senza_libretto": veicoli_senza,
         "anagrafiche_senza_ci": anagrafiche_senza_ci,
         "totali": {
-            "polizze": len(polizze_senza),
-            "veicoli": len(veicoli_senza),
-            "anagrafiche": len(anagrafiche_senza_ci),
+            "polizze": tot_polizze,
+            "veicoli": tot_veicoli,
+            "anagrafiche": tot_anagrafiche,
         },
     }
 
