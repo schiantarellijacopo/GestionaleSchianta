@@ -184,7 +184,7 @@ function PolizzaMatricolaCard({ p, expanded, onToggle, onOpenDocs, onAnnullaApp,
                         <Button size="sm" onClick={onNewApp}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white"
                                 data-testid={`btn-new-app-${p.id}`}>
-                            <Plus size={13} className="mr-1" /> Applicazione
+                            <Plus size={13} className="mr-1" /> Nuova applicazione
                         </Button>
                     </div>
                 </div>

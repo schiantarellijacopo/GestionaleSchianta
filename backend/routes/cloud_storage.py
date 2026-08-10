@@ -912,3 +912,88 @@ async def scan_summary(user=Depends(current_user)):
                                      "anagrafiche_create": 0, "runs": 0},
         "pending_manual_smistamento": pending_manual,
     }
+
+
+@router.get("/inbox-files")
+async def list_inbox_files(
+    provider: str = Query("google_drive", regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Lista i file attualmente presenti nella cartella INBOX del Drive del tenant.
+    Serve alla UI per far vedere il contenuto vivo del Drive prima dello scan.
+    """
+    tenant = _tenant_id(user)
+    conn = await db.cloud_connections.find_one({"tenant_id": tenant, "provider": provider})
+    if not conn:
+        return {"files": [], "error": "Cloud non collegato"}
+    try:
+        token = await _fresh_access_token(provider, conn)
+    except Exception as e:
+        return {"files": [], "error": str(e)}
+    inbox_segments = await _resolve_category_path("inbox", {})
+    parent = None
+    for seg in inbox_segments:
+        fid = await _find_folder(provider, token, seg, parent)
+        if not fid:
+            return {"files": [], "error": "Cartella INBOX non ancora creata"}
+        parent = fid
+    from cloud_ocr_scanner import _list_files_in_folder
+    files = await _list_files_in_folder(provider, token, parent)
+    # Ordina per nome
+    files.sort(key=lambda x: (x.get("name") or "").lower())
+    return {"files": files, "count": len(files), "inbox_id": parent}
+
+
+@router.get("/archivio")
+async def list_archivio(
+    limit: int = Query(100, ge=1, le=500),
+    only_matched: bool = Query(False),
+    user=Depends(current_user),
+):
+    """Elenco documenti già processati/archiviati (storico OCR)."""
+    tenant = _tenant_id(user)
+    q: dict = {"tenant_id": tenant}
+    if only_matched:
+        q["routed_to"] = {"$ne": "da_smistare"}
+    rows = db.cloud_documents.find(q, {"_id": 0}).sort("created_at", -1).limit(limit)
+    docs = []
+    async for d in rows:
+        cls = d.get("classification", {}) or {}
+        de = cls.get("dati_estratti", {}) or {}
+        # Enrichment: carica nome anagrafica/polizza per la UI
+        ana_name = None
+        if d.get("matched_anagrafica_id"):
+            a = await db.anagrafiche.find_one(
+                {"id": d["matched_anagrafica_id"]},
+                {"_id": 0, "cognome": 1, "nome": 1, "ragione_sociale": 1},
+            )
+            if a:
+                ana_name = (a.get("ragione_sociale")
+                            or f"{a.get('cognome', '')} {a.get('nome', '')}".strip())
+        docs.append({
+            "file_name": d.get("file_name"),
+            "file_id": d.get("file_id"),
+            "provider": d.get("provider"),
+            "tipo_documento": cls.get("tipo_documento"),
+            "confidenza": cls.get("confidenza"),
+            "routed_to": d.get("routed_to"),
+            "routed_path": d.get("routed_path"),
+            "matched_anagrafica_id": d.get("matched_anagrafica_id"),
+            "matched_polizza_id": d.get("matched_polizza_id"),
+            "anagrafica_nome": ana_name,
+            "codice_fiscale": de.get("codice_fiscale"),
+            "targa": de.get("targa"),
+            "numero_polizza": de.get("numero_polizza"),
+            "created_at": d.get("created_at"),
+        })
+    # Statistiche
+    tot = await db.cloud_documents.count_documents({"tenant_id": tenant})
+    abbinati = await db.cloud_documents.count_documents({
+        "tenant_id": tenant, "routed_to": {"$ne": "da_smistare"},
+    })
+    return {
+        "documenti": docs,
+        "totale": tot,
+        "abbinati": abbinati,
+        "da_smistare": tot - abbinati,
+    }

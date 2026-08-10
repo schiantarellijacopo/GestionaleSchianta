@@ -37,8 +37,8 @@ _scheduler: Optional[AsyncIOScheduler] = None
 # ============================================================
 # PROMPT Gemini per classificazione documento
 # ============================================================
-CLASSIFY_PROMPT = """Sei un classificatore documenti per un CRM assicurativo italiano.
-Analizza l'immagine/PDF e restituisci ESCLUSIVAMENTE un JSON valido con questa struttura:
+CLASSIFY_PROMPT = """Sei un classificatore esperto di documenti per un CRM assicurativo italiano.
+Analizza l'immagine e restituisci ESCLUSIVAMENTE un JSON valido con questa struttura:
 
 {
   "tipo_documento": "carta_identita | patente | passaporto | codice_fiscale | privacy | polizza_frontespizio | quietanza | denuncia_sinistro | estratto_conto_compagnia | bonifico | rid | altro",
@@ -46,8 +46,8 @@ Analizza l'immagine/PDF e restituisci ESCLUSIVAMENTE un JSON valido con questa s
   "dati_estratti": {
     "codice_fiscale": "16 caratteri uppercase o null",
     "partita_iva": "11 cifre o null",
-    "cognome": "stringa o null",
-    "nome": "stringa o null",
+    "cognome": "stringa MAIUSCOLA o null",
+    "nome": "stringa MAIUSCOLA o null",
     "numero_polizza": "stringa o null",
     "numero_titolo": "stringa quietanza o null",
     "numero_sinistro": "stringa o null",
@@ -63,12 +63,115 @@ Analizza l'immagine/PDF e restituisci ESCLUSIVAMENTE un JSON valido con questa s
   }
 }
 
-Regole:
-- Non aggiungere testo prima o dopo il JSON
-- Non usare markdown ```json```
-- Se il documento non è classificabile, usa tipo_documento="altro"
-- Cognome/Nome in MAIUSCOLO
-- Targa in MAIUSCOLO senza spazi
+===================================================================
+REGOLE DI CLASSIFICAZIONE (PRIORITÀ ALTA — LEGGERE CON ATTENZIONE):
+
+★ CARTA D'IDENTITÀ ITALIANA (tipo_documento="carta_identita"):
+Segnali INEQUIVOCABILI:
+  - Testo "REPUBBLICA ITALIANA" o "CARTA D'IDENTITÀ" o "COMUNE DI ..."
+  - Foto tessera del titolare visibile
+  - Campi: COGNOME, NOME, LUOGO E DATA DI NASCITA, RESIDENZA, STATURA, PROFESSIONE
+  - Codice tipo "CA00000AA" o simile in alto
+  - Formato carta elettronica (CIE) o cartaceo verde
+
+★ PATENTE DI GUIDA (tipo_documento="patente"):
+Segnali:
+  - "PATENTE DI GUIDA" o "DRIVING LICENCE"
+  - Categorie (A, B, C, ...) in tabella con date
+  - Numero patente formato "UA1234567A" o "MI1234567A"
+  - Bandiera UE + "ITALIA"
+
+★ POLIZZA_FRONTESPIZIO (tipo_documento="polizza_frontespizio"):
+Solo se il documento è CHIARAMENTE una polizza assicurativa:
+  - Titolo "POLIZZA" / "CONTRATTO ASSICURATIVO" / "CERTIFICATO ASSICURAZIONE"
+  - Compagnia (UNIPOL, GENERALI, CATTOLICA, ALLIANZ...) in EVIDENZA
+  - Numero polizza chiaramente indicato (es. "N. 1234567890" o "Polizza n. ...")
+  - Premio, effetto, scadenza in EURO
+  - **ATTENZIONE**: se vedi P.IVA di una ditta E una foto tessera personale → NON è polizza, è carta d'identità di un dipendente. Classifica "carta_identita".
+
+★ QUIETANZA (tipo_documento="quietanza"):
+  - "QUIETANZA" o "RICEVUTA DI PAGAMENTO"
+  - Riferimento a una polizza esistente
+  - Importo pagato
+  - Data pagamento
+
+★ DENUNCIA SINISTRO (tipo_documento="denuncia_sinistro"):
+  - "DENUNCIA DI SINISTRO" o "CONSTATAZIONE AMICHEVOLE" o "CAI"
+  - Numero sinistro
+  - Data avvenimento, luogo, dinamica
+
+★ ESTRATTO CONTO COMPAGNIA (tipo_documento="estratto_conto_compagnia"):
+  - "ESTRATTO CONTO" con logo compagnia
+  - Elenco titoli/polizze con provvigioni
+  - Totale a debito/credito
+
+★ BONIFICO (tipo_documento="bonifico"):
+  - "BONIFICO BANCARIO" o CRO/TRN
+  - IBAN mittente + IBAN destinatario
+  - Importo, data valuta
+
+★ RID / SDD (tipo_documento="rid"):
+  - "SEPA DIRECT DEBIT" o "RID" o "MANDATO ADDEBITO"
+
+★ MODULO PRIVACY (tipo_documento="privacy"):
+  - "INFORMATIVA PRIVACY" / "TRATTAMENTO DATI PERSONALI" / "GDPR"
+  - Firma richiesta
+
+===================================================================
+REGOLE DI ESTRAZIONE DATI:
+
+1. **codice_fiscale**: 16 caratteri (SCHJCP91M18I829O), MAI confondere con P.IVA (11 cifre).
+2. **partita_iva**: SOLO 11 CIFRE PURE (04796220160). Se vedi CF-persona-fisica NON metterla qui.
+3. **cognome/nome**: SEMPRE MAIUSCOLO. Per persone fisiche (C.I., patente). Per aziende usa il campo "cognome" con la ragione sociale SOLO se non c'è persona fisica.
+4. **numero_polizza**: SOLO se documento è polizza/quietanza. Le C.I. NON hanno numero_polizza.
+5. **targa**: SOLO se documento è polizza auto o denuncia sinistro. Formato AA000AA (2 lettere, 3 cifre, 2 lettere).
+6. **data_scadenza**: su C.I./patente è la scadenza DEL DOCUMENTO stesso; su polizza è la scadenza POLIZZA.
+7. Se un campo è illeggibile o non presente → `null`. NON inventare mai valori.
+
+===================================================================
+ESEMPIO 1 — Carta d'identità cartacea:
+Input: documento verde con "COMUNE DI SONDRIO", foto, "COGNOME: ROSSI, NOME: MARIO", CF "RSSMRA80A01H501U"
+Output:
+{
+  "tipo_documento": "carta_identita",
+  "confidenza": "alta",
+  "dati_estratti": {
+    "codice_fiscale": "RSSMRA80A01H501U",
+    "partita_iva": null,
+    "cognome": "ROSSI",
+    "nome": "MARIO",
+    "numero_polizza": null,
+    "targa": null,
+    "data_scadenza": "2028-05-15",
+    "data_avvenimento": null, "data_effetto": null, "data_pagamento": null,
+    "numero_titolo": null, "numero_sinistro": null, "compagnia": null,
+    "importo": null, "anno_riferimento": null, "mese_riferimento": null
+  }
+}
+
+ESEMPIO 2 — Polizza RCA auto:
+Input: "CATTOLICA ASSICURAZIONI", "Polizza n. 184643261", contraente "MTS SRL P.IVA 04796220160", targa "HE161EE"
+Output:
+{
+  "tipo_documento": "polizza_frontespizio",
+  "confidenza": "alta",
+  "dati_estratti": {
+    "codice_fiscale": null,
+    "partita_iva": "04796220160",
+    "cognome": "MTS SRL",
+    "nome": null,
+    "numero_polizza": "184643261",
+    "targa": "HE161EE",
+    "compagnia": "CATTOLICA ASSICURAZIONI",
+    "data_effetto": "2026-06-30", "data_scadenza": "2027-12-31",
+    "data_avvenimento": null, "data_pagamento": null,
+    "numero_titolo": null, "numero_sinistro": null,
+    "importo": null, "anno_riferimento": null, "mese_riferimento": null
+  }
+}
+
+===================================================================
+Rispondi SOLO con il JSON. Nessun markdown, nessun testo prima o dopo.
 """
 
 
@@ -96,11 +199,12 @@ async def _pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-async def _classify_document(file_bytes: bytes, mime: str) -> dict:
+async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -> dict:
     """Chiama Gemini Vision per classificare + estrarre dati.
 
     Se il file è PDF, converte la prima pagina in PNG (Gemini Vision accetta
     solo immagini). File multi-pagina: viene classificata solo la prima.
+    Il filename è usato come HINT nel prompt per aumentare la precisione.
     """
     from emergentintegrations.llm.chat import (
         LlmChat, UserMessage, ImageContent, TextDelta, StreamDone,
@@ -116,14 +220,38 @@ async def _classify_document(file_bytes: bytes, mime: str) -> dict:
         except Exception as e:
             logger.warning("Conversione PDF→image fallita (%s): fallback su bytes originali", e)
 
+    # HINT dal filename per guidare il classificatore
+    fname_lower = filename.lower()
+    hint = ""
+    if any(k in fname_lower for k in ["c.i.", "ci ", "carta ident", "carta_ident", "id_", "cie"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce che si tratti di una CARTA D'IDENTITÀ. Verifica e privilegia questa classificazione se coerente con l'immagine."
+    elif any(k in fname_lower for k in ["patent", "driving"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce che si tratti di una PATENTE DI GUIDA. Verifica e privilegia questa classificazione."
+    elif any(k in fname_lower for k in ["polizza", "policy", "contratto assic"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce POLIZZA_FRONTESPIZIO."
+    elif any(k in fname_lower for k in ["quietanza", "ricevut"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce QUIETANZA."
+    elif any(k in fname_lower for k in ["sinistro", "denuncia", "cai_"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce DENUNCIA_SINISTRO."
+    elif any(k in fname_lower for k in ["estratto", "ec_", "e_c_", "extract"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce ESTRATTO_CONTO_COMPAGNIA."
+    elif any(k in fname_lower for k in ["bonifico", "sepa", "wire"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce BONIFICO."
+    elif any(k in fname_lower for k in ["privacy", "gdpr", "consenso"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce MODULO PRIVACY."
+    elif any(k in fname_lower for k in ["cf_", "codice_fisc", "tesserino"]):
+        hint = "\n\n💡 HINT: il nome file suggerisce TESSERINO CODICE FISCALE."
+
+    prompt_final = CLASSIFY_PROMPT + hint + f"\n\nNome file per contesto: '{filename}'"
+
     b64 = base64.b64encode(file_bytes).decode("ascii")
     img = ImageContent(image_base64=b64)
     chat = LlmChat(
         api_key=key,
         session_id=f"cloud-ocr-{os.urandom(4).hex()}",
-        system_message="Classifica e estrai dati da documenti assicurativi italiani.",
+        system_message="Classifica documenti assicurativi italiani con MASSIMA precisione. Rispondi solo JSON.",
     ).with_model("gemini", "gemini-3-flash-preview")
-    msg = UserMessage(text=CLASSIFY_PROMPT, file_contents=[img])
+    msg = UserMessage(text=prompt_final, file_contents=[img])
     text = ""
     async for ev in chat.stream_message(msg):
         if isinstance(ev, TextDelta):
@@ -505,10 +633,10 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         return {"file_id": file_id, "name": name,
                 "routed_to": "da_smistare", "reason": f"MIME non supportato ({mime})"}
 
-    # Download + OCR
+    # Download + OCR (passiamo il filename come hint al classifier)
     file_bytes = await _download_file(provider, token, file_id)
     try:
-        classification = await _classify_document(file_bytes, mime)
+        classification = await _classify_document(file_bytes, mime, filename=name)
     except Exception as e:
         classification = {"tipo_documento": "altro", "confidenza": "bassa",
                           "dati_estratti": {}, "ocr_error": str(e)[:200]}

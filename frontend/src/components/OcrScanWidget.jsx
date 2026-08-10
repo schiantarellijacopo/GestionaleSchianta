@@ -14,17 +14,31 @@ import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CloudDownload, CheckCircle2, AlertTriangle, UserPlus, RefreshCw, Sparkles } from "lucide-react";
+import { CloudDownload, CheckCircle2, AlertTriangle, UserPlus, RefreshCw, Sparkles, FileText, Archive, ChevronDown, ChevronRight, Folder, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 export default function OcrScanWidget({ variant = "full", onClickPending }) {
     const [summary, setSummary] = useState(null);
     const [scanning, setScanning] = useState(false);
+    const [inboxFiles, setInboxFiles] = useState(null);
+    const [archivio, setArchivio] = useState(null);
+    const [showInbox, setShowInbox] = useState(false);
+    const [showArchivio, setShowArchivio] = useState(false);
 
     const load = () => {
         api.get("/librerie/cloud-storage/scan-summary")
             .then((r) => setSummary(r.data))
             .catch(() => setSummary({ error: true }));
+    };
+    const loadInbox = () => {
+        api.get("/librerie/cloud-storage/inbox-files")
+            .then((r) => setInboxFiles(r.data))
+            .catch(() => setInboxFiles({ files: [], error: "errore" }));
+    };
+    const loadArchivio = () => {
+        api.get("/librerie/cloud-storage/archivio?limit=50")
+            .then((r) => setArchivio(r.data))
+            .catch(() => setArchivio({ documenti: [] }));
     };
     useEffect(() => { load(); }, []);
 
@@ -164,6 +178,99 @@ export default function OcrScanWidget({ variant = "full", onClickPending }) {
                 <span>{cum.abbinati || 0} abbinati</span>
                 <span>·</span>
                 <span>{cum.anagrafiche_create || 0} anagrafiche</span>
+            </div>
+
+            {/* Sezione INBOX (file attualmente in coda sul Drive) */}
+            <div className="mt-3 border-t border-slate-100 pt-2">
+                <button
+                    onClick={() => { setShowInbox(!showInbox); if (!showInbox) loadInbox(); }}
+                    className="w-full flex items-center justify-between text-xs font-semibold text-slate-700 hover:text-sky-700"
+                    data-testid="btn-toggle-inbox"
+                >
+                    <span className="flex items-center gap-1">
+                        {showInbox ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        <Folder size={12} className="text-sky-600" /> File in coda su Google Drive INBOX
+                    </span>
+                    {inboxFiles && <span className="text-[10px] text-slate-500">{inboxFiles.count || 0} file</span>}
+                </button>
+                {showInbox && (
+                    <div className="mt-2 max-h-56 overflow-y-auto border rounded bg-slate-50">
+                        {inboxFiles === null ? (
+                            <div className="p-2 text-[11px] text-slate-500 italic">Caricamento…</div>
+                        ) : inboxFiles.error ? (
+                            <div className="p-2 text-[11px] text-rose-600">{inboxFiles.error}</div>
+                        ) : (inboxFiles.files || []).length === 0 ? (
+                            <div className="p-3 text-[11px] text-slate-500 italic text-center">
+                                📭 INBOX vuota. Carica file nella cartella <code>Assicura CRM/INBOX/</code> del tuo Drive.
+                            </div>
+                        ) : inboxFiles.files.map((f) => (
+                            <div key={f.id} className="flex items-center gap-2 px-2 py-1.5 text-[11px] border-b border-slate-100 hover:bg-white"
+                                 data-testid={`inbox-file-${f.id}`}>
+                                <FileText size={11} className="text-slate-500 shrink-0" />
+                                <span className="flex-1 truncate font-mono">{f.name}</span>
+                                <span className="text-[10px] text-slate-400">
+                                    {f.size ? `${(Number(f.size) / 1024).toFixed(1)} KB` : "—"}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Sezione ARCHIVIO (documenti già smistati) */}
+            <div className="mt-2">
+                <button
+                    onClick={() => { setShowArchivio(!showArchivio); if (!showArchivio) loadArchivio(); }}
+                    className="w-full flex items-center justify-between text-xs font-semibold text-slate-700 hover:text-emerald-700"
+                    data-testid="btn-toggle-archivio"
+                >
+                    <span className="flex items-center gap-1">
+                        {showArchivio ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        <Archive size={12} className="text-emerald-600" /> Archivio documenti smistati
+                    </span>
+                    {archivio && (
+                        <span className="text-[10px] text-slate-500">
+                            {archivio.totale || 0} totali · <span className="text-emerald-700">{archivio.abbinati || 0} ok</span>
+                        </span>
+                    )}
+                </button>
+                {showArchivio && (
+                    <div className="mt-2 max-h-64 overflow-y-auto border rounded bg-white">
+                        {archivio === null ? (
+                            <div className="p-2 text-[11px] text-slate-500 italic">Caricamento…</div>
+                        ) : (archivio.documenti || []).length === 0 ? (
+                            <div className="p-3 text-[11px] text-slate-500 italic text-center">
+                                Nessun documento processato ancora.
+                            </div>
+                        ) : archivio.documenti.map((d, i) => (
+                            <div key={i} className="flex items-center gap-2 px-2 py-1.5 text-[11px] border-b border-slate-100 hover:bg-emerald-50/30"
+                                 data-testid={`archivio-doc-${i}`}>
+                                <span title={d.routed_to === "da_smistare" ? "Da smistare" : "Abbinato"}>
+                                    {d.routed_to === "da_smistare"
+                                        ? <AlertTriangle size={11} className="text-amber-600 shrink-0" />
+                                        : <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />}
+                                </span>
+                                <span className="font-mono text-slate-800 flex-shrink-0 truncate max-w-[220px]">{d.file_name}</span>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] uppercase tracking-wider text-slate-700 shrink-0">
+                                    {(d.tipo_documento || "?").replace(/_/g, " ")}
+                                </span>
+                                {d.anagrafica_nome && (
+                                    <Link to={`/anagrafiche/${d.matched_anagrafica_id}`}
+                                          className="text-sky-700 hover:underline truncate">
+                                        <ExternalLink size={9} className="inline mr-0.5" />
+                                        {d.anagrafica_nome}
+                                    </Link>
+                                )}
+                                {d.numero_polizza && (
+                                    <span className="text-violet-700 font-mono">Pol. {d.numero_polizza}</span>
+                                )}
+                                <span className="ml-auto text-[9px] text-slate-400 shrink-0">
+                                    {new Date(d.created_at).toLocaleDateString("it-IT")}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </Card>
     );

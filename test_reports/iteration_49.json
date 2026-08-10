@@ -1,0 +1,36 @@
+{
+  "summary": "Iterazione 49 - Testing E2E pipeline OCR notturna Google Drive + widget OcrScanWidget + Libro Matricola + SMS bulk titoli. Backend: 9/9 pytest passano (~3s) su test_iteration_49.py. Cloud storage endpoints: config-status ritorna google_drive.configured=true + encryption_configured=true; status mostra tenant collegato a google_drive; scan-summary ritorna latest_run (letti/abbinati/in_attesa/anagrafiche_create) + cumulative (runs>0) + pending_manual_smistamento; inbox-files ritorna files[] + inbox_id; archivio ritorna documenti/totale/abbinati/da_smistare; scan-now (con provider come Form field) accetta e risponde. documenti-mancanti ritorna totali reali. sms-invia-bulk-titoli ritorna JSON con inviati=0 + error='twilio_not_configured' + motivo 'Canale SMS non configurato: aggiungi TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM in backend/.env'. libro-matricola/polizze ritorna polizze madri con applicazioni raggruppate. Frontend (1920x1080): /documenti-inbox mostra ocr-widget-full + banner totali (7 run, 40 file letti, 14 abbinati, 3 anagrafiche) + Scansiona ora + btn-toggle-inbox + btn-toggle-archivio. Dashboard mostra ocr-widget-compact. /libro-matricola mostra 3 polizze madri (polizza-lm-*) con KPI (Polizze madri 3, Applicaz totali 0) + pulsante 'Applicazione' per gruppo. /avvisi mostra 696 checkbox tutti selezionati di default (50/50 verificati). /polizze, /sinistri, /anagrafiche hanno rispettivi pulsanti Importa (polizza-import-button, sinistro-import-button, anagrafica-import-button). /librerie tab 'Cloud Storage' mostra Google Drive con status 'Collegato per l'intera agenzia · dal 10/08/2026' + Cartella 'Assicura CRM' + pulsanti 'Scegli cartella' + 'Scollega'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/libro-matricola", "issues": ["Il pulsante per aggiungere nuova applicazione è etichettato '+ Applicazione' (non 'Nuova applicazione' come da specifica). Funzionalmente presente, solo minor label mismatch."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_49.py",
+    "/app/test_reports/pytest/iter49_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "cloud_storage.py::scan_inbox_now — usa Form(...) per il parametro 'provider', quindi client che invia application/json riceve 422. Considerare accettare sia Form che JSON body per consistenza con altri endpoint POST del progetto (la maggior parte accetta JSON).",
+    "cloud_ocr_scanner.py — la scansione manuale via /scan-now chiama Gemini Vision su ogni file (30-90s/file). Sotto carico multi-tenant potrebbe saturare il quota Gemini. Considerare rate-limit per-tenant e/o queue asincrona (Celery/RQ) per non bloccare il worker HTTP.",
+    "libro-matricola UI — il label pulsante '+ Applicazione' andrebbe uniformato a 'Nuova applicazione' come da specifica (o aggiornare la spec). Minore ma influisce sul discoverability.",
+    "cloud_storage.py — GOOGLE_DRIVE_CLIENT_ID/SECRET letti a module-load; se admin ruota le credenziali serve restart supervisor (persiste dall'iter 48).",
+    "extras_p1p2.py::documenti-mancanti — verificare che il conteggio 'reale' (non capato a 500) sia paginato lato UI se supera 1000+ voci, altrimenti pagina lenta.",
+    "avvisi 'Totale x/y' — la logica di update quando l'utente deseleziona titoli è UI-side; assicurarsi che il calcolo sommi solo i selezionati e non ricarichi tutta la lista (perf su 1028 titoli)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_49.py",
+    "/app/test_reports/pytest/iter49_results.xml",
+    "/app/test_reports/iteration_49.json"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (8/8 flussi verificati)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna. Test SMS usa titolo_id fittizio (endpoint ritorna comunque error='twilio_not_configured' prima di lookup, come atteso).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints tutti verdi. NOTA IMPORTANTE: POST /api/librerie/cloud-storage/scan-now richiede 'provider' come Form field (application/x-www-form-urlencoded), NON come JSON body — usare requests.post(..., data={'provider': 'google_drive'}) non json={}. GET /api/librerie/cloud-storage/status ritorna {connections:[{provider:'google_drive', ...}]} con Google Drive già collegato al tenant admin. Ci sono già ~3 polizze libro-matricola nel DB (una 'ATTIVA' su SCHIANTARELLI, una 'ATTIVA' su ABITANTI DELLA FRAZ. DI CEVO TEST-LM-26739, una 'SOSTITUITA' su CAPORUSSO PATRIZIA). Il POST /api/avvisi/sms-invia-bulk-titoli ritorna 200 con {inviati:0, skipped:[{motivo:'...'}] , titoli_richiesti:N, error:'twilio_not_configured'} — usare str(j).lower() per verificare presenza 'twilio'. Frontend /libro-matricola pulsante è '+ Applicazione' (non 'Nuova applicazione' letterale). Nessun bug bloccante trovato.",
+  "rca of the issue": "N/A - nessun bug rilevato."
+}
