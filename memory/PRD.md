@@ -1,5 +1,30 @@
 # Programma Assicurativo — PRD (aggiornato 11/02/2026)
 
+## Sessione 11/02/2026 (fork) — PIRAMIDE PRIVATI COMPLETATA ✅
+
+### 🎯 Piramide delle Coperture (schema Schiantarelli) — implementata pixel-perfect
+- **Componente riusabile** `/app/frontend/src/components/PiramidePrivati.jsx` (~400 righe)
+  - 8 bande dal basso all'apice: Invalidità → Premorienza → Danni Ad Altri → Perdita Beni → Liquidità → Cassa Lievi → Cassa Grandi → Crescita Capitale
+  - Header logo agenzia + "Futuro Senza Sorprese"
+  - Legenda 🟢 ADEGUATO / 🟡 NON ADEGUATO / 🔴 ASSENTE
+  - Sidebar sinistra con 7 campi dati reddito editabili
+  - Footer: Testamento (Sì/No) + 4 caselle Eredi legittimi
+  - Modalità editabile (agenzia) o read-only (cliente) via prop `onSave`
+  - CTA "richiedi preventivo" sui pallini rossi/gialli
+- **Backend** `server.py`:
+  - `GET /api/anagrafiche/{aid}/analisi/piramide-v2` — ritorna voci auto-popolate + dati salvati
+  - `PUT /api/anagrafiche/{aid}/analisi/piramide-v2` — salva reddito/testamento/eredi/override
+  - Helper `_piramide_v2_calcola_voci` legge polizze attive, aggrega per categoria via matcher (keyword per ramo/prodotto/garanzia), calcola stato in base a soglie configurabili (`_PIRAMIDE_V2_SOGLIE`)
+- **Backend** `portale_cliente.py`:
+  - `GET /api/portale/protezione` — versione read-only per il cliente (stesso schema)
+  - `POST /api/portale/protezione/richiedi-preventivo` — crea richiesta admin + msg chat
+- **Integrazione UI**:
+  - Portale cliente: nuova sezione "La mia protezione" in `PortaleCliente.jsx` (menu con icona Shield, gradient fucsia-rosa)
+  - Software agenzia: nuovo componente `PiramideCopertureNuova` nel sub-tab "Piramide" in `AnalisiClienteTab.jsx`. La piramide legacy resta accessibile in collapsible "details"
+- **Test end-to-end verificato**: 
+  - Portale cliente (screenshot): piramide renderizzata identica allo schema Schiantarelli con 8 livelli, 11 pallini, tutte le voci correttamente popolate
+  - Backend restituisce 3 polizze RCA di Jacopo per la voce `danni_veicoli` con stato "assente" (capitale 0 in DB → pallino rosso corretto)
+
 ## Sessione 11/02/2026 (fork) — Import fixes + Piramide preparazione
 
 ### 🔴 Bug fix critici P0

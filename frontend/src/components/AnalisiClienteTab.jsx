@@ -5,6 +5,7 @@
 import { useEffect, useState, useRef } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
+import PiramidePrivati from "@/components/PiramidePrivati";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,7 +163,17 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                     <TrattativaTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} reloadAc={load} />
                 </TabsContent>
                 <TabsContent value="piramide">
-                    <PiramideTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} reloadAc={load} />
+                    <PiramideCopertureNuova anagrafica_id={anagrafica_id} canEdit={canEdit} />
+                    <div className="mt-8 pt-6 border-t border-slate-300">
+                        <details className="text-sm">
+                            <summary className="cursor-pointer text-slate-500 hover:text-slate-800">
+                                Piramide storica (categoria/titolo) — legacy
+                            </summary>
+                            <div className="mt-4">
+                                <PiramideTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} reloadAc={load} />
+                            </div>
+                        </details>
+                    </div>
                 </TabsContent>
             </Tabs>
         </div>
@@ -1422,6 +1433,63 @@ function ScenarioGrid({ scen, scenKey, canEdit, setTratt, color }) {
         </div>
     );
 }
+
+// ============== PIRAMIDE COPERTURE (v2 — schema Schiantarelli) ==============
+function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
+    const [data, setData] = useState(null);
+    const [agenzia, setAgenzia] = useState({});
+    const [busy, setBusy] = useState(false);
+
+    const load = async () => {
+        try {
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`);
+            setData(r.data);
+        } catch (e) {
+            toast.error("Errore caricamento piramide: " + (e.response?.data?.detail || e.message));
+        }
+    };
+
+    useEffect(() => {
+        load();
+        api.get("/impostazioni").then((r) => setAgenzia(r.data?.agenzia || {})).catch(() => {});
+        /* eslint-disable-next-line */
+    }, [anagrafica_id]);
+
+    const salva = async (payload) => {
+        setBusy(true);
+        try {
+            await api.put(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`, payload);
+            await load();
+        } finally { setBusy(false); }
+    };
+
+    if (!data) return <div className="text-center py-8 text-slate-500">Caricamento piramide...</div>;
+
+    return (
+        <div className="space-y-3 mt-4">
+            <div className="bg-sky-50 border border-sky-200 rounded p-3 text-xs text-sky-900 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <strong>Piramide delle Coperture</strong> — mappa visuale della protezione del cliente.
+                    Valori auto-popolati dalle polizze attive; puoi sovrascriverli e salvare i dati reddito/testamento.
+                </div>
+                <div className="text-[10px] text-sky-700">
+                    Legenda: 🟢 Adeguato · 🟡 Non adeguato · 🔴 Assente
+                </div>
+            </div>
+            <PiramidePrivati
+                voci_calcolate={data.voci_calcolate}
+                dati_reddito={data.dati_reddito}
+                testamento={data.testamento}
+                eredi_legittimi={data.eredi_legittimi}
+                override_voci={data.override_voci}
+                onSave={canEdit ? salva : null}
+                agenziaName={agenzia.nome || agenzia.ragione_sociale || "Assicurazioni"}
+                agenziaLogo={agenzia.logo_url}
+            />
+        </div>
+    );
+}
+
 
 // ============== PIRAMIDE DELLE SOLUZIONI ==============
 const PIR_CATEGORIE = ["Reddito", "Premorienza", "Invalidita", "Responsabilita", "Beni", "Pensione", "Risparmio"];

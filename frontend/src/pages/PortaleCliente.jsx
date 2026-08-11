@@ -10,6 +10,7 @@
 import { useEffect, useState, useRef } from "react";
 import { toast, Toaster } from "sonner";
 import axios from "axios";
+import PiramidePrivati from "@/components/PiramidePrivati";
 import {
     User, FileText, Wallet, FolderOpen, AlertCircle, Phone,
     Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send, Paperclip,
@@ -286,6 +287,57 @@ function SectionHeader({ icon: Icon, title, subtitle, gradient = "from-sky-500 t
                 {subtitle && <div className="text-sm text-slate-500 mt-0.5">{subtitle}</div>}
             </div>
             {right}
+        </div>
+    );
+}
+
+// ─── PIRAMIDE COPERTURE ────────────────────────────────────────────────
+function PiramideView() {
+    const [data, setData] = useState(null);
+    const [agenzia, setAgenzia] = useState({});
+
+    useEffect(() => {
+        clientApi.get("/protezione").then((r) => setData(r.data)).catch(() => setData({}));
+        clientApi.get("/agenzia").then((r) => setAgenzia(r.data || {})).catch(() => {});
+    }, []);
+
+    const richiediPreventivo = async (voceId, voceLabel) => {
+        try {
+            await clientApi.post("/protezione/richiedi-preventivo", {
+                livello_id: voceId, livello_nome: voceLabel,
+            });
+            toast.success(`Richiesta preventivo per "${voceLabel}" inviata all'agenzia`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio richiesta");
+        }
+    };
+
+    if (!data) {
+        return <div className="p-8 text-center text-slate-500">Caricamento piramide...</div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="bg-gradient-to-r from-fuchsia-500 to-pink-600 text-white rounded-xl p-4 md:p-5 shadow-lg">
+                <h2 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+                    <Shield size={22} /> La tua Piramide di Protezione
+                </h2>
+                <p className="text-sm text-white/90 mt-1">
+                    Guarda in un colpo d&apos;occhio le tue coperture. I pallini <strong className="text-red-100">rossi</strong> e{" "}
+                    <strong className="text-yellow-100">gialli</strong> sono cliccabili: richiedi subito un preventivo.
+                </p>
+            </div>
+            <PiramidePrivati
+                voci_calcolate={data.voci_calcolate}
+                dati_reddito={data.dati_reddito}
+                testamento={data.testamento}
+                eredi_legittimi={data.eredi_legittimi}
+                override_voci={data.override_voci}
+                onSave={null /* read-only per il cliente */}
+                onRichiediPreventivo={richiediPreventivo}
+                agenziaName={agenzia.nome || "La tua Agenzia"}
+                agenziaLogo={agenzia.logo_url}
+            />
         </div>
     );
 }

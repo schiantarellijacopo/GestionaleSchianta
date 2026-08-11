@@ -7360,6 +7360,177 @@ async def upload_estratto_inps(
     }
 
 
+@api.get("/anagrafiche/{aid}/analisi/piramide-v2")
+async def get_piramide_v2(aid: str, user=Depends(current_user)):
+    """Restituisce la piramide v2 (schema Schiantarelli) del cliente con valori
+    auto-popolati dalle polizze attive.
+    """
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ac = await _ensure_analisi(aid)
+    piramide = ac.get("piramide_v2") or {}
+    # Auto-popolamento: leggi le polizze attive del cliente e aggrega per categoria
+    voci = await _piramide_v2_calcola_voci(aid)
+    piramide["voci_calcolate"] = voci
+    return piramide
+
+
+@api.put("/anagrafiche/{aid}/analisi/piramide-v2")
+async def update_piramide_v2(aid: str, body: dict, user=Depends(current_user)):
+    """Salva/aggiorna i dati editabili della piramide v2:
+    - dati_reddito (sidebar)
+    - testamento (bool)
+    - eredi_legittimi (list[str])
+    - note per voce (opzionale)
+    """
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    await _ensure_analisi(aid)
+    upd = {"piramide_v2": {
+        "dati_reddito": body.get("dati_reddito") or {},
+        "testamento": bool(body.get("testamento")),
+        "eredi_legittimi": body.get("eredi_legittimi") or [],
+        "override_voci": body.get("override_voci") or {},
+    }, "updated_at": _now_iso()}
+    await db.analisi_cliente.update_one(
+        {"anagrafica_id": aid}, {"$set": upd}, upsert=True,
+    )
+    return upd["piramide_v2"]
+
+
+# Mappatura voce piramide → keyword ramo/prodotto/garanzia da cercare nelle polizze
+_PIRAMIDE_V2_MATCHERS = {
+    # 1. Invalidità
+    "invalidita_malattia": ["invalidit", "ip perman", "capitale invalidita"],
+    "invalidita_infortunio": ["infortun", "ip perman", "invalidit"],
+    "invalidita_non_autosufficienza": ["non autosuff", "ltc", "long term", "assistenza"],
+    # 2. Premorienza
+    "premorienza_malattia": ["tcm", "temporanea caso morte", "vita", "premorienza malatt"],
+    "premorienza_infortunio": ["infortun morte", "morte da infortun", "tcm infortun"],
+    # 3. Danni provocati ad altri
+    "danni_veicoli": ["rca", "rc auto", "auto", "motocicl", "ciclomotor", "autocarr", "veicoli"],
+    "danni_immobili": ["rc fabbricat", "rc immobil", "rc casa", "responsabilita civile fabbricat"],
+    "danni_professioni": ["rc profession", "professional", "medic malprac"],
+    "danni_vita_privata": ["rc capofamiglia", "capofamiglia", "vita privata", "rc famiglia"],
+    # 4. Perdita beni
+    "perdita_beni_immobili": ["incendio", "casa", "abitazion", "fabbricat", "multirischio casa",
+                              "eventi atmosf", "alluvion"],
+    "perdita_beni_aziende": ["impresa", "azienda", "artigian", "multirischio azienda",
+                             "attivit"],
+    # 5-8. Risparmio e Investimento (dai capitali polizze vita/risparmio)
+    "liquidita_giornaliera": ["conto corrente"],  # tipicamente no polizze; da input manuale
+    "cassa_lievi": ["risparmio", "capitale differ"],
+    "cassa_grandi": ["capitale differ", "unit linked"],
+    "crescita_capitale": ["unit linked", "gestione separata", "polizza investimento",
+                          "generazione", "misto", "rivalutabile"],
+}
+
+
+def _match_polizza_voce(polizza: dict, voce_keys: list) -> bool:
+    """Verifica se una polizza copre la voce specifica."""
+    haystack = " ".join([
+        polizza.get("prodotto") or "",
+        polizza.get("ramo") or "",
+        polizza.get("ramo_originale") or "",
+    ]).lower()
+    for g in polizza.get("garanzie") or []:
+        haystack += " " + (g.get("garanzia") or "").lower()
+        haystack += " " + (g.get("garanzia_originale") or "").lower()
+    return any(k in haystack for k in voce_keys)
+
+
+def _max_capitale_polizza(polizza: dict) -> float:
+    """Ritorna il massimo capitale/massimale trovato nella polizza."""
+    maxi = 0.0
+    for k in ("capitale_assicurato", "massimali"):
+        v = polizza.get(k)
+        if isinstance(v, (int, float)):
+            maxi = max(maxi, float(v))
+        elif isinstance(v, str) and v:
+            try:
+                maxi = max(maxi, float(v.replace(".", "").replace(",", ".")))
+            except (ValueError, AttributeError):
+                pass
+    for g in polizza.get("garanzie") or []:
+        for k in ("capitale_assicurato", "massimale", "capitale", "somma_assicurata"):
+            v = g.get(k)
+            if isinstance(v, (int, float)):
+                maxi = max(maxi, float(v))
+    return maxi
+
+
+# Soglie per determinare colore (adeguato/non_adeguato/assente)
+# Se capitale >= adeguato_min → 🟢, se >= non_adeguato_min → 🟡, altrimenti → 🔴
+_PIRAMIDE_V2_SOGLIE = {
+    "danni_veicoli": {"adeguato": 6000000, "non_adeguato": 1000000},
+    "danni_immobili": {"adeguato": 1000000, "non_adeguato": 250000},
+    "danni_professioni": {"adeguato": 1000000, "non_adeguato": 500000},
+    "danni_vita_privata": {"adeguato": 1500000, "non_adeguato": 500000},
+    "perdita_beni_immobili": {"adeguato": 300000, "non_adeguato": 100000},
+    "perdita_beni_aziende": {"adeguato": 500000, "non_adeguato": 100000},
+    "invalidita_malattia": {"adeguato": 200000, "non_adeguato": 50000},
+    "invalidita_infortunio": {"adeguato": 200000, "non_adeguato": 50000},
+    "invalidita_non_autosufficienza": {"adeguato": 100000, "non_adeguato": 30000},
+    "premorienza_malattia": {"adeguato": 300000, "non_adeguato": 100000},
+    "premorienza_infortunio": {"adeguato": 300000, "non_adeguato": 100000},
+    "liquidita_giornaliera": {"adeguato": 10000, "non_adeguato": 3000},
+    "cassa_lievi": {"adeguato": 30000, "non_adeguato": 10000},
+    "cassa_grandi": {"adeguato": 100000, "non_adeguato": 30000},
+    "crescita_capitale": {"adeguato": 50000, "non_adeguato": 10000},
+}
+
+
+def _stato_voce(voce_id: str, capitale: float) -> str:
+    """Ritorna 'adeguato' | 'non_adeguato' | 'assente' in base alle soglie."""
+    if not capitale or capitale <= 0:
+        return "assente"
+    soglie = _PIRAMIDE_V2_SOGLIE.get(voce_id, {})
+    if capitale >= soglie.get("adeguato", 100000):
+        return "adeguato"
+    if capitale >= soglie.get("non_adeguato", 10000):
+        return "non_adeguato"
+    return "non_adeguato"  # capitale > 0 ma sotto soglia minima → giallo
+
+
+async def _piramide_v2_calcola_voci(anagrafica_id: str) -> dict:
+    """Legge polizze attive del cliente e ritorna dict con capitale/stato per ogni voce."""
+    oggi = datetime.now(timezone.utc).date().isoformat()
+    polizze = await db.polizze.find(
+        {
+            "contraente_id": anagrafica_id,
+            "$or": [
+                {"scadenza": {"$gte": oggi}},
+                {"scadenza": {"$exists": False}},
+                {"scadenza": None},
+            ],
+            "stato": {"$nin": ["disdettata", "annullata", "sospesa"]},
+        },
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "ramo_originale": 1,
+         "prodotto": 1, "compagnia_id": 1, "capitale_assicurato": 1,
+         "massimali": 1, "garanzie": 1, "scadenza": 1, "premio_lordo": 1},
+    ).to_list(500)
+    out = {}
+    for voce_id, keywords in _PIRAMIDE_V2_MATCHERS.items():
+        capitale_max = 0.0
+        polizze_match = []
+        for p in polizze:
+            if _match_polizza_voce(p, keywords):
+                cap = _max_capitale_polizza(p)
+                capitale_max = max(capitale_max, cap)
+                polizze_match.append({
+                    "id": p["id"],
+                    "numero": p.get("numero_polizza"),
+                    "prodotto": p.get("prodotto"),
+                    "capitale": cap,
+                })
+        out[voce_id] = {
+            "capitale": capitale_max if capitale_max > 0 else None,
+            "stato": _stato_voce(voce_id, capitale_max),
+            "polizze": polizze_match,
+        }
+    return out
+
+
 @api.post("/anagrafiche/{aid}/analisi/piramide/auto-popola")
 async def auto_popola_piramide(aid: str, user=Depends(current_user)):
     """Pre-popola la piramide delle soluzioni con coperture suggerite calcolate

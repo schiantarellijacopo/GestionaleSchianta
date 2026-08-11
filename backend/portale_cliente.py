@@ -633,11 +633,25 @@ def _match_livello(polizza: dict) -> Optional[str]:
 
 @router.get("/protezione")
 async def portale_piramide_protezione(cliente=Depends(current_cliente)):
-    """Ritorna la piramide di protezione del cliente.
-
-    Per ogni livello (RCA, Casa, Vita&Salute, Impresa, Previdenza, Tutela Legale)
-    determina se è coperto in base alle polizze attive del cliente.
+    """Ritorna la Piramide v2 (schema Schiantarelli) del cliente con voci
+    auto-popolate dalle polizze attive + dati salvati (reddito, testamento, eredi).
     """
+    from server import db, _piramide_v2_calcola_voci
+    ac = await db.analisi_cliente.find_one({"anagrafica_id": cliente["id"]}, {"_id": 0}) or {}
+    piramide = ac.get("piramide_v2") or {}
+    voci = await _piramide_v2_calcola_voci(cliente["id"])
+    return {
+        "voci_calcolate": voci,
+        "dati_reddito": piramide.get("dati_reddito") or {},
+        "testamento": piramide.get("testamento", False),
+        "eredi_legittimi": piramide.get("eredi_legittimi") or [],
+        "override_voci": piramide.get("override_voci") or {},
+    }
+
+
+@router.get("/protezione-legacy")
+async def portale_piramide_protezione_legacy(cliente=Depends(current_cliente)):
+    """Legacy: ritorna la piramide di protezione semplice del cliente."""
     from server import db
     oggi = datetime.now(timezone.utc).date().isoformat()
     # Prendi tutte le polizze del cliente ancora ATTIVE (non scadute e stato != disdetta)
