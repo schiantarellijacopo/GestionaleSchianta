@@ -6094,6 +6094,9 @@ async def list_unmapped_entities(
     #   - qualunque record che sia sfuggito all'auto-create in ania_importer
     # L'utente creato è inattivo e con password non usabile: l'admin lo
     # completa in Librerie → Utenti / Collaboratori.
+    # Inoltre facciamo IMMEDIATAMENTE il back-fill sulle polizze già importate
+    # (`operatore_ania_codice == valore_flusso` con `collaboratore_id` vuoto)
+    # così le polizze acquisiscono subito il nuovo collaboratore.
     for it in by_tipo["collaboratore"]:
         if it.get("entita_id"):
             continue
@@ -6111,6 +6114,17 @@ async def list_unmapped_entities(
                 "auto_created": True,
                 "updated_at": _now_iso(),
             }},
+        )
+        # 🔧 Back-fill immediato sulle polizze già importate: associa il nuovo
+        # utente a tutte le polizze con `operatore_ania_codice == codice` e
+        # `collaboratore_id` vuoto (o mai impostato).
+        await db.polizze.update_many(
+            {
+                "operatore_ania_codice": codice,
+                "$or": [{"collaboratore_id": None}, {"collaboratore_id": ""},
+                        {"collaboratore_id": {"$exists": False}}],
+            },
+            {"$set": {"collaboratore_id": new_uid, "updated_at": _now_iso()}},
         )
         # Refresha la voce nella risposta
         it["entita_id"] = new_uid
