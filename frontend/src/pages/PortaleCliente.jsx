@@ -679,6 +679,8 @@ function TitoloMini({ t, oggi }) {
     );
 }
 
+// Riga singolo allegato (nome + tipo + download)
+function AllegatoRow({ d, small }) {
     const ext = (d.nome_file || "").split(".").pop()?.toLowerCase();
     const isImg = /^(jpg|jpeg|png|webp|heic|gif)$/.test(ext);
     const isPdf = ext === "pdf";

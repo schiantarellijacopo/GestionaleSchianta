@@ -7,7 +7,7 @@ import {
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
     Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
-    Banknote, ArrowRightLeft, Sparkles, ClipboardList,
+    Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
 } from "lucide-react";
 
