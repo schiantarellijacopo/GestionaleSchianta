@@ -289,8 +289,8 @@ function App() {
                             <Route path="*" element={<Navigate to="/" replace />} />
                         </Route>
                     </Routes>
+                    <CopilotWidget />
                 </BrowserRouter>
-                <CopilotWidget />
                 <Toaster position="top-right" richColors />
             </AuthProvider>
         </div>

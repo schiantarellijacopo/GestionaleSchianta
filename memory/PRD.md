@@ -424,3 +424,10 @@ Usare integration_expert prima di implementare.
 - P2: Pannello personalizzazione portale (slogan, colori)
 - P0 (tech debt): Refactor server.py (>12k righe)
 
+
+## Sessione 2026-06 (fork) — Fix definitivo interattività Piramide
+### ✅ Piramide Privati: root cause REALE trovata e risolta
+- Il problema NON era il clip-path (già sistemato): era un **reset dello stato React**. I default prop `= {}` di `PiramidePrivati.jsx` creavano una nuova referenza ad ogni render; gli `useEffect` con dipendenza sull'oggetto si ri-attivavano e azzeravano `custom`/`overrides`/`stati` subito dopo ogni modifica (il "+" aggiungeva la riga ma spariva, il testo digitato veniva cancellato, il colore tornava indietro).
+- Fix: sync dalle prop solo su cambio di CONTENUTO (firma JSON.stringify come dipendenza degli effect).
+- Fix secondario: `cycleStato` ora parte dallo stato attualmente visualizzato (prima il primo click su un pallino già "adeguato" non cambiava colore).
+- Testato via browser automation: + aggiunge riga ✓, digitazione label/capitale/input standard ✓, ciclo pallino rosso→verde→giallo→rosso ✓, salvataggio + persistenza dopo reload ✓.

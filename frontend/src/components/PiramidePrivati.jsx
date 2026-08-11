@@ -166,16 +166,22 @@ export default function PiramidePrivati({
     const [saving, setSaving] = useState(false);
     const [prepopolando, setPrepopolando] = useState(false);
 
-    useEffect(() => { setReddito(dati_reddito || {}); }, [dati_reddito]);
+    // Sync dalle prop SOLO quando il contenuto cambia davvero (firma JSON).
+    // Con dipendenza sull'oggetto, i default "= {}" creavano una nuova referenza
+    // ad ogni render e resettavano lo stato locale (input/pallini/+ non funzionanti).
+    const sigReddito = JSON.stringify(dati_reddito || {});
+    const sigEredi = JSON.stringify(eredi_legittimi || []);
+    const sigOverrides = JSON.stringify(override_voci || {});
+    const sigStati = JSON.stringify(stato_voci || {});
+    const sigCustom = JSON.stringify(voci_custom || {});
+    /* eslint-disable react-hooks/exhaustive-deps */
+    useEffect(() => { setReddito(dati_reddito || {}); }, [sigReddito]);
     useEffect(() => { setTest(!!testamento); }, [testamento]);
-    useEffect(() => {
-        const b = Array.isArray(eredi_legittimi) ? [...eredi_legittimi] : [];
-        while (b.length < 4) b.push("");
-        setEredi(b.slice(0, 4));
-    }, [eredi_legittimi]);
-    useEffect(() => { setOverrides(override_voci || {}); }, [override_voci]);
-    useEffect(() => { setStati(stato_voci || {}); }, [stato_voci]);
-    useEffect(() => { setCustom(voci_custom || {}); }, [voci_custom]);
+    useEffect(() => { setEredi(normEredi(eredi_legittimi)); }, [sigEredi]);
+    useEffect(() => { setOverrides(override_voci || {}); }, [sigOverrides]);
+    useEffect(() => { setStati(stato_voci || {}); }, [sigStati]);
+    useEffect(() => { setCustom(voci_custom || {}); }, [sigCustom]);
+    /* eslint-enable react-hooks/exhaustive-deps */
 
     // ── geometria dinamica: la piramide cresce con le voci custom ──
     const layout = (() => {
@@ -233,17 +239,9 @@ export default function PiramidePrivati({
         return voci_calcolate[vid]?.stato || "assente";
     };
     const cycleStato = (vid) => {
-        setStati((s) => {
-            const cur = s[vid];
-            if (!cur) return { ...s, [vid]: DOT_CYCLE[0] };
-            const idx = DOT_CYCLE.indexOf(cur);
-            if (idx === DOT_CYCLE.length - 1) {
-                const nx = { ...s };
-                delete nx[vid];   // torna ad automatico
-                return nx;
-            }
-            return { ...s, [vid]: DOT_CYCLE[idx + 1] };
-        });
+        const cur = statoVoce(vid); // parte dallo stato attualmente mostrato
+        const nx = DOT_CYCLE[(DOT_CYCLE.indexOf(cur) + 1) % DOT_CYCLE.length];
+        setStati((s) => ({ ...s, [vid]: nx }));
     };
     const onDotClick = (voce) => {
         if (editable) { cycleStato(voce.id); return; }
