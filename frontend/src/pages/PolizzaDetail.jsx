@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading } from "@/components/Shared";
+import CollaboratoreInlineSelect from "@/components/CollaboratoreInlineSelect";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,16 @@ export default function PolizzaDetail() {
                         <Hd label="Ultimo titolo" value={fmtDate(pol.ultimo_titolo_scadenza || pol.titoli?.[0]?.data_incasso || pol.effetto)} />
                         <Hd label="Stato" value={<StatusBadge stato={pol.stato} />} />
                         <Hd label="Copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />
-                        <Hd label="Collaboratore" value={pol.collaboratore_nome || (pol.collaboratore_id ? pol.collaboratore_id.slice(0, 6) : "—")} />
+                        <div className="flex flex-col justify-center">
+                            <CollaboratoreInlineSelect
+                                entita="polizze"
+                                id={pol.id}
+                                value={pol.collaboratore_id}
+                                canEdit={canEdit}
+                                onSaved={load}
+                                label="Operatore"
+                            />
+                        </div>
                     </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-3 px-6 py-4 text-sm">

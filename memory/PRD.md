@@ -1,38 +1,68 @@
 # Programma Assicurativo — PRD (aggiornato 11/02/2026)
 
-## Sessione 11/02/2026 (fork) — Wizard Import semplificato + bug duplicati + Bulk Rename Prodotti
+## Sessione 11/02/2026 (fork) — Import fixes + Piramide preparazione
 
-### 🔴 Bug fix critico — Duplicati in `import_mappings`
-- **Sintomo**: Wizard mostrava compagnie/prodotti/rami come "non mappati" anche dopo aver salvato l'associazione.
-- **Causa**: 75 righe duplicate in `db.import_mappings` con stessa `(tipo, flusso, valore_flusso)`. `update_one` aggiornava solo la prima, l'altra restava con `entita_id=None`.
-- **Fix**: dedup script eseguito una tantum (rimossi 75 dup); poi nell'endpoint `POST /api/import/mappings` aggiunta logica preventiva che elimina eventuali duplicati prima dell'upsert.
+### 🔴 Bug fix critici P0
+1. **Duplicati in `import_mappings`** (75 righe orfane): dedup effettuato + fix preventivo nell'endpoint POST `/api/import/mappings` (delete_many extras prima dell'upsert)
+2. **Import ANIA non associava operatori alle polizze/titoli**: campo giusto era `collaboratore_1` (non `cod_operatore`). Fix in `_resolve_operatore_codice` (ania_importer.py) + esteso `_processa_titoli` per estrarre collaboratore da rec40 o ereditarlo dalla polizza.
+3. **Anagrafiche non ricevevano collaboratore_id**: aggiunto back-fill in `_processa_polizze` (setta collaboratore su anagrafica se assente) e nel `/api/import/mappings/apply` (back-fill retroattivo anagrafiche + titoli).
+4. **AnagraficaDetail lint fix** (`InlineEditField`/`InlineChannelsField` non definiti, componenti nested instabili)
+5. **PolizzaDetail bug** `ContraenteFilter is not defined` → import mancante ripristinato
+6. **PolizzaDetail** tab default = `garanzie` (per polizze non-RCA) + totale colonna Massimali/Capitali rimosso + fallback intelligente per RCA (usa `pol.massimali` se garanzia vuota)
 
-### ✅ Auto-suggerisci Ramo per Prodotti
-- Backend `/api/import/unmapped`: per ogni prodotto non ancora mappato calcola `suggested_entita_id` in base a keyword matching sul nome (AUTO/VEICOLI→Auto, CASA/ABITAZIONE→Casa, VITA/TCM→Vita, IMPRESA/ARTIGIANI→Multirischio, PENSIONE/PIP→Previdenza, TUTELA LEGALE→Tutela Legale, ecc.).
-- Frontend `Importazione.jsx`: pre-seleziona il ramo suggerito con sfondo azzurro + messaggio "💡 Ramo suggerito automaticamente". L'utente conferma tutti in un click con "Salva e applica".
+### ✅ Wizard Mapping Entità — semplificato
+- **Tab Garanzia rimossa**: garanzie auto-create in libreria durante import
+- **Tab Prodotto**: sceglie solo il Ramo, prodotto viene auto-creato in libreria con nome del flusso + `auto_created=True`
+- **Tab Operatore/Collaboratore**: auto-crea utenti stub (attivo=false, password disabilitata) per codici mai visti; badge giallo "AUTO-CREATO" in wizard; utente completa in Librerie → Utenti
+- **Auto-suggerisci Ramo** dai keyword del nome prodotto (AUTOPIU'→Auto, ABITAZIONE→Casa, VITA/TCM→Vita, IMPRESA→Multirischio, ecc.) — pre-selezione sfondo azzurro
 
-### ✅ Auto-crea Operatori (mai più mapping manuale)
-- **`ania_importer.py`**: `_resolve_operatore_codice` ora auto-crea uno stub `db.users` (`role=collaboratore, attivo=False, password_hash="!DISABLED-IMPORT-AUTO"`) al primo incontro con un operatore ignoto. Aggiunge un mapping in `import_mappings` con `auto_created=True`.
-- **`server.py` `/import/unmapped`**: helper `_auto_create_stub_operatore` per convertire i mapping legacy con `entita_id=None`. La tab Operatore/Collaboratore resta nel wizard: mostra badge giallo "AUTO-CREATO" + hint "completa in Librerie → Utenti/Collaboratori". L'utente può comunque cambiare associazione manualmente.
+### ✅ Bulk Rename Prodotti
+- Endpoint `POST /librerie/prodotti/bulk-rename` (idempotente, dedup nome)
+- Dialog in Librerie → Prodotti → pulsante "Rinomina in massa" con filtri (auto-creati / tutti) + ricerca
 
-### ✅ Rinomina Prodotti in massa
-- Backend nuovo endpoint `POST /librerie/prodotti/bulk-rename` che accetta `{items: [{id, nome}]}` e ritorna `{rinominati, saltati, conflitti}`. Idempotente con controllo unicità nome.
-- Frontend Librerie sezione Prodotti: nuovo pulsante "**Rinomina in massa**" che apre `BulkRenameProdottiDialog` con filtri:
-  - "Solo auto-creati" (default) — mostra solo prodotti con `auto_created=True`
-  - "Tutti"
-  - Ricerca per nome/ramo
-- Salvataggio batch con contatore modifiche live e badge "AUTO" sui prodotti creati automaticamente dall'import.
-- Nel wizard, i prodotti auto-creati portano ora `auto_created: true, auto_created_from: <codice flusso>` per il filtro nel dialog.
+### ✅ Endpoint Piramide Base (portale cliente) — draft
+- `GET /api/portale/protezione` con 6 livelli semplici (RCA/Casa/Vita&Salute/Impresa/Previdenza/Tutela Legale)
+- `POST /api/portale/protezione/richiedi-preventivo` (crea richiesta admin + messaggio chat)
+- **NB**: da riprogettare secondo il modello richiesto (vedi sotto).
 
-### 🔧 Bonus fix minori
-- **PolizzaDetail**: `defaultValue` dei `<Tabs>` = `garanzie` per polizze non-RCA (bypass del click su tab Garanzie).
-- **AnagraficaDetail**: risolti errori `react/jsx-no-undef` e `react/no-unstable-nested-components` (`InlineEditField`, `InlineChannelsField`, `ChannelChip`).
+## 🎯 TASK PRIORITARIO PROSSIMA SESSIONE — Piramide Coperture Ricca
 
-### Test verificati (curl end-to-end)
-- Duplicati: 0 in tutti i tipi dopo dedup + nuovo insert
-- Auto-suggest: `ABITAZIONE` → Ramo MULTIRISCHIO, `ACTIVE RISPARMIO` → Ramo Vita, `AUTOPIU'` → Ramo Auto
-- Bulk rename: chiamata dry-run OK
-- Prodotto auto-create con `TEST_NEW_PROD_XYZ` → prodotto in libreria con `auto_created=True, ramo=MULTIRISCHIO`
+### Design richiesto (dagli screenshot utente)
+**A) Piramide PRIVATI** (7 livelli dal basso all'apice):
+1. **PREMORIENZA** (rosso, base larga): capitale TCM
+2. **INVALIDITÀ**: IP/inabilità
+3. **RESPONSABILITÀ**: RC capofamiglia, veicoli, professioni, minori
+4. **BENI**: casa, incendio, eventi atmosferici, alluvioni, sequestri
+5. **REDDITO**: liquidità giornaliera / conto corrente
+6. **PENSIONE**: cassa per grandi/lievi esigenze, PIP
+7. **RISPARMIO** (verde, apice): crescita capitale/investimento
+
+**B) Piramide AZIENDE** (nuova, 7 livelli):
+1. RC veicoli (base)
+2. RC terzi
+3. RC dipendenti
+4. RC prodotti, RC ambientale, RC amministratori, RC datoriale
+5. Guasto macchinari, Merci, Crediti, Cyber, Tutela legale, Danni indiretti/beni
+6. Uomini chiave (Morte + Invalidità)
+7. Liquidità aziendale + TFM
+8. Patrimonio netto (apice)
+
+**C) Legenda colori**: 🟢 Adeguato · 🟡 Non adeguato · 🔴 Assente
+
+**D) Auto-popolamento** dai massimali/capitali delle polizze ATTIVE del cliente (già presente basicalmente in `auto_popola_piramide` server.py:7363, da estendere).
+
+### Implementazione (~5-6h)
+1. **Backend**:
+   - Estendere `POST /anagrafiche/{aid}/analisi/piramide/auto-popola` per leggere massimali da tutte le polizze attive
+   - Nuovo endpoint dedicato `/anagrafiche/{aid}/analisi/piramide-aziendale/auto-popola` con schema aziendale
+   - Add campo `Anagrafica.tipo` check → piramide privata o aziendale
+2. **Frontend software agenzia** — ristrutturare `PiramideTab` con:
+   - Sub-tab Piramide Privato / Piramide Aziendale (auto in base a `ana.tipo`)
+   - SVG stilizzato dei 7 livelli con colori adeguato/non/assente
+   - Pulsante "Pre-popola" evoluto (già esiste base)
+3. **Portale Cliente**:
+   - Rimuovere sezione semplice appena creata
+   - Sostituire con `PiramideView` gemella (read-only) con CTA "Richiedi preventivo" per livelli 🔴 assenti
 
 ## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
 

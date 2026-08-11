@@ -569,6 +569,207 @@ async def list_sinistri(cliente=Depends(current_cliente)):
 
 
 # ============================================================
+# PIRAMIDE COPERTURE — gamification protezione
+# ============================================================
+# Mapping keyword ramo → livello piramide.
+# Ordine top → bottom della piramide (base larga = fondamentale).
+_PIRAMIDE_LIVELLI = [
+    {
+        "id": "rca", "nome": "RCA / Veicoli", "icona": "car",
+        "colore": "sky", "descrizione": "Responsabilità civile veicoli",
+        "keywords": ["rca", "rc auto", "rc-auto", "auto", "motocicl",
+                     "ciclomotor", "autocarr", "veicoli", "flotta",
+                     "libro matricola", "assistenza stradale", "furto veicoli"],
+    },
+    {
+        "id": "casa", "nome": "Casa", "icona": "home",
+        "colore": "emerald", "descrizione": "Abitazione, contenuto e fabbricato",
+        "keywords": ["casa", "abitazion", "fabbricat", "multirischio",
+                     "condominio", "parrocch", "globale fabbricati",
+                     "immobil"],
+    },
+    {
+        "id": "vita_salute", "nome": "Vita & Salute", "icona": "heart",
+        "colore": "rose", "descrizione": "Tu, la tua famiglia, la tua salute",
+        "keywords": ["vita", "tcm", "temporanea caso morte", "misto",
+                     "rivalutabile", "unit linked", "salute", "malatt",
+                     "infortun", "capitale differ", "risparmio",
+                     "generazione", "protezione persona"],
+    },
+    {
+        "id": "impresa", "nome": "Impresa", "icona": "briefcase",
+        "colore": "amber", "descrizione": "Attività, RC professionale, dipendenti",
+        "keywords": ["impres", "azienda", "artigian", "commercio",
+                     "negozio", "attivit", "rc profession", "rc generale",
+                     "responsabilit", "industri", "grandine", "trasporti",
+                     "cauzion", "cristal"],
+    },
+    {
+        "id": "pensione", "nome": "Previdenza", "icona": "piggy-bank",
+        "colore": "violet", "descrizione": "Pensione integrativa, PIP, FIP",
+        "keywords": ["pension", "previd", " pip ", " fip ", "fondo pension"],
+    },
+    {
+        "id": "tutela_legale", "nome": "Tutela Legale", "icona": "scale",
+        "colore": "slate", "descrizione": "Assistenza legale e ricorsi",
+        "keywords": ["tutela legale", "legal", "protezione legale"],
+    },
+]
+
+
+def _match_livello(polizza: dict) -> Optional[str]:
+    """Ritorna l'id del livello piramide che matcha con la polizza."""
+    haystack = " ".join([
+        (polizza.get("prodotto") or ""),
+        (polizza.get("ramo") or ""),
+        (polizza.get("ramo_originale") or ""),
+    ]).lower()
+    haystack = " " + haystack + " "
+    for lvl in _PIRAMIDE_LIVELLI:
+        if any(k in haystack for k in lvl["keywords"]):
+            return lvl["id"]
+    return None
+
+
+@router.get("/protezione")
+async def portale_piramide_protezione(cliente=Depends(current_cliente)):
+    """Ritorna la piramide di protezione del cliente.
+
+    Per ogni livello (RCA, Casa, Vita&Salute, Impresa, Previdenza, Tutela Legale)
+    determina se è coperto in base alle polizze attive del cliente.
+    """
+    from server import db
+    oggi = datetime.now(timezone.utc).date().isoformat()
+    # Prendi tutte le polizze del cliente ancora ATTIVE (non scadute e stato != disdetta)
+    polizze = await db.polizze.find(
+        {
+            "contraente_id": cliente["id"],
+            "$or": [
+                {"scadenza": {"$gte": oggi}},
+                {"scadenza": {"$exists": False}},
+                {"scadenza": None},
+            ],
+            "stato": {"$nin": ["disdettata", "annullata", "sospesa"]},
+        },
+        {"_id": 0, "id": 1, "ramo": 1, "ramo_originale": 1, "prodotto": 1,
+         "numero_polizza": 1, "compagnia_id": 1, "premio_lordo": 1,
+         "capitale_assicurato": 1, "massimali": 1, "garanzie": 1, "scadenza": 1},
+    ).to_list(500)
+    # Aggrega per livello
+    by_lvl: dict = {lvl["id"]: {"polizze": [], "massimale_tot": 0.0, "premio_tot": 0.0} for lvl in _PIRAMIDE_LIVELLI}
+    for p in polizze:
+        lvl_id = _match_livello(p)
+        if not lvl_id:
+            continue
+        # Massimale: prendi il max tra i vari campi disponibili
+        maxi = 0.0
+        for k in ("capitale_assicurato", "massimali"):
+            v = p.get(k)
+            if isinstance(v, (int, float)):
+                maxi = max(maxi, float(v))
+            elif isinstance(v, str):
+                try:
+                    maxi = max(maxi, float(v.replace(".", "").replace(",", ".")))
+                except (ValueError, AttributeError):
+                    pass
+        # Dai garanzie: max dei capitali
+        for g in p.get("garanzie") or []:
+            for k in ("capitale_assicurato", "massimale", "capitale", "somma_assicurata"):
+                v = g.get(k)
+                if isinstance(v, (int, float)):
+                    maxi = max(maxi, float(v))
+        by_lvl[lvl_id]["polizze"].append({
+            "id": p["id"],
+            "numero": p.get("numero_polizza"),
+            "prodotto": p.get("prodotto"),
+            "ramo": p.get("ramo"),
+            "scadenza": p.get("scadenza"),
+            "massimale": maxi if maxi > 0 else None,
+            "premio_lordo": p.get("premio_lordo") or 0,
+        })
+        by_lvl[lvl_id]["massimale_tot"] += maxi
+        by_lvl[lvl_id]["premio_tot"] += float(p.get("premio_lordo") or 0)
+    # Costruisci risposta ordinata
+    livelli_out = []
+    coperti = 0
+    for lvl in _PIRAMIDE_LIVELLI:
+        agg = by_lvl[lvl["id"]]
+        is_coperto = len(agg["polizze"]) > 0
+        if is_coperto:
+            coperti += 1
+        livelli_out.append({
+            "id": lvl["id"],
+            "nome": lvl["nome"],
+            "descrizione": lvl["descrizione"],
+            "icona": lvl["icona"],
+            "colore": lvl["colore"],
+            "coperto": is_coperto,
+            "polizze": agg["polizze"],
+            "n_polizze": len(agg["polizze"]),
+            "massimale_tot": agg["massimale_tot"] if agg["massimale_tot"] > 0 else None,
+            "premio_tot": round(agg["premio_tot"], 2) if agg["premio_tot"] > 0 else None,
+        })
+    tot = len(_PIRAMIDE_LIVELLI)
+    return {
+        "livelli": livelli_out,
+        "coperti": coperti,
+        "totali": tot,
+        "percentuale": round(coperti / tot * 100),
+    }
+
+
+@router.post("/protezione/richiedi-preventivo")
+async def richiedi_preventivo_piramide(body: dict, cliente=Depends(current_cliente)):
+    """Cliente clicca "Richiedi preventivo" su un livello scoperto.
+
+    Body: {"livello_id": "casa", "livello_nome": "Casa"}
+    Crea:
+    - Una richiesta nella dashboard admin (widget "Richieste da verificare")
+    - Un messaggio in chat_portale con testo precompilato
+    """
+    from server import db
+    livello_id = (body.get("livello_id") or "").strip()
+    livello_nome = (body.get("livello_nome") or livello_id or "protezione").strip()
+    if not livello_id:
+        raise HTTPException(400, "livello_id richiesto")
+    now = datetime.now(timezone.utc).isoformat()
+    cliente_nome = (cliente.get("ragione_sociale")
+                    or cliente.get("cognome_nome")
+                    or f"{cliente.get('cognome','')} {cliente.get('nome','')}".strip()
+                    or cliente.get("email"))
+    # 1) Richiesta lato admin
+    rich_id = str(uuid.uuid4())
+    await db.richieste_cliente.insert_one({
+        "id": rich_id,
+        "tipo": "preventivo_piramide",
+        "cliente_id": cliente["id"],
+        "cliente_nome": cliente_nome,
+        "livello_id": livello_id,
+        "livello_nome": livello_nome,
+        "messaggio": f"Richiesta preventivo per: {livello_nome}",
+        "stato": "da_verificare",
+        "tenant_id": cliente.get("tenant_id"),
+        "created_at": now,
+    })
+    # 2) Messaggio in chat portale (visibile sia lato cliente sia lato agenzia)
+    await db.chat_portale.insert_one({
+        "id": str(uuid.uuid4()),
+        "anagrafica_id": cliente["id"],
+        "tenant_id": cliente.get("tenant_id"),
+        "direzione": "in",
+        "testo": f"🛡️ Vorrei ricevere un preventivo per copertura: {livello_nome}.",
+        "mittente_admin_id": None,
+        "created_at": now,
+        "letto": False,
+    })
+    return {
+        "ok": True,
+        "richiesta_id": rich_id,
+        "messaggio": f"Richiesta inviata all'agenzia per {livello_nome}",
+    }
+
+
+# ============================================================
 # ANAGRAFICA — richiesta modifica
 # ============================================================
 @router.put("/anagrafica/richiesta")

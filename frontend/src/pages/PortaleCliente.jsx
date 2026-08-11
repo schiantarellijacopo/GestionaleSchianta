@@ -14,6 +14,7 @@ import {
     User, FileText, Wallet, FolderOpen, AlertCircle, Phone,
     Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send, Paperclip,
     Shield, ShieldCheck, Heart, Home, Clock, CheckCircle2,
+    Briefcase, PiggyBank, Scale, TrendingUp, XCircle,
 } from "lucide-react";
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -29,6 +30,7 @@ clientApi.interceptors.request.use((cfg) => {
 
 const SEZIONI = [
     { key: "profilo",  label: "Il mio profilo", icon: User },
+    { key: "piramide", label: "La mia protezione", icon: Shield },
     { key: "polizze",  label: "Le mie polizze", icon: FileText },
     { key: "titoli",   label: "Titoli & Quietanze", icon: Wallet },
     { key: "documenti", label: "Documenti & Upload", icon: FolderOpen },
@@ -157,6 +159,7 @@ export default function PortaleCliente() {
                 {/* Content */}
                 <main className="flex-1 p-4 sm:p-6 lg:p-10 max-w-6xl mx-auto w-full">
                     {sezione === "profilo" && <ProfiloView cliente={cliente} onReload={() => clientApi.get("/me").then((r) => setCliente(r.data))} />}
+                    {sezione === "piramide" && <PiramideView />}
                     {sezione === "polizze" && <PolizzeView />}
                     {sezione === "titoli" && <TitoliView />}
                     {sezione === "documenti" && <DocumentiView />}
@@ -172,6 +175,7 @@ export default function PortaleCliente() {
 // Colore accento per ogni sezione (usato in NavList + intestazioni pagine)
 const SEZIONI_COLORS = {
     profilo: "from-sky-500 to-blue-600",
+    piramide: "from-fuchsia-500 to-pink-600",
     polizze: "from-violet-500 to-purple-600",
     titoli: "from-emerald-500 to-teal-600",
     documenti: "from-amber-500 to-orange-600",
