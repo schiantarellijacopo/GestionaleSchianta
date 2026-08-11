@@ -6341,6 +6341,53 @@ async def apply_import_mappings(
                 )
                 summary["polizze_garanzia"] += 1
 
+    # 🆕 Back-fill anagrafiche: eredita il collaboratore_id dalla polizza
+    # più frequente del contraente (se manca su anagrafica).
+    n_ana_updated = 0
+    pipeline = [
+        {"$match": {"collaboratore_id": {"$type": "string", "$ne": ""}}},
+        {"$group": {
+            "_id": {"contraente_id": "$contraente_id", "collaboratore_id": "$collaboratore_id"},
+            "n": {"$sum": 1},
+        }},
+        {"$sort": {"n": -1}},
+    ]
+    seen_contraenti: set[str] = set()
+    async for r in db.polizze.aggregate(pipeline):
+        contr = r["_id"].get("contraente_id")
+        coll = r["_id"].get("collaboratore_id")
+        if not contr or contr in seen_contraenti:
+            continue
+        seen_contraenti.add(contr)
+        upd = await db.anagrafiche.update_one(
+            {
+                "id": contr,
+                "$or": [{"collaboratore_id": None}, {"collaboratore_id": ""},
+                        {"collaboratore_id": {"$exists": False}}],
+            },
+            {"$set": {"collaboratore_id": coll, "updated_at": _now_iso()}},
+        )
+        if upd.modified_count:
+            n_ana_updated += 1
+    summary["anagrafiche_collaboratore"] = n_ana_updated
+
+    # 🆕 Back-fill titoli: eredita collaboratore_id dalla polizza (se manca sul titolo).
+    n_tit_updated = 0
+    async for pol in db.polizze.find(
+        {"collaboratore_id": {"$type": "string", "$ne": ""}},
+        {"_id": 0, "id": 1, "collaboratore_id": 1},
+    ):
+        r = await db.titoli.update_many(
+            {
+                "polizza_id": pol["id"],
+                "$or": [{"collaboratore_id": None}, {"collaboratore_id": ""},
+                        {"collaboratore_id": {"$exists": False}}],
+            },
+            {"$set": {"collaboratore_id": pol["collaboratore_id"], "updated_at": _now_iso()}},
+        )
+        n_tit_updated += r.modified_count
+    summary["titoli_collaboratore"] = n_tit_updated
+
     await log_attivita(user, "apply", "import_mappings", None,
                        f"Applicate {len(mappings)} mappature", payload=summary)
     return summary

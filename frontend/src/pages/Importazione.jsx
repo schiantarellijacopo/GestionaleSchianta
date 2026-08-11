@@ -396,8 +396,14 @@ function MappingWizardDialog({ open, onClose }) {
                 + (s.polizze_garanzia || 0)
                 + (s.polizze_compagnia || 0)
                 + (s.polizze_ramo || 0);
+            const ana = s.anagrafiche_collaboratore || 0;
+            const tit = s.titoli_collaboratore || 0;
             if (showToast) {
-                toast.success(`Back-fill completato: ${total} polizze aggiornate`);
+                const extra = [];
+                if (ana) extra.push(`${ana} anagrafiche`);
+                if (tit) extra.push(`${tit} titoli`);
+                const suffix = extra.length ? ` · ${extra.join(", ")} col collaboratore` : "";
+                toast.success(`Back-fill completato: ${total} polizze aggiornate${suffix}`);
             }
         } catch (e) {
             toast.error("Errore back-fill: " + (e.response?.data?.detail || e.message));

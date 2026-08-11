@@ -619,6 +619,17 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             if collaboratore_id:
                 data["collaboratore_id"] = collaboratore_id
             await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
+            # 🆕 Se l'anagrafica del contraente non ha un collaboratore
+            # responsabile, ereditalo dalla polizza appena importata.
+            if collaboratore_id and contraente_id:
+                await db.anagrafiche.update_one(
+                    {
+                        "id": contraente_id,
+                        "$or": [{"collaboratore_id": None}, {"collaboratore_id": ""},
+                                {"collaboratore_id": {"$exists": False}}],
+                    },
+                    {"$set": {"collaboratore_id": collaboratore_id, "updated_at": _now_iso()}},
+                )
 
 
 # ---------------------------------------------------------------------------
