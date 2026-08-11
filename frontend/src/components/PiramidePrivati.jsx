@@ -102,14 +102,13 @@ const ZONA_COLORS = {
     investimento: "bg-slate-100 text-slate-800 border-slate-300",
 };
 
-// Formatter € breve (1.5M €, 250K €, …)
+// Formatter € completo con separatore migliaia (es. 1.500.000 €)
 function fmtEur(v) {
     if (v == null || v === "" || Number.isNaN(Number(v))) return "";
-    const n = Number(v);
+    const n = Math.round(Number(v));
     if (n === 0) return "";
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, "")}M €`;
-    if (n >= 1000) return `${Math.round(n / 1000)}K €`;
-    return `${Math.round(n)} €`;
+    // Formato italiano: 1.234.567 €
+    return `${n.toLocaleString("it-IT")} €`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -178,23 +177,16 @@ export default function PiramidePrivati({
 
     return (
         <div className="bg-white rounded-lg border-2 border-slate-800 p-4 md:p-6 font-sans" data-testid="piramide-privati">
-            {/* HEADER: logo agenzia + titolo brand */}
-            <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-300">
-                <div className="flex items-center gap-3">
-                    <div className="w-14 h-14 rounded-full bg-emerald-100 border-2 border-emerald-700 flex items-center justify-center text-[9px] font-bold text-emerald-900 text-center leading-tight">
-                        FUTURO<br />SENZA<br />SORPRESE
+            {/* HEADER: solo logo agenzia (grande, centrato/destra) */}
+            <div className="flex justify-end items-center mb-3 pb-3 border-b border-slate-300">
+                {agenziaLogo ? (
+                    <img src={agenziaLogo} alt={agenziaName} className="h-16 md:h-20 w-auto object-contain" />
+                ) : (
+                    <div className="text-right">
+                        <div className="text-2xl md:text-3xl font-bold text-sky-900 tracking-tight">{agenziaName}</div>
+                        <div className="text-[11px] text-slate-500 uppercase tracking-wider mt-0.5">Piramide delle Coperture</div>
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {agenziaLogo ? (
-                        <img src={agenziaLogo} alt="logo" className="h-12 w-auto object-contain" />
-                    ) : (
-                        <div className="text-right">
-                            <div className="text-2xl font-bold text-slate-800">{agenziaName}</div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">Piramide delle Coperture</div>
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
 
             {/* LEGENDA */}
@@ -211,8 +203,8 @@ export default function PiramidePrivati({
                 </span>
             </div>
 
-            {/* CORPO: sidebar dati + piramide */}
-            <div className="grid grid-cols-12 gap-4">
+            {/* CORPO: sidebar dati + piramide + zone labels come step-pyramid */}
+            <div className="grid grid-cols-12 gap-3">
                 {/* SIDEBAR SX — dati reddito */}
                 <div className="col-span-12 md:col-span-3 space-y-2 text-[11px]">
                     <SidebarField label="IL TUO REDDITO ATTUALE" value={reddito.reddito_attuale}
@@ -252,7 +244,7 @@ export default function PiramidePrivati({
                 </div>
 
                 {/* PIRAMIDE — colonna centrale grande */}
-                <div className="col-span-12 md:col-span-9 relative">
+                <div className="col-span-12 md:col-span-7">
                     <div className="flex flex-col-reverse items-center gap-0.5 px-2">
                         {LIVELLI.map((lvl) => (
                             <PiramideLivello
@@ -267,13 +259,36 @@ export default function PiramidePrivati({
                             />
                         ))}
                     </div>
-                    {/* ZONE LABELS a destra (posizionamento assoluto opzionale, qui semplificato) */}
-                    <div className="hidden lg:flex flex-col-reverse absolute right-[-140px] top-0 h-full py-2 gap-1 w-32 text-[10px] font-bold uppercase tracking-wider">
-                        <ZoneLabel color="from-red-100 to-red-50 border-red-200" text="Protezione del Reddito" flex={2} />
-                        <ZoneLabel color="from-emerald-100 to-red-100 border-slate-200" text="Protezione del Patrimonio" flex={2} />
-                        <ZoneLabel color="from-teal-100 to-emerald-100 border-teal-200" text="Risparmio" flex={3} />
-                        <ZoneLabel color="from-teal-200 to-teal-100 border-teal-300" text="Investimento" flex={1} />
-                    </div>
+                </div>
+
+                {/* ZONE LABELS DX — piramide di gradini che seguono le zone */}
+                <div className="col-span-12 md:col-span-2 flex flex-col-reverse gap-0.5 text-[10px] font-bold uppercase tracking-wider">
+                    {/* Base larga → apice stretto, ogni zona in gradiente rettangolo di altezza proporzionale */}
+                    <ZoneStep
+                        text="Protezione del Reddito"
+                        gradient="from-red-400 to-red-300"
+                        heightVh={20}
+                        widthPct={100}
+                    />
+                    <ZoneStep
+                        text="Protezione del Patrimonio"
+                        gradient="from-red-300 via-emerald-200 to-emerald-300"
+                        heightVh={18}
+                        widthPct={82}
+                    />
+                    <ZoneStep
+                        text="Risparmio"
+                        gradient="from-teal-300 to-teal-200"
+                        heightVh={22}
+                        widthPct={64}
+                    />
+                    <ZoneStep
+                        text="Investimento"
+                        gradient="from-teal-500 to-teal-400"
+                        heightVh={10}
+                        widthPct={46}
+                        textColor="text-white"
+                    />
                 </div>
             </div>
 
@@ -341,11 +356,21 @@ function SidebarField({ label, value, editable, onChange }) {
     );
 }
 
-function ZoneLabel({ color, text, flex }) {
+function ZoneStep({ text, gradient, heightVh, widthPct, textColor = "text-slate-800" }) {
+    // Larghezza in % del container: base larga (100%), apice stretto (46%)
     return (
-        <div className={`bg-gradient-to-r ${color} border rounded flex items-center justify-center text-center px-2 py-1`}
-             style={{ flex }}>
-            {text}
+        <div className="w-full flex justify-start">
+            <div
+                className={`bg-gradient-to-r ${gradient} border border-white/60 shadow-sm rounded-r-md flex items-center justify-center text-center px-2 py-1 ${textColor}`}
+                style={{
+                    width: `${widthPct}%`,
+                    minHeight: `${heightVh * 4}px`,  // scala da vh a px approssimato
+                }}
+            >
+                <span className="leading-tight text-[9px] md:text-[10px] break-words">
+                    {text}
+                </span>
+            </div>
         </div>
     );
 }
