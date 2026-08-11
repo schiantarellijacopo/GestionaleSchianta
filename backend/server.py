@@ -5969,12 +5969,17 @@ async def list_unmapped_entities(
     Se `include_mapped=true`, include anche quelle già associate (per permettere
     la modifica/eliminazione del mapping dal wizard).
     """
+    # NB: garanzia è stata rimossa dal wizard - le garanzie vengono create
+    # in libreria (mapping_garanzie) in automatico durante l'import.
+    # Per Prodotto, non serve più scegliere un prodotto della libreria:
+    # basta collegare il valore del flusso al RAMO di appartenenza e il
+    # prodotto viene creato automaticamente in libreria (vedi save_mapping).
     by_tipo: dict[str, list[dict]] = {
-        "compagnia": [], "ramo": [], "prodotto": [], "collaboratore": [], "garanzia": [],
+        "compagnia": [], "ramo": [], "prodotto": [], "collaboratore": [],
     }
     flt: dict = {
         "flusso": flusso,
-        "tipo": {"$in": ["compagnia", "ramo", "prodotto", "collaboratore", "garanzia"]},
+        "tipo": {"$in": ["compagnia", "ramo", "prodotto", "collaboratore"]},
     }
     if not include_mapped:
         flt["$or"] = [{"entita_id": None}, {"entita_id": ""}]
@@ -6006,31 +6011,73 @@ async def list_unmapped_entities(
             {"_id": 0, "id": 1, "name": 1, "email": 1},
         ).sort("name", 1)
     ]
-    candidates["prodotto"] = [
-        {"id": p["id"], "label": p.get("nome")}
-        async for p in db.prodotti.find({}, {"_id": 0, "id": 1, "nome": 1}).sort("nome", 1)
-    ]
-    # Garanzie: usa la libreria mapping_garanzie + lista distinct dalle polizze
-    gar_labels: set[str] = set()
-    async for g in db.mapping_garanzie.find({"nome_personalizzato": {"$ne": None}}, {"_id": 0, "nome_personalizzato": 1}):
-        if g.get("nome_personalizzato"):
-            gar_labels.add(g["nome_personalizzato"])
-    candidates["garanzia"] = [{"id": n, "label": n} for n in sorted(gar_labels)]
+    # Prodotto: candidati = RAMI (l'utente sceglie il ramo, il prodotto
+    # viene poi auto-creato in libreria con il nome del flusso).
+    candidates["prodotto"] = candidates["ramo"]
     return {**by_tipo, "candidates": candidates}
 
 
 @api.post("/import/mappings", status_code=201)
 async def save_mapping(body: dict, user=Depends(require_user("admin", "collaboratore"))):
-    """Crea o aggiorna una mappatura. Chiave univoca: (tipo, flusso, valore_flusso)."""
+    """Crea o aggiorna una mappatura. Chiave univoca: (tipo, flusso, valore_flusso).
+
+    Per tipo == 'prodotto', `entita_id` in ingresso è l'id di un RAMO. In quel caso
+    creiamo (idempotentemente) un prodotto in libreria con nome = valore del flusso
+    (o label_flusso se più ricca) collegato al ramo scelto, e salviamo il mapping
+    con `entita_id` = id del nuovo prodotto.
+    """
     tipo = body.get("tipo")
     flusso = body.get("flusso", "omnia")
     valore_flusso = body.get("valore_flusso")
     if not (tipo and valore_flusso):
         raise HTTPException(400, "tipo e valore_flusso richiesti")
+
+    entita_id = body.get("entita_id")
+    label_programma = body.get("label_programma")
+
+    # 🆕 Prodotto: auto-crea in libreria collegando al ramo scelto
+    if tipo == "prodotto" and entita_id:
+        ramo_doc = await db.rami.find_one({"id": entita_id}, {"_id": 0, "id": 1, "codice": 1, "nome": 1})
+        if not ramo_doc:
+            raise HTTPException(400, "Ramo non valido: seleziona un ramo esistente dalla libreria")
+        # Nome prodotto = quello mostrato nel wizard (label_flusso più ricca) o valore grezzo
+        # Prendiamo dallo stub esistente la label più ricca se disponibile
+        stub = await db.import_mappings.find_one(
+            {"tipo": "prodotto", "flusso": flusso, "valore_flusso": valore_flusso},
+            {"_id": 0, "label_flusso": 1},
+        ) or {}
+        nome_prod = (stub.get("label_flusso") or valore_flusso).strip()
+        ramo_code = ramo_doc.get("codice") or ramo_doc["id"]
+        # Idempotente: se esiste un prodotto con lo stesso nome, riusalo (aggiorna ramo se vuoto)
+        existing_prod = await db.prodotti.find_one(
+            {"nome": nome_prod}, {"_id": 0, "id": 1, "ramo": 1},
+        )
+        if existing_prod:
+            prod_id = existing_prod["id"]
+            if not existing_prod.get("ramo"):
+                await db.prodotti.update_one(
+                    {"id": prod_id}, {"$set": {"ramo": ramo_code, "updated_at": _now_iso()}},
+                )
+        else:
+            prod_id = str(uuid.uuid4())
+            await db.prodotti.insert_one({
+                "id": prod_id,
+                "nome": nome_prod,
+                "ramo": ramo_code,
+                "attivo": True,
+                "termini_mora_giorni": 15,
+                "is_libro_matricola": False,
+                "mostra_sezione_veicolo": False,
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+            })
+        entita_id = prod_id
+        label_programma = nome_prod
+
     upd = {
         "tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso,
-        "entita_id": body.get("entita_id"),
-        "label_programma": body.get("label_programma"),
+        "entita_id": entita_id,
+        "label_programma": label_programma,
         "note": body.get("note"),
         "updated_at": _now_iso(),
     }

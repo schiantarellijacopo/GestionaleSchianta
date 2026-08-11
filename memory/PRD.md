@@ -1,4 +1,23 @@
-# Programma Assicurativo — PRD (aggiornato 04/08/2026)
+# Programma Assicurativo — PRD (aggiornato 11/02/2026)
+
+## Sessione 11/02/2026 (fork) — Semplificazione Wizard Mapping + Default Tab Garanzie
+
+### ✅ Fix critici
+1. **AnagraficaDetail lint fix**: risolti errori `react/jsx-no-undef` e `react/no-unstable-nested-components`. `InlineEditField` e `InlineChannelsField` estratti come componenti top-level; sotto-componente `Chip` di `InlineChannelsField` estratto in `ChannelChip`. Build compila di nuovo.
+2. **PolizzaDetail — tab default = Garanzie**: `defaultValue` dei `<Tabs>` è ora `garanzie` per polizze non-RCA, `veicolo` per polizze RCA. L'utente non deve più cliccare "Garanzie" ogni volta che apre una polizza.
+
+### ✅ Wizard Mapping Entità Importazione — semplificato
+- **Tab Garanzia rimossa** dal wizard (frontend + backend). Le garanzie continuano a essere auto-create nella libreria `mapping_garanzie` durante l'import via `_ensure_stub_mapping`.
+- **Tab Prodotto**: invece di scegliere un prodotto esistente in libreria, l'utente sceglie solo il **Ramo** di appartenenza. Il backend `POST /api/import/mappings` (server.py:6022) ora:
+  - Per `tipo == "prodotto"`, `entita_id` in ingresso è un `ramo_id`
+  - Auto-crea (idempotentemente) un prodotto in `db.prodotti` con `nome = label_flusso` (o `valore_flusso`) e `ramo = ramo.codice`
+  - Salva il mapping con `entita_id` = id del nuovo prodotto e `label_programma` = nome del prodotto
+- **`/api/import/unmapped`**: candidati per `prodotto` ora sono la lista dei rami; `garanzia` esclusa dalla risposta.
+- UI in `Importazione.jsx` (`MappingRows`): banner esplicativo, header "Ramo di appartenenza (il prodotto viene creato in libreria)", riga già mappata mostra "✓ Prodotto in libreria: <nome>".
+
+### Test verificati (curl)
+- `POST /api/import/mappings tipo=prodotto entita_id=<ramo_id>` → crea prodotto nuovo in `db.prodotti` (verificato con valore `TEST_NEW_PROD_XYZ` → ramo `MULTIRISCHIO`).
+- Idempotente: se esiste già un prodotto con stesso nome, riusa senza duplicare.
 
 ## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
 

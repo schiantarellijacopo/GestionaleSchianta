@@ -31,14 +31,12 @@ const TIPO_LABEL = {
     ramo: "Ramo",
     collaboratore: "Operatore / Collaboratore",
     prodotto: "Prodotto",
-    garanzia: "Garanzia",
 };
 const TIPO_PLURAL = {
     compagnie: "compagnia",
     rami: "ramo",
     collaboratori: "collaboratore",
     prodotti: "prodotto",
-    garanzie: "garanzia",
 };
 
 
@@ -315,7 +313,7 @@ function MappingWizardDialog({ open, onClose }) {
         try {
             const res = await api.get(`/import/unmapped${showAll ? "?include_mapped=true" : ""}`);
             setData(res.data);
-            const first = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+            const first = ["compagnia", "ramo", "collaboratore", "prodotto"]
                 .find((t) => (res.data[t] || []).length > 0);
             if (first) setActive(first);
         } catch (e) {
@@ -344,7 +342,7 @@ function MappingWizardDialog({ open, onClose }) {
             for (const [mid, entita_id] of updates) {
                 const it = byId[mid];
                 if (!it) continue;
-                const tipo = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"]
+                const tipo = ["compagnia", "ramo", "collaboratore", "prodotto"]
                     .find((t) => (data[t] || []).some((x) => x.id === mid));
                 await api.post("/import/mappings", {
                     tipo,
@@ -401,7 +399,7 @@ function MappingWizardDialog({ open, onClose }) {
 
     if (!open) return null;
 
-    const tipi = ["compagnia", "ramo", "collaboratore", "prodotto", "garanzia"];
+    const tipi = ["compagnia", "ramo", "collaboratore", "prodotto"];
     const counts = data ? Object.fromEntries(tipi.map((t) => [t, (data[t] || []).length])) : {};
     const totalCount = Object.values(counts).reduce((s, n) => s + n, 0);
 
@@ -521,69 +519,85 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
     if (!items.length) {
         return <p className="text-sm text-slate-500 py-4 text-center">Nessuna entità in questa categoria.</p>;
     }
+    // Per 'prodotto' l'utente sceglie il RAMO — il prodotto viene creato in libreria in automatico
+    const headerAssoc = tipo === "prodotto"
+        ? "Ramo di appartenenza (il prodotto viene creato in libreria)"
+        : `Associazione → ${TIPO_LABEL[tipo]} programma`;
+    const placeholder = tipo === "prodotto" ? "— Seleziona un ramo —" : "— Non associato —";
     return (
-        <table className="data-table w-full text-sm">
-            <thead>
-                <tr>
-                    <th>Valore nel flusso</th>
-                    <th className="num">Occ.</th>
-                    <th>Associazione → {TIPO_LABEL[tipo]} programma</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {items.map((it) => {
-                    // Se l'utente ha modificato il valore, usa quello; altrimenti il valore corrente
-                    const currentVal = edits[it.id] !== undefined ? edits[it.id] : (it.entita_id || "");
-                    const isMapped = !!it.entita_id;
-                    const hasLabel = it.label_flusso && it.label_flusso !== it.valore_flusso;
-                    return (
-                        <tr key={it.id} data-testid={`wizard-row-${it.id}`} className={isMapped ? "bg-emerald-50/40" : ""}>
-                            <td>
-                                {/* Il nome leggibile (descrizione) va in primo piano; il codice tecnico sotto */}
-                                <div className="font-medium text-slate-800">
-                                    {hasLabel ? it.label_flusso : it.valore_flusso}
-                                </div>
-                                {hasLabel && (
-                                    <div className="text-[11px] text-slate-500 font-mono">cod: {it.valore_flusso}</div>
-                                )}
-                                {isMapped && (
-                                    <div className="text-[10px] text-emerald-700 mt-0.5">
-                                        ✓ Attualmente: {it.label_programma || it.entita_id}
+        <>
+            {tipo === "prodotto" && (
+                <div className="mb-3 text-xs bg-sky-50 border border-sky-200 rounded-md p-2.5 text-sky-900">
+                    Il nome del prodotto verrà copiato dal flusso e creato automaticamente
+                    nella libreria <strong>Prodotti</strong>. A te serve solo scegliere il
+                    <strong> ramo</strong> di appartenenza (Auto, Multirischi, Vita, …).
+                    Se vuoi rinominarlo o modificarlo, lo trovi in
+                    &nbsp;<em>Impostazioni → Prodotti</em>.
+                </div>
+            )}
+            <table className="data-table w-full text-sm">
+                <thead>
+                    <tr>
+                        <th>Valore nel flusso</th>
+                        <th className="num">Occ.</th>
+                        <th>{headerAssoc}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {items.map((it) => {
+                        // Se l'utente ha modificato il valore, usa quello; altrimenti il valore corrente
+                        const currentVal = edits[it.id] !== undefined ? edits[it.id] : (it.entita_id || "");
+                        const isMapped = !!it.entita_id;
+                        const hasLabel = it.label_flusso && it.label_flusso !== it.valore_flusso;
+                        return (
+                            <tr key={it.id} data-testid={`wizard-row-${it.id}`} className={isMapped ? "bg-emerald-50/40" : ""}>
+                                <td>
+                                    {/* Il nome leggibile (descrizione) va in primo piano; il codice tecnico sotto */}
+                                    <div className="font-medium text-slate-800">
+                                        {hasLabel ? it.label_flusso : it.valore_flusso}
                                     </div>
-                                )}
-                            </td>
-                            <td className="num">{it.occorrenze || 0}</td>
-                            <td>
-                                <select
-                                    value={currentVal}
-                                    onChange={(e) => onChange(it.id, e.target.value)}
-                                    className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""}`}
-                                    data-testid={`wizard-select-${it.id}`}
-                                >
-                                    <option value="">— Non associato —</option>
-                                    {candidates.map((c) => (
-                                        <option key={c.id} value={c.id}>{c.label}</option>
-                                    ))}
-                                </select>
-                            </td>
-                            <td>
-                                {isMapped && (
-                                    <button
-                                        onClick={() => onRemove(it.id)}
-                                        className="text-rose-600 hover:text-rose-800 p-1"
-                                        title="Elimina mapping"
-                                        data-testid={`wizard-remove-${it.id}`}
+                                    {hasLabel && (
+                                        <div className="text-[11px] text-slate-500 font-mono">cod: {it.valore_flusso}</div>
+                                    )}
+                                    {isMapped && (
+                                        <div className="text-[10px] text-emerald-700 mt-0.5">
+                                            ✓ {tipo === "prodotto" ? "Prodotto in libreria" : "Attualmente"}: {it.label_programma || it.entita_id}
+                                        </div>
+                                    )}
+                                </td>
+                                <td className="num">{it.occorrenze || 0}</td>
+                                <td>
+                                    <select
+                                        value={currentVal}
+                                        onChange={(e) => onChange(it.id, e.target.value)}
+                                        className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""}`}
+                                        data-testid={`wizard-select-${it.id}`}
                                     >
-                                        <X size={14} />
-                                    </button>
-                                )}
-                            </td>
-                        </tr>
-                    );
-                })}
-            </tbody>
-        </table>
+                                        <option value="">{placeholder}</option>
+                                        {candidates.map((c) => (
+                                            <option key={c.id} value={c.id}>{c.label}</option>
+                                        ))}
+                                    </select>
+                                </td>
+                                <td>
+                                    {isMapped && (
+                                        <button
+                                            onClick={() => onRemove(it.id)}
+                                            className="text-rose-600 hover:text-rose-800 p-1"
+                                            title="Elimina mapping"
+                                            data-testid={`wizard-remove-${it.id}`}
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    )}
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </>
     );
 }
 
