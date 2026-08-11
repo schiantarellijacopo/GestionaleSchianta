@@ -27,42 +27,74 @@
 
 ## 🎯 TASK PRIORITARIO PROSSIMA SESSIONE — Piramide Coperture Ricca
 
-### Design richiesto (dagli screenshot utente)
-**A) Piramide PRIVATI** (7 livelli dal basso all'apice):
-1. **PREMORIENZA** (rosso, base larga): capitale TCM
-2. **INVALIDITÀ**: IP/inabilità
-3. **RESPONSABILITÀ**: RC capofamiglia, veicoli, professioni, minori
-4. **BENI**: casa, incendio, eventi atmosferici, alluvioni, sequestri
-5. **REDDITO**: liquidità giornaliera / conto corrente
-6. **PENSIONE**: cassa per grandi/lievi esigenze, PIP
-7. **RISPARMIO** (verde, apice): crescita capitale/investimento
+### Design PIRAMIDE PRIVATI (esattamente come screenshot utente Schiantarelli)
 
-**B) Piramide AZIENDE** (nuova, 7 livelli):
-1. RC veicoli (base)
-2. RC terzi
-3. RC dipendenti
-4. RC prodotti, RC ambientale, RC amministratori, RC datoriale
-5. Guasto macchinari, Merci, Crediti, Cyber, Tutela legale, Danni indiretti/beni
-6. Uomini chiave (Morte + Invalidità)
-7. Liquidità aziendale + TFM
-8. Patrimonio netto (apice)
+SVG triangolo con 8 bande dal basso (rossa larga) all'alto (verde acqua stretta).
+Header: Logo "Futuro Senza Sorprese" (sx) + Logo Assicurazioni Schiantarelli (dx).
+Legenda: 🟢 ADEGUATO · 🟡 NON ADEGUATO · 🔴 ASSENTE.
 
-**C) Legenda colori**: 🟢 Adeguato · 🟡 Non adeguato · 🔴 Assente
+**Zone (etichette a destra):**
+- **PROTEZIONE DEL REDDITO** (livelli 1-2)
+- **PROTEZIONE DEL PATRIMONIO** (livelli 3-4)
+- **RISPARMIO** (livelli 5-7)
+- **INVESTIMENTO** (livello 8 apice)
 
-**D) Auto-popolamento** dai massimali/capitali delle polizze ATTIVE del cliente (già presente basicalmente in `auto_popola_piramide` server.py:7363, da estendere).
+**Livelli dal basso all'apice:**
+1. IN CASO DI INVALIDITÀ DOVUTA A (rossa): Malattia / Infortunio / Non autosufficienza
+2. IN CASO DI PREMORIENZA DOVUTA A (rossa): Malattia / Infortunio
+3. IN CASO DI DANNI PROVOCATI AD ALTRI, DOVUTI A (rossa): Veicoli / Immobili / Professioni / Vita privata
+4. PERDITA DEI BENI DOVUTA DA Incendi/Eventi/Alluvioni/Terremoti (verde): Immobili / Aziende
+5. LIQUIDITÀ GIORNALIERA – Conto Corrente (azzurro)
+6. CASSA PER LE LIEVI ESIGENZE (azzurro)
+7. CASSA PER LE GRANDI ESIGENZE (azzurro)
+8. CRESCITA DEL CAPITALE (verde acqua apice)
 
-### Implementazione (~5-6h)
-1. **Backend**:
-   - Estendere `POST /anagrafiche/{aid}/analisi/piramide/auto-popola` per leggere massimali da tutte le polizze attive
-   - Nuovo endpoint dedicato `/anagrafiche/{aid}/analisi/piramide-aziendale/auto-popola` con schema aziendale
-   - Add campo `Anagrafica.tipo` check → piramide privata o aziendale
-2. **Frontend software agenzia** — ristrutturare `PiramideTab` con:
-   - Sub-tab Piramide Privato / Piramide Aziendale (auto in base a `ana.tipo`)
-   - SVG stilizzato dei 7 livelli con colori adeguato/non/assente
-   - Pulsante "Pre-popola" evoluto (già esiste base)
-3. **Portale Cliente**:
-   - Rimuovere sezione semplice appena creata
-   - Sostituire con `PiramideView` gemella (read-only) con CTA "Richiedi preventivo" per livelli 🔴 assenti
+Ogni voce ha: campo "sei protetto fino a €___" + pallino colore.
+
+**Sidebar sinistra — dati editabili:**
+- reddito_attuale
+- estratto_conto_contributivo (Sì/No)
+- reddito_lordo_annuale in caso di: invalidita_66_99, inabilita_100, superstiti, responsabilita, perdita_beni
+
+**Footer:** testamento (Sì/No), eredi_legittimi[4]
+
+### Auto-popolamento valori dalle polizze attive del cliente
+Mappatura ramo/garanzia → livello piramide (config in Impostazioni):
+- Veicoli → max(massimale_rca) polizze RCA
+- Immobili → max(capitale_incendio) polizze Casa/Multirischi
+- Aziende → max(capitale) polizze Impresa
+- Malattia (invalidità/premorienza) → polizze Vita/Infortuni/Salute
+- Ecc.
+
+Regole colore pallino (soglie in Impostazioni):
+- 🔴 ASSENTE: nessuna polizza copre
+- 🟡 NON ADEGUATO: capitale < soglia_minima (es. RCA < €6M)
+- 🟢 ADEGUATO: capitale ≥ soglia_ottimale
+
+### Design PIRAMIDE AZIENDE (per persona_giuridica) — da confermare
+Struttura base (7-8 livelli): RC veicoli/terzi/dipendenti/prodotti/ambientale/amministratori/datoriale → Guasti/Merci/Crediti/Cyber/Tutela legale → Uomini chiave → Liquidità+TFM → Patrimonio netto (apice)
+
+### Implementazione stimata (~6h)
+
+**Backend (2h):**
+1. Model `AnalisiCliente.piramide_v2 = {tipo, dati_reddito, testamento, eredi_legittimi, livelli:[{id,nome,voci:[{label,capitale_attuale,stato}]}]}`
+2. `POST /anagrafiche/{aid}/analisi/piramide-v2/auto-popola` — legge polizze attive, aggrega per categoria, calcola stato colore
+3. `GET /portale/piramide` — versione read-only
+4. `POST /portale/piramide/richiedi-preventivo` (adatta esistente)
+5. `PUT /impostazioni/piramide/soglie` — admin config colori
+
+**Frontend Agenzia (2h):**
+- Nuovo `PiramideRicca.jsx` con SVG pixel-perfect
+- Editing sidebar + footer
+- Sub-tab Privato/Aziendale (auto in base a ana.tipo)
+- Retrocompatibilità con `PiramideTab` esistente in AnalisiClienteTab
+
+**Frontend Portale (1.5h):**
+- Sezione "La mia protezione" (sostituisce endpoint semplice appena creato)
+- SVG identica al software agenzia (read-only)
+- CTA "Richiedi preventivo" per righe rosse/gialle
+
+**PDF Export (0.5h):** endpoint `/anagrafiche/{aid}/analisi/piramide-v2/pdf` identico allo screenshot
 
 ## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
 
