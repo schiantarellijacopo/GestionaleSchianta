@@ -5,6 +5,7 @@ import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import IconForRamo from "@/components/IconForRamo";
+import ContraenteFilter from "@/components/ContraenteFilter";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
