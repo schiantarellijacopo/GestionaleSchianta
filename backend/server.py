@@ -12477,6 +12477,130 @@ async def _cp_download_allegato(
     )
 
 
+@_chat_portale_router.post("/{aid}/save-to-diary")
+async def _cp_save_to_diary(
+    aid: str, body: Optional[dict] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Salva nel Diario del cliente il riassunto delle chat di una giornata specifica
+    (o di oggi se non specificata). Idempotente: se esiste già una voce diario di tipo
+    'chat' per quel giorno + anagrafica, la aggiorna con i messaggi mancanti.
+
+    Body opzionale: {"giorno": "YYYY-MM-DD"}. Default = oggi.
+    """
+    from shared import log_diario_cliente
+    giorno = ((body or {}).get("giorno") or "").strip() or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start = f"{giorno}T00:00:00"
+    end = f"{giorno}T23:59:59.999999"
+    msgs = await db.chat_portale.find(
+        {"anagrafica_id": aid, "created_at": {"$gte": start, "$lte": end}},
+        {"_id": 0, "direzione": 1, "testo": 1, "mittente_admin_nome": 1,
+         "created_at": 1, "allegato_nome": 1, "cliente_nome": 1},
+    ).sort("created_at", 1).to_list(500)
+    if not msgs:
+        return {"messaggi_salvati": 0, "giorno": giorno,
+                "messaggio": "Nessun messaggio in questa giornata"}
+
+    cliente_nome = msgs[0].get("cliente_nome") or "cliente"
+    # Costruisce trascrizione formattata
+    righe = []
+    for m in msgs:
+        h = str(m.get("created_at") or "")[11:16]
+        chi = m.get("mittente_admin_nome") or "Agenzia" if m.get("direzione") == "out" else cliente_nome
+        testo = (m.get("testo") or "").strip()
+        alleg = m.get("allegato_nome")
+        if alleg and not testo:
+            testo = f"📎 {alleg}"
+        elif alleg:
+            testo = f"{testo} 📎 {alleg}"
+        righe.append(f"[{h}] {chi}: {testo}")
+    trascrizione = "\n".join(righe)
+
+    # Idempotenza: verifica se esiste già una voce diario di tipo 'chat' per aid+giorno
+    already = await db.diario.find_one({
+        "anagrafica_id": aid, "tipo": "chat",
+        "data": {"$regex": f"^{giorno}"},
+    })
+    descrizione = f"Chat Portale del {giorno} — {len(msgs)} messaggi"
+    if already:
+        # aggiorna
+        await db.diario.update_one(
+            {"_id": already["_id"]},
+            {"$set": {
+                "descrizione": descrizione,
+                "contenuto": trascrizione[:20000],
+                "n_messaggi": len(msgs),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return {"messaggi_salvati": len(msgs), "giorno": giorno,
+                "aggiornato": True, "diario_id": already.get("id")}
+    voce = await log_diario_cliente(
+        aid, "chat", descrizione, trascrizione[:20000],
+        autore=user, extra={"n_messaggi": len(msgs), "canale": "portale", "giorno": giorno},
+    )
+    return {"messaggi_salvati": len(msgs), "giorno": giorno,
+            "diario_id": voce.get("id") if voce else None}
+
+
+async def salva_tutte_le_chat_giornaliere():
+    """Job schedulato (giornaliero alle 23:55): per ogni chat portale con
+    messaggi di oggi, salva/aggiorna la voce Diario del cliente."""
+    giorno = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start = f"{giorno}T00:00:00"
+    end = f"{giorno}T23:59:59.999999"
+    # Trova tutte le anagrafiche con messaggi di oggi
+    aids = await db.chat_portale.distinct(
+        "anagrafica_id", {"created_at": {"$gte": start, "$lte": end}})
+    salvati = 0
+    for aid in aids:
+        try:
+            msgs = await db.chat_portale.find(
+                {"anagrafica_id": aid, "created_at": {"$gte": start, "$lte": end}},
+                {"_id": 0, "direzione": 1, "testo": 1, "mittente_admin_nome": 1,
+                 "created_at": 1, "allegato_nome": 1, "cliente_nome": 1},
+            ).sort("created_at", 1).to_list(500)
+            if not msgs:
+                continue
+            cliente_nome = msgs[0].get("cliente_nome") or "cliente"
+            righe = []
+            for m in msgs:
+                h = str(m.get("created_at") or "")[11:16]
+                chi = m.get("mittente_admin_nome") or "Agenzia" if m.get("direzione") == "out" else cliente_nome
+                testo = (m.get("testo") or "").strip()
+                alleg = m.get("allegato_nome")
+                if alleg and not testo:
+                    testo = f"📎 {alleg}"
+                elif alleg:
+                    testo = f"{testo} 📎 {alleg}"
+                righe.append(f"[{h}] {chi}: {testo}")
+            trascrizione = "\n".join(righe)
+            descrizione = f"Chat Portale del {giorno} — {len(msgs)} messaggi"
+            already = await db.diario.find_one({
+                "anagrafica_id": aid, "tipo": "chat",
+                "data": {"$regex": f"^{giorno}"},
+            })
+            if already:
+                await db.diario.update_one(
+                    {"_id": already["_id"]},
+                    {"$set": {"descrizione": descrizione, "contenuto": trascrizione[:20000],
+                              "n_messaggi": len(msgs),
+                              "updated_at": datetime.now(timezone.utc).isoformat()}},
+                )
+            else:
+                from shared import log_diario_cliente
+                await log_diario_cliente(
+                    aid, "chat", descrizione, trascrizione[:20000],
+                    autore=None,
+                    extra={"n_messaggi": len(msgs), "canale": "portale", "giorno": giorno},
+                )
+            salvati += 1
+        except Exception:
+            logger.exception("Errore salvataggio diario chat portale per aid=%s", aid)
+    logger.info("Job giornaliero chat portale: %d clienti salvati nel diario", salvati)
+    return salvati
+
+
 app.include_router(_chat_portale_router)
 
 # ============================================================

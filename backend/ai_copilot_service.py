@@ -384,6 +384,131 @@ KEYWORDS_SINISTRI = ["sinistr", "denunc", "danni"]
 KEYWORDS_VEICOLI = ["veicol", "auto", "macchin", "moto", "targa"]
 KEYWORDS_CROSS_SELL = ["cross-sell", "cross sell", "opportunit", "propost", "cosa proporr", "cosa vend", "cosa manca"]
 KEYWORDS_RIEPILOGO = ["riepilog", "totale", "quanti", "quante", "portafogli", "kpi", "stat"]
+KEYWORDS_PENSIONE = ["pension", "invalid", "inabilit", "superstit", "reversibil", "scheda calcol",
+                     "biblioteca previdenz", "montant", "coeffic", "requisit contribut", "assegno ordinari"]
+KEYWORDS_COMPAGNIA = ["compagni", "assicuratore", "provvigion trattien", "logo compagn"]
+KEYWORDS_VIDEO = ["video", "corso", "corsi", "formazion", "tutorial"]
+KEYWORDS_AGENZIA = ["agenzia", "sede", "sedi", "team", "il nostro team", "orari agenzia", "contatti agenzia",
+                    "app cliente", "portale cliente"]
+KEYWORDS_PIRAMIDE = ["piramide", "protezion", "coperture cliente"]
+
+
+async def tool_schede_calcolo(user: dict, categoria: Optional[str] = None) -> list[dict]:
+    """Elenca le schede di calcolo previdenziali generate dall'AI e presenti in
+    biblioteca (db.schede_calcolo). Se `categoria` specificata, ritorna solo quella."""
+    flt: dict = {}
+    if categoria:
+        flt["categoria"] = {"$regex": re.escape(categoria), "$options": "i"}
+    docs = await db.schede_calcolo.find(
+        flt, {"_id": 0, "id": 1, "categoria": 1, "anno": 1, "stato_verifica": 1,
+              "generated_at": 1, "spiegazione_modifiche": 1, "contenuto.sintesi": 1,
+              "contenuto.parametri": 1, "contenuto.formule": 1,
+              "contenuto.discrepanze_crm": 1, "modifiche": 1, "fonti": 1},
+    ).sort("generated_at", -1).to_list(20)
+    # Prende solo l'ultima per ogni categoria
+    seen: set[str] = set()
+    out = []
+    for d in docs:
+        cat = d.get("categoria") or ""
+        if cat in seen:
+            continue
+        seen.add(cat)
+        contenuto = d.pop("contenuto", {}) or {}
+        d["sintesi"] = contenuto.get("sintesi")
+        d["n_parametri"] = len(contenuto.get("parametri") or [])
+        d["n_formule"] = len(contenuto.get("formule") or [])
+        d["n_discrepanze"] = len(contenuto.get("discrepanze_crm") or [])
+        d["parametri_principali"] = [
+            f"{p.get('nome')} = {p.get('valore')} (fonte: {p.get('fonte')})"
+            for p in (contenuto.get("parametri") or [])[:8]
+        ]
+        d["n_fonti_pdf"] = len(d.pop("fonti", []) or [])
+        d["pdf_url"] = f"/api/biblioteca-previdenza/schede-calcolo/{cat}/pdf"
+        out.append(d)
+    return out
+
+
+async def tool_compagnie(user: dict, q: Optional[str] = None) -> list[dict]:
+    """Elenco compagnie attive (rubrica). Q = filtro su ragione sociale/codice."""
+    flt: dict = {"attiva": True}
+    if q:
+        flt["$or"] = [
+            {"ragione_sociale": {"$regex": re.escape(q), "$options": "i"}},
+            {"codice": {"$regex": re.escape(q), "$options": "i"}},
+        ]
+    docs = await db.compagnie.find(
+        flt, {"_id": 0, "id": 1, "codice": 1, "ragione_sociale": 1,
+              "referente": 1, "email": 1, "telefono": 1, "sito_web": 1,
+              "trattiene_provvigioni": 1, "tipo_mandato": 1, "logo_url": 1},
+    ).sort("ragione_sociale", 1).to_list(60)
+    return docs
+
+
+async def tool_video_corsi(user: dict) -> list[dict]:
+    """Elenco video/corsi pubblicati con filtro RBAC su visibile_ruoli."""
+    flt: dict = {"pubblicato": True}
+    role = user.get("role")
+    if role and role != "admin":
+        flt["visibile_ruoli"] = role
+    docs = await db.corsi.find(
+        flt, {"_id": 0, "id": 1, "titolo": 1, "categoria": 1, "descrizione": 1,
+              "video_url": 1, "durata_minuti": 1, "visibile_ruoli": 1,
+              "created_at": 1},
+    ).sort("created_at", -1).to_list(40)
+    for d in docs:
+        d["pubblicato_su_app_cliente"] = "cliente" in (d.get("visibile_ruoli") or [])
+    return docs
+
+
+async def tool_agenzia_info(user: dict) -> dict:
+    """Dati dell'agenzia (sedi, team, orari, contatti, slogan) da azienda_config."""
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    return {
+        "ragione_sociale": az.get("ragione_sociale"),
+        "telefono": az.get("telefono"),
+        "email": az.get("email"),
+        "pec": az.get("pec"),
+        "rui": az.get("rui"),
+        "indirizzo_principale": az.get("indirizzo"),
+        "comune_principale": az.get("comune"),
+        "provincia_principale": az.get("provincia"),
+        "sito_web": az.get("sito_web"),
+        "slogan_portale": az.get("slogan_portale"),
+        "n_sedi": len(az.get("portale_sedi") or []),
+        "sedi": [
+            {"nome": s.get("nome"), "indirizzo": s.get("indirizzo"),
+             "comune": s.get("comune"), "provincia": s.get("provincia"),
+             "telefono": s.get("telefono"),
+             "n_orari": len(s.get("orari") or [])}
+            for s in (az.get("portale_sedi") or [])
+        ],
+        "n_team": len(az.get("portale_team") or []),
+        "team": [
+            {"nome": m.get("nome"), "ruolo": m.get("ruolo"),
+             "email": m.get("email"), "telefono": m.get("telefono"),
+             "descrizione": (m.get("descrizione") or "")[:120]}
+            for m in (az.get("portale_team") or [])
+        ],
+        "orari_generici": az.get("portale_orari") or [],
+        "assistenza_compagnie": az.get("assistenza_compagnie") or [],
+    }
+
+
+async def tool_piramide_cliente(user: dict, anagrafica_id: str) -> dict:
+    """Piramide protezioni v2 del cliente (voci calcolate + dati reddito + testamento)."""
+    ac = await db.analisi_cliente.find_one({"anagrafica_id": anagrafica_id}, {"_id": 0}) or {}
+    piramide = ac.get("piramide_v2") or {}
+    return {
+        "anagrafica_id": anagrafica_id,
+        "dati_reddito": piramide.get("dati_reddito") or {},
+        "testamento": piramide.get("testamento"),
+        "eredi_legittimi": piramide.get("eredi_legittimi") or [],
+        "n_voci_custom": sum(len(v) for v in (piramide.get("voci_custom") or {}).values()),
+        "override_voci": len(piramide.get("override_voci") or {}),
+        "stato_voci": piramide.get("stato_voci") or {},
+        "n_estratti_inps": len(ac.get("estratti_conto_inps") or []),
+        "n_storico_redditi": len(ac.get("storico_redditi") or []),
+    }
 
 
 async def dispatch_query(user_message: str, user: dict) -> dict:
@@ -508,33 +633,69 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
 # =========================================================
 # CHAT LLM (Claude Sonnet 4.6) — multi-turno con storia da Mongo
 # =========================================================
-SYSTEM_PROMPT = """Sei l'AI Copilot di "Programma Assicurativo", un CRM per agenzie assicurative italiane.
-Aiuti l'agente/collaboratore/dipendente/cliente a interrogare i dati storici del CRM: anagrafiche,
-polizze, titoli/quietanze/pagamenti, sinistri, veicoli, documenti e KPI di portafoglio.
+SYSTEM_PROMPT = """Sei l'AGENTE AI di "Programma Assicurativo", un CRM per agenzie assicurative italiane.
+Sei un agente RIGOROSO che risponde ESCLUSIVAMENTE sui dati del CRM dell'utente e degli oggetti visibili al suo ruolo.
 
-REGOLE FONDAMENTALI:
-1. Rispondi SEMPRE in italiano, tono professionale ma cordiale.
-2. Basa ogni risposta ESCLUSIVAMENTE sui dati forniti nella sezione "Dati recuperati dal DB". 
-   Se il dato non c'è, dì "Non trovato nel database" e proponi filtri alternativi.
-3. Non inventare mai numeri o record. Non anonimizzare i dati (sono già filtrati per permessi).
-4. Rendi le risposte AZIONABILI: quando citi un cliente/polizza/sinistro, includi il link Markdown cliccabile.
-   Esempio: `[Mario Rossi](/anagrafiche/abc-123)` oppure `[Polizza 12345](/polizze/xyz)`.
-5. Usa TABELLE Markdown quando ci sono più record (max 10 righe, indica se ne esistono altre).
-6. Formato importi: € 1.234,56 (formato italiano).
-7. Formato date: DD/MM/YYYY.
-8. Suggerisci sempre 1-2 azioni concrete alla fine (es. "📞 Chiama entro venerdì", "✉ Invia PDF avviso").
+═════════════════════════════════════════════════════════════
+REGOLE INDEROGABILI
+═════════════════════════════════════════════════════════════
 
-CAPACITÀ:
-- Cerca clienti per nome, CF, P.IVA, email, telefono.
-- Trova polizze/titoli/sinistri per cliente, ramo, anno, stato.
-- Elenca polizze in scadenza nei prossimi N giorni.
-- Elenca titoli sospesi/da incassare (pagamenti in ritardo).
-- Sinistri aperti/chiusi per cliente/anno.
-- Cross-sell: quali rami mancano nel portafoglio di un cliente.
-- Riepilogo KPI portafoglio.
+1. **FONTE PRIMARIA = CRM**. Basa ogni risposta ESCLUSIVAMENTE sui dati forniti nella sezione
+   "Dati recuperati dal DB". Se il dato non è presente rispondi:
+   `Non trovato nel CRM. Puoi affinare la ricerca: [suggerimenti]`.
 
-Se l'utente ti chiede qualcosa fuori dal CRM (news, meteo, ecc.) declina cortesemente.
+2. **SEGNALA CONOSCENZA ESTERNA**. Se DEVI usare informazioni FUORI dai dati CRM
+   (normativa generale, coefficienti INPS non presenti nella biblioteca del CRM,
+   procedure standard di settore, conoscenza attuariale, matematica, ecc.),
+   DEVI aprire quel paragrafo con il tag esatto, in grassetto:
+
+   `⚠️ **FONTE ESTERNA (fuori CRM):**`
+
+   Subito dopo il tag spiega BREVEMENTE che tipo di conoscenza stai usando
+   (es. "normativa L.335/1995 non presente nella Biblioteca Previdenza del CRM").
+   NON mescolare mai dati CRM e conoscenza esterna nello stesso paragrafo:
+   separa i due blocchi.
+
+3. **NIENTE INVENTATO**. Non inventare mai numeri, ID, importi, date, CF, polizze,
+   nomi, telefoni, indirizzi. Se non c'è nel DB → "non trovato".
+
+4. **CITA LA FONTE INTERNA**. Quando riporti un record, cita la collezione tra parentesi
+   (es. "polizza n. 12345 (fonte: db.polizze)", "titolo sospeso (fonte: db.titoli)",
+   "scheda calcolo DIPENDENTI PRIVATI (fonte: db.schede_calcolo)").
+
+5. **RENDI CLICCABILE**. Ogni cliente/polizza/sinistro citato deve avere link Markdown:
+   `[Mario Rossi](/anagrafiche/abc-123)` · `[Polizza 12345](/polizze/xyz)` ·
+   `[Sinistro #789](/sinistri/def)`.
+
+6. **FORMATO**:
+   - italiano professionale, tono cordiale
+   - importi: € 1.234,56 (separatori italiani)
+   - date: DD/MM/YYYY
+   - tabelle Markdown per >2 righe (max 10, indica se ne mancano altre)
+
+7. **AZIONI CONCRETE**. Chiudi ogni risposta con 1-2 azioni operative
+   (📞/✉/📄) coerenti col dato mostrato.
+
+═════════════════════════════════════════════════════════════
+CAPACITÀ (tutte basate su dati CRM)
+═════════════════════════════════════════════════════════════
+- Ricerca clienti (nome, CF, P.IVA, email, cellulare)
+- Polizze / titoli / sinistri / veicoli / allegati (con filtri per ramo, anno, stato)
+- Scadenze polizze / titoli sospesi
+- Cross-sell (rami mancanti nel portafoglio del cliente)
+- Riepilogo KPI portafoglio (n° clienti, polizze attive, premi, sinistri)
+- Piramide protezioni cliente (voci calcolate)
+- Schede di calcolo previdenziale generate dall'AI (Biblioteca Previdenza)
+- Compagnie (rubrica, logo, contatti)
+- Video/corsi pubblicati sul portale cliente
+
+═════════════════════════════════════════════════════════════
+RIFIUTA
+═════════════════════════════════════════════════════════════
+- News, meteo, argomenti non assicurativi → "Sono l'agente del tuo CRM, non posso occuparmene."
+- Modifiche/scritture (crea/aggiorna/elimina) → "Sono in modalità read-only, effettua l'operazione dalla UI."
 """
+
 
 
 async def _get_or_create_session(session_id: Optional[str], user: dict) -> str:

@@ -380,39 +380,27 @@ export default function PiramidePrivati({
             <div className="overflow-x-auto pb-2">
                 <div className="relative mx-auto" style={{ width: TOTAL_W, height: H, minWidth: TOTAL_W }}>
 
-                    {/* TRIANGOLO CLIPPATO: tutto il contenuto resta dentro i bordi */}
-                    <div className="absolute top-0 left-0 bg-white"
+                    {/* LAYER 1 — TRIANGOLO CLIPPATO: solo bg + strip colorate (decorativo, non intercetta click) */}
+                    <div className="absolute top-0 left-0 bg-white pointer-events-none"
                          style={{
                              width: PYR_W, height: H,
                              clipPath: "polygon(50% 0%, 100% 100%, 0% 100%)",
                          }}>
                         {LEVELS.map((lvl) => (
-                            <Level key={lvl.id} lvl={lvl}
-                                   yTop={layout.map[lvl.id].yTop}
-                                   h={layout.map[lvl.id].h}
-                                   editable={editable}
-                                   capitaleVoce={capitaleVoce}
-                                   statoVoce={statoVoce}
-                                   onDotClick={onDotClick}
-                                   onChangeOverride={(vid, v) => setOverrides((s) => ({ ...s, [vid]: v }))}
-                                   canRequestQuote={!editable && !!onRichiediPreventivo}
-                                   customVoci={custom[lvl.id] || []}
-                                   onAddCustom={() => addCustom(lvl.id)}
-                                   onUpdateCustom={(idx, patch) => updateCustom(lvl.id, idx, patch)}
-                                   onRemoveCustom={(idx) => removeCustom(lvl.id, idx)}
-                                   onCustomDotClick={(idx, voce) => onCustomDotClick(lvl.id, idx, voce)}
-                            />
+                            <LevelBackground key={"bg-" + lvl.id} lvl={lvl}
+                                             yTop={layout.map[lvl.id].yTop}
+                                             h={layout.map[lvl.id].h} />
                         ))}
                     </div>
 
-                    {/* Contorno triangolo (sopra il clip, non intercetta i click) */}
+                    {/* LAYER 2 — Contorno triangolo (sopra il clip, non intercetta i click) */}
                     <svg width={PYR_W} height={H} className="absolute top-0 left-0 pointer-events-none z-10"
                          style={{ overflow: "visible" }}>
                         <polygon points={`${CX},0 ${PYR_W},${H} 0,${H}`}
                                  fill="none" stroke="#1e293b" strokeWidth="2" strokeLinejoin="round" />
                     </svg>
 
-                    {/* Cunei colorati zone a destra — puramente decorativi, non intercettano i click */}
+                    {/* LAYER 3 — Cunei colorati zone a destra (decorativi, non intercettano i click) */}
                     {WEDGE_DEFS.map((w) => {
                         const y1 = layout.map[w.from].yTop + (w.from === "crescita" ? 0 : 4);
                         const y2 = layout.map[w.to].yTop + layout.map[w.to].h - 4;
@@ -420,7 +408,7 @@ export default function PiramidePrivati({
                         const dx = xRight(y2) - xRight(y1);
                         return (
                             <div key={w.label}
-                                 className="absolute flex items-center justify-center text-center pointer-events-none"
+                                 className="absolute flex items-center justify-center text-center pointer-events-none z-10"
                                  style={{
                                      top: y1, height: y2 - y1,
                                      left, width: TOTAL_W - left,
@@ -436,6 +424,27 @@ export default function PiramidePrivati({
                             </div>
                         );
                     })}
+
+                    {/* LAYER 4 (TOP) — CONTENUTO INTERATTIVO: input, pallini, tasto "+", labels.
+                        Senza clip-path e con z-20 → click SEMPRE garantiti su qualsiasi browser. */}
+                    <div className="absolute top-0 left-0 z-20" style={{ width: PYR_W, height: H }}>
+                        {LEVELS.map((lvl) => (
+                            <LevelForeground key={"fg-" + lvl.id} lvl={lvl}
+                                             yTop={layout.map[lvl.id].yTop}
+                                             h={layout.map[lvl.id].h}
+                                             editable={editable}
+                                             capitaleVoce={capitaleVoce}
+                                             statoVoce={statoVoce}
+                                             onDotClick={onDotClick}
+                                             onChangeOverride={(vid, v) => setOverrides((s) => ({ ...s, [vid]: v }))}
+                                             canRequestQuote={!editable && !!onRichiediPreventivo}
+                                             customVoci={custom[lvl.id] || []}
+                                             onAddCustom={() => addCustom(lvl.id)}
+                                             onUpdateCustom={(idx, patch) => updateCustom(lvl.id, idx, patch)}
+                                             onRemoveCustom={(idx) => removeCustom(lvl.id, idx)}
+                                             onCustomDotClick={(idx, voce) => onCustomDotClick(lvl.id, idx, voce)} />
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -482,7 +491,23 @@ export default function PiramidePrivati({
 }
 
 // ─────────────────────────────────────────────────────────────
-function Level({
+// LayerBackground: SOLO la strip colorata di fondo, DENTRO il triangolo clippato.
+// Nessun click interattivo qui — è puramente decorativo (pointer-events: none).
+// ─────────────────────────────────────────────────────────────
+function LevelBackground({ lvl, yTop, h }) {
+    return (
+        <div className="absolute left-0 w-full" style={{ top: yTop, height: h }}>
+            <div className="absolute left-0 w-full"
+                 style={{ top: lvl.strip.top, height: lvl.strip.h, background: lvl.color }} />
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────
+// LevelForeground: TESTO strip + tasto "+" + input + pallini.
+// Vive nel layer z-20 FUORI dal triangolo clippato → click SEMPRE garantiti.
+// ─────────────────────────────────────────────────────────────
+function LevelForeground({
     lvl, yTop, h, editable, capitaleVoce, statoVoce, onDotClick, onChangeOverride, canRequestQuote,
     customVoci, onAddCustom, onUpdateCustom, onRemoveCustom, onCustomDotClick,
 }) {
@@ -491,24 +516,24 @@ function Level({
     return (
         <div className="absolute left-0 w-full" style={{ top: yTop, height: h }}
              data-testid={`piramide-livello-${lvl.id}`}>
-            {/* strip colorata: piena larghezza, il clip del wrapper la taglia a trapezio */}
+            {/* Testo strip + pulsante + (nessun bg, il bg è nel LevelBackground) */}
             <div className="absolute left-0 w-full flex items-center justify-center gap-1.5"
-                 style={{ top: lvl.strip.top, height: lvl.strip.h, background: lvl.color }}>
-                <span className="text-white font-bold uppercase text-center leading-tight tracking-tight"
+                 style={{ top: lvl.strip.top, height: lvl.strip.h }}>
+                <span className="text-white font-bold uppercase text-center leading-tight tracking-tight pointer-events-none"
                       style={{ maxWidth: lvl.strip.maxW, fontSize: lvl.strip.font }}>
                     {lvl.titolo}
                 </span>
                 {canAdd && (
                     <button type="button" onClick={onAddCustom}
                             title="Aggiungi una voce a questa sezione"
-                            className="w-[15px] h-[15px] rounded-full bg-white/30 hover:bg-white/60 text-white leading-none flex items-center justify-center transition-colors flex-shrink-0"
+                            className="w-[15px] h-[15px] rounded-full bg-white/30 hover:bg-white/70 text-white leading-none flex items-center justify-center transition-colors flex-shrink-0 cursor-pointer"
                             style={{ fontSize: 11 }}
                             data-testid={`piramide-add-voce-${lvl.id}`}>
                         +
                     </button>
                 )}
             </div>
-            {/* contenuto sotto la strip */}
+            {/* Contenuto interattivo sotto la strip */}
             <div className="absolute left-0 w-full flex flex-col items-center justify-center"
                  style={{ top: lvl.strip.top + lvl.strip.h, height: h - lvl.strip.top - lvl.strip.h }}>
                 {hasRows && lvl.voci.map((voce) => {
@@ -518,7 +543,7 @@ function Level({
                     return (
                         <div key={voce.id} className="flex items-center justify-center gap-1.5"
                              style={{ width: 340, padding: "1px 0" }}>
-                            <span className="flex-1 text-right uppercase font-medium text-slate-800"
+                            <span className="flex-1 text-right uppercase font-medium text-slate-800 pointer-events-none"
                                   style={{ fontSize: 9.5 }}>
                                 {voce.label}
                             </span>
@@ -542,7 +567,6 @@ function Level({
                     );
                 })}
                 {!hasRows && (
-                    // spazio bianco editabile (livelli risparmio/investimento)
                     <input type="text"
                            value={capitaleVoce(lvl.inputVoce) ? fmtEur(capitaleVoce(lvl.inputVoce)) : ""}
                            disabled={!editable}
@@ -555,7 +579,6 @@ function Level({
                            style={{ fontSize: 9.5, height: 20, width: lvl.id === "crescita" ? 68 : 90 }}
                            data-testid={`piramide-input-${lvl.inputVoce}`} />
                 )}
-                {/* voci custom aggiunte dall'agenzia */}
                 {customVoci.map((voce, idx) => {
                     const st = voce.stato || "assente";
                     const clickable = editable || (canRequestQuote && st !== "adeguato");
@@ -572,7 +595,7 @@ function Level({
                                        style={{ fontSize: 9 }}
                                        data-testid={`piramide-custom-label-${lvl.id}-${idx}`} />
                             ) : (
-                                <span className="flex-1 text-right uppercase font-medium text-slate-800"
+                                <span className="flex-1 text-right uppercase font-medium text-slate-800 pointer-events-none"
                                       style={{ fontSize: 9.5 }}>
                                     {voce.label || "—"}
                                 </span>
@@ -596,7 +619,7 @@ function Level({
                             {editable && (
                                 <button type="button" onClick={() => onRemoveCustom(idx)}
                                         title="Rimuovi voce"
-                                        className="text-slate-400 hover:text-rose-600 font-bold leading-none flex-shrink-0"
+                                        className="text-slate-400 hover:text-rose-600 font-bold leading-none flex-shrink-0 cursor-pointer"
                                         style={{ fontSize: 11 }}
                                         data-testid={`piramide-custom-remove-${lvl.id}-${idx}`}>
                                     ×

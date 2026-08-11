@@ -389,6 +389,212 @@ async def lista_carichi_mensili(
     return {"totale": len(rows), "righe": rows}
 
 
+@router.get("/carichi-mensili/confronto-annuale")
+async def confronto_annuale(
+    anno: int = Query(..., description="Anno corrente da confrontare"),
+    mese: Optional[str] = Query(None, description="MM 01-12 opzionale per filtrare per mese di decorrenza"),
+    user=Depends(current_user),
+):
+    """Confronto anno precedente vs anno corrente **per data DECORRENZA** dei titoli.
+
+    Trova tutti i titoli con `effetto` nell'anno corrente + anno precedente,
+    li accoppia per polizza+stesso mese di decorrenza, e segnala:
+    - titoli PRESENTI in entrambi gli anni (mostra variazione premio)
+    - titoli ANNO PRECEDENTE mancanti quest'anno (segnala motivo dedotto):
+        · polizza sostituita → mostra nuovo numero polizza
+        · polizza annullata/disdettata → mostra motivo e data
+        · polizza sospesa → mostra data sospensione
+        · scadenza cambiata → segnala nuova scadenza
+        · nessun motivo → segnala anomalia (verifica manuale)
+    - titoli ANNO CORRENTE nuovi (assenti l'anno scorso) → "nuova emissione"
+    """
+    anno_prec = anno - 1
+    prefix_curr = f"{anno}-{mese.zfill(2) if mese else ''}"
+    prefix_prev = f"{anno_prec}-{mese.zfill(2) if mese else ''}"
+
+    # Query titoli anno corrente
+    titoli_curr = await db.titoli.find(
+        {"effetto": {"$regex": f"^{prefix_curr}"}}, {"_id": 0},
+    ).sort("effetto", 1).to_list(5000)
+    titoli_prev = await db.titoli.find(
+        {"effetto": {"$regex": f"^{prefix_prev}"}}, {"_id": 0},
+    ).sort("effetto", 1).to_list(5000)
+
+    # Batch lookup polizze/anagrafiche/compagnie
+    all_pol_ids = list({t.get("polizza_id") for t in (titoli_curr + titoli_prev)
+                        if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": all_pol_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "contraente_id": 1,
+         "compagnia_id": 1, "stato": 1, "data_annullamento": 1,
+         "motivo_annullamento": 1, "data_sospensione": 1,
+         "riattivazione_prevista": 1, "sostituita_da_polizza_id": 1,
+         "premio_lordo": 1, "effetto": 1, "scadenza": 1, "targa": 1},
+    )}
+    ana_ids = list({p.get("contraente_id") for p in pols.values()})
+    anas = {a["id"]: a.get("ragione_sociale") async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    cmp_ids = list({p.get("compagnia_id") for p in pols.values() if p.get("compagnia_id")})
+    cmps = {c["id"]: c.get("ragione_sociale") or c.get("codice") or "-"
+            async for c in db.compagnie.find(
+                {"id": {"$in": cmp_ids}},
+                {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
+    # Lookup polizze SOSTITUTIVE (per messaggio "sostituita da polizza XYZ")
+    sostit_ids = list({p.get("sostituita_da_polizza_id") for p in pols.values()
+                       if p.get("sostituita_da_polizza_id")})
+    sostit_map = {sp["id"]: sp async for sp in db.polizze.find(
+        {"id": {"$in": sostit_ids}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "effetto": 1, "premio_lordo": 1})}
+
+    def _mese(dt: str) -> str:
+        return (dt or "")[:7]
+
+    def _row(t: Optional[dict], polizza_id: str, tipo_row: str, motivo: str = "",
+             dettaglio: str = "", nuova_polizza: Optional[str] = None,
+             match_prev: Optional[dict] = None, match_curr: Optional[dict] = None) -> dict:
+        p = pols.get(polizza_id, {})
+        base_t = t or match_curr or match_prev or {}
+        curr = float((match_curr or {}).get("importo_lordo") or 0) if match_curr else 0
+        prev = float((match_prev or {}).get("importo_lordo") or 0) if match_prev else 0
+        delta = curr - prev if (curr and prev) else None
+        return {
+            "id": base_t.get("id") or f"missing-{polizza_id}-{tipo_row}",
+            "tipo_row": tipo_row,   # "confermato" | "mancante" | "nuovo"
+            "motivo": motivo,       # "sostituita" | "annullata" | "sospesa" | "scadenza_cambiata" | "nuova_emissione" | "anomalia"
+            "motivo_label": {
+                "sostituita": "🔄 Polizza sostituita",
+                "annullata": "🛑 Polizza annullata",
+                "sospesa": "⏸ Polizza sospesa",
+                "scadenza_cambiata": "📅 Scadenza cambiata",
+                "nuova_emissione": "✨ Nuova emissione",
+                "anomalia": "⚠ Anomalia — verificare",
+                "": "🟢 Confermata",
+            }.get(motivo, motivo),
+            "dettaglio": dettaglio,
+            "polizza_id": polizza_id,
+            "polizza_numero": p.get("numero_polizza"),
+            "polizza_ramo": p.get("ramo"),
+            "polizza_targa": p.get("targa"),
+            "nuova_polizza_numero": nuova_polizza,
+            "cliente_nome": anas.get(p.get("contraente_id")),
+            "compagnia_nome": cmps.get(p.get("compagnia_id")),
+            "effetto_anno_prec": (match_prev or {}).get("effetto") if match_prev else None,
+            "effetto_anno_corr": (match_curr or {}).get("effetto") if match_curr else None,
+            "scadenza_anno_prec": (match_prev or {}).get("scadenza"),
+            "scadenza_anno_corr": (match_curr or {}).get("scadenza"),
+            "premio_anno_prec": prev if prev else None,
+            "premio_anno_corr": curr if curr else None,
+            "delta_euro": round(delta, 2) if delta is not None else None,
+            "delta_pct": round((delta / prev) * 100, 1) if delta is not None and prev else None,
+        }
+
+    # Indicizzazione per polizza_id + mese
+    def _idx(titoli: list[dict]) -> dict:
+        idx: dict[tuple, dict] = {}
+        for t in titoli:
+            key = (t.get("polizza_id"), _mese(t.get("effetto") or ""))
+            if key not in idx:
+                idx[key] = t
+        return idx
+
+    idx_curr = _idx(titoli_curr)
+    idx_prev = _idx(titoli_prev)
+
+    rows: list[dict] = []
+    keys_visti: set = set()
+
+    # 1) Titoli anno precedente: cerca corrispondente anno corrente
+    for (pid, m), t_prev in idx_prev.items():
+        # Cerca titolo corrente sulla stessa polizza (anche in mese diverso)
+        t_curr = idx_curr.get((pid, m))
+        p = pols.get(pid, {})
+        stato_pol = (p.get("stato") or "").lower()
+
+        if not t_curr:
+            # cerca altrove nell'anno corrente (mese diverso)
+            candidati = [tc for (kp, km), tc in idx_curr.items() if kp == pid]
+            t_curr_alt = candidati[0] if candidati else None
+
+            if p.get("sostituita_da_polizza_id"):
+                sp = sostit_map.get(p["sostituita_da_polizza_id"], {})
+                # Se la polizza sostitutiva ha un titolo anno corrente, mostralo
+                titolo_sub_curr = None
+                for tc in titoli_curr:
+                    if tc.get("polizza_id") == p["sostituita_da_polizza_id"]:
+                        titolo_sub_curr = tc
+                        break
+                rows.append(_row(t_prev, pid, "mancante", "sostituita",
+                                 dettaglio=f"Sostituita da polizza {sp.get('numero_polizza', 'N/A')}"
+                                           + (f" (decorrenza {sp.get('effetto')})" if sp.get('effetto') else ""),
+                                 nuova_polizza=sp.get("numero_polizza"),
+                                 match_prev=t_prev, match_curr=titolo_sub_curr))
+                if titolo_sub_curr:
+                    keys_visti.add((p["sostituita_da_polizza_id"], _mese(titolo_sub_curr.get("effetto") or "")))
+            elif stato_pol in ("annullata", "disdettata", "cessata"):
+                data_ann = p.get("data_annullamento") or "-"
+                motivo_ann = p.get("motivo_annullamento") or "senza motivo specificato"
+                rows.append(_row(t_prev, pid, "mancante", "annullata",
+                                 dettaglio=f"Annullata il {data_ann}: {motivo_ann}",
+                                 match_prev=t_prev))
+            elif stato_pol == "sospesa" or p.get("data_sospensione"):
+                data_sosp = p.get("data_sospensione") or "-"
+                riatt = p.get("riattivazione_prevista")
+                rows.append(_row(t_prev, pid, "mancante", "sospesa",
+                                 dettaglio=f"Sospesa dal {data_sosp}"
+                                           + (f" · riattivazione {riatt}" if riatt else ""),
+                                 match_prev=t_prev))
+            elif t_curr_alt:
+                # esiste ma in mese diverso → scadenza cambiata
+                rows.append(_row(t_prev, pid, "mancante", "scadenza_cambiata",
+                                 dettaglio=f"Decorrenza spostata da {t_prev.get('effetto')} a "
+                                           f"{t_curr_alt.get('effetto')} (mese cambiato)",
+                                 match_prev=t_prev, match_curr=t_curr_alt))
+                keys_visti.add((pid, _mese(t_curr_alt.get("effetto") or "")))
+            else:
+                # Nessun motivo dedotto → segnala anomalia
+                rows.append(_row(t_prev, pid, "mancante", "anomalia",
+                                 dettaglio="Nessun titolo trovato per questa polizza nell'anno corrente. "
+                                          "Verifica se è stata dimenticata o cessata senza notifica.",
+                                 match_prev=t_prev))
+        else:
+            # confermato — presente in entrambi gli anni
+            rows.append(_row(t_curr, pid, "confermato", "",
+                             match_prev=t_prev, match_curr=t_curr))
+            keys_visti.add((pid, m))
+
+    # 2) Titoli anno corrente NON già processati → nuove emissioni
+    for (pid, m), t_curr in idx_curr.items():
+        if (pid, m) in keys_visti:
+            continue
+        # verifica se ci sono OGNI corrispondenza sulla stessa polizza in idx_prev
+        # (anche in mese diverso) → se sì è variazione mese, altrimenti nuovo
+        prev_stessa_polizza = [tp for (kp, km), tp in idx_prev.items() if kp == pid]
+        if prev_stessa_polizza:
+            # scadenza cambiata già gestita sopra dal ramo mancante; skip
+            continue
+        rows.append(_row(t_curr, pid, "nuovo", "nuova_emissione",
+                         dettaglio=f"Polizza emessa nell'anno {anno} (nessun premio {anno_prec})",
+                         match_curr=t_curr))
+
+    # Ordina: mancanti prima (per attenzione), poi nuovi, poi confermati
+    ordine = {"mancante": 0, "nuovo": 1, "confermato": 2}
+    rows.sort(key=lambda r: (ordine.get(r["tipo_row"], 9),
+                             r.get("cliente_nome") or "",
+                             r.get("polizza_numero") or ""))
+
+    stats = {
+        "anno_corrente": anno, "anno_precedente": anno_prec,
+        "totale": len(rows),
+        "confermati": sum(1 for r in rows if r["tipo_row"] == "confermato"),
+        "mancanti": sum(1 for r in rows if r["tipo_row"] == "mancante"),
+        "nuovi": sum(1 for r in rows if r["tipo_row"] == "nuovo"),
+        "premio_totale_prec": round(sum((r["premio_anno_prec"] or 0) for r in rows), 2),
+        "premio_totale_corr": round(sum((r["premio_anno_corr"] or 0) for r in rows), 2),
+    }
+    stats["delta_premio"] = round(stats["premio_totale_corr"] - stats["premio_totale_prec"], 2)
+    return {"stats": stats, "righe": rows}
+
+
 class ValidaBody(BaseModel):
     titoli_ids: list[str]
 

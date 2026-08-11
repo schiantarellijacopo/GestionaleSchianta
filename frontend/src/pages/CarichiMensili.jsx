@@ -197,6 +197,10 @@ export default function CarichiMensili() {
                     <p className="text-sm text-slate-500">Import selettivo dei titoli in scadenza + vaglio operatore</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => setConfrontoOpen(true)} data-testid="btn-confronto-annuale"
+                            className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                        <TrendingDown size={14} className="mr-1" /> Confronto anno prec.
+                    </Button>
                     <Button variant="outline" onClick={() => setImportOpen(true)} data-testid="btn-import-excel"
                             className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
                         <Upload size={14} className="mr-1" /> Importa Excel/CSV

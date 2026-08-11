@@ -454,6 +454,13 @@ function StatoBadge({ stato }) {
 
 function SchedaDettaglio({ scheda }) {
     const c = scheda.contenuto || {};
+    const [tab, setTab] = useState("semplice");
+    const esempi = c.esempi_pratici || (c.esempio_calcolo ? [{
+        titolo: "Esempio di calcolo",
+        passaggi: (c.esempio_calcolo || []).map((s) => ({
+            descrizione: s.descrizione, valore: s.risultato,
+        })),
+    }] : []);
     return (
         <div className="mt-3 pt-3 border-t border-slate-100 space-y-3 text-xs" data-testid="scheda-dettaglio">
             {/* COSA È CAMBIATO — sempre in evidenza quando i criteri cambiano */}
@@ -493,50 +500,210 @@ function SchedaDettaglio({ scheda }) {
                     <CheckCircle2 size={13} /> {scheda.diff_note}
                 </div>
             )}
-            {c.sintesi && <p className="text-slate-700">{c.sintesi}</p>}
-            {(c.requisiti || []).length > 0 && (
-                <TabellaScheda titolo="Requisiti" rows={c.requisiti} cols={["prestazione", "requisito"]} />
-            )}
-            {(c.formule || []).length > 0 && (
-                <TabellaScheda titolo="Formule di calcolo" rows={c.formule} cols={["prestazione", "formula"]} />
-            )}
-            {(c.parametri || []).length > 0 && (
-                <TabellaScheda titolo="Parametri chiave" rows={c.parametri} cols={["nome", "valore", "fonte"]} />
-            )}
-            {(c.discrepanze_crm || []).length > 0 ? (
-                <div>
-                    <div className="font-semibold text-rose-700 mb-1 flex items-center gap-1">
-                        <AlertTriangle size={12} /> Discrepanze con i criteri del CRM
-                    </div>
-                    <table className="w-full border border-rose-200">
-                        <thead className="bg-rose-50 text-rose-800">
-                            <tr>{["Parametro", "Valore CRM", "Valore documenti", "Gravità", "Correzione"].map((h) => (
-                                <th key={h} className="text-left px-2 py-1 font-semibold">{h}</th>))}</tr>
-                        </thead>
-                        <tbody>
-                            {c.discrepanze_crm.map((d, i) => (
-                                <tr key={i} className="border-t border-rose-100">
-                                    <td className="px-2 py-1 font-medium">{d.parametro}</td>
-                                    <td className="px-2 py-1">{d.valore_crm}</td>
-                                    <td className="px-2 py-1">{d.valore_documenti}</td>
-                                    <td className="px-2 py-1 uppercase font-bold text-[9px]">{d.gravita}</td>
-                                    <td className="px-2 py-1">{d.correzione_suggerita}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            ) : (
-                <div className="text-emerald-700 flex items-center gap-1">
-                    <CheckCircle2 size={13} /> Nessuna discrepanza rilevata con i criteri di calcolo del CRM.
-                </div>
-            )}
-            {c.note_verifica_annuale && (
-                <div className="text-slate-500 italic">Verifica annuale: {c.note_verifica_annuale}</div>
-            )}
-            <div className="text-[10px] text-slate-400">
-                Fonti: {(scheda.fonti || []).slice(0, 10).join(" · ")}{(scheda.fonti || []).length > 10 ? ` +${scheda.fonti.length - 10}` : ""}
+
+            {/* TABS: Semplice · Esempi · Tecnica */}
+            <div className="flex gap-1 border-b border-slate-200">
+                {[
+                    ["semplice", "🗣 In parole semplici"],
+                    ["esempi", `📊 Esempi pratici${esempi.length ? ` (${esempi.length})` : ""}`],
+                    ["tecnica", "🔬 Dettagli tecnici"],
+                ].map(([k, label]) => (
+                    <button key={k} onClick={() => setTab(k)}
+                            className={`px-3 py-2 text-xs font-semibold transition border-b-2 -mb-px ${tab === k
+                                ? "border-sky-600 text-sky-700"
+                                : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                            data-testid={`scheda-tab-${k}`}>
+                        {label}
+                    </button>
+                ))}
             </div>
+
+            {/* TAB 1 — SEMPLICE */}
+            {tab === "semplice" && (
+                <div className="space-y-3">
+                    {c.spiegazione_semplice ? (
+                        <div className="bg-sky-50 border border-sky-200 rounded-lg p-3">
+                            <div className="text-[10px] font-bold text-sky-800 uppercase mb-1 tracking-wide">
+                                Come funziona la pensione per questa categoria
+                            </div>
+                            <p className="text-slate-800 leading-relaxed whitespace-pre-line">
+                                {c.spiegazione_semplice}
+                            </p>
+                        </div>
+                    ) : c.sintesi ? (
+                        <p className="text-slate-700">{c.sintesi}</p>
+                    ) : null}
+
+                    {(c.punti_chiave_cliente || []).length > 0 && (
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-600 uppercase mb-1.5 tracking-wide">
+                                Punti chiave da comunicare al cliente
+                            </div>
+                            <ul className="space-y-1">
+                                {c.punti_chiave_cliente.map((p, i) => (
+                                    <li key={i} className="flex items-start gap-2 bg-white border border-slate-200 rounded p-2">
+                                        <span className="text-emerald-600 font-bold flex-shrink-0">✓</span>
+                                        <span className="text-slate-800">{p}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {(c.cosa_fare_prima_della_domanda || []).length > 0 && (
+                        <div>
+                            <div className="text-[10px] font-bold text-slate-600 uppercase mb-1.5 tracking-wide">
+                                Cosa fare prima di presentare domanda INPS
+                            </div>
+                            <ol className="space-y-1">
+                                {c.cosa_fare_prima_della_domanda.map((p, i) => (
+                                    <li key={i} className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded p-2">
+                                        <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                            {i + 1}
+                                        </span>
+                                        <span className="text-slate-800">{p}</span>
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
+
+                    {(c.discrepanze_crm || []).length === 0 && (
+                        <div className="text-emerald-700 flex items-center gap-1 text-xs">
+                            <CheckCircle2 size={13} /> I parametri del CRM sono allineati con i documenti ufficiali analizzati.
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* TAB 2 — ESEMPI PRATICI */}
+            {tab === "esempi" && (
+                <div className="space-y-3">
+                    {esempi.length === 0 ? (
+                        <div className="text-slate-500 italic bg-slate-50 border border-slate-200 rounded p-3">
+                            Nessun esempio pratico disponibile. Rigenera la scheda per ottenere case study aggiornati.
+                        </div>
+                    ) : esempi.map((es, idx) => (
+                        <div key={idx} className="bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm"
+                             data-testid={`scheda-esempio-${idx}`}>
+                            <div className="bg-gradient-to-r from-sky-600 to-blue-700 px-3 py-2">
+                                <div className="text-white font-bold text-sm">{es.titolo || `Esempio ${idx + 1}`}</div>
+                            </div>
+                            <div className="p-3 space-y-2">
+                                {(es.profilo || es.evento) && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {es.profilo && (
+                                            <div className="bg-slate-50 border border-slate-200 rounded p-2">
+                                                <div className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Profilo</div>
+                                                <div className="text-slate-800">{es.profilo}</div>
+                                            </div>
+                                        )}
+                                        {es.evento && (
+                                            <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                                                <div className="text-[9px] font-bold text-amber-700 uppercase mb-0.5">Evento</div>
+                                                <div className="text-slate-800">{es.evento}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {(es.passaggi || []).length > 0 && (
+                                    <div>
+                                        <div className="text-[9px] font-bold text-slate-500 uppercase mb-1">Passaggi del calcolo</div>
+                                        <ol className="space-y-1">
+                                            {es.passaggi.map((p, i) => (
+                                                <li key={i} className="flex items-start gap-2 text-[11px]">
+                                                    <span className="bg-sky-600 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                                        {i + 1}
+                                                    </span>
+                                                    <span className="flex-1 text-slate-700">{p.descrizione}</span>
+                                                    {p.formula && (
+                                                        <code className="bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
+                                                            {p.formula}
+                                                        </code>
+                                                    )}
+                                                    {(p.valore || p.risultato) && (
+                                                        <span className="font-mono font-semibold text-emerald-700 text-[11px] flex-shrink-0">
+                                                            → {p.valore || p.risultato}
+                                                        </span>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                )}
+                                {(es.risultato_finale || es.netto_stimato) && (
+                                    <div className="bg-emerald-50 border-2 border-emerald-300 rounded p-2.5 mt-2">
+                                        {es.risultato_finale && (
+                                            <div className="text-slate-800">
+                                                <span className="text-[10px] font-bold text-emerald-800 uppercase">Risultato: </span>
+                                                <span className="font-bold text-emerald-900">{es.risultato_finale}</span>
+                                            </div>
+                                        )}
+                                        {es.netto_stimato && (
+                                            <div className="text-[11px] text-slate-600 mt-0.5">
+                                                <span className="text-emerald-700 font-semibold">Netto stimato: </span>
+                                                {es.netto_stimato}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* TAB 3 — TECNICA */}
+            {tab === "tecnica" && (
+                <div className="space-y-3">
+                    {c.sintesi && <p className="text-slate-700 bg-slate-50 border border-slate-200 rounded p-2">{c.sintesi}</p>}
+                    {(c.requisiti || []).length > 0 && (
+                        <TabellaScheda titolo="Requisiti" rows={c.requisiti} cols={["prestazione", "requisito"]} />
+                    )}
+                    {(c.formule || []).length > 0 && (
+                        <TabellaScheda titolo="Formule di calcolo" rows={c.formule} cols={["prestazione", "formula"]} />
+                    )}
+                    {(c.parametri || []).length > 0 && (
+                        <TabellaScheda titolo="Parametri chiave" rows={c.parametri} cols={["nome", "valore", "fonte"]} />
+                    )}
+                    {(c.discrepanze_crm || []).length > 0 ? (
+                        <div>
+                            <div className="font-semibold text-rose-700 mb-1 flex items-center gap-1">
+                                <AlertTriangle size={12} /> Discrepanze con i criteri del CRM
+                            </div>
+                            <table className="w-full border border-rose-200">
+                                <thead className="bg-rose-50 text-rose-800">
+                                    <tr>{["Parametro", "Valore CRM", "Valore documenti", "Gravità", "Correzione"].map((h) => (
+                                        <th key={h} className="text-left px-2 py-1 font-semibold">{h}</th>))}</tr>
+                                </thead>
+                                <tbody>
+                                    {c.discrepanze_crm.map((d, i) => (
+                                        <tr key={i} className="border-t border-rose-100">
+                                            <td className="px-2 py-1 font-medium">{d.parametro}</td>
+                                            <td className="px-2 py-1">{d.valore_crm}</td>
+                                            <td className="px-2 py-1">{d.valore_documenti}</td>
+                                            <td className="px-2 py-1 uppercase font-bold text-[9px]">{d.gravita}</td>
+                                            <td className="px-2 py-1">{d.correzione_suggerita}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-emerald-700 flex items-center gap-1">
+                            <CheckCircle2 size={13} /> Nessuna discrepanza rilevata con i criteri di calcolo del CRM.
+                        </div>
+                    )}
+                    {c.note_verifica_annuale && (
+                        <div className="text-slate-500 italic">Verifica annuale: {c.note_verifica_annuale}</div>
+                    )}
+                    <div className="text-[10px] text-slate-400">
+                        Fonti PDF ({(scheda.fonti || []).length}):{" "}
+                        {(scheda.fonti || []).slice(0, 10).map((f) => typeof f === "string" ? f : (f.nome_file || f.nome || "")).filter(Boolean).join(" · ")}
+                        {(scheda.fonti || []).length > 10 ? ` +${scheda.fonti.length - 10}` : ""}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

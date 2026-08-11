@@ -116,7 +116,7 @@ export default function Chat() {
                 <TabsContent value="interna" className="mt-3">
             <Card className="border-slate-200 overflow-hidden shadow-md rounded-2xl" style={{ height: "calc(100vh - 320px)" }}>
                 <div className="grid grid-cols-12 h-full">
-                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="chat-contatti-list">
+                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40 min-h-0" data-testid="chat-contatti-list">
                         {contatti === null ? <Loading /> : contatti.length === 0 ? <Empty message="Nessun contatto" /> : (
                             <ul className="divide-y divide-slate-100">
                                 {contatti.map((c) => (
@@ -158,7 +158,7 @@ export default function Chat() {
                         )}
                     </div>
 
-                    <div className="col-span-8 flex flex-col" data-testid="chat-conversation">
+                    <div className="col-span-8 flex flex-col min-h-0" data-testid="chat-conversation">
                         {!sel ? (
                             <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
                                 <div className="text-center">
@@ -556,7 +556,7 @@ function WhatsAppInbox() {
                 )}
                 <div className="grid grid-cols-12 h-full">
                     {/* Lista chat */}
-                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="wa-chats-list">
+                    <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40 min-h-0" data-testid="wa-chats-list">
                         <div className="px-3 py-2 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                             <div className="text-xs font-medium text-slate-700">
                                 Conversazioni ({chats.length})
@@ -611,7 +611,7 @@ function WhatsAppInbox() {
                     </div>
 
                     {/* Conversazione */}
-                    <div className="col-span-8 flex flex-col" data-testid="wa-conversation">
+                    <div className="col-span-8 flex flex-col min-h-0" data-testid="wa-conversation">
                         {!selChat ? (
                             <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
                                 <div className="text-center">
@@ -817,7 +817,7 @@ function ChatPortaleAdmin() {
     return (
         <Card className="border-slate-200 overflow-hidden shadow-md rounded-2xl" style={{ height: "calc(100vh - 320px)" }}>
             <div className="grid grid-cols-12 h-full">
-                <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40" data-testid="chat-portale-lista">
+                <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40 min-h-0" data-testid="chat-portale-lista">
                     {clienti === null ? <Loading /> : clienti.length === 0 ? (
                         <Empty message="Nessun cliente ha ancora scritto dal portale" />
                     ) : (
@@ -852,7 +852,7 @@ function ChatPortaleAdmin() {
                     )}
                 </div>
 
-                <div className="col-span-8 flex flex-col" data-testid="chat-portale-conv">
+                <div className="col-span-8 flex flex-col min-h-0" data-testid="chat-portale-conv">
                     {!sel ? (
                         <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
                             <div className="text-center">

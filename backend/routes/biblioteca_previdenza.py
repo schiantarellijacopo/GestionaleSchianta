@@ -446,30 +446,52 @@ async def _genera_scheda_worker(jid: str, categoria: str, chunks: list, fonti: l
     await _job_update(jid, progress={"categoria": categoria, "step": "generazione_ai", "docs": len(fonti)})
 
     prompt = (
-        "Sei un attuario esperto del sistema previdenziale italiano. Analizza i documenti "
-        f"della categoria «{categoria}» e produci una SCHEDA DI CALCOLO strutturata per le "
-        "prestazioni: pensione di invalidità (assegno ordinario), pensione di inabilità, "
-        "pensione ai superstiti/premorienza.\n\n"
+        "Sei un attuario esperto del sistema previdenziale italiano CHE SA SPIEGARE. "
+        f"Analizza i documenti della categoria «{categoria}» e produci una SCHEDA DI "
+        "CALCOLO strutturata per le prestazioni: pensione di invalidità (assegno "
+        "ordinario), pensione di inabilità, pensione ai superstiti/premorienza.\n\n"
         + "\n\n".join(chunks)
         + "\n\n" + _crm_params_summary() +
         "\nRispondi SOLO con un JSON valido (nessun testo prima o dopo) con questa struttura:\n"
         "{\n"
         '  "sintesi": "2-3 frasi sulla categoria e le sue specificità",\n'
-        '  "requisiti": [{"prestazione": "...", "requisito": "..."}],\n'
-        '  "formule": [{"prestazione": "...", "formula": "formula matematica leggibile con simboli"}],\n'
-        '  "parametri": [{"nome": "...", "valore": "...", "fonte": "nome documento"}],\n'
+        '  "spiegazione_semplice": "Spiegazione DISCORSIVA (150-250 parole) del calcolo pensione '
+        'in linguaggio COMPRENSIBILE AL CLIENTE non tecnico. Niente formule, niente sigle senza spiegazione. '
+        'Deve rispondere: quando maturo il diritto? quanto prenderò? cosa determina l\'importo? cosa cambia '
+        'se sono invalido o muoio? Usa esempi concreti in € come riferimento.",\n'
+        '  "requisiti": [{"prestazione": "nome prestazione", "requisito": "descrizione requisito"}],\n'
+        '  "formule": [{"prestazione": "nome", "formula": "formula matematica leggibile"}],\n'
+        '  "parametri": [{"nome": "...", "valore": "...", "fonte": "nome documento PDF"}],\n'
         '  "discrepanze_crm": [{"parametro": "...", "valore_crm": "...", "valore_documenti": "...", '
         '"gravita": "alta|media|bassa", "correzione_suggerita": "..."}],\n'
-        '  "esempio_calcolo": [\n'
-        '    {"passo": "1", "descrizione": "spiegazione del passo", "formula": "formula applicata", "risultato": "valore numerico"},\n'
-        '    {"passo": "2", "descrizione": "...", "formula": "...", "risultato": "..."}\n'
+        '  "esempi_pratici": [\n'
+        '    {\n'
+        '      "titolo": "Es. 1 — Mario, 45 anni, invalidità totale (100%)",\n'
+        '      "profilo": "45 anni, 20 anni di contributi, reddito attuale € 30.000/anno",\n'
+        '      "evento": "Diventa invalido al 100% oggi (2026)",\n'
+        '      "passaggi": [\n'
+        '        {"descrizione": "Verifica requisito contributivo", "valore": "20 anni ≥ 5 anni richiesti: OK"},\n'
+        '        {"descrizione": "Montante contributivo accumulato", "valore": "€ 198.000 (20×30k×33%)"},\n'
+        '        {"descrizione": "Maggiorazione figurativa (anni mancanti a 60)", "valore": "+ € 148.500 (15×30k×33%)"},\n'
+        '        {"descrizione": "Coefficiente trasformazione a 60 anni", "valore": "4,536%"},\n'
+        '        {"descrizione": "Pensione lorda annua", "valore": "€ 15.740"}\n'
+        '      ],\n'
+        '      "risultato_finale": "€ 1.210 lordi/mese (€ 15.740 / 13 mensilità)",\n'
+        '      "netto_stimato": "€ 932/mese circa"\n'
+        '    },\n'
+        '    {"titolo": "Es. 2 — Anna, superstite di coniuge + 1 figlio", "profilo": "...", "evento": "...", "passaggi": [...], "risultato_finale": "...", "netto_stimato": "..."},\n'
+        '    {"titolo": "Es. 3 — Luca, senza requisiti (2 anni contributi)", "profilo": "...", "evento": "...", "passaggi": [...], "risultato_finale": "..."}\n'
         '  ],\n'
+        '  "punti_chiave_cliente": ["3-5 bullet point sintetici da comunicare al cliente in 30 secondi"],\n'
+        '  "cosa_fare_prima_della_domanda": ["checklist 3-4 passi pratici prima di presentare domanda INPS"],\n'
         '  "note_verifica_annuale": "cosa controllare l\'anno prossimo (importi, coefficienti, soglie)"\n'
         "}\n\n"
-        "L'esempio_calcolo DEVE essere un caso realistico verificabile: "
-        "es. lavoratore 40 anni contributi, reddito 30.000€, pensione a 67 anni, con "
-        "tutti i passaggi numerici (contributi versati, montante rivalutato, coefficiente "
-        "applicato, pensione lorda annua)."
+        "Requisiti QUALITÀ:\n"
+        "- «esempi_pratici»: MINIMO 3 casi realistici COMPLETI di passaggi numerici verificabili.\n"
+        "  Almeno un caso di INVALIDITÀ, uno di SUPERSTITI, uno LIMITE (senza requisiti).\n"
+        "  I numeri devono essere COERENTI con i parametri e le formule dichiarate.\n"
+        "- «spiegazione_semplice»: rivolta a un cliente NON tecnico. Zero sigle senza definirle.\n"
+        "- «punti_chiave_cliente»: 3-5 frasi brevissime che l'agente può ripetere al cliente."
     )
     chat = LlmChat(
         api_key=os.environ.get("EMERGENT_LLM_KEY"),

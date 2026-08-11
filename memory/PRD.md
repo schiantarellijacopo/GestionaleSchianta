@@ -13,8 +13,13 @@
 
 ### 🔴 P0 — Piramide delle Coperture: fix UX + layout stampabile A4
 - **Bug fix**: pulsante "+", input reddito, pallini stato ora funzionano in modalità agenzia (canEdit propagato correttamente).
-- **🐛 BUG CRITICO risolto (fix successivo)**: i cunei laterali (INVESTIMENTO/RISPARMIO/PROTEZIONE), pur avendo `clip-path` che li rende visualmente triangolari, geometricamente sono div rettangolari che coprivano metà destra del triangolo — intercettavano tutti i click a destra (pallini, input, tasto +). Aggiunto `pointer-events: none` ai wedge (decorativi puri). Verificato E2E con Playwright: click + → nuova voce, click pallino → cambia colore, input → scrive.
-- **Layout compatto**: `PYR_W=720` (era 1040), `WEDGE_AREA=105` (era 250), totale 825px stampabile in A4.
+- **🐛 BUG CRITICO risolto (fix successivo)**: i cunei laterali (INVESTIMENTO/RISPARMIO/PROTEZIONE), pur avendo `clip-path` che li rende visualmente triangolari, geometricamente sono div rettangolari che coprivano metà destra del triangolo — intercettavano tutti i click a destra (pallini, input, tasto +). Aggiunto `pointer-events: none` ai wedge (decorativi puri).
+- **🐛 BUG DEFINITIVO risolto (refactor strutturale)**: nonostante il fix wedge, il triangolo padre con `clip-path` bloccava ancora eventi mouse in alcuni casi. Ristrutturato in **4 layer**:
+  1. LAYER 1 (bg triangolo bianco clippato) — `pointer-events: none` — solo `LevelBackground` (strip colorate decorative)
+  2. LAYER 2 (SVG contorno) — `pointer-events: none`
+  3. LAYER 3 (wedge cunei laterali) — `pointer-events: none`
+  4. LAYER 4 (z-20, SENZA clip) — `LevelForeground`: input, pallini, tasto "+", pulsanti custom → click SEMPRE funzionanti indipendentemente dal clip-path
+  Verificato E2E: click + → nuova voce, click pallino → cambia colore verde/giallo/rosso, input → scrive 500.000 €.
 - **Sidebar dati_reddito**: spostata sopra il triangolo in griglia orizzontale 4 colonne (era absolute overlay sinistro, occupava spazio triangolo).
 - **Cunei laterali**: font ridotto a 9px, padding minimizzato.
 - **Auto-populate GET piramide-v2**: se `dati_reddito` è vuoto, backend lo popola da `reddito_annuo_lordo` anagrafica + `estratti_conto_inps` presenti.

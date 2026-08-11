@@ -37,6 +37,7 @@ const SEZIONI = [
     { key: "documenti", label: "Documenti & Upload", icon: FolderOpen },
     { key: "sinistri", label: "I miei sinistri", icon: AlertCircle },
     { key: "chat",     label: "Chat con l'agenzia", icon: MessageSquare },
+    { key: "team",     label: "Il nostro team", icon: Users },
     { key: "servizi",  label: "Servizi & Assistenza", icon: Phone },
 ];
 
@@ -484,7 +485,7 @@ function AnalisiPersonalizzataCTA() {
 }
 
 // ─── PROFILO ──────────────────────────────────────────────────────────
-function ProfiloView({ cliente }) {
+function ProfiloView({ cliente, avatarUrl }) {
     const [modifiche, setModifiche] = useState({});
     const richiedi = async () => {
         if (Object.keys(modifiche).length === 0) { toast.info("Nessuna modifica"); return; }

@@ -156,6 +156,29 @@ def genera_pdf_scheda_calcolo(scheda: dict, ragione_sociale: str = "Assicura CRM
         story.append(Paragraph(_sicura(sintesi), st["body"]))
         story.append(Spacer(1, 4))
 
+    # ─────────────────── SPIEGAZIONE SEMPLICE (per il cliente) ───────────────────
+    spiegazione = contenuto.get("spiegazione_semplice")
+    if spiegazione:
+        story.append(Paragraph("Come funziona la pensione — in parole semplici", st["h2"]))
+        story.append(Paragraph(_sicura(spiegazione), st["body"]))
+        story.append(Spacer(1, 4))
+
+    # ─────────────────── PUNTI CHIAVE CLIENTE ───────────────────
+    punti = contenuto.get("punti_chiave_cliente") or []
+    if punti:
+        story.append(Paragraph("Punti chiave da comunicare al cliente", st["h3"]))
+        for p in punti:
+            story.append(Paragraph(f"✓ {_sicura(p)}", st["body"]))
+        story.append(Spacer(1, 4))
+
+    # ─────────────────── CHECKLIST DOMANDA INPS ───────────────────
+    checklist = contenuto.get("cosa_fare_prima_della_domanda") or []
+    if checklist:
+        story.append(Paragraph("Cosa fare prima di presentare domanda INPS", st["h3"]))
+        for i, p in enumerate(checklist, 1):
+            story.append(Paragraph(f"{i}. {_sicura(p)}", st["body"]))
+        story.append(Spacer(1, 6))
+
     # ─────────────────── DISCREPANZE CRM ───────────────────
     discrepanze = contenuto.get("discrepanze_crm") or []
     if discrepanze:
@@ -287,26 +310,88 @@ def genera_pdf_scheda_calcolo(scheda: dict, ragione_sociale: str = "Assicura CRM
             ], col1_w=45))
             story.append(Spacer(1, 3))
 
-    # ─────────────────── ESEMPIO CALCOLO PASSO-PASSO ───────────────────
-    esempio = contenuto.get("esempio_calcolo") or contenuto.get("esempio")
-    if esempio:
-        story.append(Paragraph("Esempio di calcolo passo-passo", st["h2"]))
-        if isinstance(esempio, str):
-            story.append(Paragraph(_sicura(esempio), st["body"]))
-        elif isinstance(esempio, list):
-            for step in esempio:
-                if isinstance(step, dict):
-                    story.append(Paragraph(
-                        f"<b>{_sicura(step.get('passo'))}</b>: {_sicura(step.get('descrizione'))}",
-                        st["body"]))
-                    if step.get("formula"):
-                        story.append(Paragraph(_sicura(step["formula"]), st["code"]))
-                    if step.get("risultato"):
-                        story.append(Paragraph(
-                            f"→ Risultato: <b>{_sicura(step['risultato'])}</b>", st["body"]))
-                else:
-                    story.append(Paragraph(_sicura(str(step)), st["body"]))
-        story.append(Spacer(1, 6))
+    # ─────────────────── ESEMPI PRATICI ───────────────────
+    esempi = contenuto.get("esempi_pratici") or []
+    if not esempi and (contenuto.get("esempio_calcolo") or contenuto.get("esempio")):
+        # retrocompat: convertiamo il vecchio schema
+        vecchio = contenuto.get("esempio_calcolo") or contenuto.get("esempio")
+        if isinstance(vecchio, list):
+            esempi = [{"titolo": "Esempio di calcolo", "passaggi":
+                       [{"descrizione": s.get("descrizione") if isinstance(s, dict) else str(s),
+                         "formula": (s.get("formula") if isinstance(s, dict) else None),
+                         "valore": (s.get("risultato") if isinstance(s, dict) else None)}
+                        for s in vecchio]}]
+        elif isinstance(vecchio, str):
+            esempi = [{"titolo": "Esempio di calcolo", "profilo": vecchio, "passaggi": []}]
+
+    if esempi:
+        story.append(Paragraph(f"Esempi pratici di calcolo ({len(esempi)})", st["h2"]))
+        story.append(Paragraph(
+            "Casi reali per capire come cambia la pensione a seconda del profilo e dell'evento. "
+            "I numeri sono coerenti con i parametri ufficiali di questa scheda.",
+            st["small"]))
+        story.append(Spacer(1, 3))
+
+        for idx, es in enumerate(esempi, 1):
+            story.append(Paragraph(
+                _sicura(es.get("titolo") or f"Esempio {idx}"), st["h3"]))
+
+            # Profilo + Evento in tabella 2 colonne
+            info_rows = []
+            if es.get("profilo"):
+                info_rows.append(("Profilo", _sicura(es["profilo"])))
+            if es.get("evento"):
+                info_rows.append(("Evento", _sicura(es["evento"])))
+            if info_rows:
+                story.append(_kv_table(info_rows, col1_w=30))
+                story.append(Spacer(1, 3))
+
+            # Passaggi
+            passaggi = es.get("passaggi") or []
+            if passaggi:
+                pa_data = [[Paragraph("<b>#</b>", st["body"]),
+                            Paragraph("<b>Passaggio</b>", st["body"]),
+                            Paragraph("<b>Formula</b>", st["body"]),
+                            Paragraph("<b>Valore</b>", st["body"])]]
+                for j, p in enumerate(passaggi, 1):
+                    pa_data.append([
+                        Paragraph(str(j), st["body"]),
+                        Paragraph(_sicura(p.get("descrizione")), st["body"]),
+                        Paragraph(_sicura(p.get("formula")) if p.get("formula") else "—", st["body"]),
+                        Paragraph(f"<b>{_sicura(p.get('valore') or p.get('risultato'))}</b>", st["body"]),
+                    ])
+                pa_tbl = Table(pa_data, colWidths=[8 * mm, 78 * mm, 45 * mm, 43 * mm], repeatRows=1)
+                pa_tbl.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), COLORS["accent"]),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("GRID", (0, 0), (-1, -1), 0.3, COLORS["border"]),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                     [colors.white, COLORS["bg_soft"]]),
+                ]))
+                story.append(pa_tbl)
+                story.append(Spacer(1, 2))
+
+            # Risultato finale
+            if es.get("risultato_finale") or es.get("netto_stimato"):
+                risult = f"<b>Risultato: {_sicura(es.get('risultato_finale'))}</b>"
+                if es.get("netto_stimato"):
+                    risult += f"<br/>Netto stimato: {_sicura(es.get('netto_stimato'))}"
+                ris_tbl = Table([[Paragraph(risult, st["body"])]],
+                                colWidths=[174 * mm])
+                ris_tbl.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), COLORS["bg_ok"]),
+                    ("BOX", (0, 0), (-1, -1), 1, COLORS["success"]),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ]))
+                story.append(ris_tbl)
+            story.append(Spacer(1, 6))
 
     # ─────────────────── FONTI ───────────────────
     fonti = scheda.get("fonti") or []
