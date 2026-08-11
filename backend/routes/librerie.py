@@ -1093,6 +1093,49 @@ async def upload_logo_azienda(file: UploadFile = File(...),
     return {"logo_url": url}
 
 
+@router.post("/librerie/azienda/video-analisi")
+async def upload_video_analisi(file: UploadFile = File(...),
+                                user: dict = Depends(require_user("admin"))) -> dict:
+    """Carica il video motivazionale mostrato nella CTA 'Analisi Personalizzata' del portale cliente."""
+    data = await file.read()
+    if len(data) > 80 * 1024 * 1024:
+        raise HTTPException(400, "Video troppo grande (max 80 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if not (ct or "").startswith("video/"):
+        raise HTTPException(400, "Il file deve essere un video (MP4/WebM)")
+    ext = (file.filename or "video.mp4").rsplit(".", 1)[-1].lower() or "mp4"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/azienda/video_analisi_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    existing = await db.azienda_config.find_one({})
+    set_fields = {"video_analisi_storage_path": result["path"],
+                  "video_analisi_filename": file.filename,
+                  "updated_at": _now_iso()}
+    if not existing:
+        cfg = AziendaConfig(**set_fields)
+        await db.azienda_config.insert_one(cfg.model_dump())
+    else:
+        await db.azienda_config.update_one({"id": existing["id"]}, {"$set": set_fields})
+    return {"ok": True, "filename": file.filename}
+
+
+@router.delete("/librerie/azienda/video-analisi")
+async def delete_video_analisi(user: dict = Depends(require_user("admin"))) -> dict:
+    """Rimuove il video motivazionale (file caricato e/o URL esterno)."""
+    existing = await db.azienda_config.find_one({})
+    if existing:
+        await db.azienda_config.update_one(
+            {"id": existing["id"]},
+            {"$set": {"video_analisi_storage_path": None,
+                      "video_analisi_filename": None,
+                      "video_analisi_url": None,
+                      "updated_at": _now_iso()}},
+        )
+    return {"ok": True}
+
+
 # ============================================================
 # LIBRERIE — SCHEMA PROVVIGIONALE
 # ============================================================

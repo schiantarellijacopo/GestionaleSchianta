@@ -6949,6 +6949,62 @@ def _calcola_patrimonio_totale(ac: dict) -> dict | float:
     return round(immobili_tot + veicoli_tot + beni_tot + aziende_tot, 2)
 
 
+@api.post("/anagrafiche/{aid}/analisi/veicoli/auto-popola")
+async def auto_popola_veicoli(aid: str, user=Depends(current_user)):
+    """Popola la lista veicoli dell'Analisi Cliente dalle polizze auto attive:
+    targa + marca/modello + valore veicolo (se presenti in polizza)."""
+    ac = await _ensure_analisi(aid)
+    oggi = datetime.now(timezone.utc).date().isoformat()
+    polizze = await db.polizze.find(
+        {
+            "contraente_id": aid,
+            "targa": {"$nin": [None, ""]},
+            "stato": {"$nin": ["disdettata", "annullata", "sospesa"]},
+            "$or": [
+                {"scadenza": {"$gte": oggi}},
+                {"scadenza": {"$exists": False}},
+                {"scadenza": None},
+            ],
+        },
+        {"_id": 0, "numero_polizza": 1, "targa": 1, "veicolo_marca": 1,
+         "veicolo_modello": 1, "veicolo_settore": 1, "veicolo_tipo": 1,
+         "valore_veicolo": 1},
+    ).to_list(300)
+
+    esistenti = {(v.get("targa") or "").strip().upper()
+                 for v in (ac.get("veicoli") or []) if v.get("targa")}
+    aggiunti = []
+    for p in polizze:
+        targa = (p.get("targa") or "").strip().upper()
+        if not targa or targa in esistenti:
+            continue
+        esistenti.add(targa)
+        settore = f"{p.get('veicolo_settore') or ''} {p.get('veicolo_tipo') or ''}".lower()
+        tipo = "auto"
+        if "moto" in settore or "ciclomot" in settore:
+            tipo = "moto"
+        elif "autocarr" in settore or "furgon" in settore:
+            tipo = "furgone"
+        elif "camper" in settore:
+            tipo = "camper"
+        aggiunti.append({
+            "tipo": tipo,
+            "marca": p.get("veicolo_marca"),
+            "modello": p.get("veicolo_modello"),
+            "targa": targa,
+            "valore_commerciale": float(p.get("valore_veicolo") or 0),
+            "fonte": "polizza",
+            "polizza_numero": p.get("numero_polizza"),
+        })
+
+    veicoli = list(ac.get("veicoli") or []) + aggiunti
+    if aggiunti:
+        await db.analisi_cliente.update_one(
+            {"anagrafica_id": aid},
+            {"$set": {"veicoli": veicoli, "updated_at": _now_iso()}})
+    return {"aggiunti": len(aggiunti), "veicoli": veicoli}
+
+
 @api.get("/anagrafiche/{aid}/analisi/patrimonio")
 async def get_patrimonio_riepilogo(aid: str, user=Depends(current_user)):
     """Riepilogo patrimoniale: liquidità, immobili, veicoli, beni, aziende, debiti, montante."""
@@ -7372,6 +7428,11 @@ async def get_piramide_v2(aid: str, user=Depends(current_user)):
     # Auto-popolamento: leggi le polizze attive del cliente e aggrega per categoria
     voci = await _piramide_v2_calcola_voci(aid)
     piramide["voci_calcolate"] = voci
+    ana = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, "ragione_sociale": 1, "cognome": 1, "nome": 1, "cognome_nome": 1})
+    if ana:
+        piramide["cliente_nome"] = (ana.get("ragione_sociale") or ana.get("cognome_nome")
+                                    or f"{ana.get('cognome', '') or ''} {ana.get('nome', '') or ''}".strip())
     return piramide
 
 
@@ -7386,11 +7447,23 @@ async def update_piramide_v2(aid: str, body: dict, user=Depends(current_user)):
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
     await _ensure_analisi(aid)
+    eredi = []
+    for e in body.get("eredi_legittimi") or []:
+        if isinstance(e, str):
+            s = e.strip()
+        elif isinstance(e, dict):
+            s = str(e.get("nome") or "").strip()
+        else:
+            s = str(e or "").strip()
+        if s:
+            eredi.append(s)
     upd = {"piramide_v2": {
         "dati_reddito": body.get("dati_reddito") or {},
         "testamento": bool(body.get("testamento")),
-        "eredi_legittimi": body.get("eredi_legittimi") or [],
+        "eredi_legittimi": eredi,
         "override_voci": body.get("override_voci") or {},
+        "stato_voci": body.get("stato_voci") or {},
+        "voci_custom": body.get("voci_custom") or {},
     }, "updated_at": _now_iso()}
     await db.analisi_cliente.update_one(
         {"anagrafica_id": aid}, {"$set": upd}, upsert=True,
@@ -11853,6 +11926,12 @@ api.include_router(_import_pol_router.router)
 api.include_router(_import_sin_router.router)
 api.include_router(_cloud_router.router)
 api.include_router(_copilot_router.router)
+
+from routes import biblioteca_previdenza as _bibl_prev_router
+api.include_router(_bibl_prev_router.router)
+
+from routes import app_cliente as _app_cliente_router
+api.include_router(_app_cliente_router.router)
 
 app.include_router(api)
 

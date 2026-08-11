@@ -9,6 +9,7 @@ import {
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
+    Smartphone,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -55,11 +56,13 @@ const ALL_MENU_ITEMS = [
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
+    { id: "biblioteca_previdenza", path: "/biblioteca-previdenza", icon: "Library", label: "Biblioteca Previdenza", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rubrica_compagnie", path: "/rubrica-compagnie", icon: "BookUser", label: "Rubrica compagnie", section: "amministrazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "agenzie", path: "/agenzie", icon: "Building2", label: "Agenzie (partner)", section: "amministrazione", roles: ["admin"] },
     { id: "setup_iniziale", path: "/setup-iniziale", icon: "Banknote", label: "Setup iniziale", section: "amministrazione", roles: ["admin"] },
     { id: "scambio_dati", path: "/scambio-dati", icon: "ArrowRightLeft", label: "Scambio dati agenzie", section: "amministrazione", roles: ["admin"] },
     { id: "librerie", path: "/librerie", icon: "Library", label: "Librerie", section: "amministrazione", roles: ["admin", "collaboratore"] },
+    { id: "app_cliente", path: "/app-cliente", icon: "Smartphone", label: "App Cliente", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "impostazioni_firme", path: "/impostazioni/firme", icon: "PenLine", label: "Firma Elettronica", section: "amministrazione", roles: ["admin"] },
     { id: "whatsapp", path: "/whatsapp", icon: "MessageCircle", label: "WhatsApp Agenzie", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "importazioni", path: "/importazioni", icon: "Upload", label: "Importazioni Flussi", section: "amministrazione", roles: ["admin", "collaboratore"] },
@@ -70,7 +73,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone,
 };
 
 const SECTION_LABELS = {

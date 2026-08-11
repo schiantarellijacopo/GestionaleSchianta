@@ -124,9 +124,12 @@ async def get_agenzia_info(cliente=Depends(current_cliente)):
     """Info dell'agenzia da mostrare nel Portale (logo + contatti + branding)."""
     from server import db
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    logo = az.get("logo_url")
+    if az.get("logo_storage_path") or (logo or "").startswith("/api/storage/"):
+        logo = "/api/portale/public/logo"
     return {
         "ragione_sociale": az.get("ragione_sociale") or "La tua agenzia",
-        "logo_url": az.get("logo_url"),
+        "logo_url": logo,
         "telefono": az.get("telefono"),
         "email": az.get("email"),
         "pec": az.get("pec"),
@@ -136,6 +139,10 @@ async def get_agenzia_info(cliente=Depends(current_cliente)):
         "cap": az.get("cap"),
         "sito_web": az.get("sito_web"),
         "rui": az.get("rui"),
+        "slogan": az.get("slogan_portale"),
+        "orari": az.get("portale_orari") or [],
+        "team": az.get("portale_team") or [],
+        "assistenza_compagnie": az.get("assistenza_compagnie") or [],
     }
 
 
@@ -646,6 +653,10 @@ async def portale_piramide_protezione(cliente=Depends(current_cliente)):
         "testamento": piramide.get("testamento", False),
         "eredi_legittimi": piramide.get("eredi_legittimi") or [],
         "override_voci": piramide.get("override_voci") or {},
+        "stato_voci": piramide.get("stato_voci") or {},
+        "voci_custom": piramide.get("voci_custom") or {},
+        "cliente_nome": (cliente.get("ragione_sociale") or cliente.get("cognome_nome")
+                         or f"{cliente.get('cognome', '') or ''} {cliente.get('nome', '') or ''}".strip()),
     }
 
 
@@ -953,3 +964,173 @@ async def list_servizi(cliente=Depends(current_cliente)):
              "url": "https://wa.me/393334455667", "categoria": "contatto"},
         ]
     return items
+
+
+# ============================================================
+# ASSET PUBBLICI DEL PORTALE (logo + video motivazionale)
+# ============================================================
+@router.get("/public/logo")
+async def portale_public_logo():
+    """Serve il logo dell'agenzia senza autenticazione (usato da <img> nel portale)."""
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "logo_storage_path": 1, "logo_url": 1}) or {}
+    path = az.get("logo_storage_path")
+    if not path and (az.get("logo_url") or "").startswith("/api/storage/"):
+        path = az["logo_url"][len("/api/storage/"):]
+    if not path:
+        raise HTTPException(404, "Logo non configurato")
+    try:
+        data, ctype = obj_storage.get_object(path)
+    except Exception:
+        raise HTTPException(404, "Logo non trovato")
+    return StreamingResponse(io.BytesIO(data), media_type=ctype or "image/png",
+                             headers={"Cache-Control": "public, max-age=3600"})
+
+
+@router.get("/public/video-analisi")
+async def portale_public_video_analisi():
+    """Serve il video motivazionale caricato dall'agenzia (senza auth, per <video>)."""
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "video_analisi_storage_path": 1}) or {}
+    path = az.get("video_analisi_storage_path")
+    if not path:
+        raise HTTPException(404, "Video non configurato")
+    try:
+        data, ctype = obj_storage.get_object(path)
+    except Exception:
+        raise HTTPException(404, "Video non trovato")
+    return StreamingResponse(io.BytesIO(data), media_type=ctype or "video/mp4",
+                             headers={"Accept-Ranges": "bytes"})
+
+
+# ============================================================
+# CTA ANALISI PERSONALIZZATA — video + upload estratto INPS
+# ============================================================
+@router.get("/analisi-personalizzata")
+async def portale_analisi_personalizzata(cliente=Depends(current_cliente)):
+    """Config CTA: video motivazionale + estratti INPS già inviati dal cliente."""
+    from server import db
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "video_analisi_url": 1, "video_analisi_storage_path": 1}) or {}
+    ac = await db.analisi_cliente.find_one(
+        {"anagrafica_id": cliente["id"]}, {"_id": 0, "estratti_conto_inps": 1}) or {}
+    estratti = [
+        {"id": e.get("id"), "nome_file": e.get("nome_file"),
+         "data_caricamento": e.get("data_caricamento"),
+         "anno_riferimento": e.get("anno_riferimento")}
+        for e in (ac.get("estratti_conto_inps") or [])
+        if e.get("fonte") == "portale_cliente"
+    ]
+    return {
+        "video_url": az.get("video_analisi_url"),
+        "video_file": bool(az.get("video_analisi_storage_path")),
+        "estratti": estratti,
+    }
+
+
+@router.post("/analisi-personalizzata/upload-inps")
+async def portale_upload_estratto_inps(
+    file: UploadFile = File(...),
+    cliente=Depends(current_cliente),
+):
+    """Il cliente carica il PDF dell'estratto conto contributivo INPS.
+    Il file viene parsato, archiviato nell'analisi cliente (badge 'dal portale')
+    e l'agenzia riceve una notifica nelle Richieste dal Portale."""
+    from server import db, obj_storage, _ensure_analisi, _now_iso, _uid
+    import inps_calculator
+    import io
+
+    contents = await file.read()
+    if len(contents) > 15 * 1024 * 1024:
+        raise HTTPException(413, "File troppo grande (max 15 MB)")
+    fname = (file.filename or "estratto.pdf")
+    if not fname.lower().endswith(".pdf"):
+        raise HTTPException(400, "Carica il PDF dell'estratto conto INPS")
+
+    text = ""
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(contents)) as pdf:
+            text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    except Exception:
+        text = ""
+    parsed = inps_calculator.parse_estratto_conto_inps(text) if text.strip() else {}
+
+    storage_path = (f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/"
+                    f"{cliente['id']}/estratti_inps/{uuid.uuid4()}.pdf")
+    file_url = None
+    try:
+        res = obj_storage.put_object(storage_path, contents, "application/pdf")
+        file_url = f"/api/storage/{res['path']}"
+        storage_path = res["path"]
+    except Exception:
+        storage_path = None
+
+    anno_rif = None
+    if parsed.get("storico_redditi"):
+        anno_rif = max((r["anno"] for r in parsed["storico_redditi"]), default=None)
+
+    cliente_nome = (cliente.get("ragione_sociale") or cliente.get("cognome_nome")
+                    or f"{cliente.get('cognome', '')} {cliente.get('nome', '')}".strip())
+
+    ac = await _ensure_analisi(cliente["id"])
+    estratto_entry = {
+        "id": _uid(),
+        "url": file_url,
+        "storage_path": storage_path,
+        "nome_file": fname,
+        "mime": "application/pdf",
+        "size_kb": round(len(contents) / 1024, 1),
+        "data_caricamento": _now_iso(),
+        "anno_riferimento": anno_rif,
+        "totale_settimane": parsed.get("settimane_contributive", 0),
+        "totale_versato": parsed.get("totale_versato", 0),
+        "totale_retribuzioni": parsed.get("totale_retribuzioni", 0),
+        "montante_stimato": parsed.get("montante_stimato", 0),
+        "anni_stimati": parsed.get("anni_stimati", 0),
+        "fonte": "portale_cliente",
+        "caricato_da_nome": cliente_nome,
+    }
+    update = {"updated_at": _now_iso(),
+              "estratti_conto_inps": list(ac.get("estratti_conto_inps") or []) + [estratto_entry]}
+
+    # Merge non distruttivo di storico redditi / periodi contributivi
+    existing_storico = {(r.get("anno"), r.get("cassa", "")): r for r in (ac.get("storico_redditi") or [])}
+    for nuovo in parsed.get("storico_redditi") or []:
+        existing_storico[(nuovo["anno"], nuovo.get("cassa", ""))] = nuovo
+    if existing_storico:
+        update["storico_redditi"] = list(existing_storico.values())
+    existing_periodi = {(p.get("inizio_periodo"), p.get("fondo")): p
+                        for p in (ac.get("periodi_contributivi") or [])}
+    for nuovo in parsed.get("periodi_contributivi") or []:
+        existing_periodi[(nuovo["inizio_periodo"], nuovo["fondo"])] = nuovo
+    if existing_periodi:
+        update["periodi_contributivi"] = list(existing_periodi.values())
+
+    await db.analisi_cliente.update_one({"anagrafica_id": cliente["id"]}, {"$set": update})
+
+    # Notifica all'agenzia (widget "Richieste dal Portale Cliente")
+    await db.richieste_cliente.insert_one({
+        "id": str(uuid.uuid4()),
+        "tipo": "upload_estratto_inps",
+        "cliente_id": cliente["id"],
+        "cliente_nome": cliente_nome,
+        "dettaglio": f"Estratto conto INPS caricato dal portale: {fname}",
+        "stato": "da_verificare",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "ok": True,
+        "estratto_id": estratto_entry["id"],
+        "parsed": {
+            "settimane_contributive": parsed.get("settimane_contributive", 0),
+            "anni_stimati": parsed.get("anni_stimati", 0),
+        },
+    }

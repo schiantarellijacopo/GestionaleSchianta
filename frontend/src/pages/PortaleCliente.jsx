@@ -15,7 +15,7 @@ import {
     User, FileText, Wallet, FolderOpen, AlertCircle, Phone,
     Menu, X, LogOut, Upload, Download, ChevronRight, Building2, Car, MessageSquare, Send, Paperclip,
     Shield, ShieldCheck, Heart, Home, Clock, CheckCircle2,
-    Briefcase, PiggyBank, Scale, TrendingUp, XCircle,
+    Briefcase, PiggyBank, Scale, TrendingUp, XCircle, Users,
 } from "lucide-react";
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
@@ -160,7 +160,7 @@ export default function PortaleCliente() {
                 {/* Content */}
                 <main className="flex-1 p-4 sm:p-6 lg:p-10 max-w-6xl mx-auto w-full">
                     {sezione === "profilo" && <ProfiloView cliente={cliente} onReload={() => clientApi.get("/me").then((r) => setCliente(r.data))} />}
-                    {sezione === "piramide" && <PiramideView />}
+                    {sezione === "piramide" && <PiramideView cliente={cliente} />}
                     {sezione === "polizze" && <PolizzeView />}
                     {sezione === "titoli" && <TitoliView />}
                     {sezione === "documenti" && <DocumentiView />}
@@ -292,7 +292,7 @@ function SectionHeader({ icon: Icon, title, subtitle, gradient = "from-sky-500 t
 }
 
 // ─── PIRAMIDE COPERTURE ────────────────────────────────────────────────
-function PiramideView() {
+function PiramideView({ cliente }) {
     const [data, setData] = useState(null);
     const [agenzia, setAgenzia] = useState({});
 
@@ -316,6 +316,12 @@ function PiramideView() {
         return <div className="p-8 text-center text-slate-500">Caricamento piramide...</div>;
     }
 
+    const logoSrc = agenzia.logo_url
+        ? (agenzia.logo_url.startsWith("http") || agenzia.logo_url.startsWith("data:")
+            ? agenzia.logo_url
+            : `${BACKEND}${agenzia.logo_url}`)
+        : null;
+
     return (
         <div className="space-y-4">
             <div className="bg-gradient-to-r from-fuchsia-500 to-pink-600 text-white rounded-xl p-4 md:p-5 shadow-lg">
@@ -333,11 +339,128 @@ function PiramideView() {
                 testamento={data.testamento}
                 eredi_legittimi={data.eredi_legittimi}
                 override_voci={data.override_voci}
+                stato_voci={data.stato_voci}
+                voci_custom={data.voci_custom}
+                clienteNome={data.cliente_nome || cliente?.nome}
                 onSave={null /* read-only per il cliente */}
                 onRichiediPreventivo={richiediPreventivo}
-                agenziaName={agenzia.nome || "La tua Agenzia"}
-                agenziaLogo={agenzia.logo_url}
+                agenziaName={agenzia.ragione_sociale || "La tua Agenzia"}
+                agenziaLogo={logoSrc}
             />
+            <AnalisiPersonalizzataCTA />
+        </div>
+    );
+}
+
+// ─── CTA ANALISI PERSONALIZZATA (upload INPS + video) ─────────────────
+function ytEmbedUrl(url) {
+    const m = (url || "").match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{6,})/);
+    return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
+
+function AnalisiPersonalizzataCTA() {
+    const [info, setInfo] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const fileRef = useRef(null);
+
+    const load = () => clientApi.get("/analisi-personalizzata")
+        .then((r) => setInfo(r.data)).catch(() => setInfo({}));
+    useEffect(() => { load(); }, []);
+
+    const handleUpload = async (e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        if (!f.name.toLowerCase().endsWith(".pdf")) {
+            toast.error("Carica il PDF dell'estratto conto INPS");
+            return;
+        }
+        const fd = new FormData();
+        fd.append("file", f);
+        setUploading(true);
+        try {
+            await clientApi.post("/analisi-personalizzata/upload-inps", fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Estratto conto inviato! Il tuo consulente lo analizzerà e ti contatterà.");
+            load();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore durante il caricamento");
+        } finally {
+            setUploading(false);
+            if (fileRef.current) fileRef.current.value = "";
+        }
+    };
+
+    if (!info) return null;
+    const yt = ytEmbedUrl(info.video_url);
+    const hasVideo = !!(info.video_url || info.video_file);
+
+    return (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="cta-analisi-personalizzata">
+            <div className="bg-gradient-to-r from-amber-400 to-orange-500 px-5 py-4 text-white">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                    <TrendingUp size={20} /> Vuoi un&apos;Analisi Personalizzata gratuita?
+                </h3>
+                <p className="text-sm text-white/90 mt-0.5">
+                    Carica il tuo estratto conto contributivo INPS: il tuo consulente calcolerà quanto sei
+                    davvero protetto in caso di invalidità, inabilità o premorienza.
+                </p>
+            </div>
+            <div className={`grid grid-cols-1 ${hasVideo ? "md:grid-cols-2" : ""} gap-5 p-5`}>
+                {hasVideo && (
+                    <div>
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                            Guarda perché è importante
+                        </div>
+                        {yt ? (
+                            <div className="aspect-video rounded-xl overflow-hidden border border-slate-200 shadow">
+                                <iframe title="Video analisi personalizzata" src={yt}
+                                        className="w-full h-full" frameBorder="0"
+                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                        allowFullScreen data-testid="cta-video-youtube" />
+                            </div>
+                        ) : (
+                            <video controls
+                                   className="w-full rounded-xl border border-slate-200 shadow aspect-video bg-black"
+                                   src={info.video_file ? `${API}/public/video-analisi` : info.video_url}
+                                   data-testid="cta-video-player" />
+                        )}
+                    </div>
+                )}
+                <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                        Estratto Conto Contributivo INPS
+                    </div>
+                    <div className="border-2 border-dashed border-sky-300 bg-sky-50/50 rounded-xl p-5 text-center">
+                        <FileText className="mx-auto text-sky-500 mb-2" size={30} />
+                        <p className="text-sm text-slate-600 mb-3">
+                            Scaricalo dal sito INPS (&laquo;Estratto conto contributivo&raquo;) e caricalo qui in PDF.
+                        </p>
+                        <input ref={fileRef} type="file" accept=".pdf,application/pdf" className="hidden"
+                               onChange={handleUpload} data-testid="cta-inps-file-input" />
+                        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+                                className="bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow disabled:opacity-60"
+                                data-testid="cta-inps-upload-btn">
+                            <Upload size={14} className="inline mr-1.5 -mt-0.5" />
+                            {uploading ? "Caricamento..." : "Carica il PDF INPS"}
+                        </button>
+                    </div>
+                    {(info.estratti || []).length > 0 && (
+                        <div className="mt-3 space-y-1.5" data-testid="cta-estratti-inviati">
+                            <div className="text-xs font-semibold text-slate-500">Documenti già inviati:</div>
+                            {info.estratti.map((e) => (
+                                <div key={e.id}
+                                     className="flex items-center gap-2 text-xs text-slate-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+                                    <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
+                                    <span className="truncate flex-1">{e.nome_file}</span>
+                                    <span className="text-slate-400 flex-shrink-0">
+                                        {e.data_caricamento ? new Date(e.data_caricamento).toLocaleDateString("it-IT") : ""}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
@@ -1183,7 +1306,13 @@ function ServiziView({ agenzia }) {
                     <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/10" />
                     <div className="relative">
                         <div className="text-[11px] uppercase tracking-wider text-white/80 mb-1">La tua agenzia</div>
-                        <div className="text-xl font-bold mb-3">{agenzia.ragione_sociale}</div>
+                        <div className="text-xl font-bold mb-1">{agenzia.ragione_sociale}</div>
+                        {agenzia.slogan && (
+                            <div className="text-sm text-white/85 italic mb-3" data-testid="agenzia-slogan">
+                                {agenzia.slogan}
+                            </div>
+                        )}
+                        {!agenzia.slogan && <div className="mb-2" />}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                             {agenzia.telefono && (
                                 <a href={`tel:${agenzia.telefono}`} className="flex items-center gap-2 hover:underline">
@@ -1210,7 +1339,7 @@ function ServiziView({ agenzia }) {
             {srv.length > 0 && (
                 <>
                     <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">Link utili</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                         {srv.map((s, i) => (
                             <a key={i} href={s.url} target="_blank" rel="noreferrer"
                                className="bg-white hover:bg-sky-50 rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-3 transition hover:shadow-md">
@@ -1226,6 +1355,74 @@ function ServiziView({ agenzia }) {
                         ))}
                     </div>
                 </>
+            )}
+
+            {/* Orari di apertura */}
+            {(agenzia?.orari || []).length > 0 && (
+                <div className="mb-6" data-testid="servizi-orari">
+                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <Clock size={14} /> Orari di apertura
+                    </h3>
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-100 divide-y divide-slate-50">
+                        {agenzia.orari.map((o, i) => (
+                            <div key={i} className="flex items-center justify-between px-4 py-3 text-sm">
+                                <span className="font-medium text-slate-700">{o.giorni}</span>
+                                <span className="text-slate-500">{o.orario}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Team */}
+            {(agenzia?.team || []).length > 0 && (
+                <div className="mb-6" data-testid="servizi-team">
+                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <Users size={14} /> Il nostro team
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {agenzia.team.map((m, i) => (
+                            <div key={i} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-3">
+                                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center font-bold text-sm">
+                                    {(m.nome || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-slate-800">{m.nome}</div>
+                                    {m.ruolo && <div className="text-xs text-slate-500">{m.ruolo}</div>}
+                                    <div className="flex gap-3 mt-0.5 text-xs">
+                                        {m.telefono && <a href={`tel:${m.telefono}`} className="text-sky-600 hover:underline">{m.telefono}</a>}
+                                        {m.email && <a href={`mailto:${m.email}`} className="text-sky-600 hover:underline truncate">{m.email}</a>}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Numeri assistenza per compagnia */}
+            {(agenzia?.assistenza_compagnie || []).length > 0 && (
+                <div className="mb-6" data-testid="servizi-assistenza-compagnie">
+                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <Phone size={14} /> Numeri assistenza per compagnia
+                    </h3>
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-100 divide-y divide-slate-50">
+                        {agenzia.assistenza_compagnie.map((a, i) => (
+                            <div key={i} className="flex items-center gap-3 px-4 py-3">
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-slate-800 text-sm">{a.compagnia}</div>
+                                    {a.note && <div className="text-xs text-slate-500">{a.note}</div>}
+                                </div>
+                                {a.numero && (
+                                    <a href={`tel:${a.numero.replace(/\s/g, "")}`}
+                                       className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-3 py-1.5 text-sm font-semibold hover:bg-emerald-100 transition">
+                                        <Phone size={13} /> {a.numero}
+                                    </a>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
             )}
         </div>
     );

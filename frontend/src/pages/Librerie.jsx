@@ -1408,11 +1408,35 @@ function AziendaSezione() {
     const [f, setF] = useState(null);
     const [logoFile, setLogoFile] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [videoUploading, setVideoUploading] = useState(false);
     const load = () => api.get("/librerie/azienda").then((r) => setF(r.data));
     useEffect(() => { load(); }, []);
 
     if (!f) return <Loading />;
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const uploadVideo = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 80 * 1024 * 1024) { toast.error("Video troppo grande (max 80 MB)"); e.target.value = ""; return; }
+        const fd = new FormData();
+        fd.append("file", file);
+        setVideoUploading(true);
+        try {
+            await api.post("/librerie/azienda/video-analisi", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Video caricato — visibile ai clienti nel portale");
+            load();
+        } catch (err) { toast.error(errMsg(err, "Errore upload video")); }
+        finally { setVideoUploading(false); e.target.value = ""; }
+    };
+
+    const rimuoviVideo = async () => {
+        try {
+            await api.delete("/librerie/azienda/video-analisi");
+            toast.success("Video rimosso");
+            load();
+        } catch (err) { toast.error(errMsg(err, "Errore")); }
+    };
 
     const salva = async () => {
         setSaving(true);
@@ -1470,6 +1494,41 @@ function AziendaSezione() {
                         <label htmlFor="logo-upload" className="cursor-pointer mt-3 inline-flex items-center gap-1 text-xs text-sky-700 hover:underline">
                             <Upload size={12} /> Scegli logo (PNG/JPG, max 5MB)
                         </label>
+                    </div>
+
+                    <div className="mt-5">
+                        <Label>Video &quot;Analisi Personalizzata&quot; (Portale Cliente)</Label>
+                        <div className="mt-2 border border-dashed border-slate-300 rounded-md p-3 bg-slate-50 text-xs space-y-2" data-testid="video-analisi-panel">
+                            {f.video_analisi_filename ? (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-emerald-700 font-medium truncate">🎬 {f.video_analisi_filename}</span>
+                                    <button onClick={rimuoviVideo} className="text-rose-600 hover:underline flex-shrink-0" data-testid="video-analisi-rimuovi">Rimuovi</button>
+                                </div>
+                            ) : f.video_analisi_url ? (
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-emerald-700 truncate">🔗 {f.video_analisi_url}</span>
+                                    <button onClick={rimuoviVideo} className="text-rose-600 hover:underline flex-shrink-0" data-testid="video-analisi-rimuovi">Rimuovi</button>
+                                </div>
+                            ) : (
+                                <div className="text-slate-500">Nessun video configurato</div>
+                            )}
+                            <Input
+                                placeholder="URL YouTube o link video…"
+                                value={f.video_analisi_url || ""}
+                                onChange={(e) => set("video_analisi_url", e.target.value)}
+                                data-testid="video-analisi-url-input"
+                            />
+                            <div className="text-slate-400 text-center">— oppure —</div>
+                            <input type="file" accept="video/*" id="video-analisi-upload" className="hidden"
+                                   onChange={uploadVideo} data-testid="video-analisi-file-input" />
+                            <label htmlFor="video-analisi-upload" className="cursor-pointer inline-flex items-center gap-1 text-sky-700 hover:underline">
+                                <Upload size={12} /> {videoUploading ? "Caricamento…" : "Carica file MP4 (max 80MB)"}
+                            </label>
+                            <div className="text-slate-400">
+                                Mostrato ai clienti nella sezione &quot;La mia protezione&quot; del portale,
+                                accanto all&apos;upload dell&apos;estratto conto INPS. L&apos;URL si salva con il pulsante &quot;Salva&quot;.
+                            </div>
+                        </div>
                     </div>
                 </div>
 

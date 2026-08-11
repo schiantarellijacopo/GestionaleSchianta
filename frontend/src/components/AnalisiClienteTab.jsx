@@ -22,6 +22,7 @@ import {
 import {
     Wallet, Home, Target, Calculator, Briefcase, Shield, Scale,
     FileText, Save, Plus, Trash2, TrendingDown, TrendingUp, Upload,
+    Sparkles, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Loading } from "@/components/Shared";
@@ -292,6 +293,23 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id }) {
             <Card className="p-5 border-slate-200">
                 <SectionHeader title="Veicoli" icon={<Briefcase size={16} />} count={ac.veicoli?.length || 0}
                     onAdd={canEdit ? () => addItem("veicoli", { tipo: "auto", valore_commerciale: 0 }) : null} />
+                {canEdit && (
+                    <div className="mb-2">
+                        <Button size="sm" variant="outline" className="text-xs h-7"
+                                data-testid="veicoli-auto-popola-btn"
+                                onClick={async () => {
+                                    try {
+                                        const r = await api.post(`/anagrafiche/${anagrafica_id}/analisi/veicoli/auto-popola`);
+                                        set("veicoli", r.data.veicoli);
+                                        toast.success(r.data.aggiunti > 0
+                                            ? `${r.data.aggiunti} veicoli aggiunti dalle polizze auto (targa + valore)`
+                                            : "Nessun nuovo veicolo trovato nelle polizze attive");
+                                    } catch (e) { toast.error("Errore: " + (e.response?.data?.detail || e.message)); }
+                                }}>
+                            <TrendingUp size={12} className="mr-1" /> Auto-popola da polizze auto
+                        </Button>
+                    </div>
+                )}
                 {(ac.veicoli || []).map((v, i) => (
                     <VeicoloRow key={i} item={v} canEdit={canEdit}
                         onChange={(patch) => updateItem("veicoli", i, patch)}
@@ -588,6 +606,9 @@ function PensioneInpsTab({ ac, set, canEdit, anagrafica_id, ana, onReload, reloa
 
             {/* Archivio estratti INPS */}
             <ArchivioEstrattiInps anagrafica_id={anagrafica_id} ac={ac} canEdit={canEdit} onUpdate={async () => { await reloadAc?.(); onReload?.(); calcola(); }} />
+
+            {/* Consulto AI su Biblioteca Previdenza */}
+            <ConsulenzaPrevidenzaAI anagrafica_id={anagrafica_id} />
 
             {/* Carriera contributiva (periodi) */}
             <Card className="p-5 border-slate-200">
@@ -1125,6 +1146,12 @@ function ArchivioEstrattiInps({ anagrafica_id, ac, canEdit, onUpdate }) {
                                         </a>
                                     ) : (e.nome_file || "—")}
                                     <span className="text-[10px] text-slate-400 ml-2">{e.size_kb} KB</span>
+                                    {e.fonte === "portale_cliente" && (
+                                        <span className="ml-2 text-[9px] bg-violet-100 text-violet-700 border border-violet-300 rounded px-1 py-[1px] font-semibold uppercase"
+                                              data-testid={`inps-badge-portale-${e.id}`}>
+                                            dal portale
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="text-xs text-slate-500">
                                     {e.data_caricamento ? new Date(e.data_caricamento).toLocaleDateString("it-IT") : "—"}
@@ -1482,6 +1509,9 @@ function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
                 testamento={data.testamento}
                 eredi_legittimi={data.eredi_legittimi}
                 override_voci={data.override_voci}
+                stato_voci={data.stato_voci}
+                voci_custom={data.voci_custom}
+                clienteNome={data.cliente_nome}
                 onSave={canEdit ? salva : null}
                 agenziaName={agenzia.nome || agenzia.ragione_sociale || "Assicurazioni"}
                 agenziaLogo={agenzia.logo_url}
@@ -1724,3 +1754,67 @@ function PiramideTab({ ac, set, canEdit, anagrafica_id, reloadAc }) {
     );
 }
 
+
+// ============== Consulto AI — Biblioteca Previdenza ==============
+function ConsulenzaPrevidenzaAI({ anagrafica_id }) {
+    const [cartelle, setCartelle] = useState([]);
+    const [cartella, setCartella] = useState("");
+    const [domanda, setDomanda] = useState("Verifica requisiti e regole di calcolo per pensione di invalidità, inabilità e superstiti per questo cliente, con formule e coefficienti applicabili.");
+    const [risposta, setRisposta] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        api.get("/biblioteca-previdenza/cartelle")
+            .then((r) => setCartelle(r.data || []))
+            .catch(() => {});
+    }, []);
+
+    const chiedi = async () => {
+        if (!cartella) { toast.error("Scegli la categoria del lavoratore (cartella)"); return; }
+        setLoading(true); setRisposta(null);
+        try {
+            const r = await api.post("/biblioteca-previdenza/consulta-ai", { cartella, domanda, anagrafica_id });
+            setRisposta(r.data);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || e.message);
+        } finally { setLoading(false); }
+    };
+
+    return (
+        <Card className="p-5 border-violet-200 bg-violet-50/40" data-testid="consulenza-previdenza-ai">
+            <div className="text-sm font-semibold text-violet-900 mb-2 flex items-center gap-2">
+                <Sparkles size={15} /> Consulto AI · Biblioteca Previdenza
+                <span className="text-[10px] font-normal text-violet-600">(usa i PDF PASS PREVIDENZA della categoria scelta + i dati del cliente)</span>
+            </div>
+            <div className="flex flex-col md:flex-row gap-2">
+                <Select value={cartella} onValueChange={setCartella}>
+                    <SelectTrigger className="w-full md:w-60 h-9 text-xs bg-white" data-testid="previdenza-ai-cartella">
+                        <SelectValue placeholder="Categoria lavoratore..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {cartelle.map((c) => (
+                            <SelectItem key={c.nome} value={c.nome}>{c.nome} ({c.documenti})</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <Textarea value={domanda} onChange={(e) => setDomanda(e.target.value)}
+                          className="flex-1 text-xs bg-white min-h-[38px]" rows={2}
+                          data-testid="previdenza-ai-domanda" />
+                <Button onClick={chiedi} disabled={loading} className="bg-violet-700 hover:bg-violet-800"
+                        data-testid="previdenza-ai-btn">
+                    {loading ? <Loader2 size={14} className="animate-spin mr-1" /> : <Sparkles size={14} className="mr-1" />}
+                    Chiedi
+                </Button>
+            </div>
+            {risposta && (
+                <div className="mt-2 bg-white border border-violet-200 rounded p-3 text-xs text-slate-800 whitespace-pre-wrap"
+                     data-testid="previdenza-ai-risposta">
+                    {risposta.risposta}
+                    <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500">
+                        Fonti: {(risposta.fonti || []).join(" · ") || "—"}
+                    </div>
+                </div>
+            )}
+        </Card>
+    );
+}

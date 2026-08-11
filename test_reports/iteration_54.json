@@ -1,0 +1,41 @@
+{
+  "summary": "Iterazione 54 - Testing di Piramide V2 (backend+frontend), Portale Cliente (protezione, pallini, CTA analisi personalizzata + upload INPS), Librerie Video Analisi, badge 'dal portale' su estratti INPS, e regressione ANIA. Backend 12/12 test pytest passati. Frontend: portale renderizza piramide triangolare correttamente, pallini cliccabili con toast 'preventivo', upload PDF via CTA funziona, badge viola DAL PORTALE mostrato su 4 estratti nell'archivio CRM. Pannello video-analisi in Librerie presente con URL YouTube demo corretto. Piramide CRM: click pallini cicla verde/giallo/rosso/auto correttamente, SAVE (PUT /piramide-v2) e persistenza dopo reload FUNZIONA con dati puliti — MA emerso bug frontend: se eredi_legittimi contiene oggetti (non stringhe), la Salva Piramide fallisce con 'trim is not a function' nel filter di eredi (PiramidePrivati.jsx:193). Cleanup DB eseguito. Regressione ANIA: GET /import/mappings 200 senza duplicati, POST apply 200, /importazioni si carica senza errori JS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/anagrafiche/{aid}/analisi/piramide-v2", "issue": "Nessuna validazione lato server su eredi_legittimi (accetta lista di oggetti mentre il frontend richiede stringhe → causa crash Salva Piramide). Aggiungere Pydantic model per normalizzare a List[str] o filtrare non-string."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PiramidePrivati.jsx (salva callback)", "issue": "eredi.filter((e)=>(e||'').trim()) crash con 'trim is not a function' se un erede non è stringa. Difensivamente: filter/map su String(e||'').trim(). Blocca il salvataggio Piramide se il DB contiene eredi legacy come oggetti.", "selector": "PiramidePrivati.jsx:193", "priority": "HIGH"},
+      {"component": "PiramidePrivati.jsx eredi input", "issue": "Rendering di un eredi legittimo oggetto mostra '[object Object]' come value nell'input (line 435 circa). Da normalizzare in ingresso.", "selector": "data-testid=eredi-0", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Piramide portale + CRM", "issues": ["data-testid piramide-wrap non presente (task lo menzionava come alternativa a piramide-privati) - solo piramide-privati esiste. Ok, ma allineare doc."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter54_piramide_portale.py",
+    "/app/test_reports/pytest/iter54.xml"
+  ],
+  "action_items": [
+    "Rendere PiramidePrivati.jsx tollerante a eredi_legittimi non-string: usare String(e||'').trim() sia in filter (line 193) sia nel value dell'input eredi (line ~435). Questo previene crash su dati legacy.",
+    "Aggiungere validazione Pydantic al PUT /piramide-v2 per normalizzare eredi_legittimi a List[str] scartando/convertendo oggetti."
+  ],
+  "critical_code_review_comments": [
+    "PiramidePrivati.jsx: gestione difensiva insufficiente su tipi ricevuti dal backend (eredi_legittimi, override_voci). Assumere sempre string per campi user-editable.",
+    "Backend piramide-v2 (server.py ~7396) accetta qualsiasi shape senza modello Pydantic - facile creare stato incoerente lato UI. Aggiungere PiramideV2Payload BaseModel."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter54_piramide_portale.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "90% (piramide/portale/librerie/badge ok; salva piramide funziona solo con dati puliti)"},
+  "test_credentials": "admin@assicura.it / Admin123! ; marco.rossi@demo.it / RSSMRC75H10F205X",
+  "seed_data_creation": "Uploadati 3 PDF di test in db.estratti_inps per Rossi Marco (estratto_test_iter54.pdf x2, upload_test_ui.pdf) via portale. Cleanup piramide-v2 eseguito a fine test (eredi_legittimi=[], stato_voci={}, testamento=false). video_analisi_url ripristinato a demo YouTube. video_file rimane assente (public/video-analisi restituisce 404 come atteso).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Il flusso completo Piramide V2 funziona end-to-end quando eredi_legittimi contiene solo stringhe. Bug HIGH da correggere: PiramidePrivati.jsx crash su eredi non-stringa (linea ~193). Backend tutti gli endpoint testati OK. La persistenza dello stato_voci pallini è verificata (click → save → reload → colore verde persiste). Attenzione: se il main agent modifica il backend e ripulisce il DB, il file estratto_test_iter54.pdf resterà in mongo (non ha creato problemi durante i test). video_analisi_url YouTube demo attivo.",
+  "rca of the issue": "RCA bug 'Salva Piramide fallisce': PiramidePrivati.jsx salva() chiama eredi.filter((e) => (e || '').trim()). Se eredi_legittimi restituito dal backend contiene un oggetto (es. {nome:..., quota:...} inserito da API senza validazione), (e || '') restituisce l'oggetto stesso e .trim() non esiste su Object → TypeError, catchato in try/catch che mostra 'Errore salvataggio: (e || \"\").trim is not a function' via toast e NON invia mai la PUT. Riproduzione: PUT /piramide-v2 con eredi_legittimi=[{nome:'X'}] via curl → GET restituisce quell'oggetto → aprire UI Piramide Soluzioni → click Salva → nessuna PUT emessa, toast errore. Mitigazione: mappare eredi in ingresso (useEffect init) e filter/map con String() cast; oppure Pydantic model backend che scarta non-string. Fix minimo: sostituire filter((e)=>(e||'').trim()) con filter((e)=>typeof e==='string' && e.trim()) — o normalizzare a stringa (es. e?.nome || e || '').toString()."
+}
