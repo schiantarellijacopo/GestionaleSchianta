@@ -2560,6 +2560,37 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     return strip_mongo_id(await db.polizze.find_one({"id": pid}, {"_id": 0}))
 
 
+@api.patch("/polizze/{pid}/garanzie/{idx}")
+async def patch_polizza_garanzia(
+    pid: str, idx: int, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna i campi di una singola garanzia (es. massimale manuale)."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "garanzie": 1})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    garanzie = list(pol.get("garanzie") or [])
+    if idx < 0 or idx >= len(garanzie):
+        raise HTTPException(404, "Garanzia non trovata")
+    ALLOWED = {"massimale", "capitale", "capitale_assicurato", "somma_assicurata",
+               "massimali", "note", "franchigia", "scoperto"}
+    patch = {k: v for k, v in (body or {}).items() if k in ALLOWED and v is not None}
+    if not patch:
+        raise HTTPException(400, "Nessun campo valido da aggiornare")
+    garanzie[idx] = {**garanzie[idx], **patch}
+    upd = {"garanzie": garanzie, "updated_at": _now_iso()}
+    maxi = max((g.get("capitale_assicurato") or g.get("massimale") or 0
+                for g in garanzie if isinstance(g.get("capitale_assicurato") or g.get("massimale"), (int, float))),
+                default=0)
+    if maxi:
+        upd["capitale_assicurato"] = maxi
+    await db.polizze.update_one({"id": pid}, {"$set": upd})
+    await log_attivita(user, "update_garanzia", "polizza", pid,
+                        {"idx": idx, "patch": patch})
+    return {"ok": True, "garanzia": garanzie[idx]}
+
+
+
 @api.delete("/polizze/{pid}")
 async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
     await db.polizze.delete_one({"id": pid})

@@ -350,7 +350,6 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Email", ana.email],
                         ["Telefono", formatPhone(ana.telefono)],
                         ["Cellulare", formatPhone(ana.cellulare)],
-                        ["IBAN", ana.iban],
                         ["Indirizzo", ana.indirizzo],
                         ["Comune", `${ana.comune || ""} ${ana.provincia ? `(${ana.provincia})` : ""}`],
                         ["CAP", ana.cap],
@@ -369,6 +368,31 @@ function DatiTab({ ana, canEdit, onReload }) {
                             <div className="text-sm text-slate-800 num">{v || "—"}</div>
                         </div>
                     ))}
+                    {/* IBAN — editabile inline */}
+                    <InlineEditField
+                        label="IBAN"
+                        value={ana.iban}
+                        canEdit={canEdit}
+                        placeholder="IT60 X054 2811 1010 0000 0123 456"
+                        onSave={async (val) => {
+                            await api.put(`/anagrafiche/${ana.id}`, { ...ana, iban: val });
+                            toast.success("IBAN aggiornato");
+                            onReload && onReload();
+                        }}
+                    />
+                    {/* Preferenze canale comunicazione — editabile inline (checkbox multi) */}
+                    <InlineChannelsField
+                        label="Canale preferito avvisi"
+                        emailEnabled={ana.canale_email !== false}
+                        smsEnabled={ana.canale_sms !== false}
+                        waEnabled={ana.canale_whatsapp !== false}
+                        canEdit={canEdit}
+                        onSave={async (patch) => {
+                            await api.put(`/anagrafiche/${ana.id}`, { ...ana, ...patch });
+                            toast.success("Preferenze aggiornate");
+                            onReload && onReload();
+                        }}
+                    />
                 </div>
                 {ana.note && (
                     <div className="mt-5 pt-4 border-t border-slate-100">
@@ -1729,4 +1753,88 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
             />
         </div>
     );
+
+// ─────────────────────────────────────────────────────────────────────
+// InlineEditField — Campo readonly che al click diventa input; salva onBlur/Enter.
+// ─────────────────────────────────────────────────────────────────────
+function InlineEditField({ label, value, placeholder, canEdit, onSave }) {
+    const [editing, setEditing] = useState(false);
+    const [val, setVal] = useState(value || "");
+    const [saving, setSaving] = useState(false);
+    useEffect(() => { setVal(value || ""); }, [value]);
+    const commit = async () => {
+        setEditing(false);
+        if ((val || "") === (value || "")) return;
+        setSaving(true);
+        try { await onSave(val); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio"); setVal(value || ""); }
+        finally { setSaving(false); }
+    };
+    return (
+        <div className="group">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                {label}
+                {canEdit && !editing && (
+                    <button onClick={() => setEditing(true)}
+                            data-testid={`inline-edit-${label.toLowerCase()}`}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-sky-600 hover:text-sky-800 text-[10px] font-semibold ml-1">
+                        ✏ modifica
+                    </button>
+                )}
+            </div>
+            {editing ? (
+                <input autoFocus value={val} placeholder={placeholder}
+                       onChange={(e) => setVal(e.target.value)}
+                       onBlur={commit}
+                       onKeyDown={(e) => { if (e.key === "Enter") commit();
+                                            if (e.key === "Escape") { setEditing(false); setVal(value || ""); } }}
+                       data-testid={`inline-input-${label.toLowerCase()}`}
+                       className="w-full text-sm border border-sky-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-200" />
+            ) : (
+                <div className="text-sm text-slate-800 num flex items-center gap-1">
+                    {saving ? <span className="text-slate-400 italic">salvataggio…</span>
+                            : (value || <span className="text-slate-300">—</span>)}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// InlineChannelsField — 3 checkbox (Email / SMS / WhatsApp) editabili al volo.
+// ─────────────────────────────────────────────────────────────────────
+function InlineChannelsField({ label, emailEnabled, smsEnabled, waEnabled, canEdit, onSave }) {
+    const [busy, setBusy] = useState(false);
+    const toggle = async (key, current) => {
+        if (!canEdit) return;
+        setBusy(true);
+        try { await onSave({ [key]: !current }); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setBusy(false); }
+    };
+    const Chip = ({ label: l, on, onClick, testid }) => (
+        <button type="button" onClick={onClick} disabled={!canEdit || busy}
+                data-testid={testid}
+                className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border transition-colors ${
+                    on ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                       : "bg-slate-100 text-slate-400 border-slate-200 line-through"
+                } ${canEdit ? "hover:shadow-sm cursor-pointer" : "cursor-default"}`}>
+            {on ? "✓" : "✗"} {l}
+        </button>
+    );
+    return (
+        <div className="col-span-2 md:col-span-3">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{label}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+                <Chip label="Email"    on={emailEnabled} onClick={() => toggle("canale_email", emailEnabled)} testid="canale-email" />
+                <Chip label="SMS"      on={smsEnabled}   onClick={() => toggle("canale_sms", smsEnabled)}    testid="canale-sms" />
+                <Chip label="WhatsApp" on={waEnabled}    onClick={() => toggle("canale_whatsapp", waEnabled)} testid="canale-whatsapp" />
+                <span className="text-[10px] text-slate-400 ml-2">
+                    usati per l&apos;invio massa avvisi
+                </span>
+            </div>
+        </div>
+    );
+}
+
 }

@@ -210,6 +210,7 @@ export default function PolizzaDetail() {
                                 <thead>
                                     <tr>
                                         <th>Garanzia</th>
+                                        <th className="text-right">Massimali / Capitali</th>
                                         <th className="text-right">Netto</th>
                                         <th className="text-right">Accessori</th>
                                         <th className="text-right">Imposte</th>
@@ -220,22 +221,37 @@ export default function PolizzaDetail() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {pol.garanzie.map((g, i) => (
-                                        <tr key={i}>
-                                            <td className="font-medium">{g.garanzia || g.garanzia_originale || g.codice_ania || "—"}</td>
-                                            <td className="num text-right">{fmtEur(g.netto)}</td>
-                                            <td className="num text-right text-slate-600">{fmtEur(g.accessori)}</td>
-                                            <td className="num text-right text-slate-600">{fmtEur(g.imposte)}</td>
-                                            <td className="num text-right text-slate-600">{fmtEur(g.ssn)}</td>
-                                            <td className="num text-right font-semibold">{fmtEur(g.lordo)}</td>
-                                            <td className="num text-right text-slate-600">{fmtEur(g.diritti)}</td>
-                                            <td className="num text-right text-emerald-700">{fmtEur(g.provvigione)}</td>
-                                        </tr>
-                                    ))}
+                                    {pol.garanzie.map((g, i) => {
+                                        // Massimale della singola garanzia (fallback su vari nomi
+                                        // usati dai flussi import ANIA / OMNIA)
+                                        const mx = g.massimale ?? g.capitale ?? g.capitale_assicurato
+                                                    ?? g.somma_assicurata ?? g.massimali;
+                                        return (
+                                            <tr key={i}>
+                                                <td className="font-medium">{g.garanzia || g.garanzia_originale || g.codice_ania || "—"}</td>
+                                                <td className="num text-right text-sky-700 font-medium">
+                                                    <MassimaleCell polizzaId={pol.id} index={i}
+                                                                   current={mx}
+                                                                   canEdit={canEdit}
+                                                                   onSaved={load} />
+                                                </td>
+                                                <td className="num text-right">{fmtEur(g.netto)}</td>
+                                                <td className="num text-right text-slate-600">{fmtEur(g.accessori)}</td>
+                                                <td className="num text-right text-slate-600">{fmtEur(g.imposte)}</td>
+                                                <td className="num text-right text-slate-600">{fmtEur(g.ssn)}</td>
+                                                <td className="num text-right font-semibold">{fmtEur(g.lordo)}</td>
+                                                <td className="num text-right text-slate-600">{fmtEur(g.diritti)}</td>
+                                                <td className="num text-right text-emerald-700">{fmtEur(g.provvigione)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                                 <tfoot>
                                     <tr className="bg-slate-50 font-semibold">
                                         <td>TOTALE</td>
+                                        <td className="num text-right text-sky-700">
+                                            {pol.capitale_assicurato ? fmtEur(pol.capitale_assicurato) : (pol.massimali || "—")}
+                                        </td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.netto || 0), 0))}</td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.accessori || 0), 0))}</td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.imposte || 0), 0))}</td>
@@ -957,3 +973,59 @@ function Grid({ items }) {
         </div>
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// MassimaleCell — Cella editable inline per il massimale della singola
+// garanzia. Se manca il valore mostra "+ Inserisci" cliccabile che
+// diventa input numerico; salva via PATCH /api/polizze/{pid}/garanzie/{i}.
+// ─────────────────────────────────────────────────────────────────────
+function MassimaleCell({ polizzaId, index, current, canEdit, onSaved }) {
+    const [editing, setEditing] = useState(false);
+    const [val, setVal] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    const display = typeof current === "number" && current > 0
+        ? fmtEur(current)
+        : (current && String(current).trim()) ? String(current) : null;
+
+    const start = () => {
+        if (!canEdit) return;
+        setVal(typeof current === "number" ? String(current) : (current || ""));
+        setEditing(true);
+    };
+
+    const commit = async () => {
+        setEditing(false);
+        const num = parseFloat((val || "").replace(",", ".").replace(/[€\s]/g, ""));
+        const patch = { massimale: isNaN(num) ? val : num, capitale_assicurato: isNaN(num) ? undefined : num };
+        setSaving(true);
+        try {
+            await api.patch(`/polizze/${polizzaId}/garanzie/${index}`, patch);
+            toast.success("Massimale salvato");
+            onSaved && onSaved();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio massimale");
+        } finally { setSaving(false); }
+    };
+
+    if (editing) {
+        return (
+            <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+                   onBlur={commit}
+                   onKeyDown={(e) => { if (e.key === "Enter") commit();
+                                        if (e.key === "Escape") setEditing(false); }}
+                   data-testid={`massimale-input-${index}`}
+                   placeholder="es. 500000"
+                   className="w-32 text-sm border border-sky-300 rounded px-2 py-0.5 text-right focus:outline-none focus:ring-2 focus:ring-sky-200" />
+        );
+    }
+    if (saving) return <span className="text-slate-400 italic">salvo…</span>;
+    return (
+        <button onClick={start} disabled={!canEdit}
+                data-testid={`massimale-cell-${index}`}
+                className={`w-full text-right ${display ? "hover:bg-sky-50 rounded px-2 py-0.5" : "text-slate-400 hover:text-sky-600"}`}>
+            {display || (canEdit ? <span className="text-[11px]">+ inserisci</span> : <span className="text-slate-300">—</span>)}
+        </button>
+    );
+}
+
