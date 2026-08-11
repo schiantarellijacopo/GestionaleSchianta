@@ -136,7 +136,7 @@ export default function PolizzaDetail() {
                 <TargaConflictWidget targa={pol.targa} excludeId={pol.id} compact />
             )}
 
-            <Tabs defaultValue="veicolo">
+            <Tabs defaultValue={(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) ? "veicolo" : "garanzie"}>
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     {(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>

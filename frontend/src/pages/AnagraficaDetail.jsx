@@ -1753,6 +1753,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
             />
         </div>
     );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // InlineEditField — Campo readonly che al click diventa input; salva onBlur/Enter.
@@ -1803,6 +1804,19 @@ function InlineEditField({ label, value, placeholder, canEdit, onSave }) {
 // ─────────────────────────────────────────────────────────────────────
 // InlineChannelsField — 3 checkbox (Email / SMS / WhatsApp) editabili al volo.
 // ─────────────────────────────────────────────────────────────────────
+function ChannelChip({ label, on, onClick, disabled, testid }) {
+    return (
+        <button type="button" onClick={onClick} disabled={disabled}
+                data-testid={testid}
+                className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border transition-colors ${
+                    on ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                       : "bg-slate-100 text-slate-400 border-slate-200 line-through"
+                } ${disabled ? "cursor-default" : "hover:shadow-sm cursor-pointer"}`}>
+            {on ? "✓" : "✗"} {label}
+        </button>
+    );
+}
+
 function InlineChannelsField({ label, emailEnabled, smsEnabled, waEnabled, canEdit, onSave }) {
     const [busy, setBusy] = useState(false);
     const toggle = async (key, current) => {
@@ -1812,29 +1826,18 @@ function InlineChannelsField({ label, emailEnabled, smsEnabled, waEnabled, canEd
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setBusy(false); }
     };
-    const Chip = ({ label: l, on, onClick, testid }) => (
-        <button type="button" onClick={onClick} disabled={!canEdit || busy}
-                data-testid={testid}
-                className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border transition-colors ${
-                    on ? "bg-emerald-100 text-emerald-700 border-emerald-300"
-                       : "bg-slate-100 text-slate-400 border-slate-200 line-through"
-                } ${canEdit ? "hover:shadow-sm cursor-pointer" : "cursor-default"}`}>
-            {on ? "✓" : "✗"} {l}
-        </button>
-    );
+    const disabled = !canEdit || busy;
     return (
         <div className="col-span-2 md:col-span-3">
             <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{label}</div>
             <div className="flex flex-wrap items-center gap-1.5">
-                <Chip label="Email"    on={emailEnabled} onClick={() => toggle("canale_email", emailEnabled)} testid="canale-email" />
-                <Chip label="SMS"      on={smsEnabled}   onClick={() => toggle("canale_sms", smsEnabled)}    testid="canale-sms" />
-                <Chip label="WhatsApp" on={waEnabled}    onClick={() => toggle("canale_whatsapp", waEnabled)} testid="canale-whatsapp" />
+                <ChannelChip label="Email"    on={emailEnabled} onClick={() => toggle("canale_email", emailEnabled)} disabled={disabled} testid="canale-email" />
+                <ChannelChip label="SMS"      on={smsEnabled}   onClick={() => toggle("canale_sms", smsEnabled)}    disabled={disabled} testid="canale-sms" />
+                <ChannelChip label="WhatsApp" on={waEnabled}    onClick={() => toggle("canale_whatsapp", waEnabled)} disabled={disabled} testid="canale-whatsapp" />
                 <span className="text-[10px] text-slate-400 ml-2">
                     usati per l&apos;invio massa avvisi
                 </span>
             </div>
         </div>
     );
-}
-
 }
