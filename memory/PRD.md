@@ -1,6 +1,56 @@
 # Programma Assicurativo — PRD (aggiornato 11/02/2026)
 
-## Sessione 11/02/2026 (fork) — PIRAMIDE PRIVATI COMPLETATA ✅
+## Sessione 11/02/2026 (fork) — PIRAMIDE VERA + CTA da sviluppare
+
+### 🎯 Piramide delle Coperture — implementata come vera piramide 3D
+- **Layout definitivo**: SVG polygon triangolo esterno + bande stepped con `width%` decrescente dal basso all'apice
+- Widths: `[100, 92, 82, 72, 62, 52, 40, 22]` con `min-heights` per livelli vuoti
+- Titolo banda + sfondo colorato + voci con input + pallino stato
+- Zone label DX (Investimento/Risparmio/Protezione Patrimonio/Protezione Reddito) come piramide di gradini dentro il container
+- Formato numeri: `1.000.000 €` (toLocaleString it-IT)
+- Header con solo logo agenzia (rimosso cerchio Futuro Senza Sorprese)
+- Legenda 🟢🟡🔴 + Footer Testamento + 4 Eredi legittimi
+- Componente unico riusabile `PiramidePrivati.jsx` (editabile in agenzia + read-only nel portale cliente)
+
+### ✅ Verificato end-to-end
+Screenshot cliente Jacopo: piramide renderizzata perfettamente con 8 livelli, contorno diagonale visibile, tutti i testi leggibili, zone label allineate.
+
+## 🎯 TASK PROSSIMA SESSIONE (richiesti da utente)
+
+### 1. CTA "Analisi Personalizzata" nel portale cliente
+- Sezione dedicata in `PortaleCliente.jsx` (nuovo tab o inline nella piramide)
+- Testo motivazionale: "Vuoi un'analisi personalizzata? Contattaci"
+- **Upload PDF Estratto Conto Contributivo** (INPS) direttamente dall'app cliente
+  - Endpoint POST già esistente in software agenzia (Archivio INPS)
+  - Aggiungere l'accesso client-side + salvare `owner_type=cliente`
+- **Video motivazionale**: 
+  - Nuovo campo `agenzia_config.video_analisi_url` (upload MP4 o URL YouTube)
+  - Player embed nella sezione CTA lato cliente
+  - Pannello agenzia per caricare/aggiornare il video
+
+### 2. Sezione "Estratti INPS caricati dai clienti"
+- Nel software agenzia in `AnalisiClienteTab` → Archivio Estratto Conto INPS
+- Mostrare badge "caricato dal cliente" per PDF caricati via portale
+- Notifica dashboard quando un cliente carica un nuovo estratto
+
+### 3. Toggle Notifiche Piramide Mensili (Impostazioni)
+- Aggiungere in `Impostazioni.jsx` un pannello "Notifiche automatiche clienti"
+- Toggle ON/OFF: "Invia mensilmente al cliente riepilogo copertura"
+- Se ON: cron job mensile invia email con "La tua protezione è al X%" + link portale
+- Salvato in `agenzia_config.notifiche_piramide_attive`
+
+### 4. Piramide Aziende
+- Variante per `Anagrafica.tipo == "persona_giuridica"`
+- 7-8 livelli: RC veicoli/terzi/dipendenti/prodotti/ambientale/amministratori/datoriale → Uomini chiave → Liquidità+TFM → Patrimonio netto
+- Nuovo componente `PiramideAziende.jsx` gemello a `PiramidePrivati.jsx`
+
+### 5. PDF Export Piramide
+- Endpoint `/anagrafiche/{aid}/analisi/piramide-v2/pdf` con weasyprint
+- Layout identico allo screenshot Schiantarelli originale
+- QR code sul PDF che apre il portale cliente sulla piramide interattiva
+- Bottone "Stampa" e "Invia via email" in AnalisiClienteTab
+
+## Sessione 11/02/2026 (fork) — Import fixes + Piramide preparazione
 
 ### 🎯 Piramide delle Coperture (schema Schiantarelli) — implementata pixel-perfect
 - **Componente riusabile** `/app/frontend/src/components/PiramidePrivati.jsx` (~400 righe)

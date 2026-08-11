@@ -76,8 +76,11 @@ const LIVELLI = [
     },
 ];
 
-// Larghezza di ogni banda in % (dal basso al vertice). Base = 100%, apice ≈ 20%.
-const WIDTHS = [100, 90, 78, 66, 56, 46, 34, 22];
+// Larghezza di ogni banda in % (dal basso al vertice). Base = 100%, apice ≈ 18%.
+// Progressione dramática per dare visivamente forma di piramide reale.
+const WIDTHS = [100, 92, 82, 72, 62, 52, 40, 22];
+// Altezza minima in pixel per ogni banda anche se vuota (livelli senza voci)
+const MIN_HEIGHTS = [null, null, null, null, 55, 55, 55, 65];
 
 const STATO_COLORE = {
     adeguato: "bg-emerald-500 border-emerald-700",
@@ -245,19 +248,37 @@ export default function PiramidePrivati({
 
                 {/* PIRAMIDE — colonna centrale grande */}
                 <div className="col-span-12 md:col-span-7">
-                    <div className="flex flex-col-reverse items-center gap-0.5 px-2">
-                        {LIVELLI.map((lvl) => (
-                            <PiramideLivello
-                                key={lvl.idx}
-                                lvl={lvl}
-                                width={WIDTHS[lvl.idx]}
-                                capitaleVoce={capitaleVoce}
-                                statoVoce={statoVoce}
-                                editable={editable}
-                                onChangeOverride={(vid, v) => setOverrides((s) => ({ ...s, [vid]: v }))}
-                                onRichiediPreventivo={onRichiediPreventivo}
+                    <div className="relative">
+                        {/* Outline outer piramide (SVG) — dà l'aspetto di una vera piramide */}
+                        <svg
+                            viewBox="0 0 100 100"
+                            preserveAspectRatio="none"
+                            className="absolute inset-0 w-full h-full pointer-events-none z-10"
+                        >
+                            <polygon
+                                points="50,0 100,100 0,100"
+                                fill="none"
+                                stroke="#1e293b"
+                                strokeWidth="0.4"
+                                vectorEffect="non-scaling-stroke"
                             />
-                        ))}
+                        </svg>
+                        <div className="flex flex-col-reverse items-center gap-0">
+                            {LIVELLI.map((lvl, i) => (
+                                <PiramideLivello
+                                    key={lvl.idx}
+                                    lvl={lvl}
+                                    width={WIDTHS[lvl.idx]}
+                                    widthAbove={WIDTHS[lvl.idx + 1] ?? 0}
+                                    minHeight={MIN_HEIGHTS[lvl.idx]}
+                                    capitaleVoce={capitaleVoce}
+                                    statoVoce={statoVoce}
+                                    editable={editable}
+                                    onChangeOverride={(vid, v) => setOverrides((s) => ({ ...s, [vid]: v }))}
+                                    onRichiediPreventivo={onRichiediPreventivo}
+                                />
+                            ))}
+                        </div>
                     </div>
                 </div>
 
@@ -375,57 +396,63 @@ function ZoneStep({ text, gradient, heightVh, widthPct, textColor = "text-slate-
     );
 }
 
-function PiramideLivello({ lvl, width, capitaleVoce, statoVoce, editable, onChangeOverride, onRichiediPreventivo }) {
-    // La forma della banda usa un trapezoide via clip-path
-    const marginX = (100 - width) / 2;
+function PiramideLivello({ lvl, width, widthAbove, minHeight, capitaleVoce, statoVoce, editable, onChangeOverride, onRichiediPreventivo }) {
+    const isEmptyLevel = lvl.voci.length === 0;
+    // Bande occupano il `width`% del container padre (centrate). Il contorno SVG esterno
+    // dà l'aspetto piramidale complessivo. Per evitare tagli di testo, NON usiamo
+    // clip-path sui singoli livelli — solo max-width con centraggio.
     return (
-        <div className="w-full flex justify-center" style={{ paddingLeft: `${marginX}%`, paddingRight: `${marginX}%` }}>
-            <div className="w-full">
-                {/* Banda del livello con titolo */}
-                <div className={`${lvl.colore_banda} text-white text-[10px] md:text-[11px] font-bold uppercase text-center px-2 py-1 tracking-tight`}
-                     data-testid={`piramide-livello-${lvl.idx}`}>
-                    {lvl.titolo}
-                </div>
-                {/* Voci: se il livello ne ha, mostra input; altrimenti banda vuota */}
-                {lvl.voci.length > 0 && (
-                    <div className="border border-slate-300 bg-white">
-                        {lvl.voci.map((voce) => {
-                            const cap = capitaleVoce(voce.id);
-                            const st = statoVoce(voce.id);
-                            return (
-                                <div key={voce.id} className="flex items-center gap-2 border-b last:border-b-0 border-slate-200 px-2 py-1 text-[10px]">
-                                    <span className="flex-1 uppercase font-medium text-slate-700 text-[9px] md:text-[10px]" title={voce.label}>
-                                        {voce.label}
-                                    </span>
-                                    <input
-                                        type="text"
-                                        value={cap ? fmtEur(cap) : ""}
-                                        disabled={!editable}
-                                        onChange={(e) => {
-                                            const raw = e.target.value.replace(/[^\d]/g, "");
-                                            onChangeOverride(voce.id, raw);
-                                        }}
-                                        placeholder="—"
-                                        className="border border-slate-300 rounded px-1.5 py-0.5 text-[10px] w-20 md:w-24 text-right font-mono"
-                                        data-testid={`piramide-input-${voce.id}`}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => onRichiediPreventivo && st !== "adeguato"
-                                            ? onRichiediPreventivo(voce.id, voce.label)
-                                            : null}
-                                        title={STATO_LABEL[st] + (st !== "adeguato" ? " — click per richiedere preventivo" : "")}
-                                        className={`w-4 h-4 rounded-full border-2 ${STATO_COLORE[st]} flex-shrink-0 ${
-                                            onRichiediPreventivo && st !== "adeguato" ? "cursor-pointer hover:scale-125 transition-transform" : "cursor-default"
-                                        }`}
-                                        data-testid={`piramide-pallino-${voce.id}`}
-                                    />
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
+        <div
+            className="relative"
+            style={{
+                width: `${width}%`,
+                minHeight: minHeight ? `${minHeight}px` : undefined,
+            }}
+            data-testid={`piramide-livello-${lvl.idx}`}
+        >
+            {/* Titolo banda (sempre visibile, sfumatura verso i bordi) */}
+            <div className={`${lvl.colore_banda} text-white text-[10px] md:text-[11px] font-bold uppercase text-center px-2 py-1 tracking-tight`}>
+                {lvl.titolo}
             </div>
+            {/* Voci con input + pallino (fondo bianco) */}
+            {!isEmptyLevel && (
+                <div className="border-x border-b border-slate-300 bg-white">
+                    {lvl.voci.map((voce) => {
+                        const cap = capitaleVoce(voce.id);
+                        const st = statoVoce(voce.id);
+                        return (
+                            <div key={voce.id} className="flex items-center gap-2 border-b last:border-b-0 border-slate-200 px-2 py-1 text-[10px]">
+                                <span className="flex-1 uppercase font-medium text-slate-700 text-[9px] md:text-[10px]" title={voce.label}>
+                                    {voce.label}
+                                </span>
+                                <input
+                                    type="text"
+                                    value={cap ? fmtEur(cap) : ""}
+                                    disabled={!editable}
+                                    onChange={(e) => {
+                                        const raw = e.target.value.replace(/[^\d]/g, "");
+                                        onChangeOverride(voce.id, raw);
+                                    }}
+                                    placeholder="—"
+                                    className="border border-slate-300 rounded px-1.5 py-0.5 text-[10px] w-24 md:w-28 text-right font-mono"
+                                    data-testid={`piramide-input-${voce.id}`}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => onRichiediPreventivo && st !== "adeguato"
+                                        ? onRichiediPreventivo(voce.id, voce.label)
+                                        : null}
+                                    title={STATO_LABEL[st] + (st !== "adeguato" ? " — click per richiedere preventivo" : "")}
+                                    className={`w-4 h-4 rounded-full border-2 ${STATO_COLORE[st]} flex-shrink-0 ${
+                                        onRichiediPreventivo && st !== "adeguato" ? "cursor-pointer hover:scale-125 transition-transform" : "cursor-default"
+                                    }`}
+                                    data-testid={`piramide-pallino-${voce.id}`}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
