@@ -13,6 +13,7 @@
 
 ### 🔴 P0 — Piramide delle Coperture: fix UX + layout stampabile A4
 - **Bug fix**: pulsante "+", input reddito, pallini stato ora funzionano in modalità agenzia (canEdit propagato correttamente).
+- **🐛 BUG CRITICO risolto (fix successivo)**: i cunei laterali (INVESTIMENTO/RISPARMIO/PROTEZIONE), pur avendo `clip-path` che li rende visualmente triangolari, geometricamente sono div rettangolari che coprivano metà destra del triangolo — intercettavano tutti i click a destra (pallini, input, tasto +). Aggiunto `pointer-events: none` ai wedge (decorativi puri). Verificato E2E con Playwright: click + → nuova voce, click pallino → cambia colore, input → scrive.
 - **Layout compatto**: `PYR_W=720` (era 1040), `WEDGE_AREA=105` (era 250), totale 825px stampabile in A4.
 - **Sidebar dati_reddito**: spostata sopra il triangolo in griglia orizzontale 4 colonne (era absolute overlay sinistro, occupava spazio triangolo).
 - **Cunei laterali**: font ridotto a 9px, padding minimizzato.

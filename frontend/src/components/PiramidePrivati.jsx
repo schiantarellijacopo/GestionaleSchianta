@@ -412,7 +412,7 @@ export default function PiramidePrivati({
                                  fill="none" stroke="#1e293b" strokeWidth="2" strokeLinejoin="round" />
                     </svg>
 
-                    {/* Cunei colorati zone a destra */}
+                    {/* Cunei colorati zone a destra — puramente decorativi, non intercettano i click */}
                     {WEDGE_DEFS.map((w) => {
                         const y1 = layout.map[w.from].yTop + (w.from === "crescita" ? 0 : 4);
                         const y2 = layout.map[w.to].yTop + layout.map[w.to].h - 4;
@@ -420,7 +420,7 @@ export default function PiramidePrivati({
                         const dx = xRight(y2) - xRight(y1);
                         return (
                             <div key={w.label}
-                                 className="absolute flex items-center justify-center text-center"
+                                 className="absolute flex items-center justify-center text-center pointer-events-none"
                                  style={{
                                      top: y1, height: y2 - y1,
                                      left, width: TOTAL_W - left,
