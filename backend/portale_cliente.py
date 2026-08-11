@@ -141,9 +141,39 @@ async def get_agenzia_info(cliente=Depends(current_cliente)):
         "rui": az.get("rui"),
         "slogan": az.get("slogan_portale"),
         "orari": az.get("portale_orari") or [],
-        "team": az.get("portale_team") or [],
+        "sedi": az.get("portale_sedi") or [],
+        "team": [
+            {
+                "id": m.get("id"),
+                "nome": m.get("nome"),
+                "ruolo": m.get("ruolo"),
+                "descrizione": m.get("descrizione"),
+                "telefono": m.get("telefono"),
+                "email": m.get("email"),
+                "foto_url": f"/api/portale/public/team-foto/{m.get('id')}" if m.get("foto_path") else None,
+            }
+            for m in (az.get("portale_team") or [])
+        ],
         "assistenza_compagnie": az.get("assistenza_compagnie") or [],
     }
+
+
+@router.get("/me/avatar")
+async def get_me_avatar(cliente=Depends(current_cliente)):
+    """Foto profilo del cliente (se presente in anagrafica)."""
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+    ana = await db.anagrafiche.find_one({"id": cliente["id"]}, {"_id": 0, "avatar_url": 1}) or {}
+    url = ana.get("avatar_url") or ""
+    if not url.startswith("/api/storage/"):
+        raise HTTPException(404, "Avatar non presente")
+    try:
+        data, ctype = obj_storage.get_object(url[len("/api/storage/"):])
+    except Exception:
+        raise HTTPException(404, "Avatar non disponibile")
+    return StreamingResponse(io.BytesIO(data), media_type=ctype or "image/jpeg",
+                             headers={"Cache-Control": "private, max-age=600"})
 
 
 @router.get("/me")
@@ -953,9 +983,6 @@ async def list_servizi(cliente=Depends(current_cliente)):
     # Se non ce ne sono, restituisce servizi di default
     if not items:
         items = [
-            {"nome": "Assistenza Stradale H24", "icona": "life-buoy",
-             "descrizione": "Chiamata gratuita in caso di guasto o incidente",
-             "url": "tel:+39800123456", "categoria": "emergenza"},
             {"nome": "Denuncia Sinistro", "icona": "alert-triangle",
              "descrizione": "Segnala un sinistro in modo rapido",
              "url": "tel:+39800654321", "categoria": "emergenza"},
@@ -964,6 +991,26 @@ async def list_servizi(cliente=Depends(current_cliente)):
              "url": "https://wa.me/393334455667", "categoria": "contatto"},
         ]
     return items
+
+
+@router.get("/public/team-foto/{tid}")
+async def portale_public_team_foto(tid: str):
+    """Serve la foto di un membro del team senza autenticazione (usata dal portale)."""
+    from server import db, obj_storage
+    from fastapi.responses import StreamingResponse
+    import io
+    az = await db.azienda_config.find_one(
+        {"portale_team.id": tid}, {"_id": 0, "portale_team.$": 1}) or {}
+    team = az.get("portale_team") or []
+    path = team[0].get("foto_path") if team else None
+    if not path:
+        raise HTTPException(404, "Foto non trovata")
+    try:
+        data, ctype = obj_storage.get_object(path)
+    except Exception:
+        raise HTTPException(404, "Foto non disponibile")
+    return StreamingResponse(io.BytesIO(data), media_type=ctype or "image/jpeg",
+                             headers={"Cache-Control": "public, max-age=3600"})
 
 
 # ============================================================

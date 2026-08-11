@@ -54,6 +54,16 @@ export default function PortaleCliente() {
         clientApi.get("/agenzia").then((r) => setAgenzia(r.data)).catch(() => {});
     }, [token]);
 
+    const [avatarUrl, setAvatarUrl] = useState(null);
+    useEffect(() => {
+        if (!token || !cliente) { setAvatarUrl(null); return; }
+        let objUrl = null;
+        clientApi.get("/me/avatar", { responseType: "blob" })
+            .then((r) => { objUrl = URL.createObjectURL(r.data); setAvatarUrl(objUrl); })
+            .catch(() => setAvatarUrl(null));
+        return () => { if (objUrl) URL.revokeObjectURL(objUrl); };
+    }, [token, cliente?.id]);
+
     const logout = () => {
         localStorage.removeItem("portale_token");
         setToken(null); setCliente(null);
@@ -99,20 +109,20 @@ export default function PortaleCliente() {
                         <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
                             {agenzia?.ragione_sociale || "Agenzia"}
                         </div>
-                        {agenzia?.telefono && (
-                            <a href={`tel:${agenzia.telefono}`}
-                               className="text-[11px] text-sky-700 hover:underline block mt-0.5">
-                                📞 {agenzia.telefono}
-                            </a>
-                        )}
                     </div>
 
                     {/* Info cliente */}
                     <div className="px-5 py-4 border-b border-slate-100 bg-white">
                         <div className="flex items-center gap-3">
-                            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold text-lg shadow">
-                                {(cliente.nome || "?").charAt(0).toUpperCase()}
-                            </div>
+                            {avatarUrl ? (
+                                <img src={avatarUrl} alt=""
+                                     className="w-11 h-11 rounded-full object-cover shadow border-2 border-white"
+                                     data-testid="sidebar-avatar" />
+                            ) : (
+                                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-blue-600 text-white flex items-center justify-center font-bold text-lg shadow">
+                                    {(cliente.nome || "?").charAt(0).toUpperCase()}
+                                </div>
+                            )}
                             <div className="min-w-0 flex-1">
                                 <div className="text-sm font-bold text-slate-800 truncate">{cliente.nome}</div>
                                 {cliente.email && (
@@ -159,13 +169,14 @@ export default function PortaleCliente() {
 
                 {/* Content */}
                 <main className="flex-1 p-4 sm:p-6 lg:p-10 max-w-6xl mx-auto w-full">
-                    {sezione === "profilo" && <ProfiloView cliente={cliente} onReload={() => clientApi.get("/me").then((r) => setCliente(r.data))} />}
+                    {sezione === "profilo" && <ProfiloView cliente={cliente} avatarUrl={avatarUrl} onReload={() => clientApi.get("/me").then((r) => setCliente(r.data))} />}
                     {sezione === "piramide" && <PiramideView cliente={cliente} />}
                     {sezione === "polizze" && <PolizzeView />}
                     {sezione === "titoli" && <TitoliView />}
                     {sezione === "documenti" && <DocumentiView />}
                     {sezione === "sinistri" && <SinistriView />}
                     {sezione === "chat" && <ChatView />}
+                    {sezione === "team" && <TeamView agenzia={agenzia} />}
                     {sezione === "servizi" && <ServiziView agenzia={agenzia} />}
                 </main>
             </div>
@@ -182,6 +193,7 @@ const SEZIONI_COLORS = {
     documenti: "from-amber-500 to-orange-600",
     sinistri: "from-rose-500 to-red-600",
     chat: "from-cyan-500 to-sky-600",
+    team: "from-teal-500 to-emerald-600",
     servizi: "from-indigo-500 to-blue-600",
 };
 
@@ -276,12 +288,18 @@ function ProfiloField({ label, defaultVal, onChange }) {
 }
 
 // Header di sezione riusabile con icona colorata a gradient
-function SectionHeader({ icon: Icon, title, subtitle, gradient = "from-sky-500 to-blue-600", right }) {
+function SectionHeader({ icon: Icon, title, subtitle, gradient = "from-sky-500 to-blue-600", right, imageUrl }) {
     return (
         <div className="mb-6 flex items-start gap-4">
-            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${gradient} shadow-md flex items-center justify-center shrink-0`}>
-                <Icon className="text-white" size={26} />
-            </div>
+            {imageUrl ? (
+                <img src={imageUrl} alt=""
+                     className="w-14 h-14 rounded-2xl object-cover shadow-md shrink-0 border-2 border-white"
+                     data-testid="section-header-avatar" />
+            ) : (
+                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${gradient} shadow-md flex items-center justify-center shrink-0`}>
+                    <Icon className="text-white" size={26} />
+                </div>
+            )}
             <div className="flex-1 min-w-0">
                 <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 leading-tight">{title}</h2>
                 {subtitle && <div className="text-sm text-slate-500 mt-0.5">{subtitle}</div>}
@@ -482,7 +500,8 @@ function ProfiloView({ cliente }) {
         <div>
             <SectionHeader icon={User} title="Il mio profilo"
                 subtitle="Verifica i tuoi dati e richiedi eventuali modifiche"
-                gradient={SEZIONI_COLORS.profilo} />
+                gradient={SEZIONI_COLORS.profilo}
+                imageUrl={avatarUrl} />
 
             {/* Card 1: Dati identificativi */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5">
@@ -1357,71 +1376,131 @@ function ServiziView({ agenzia }) {
                 </>
             )}
 
-            {/* Orari di apertura */}
+            {/* Orari di apertura — card elegante */}
             {(agenzia?.orari || []).length > 0 && (
                 <div className="mb-6" data-testid="servizi-orari">
-                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Clock size={14} /> Orari di apertura
-                    </h3>
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-100 divide-y divide-slate-50">
-                        {agenzia.orari.map((o, i) => (
-                            <div key={i} className="flex items-center justify-between px-4 py-3 text-sm">
-                                <span className="font-medium text-slate-700">{o.giorni}</span>
-                                <span className="text-slate-500">{o.orario}</span>
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-500 to-blue-600 px-5 py-3.5 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                                <Clock size={18} className="text-white" />
                             </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Team */}
-            {(agenzia?.team || []).length > 0 && (
-                <div className="mb-6" data-testid="servizi-team">
-                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Users size={14} /> Il nostro team
-                    </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {agenzia.team.map((m, i) => (
-                            <div key={i} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-3">
-                                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center font-bold text-sm">
-                                    {(m.nome || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-slate-800">{m.nome}</div>
-                                    {m.ruolo && <div className="text-xs text-slate-500">{m.ruolo}</div>}
-                                    <div className="flex gap-3 mt-0.5 text-xs">
-                                        {m.telefono && <a href={`tel:${m.telefono}`} className="text-sky-600 hover:underline">{m.telefono}</a>}
-                                        {m.email && <a href={`mailto:${m.email}`} className="text-sky-600 hover:underline truncate">{m.email}</a>}
+                            <div>
+                                <div className="text-white font-bold text-sm uppercase tracking-wider">Orari di apertura</div>
+                                <div className="text-white/70 text-[11px]">Quando trovarci in agenzia</div>
+                            </div>
+                        </div>
+                        <div className="divide-y divide-slate-50">
+                            {agenzia.orari.map((o, i) => (
+                                <div key={i} className="flex items-center justify-between px-5 py-3.5 hover:bg-slate-50/60 transition">
+                                    <div className="flex items-center gap-3">
+                                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                        <span className="font-semibold text-slate-800 text-sm">{o.giorni}</span>
                                     </div>
+                                    <span className="bg-slate-100 text-slate-700 rounded-full px-3.5 py-1 text-xs font-semibold tracking-wide">
+                                        {o.orario}
+                                    </span>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* Numeri assistenza per compagnia */}
+            {/* Assistenza Stradale H24 — numeri per compagnia */}
             {(agenzia?.assistenza_compagnie || []).length > 0 && (
                 <div className="mb-6" data-testid="servizi-assistenza-compagnie">
-                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Phone size={14} /> Numeri assistenza per compagnia
-                    </h3>
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-100 divide-y divide-slate-50">
-                        {agenzia.assistenza_compagnie.map((a, i) => (
-                            <div key={i} className="flex items-center gap-3 px-4 py-3">
-                                <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-slate-800 text-sm">{a.compagnia}</div>
-                                    {a.note && <div className="text-xs text-slate-500">{a.note}</div>}
-                                </div>
-                                {a.numero && (
-                                    <a href={`tel:${a.numero.replace(/\s/g, "")}`}
-                                       className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-3 py-1.5 text-sm font-semibold hover:bg-emerald-100 transition">
-                                        <Phone size={13} /> {a.numero}
-                                    </a>
-                                )}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-3.5 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                                <Car size={18} className="text-white" />
                             </div>
-                        ))}
+                            <div>
+                                <div className="text-white font-bold text-sm uppercase tracking-wider">Assistenza Stradale H24</div>
+                                <div className="text-white/70 text-[11px]">Ogni compagnia ha il suo numero dedicato: chiama quello della tua polizza</div>
+                            </div>
+                        </div>
+                        <div className="divide-y divide-slate-50">
+                            {agenzia.assistenza_compagnie.map((a, i) => (
+                                <div key={i} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50/60 transition">
+                                    <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center font-bold text-emerald-700 text-xs">
+                                        {(a.compagnia || "?").slice(0, 2).toUpperCase()}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-semibold text-slate-800 text-sm">{a.compagnia}</div>
+                                        {a.note && <div className="text-xs text-slate-500">{a.note}</div>}
+                                    </div>
+                                    {a.numero && (
+                                        <a href={`tel:${a.numero.replace(/\s/g, "")}`}
+                                           className="flex items-center gap-1.5 bg-emerald-600 text-white rounded-full px-4 py-2 text-sm font-bold hover:bg-emerald-700 shadow-sm transition">
+                                            <Phone size={14} /> {a.numero}
+                                        </a>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
                     </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── IL NOSTRO TEAM — sezione dedicata ─────────────────────
+function TeamView({ agenzia }) {
+    const team = agenzia?.team || [];
+    return (
+        <div data-testid="team-view">
+            <SectionHeader icon={Users} title="Il nostro team"
+                subtitle="Le persone dell'agenzia al tuo servizio"
+                gradient={SEZIONI_COLORS.team} />
+            {team.length === 0 ? (
+                <EmptyState icon={Users} testo="Il team non è ancora stato pubblicato." />
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {team.map((m, i) => (
+                        <div key={m.id || i}
+                             className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition"
+                             data-testid={`team-card-${i}`}>
+                            <div className="h-2 bg-gradient-to-r from-teal-500 to-emerald-600" />
+                            <div className="p-5">
+                                <div className="flex items-center gap-4 mb-3">
+                                    {m.foto_url ? (
+                                        <img src={`${BACKEND}${m.foto_url}`} alt={m.nome}
+                                             className="w-16 h-16 rounded-full object-cover border-2 border-teal-100 shadow-sm" />
+                                    ) : (
+                                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 text-white flex items-center justify-center font-bold text-lg">
+                                            {(m.nome || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className="min-w-0">
+                                        <div className="font-bold text-slate-800">{m.nome}</div>
+                                        {m.ruolo && (
+                                            <span className="inline-block mt-0.5 bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">
+                                                {m.ruolo}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                {m.descrizione && (
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-3">{m.descrizione}</p>
+                                )}
+                                <div className="flex flex-wrap gap-2">
+                                    {m.telefono && (
+                                        <a href={`tel:${m.telefono.replace(/\s/g, "")}`}
+                                           className="flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 transition">
+                                            <Phone size={12} /> {m.telefono}
+                                        </a>
+                                    )}
+                                    {m.email && (
+                                        <a href={`mailto:${m.email}`}
+                                           className="flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 transition truncate max-w-full">
+                                            <Send size={12} /> {m.email}
+                                        </a>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             )}
         </div>

@@ -163,6 +163,124 @@ def _parse_date_iso(raw: Optional[str]) -> str:
 
 
 # ============================================================
+# Auto-collegamento polizze firmate da email
+# ============================================================
+# Regex per estrarre numeri polizza candidati da testo/oggetto/nome-file.
+# Supporta i formati più comuni delle compagnie italiane:
+#  - numeri puri di 6-14 cifre
+#  - alfanumerici con separatori (POL-2024-000123, P.2024.001, ABC/12345)
+#  - preceduti da "polizza n.", "n. polizza", "polizza:"
+_NUM_POLIZZA_RE = re.compile(
+    r"(?:polizza\s*(?:n[°º\.]|nr\.?|num(?:ero)?\.?)?\s*[:.]?\s*)?"
+    r"([A-Z]{0,4}[-\.\/]?\d[\d\-\.\/A-Z]{5,20}\d)",
+    re.IGNORECASE,
+)
+
+
+def _candidati_numeri_polizza(*testi: str) -> list[str]:
+    """Estrae candidati numero polizza da uno o più testi (oggetto, body, filename).
+    Ritorna lista deduplicata di stringhe normalizzate (uppercase, senza spazi)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in testi:
+        if not t:
+            continue
+        for m in _NUM_POLIZZA_RE.finditer(t):
+            raw = (m.group(1) or "").strip().upper()
+            # scarto stringhe troppo generiche (es. anno "2024" o "20240215")
+            cifre = sum(1 for c in raw if c.isdigit())
+            if cifre < 6:
+                continue
+            if raw in seen:
+                continue
+            seen.add(raw)
+            out.append(raw)
+    return out
+
+
+async def _auto_allega_polizza(
+    db: AsyncIOMotorDatabase, *, subject: str, body_text: str,
+    attachments: list[dict], anagrafica_id: Optional[str],
+) -> list[dict]:
+    """Se una mail ha allegati PDF e nel testo/oggetto/nome file è citato un
+    numero polizza esistente, crea automaticamente un record `Allegato`
+    (tipo=polizza) collegato alla polizza e all'anagrafica.
+
+    Ritorna la lista dei match (per il diario). Le polizze auto-allegate sono
+    marcate `fonte='email_imap'` e `visibile_cliente=False` (verifica manuale
+    prima di renderle visibili nel portale cliente).
+    """
+    import storage as obj_storage
+    from db_models import Allegato
+    pdf_attachments = [a for a in attachments if (a.get("content_type", "").lower().endswith("pdf"))
+                       or (a.get("filename", "").lower().endswith(".pdf"))]
+    if not pdf_attachments:
+        return []
+
+    # Testi in cui cercare i candidati
+    testi = [subject or "", body_text or ""] + [a.get("filename", "") for a in pdf_attachments]
+    candidati = _candidati_numeri_polizza(*testi)
+    if not candidati:
+        return []
+
+    matches: list[dict] = []
+    # Cerca polizze per numero_polizza esatto (case-insensitive)
+    q = {"numero_polizza": {"$in": [c for c in candidati] +
+                                     [c.lower() for c in candidati]}}
+    if anagrafica_id:
+        # Se conosciamo il mittente, filtriamo solo sulle sue polizze (evita match casuali)
+        q["contraente_id"] = anagrafica_id
+    polizze = await db.polizze.find(
+        q, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1,
+            "ramo": 1, "compagnia_id": 1}).to_list(20)
+    if not polizze:
+        # fallback: se non conosciamo il mittente, NON facciamo match "aperto"
+        # per evitare falsi positivi
+        return []
+
+    # Per ogni polizza matchata + ogni PDF, crea un allegato
+    for pol in polizze:
+        for att in pdf_attachments:
+            # Recupera i byte dal path già salvato per copiarli in un path polizza-scoped
+            try:
+                data, ctype = obj_storage.get_object(att["storage_path"])
+            except Exception:
+                logger.exception("Impossibile leggere allegato %s per riclassificazione polizza",
+                                 att.get("storage_path"))
+                continue
+            import os as _os
+            app_name = _os.environ.get("APP_NAME", "assicura")
+            new_path = f"{app_name}/polizze/{pol['id']}/firmata_email_{_now_iso()[:10]}_{att['filename']}"
+            try:
+                obj_storage.put_object(new_path, data, ctype or "application/pdf")
+            except Exception:
+                logger.exception("Errore salvataggio allegato polizza %s", pol["id"])
+                continue
+            alleg = Allegato(
+                entita_tipo="polizza", entita_id=pol["id"],
+                nome_file=att["filename"],
+                url=f"/api/storage/{new_path}", storage_path=new_path,
+                mime=ctype or att.get("content_type") or "application/pdf",
+                size_kb=round(len(data) / 1024, 1),
+                caricato_da=None,   # System via IMAP
+            ).model_dump()
+            alleg["fonte"] = "email_imap"
+            alleg["visibile_cliente"] = False
+            alleg["categoria"] = "polizza_firmata"
+            alleg["origine_email_subject"] = (subject or "")[:200]
+            await db.allegati.insert_one(alleg)
+            # Idempotenza: se dovesse riarrivare per ripolling, il match sarà lo stesso e
+            # basta un uniqueness soft (per storage_path).
+            matches.append({
+                "polizza_id": pol["id"],
+                "numero_polizza": pol.get("numero_polizza"),
+                "filename": att["filename"],
+                "storage_path": new_path,
+            })
+    return matches
+
+
+# ============================================================
 # Core polling logic
 # ============================================================
 async def poll_once(db: AsyncIOMotorDatabase) -> dict:
@@ -322,14 +440,35 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                 await db.email_inbox.insert_one(doc)
                 nuovi += 1
 
+                # Auto-collega PDF firmato → polizza (se numero polizza citato)
+                polizze_matched: list[dict] = []
+                if attachments:
+                    try:
+                        polizze_matched = await _auto_allega_polizza(
+                            db, subject=subject or "", body_text=body_text or "",
+                            attachments=attachments, anagrafica_id=anagrafica_id,
+                        )
+                        if polizze_matched:
+                            # aggiorna email con i match
+                            await db.email_inbox.update_one(
+                                {"uid": str(uid), "folder": folder},
+                                {"$set": {"polizze_matched": polizze_matched}},
+                            )
+                    except Exception:
+                        logger.exception("Errore auto-allegamento polizza per email UID=%s", uid)
+
                 # Se mittente conosciuto → log diario cliente (usa collection `db.diario`)
                 if anagrafica_id:
                     try:
                         from shared import log_diario_cliente
+                        desc = f"Email ricevuta da {from_name or from_addr}: {subject or '(no subject)'}"
+                        if polizze_matched:
+                            nums = ", ".join(str(m.get("numero_polizza") or "") for m in polizze_matched)
+                            desc += f" — 📎 auto-collegata a polizza {nums}"
                         await log_diario_cliente(
                             anagrafica_id,
                             "email",
-                            f"Email ricevuta da {from_name or from_addr}: {subject or '(no subject)'}"[:200],
+                            desc[:250],
                             (body_text or "")[:2000],
                             autore=None,  # System
                         )

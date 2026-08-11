@@ -1,41 +1,73 @@
 """Calcolatore semplificato pensioni INPS (invalidità / inabilità / superstite).
 
-NOTA IMPORTANTE
-Questo modulo fornisce stime indicative basate su parametri INPS 2025/2026
-e sulle regole generali del calcolo retributivo/contributivo. Non sostituisce
-il calcolo ufficiale INPS. Le aliquote, i coefficienti di trasformazione e
-i requisiti contributivi sono parametri configurabili.
+FONTI UFFICIALI (verifica 12/02/2026):
+- Coefficienti di trasformazione 2025-2026: DM Min. Lavoro 20/11/2024,
+  pubblicato in G.U. n. 35 del 12/02/2025 (allegato tecnico).
+  Fonte: https://www.lavoro.gov.it/media/88106
+- Aliquote reversibilità: L. 335/1995 art. 1, comma 41; L. 903/1965 art. 22.
+  Fonte: https://www.inps.it/it/it/dettaglio-scheda.it.schede-servizio-strumento.schede-servizi.pensione-ai-superstiti-indiretta-e-di-reversibilit--50605
+- Tassi di rivalutazione montante (variazione media quinquennale PIL nominale):
+  Note ISTAT annuali - Ministero del Lavoro.
+- Assegno invalidità civile 2026: 340,71 €/mese × 13 (Circolare INPS).
+- Trattamento minimo INPS 2026: 611,85 €/mese.
+- Aliquote contributive 2026: Circolari INPS n. 8/2026 (Gestione Separata),
+  n. 14/2026 (Artigiani/Commercianti).
+
+Questo modulo fornisce stime indicative e non sostituisce il calcolo ufficiale INPS.
 """
 from datetime import datetime
 from typing import Literal, Optional
 
 
-# Parametri base (INPS 2025/2026 - valori indicativi)
+# Parametri base (INPS 2025/2026 - valori ufficiali verificati 12/02/2026)
 PARAMS = {
-    # Pensione di invalidità civile importi mensili 2025 (€)
-    "invalidita_civile_mensile_2025": 333.33,
-    # Pensione di inabilità INPS: % della retribuzione pensionabile
-    "inabilita_perc_retribuzione": 0.80,
+    # Pensione di invalidità civile importo mensile 2026 (€) — Circolare INPS
+    "invalidita_civile_mensile_2026": 340.71,
+    # Alias retrocompat (deprecato)
+    "invalidita_civile_mensile_2025": 340.71,
+    # Trattamento minimo INPS 2026 (€/mese)
+    "trattamento_minimo_2026": 611.85,
     # Pensione superstite (reversibilità) % della pensione del de cuius
+    # Fonte: L. 335/1995 art. 1 c. 41
     "superstite_solo_coniuge": 0.60,
     "superstite_coniuge_un_figlio": 0.80,
     "superstite_coniuge_due_o_piu_figli": 1.00,
     "superstite_solo_figli_uno": 0.70,
     "superstite_solo_figli_due": 0.80,
     "superstite_solo_figli_tre_o_piu": 1.00,
-    # Coefficienti di trasformazione contributivo 2025 (semplificati)
+    # Riduzioni Tabella F L. 335/1995 (reversibilità per reddito 2026)
+    # (soglia_annua_massima, riduzione_percentuale)
+    "riduzioni_reversibilita_2026": [
+        (23862.15, 0.00),   # ≤ 3 × TM
+        (31816.20, 0.25),   # 3-4 × TM
+        (39770.25, 0.40),   # 4-5 × TM
+        (float("inf"), 0.50),  # > 5 × TM
+    ],
+    # Coefficienti di trasformazione BIENNIO 2025-2026
+    # Fonte: DM 20/11/2024 - G.U. n. 35/2025 - in vigore fino al 31/12/2026
     # Età -> coefficiente
     "coefficienti_trasformazione_2025": {
-        57: 0.04475, 58: 0.04594, 59: 0.04719,
-        60: 0.04852, 61: 0.04993, 62: 0.05144,
-        63: 0.05303, 64: 0.05472, 65: 0.05652,
-        66: 0.05846, 67: 0.06055, 68: 0.06281,
-        69: 0.06526, 70: 0.06792, 71: 0.07081,
-        72: 0.07399,
+        57: 0.04204, 58: 0.04308, 59: 0.04419,
+        60: 0.04536, 61: 0.04661, 62: 0.04795,
+        63: 0.04936, 64: 0.05088, 65: 0.05250,
+        66: 0.05423, 67: 0.05608, 68: 0.05808,
+        69: 0.06024, 70: 0.06258, 71: 0.06510,
     },
-    # Aliquota IRPEF stimata media
+    # Aliquote contributive 2026 (% del reddito imponibile)
+    "aliquota_dipendenti": 0.33,       # datore + lavoratore
+    "aliquota_gestione_separata_prof": 0.2607,  # 26,07% liberi professionisti
+    "aliquota_gestione_separata_cococo": 0.3503,  # 35,03% co.co.co
+    "aliquota_gestione_separata_pensionati": 0.24,  # pensionati/iscritti altra cassa
+    "aliquota_artigiani": 0.24,        # IVS
+    "aliquota_commercianti": 0.2448,   # IVS + indennizzo cessazione
+    # Massimale gestione separata 2026 (€)
+    "massimale_gestione_separata_2026": 122295,
+    # Minimale contributivo annuo 2026 (€)
+    "minimale_contributivo_2026": 18808,
+    # Aliquota IRPEF stimata media per stima netto
     "irpef_stimata": 0.23,
-    # Soglia minima settimane per invalidità (5 anni di cui 3 nell'ultimo quinquennio)
+    # Soglia minima settimane per invalidità/inabilità (art. 1 L. 222/1984):
+    # 5 anni di contribuzione (260 sett.) di cui 3 nel quinquennio precedente (156 sett.)
     "settimane_min_invalidita": 260,
     "settimane_min_invalidita_recenti": 156,
 }
@@ -51,13 +83,16 @@ def _coefficiente_trasformazione(eta: int) -> float:
 
 
 # Coefficienti di rivalutazione INPS annuali (variazione media quinquennale PIL nominale)
-# Fonte: Ministero del Lavoro - Comunicati ufficiali
+# Fonte ufficiale: Note ISTAT annuali - Ministero del Lavoro e Politiche Sociali
+# https://www.lavoro.gov.it/notizie/pagine/tasso-annuo-di-capitalizzazione-...
+# Verificato 12/02/2026: valori ufficiali confermati fino al 2025.
+# 2026: dato stimato (verrà pubblicato a fine 2026 con nota ISTAT).
 TASSI_RIVALUTAZIONE_INPS = {
-    2009: 0.033147, 2010: 0.017935, 2011: 0.016244, 2012: 0.037935,
-    2013: 0.016126, 2014: 0.010676, 2015: 0.005063, 2016: -0.001927,
-    2017: -0.002155, 2018: 0.007549, 2019: 0.013500, 2020: 0.018294,
-    2021: 0.017270, 2022: 0.047770, 2023: 0.063275, 2024: 0.038666,
-    2025: 0.020000, 2026: 0.020000,  # stima
+    2010: 0.017935, 2011: 0.016165, 2012: 0.011344, 2013: 0.001643,
+    2014: -0.001927, 2015: 0.005058, 2016: 0.004684, 2017: 0.005205,
+    2018: 0.013478, 2019: 0.018254, 2020: 0.019199, 2021: -0.000215,
+    2022: 0.009973, 2023: 0.023082, 2024: 0.036622, 2025: 0.040445,
+    2026: 0.030000,  # stima (verificare a fine anno)
 }
 
 
@@ -101,8 +136,8 @@ def _calcola_invalidita(
             f"Settimane contributive insufficienti: minimo richiesto "
             f"{PARAMS['settimane_min_invalidita']}, presenti {settimane_contributive}."
         )
-        pensione_annua = PARAMS["invalidita_civile_mensile_2025"] * 13
-        return pensione_annua, "Pensione di invalidità civile (importo base 2025)", False, note
+        pensione_annua = PARAMS["invalidita_civile_mensile_2026"] * 13
+        return pensione_annua, "Pensione di invalidità civile (importo base 2026)", False, note
     perc = (percentuale_invalidita or 100) / 100.0
     pensione_annua = pensione_contributiva_annua * perc
     return pensione_annua, "Assegno ordinario di invalidità (calcolo contributivo)", True, note
@@ -137,6 +172,27 @@ def _aliquota_superstite(numero_familiari: int) -> tuple[float, Optional[str]]:
     if numero_familiari == 2:
         return PARAMS["superstite_coniuge_un_figlio"], None
     return PARAMS["superstite_coniuge_due_o_piu_figli"], None
+
+
+def riduzione_reversibilita_per_reddito(pensione_lorda_annua: float,
+                                       reddito_superstite: float,
+                                       ha_figli_minori_studenti_inabili: bool = False) -> tuple[float, float, str]:
+    """Applica le riduzioni Tabella F L.335/1995 sulla pensione ai superstiti.
+
+    Ritorna (pensione_ridotta, riduzione_percentuale, note).
+    Le riduzioni NON si applicano se nel nucleo ci sono figli minori/studenti/inabili
+    (Corte Cost. sent. 162/2022).
+    Fonte: https://www.inps.it/it/it/dettaglio-scheda... pensione-superstiti
+    """
+    if ha_figli_minori_studenti_inabili:
+        return pensione_lorda_annua, 0.0, "Nessuna riduzione: nucleo con figli minori/studenti/inabili."
+    for soglia, perc in PARAMS["riduzioni_reversibilita_2026"]:
+        if reddito_superstite <= soglia:
+            if perc == 0:
+                return pensione_lorda_annua, 0.0, "Reddito del superstite ≤ 3× trattamento minimo: nessuna riduzione."
+            ridotta = pensione_lorda_annua * (1 - perc)
+            return ridotta, perc, f"Riduzione {perc*100:.0f}% per reddito superstite (Tabella F L.335/1995)."
+    return pensione_lorda_annua, 0.0, ""
 
 
 def _calcola_superstite(

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Clock, Users, Phone, Link2, Video, Save, Plus, Trash2, Upload,
-    Loader2, MessageSquareQuote,
+    Loader2, MessageSquareQuote, Camera, MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,7 +21,20 @@ export default function AppCliente() {
 
     const load = async () => {
         const r = await api.get("/app-cliente/config");
-        setCfg(r.data);
+        const data = r.data;
+        // migrazione: se non ci sono sedi ma esistono orari, prefigura la sede principale
+        if (!(data.sedi || []).length && (data.orari || []).length) {
+            data.sedi = [{
+                id: `sede_${Date.now()}`,
+                nome: "Sede principale",
+                indirizzo: data.contatti?.indirizzo || "",
+                comune: data.contatti?.comune || "",
+                provincia: data.contatti?.provincia || "",
+                telefono: data.contatti?.telefono || "",
+                orari: data.orari,
+            }];
+        }
+        setCfg(data);
     };
     useEffect(() => { load().catch((e) => toast.error("Errore: " + e.message)); }, []);
 
@@ -35,6 +48,7 @@ export default function AppCliente() {
                 contatti: cfg.contatti,
                 slogan_portale: cfg.slogan_portale || "",
                 orari: cfg.orari,
+                sedi: cfg.sedi,
                 team: cfg.team,
                 assistenza_compagnie: cfg.assistenza_compagnie,
                 servizi: cfg.servizi,
@@ -79,56 +93,45 @@ export default function AppCliente() {
                 </div>
             </Card>
 
-            {/* Orari */}
+            {/* Sedi & Orari */}
             <Card className="p-5 border-slate-200">
-                <SecTitle icon={<Clock size={15} />} title="Orari di apertura"
-                    onAdd={() => set("orari", [...(cfg.orari || []), { giorni: "", orario: "" }])}
-                    addTestid="orari-add" />
-                {(cfg.orari || []).length === 0 && <EmptyHint testo='Nessun orario. Es: "Lun-Ven" → "8:30-12:30 / 14:30-18:30"' />}
-                {(cfg.orari || []).map((r, i) => (
-                    <div key={i} className="flex gap-2 mb-1.5 items-center">
-                        <Input value={r.giorni || ""} placeholder="Lun-Ven" className="w-44 h-8 text-xs"
-                               onChange={(e) => set("orari", cfg.orari.map((x, j) => j === i ? { ...x, giorni: e.target.value } : x))}
-                               data-testid={`orari-giorni-${i}`} />
-                        <Input value={r.orario || ""} placeholder="8:30-12:30 / 14:30-18:30" className="flex-1 h-8 text-xs"
-                               onChange={(e) => set("orari", cfg.orari.map((x, j) => j === i ? { ...x, orario: e.target.value } : x))}
-                               data-testid={`orari-orario-${i}`} />
-                        <RemoveBtn onClick={() => set("orari", cfg.orari.filter((_, j) => j !== i))} testid={`orari-remove-${i}`} />
-                    </div>
-                ))}
+                <SecTitle icon={<MapPin size={15} />} title="Sedi & Orari (indirizzo e orari di ogni sede, anche legali)"
+                    onAdd={() => set("sedi", [...(cfg.sedi || []), {
+                        id: `sede_${Date.now()}`, nome: "", indirizzo: "", comune: "", provincia: "",
+                        telefono: "", orari: [{ giorni: "Lun-Ven", orario: "" }],
+                    }])}
+                    addTestid="sedi-add" />
+                {(cfg.sedi || []).length === 0 && <EmptyHint testo='Aggiungi le sedi: es. "Sede di Sondrio" con indirizzo e orari propri.' />}
+                <div className="space-y-3">
+                    {(cfg.sedi || []).map((s, i) => (
+                        <SedeRow key={s.id || i} s={s} i={i}
+                            onChange={(patch) => set("sedi", cfg.sedi.map((x, j) => j === i ? { ...x, ...patch } : x))}
+                            onRemove={() => set("sedi", cfg.sedi.filter((_, j) => j !== i))} />
+                    ))}
+                </div>
             </Card>
 
             {/* Team */}
             <Card className="p-5 border-slate-200">
-                <SecTitle icon={<Users size={15} />} title="Il nostro team"
-                    onAdd={() => set("team", [...(cfg.team || []), { nome: "", ruolo: "", telefono: "", email: "" }])}
+                <SecTitle icon={<Users size={15} />} title="Il nostro team (sezione dedicata nel portale)"
+                    onAdd={() => set("team", [...(cfg.team || []), { id: `tm_${Date.now()}`, nome: "", ruolo: "", descrizione: "", telefono: "", email: "", foto_path: null }])}
                     addTestid="team-add" />
-                {(cfg.team || []).length === 0 && <EmptyHint testo="Aggiungi i membri del team visibili al cliente." />}
-                {(cfg.team || []).map((r, i) => (
-                    <div key={i} className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 mb-1.5 items-center">
-                        <Input value={r.nome || ""} placeholder="Nome e cognome" className="h-8 text-xs"
-                               onChange={(e) => set("team", cfg.team.map((x, j) => j === i ? { ...x, nome: e.target.value } : x))}
-                               data-testid={`team-nome-${i}`} />
-                        <Input value={r.ruolo || ""} placeholder="Ruolo (es. Titolare, Sinistri)" className="h-8 text-xs"
-                               onChange={(e) => set("team", cfg.team.map((x, j) => j === i ? { ...x, ruolo: e.target.value } : x))}
-                               data-testid={`team-ruolo-${i}`} />
-                        <Input value={r.telefono || ""} placeholder="Telefono" className="h-8 text-xs"
-                               onChange={(e) => set("team", cfg.team.map((x, j) => j === i ? { ...x, telefono: e.target.value } : x))}
-                               data-testid={`team-telefono-${i}`} />
-                        <Input value={r.email || ""} placeholder="Email" className="h-8 text-xs"
-                               onChange={(e) => set("team", cfg.team.map((x, j) => j === i ? { ...x, email: e.target.value } : x))}
-                               data-testid={`team-email-${i}`} />
-                        <RemoveBtn onClick={() => set("team", cfg.team.filter((_, j) => j !== i))} testid={`team-remove-${i}`} />
-                    </div>
-                ))}
+                {(cfg.team || []).length === 0 && <EmptyHint testo="Aggiungi i membri del team: foto, ruolo, di cosa si occupano, email e numero interno." />}
+                <div className="space-y-3">
+                    {(cfg.team || []).map((r, i) => (
+                        <TeamMemberRow key={r.id || i} r={r} i={i}
+                            onChange={(patch) => set("team", cfg.team.map((x, j) => j === i ? { ...x, ...patch } : x))}
+                            onRemove={() => set("team", cfg.team.filter((_, j) => j !== i))} />
+                    ))}
+                </div>
             </Card>
 
             {/* Numeri assistenza per compagnia */}
             <Card className="p-5 border-slate-200">
-                <SecTitle icon={<Phone size={15} />} title="Numeri assistenza per compagnia"
+                <SecTitle icon={<Phone size={15} />} title="Assistenza Stradale H24 — numeri per compagnia"
                     onAdd={() => set("assistenza_compagnie", [...(cfg.assistenza_compagnie || []), { compagnia: "", numero: "", note: "" }])}
                     addTestid="assistenza-add" />
-                {(cfg.assistenza_compagnie || []).length === 0 && <EmptyHint testo='Es: "Allianz" → "800 686 868" — "Assistenza stradale H24"' />}
+                <EmptyHint testo="Ogni compagnia ha il suo numero di assistenza: il cliente vedrà l'elenco e chiamerà quello della sua polizza." />}
                 {(cfg.assistenza_compagnie || []).map((r, i) => (
                     <div key={i} className="grid grid-cols-2 md:grid-cols-[1fr_1fr_2fr_auto] gap-2 mb-1.5 items-center">
                         <Input value={r.compagnia || ""} placeholder="Compagnia" className="h-8 text-xs"
@@ -244,6 +247,112 @@ function VideoSection({ video, onReload }) {
                 <div className="mt-2 text-[11px] text-slate-400 italic">Nessun video configurato: la sezione video non appare nel portale.</div>
             )}
         </Card>
+    );
+}
+
+function SedeRow({ s, i, onChange, onRemove }) {
+    const setOrario = (idx, patch) =>
+        onChange({ orari: (s.orari || []).map((o, j) => j === idx ? { ...o, ...patch } : o) });
+    return (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50" data-testid={`sede-row-${i}`}>
+            <div className="flex gap-2 items-start">
+                <div className="flex-1 grid grid-cols-2 md:grid-cols-[1.2fr_1.5fr_1fr_0.5fr_1fr] gap-2">
+                    <Input value={s.nome || ""} placeholder='Nome sede (es. "Sede di Sondrio")' className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ nome: e.target.value })} data-testid={`sede-nome-${i}`} />
+                    <Input value={s.indirizzo || ""} placeholder="Indirizzo (via e civico)" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ indirizzo: e.target.value })} data-testid={`sede-indirizzo-${i}`} />
+                    <Input value={s.comune || ""} placeholder="Comune" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ comune: e.target.value })} data-testid={`sede-comune-${i}`} />
+                    <Input value={s.provincia || ""} placeholder="Prov." className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ provincia: e.target.value })} data-testid={`sede-provincia-${i}`} />
+                    <Input value={s.telefono || ""} placeholder="Telefono sede" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ telefono: e.target.value })} data-testid={`sede-telefono-${i}`} />
+                </div>
+                <RemoveBtn onClick={onRemove} testid={`sede-remove-${i}`} />
+            </div>
+            <div className="mt-2 pl-1">
+                <div className="flex items-center gap-2 mb-1">
+                    <Clock size={11} className="text-slate-400" />
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">Orari di questa sede</span>
+                    <Button size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]"
+                            onClick={() => onChange({ orari: [...(s.orari || []), { giorni: "", orario: "" }] })}
+                            data-testid={`sede-orari-add-${i}`}>
+                        <Plus size={10} className="mr-0.5" /> riga
+                    </Button>
+                </div>
+                {(s.orari || []).map((o, j) => (
+                    <div key={j} className="flex gap-2 mb-1 items-center">
+                        <Input value={o.giorni || ""} placeholder="Lun-Ven" className="w-40 h-7 text-xs bg-white"
+                               onChange={(e) => setOrario(j, { giorni: e.target.value })}
+                               data-testid={`sede-${i}-orari-giorni-${j}`} />
+                        <Input value={o.orario || ""} placeholder="8:30-12:30 / 14:30-18:30" className="flex-1 h-7 text-xs bg-white"
+                               onChange={(e) => setOrario(j, { orario: e.target.value })}
+                               data-testid={`sede-${i}-orari-orario-${j}`} />
+                        <RemoveBtn onClick={() => onChange({ orari: s.orari.filter((_, k) => k !== j) })}
+                                   testid={`sede-${i}-orari-remove-${j}`} />
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function TeamMemberRow({ r, i, onChange, onRemove }) {
+    const fotoRef = useRef(null);
+    const [uploading, setUploading] = useState(false);
+    const fotoUrl = r.foto_path
+        ? `${process.env.REACT_APP_BACKEND_URL}/api/portale/public/team-foto/${r.id}?v=${encodeURIComponent(r.foto_path)}`
+        : null;
+
+    const uploadFoto = async (f) => {
+        if (!f) return;
+        setUploading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("tid", r.id);
+            const resp = await api.post("/app-cliente/team-foto", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            onChange({ foto_path: resp.data.foto_path });
+            toast.success("Foto caricata — ricordati di premere Salva tutto");
+        } catch (e) { toast.error("Errore foto: " + (e.response?.data?.detail || e.message)); }
+        finally { setUploading(false); }
+    };
+
+    return (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50" data-testid={`team-row-${i}`}>
+            <div className="flex gap-3">
+                {/* Foto */}
+                <div className="flex flex-col items-center gap-1">
+                    <button type="button" onClick={() => fotoRef.current?.click()}
+                            className="w-16 h-16 rounded-full overflow-hidden border-2 border-slate-300 hover:border-sky-500 bg-white flex items-center justify-center transition-colors"
+                            title="Clicca per caricare la foto" data-testid={`team-foto-btn-${i}`}>
+                        {uploading ? <Loader2 size={18} className="animate-spin text-slate-400" />
+                            : fotoUrl ? <img src={fotoUrl} alt="" className="w-full h-full object-cover" />
+                            : <Camera size={20} className="text-slate-400" />}
+                    </button>
+                    <span className="text-[9px] text-slate-400">foto</span>
+                    <input ref={fotoRef} type="file" accept="image/*" className="hidden"
+                           onChange={(e) => { uploadFoto(e.target.files?.[0]); e.target.value = ""; }}
+                           data-testid={`team-foto-input-${i}`} />
+                </div>
+                {/* Campi */}
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <Input value={r.nome || ""} placeholder="Nome e cognome" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ nome: e.target.value })} data-testid={`team-nome-${i}`} />
+                    <Input value={r.ruolo || ""} placeholder="Ruolo (es. Titolare, Resp. Sinistri)" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ ruolo: e.target.value })} data-testid={`team-ruolo-${i}`} />
+                    <Input value={r.telefono || ""} placeholder="Numero interno / diretto" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ telefono: e.target.value })} data-testid={`team-telefono-${i}`} />
+                    <Input value={r.email || ""} placeholder="Email" className="h-8 text-xs bg-white"
+                           onChange={(e) => onChange({ email: e.target.value })} data-testid={`team-email-${i}`} />
+                    <Textarea value={r.descrizione || ""} placeholder="Di cosa si occupa (es. gestione sinistri auto, preventivi vita, contabilità...)"
+                              className="md:col-span-2 text-xs bg-white min-h-[44px]" rows={2}
+                              onChange={(e) => onChange({ descrizione: e.target.value })}
+                              data-testid={`team-descrizione-${i}`} />
+                </div>
+                <RemoveBtn onClick={onRemove} testid={`team-remove-${i}`} />
+            </div>
+        </div>
     );
 }
 

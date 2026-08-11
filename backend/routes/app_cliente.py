@@ -7,13 +7,38 @@ slogan e contatti. Il video motivazionale usa gli endpoint
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from auth import current_user, require_user
 from database import db
 from db_models import _now_iso, _uid
+import os
+import storage as obj_storage
 
 router = APIRouter(prefix="/app-cliente")
+
+
+@router.post("/team-foto")
+async def upload_team_foto(
+    file: UploadFile = File(...),
+    tid: str = Form(...),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Carica la foto di un membro del team (max 5MB, jpg/png/webp)."""
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Foto oltre 5 MB")
+    ct = (file.content_type or "").lower()
+    if not ct.startswith("image/"):
+        raise HTTPException(400, "Formato non valido: usa jpg/png/webp")
+    ext = (file.filename or "foto.jpg").rsplit(".", 1)[-1].lower() or "jpg"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/team/{tid}_{_uid()[:8]}.{ext}"
+    res = obj_storage.put_object(path, contents, ct)
+    # aggiorna il membro se già salvato in config
+    await db.azienda_config.update_one(
+        {"portale_team.id": tid},
+        {"$set": {"portale_team.$.foto_path": res["path"], "updated_at": _now_iso()}})
+    return {"foto_path": res["path"]}
 
 
 @router.get("/config")
@@ -32,6 +57,7 @@ async def get_config(user=Depends(current_user)):
         },
         "slogan_portale": az.get("slogan_portale"),
         "orari": az.get("portale_orari") or [],
+        "sedi": az.get("portale_sedi") or [],
         "team": az.get("portale_team") or [],
         "assistenza_compagnie": az.get("assistenza_compagnie") or [],
         "servizi": servizi,
@@ -51,9 +77,33 @@ async def update_config(body: dict, user=Depends(require_user("admin", "collabor
             {"giorni": (r.get("giorni") or "").strip(), "orario": (r.get("orario") or "").strip()}
             for r in (body.get("orari") or []) if (r.get("giorni") or r.get("orario"))
         ]
+    if "sedi" in body:
+        upd["portale_sedi"] = [
+            {
+                "id": s.get("id") or _uid(),
+                "nome": (s.get("nome") or "").strip(),
+                "indirizzo": (s.get("indirizzo") or "").strip(),
+                "comune": (s.get("comune") or "").strip(),
+                "provincia": (s.get("provincia") or "").strip(),
+                "telefono": (s.get("telefono") or "").strip(),
+                "orari": [
+                    {"giorni": (o.get("giorni") or "").strip(), "orario": (o.get("orario") or "").strip()}
+                    for o in (s.get("orari") or []) if (o.get("giorni") or o.get("orario"))
+                ],
+            }
+            for s in (body.get("sedi") or []) if (s.get("nome") or s.get("indirizzo"))
+        ]
     if "team" in body:
         upd["portale_team"] = [
-            {k: (r.get(k) or "").strip() for k in ("nome", "ruolo", "telefono", "email")}
+            {
+                "id": r.get("id") or _uid(),
+                "nome": (r.get("nome") or "").strip(),
+                "ruolo": (r.get("ruolo") or "").strip(),
+                "descrizione": (r.get("descrizione") or "").strip(),
+                "telefono": (r.get("telefono") or "").strip(),
+                "email": (r.get("email") or "").strip(),
+                "foto_path": r.get("foto_path") or None,
+            }
             for r in (body.get("team") or []) if (r.get("nome") or "").strip()
         ]
     if "assistenza_compagnie" in body:

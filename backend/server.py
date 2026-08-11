@@ -7420,6 +7420,10 @@ async def upload_estratto_inps(
 async def get_piramide_v2(aid: str, user=Depends(current_user)):
     """Restituisce la piramide v2 (schema Schiantarelli) del cliente con valori
     auto-popolati dalle polizze attive.
+
+    Se l'utente non ha ancora salvato dati_reddito, li pre-popoliamo dall'ultimo
+    estratto INPS caricato + reddito annuo lordo anagrafica. Così quando il
+    cliente carica l'estratto contributivo il reddito compare in automatico.
     """
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
@@ -7428,11 +7432,31 @@ async def get_piramide_v2(aid: str, user=Depends(current_user)):
     # Auto-popolamento: leggi le polizze attive del cliente e aggrega per categoria
     voci = await _piramide_v2_calcola_voci(aid)
     piramide["voci_calcolate"] = voci
-    ana = await db.anagrafiche.find_one(
-        {"id": aid}, {"_id": 0, "ragione_sociale": 1, "cognome": 1, "nome": 1, "cognome_nome": 1})
-    if ana:
-        piramide["cliente_nome"] = (ana.get("ragione_sociale") or ana.get("cognome_nome")
-                                    or f"{ana.get('cognome', '') or ''} {ana.get('nome', '') or ''}".strip())
+
+    # Auto-popolo dati_reddito dai dati anagrafica/analisi se mancanti
+    dati_reddito = dict(piramide.get("dati_reddito") or {})
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+    reddito_base = (dati_reddito.get("reddito_attuale")
+                    or ana.get("reddito_annuo_lordo")
+                    or ac.get("reddito_lordo_annuo"))
+    if reddito_base and not dati_reddito.get("reddito_attuale"):
+        dati_reddito["reddito_attuale"] = int(round(float(reddito_base)))
+    # Estratto conto: se ci sono estratti caricati, imposta a Sì
+    if not dati_reddito.get("estratto_conto") and (ac.get("estratti_conto_inps") or []):
+        dati_reddito["estratto_conto"] = True
+    # Fallback intelligente: reddito in caso di invalidità/inabilità = reddito attuale
+    if reddito_base:
+        r = int(round(float(reddito_base)))
+        dati_reddito.setdefault("reddito_invalidita_66_99", r)
+        dati_reddito.setdefault("reddito_inabilita_100", r)
+        dati_reddito.setdefault("reddito_superstiti", r)
+        dati_reddito.setdefault("reddito_responsabilita", r)
+        dati_reddito.setdefault("reddito_perdita_beni", r)
+    piramide["dati_reddito"] = dati_reddito
+
+    piramide.setdefault("cliente_nome",
+                        ana.get("ragione_sociale") or ana.get("cognome_nome")
+                        or f"{ana.get('cognome', '') or ''} {ana.get('nome', '') or ''}".strip())
     return piramide
 
 
@@ -7469,6 +7493,49 @@ async def update_piramide_v2(aid: str, body: dict, user=Depends(current_user)):
         {"anagrafica_id": aid}, {"$set": upd}, upsert=True,
     )
     return upd["piramide_v2"]
+
+
+@api.post("/anagrafiche/{aid}/analisi/piramide-v2/prepopola")
+async def prepopola_piramide_v2(aid: str, user=Depends(current_user)):
+    """Ritorna suggerimenti per i dati_reddito della piramide leggendo:
+    - reddito annuo lordo (anagrafica + analisi_cliente)
+    - ultimo estratto INPS caricato
+    - storico redditi (media ultimi 3 anni per stimare l'invalidità/inabilità)
+    Non salva: il frontend applica i valori nel form e l'utente conferma con "Salva".
+    """
+    if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+    ac = await _ensure_analisi(aid)
+    reddito_base = float(ana.get("reddito_annuo_lordo")
+                         or ac.get("reddito_lordo_annuo") or 0)
+    # Media ultimi 3 anni storici, se disponibile
+    storico = list(ac.get("storico_redditi") or [])
+    if storico:
+        top3 = sorted(storico, key=lambda x: int(x.get("anno") or 0), reverse=True)[:3]
+        redditi = [float(r.get("reddito") or 0) for r in top3 if float(r.get("reddito") or 0) > 0]
+        if redditi and not reddito_base:
+            reddito_base = sum(redditi) / len(redditi)
+    if not reddito_base:
+        raise HTTPException(400, "Nessun estratto INPS o reddito registrato per questo cliente. "
+                                 "Carica prima un estratto conto contributivo o valorizza il reddito lordo.")
+    r = int(round(reddito_base))
+    ha_estratti = bool(ac.get("estratti_conto_inps"))
+    return {
+        "reddito_attuale": r,
+        "estratto_conto": ha_estratti,
+        # Base pensione invalidità 66-99% → circa 50% del reddito (contributivo)
+        "reddito_invalidita_66_99": int(round(r * 0.50)),
+        # Inabilità 100% → circa 80% del reddito con maggiorazione figurativa
+        "reddito_inabilita_100": int(round(r * 0.80)),
+        # Superstiti (reversibilità coniuge 60%)
+        "reddito_superstiti": int(round(r * 0.60)),
+        # Responsabilità e perdita beni: valore reddito attuale
+        "reddito_responsabilita": r,
+        "reddito_perdita_beni": r,
+        "fonte": "estratto_conto_inps" if ha_estratti else "reddito_anagrafica",
+        "anni_storici_usati": len([1 for r in storico if float(r.get("reddito") or 0) > 0]),
+    }
 
 
 # Mappatura voce piramide → keyword ramo/prodotto/garanzia da cercare nelle polizze

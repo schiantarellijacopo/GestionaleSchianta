@@ -56,7 +56,7 @@ const ALL_MENU_ITEMS = [
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
-    { id: "biblioteca_previdenza", path: "/biblioteca-previdenza", icon: "Library", label: "Biblioteca Previdenza", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "biblioteca_previdenza", path: "/biblioteca-previdenza", icon: "Library", label: "Biblioteca", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rubrica_compagnie", path: "/rubrica-compagnie", icon: "BookUser", label: "Rubrica compagnie", section: "amministrazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "agenzie", path: "/agenzie", icon: "Building2", label: "Agenzie (partner)", section: "amministrazione", roles: ["admin"] },
     { id: "setup_iniziale", path: "/setup-iniziale", icon: "Banknote", label: "Setup iniziale", section: "amministrazione", roles: ["admin"] },

@@ -8,11 +8,12 @@ import { toast } from "sonner";
 // piramide cresce in altezza mantenendo la forma.
 // -----------------------------------------------------------------------------
 
-const PYR_W = 1040;          // larghezza base triangolo (px)
+// Layout compatto per stampa A4 (max ~830px totali).
+const PYR_W = 720;           // larghezza base triangolo (px)
 const CX = PYR_W / 2;        // apice orizzontale
-const WEDGE_AREA = 250;      // colonna cunei zone a destra
-const TOTAL_W = PYR_W + WEDGE_AREA;
-const ROW_H = 24;            // altezza extra per ogni voce custom
+const WEDGE_AREA = 105;      // colonna cunei zone a destra (compatta)
+const TOTAL_W = PYR_W + WEDGE_AREA;   // 825 px
+const ROW_H = 22;            // altezza extra per ogni voce custom
 
 const COLORS = {
     red: "#b93e3e",
@@ -36,46 +37,46 @@ const DOT_CYCLE = ["adeguato", "non_adeguato", "assente"];
 // Livelli dal vertice alla base. baseH = altezza minima; cresce con le voci custom.
 const LEVELS = [
     {
-        id: "crescita", baseH: 160, color: COLORS.tealApex,
-        strip: { top: 70, h: 44, maxW: 112, font: 8.5 },
+        id: "crescita", baseH: 130, color: COLORS.tealApex,
+        strip: { top: 56, h: 38, maxW: 88, font: 8 },
         titolo: "CRESCITA DEL CAPITALE",
         inputVoce: "crescita_capitale",
         customW: null, // apice troppo stretto per voci custom
     },
     {
-        id: "cassa_grandi", baseH: 80, color: COLORS.teal,
-        strip: { top: 0, h: 30, maxW: 205, font: 9.5 },
+        id: "cassa_grandi", baseH: 66, color: COLORS.teal,
+        strip: { top: 0, h: 26, maxW: 150, font: 8.5 },
         titolo: "CASSA PER LE GRANDI ESIGENZE",
         inputVoce: "cassa_grandi",
+        customW: 180,
+    },
+    {
+        id: "cassa_lievi", baseH: 66, color: COLORS.teal,
+        strip: { top: 0, h: 26, maxW: 220, font: 9 },
+        titolo: "CASSA PER LE LIEVI ESIGENZE",
+        inputVoce: "cassa_lievi",
         customW: 240,
     },
     {
-        id: "cassa_lievi", baseH: 80, color: COLORS.teal,
-        strip: { top: 0, h: 30, maxW: 300, font: 10 },
-        titolo: "CASSA PER LE LIEVI ESIGENZE",
-        inputVoce: "cassa_lievi",
-        customW: 310,
-    },
-    {
-        id: "liquidita", baseH: 80, color: COLORS.teal,
-        strip: { top: 0, h: 30, maxW: 400, font: 10 },
+        id: "liquidita", baseH: 66, color: COLORS.teal,
+        strip: { top: 0, h: 26, maxW: 300, font: 9 },
         titolo: "LIQUIDITÀ GIORNALIERA - CONTO CORRENTE -",
         inputVoce: "liquidita_giornaliera",
-        customW: 370,
+        customW: 290,
     },
     {
-        id: "perdita", baseH: 96, color: COLORS.green,
-        strip: { top: 0, h: 36, maxW: 480, font: 8.5 },
+        id: "perdita", baseH: 82, color: COLORS.green,
+        strip: { top: 0, h: 32, maxW: 350, font: 7.5 },
         titolo: "PERDITA DEI BENI DOVUTA DA INCENDI/ EVENTI ATMOSFERICI/ ALLUVIONI/TERREMOTI:",
         voci: [
             { id: "perdita_beni_immobili", label: "IMMOBILI, sei protetto fino a" },
             { id: "perdita_beni_aziende", label: "AZIENDE, sei protetto fino a" },
         ],
-        customW: 430,
+        customW: 340,
     },
     {
-        id: "danni", baseH: 124, color: COLORS.red,
-        strip: { top: 0, h: 28, maxW: 600, font: 10 },
+        id: "danni", baseH: 108, color: COLORS.green,
+        strip: { top: 0, h: 24, maxW: 430, font: 9 },
         titolo: "IN CASO DI DANNI PROVOCATI AD ALTRI, DOVUTI A:",
         voci: [
             { id: "danni_veicoli", label: "VEICOLI, sei protetto fino a" },
@@ -83,28 +84,28 @@ const LEVELS = [
             { id: "danni_professioni", label: "PROFESSIONI, sei protetto fino a" },
             { id: "danni_vita_privata", label: "VITA PRIVATA, sei protetto fino a" },
         ],
-        customW: 430,
+        customW: 340,
     },
     {
-        id: "premorienza", baseH: 84, color: COLORS.red,
-        strip: { top: 0, h: 28, maxW: 700, font: 10 },
+        id: "premorienza", baseH: 72, color: COLORS.red,
+        strip: { top: 0, h: 24, maxW: 500, font: 9 },
         titolo: "IN CASO DI PREMORIENZA DOVUTA A:",
         voci: [
             { id: "premorienza_malattia", label: "MALATTIA, sei protetto fino a" },
             { id: "premorienza_infortunio", label: "INFORTUNIO, sei protetto fino a" },
         ],
-        customW: 430,
+        customW: 340,
     },
     {
-        id: "invalidita", baseH: 102, color: COLORS.red,
-        strip: { top: 0, h: 28, maxW: 820, font: 10 },
+        id: "invalidita", baseH: 90, color: COLORS.red,
+        strip: { top: 0, h: 24, maxW: 580, font: 9 },
         titolo: "IN CASO DI INVALIDITÀ DOVUTA A:",
         voci: [
             { id: "invalidita_malattia", label: "MALATTIA, sei protetto fino a" },
             { id: "invalidita_infortunio", label: "INFORTUNIO, sei protetto fino a" },
             { id: "invalidita_non_autosufficienza", label: "NON AUTOSUFFICIENZA, sei protetto fino a" },
         ],
-        customW: 430,
+        customW: 340,
     },
 ];
 
@@ -149,6 +150,7 @@ export default function PiramidePrivati({
     stato_voci = {},
     voci_custom = {},
     onSave,                 // (payload) => Promise | null → read-only
+    onPrepopolate,          // () => Promise<datiRedditoSuggeriti> — bottone "Prepopola"
     onRichiediPreventivo,   // (voce_id, label) => void (portale)
     agenziaLogo,
     agenziaName = "Assicurazioni",
@@ -162,6 +164,7 @@ export default function PiramidePrivati({
     const [stati, setStati] = useState(stato_voci || {});
     const [custom, setCustom] = useState(voci_custom || {});
     const [saving, setSaving] = useState(false);
+    const [prepopolando, setPrepopolando] = useState(false);
 
     useEffect(() => { setReddito(dati_reddito || {}); }, [dati_reddito]);
     useEffect(() => { setTest(!!testamento); }, [testamento]);
@@ -205,6 +208,18 @@ export default function PiramidePrivati({
         } catch (e) { toast.error("Errore salvataggio: " + (e.response?.data?.detail || e.message)); }
         finally { setSaving(false); }
     }, [editable, onSave, reddito, test, eredi, overrides, stati, custom]);
+
+    const prepopola = useCallback(async () => {
+        if (!editable || !onPrepopolate) return;
+        setPrepopolando(true);
+        try {
+            const suggeriti = await onPrepopolate();
+            setReddito((s) => ({ ...s, ...suggeriti }));
+            toast.success("Dati reddito pre-popolati dall'estratto INPS. Verifica e salva.");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || e.message || "Errore prepopolamento");
+        } finally { setPrepopolando(false); }
+    }, [editable, onPrepopolate]);
 
     const capitaleVoce = (vid) => {
         const ov = overrides[vid];
@@ -313,48 +328,57 @@ export default function PiramidePrivati({
                 )}
             </div>
 
+            {/* SIDEBAR DATI REDDITO — sopra la piramide, layout orizzontale compatto */}
+            <div className="border border-slate-300 rounded p-2 mb-2 bg-slate-50" data-testid="piramide-sidebar">
+                {editable && onPrepopolate && (
+                    <div className="flex items-center justify-between mb-2 pb-1 border-b border-slate-200">
+                        <span className="text-[10px] font-semibold text-slate-600 uppercase">Dati reddito cliente</span>
+                        <button type="button" onClick={prepopola} disabled={prepopolando}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold px-2.5 py-1 rounded disabled:opacity-60 transition-colors flex items-center gap-1"
+                                title="Riempi automaticamente dai dati anagrafica / estratto INPS caricato"
+                                data-testid="piramide-btn-prepopola">
+                            {prepopolando ? "…" : "⚡ Prepopola dati"}
+                        </button>
+                    </div>
+                )}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-1 text-[10px]">
+                    <SidebarField label="Reddito attuale" value={reddito.reddito_attuale}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_attuale: v }))} />
+                    <div className="flex items-center gap-1 text-[9px]">
+                        <span className="font-semibold text-slate-700 uppercase whitespace-nowrap">Est. conto:</span>
+                        <label className="ml-1 mr-1">
+                            <input type="checkbox" disabled={!editable}
+                                   checked={reddito.estratto_conto === true}
+                                   onChange={() => editable && setReddito((s) => ({ ...s, estratto_conto: true }))} /> Sì
+                        </label>
+                        <label>
+                            <input type="checkbox" disabled={!editable}
+                                   checked={reddito.estratto_conto === false}
+                                   onChange={() => editable && setReddito((s) => ({ ...s, estratto_conto: false }))} /> No
+                        </label>
+                    </div>
+                    <SidebarField label="Reddito lordo invalidità 66-99%" value={reddito.reddito_invalidita_66_99}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_invalidita_66_99: v }))} />
+                    <SidebarField label="Inabilità 100%" value={reddito.reddito_inabilita_100}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_inabilita_100: v }))} />
+                    <SidebarField label="Superstiti" value={reddito.reddito_superstiti}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_superstiti: v }))} />
+                    <SidebarField label="Responsabilità" value={reddito.reddito_responsabilita}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_responsabilita: v }))} />
+                    <SidebarField label="Perdita beni" value={reddito.reddito_perdita_beni}
+                                  editable={editable}
+                                  onChange={(v) => setReddito((s) => ({ ...s, reddito_perdita_beni: v }))} />
+                </div>
+            </div>
+
             {/* AREA PIRAMIDE — scroll orizzontale su schermi stretti */}
             <div className="overflow-x-auto pb-2">
-                <div className="relative" style={{ width: TOTAL_W, height: H, minWidth: TOTAL_W }}>
-
-                    {/* Sidebar dati reddito: in alto a sinistra, fuori dal triangolo */}
-                    <div className="absolute left-0 top-1 w-[295px] space-y-1 text-[11px] z-20"
-                         data-testid="piramide-sidebar">
-                        <SidebarField label="IL TUO REDDITO ATTUALE" value={reddito.reddito_attuale}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_attuale: v }))} />
-                        <div className="flex items-center gap-1">
-                            <span className="font-semibold text-slate-700 text-[10px] uppercase">Estratto conto contributivo:</span>
-                            <label className="ml-1 mr-1 text-[10px]">
-                                <input type="checkbox" disabled={!editable}
-                                       checked={reddito.estratto_conto === true}
-                                       onChange={() => editable && setReddito((s) => ({ ...s, estratto_conto: true }))} /> Sì
-                            </label>
-                            <label className="text-[10px]">
-                                <input type="checkbox" disabled={!editable}
-                                       checked={reddito.estratto_conto === false}
-                                       onChange={() => editable && setReddito((s) => ({ ...s, estratto_conto: false }))} /> No
-                            </label>
-                        </div>
-                        <div className="text-[9px] text-slate-600 font-semibold uppercase pt-0.5">
-                            Il tuo reddito lordo annuale in caso di:
-                        </div>
-                        <SidebarField label="INVALIDITÀ: 66%-99%" value={reddito.reddito_invalidita_66_99}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_invalidita_66_99: v }))} />
-                        <SidebarField label="INABILITÀ: 100%" value={reddito.reddito_inabilita_100}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_inabilita_100: v }))} />
-                        <SidebarField label="SUPERSTITI" value={reddito.reddito_superstiti}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_superstiti: v }))} />
-                        <SidebarField label="RESPONSABILITÀ" value={reddito.reddito_responsabilita}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_responsabilita: v }))} />
-                        <SidebarField label="PERDITA BENI" value={reddito.reddito_perdita_beni}
-                                      editable={editable}
-                                      onChange={(v) => setReddito((s) => ({ ...s, reddito_perdita_beni: v }))} />
-                    </div>
+                <div className="relative mx-auto" style={{ width: TOTAL_W, height: H, minWidth: TOTAL_W }}>
 
                     {/* TRIANGOLO CLIPPATO: tutto il contenuto resta dentro i bordi */}
                     <div className="absolute top-0 left-0 bg-white"
@@ -392,7 +416,7 @@ export default function PiramidePrivati({
                     {WEDGE_DEFS.map((w) => {
                         const y1 = layout.map[w.from].yTop + (w.from === "crescita" ? 0 : 4);
                         const y2 = layout.map[w.to].yTop + layout.map[w.to].h - 4;
-                        const left = xRight(y1) + 6;
+                        const left = xRight(y1) + 4;
                         const dx = xRight(y2) - xRight(y1);
                         return (
                             <div key={w.label}
@@ -405,8 +429,8 @@ export default function PiramidePrivati({
                                      paddingLeft: dx,
                                  }}
                                  data-testid={`piramide-zona-${w.label.toLowerCase().replace(/ /g, "-")}`}>
-                                <span className="text-white font-bold uppercase tracking-wider text-[11px] leading-tight px-2 text-center"
-                                      style={{ maxWidth: TOTAL_W - left - dx - 8, textShadow: "0 1px 2px rgba(0,0,0,.25)" }}>
+                                <span className="text-white font-bold uppercase tracking-wider leading-tight px-1 text-center"
+                                      style={{ fontSize: 9, maxWidth: TOTAL_W - left - dx - 4, textShadow: "0 1px 2px rgba(0,0,0,.25)" }}>
                                     {w.label}
                                 </span>
                             </div>
@@ -492,10 +516,10 @@ function Level({
                     const st = statoVoce(voce.id);
                     const clickable = editable || (canRequestQuote && st !== "adeguato");
                     return (
-                        <div key={voce.id} className="flex items-center justify-center gap-2"
-                             style={{ width: 430, padding: "1px 0" }}>
+                        <div key={voce.id} className="flex items-center justify-center gap-1.5"
+                             style={{ width: 340, padding: "1px 0" }}>
                             <span className="flex-1 text-right uppercase font-medium text-slate-800"
-                                  style={{ fontSize: 10.5 }}>
+                                  style={{ fontSize: 9.5 }}>
                                 {voce.label}
                             </span>
                             <input type="text"
@@ -505,13 +529,13 @@ function Level({
                                        const raw = e.target.value.replace(/[^\d]/g, "");
                                        onChangeOverride(voce.id, raw);
                                    }}
-                                   className="bg-white border border-slate-500 rounded-sm px-1.5 py-0.5 text-right font-mono w-28 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                                   style={{ fontSize: 10.5, height: 20 }}
+                                   className="bg-white border border-slate-500 rounded-sm px-1 py-0.5 text-right font-mono w-24 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                   style={{ fontSize: 9.5, height: 18 }}
                                    data-testid={`piramide-input-${voce.id}`} />
                             <button type="button"
                                     onClick={() => onDotClick(voce)}
                                     title={DOT_LABEL[st] + (editable ? " — clicca per cambiare" : (st !== "adeguato" ? " — clicca per richiedere un preventivo" : ""))}
-                                    className={`w-[18px] h-[18px] rounded-full border-2 border-white shadow-sm flex-shrink-0 transition-transform ${clickable ? "cursor-pointer hover:scale-125" : "cursor-default"}`}
+                                    className={`w-[16px] h-[16px] rounded-full border-2 border-white shadow-sm flex-shrink-0 transition-transform ${clickable ? "cursor-pointer hover:scale-125" : "cursor-default"}`}
                                     style={{ background: DOT_COLORS[st], outline: "1px solid #64748b" }}
                                     data-testid={`piramide-pallino-${voce.id}`} />
                         </div>
@@ -527,8 +551,8 @@ function Level({
                                onChangeOverride(lvl.inputVoce, raw);
                            }}
                            placeholder="€"
-                           className="bg-white border border-slate-500 rounded-sm px-1.5 py-0.5 text-center font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
-                           style={{ fontSize: 10.5, height: 22, width: lvl.id === "crescita" ? 78 : 110 }}
+                           className="bg-white border border-slate-500 rounded-sm px-1 py-0.5 text-center font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+                           style={{ fontSize: 9.5, height: 20, width: lvl.id === "crescita" ? 68 : 90 }}
                            data-testid={`piramide-input-${lvl.inputVoce}`} />
                 )}
                 {/* voci custom aggiunte dall'agenzia */}
@@ -536,8 +560,8 @@ function Level({
                     const st = voce.stato || "assente";
                     const clickable = editable || (canRequestQuote && st !== "adeguato");
                     return (
-                        <div key={voce.id || idx} className="flex items-center justify-center gap-2"
-                             style={{ width: lvl.customW || 430, padding: "1px 0" }}
+                        <div key={voce.id || idx} className="flex items-center justify-center gap-1.5"
+                             style={{ width: lvl.customW || 340, padding: "1px 0" }}
                              data-testid={`piramide-custom-${lvl.id}-${idx}`}>
                             {editable ? (
                                 <input type="text"
@@ -545,11 +569,11 @@ function Level({
                                        onChange={(e) => onUpdateCustom(idx, { label: e.target.value })}
                                        placeholder="VOCE PERSONALIZZATA, protetto fino a"
                                        className="flex-1 text-right uppercase font-medium text-slate-800 bg-transparent border-0 border-b border-dashed border-slate-400 focus:outline-none focus:border-sky-500"
-                                       style={{ fontSize: 10 }}
+                                       style={{ fontSize: 9 }}
                                        data-testid={`piramide-custom-label-${lvl.id}-${idx}`} />
                             ) : (
                                 <span className="flex-1 text-right uppercase font-medium text-slate-800"
-                                      style={{ fontSize: 10.5 }}>
+                                      style={{ fontSize: 9.5 }}>
                                     {voce.label || "—"}
                                 </span>
                             )}
@@ -560,20 +584,20 @@ function Level({
                                        const raw = e.target.value.replace(/[^\d]/g, "");
                                        onUpdateCustom(idx, { capitale: raw });
                                    }}
-                                   className="bg-white border border-slate-500 rounded-sm px-1.5 py-0.5 text-right font-mono w-24 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                                   style={{ fontSize: 10.5, height: 20 }}
+                                   className="bg-white border border-slate-500 rounded-sm px-1 py-0.5 text-right font-mono w-20 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                   style={{ fontSize: 9.5, height: 18 }}
                                    data-testid={`piramide-custom-capitale-${lvl.id}-${idx}`} />
                             <button type="button"
                                     onClick={() => onCustomDotClick(idx, voce)}
                                     title={DOT_LABEL[st] + (editable ? " — clicca per cambiare" : "")}
-                                    className={`w-[18px] h-[18px] rounded-full border-2 border-white shadow-sm flex-shrink-0 transition-transform ${clickable ? "cursor-pointer hover:scale-125" : "cursor-default"}`}
+                                    className={`w-[16px] h-[16px] rounded-full border-2 border-white shadow-sm flex-shrink-0 transition-transform ${clickable ? "cursor-pointer hover:scale-125" : "cursor-default"}`}
                                     style={{ background: DOT_COLORS[st], outline: "1px solid #64748b" }}
                                     data-testid={`piramide-custom-pallino-${lvl.id}-${idx}`} />
                             {editable && (
                                 <button type="button" onClick={() => onRemoveCustom(idx)}
                                         title="Rimuovi voce"
                                         className="text-slate-400 hover:text-rose-600 font-bold leading-none flex-shrink-0"
-                                        style={{ fontSize: 12 }}
+                                        style={{ fontSize: 11 }}
                                         data-testid={`piramide-custom-remove-${lvl.id}-${idx}`}>
                                     ×
                                 </button>
@@ -588,13 +612,15 @@ function Level({
 
 function SidebarField({ label, value, editable, onChange }) {
     return (
-        <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-slate-700 text-[10px] uppercase whitespace-nowrap">{label}:</span>
+        <div className="flex items-center gap-1">
+            <span className="font-semibold text-slate-700 uppercase whitespace-nowrap" style={{ fontSize: 9 }}>{label}:</span>
             <input type="text"
                    value={value ?? ""}
                    disabled={!editable}
                    onChange={(e) => onChange(e.target.value)}
-                   className="border border-slate-400 rounded-sm px-1.5 py-0.5 text-[10px] w-[90px] font-mono text-right" />
+                   className="border border-slate-400 rounded-sm px-1 py-0.5 font-mono text-right flex-1 min-w-0"
+                   style={{ fontSize: 9.5 }}
+                   data-testid={`piramide-sidebar-${label.toLowerCase().replace(/[^a-z0-9]+/gi, '-')}`} />
         </div>
     );
 }

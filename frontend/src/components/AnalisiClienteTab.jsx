@@ -1490,6 +1490,11 @@ function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
         } finally { setBusy(false); }
     };
 
+    const prepopola = async () => {
+        const r = await api.post(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2/prepopola`);
+        return r.data;
+    };
+
     if (!data) return <div className="text-center py-8 text-slate-500">Caricamento piramide...</div>;
 
     return (
@@ -1513,6 +1518,7 @@ function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
                 voci_custom={data.voci_custom}
                 clienteNome={data.cliente_nome}
                 onSave={canEdit ? salva : null}
+                onPrepopolate={canEdit ? prepopola : null}
                 agenziaName={agenzia.nome || agenzia.ragione_sociale || "Assicurazioni"}
                 agenziaLogo={agenzia.logo_url}
             />
