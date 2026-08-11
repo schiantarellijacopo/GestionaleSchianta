@@ -249,9 +249,7 @@ export default function PolizzaDetail() {
                                 <tfoot>
                                     <tr className="bg-slate-50 font-semibold">
                                         <td>TOTALE</td>
-                                        <td className="num text-right text-sky-700">
-                                            {pol.capitale_assicurato ? fmtEur(pol.capitale_assicurato) : (pol.massimali || "—")}
-                                        </td>
+                                        <td></td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.netto || 0), 0))}</td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.accessori || 0), 0))}</td>
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.imposte || 0), 0))}</td>
