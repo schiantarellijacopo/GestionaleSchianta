@@ -224,8 +224,18 @@ export default function PolizzaDetail() {
                                     {pol.garanzie.map((g, i) => {
                                         // Massimale della singola garanzia (fallback su vari nomi
                                         // usati dai flussi import ANIA / OMNIA)
-                                        const mx = g.massimale ?? g.capitale ?? g.capitale_assicurato
+                                        let mx = g.massimale ?? g.capitale ?? g.capitale_assicurato
                                                     ?? g.somma_assicurata ?? g.massimali;
+                                        // 🆕 Fallback: se la garanzia non ha massimale ma la polizza
+                                        // sì (campo intestazione `massimali` / `capitale_assicurato`)
+                                        // ed è l'UNICA garanzia oppure è una garanzia RCA/RC principale,
+                                        // riporta il valore della polizza come massimale di garanzia.
+                                        const isRcaLike = /^rc[a\s]|rc\s|rc$|motocicl|autov|autocarr/i
+                                            .test(g.garanzia || g.garanzia_originale || "");
+                                        if ((mx == null || mx === "" || mx === 0)
+                                            && (pol.garanzie.length === 1 || isRcaLike)) {
+                                            mx = pol.massimali || pol.capitale_assicurato;
+                                        }
                                         return (
                                             <tr key={i}>
                                                 <td className="font-medium">{g.garanzia || g.garanzia_originale || g.codice_ania || "—"}</td>
