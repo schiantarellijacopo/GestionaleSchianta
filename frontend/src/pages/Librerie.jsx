@@ -83,6 +83,7 @@ function Sezione({ section }) {
     const [list, setList] = useState(null);
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [bulkOpen, setBulkOpen] = useState(false);
 
     const load = () => api.get(section.endpoint).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [section.key]);
@@ -118,6 +119,7 @@ function Sezione({ section }) {
     };
 
     const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
+    const showBulkRename = section.key === "prodotti";
 
     return (
         <div>
@@ -127,6 +129,11 @@ function Sezione({ section }) {
                     {showApplica && (
                         <Button variant="outline" size="sm" onClick={applicaMapping} data-testid={`lib-apply-${section.key}`}>
                             Applica a polizze esistenti
+                        </Button>
+                    )}
+                    {showBulkRename && list && list.length > 0 && (
+                        <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} data-testid="lib-bulk-rename-prodotti">
+                            <Pencil size={13} className="mr-1" /> Rinomina in massa
                         </Button>
                     )}
                     <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
@@ -152,11 +159,165 @@ function Sezione({ section }) {
                     <ListaSezione section={section} list={list} onEdit={setEditing} onDelete={elimina} onQuickUpdate={quickUpdate} />
                 }
             </Card>
+
+            {showBulkRename && bulkOpen && (
+                <BulkRenameProdottiDialog
+                    open={bulkOpen}
+                    prodotti={list || []}
+                    onClose={() => { setBulkOpen(false); load(); }}
+                />
+            )}
         </div>
     );
 }
 
-function ListaSezione({ section, list, onEdit, onDelete }) {
+function BulkRenameProdottiDialog({ open, prodotti, onClose }) {
+    const [filter, setFilter] = useState("auto");  // 'auto' | 'tutti'
+    const [search, setSearch] = useState("");
+    const [edits, setEdits] = useState({});  // {id: nuovoNome}
+    const [saving, setSaving] = useState(false);
+
+    const filtered = (prodotti || []).filter((p) => {
+        if (filter === "auto" && !p.auto_created) return false;
+        if (search) {
+            const s = search.toLowerCase();
+            return (p.nome || "").toLowerCase().includes(s)
+                || (p.ramo || "").toLowerCase().includes(s);
+        }
+        return true;
+    });
+
+    const modCount = Object.entries(edits).filter(([id, v]) => {
+        const p = prodotti.find((x) => x.id === id);
+        return p && v?.trim() && v.trim() !== p.nome;
+    }).length;
+
+    const salva = async () => {
+        const items = Object.entries(edits)
+            .filter(([id, v]) => {
+                const p = prodotti.find((x) => x.id === id);
+                return p && v?.trim() && v.trim() !== p.nome;
+            })
+            .map(([id, nome]) => ({ id, nome: nome.trim() }));
+        if (!items.length) { toast.info("Nessuna modifica da salvare"); return; }
+        setSaving(true);
+        try {
+            const r = await api.post("/librerie/prodotti/bulk-rename", { items });
+            const { rinominati, saltati, conflitti } = r.data;
+            if (conflitti?.length) {
+                toast.warning(`Rinominati ${rinominati} — ${conflitti.length} in conflitto (nomi già esistenti)`);
+            } else if (saltati) {
+                toast.success(`Rinominati ${rinominati} — ${saltati} saltati`);
+            } else {
+                toast.success(`Rinominati ${rinominati} prodotti`);
+            }
+            setEdits({});
+            onClose();
+        } catch (e) {
+            toast.error(errMsg(e, "Errore rinomina"));
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+            <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col" data-testid="bulk-rename-prodotti-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Pencil size={18} className="text-sky-700" />
+                        Rinomina prodotti in massa
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="flex items-center gap-3 border-b pb-3 flex-wrap">
+                    <div className="flex gap-1 text-xs">
+                        <button
+                            onClick={() => setFilter("auto")}
+                            className={`px-3 py-1.5 rounded ${filter === "auto" ? "bg-amber-100 text-amber-800 border border-amber-300" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                            data-testid="bulk-rename-filter-auto"
+                        >
+                            Solo auto-creati ({(prodotti || []).filter((p) => p.auto_created).length})
+                        </button>
+                        <button
+                            onClick={() => setFilter("tutti")}
+                            className={`px-3 py-1.5 rounded ${filter === "tutti" ? "bg-sky-100 text-sky-800 border border-sky-300" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                            data-testid="bulk-rename-filter-all"
+                        >
+                            Tutti ({(prodotti || []).length})
+                        </button>
+                    </div>
+                    <Input
+                        placeholder="Cerca per nome o ramo…"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="max-w-xs h-8 text-xs"
+                        data-testid="bulk-rename-search"
+                    />
+                    <span className="text-xs text-slate-500 ml-auto">
+                        {filtered.length} in elenco · <strong className="text-sky-700">{modCount}</strong> modifiche
+                    </span>
+                </div>
+                <div className="overflow-y-auto flex-1 py-2">
+                    {filtered.length === 0 ? (
+                        <div className="text-center text-sm text-slate-500 py-8">
+                            Nessun prodotto corrisponde ai filtri.
+                        </div>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-[11px] text-slate-500 uppercase tracking-wider">
+                                    <th className="pb-2 pl-2">Nome attuale</th>
+                                    <th className="pb-2">Ramo</th>
+                                    <th className="pb-2">Nuovo nome</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((p) => {
+                                    const current = edits[p.id] !== undefined ? edits[p.id] : p.nome;
+                                    const changed = edits[p.id] !== undefined && edits[p.id].trim() && edits[p.id].trim() !== p.nome;
+                                    return (
+                                        <tr key={p.id} className={changed ? "bg-sky-50" : ""}>
+                                            <td className="py-1.5 pl-2 text-slate-800">
+                                                {p.nome}
+                                                {p.auto_created && (
+                                                    <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-100 border border-amber-200 text-[9px] font-semibold text-amber-800 uppercase">
+                                                        auto
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="py-1.5"><span className="badge badge-neutral text-[10px]">{p.ramo || "-"}</span></td>
+                                            <td className="py-1.5 pr-2">
+                                                <Input
+                                                    value={current}
+                                                    onChange={(e) => setEdits((s) => ({ ...s, [p.id]: e.target.value }))}
+                                                    className="h-7 text-xs"
+                                                    data-testid={`bulk-rename-input-${p.id}`}
+                                                />
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+                <DialogFooter className="border-t pt-3 gap-2">
+                    <Button variant="ghost" onClick={onClose} data-testid="bulk-rename-close">
+                        Chiudi
+                    </Button>
+                    <Button
+                        onClick={salva}
+                        disabled={saving || modCount === 0}
+                        className="bg-sky-700 hover:bg-sky-800"
+                        data-testid="bulk-rename-save"
+                    >
+                        {saving ? "Salvataggio..." : `Salva ${modCount} modifiche`}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
     if (section.key === "conti-cassa") {
         return (
             <table className="tbl w-full">

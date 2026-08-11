@@ -1,23 +1,38 @@
 # Programma Assicurativo — PRD (aggiornato 11/02/2026)
 
-## Sessione 11/02/2026 (fork) — Semplificazione Wizard Mapping + Default Tab Garanzie
+## Sessione 11/02/2026 (fork) — Wizard Import semplificato + bug duplicati + Bulk Rename Prodotti
 
-### ✅ Fix critici
-1. **AnagraficaDetail lint fix**: risolti errori `react/jsx-no-undef` e `react/no-unstable-nested-components`. `InlineEditField` e `InlineChannelsField` estratti come componenti top-level; sotto-componente `Chip` di `InlineChannelsField` estratto in `ChannelChip`. Build compila di nuovo.
-2. **PolizzaDetail — tab default = Garanzie**: `defaultValue` dei `<Tabs>` è ora `garanzie` per polizze non-RCA, `veicolo` per polizze RCA. L'utente non deve più cliccare "Garanzie" ogni volta che apre una polizza.
+### 🔴 Bug fix critico — Duplicati in `import_mappings`
+- **Sintomo**: Wizard mostrava compagnie/prodotti/rami come "non mappati" anche dopo aver salvato l'associazione.
+- **Causa**: 75 righe duplicate in `db.import_mappings` con stessa `(tipo, flusso, valore_flusso)`. `update_one` aggiornava solo la prima, l'altra restava con `entita_id=None`.
+- **Fix**: dedup script eseguito una tantum (rimossi 75 dup); poi nell'endpoint `POST /api/import/mappings` aggiunta logica preventiva che elimina eventuali duplicati prima dell'upsert.
 
-### ✅ Wizard Mapping Entità Importazione — semplificato
-- **Tab Garanzia rimossa** dal wizard (frontend + backend). Le garanzie continuano a essere auto-create nella libreria `mapping_garanzie` durante l'import via `_ensure_stub_mapping`.
-- **Tab Prodotto**: invece di scegliere un prodotto esistente in libreria, l'utente sceglie solo il **Ramo** di appartenenza. Il backend `POST /api/import/mappings` (server.py:6022) ora:
-  - Per `tipo == "prodotto"`, `entita_id` in ingresso è un `ramo_id`
-  - Auto-crea (idempotentemente) un prodotto in `db.prodotti` con `nome = label_flusso` (o `valore_flusso`) e `ramo = ramo.codice`
-  - Salva il mapping con `entita_id` = id del nuovo prodotto e `label_programma` = nome del prodotto
-- **`/api/import/unmapped`**: candidati per `prodotto` ora sono la lista dei rami; `garanzia` esclusa dalla risposta.
-- UI in `Importazione.jsx` (`MappingRows`): banner esplicativo, header "Ramo di appartenenza (il prodotto viene creato in libreria)", riga già mappata mostra "✓ Prodotto in libreria: <nome>".
+### ✅ Auto-suggerisci Ramo per Prodotti
+- Backend `/api/import/unmapped`: per ogni prodotto non ancora mappato calcola `suggested_entita_id` in base a keyword matching sul nome (AUTO/VEICOLI→Auto, CASA/ABITAZIONE→Casa, VITA/TCM→Vita, IMPRESA/ARTIGIANI→Multirischio, PENSIONE/PIP→Previdenza, TUTELA LEGALE→Tutela Legale, ecc.).
+- Frontend `Importazione.jsx`: pre-seleziona il ramo suggerito con sfondo azzurro + messaggio "💡 Ramo suggerito automaticamente". L'utente conferma tutti in un click con "Salva e applica".
 
-### Test verificati (curl)
-- `POST /api/import/mappings tipo=prodotto entita_id=<ramo_id>` → crea prodotto nuovo in `db.prodotti` (verificato con valore `TEST_NEW_PROD_XYZ` → ramo `MULTIRISCHIO`).
-- Idempotente: se esiste già un prodotto con stesso nome, riusa senza duplicare.
+### ✅ Auto-crea Operatori (mai più mapping manuale)
+- **`ania_importer.py`**: `_resolve_operatore_codice` ora auto-crea uno stub `db.users` (`role=collaboratore, attivo=False, password_hash="!DISABLED-IMPORT-AUTO"`) al primo incontro con un operatore ignoto. Aggiunge un mapping in `import_mappings` con `auto_created=True`.
+- **`server.py` `/import/unmapped`**: helper `_auto_create_stub_operatore` per convertire i mapping legacy con `entita_id=None`. La tab Operatore/Collaboratore resta nel wizard: mostra badge giallo "AUTO-CREATO" + hint "completa in Librerie → Utenti/Collaboratori". L'utente può comunque cambiare associazione manualmente.
+
+### ✅ Rinomina Prodotti in massa
+- Backend nuovo endpoint `POST /librerie/prodotti/bulk-rename` che accetta `{items: [{id, nome}]}` e ritorna `{rinominati, saltati, conflitti}`. Idempotente con controllo unicità nome.
+- Frontend Librerie sezione Prodotti: nuovo pulsante "**Rinomina in massa**" che apre `BulkRenameProdottiDialog` con filtri:
+  - "Solo auto-creati" (default) — mostra solo prodotti con `auto_created=True`
+  - "Tutti"
+  - Ricerca per nome/ramo
+- Salvataggio batch con contatore modifiche live e badge "AUTO" sui prodotti creati automaticamente dall'import.
+- Nel wizard, i prodotti auto-creati portano ora `auto_created: true, auto_created_from: <codice flusso>` per il filtro nel dialog.
+
+### 🔧 Bonus fix minori
+- **PolizzaDetail**: `defaultValue` dei `<Tabs>` = `garanzie` per polizze non-RCA (bypass del click su tab Garanzie).
+- **AnagraficaDetail**: risolti errori `react/jsx-no-undef` e `react/no-unstable-nested-components` (`InlineEditField`, `InlineChannelsField`, `ChannelChip`).
+
+### Test verificati (curl end-to-end)
+- Duplicati: 0 in tutti i tipi dopo dedup + nuovo insert
+- Auto-suggest: `ABITAZIONE` → Ramo MULTIRISCHIO, `ACTIVE RISPARMIO` → Ramo Vita, `AUTOPIU'` → Ramo Auto
+- Bulk rename: chiamata dry-run OK
+- Prodotto auto-create con `TEST_NEW_PROD_XYZ` → prodotto in libreria con `auto_created=True, ramo=MULTIRISCHIO`
 
 ## Sessione 11/02/2026 — Portale Cliente completato + 4 punti finali utente (iter_51: 18/18 PASS)
 

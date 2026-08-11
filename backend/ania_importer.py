@@ -399,6 +399,45 @@ async def _risolvi_contraente(db, contraente_exp: str | None,
     return ph.id
 
 
+async def _auto_create_stub_user(db, operatore_codice: str, label: str) -> Optional[str]:
+    """Crea uno stub 'collaboratore' in db.users (attivo=False) e ritorna il suo id.
+
+    Usato dall'import quando trova un codice operatore mai visto: al posto di
+    chiedere all'admin di mappare manualmente, creiamo subito l'utente
+    placeholder — l'admin lo completerà (email/password/attivo) in
+    Librerie → Utenti / Collaboratori.
+    """
+    if not operatore_codice:
+        return None
+    codice = operatore_codice.strip()
+    # slug email placeholder
+    slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
+    email = f"operatore.{slug}@import-auto.local"
+    # dedup difensivo: se esiste già uno stub con quell'email, riusalo
+    existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+    if existing:
+        return existing["id"]
+    # Nome leggibile: label dal flusso o "Operatore <codice>"
+    nome_display = (label or "").strip() or f"Operatore {codice}"
+    # password_hash con valore fittizio non usabile (l'utente non può loggare
+    # finché admin non gli assegna una password vera dal form Utenti).
+    user_id = _uid()
+    doc = {
+        "id": user_id,
+        "email": email,
+        "name": nome_display,
+        "role": "collaboratore",
+        "attivo": False,
+        "auto_created": True,
+        "auto_created_from_codice": codice,
+        "password_hash": "!DISABLED-IMPORT-AUTO",  # bcrypt-invalid → login impossibile
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    }
+    await db.users.insert_one(doc)
+    return user_id
+
+
 async def _resolve_operatore_codice(db, row: dict,
                                    mapping_operatori: dict,
                                    tracker: Optional[Dict[str, Dict[str, dict]]] = None,
@@ -406,7 +445,8 @@ async def _resolve_operatore_codice(db, row: dict,
     """Estrae l'operatore_codice dalla riga e risolve il collaboratore_id.
 
     Risolve sia via mapping_operatori (legacy) che via import_mappings (nuovo).
-    Traccia l'operatore come "non mappato" se non risolto.
+    Se non risolto → AUTO-CREA uno stub user (attivo=false) e salva il mapping.
+    L'admin poi va in Librerie → Utenti a completare/attivare.
     Ritorna (operatore_codice, collaboratore_id).
     """
     operatore_codice = (row.get("cod_operatore")
@@ -424,13 +464,34 @@ async def _resolve_operatore_codice(db, row: dict,
     if not collaboratore_id:
         collaboratore_id = mapping_operatori.get(operatore_codice)
     if not collaboratore_id:
-        # tracking + stub legacy per compatibilità con UI Librerie esistente
-        await _ensure_stub_mapping(db, "mapping_operatori", operatore_codice, label)
-        if tracker is not None:
-            await _track_unmapped(
-                db, tracker, "collaboratore", operatore_codice,
-                label=label, import_mappings=import_mappings,
+        # 🆕 Auto-crea stub user (invece di lasciare la scelta manuale)
+        new_user_id = await _auto_create_stub_user(db, operatore_codice, label)
+        if new_user_id:
+            collaboratore_id = new_user_id
+            # Salva subito il mapping così i prossimi import lo risolvono senza
+            # ricreare utenti duplicati.
+            await db.import_mappings.update_one(
+                {"tipo": "collaboratore", "flusso": "omnia", "valore_flusso": operatore_codice},
+                {
+                    "$setOnInsert": {
+                        "id": _uid(),
+                        "tipo": "collaboratore", "flusso": "omnia",
+                        "valore_flusso": operatore_codice,
+                        "created_at": _now_iso(),
+                    },
+                    "$set": {
+                        "entita_id": new_user_id,
+                        "label_flusso": label or operatore_codice,
+                        "label_programma": label or f"Operatore {operatore_codice}",
+                        "auto_created": True,
+                        "updated_at": _now_iso(),
+                    },
+                    "$inc": {"occorrenze": 1},
+                },
+                upsert=True,
             )
+        # Mantiene lo stub legacy per la UI Librerie mapping_operatori
+        await _ensure_stub_mapping(db, "mapping_operatori", operatore_codice, label)
     return operatore_codice, collaboratore_id
 
 

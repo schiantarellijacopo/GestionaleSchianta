@@ -5969,6 +5969,67 @@ async def list_unmapped_entities(
     Se `include_mapped=true`, include anche quelle già associate (per permettere
     la modifica/eliminazione del mapping dal wizard).
     """
+    # Keyword mapping per auto-suggerire il ramo dal nome del prodotto.
+    # Prima wins: la lista è valutata in ordine e la prima regola che matcha
+    # applica il suo elenco di keyword da cercare nel nome del ramo.
+    PROD_RAMO_KEYWORDS = [
+        # (keyword nel nome prodotto, keyword nel nome ramo)
+        (["flotta", "libro matricola"], ["flotte", "libro matricola"]),
+        (["autopiu", "guidamica", "veicoli auto", " rca", "auto ", "auto,",
+          " veicoli", "motocicl", "ciclomotor", "autocarri", "rc auto",
+          " rca(", "rca "], ["rc auto", "rca", "auto"]),
+        (["imprese", "impresa", "artigian", "commercio", "negozio",
+          "attivit"], ["impresa", "azienda", "multirischio"]),
+        (["casa", "abitazione", "fabbricat", "home", "immobile",
+          "condominio", "parrocch"], ["casa", "abitazione", "multirischio", "condominio", "parrocchie"]),
+        (["vita", "tcm ", "temporanea caso morte", "rivalutabile",
+          "unit linked", "unit-linked", "misto", "capitale differ",
+          "risparmio", "generazione"], ["vita"]),
+        (["salute", "malatt", "medic", "doctor", "care ",
+          "cura"], ["salute", "malattia"]),
+        (["infortun"], ["infortuni", "malattia"]),
+        (["pension", "previd", " pip ", "fondo pension"], ["pensione", "previdenza"]),
+        (["tutela legale", "legal", "protezione legale"], ["tutela legale"]),
+    ]
+
+    def _suggest_ramo_id(product_name: str, rami_candidates: list) -> Optional[str]:
+        if not product_name:
+            return None
+        pn = " " + product_name.lower() + " "
+        for prod_keys, ramo_keys in PROD_RAMO_KEYWORDS:
+            if any(k in pn for k in prod_keys):
+                for r in rami_candidates:
+                    rn = (r.get("label") or "").lower()
+                    if any(rk in rn for rk in ramo_keys):
+                        return r["id"]
+        return None
+
+    async def _auto_create_stub_operatore(codice: str, label: str) -> Optional[str]:
+        """Crea (o riusa) un utente stub 'collaboratore' inattivo per l'operatore
+        importato. L'admin poi lo completa in Librerie → Utenti / Collaboratori."""
+        if not codice:
+            return None
+        slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
+        email = f"operatore.{slug}@import-auto.local"
+        existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+        if existing:
+            return existing["id"]
+        nome_display = (label or "").strip() or f"Operatore {codice}"
+        user_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": user_id,
+            "email": email,
+            "name": nome_display,
+            "role": "collaboratore",
+            "attivo": False,
+            "auto_created": True,
+            "auto_created_from_codice": codice,
+            "password_hash": "!DISABLED-IMPORT-AUTO",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        })
+        return user_id
+
     # NB: garanzia è stata rimossa dal wizard - le garanzie vengono create
     # in libreria (mapping_garanzie) in automatico durante l'import.
     # Per Prodotto, non serve più scegliere un prodotto della libreria:
@@ -6005,15 +6066,57 @@ async def list_unmapped_entities(
         async for r in db.rami.find({"attivo": {"$ne": False}}, {"_id": 0, "id": 1, "nome": 1, "codice": 1}).sort("nome", 1)
     ]
     candidates["collaboratore"] = [
-        {"id": u["id"], "label": u.get("name") or u.get("email")}
+        {
+            "id": u["id"],
+            "label": (u.get("name") or u.get("email"))
+                     + (" (da completare)" if u.get("auto_created") else ""),
+        }
         async for u in db.users.find(
-            {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "email": 1},
+            {"role": {"$in": ["admin", "collaboratore", "dipendente"]}},
+            {"_id": 0, "id": 1, "name": 1, "email": 1, "auto_created": 1},
         ).sort("name", 1)
     ]
     # Prodotto: candidati = RAMI (l'utente sceglie il ramo, il prodotto
     # viene poi auto-creato in libreria con il nome del flusso).
     candidates["prodotto"] = candidates["ramo"]
+
+    # 🆕 Auto-suggerimento ramo per ogni prodotto NON ancora mappato
+    rami_list = candidates["ramo"]
+    for it in by_tipo["prodotto"]:
+        if not it.get("entita_id"):
+            product_name = it.get("label_flusso") or it.get("valore_flusso") or ""
+            it["suggested_entita_id"] = _suggest_ramo_id(product_name, rami_list)
+
+    # 🆕 Auto-creazione stub user per ogni OPERATORE non ancora mappato.
+    # Copre due casi:
+    #   - flussi importati PRIMA di questa feature (legacy stub in import_mappings
+    #     con entita_id=None)
+    #   - qualunque record che sia sfuggito all'auto-create in ania_importer
+    # L'utente creato è inattivo e con password non usabile: l'admin lo
+    # completa in Librerie → Utenti / Collaboratori.
+    for it in by_tipo["collaboratore"]:
+        if it.get("entita_id"):
+            continue
+        codice = it.get("valore_flusso") or ""
+        label = it.get("label_flusso") or codice
+        new_uid = await _auto_create_stub_operatore(codice, label)
+        if not new_uid:
+            continue
+        # Aggiorna il mapping in DB
+        await db.import_mappings.update_one(
+            {"id": it["id"]},
+            {"$set": {
+                "entita_id": new_uid,
+                "label_programma": label or f"Operatore {codice}",
+                "auto_created": True,
+                "updated_at": _now_iso(),
+            }},
+        )
+        # Refresha la voce nella risposta
+        it["entita_id"] = new_uid
+        it["label_programma"] = label or f"Operatore {codice}"
+        it["auto_created"] = True
+
     return {**by_tipo, "candidates": candidates}
 
 
@@ -6068,6 +6171,8 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
                 "termini_mora_giorni": 15,
                 "is_libro_matricola": False,
                 "mostra_sezione_veicolo": False,
+                "auto_created": True,  # 🆕 creato dal wizard mapping import
+                "auto_created_from": valore_flusso,
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
             })
@@ -6081,6 +6186,21 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
         "note": body.get("note"),
         "updated_at": _now_iso(),
     }
+    # 🔧 FIX duplicati: se ci sono più righe con la stessa chiave (dovuto a
+    # tracking legacy prima delle nostre migrazioni), cancella gli extra prima
+    # dell'upsert per evitare che update_one aggiorni solo uno dei duplicati
+    # e lasci "orfano" l'altro visibile come non mappato.
+    existing_docs = await db.import_mappings.find(
+        {"tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso},
+        {"_id": 0, "id": 1},
+    ).to_list(50)
+    if len(existing_docs) > 1:
+        keep_id = existing_docs[0]["id"]
+        extra_ids = [d["id"] for d in existing_docs[1:]]
+        await db.import_mappings.delete_many({"id": {"$in": extra_ids}})
+        # Aggiorna esplicitamente il record che teniamo
+        await db.import_mappings.update_one({"id": keep_id}, {"$set": upd})
+        return upd
     await db.import_mappings.update_one(
         {"tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso},
         {"$set": upd, "$setOnInsert": {"created_at": _now_iso()}},

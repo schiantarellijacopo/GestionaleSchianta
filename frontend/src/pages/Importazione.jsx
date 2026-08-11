@@ -313,6 +313,15 @@ function MappingWizardDialog({ open, onClose }) {
         try {
             const res = await api.get(`/import/unmapped${showAll ? "?include_mapped=true" : ""}`);
             setData(res.data);
+            // 🆕 Pre-seleziona il ramo suggerito per ogni prodotto non ancora mappato,
+            // così l'utente basta clicchi "Salva e applica" per confermarli tutti.
+            const initEdits = {};
+            for (const it of (res.data.prodotto || [])) {
+                if (!it.entita_id && it.suggested_entita_id) {
+                    initEdits[it.id] = it.suggested_entita_id;
+                }
+            }
+            setEdits(initEdits);
             const first = ["compagnia", "ramo", "collaboratore", "prodotto"]
                 .find((t) => (res.data[t] || []).length > 0);
             if (first) setActive(first);
@@ -322,7 +331,7 @@ function MappingWizardDialog({ open, onClose }) {
     }, [showAll]);
 
     useEffect(() => {
-        if (open) { setEdits({}); load(); }
+        if (open) { load(); }
     }, [open, load]);
 
     const saveAll = async (applyAfter = false) => {
@@ -550,8 +559,17 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                         const currentVal = edits[it.id] !== undefined ? edits[it.id] : (it.entita_id || "");
                         const isMapped = !!it.entita_id;
                         const hasLabel = it.label_flusso && it.label_flusso !== it.valore_flusso;
+                        // 🆕 Auto-suggestion: prodotto con ramo suggerito ma non ancora scelto/salvato
+                        const isSuggested = !isMapped && tipo === "prodotto"
+                            && !!it.suggested_entita_id
+                            && edits[it.id] === it.suggested_entita_id;
+                        // 🆕 Operatore auto-creato in libreria (attivo=false, da completare)
+                        const isAutoCreated = !!it.auto_created;
+                        const rowClass = isAutoCreated ? "bg-amber-50/50"
+                            : isMapped ? "bg-emerald-50/40"
+                            : isSuggested ? "bg-sky-50/60" : "";
                         return (
-                            <tr key={it.id} data-testid={`wizard-row-${it.id}`} className={isMapped ? "bg-emerald-50/40" : ""}>
+                            <tr key={it.id} data-testid={`wizard-row-${it.id}`} className={rowClass}>
                                 <td>
                                     {/* Il nome leggibile (descrizione) va in primo piano; il codice tecnico sotto */}
                                     <div className="font-medium text-slate-800">
@@ -560,9 +578,26 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                                     {hasLabel && (
                                         <div className="text-[11px] text-slate-500 font-mono">cod: {it.valore_flusso}</div>
                                     )}
-                                    {isMapped && (
+                                    {isMapped && !isAutoCreated && (
                                         <div className="text-[10px] text-emerald-700 mt-0.5">
-                                            ✓ {tipo === "prodotto" ? "Prodotto in libreria" : "Attualmente"}: {it.label_programma || it.entita_id}
+                                            ✓ {tipo === "prodotto" ? "Prodotto in libreria"
+                                                : tipo === "collaboratore" ? "Utente collegato"
+                                                : "Attualmente"}: {it.label_programma || it.entita_id}
+                                        </div>
+                                    )}
+                                    {isAutoCreated && (
+                                        <div className="text-[10px] text-amber-700 mt-0.5 flex items-center gap-1">
+                                            <span className="inline-block px-1.5 py-0.5 rounded bg-amber-100 border border-amber-200 font-semibold">
+                                                AUTO-CREATO
+                                            </span>
+                                            {tipo === "collaboratore"
+                                                ? <span>utente placeholder — completa in <em>Librerie → Utenti/Collaboratori</em></span>
+                                                : <span>{it.label_programma || it.entita_id}</span>}
+                                        </div>
+                                    )}
+                                    {isSuggested && (
+                                        <div className="text-[10px] text-sky-700 mt-0.5">
+                                            💡 Ramo suggerito automaticamente — conferma con &quot;Salva e applica&quot;
                                         </div>
                                     )}
                                 </td>
@@ -571,7 +606,10 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                                     <select
                                         value={currentVal}
                                         onChange={(e) => onChange(it.id, e.target.value)}
-                                        className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""}`}
+                                        className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${
+                                            isSuggested ? "border-sky-400 ring-1 ring-sky-200"
+                                            : isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""
+                                        }`}
                                         data-testid={`wizard-select-${it.id}`}
                                     >
                                         <option value="">{placeholder}</option>

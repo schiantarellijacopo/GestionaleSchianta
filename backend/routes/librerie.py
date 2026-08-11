@@ -858,6 +858,51 @@ async def delete_prodotto(pid: str, user: dict = Depends(require_user("admin")))
     return {"ok": True}
 
 
+@router.post("/librerie/prodotti/bulk-rename")
+async def bulk_rename_prodotti(
+    body: dict, user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Rinomina in massa più prodotti in un'unica chiamata.
+
+    Body: {"items": [{"id": "...", "nome": "Nuovo Nome"}, ...]}
+    Ritorna: {"rinominati": N, "saltati": M, "conflitti": [...]}
+    """
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, "items richiesto: lista di {id, nome}")
+    rinominati, saltati, conflitti = 0, 0, []
+    now = _now_iso()
+    for it in items:
+        pid = (it.get("id") or "").strip()
+        nuovo_nome = (it.get("nome") or "").strip()
+        if not pid or not nuovo_nome:
+            saltati += 1
+            continue
+        current = await db.prodotti.find_one({"id": pid}, {"_id": 0, "nome": 1})
+        if not current:
+            saltati += 1
+            continue
+        if current.get("nome") == nuovo_nome:
+            saltati += 1
+            continue
+        # Verifica conflitto: esiste già un prodotto (diverso) con lo stesso nome?
+        existing = await db.prodotti.find_one(
+            {"nome": nuovo_nome, "id": {"$ne": pid}}, {"_id": 0, "id": 1, "nome": 1},
+        )
+        if existing:
+            conflitti.append({"id": pid, "nome_nuovo": nuovo_nome, "gia_esiste_id": existing["id"]})
+            saltati += 1
+            continue
+        await db.prodotti.update_one(
+            {"id": pid},
+            {"$set": {"nome": nuovo_nome, "updated_at": now}},
+        )
+        rinominati += 1
+    await log_attivita(user, "bulk_rename", "prodotti", None,
+                       f"Rinominati {rinominati} prodotti", payload={"conflitti": conflitti})
+    return {"rinominati": rinominati, "saltati": saltati, "conflitti": conflitti}
+
+
 # --- TIPOLOGIE SINISTRI ---
 @router.get("/librerie/tipologie-sinistri")
 async def list_tipologie_sinistri(user: dict = Depends(current_user)) -> list[dict]:
