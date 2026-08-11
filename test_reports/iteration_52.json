@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 52 - Backend verification of all bug fixes/features from user session: multi-anag portale login, /me extended fields, polizze stats+titoli quietanze, allegati/by-entita OR-match veicolo + ownership, download ownership, portale chat with file (in+out) + admin unread, invia-credenziali single (email+WA both OK) + massivo dry_run, dashboard task richieste_portale, Firma Namirial config PUT/GET + guards, Carichi Mensili stato_carico=tutti, Storico avvisi POST /rimanda WA. 23/23 pytest passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter52_portale_firma_bulk.py",
+    "/app/test_reports/pytest/iter52.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Multi-anag login funziona correttamente: entrambe le anagrafiche condividono email 'schiantarelli.jacopo@gmail.com' - login con CF SCHJCP91M18I829O ritorna correttamente SCHIANTARELLI JACOPO (id=abdc83b3-8f0f-4e1b-9a87-12ecd276b5d7). NB: nel testo del review request l'ID atteso '756628b6-...' appartiene invece ad ARSHAD HUSSNAIN (CF RSHHSN96S16Z236W); il fix riguarda la selezione della anagrafica GIUSTA in base al CF, non un ID specifico.",
+    "invia-credenziali su Marco Rossi funziona end-to-end: email_inviata=True (Gmail assicurazioni@schiantarelli.it) + whatsapp_inviato=True (Evolution agenzia-jacopoooo). Entrambe le integrazioni attive e correttamente collegate.",
+    "invia-credenziali-portale-massivo dry_run=True ritorna totale=38 esempi=10 (limit=50, solo_con_polizze=True).",
+    "Storico avvisi POST /rimanda: risponde correttamente con {ok, error, new_id, canale} - la Evolution API ha ritornato 400 per il numero test (393334455667 non esiste) ma il flusso è corretto (canale=whatsapp, new_id valorizzato). L'endpoint dovrebbe essere testato con un numero WA reale per verifica invio effettivo.",
+    "Firma Namirial: PUT/GET /librerie/azienda persiste firma_base_url/firma_environment; POST /firma/richieste con config vuota ritorna 400 'Provider firma non configurato' come atteso. GET /firma/richieste ritorna [] correttamente. Namirial real API upload non testato (mocked).",
+    "Portale allegati/by-entita: esclusione applicazione_matricola_id sotto polizza funziona; OR-match sotto applicazione_matricola pure; ownership sinistro/titolo/polizza correttamente controllata. Download ownership: 404 su UUID inesistente."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter52_portale_firma_bulk.py (new)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "admin@assicura.it/Admin123!, marco.rossi@demo.it/RSSMRC75H10F205X (93b73085-100f-4c78-883a-e6cefea49c72), schiantarelli.jacopo@gmail.com/SCHJCP91M18I829O -> SCHIANTARELLI JACOPO (abdc83b3-8f0f-4e1b-9a87-12ecd276b5d7)",
+  "seed_data_creation": "TEST_iter52 chat message + allegato PDF cliente Marco, TEST_iter52 admin reply, TEST_iter52 avviso WA in storico_avvisi + relativo clone rimandato. Config firma azienda_config popolata poi resettata (potrebbe restare test token nel campo firma_api_token).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter52 ha coperto tutti i 16 punti di verifica del review request. Nota importante: alla fine del test la config firma viene resettata a blank (firma_base_url='' firma_api_token=''); se serve, main agent deve riconfigurare Namirial in Librerie -> Firme. La collection db.chat_portale e db.storico_avvisi contengono record TEST_iter52 (prefisso per cleanup)."
+}
