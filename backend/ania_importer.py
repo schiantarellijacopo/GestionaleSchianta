@@ -449,7 +449,8 @@ async def _resolve_operatore_codice(db, row: dict,
     L'admin poi va in Librerie → Utenti a completare/attivare.
     Ritorna (operatore_codice, collaboratore_id).
     """
-    operatore_codice = (row.get("cod_operatore")
+    operatore_codice = (row.get("collaboratore_1")
+                        or row.get("cod_operatore")
                         or row.get("operatore_share")
                         or row.get("cod_collaboratore")
                         or "").strip() or None
@@ -859,7 +860,10 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
 # ---------------------------------------------------------------------------
 async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                            polizza_id_map: Dict[str, str],
-                           counts: Dict[str, int]) -> None:
+                           counts: Dict[str, int],
+                           mapping_operatori: Optional[dict] = None,
+                           tracker: Optional[Dict[str, Dict[str, dict]]] = None,
+                           import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -884,6 +888,18 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             netto_calc = round(lordo - imposte_eff, 2) if lordo > 0 else 0.0
             # Accessori titolo: rec40 col AU = accessori_totale
             accessori_titolo = _parse_float(row.get("accessori_totale", ""))
+            # 🆕 Collaboratore/operatore del titolo: leggi da rec40 (collaboratore_1)
+            # o eredita dalla polizza (fallback).
+            _op_codice, coll_id_titolo = await _resolve_operatore_codice(
+                db, row, mapping_operatori or {},
+                tracker=tracker, import_mappings=import_mappings,
+            )
+            if not coll_id_titolo:
+                # Fallback: eredita dalla polizza già importata
+                pol_ref = await db.polizze.find_one(
+                    {"id": pol_id}, {"_id": 0, "collaboratore_id": 1},
+                )
+                coll_id_titolo = (pol_ref or {}).get("collaboratore_id") or None
             data = {
                 "polizza_id": pol_id,
                 "effetto": _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10],
@@ -900,6 +916,8 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 "fonte": "import_ania",
                 "updated_at": _now_iso(),
             }
+            if coll_id_titolo:
+                data["collaboratore_id"] = coll_id_titolo
             if existing:
                 await db.titoli.update_one({"id": existing["id"]}, {"$set": data})
             else:
@@ -1094,7 +1112,9 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
     await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
                              tracker=tracker, import_mappings=import_mappings)
-    await _processa_titoli(db, files_data, log, polizza_id_map, counts)
+    await _processa_titoli(db, files_data, log, polizza_id_map, counts,
+                           mapping_operatori=mapping_operatori,
+                           tracker=tracker, import_mappings=import_mappings)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)
