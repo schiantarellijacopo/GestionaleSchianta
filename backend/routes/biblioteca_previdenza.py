@@ -383,6 +383,33 @@ async def list_schede(user=Depends(current_user)):
     return list(out.values())
 
 
+@router.get("/schede-calcolo/{categoria}/pdf")
+async def scheda_calcolo_pdf(categoria: str, user=Depends(current_user)):
+    """Genera un PDF verificabile della scheda di calcolo di una categoria.
+    Riporta: sintesi, requisiti, formule, parametri numerici (con fonte),
+    discrepanze con il CRM, modifiche rispetto alla scheda precedente,
+    esempio di calcolo passo-passo, elenco dei PDF fonte e note verifica annuale.
+    """
+    import pdf_scheda_calcolo
+    from fastapi.responses import StreamingResponse
+    import io as _io
+    scheda = await db.schede_calcolo.find_one(
+        {"categoria": categoria}, {"_id": 0}, sort=[("generated_at", -1)])
+    if not scheda:
+        raise HTTPException(404, f"Nessuna scheda generata per la categoria «{categoria}». "
+                                 "Clicca prima «Verifica annuale» per generarla.")
+    az = await db.azienda_config.find_one({}, {"_id": 0, "ragione_sociale": 1}) or {}
+    ragione = az.get("ragione_sociale") or "Assicura CRM"
+    pdf_bytes = pdf_scheda_calcolo.genera_pdf_scheda_calcolo(scheda, ragione_sociale=ragione)
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in categoria)
+    return StreamingResponse(
+        _io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'inline; filename="scheda_calcolo_{safe_name}_{str(scheda.get("generated_at",""))[:10]}.pdf"'},
+    )
+
+
 @router.post("/schede-calcolo/genera")
 async def genera_scheda(body: dict, user=Depends(require_user("admin", "collaboratore"))):
     """Avvia un JOB IN BACKGROUND per generare la scheda di calcolo di una categoria.
@@ -429,12 +456,20 @@ async def _genera_scheda_worker(jid: str, categoria: str, chunks: list, fonti: l
         "{\n"
         '  "sintesi": "2-3 frasi sulla categoria e le sue specificità",\n'
         '  "requisiti": [{"prestazione": "...", "requisito": "..."}],\n'
-        '  "formule": [{"prestazione": "...", "formula": "..."}],\n'
+        '  "formule": [{"prestazione": "...", "formula": "formula matematica leggibile con simboli"}],\n'
         '  "parametri": [{"nome": "...", "valore": "...", "fonte": "nome documento"}],\n'
         '  "discrepanze_crm": [{"parametro": "...", "valore_crm": "...", "valore_documenti": "...", '
         '"gravita": "alta|media|bassa", "correzione_suggerita": "..."}],\n'
+        '  "esempio_calcolo": [\n'
+        '    {"passo": "1", "descrizione": "spiegazione del passo", "formula": "formula applicata", "risultato": "valore numerico"},\n'
+        '    {"passo": "2", "descrizione": "...", "formula": "...", "risultato": "..."}\n'
+        '  ],\n'
         '  "note_verifica_annuale": "cosa controllare l\'anno prossimo (importi, coefficienti, soglie)"\n'
-        "}"
+        "}\n\n"
+        "L'esempio_calcolo DEVE essere un caso realistico verificabile: "
+        "es. lavoratore 40 anni contributi, reddito 30.000€, pensione a 67 anni, con "
+        "tutti i passaggi numerici (contributi versati, montante rivalutato, coefficiente "
+        "applicato, pensione lorda annua)."
     )
     chat = LlmChat(
         api_key=os.environ.get("EMERGENT_LLM_KEY"),

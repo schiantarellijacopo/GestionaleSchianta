@@ -11053,6 +11053,87 @@ async def delete_corso(cid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
+@api.post("/corsi/{cid}/invia-cliente")
+async def invia_video_cliente(
+    cid: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Invia un video (corso) a un cliente tramite EMAIL o WHATSAPP.
+
+    Body: {
+        anagrafica_id: str,           # id anagrafica cliente destinatario
+        canale: "email" | "whatsapp", # canale di invio
+        messaggio: str (opzionale),   # testo personalizzato (default template)
+    }
+    """
+    canale = (body.get("canale") or "").lower().strip()
+    aid = (body.get("anagrafica_id") or "").strip()
+    if canale not in ("email", "whatsapp"):
+        raise HTTPException(400, "Canale deve essere 'email' o 'whatsapp'")
+    if not aid:
+        raise HTTPException(400, "anagrafica_id obbligatorio")
+
+    corso = await db.corsi.find_one({"id": cid}, {"_id": 0})
+    if not corso:
+        raise HTTPException(404, "Video non trovato")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Cliente non trovato")
+
+    nome_cliente = ana.get("ragione_sociale") or ana.get("cognome_nome") or \
+                   f"{ana.get('cognome', '')} {ana.get('nome', '')}".strip() or "cliente"
+    titolo = corso.get("titolo") or "video"
+    link = corso.get("video_url") or ""
+    if not link:
+        raise HTTPException(400, "Il video non ha un link/URL da inviare")
+
+    default_msg = body.get("messaggio") or (
+        f"Ciao {nome_cliente},\n\nti condividiamo il video «{titolo}» "
+        f"che potrebbe interessarti:\n\n{link}\n\n"
+        + (corso.get("descrizione") or "")
+        + "\n\nA presto!"
+    )
+
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+
+    if canale == "email":
+        email_dest = ana.get("email") or ana.get("pec")
+        if not email_dest:
+            raise HTTPException(400, "Il cliente non ha un'email registrata")
+        from avvisi_scadenze import _invia_email as _send_mail
+        soggetto = f"Video: {titolo}"
+        html_body = (
+            f"<p>Ciao <b>{nome_cliente}</b>,</p>"
+            f"<p>ti condividiamo il video <b>{titolo}</b>:</p>"
+            f'<p><a href="{link}" target="_blank">▶ Guarda il video</a></p>'
+        )
+        if corso.get("descrizione"):
+            html_body += f"<p>{corso['descrizione']}</p>"
+        try:
+            _send_mail(az, email_dest, soggetto, default_msg, html_body)
+        except Exception as e:
+            raise HTTPException(502, f"Errore invio email: {e}")
+        canale_effettivo = f"email → {email_dest}"
+
+    else:  # whatsapp
+        cell = ana.get("cellulare") or ana.get("telefono")
+        if not cell:
+            raise HTTPException(400, "Il cliente non ha un cellulare registrato")
+        from routes.whatsapp_evo import send_text_via_evolution
+        r = await send_text_via_evolution(cell, default_msg)
+        if r.get("provider") == "wame":
+            # nessuna Evolution API configurata → link click-to-chat
+            canale_effettivo = f"WhatsApp click-to-chat → {cell}"
+        else:
+            canale_effettivo = f"WhatsApp → {cell}"
+
+    await log_attivita(
+        user, "invia", "corso", cid,
+        f"Inviato video «{titolo}» a {nome_cliente} via {canale_effettivo}",
+    )
+    return {"ok": True, "canale": canale_effettivo, "cliente": nome_cliente}
+
+
 @api.post("/corsi/{cid}/progresso")
 async def upsert_progresso(cid: str, body: dict, user=Depends(current_user)):
     """body: {secondi_visti, durata_totale_sec, ultima_posizione_sec}"""

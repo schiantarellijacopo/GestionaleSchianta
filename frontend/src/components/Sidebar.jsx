@@ -5,7 +5,7 @@ import { useSidebar } from "./Layout";
 import {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle,
     BookOpen, Building2, Upload, Calculator, Mail, Activity, LogOut, Shield,
-    Library, Kanban, Map, GraduationCap, MessageCircle, Wallet, Calendar, Coins, TimerReset,
+    Library, Kanban, Map, GraduationCap, Video, MessageCircle, Wallet, Calendar, Coins, TimerReset,
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
@@ -44,7 +44,7 @@ const ALL_MENU_ITEMS = [
     { id: "statistiche", path: "/statistiche", icon: "Activity", label: "Statistiche", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "cervello", path: "/cervello", icon: "Brain", label: "Il Cervello", section: "strumenti", roles: ["admin"] },
     { id: "assistente", path: "/assistente-personale", icon: "Bot", label: "Assistente personale", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "corsi", path: "/corsi", icon: "GraduationCap", label: "Corsi", section: "strumenti", roles: null },
+    { id: "corsi", path: "/corsi", icon: "Video", label: "Video", section: "strumenti", roles: null },
     { id: "corsi_ivass", path: "/corsi-ivass", icon: "GraduationCap", label: "Corsi IVASS · 30h", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "marketing", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "newsletter", path: "/newsletter", icon: "Mail", label: "Newsletter", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
@@ -71,7 +71,7 @@ const ALL_MENU_ITEMS = [
 
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
-    Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap,
+    Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
     TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone,
 };

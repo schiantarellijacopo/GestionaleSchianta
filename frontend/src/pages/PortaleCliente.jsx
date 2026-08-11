@@ -1376,8 +1376,62 @@ function ServiziView({ agenzia }) {
                 </>
             )}
 
-            {/* Orari di apertura — card elegante */}
-            {(agenzia?.orari || []).length > 0 && (
+            {/* SEDI dell'agenzia — indirizzo, telefono e orari di ogni sede */}
+            {(agenzia?.sedi || []).length > 0 && (
+                <div className="mb-6" data-testid="servizi-sedi">
+                    <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">
+                        Le nostre sedi
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {agenzia.sedi.map((s, i) => (
+                            <div key={s.id || i}
+                                 className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden"
+                                 data-testid={`sede-card-${i}`}>
+                                <div className="bg-gradient-to-r from-indigo-500 to-blue-600 px-5 py-3 flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                                        <Building2 size={18} className="text-white" />
+                                    </div>
+                                    <div>
+                                        <div className="text-white font-bold text-sm">{s.nome || "Sede"}</div>
+                                        <div className="text-white/80 text-[11px]">
+                                            {[s.indirizzo, s.comune, s.provincia && `(${s.provincia})`]
+                                                .filter(Boolean).join(", ")}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="p-4 space-y-2">
+                                    {s.telefono && (
+                                        <a href={`tel:${s.telefono.replace(/\s/g, "")}`}
+                                           className="flex items-center gap-2 text-sm text-slate-700 hover:text-indigo-600 transition">
+                                            <Phone size={14} /> {s.telefono}
+                                        </a>
+                                    )}
+                                    {(s.orari || []).length > 0 && (
+                                        <div className="pt-2 border-t border-slate-100">
+                                            <div className="text-[10px] font-semibold text-slate-500 uppercase mb-1.5">Orari</div>
+                                            <div className="space-y-1">
+                                                {s.orari.map((o, j) => (
+                                                    <div key={j} className="flex items-center justify-between text-xs">
+                                                        <span className="text-slate-700 font-medium">{o.giorni}</span>
+                                                        <span className="bg-slate-100 rounded-full px-2 py-0.5 text-[11px] text-slate-700">
+                                                            {o.orario}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* IL NOSTRO TEAM ha una sezione dedicata nel menu — non lo mostriamo in Servizi */}
+
+            {/* Orari di apertura — card elegante (mostra solo se non ci sono sedi con orari propri) */}
+            {(agenzia?.orari || []).length > 0 && !(agenzia?.sedi || []).some((s) => (s.orari || []).length > 0) && (
                 <div className="mb-6" data-testid="servizi-orari">
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                         <div className="bg-gradient-to-r from-indigo-500 to-blue-600 px-5 py-3.5 flex items-center gap-3">

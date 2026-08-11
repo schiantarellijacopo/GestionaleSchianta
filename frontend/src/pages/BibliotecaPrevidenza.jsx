@@ -414,6 +414,15 @@ function SchedeCalcoloTab() {
                                 </span>
                             )}
                             <div className="flex-1" />
+                            {s && (
+                                <a href={`${process.env.REACT_APP_BACKEND_URL}/api/biblioteca-previdenza/schede-calcolo/${encodeURIComponent(c.nome)}/pdf`}
+                                   target="_blank" rel="noreferrer"
+                                   className="inline-flex items-center gap-1 h-7 text-xs border border-slate-300 rounded px-2 hover:bg-slate-100 text-slate-700 font-medium"
+                                   title="Scarica il PDF con requisiti, formule, parametri, discrepanze e esempio di calcolo passo-passo"
+                                   data-testid={`pdf-scheda-${c.nome.toLowerCase().replace(/ /g, "-")}`}>
+                                    <FileText size={12} /> PDF calcolo
+                                </a>
+                            )}
                             <Button size="sm" variant="outline" className="h-7 text-xs"
                                     disabled={generating === c.nome}
                                     onClick={() => genera(c.nome)}

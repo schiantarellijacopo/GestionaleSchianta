@@ -1013,6 +1013,30 @@ async def portale_public_team_foto(tid: str):
                              headers={"Cache-Control": "public, max-age=3600"})
 
 
+@router.get("/video")
+async def portale_video(cliente=Depends(current_cliente)):
+    """Elenco video pubblicati per i clienti (dalla sezione Video del CRM).
+    Sono ritornati SOLO i video con `visibile_ruoli` che include `cliente` e pubblicati.
+    """
+    from server import db
+    items = await db.corsi.find(
+        {"pubblicato": True, "visibile_ruoli": "cliente"}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    # Ritorna solo i campi utili al cliente
+    return [
+        {
+            "id": c.get("id"),
+            "titolo": c.get("titolo"),
+            "descrizione": c.get("descrizione"),
+            "categoria": c.get("categoria"),
+            "video_url": c.get("video_url"),
+            "durata_minuti": c.get("durata_minuti"),
+            "created_at": c.get("created_at"),
+        }
+        for c in items
+    ]
+
+
 # ============================================================
 # ASSET PUBBLICI DEL PORTALE (logo + video motivazionale)
 # ============================================================

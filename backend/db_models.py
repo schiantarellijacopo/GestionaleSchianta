@@ -236,6 +236,10 @@ class Compagnia(BaseDoc):
     # Se tipo_mandato="collaborazione" → id dell'agenzia partner (libreria
     # `agenzie`) con cui collaboriamo per questa compagnia.
     agenzia_partner_id: Optional[str] = None
+    # Logo compagnia — url pubblico servito da GET /api/compagnie/{id}/logo
+    logo_url: Optional[str] = None
+    logo_storage_path: Optional[str] = None
+    logo_mime: Optional[str] = None
 
 
 # =============== ANAGRAFICHE ===============
