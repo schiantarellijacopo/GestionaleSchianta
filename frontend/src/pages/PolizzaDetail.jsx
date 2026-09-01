@@ -21,6 +21,7 @@ import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import AssicuratiTab from "@/components/AssicuratiTab";
+import RegolazionePolizzaTab from "@/components/RegolazionePolizzaTab";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
@@ -126,6 +127,27 @@ export default function PolizzaDetail() {
                                 label="Operatore"
                             />
                         </div>
+                        <div className="flex flex-col justify-center">
+                            <span className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Regolazione premio</span>
+                            {pol.regolazione_premio ? (
+                                <button
+                                    onClick={() => setRegolazioneOpen(true)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-300/40 text-violet-100 hover:bg-violet-500/30 transition-colors text-xs font-medium"
+                                    data-testid="pol-header-regolazione-on">
+                                    <Zap size={12} /> Soggetta · gestisci
+                                </button>
+                            ) : canEdit ? (
+                                <button
+                                    onClick={async () => {
+                                        try { await api.put(`/polizze/${pol.id}`, { regolazione_premio: true }); toast.success("Polizza segnata soggetta a regolazione premio"); load(); }
+                                        catch { toast.error("Errore"); }
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 border border-white/20 text-slate-200 hover:bg-white/20 transition-colors text-xs font-medium"
+                                    data-testid="pol-header-regolazione-off">
+                                    <Zap size={12} /> Attiva
+                                </button>
+                            ) : <span className="text-slate-300 text-xs">—</span>}
+                        </div>
                     </div>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-3 px-6 py-4 text-sm">
@@ -181,6 +203,11 @@ export default function PolizzaDetail() {
                     {pol.is_cumulativa_assicurati && (
                         <TabsTrigger value="assicurati" data-testid="tab-assicurati">
                             <ShieldCheck size={13} className="mr-1" />Assicurati
+                        </TabsTrigger>
+                    )}
+                    {pol.regolazione_premio && (
+                        <TabsTrigger value="regolazione" data-testid="tab-regolazione" className="text-violet-700 data-[state=active]:bg-violet-50">
+                            <Zap size={13} className="mr-1" />Regolazione
                         </TabsTrigger>
                     )}
                     <TabsTrigger value="altri"><Info size={13} className="mr-1" />Altri dati</TabsTrigger>
@@ -481,6 +508,25 @@ export default function PolizzaDetail() {
                         <AssicuratiTab polizzaId={pol.id} />
                     </TabsContent>
                 )}
+                {pol.regolazione_premio && (
+                    <TabsContent value="regolazione">
+                        <RegolazionePolizzaTab
+                            pol={pol}
+                            onReload={load}
+                            onCalcola={() => setRegolazioneOpen(true)}
+                            onGeneraTitolo={() => setTitoloEditing({
+                                _new: true,
+                                polizza_id: pol.id,
+                                numero_polizza: pol.numero_polizza,
+                                tipo: "regolazione",
+                                importo_lordo: pol.regolazione_dovuto || 0,
+                                importo_netto: pol.regolazione_dovuto || 0,
+                                effetto: new Date().toISOString().slice(0, 10),
+                                scadenza: new Date().toISOString().slice(0, 10),
+                            })}
+                        />
+                    </TabsContent>
+                )}
 
                 <TabsContent value="documenti">
                     <DocumentiPolizzaTab polizzaId={pol.id} canEdit={canEdit} onAfterOCR={load} />
@@ -678,6 +724,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         regolazione_minima: pol.regolazione_minima ?? "",
         regolazione_periodicita: pol.regolazione_periodicita || "annuale",
         regolazione_giorni_invio: pol.regolazione_giorni_invio ?? 30,
+        regolazione_base_preventivo: pol.regolazione_base_preventivo ?? "",
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -715,6 +762,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                 payload[k] = (payload[k] === "" || payload[k] === null || payload[k] === undefined)
                     ? null : parseFloat(payload[k]);
             });
+            payload.regolazione_base_preventivo = parseFloat(payload.regolazione_base_preventivo) || 0;
             payload.regolazione_giorni_invio = parseInt(payload.regolazione_giorni_invio, 10) || 30;
             if (!payload.regolazione_base) payload.regolazione_base = null;
             await api.put(`/polizze/${pol.id}`, payload);
@@ -827,18 +875,12 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                             <div><Label>Termini disdetta (gg)</Label><Input type="number" value={f.termini_disdetta_giorni} onChange={(e) => set("termini_disdetta_giorni", e.target.value)} /></div>
                             <div>
                                 <Label>Tipo pagamento preferito (questa polizza)</Label>
-                                <Select
-                                    value={f.mezzo_pagamento_preferito || "__auto__"}
-                                    onValueChange={(v) => set("mezzo_pagamento_preferito", v === "__auto__" ? "" : v)}
-                                >
-                                    <SelectTrigger data-testid="polizza-mezzo-preferito"><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="__auto__">Auto (segue ultimo incasso)</SelectItem>
-                                        {mezzi.map((m) => (
-                                            <SelectItem key={m.codice} value={m.codice}>{m.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <SelectTipoPagamento
+                                    value={f.mezzo_pagamento_preferito || ""}
+                                    onChange={(v) => set("mezzo_pagamento_preferito", v)}
+                                    placeholder="Auto (segue ultimo incasso)"
+                                    testid="polizza-mezzo-preferito"
+                                />
                                 {pol.ultimo_mezzo_pagamento && (
                                     <div className="text-[10px] text-slate-500 mt-1">
                                         Ultimo incasso: <strong>{pol.ultimo_mezzo_pagamento}</strong>
@@ -1025,6 +1067,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                         </Select>
                                     </div>
                                     <div><Label>Tasso (%)</Label><Input type="number" step="0.001" value={f.regolazione_tasso} onChange={(e) => set("regolazione_tasso", e.target.value)} placeholder="Es. 1.5" data-testid="edit-pol-reg-tasso" /></div>
+                                    <div><Label>Base di polizza (preventivo)</Label><Input type="number" step="0.01" value={f.regolazione_base_preventivo} onChange={(e) => set("regolazione_base_preventivo", e.target.value)} placeholder="Es. 100000" data-testid="edit-pol-reg-preventivo" /></div>
                                     <div><Label>Premio minimo non rimb. €</Label><Input type="number" step="0.01" value={f.regolazione_minima} onChange={(e) => set("regolazione_minima", e.target.value)} data-testid="edit-pol-reg-minima" /></div>
                                     <div className="col-span-2">
                                         <Label>Giorni dopo scadenza per invio lettera</Label>

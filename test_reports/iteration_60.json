@@ -1,0 +1,45 @@
+{
+  "summary": "Iter60 — Test E2E TITOLI (create/put, tipo Literal incl. 'annullo', provvigioni_operatori multi-collab) e REGOLAZIONE PREMIO differenziale. BACKEND: 14/14 pytest PASS (test_iter60_titoli_regolazione.py). Verificato POST /api/titoli 201 per TUTTI gli 8 tipi (nuova, rinnovo, appendice, regolazione, storno, quietanza, sostituzione, ANNULLO — bug Literal fixato). PUT /api/titoli/{id} 200 aggiorna importo/note/provvigioni. provvigioni_operatori (array {operatore_id, operatore_nome, provvigione}) persistito su create e update. POST /api/polizze/{id}/regolazione-premio/calcola differenziale: base_prev=100000, base_eff=120000, tasso=2 → differenza=20000, premio_calcolato=400.00, dovuto=max(400, minima=500)=500 (rispetta minimo non rimborsabile). Caso a credito: prev=100000, eff=80000, tasso=1.5 → differenza=-20000, premio=-300, dovuto=-300 (NON applica minima su negativi ✓). Polizza non flaggata → 400 correttamente. FRONTEND: 1) tab Titoli '+ Nuovo titolo' apre dialog titolo-edit-dialog; select titolo-tipo-select mostra TUTTE le 8 label attese (Quietanza di rinnovo/Polizza nuova/Rinnovo/Appendice/Annullo/Sostituzione/Regolazione premio/Storno). 2) 'Annullo' selezionabile senza errore. 3) titolo-provvigioni NON disabilitato su titolo nuovo. 4) titolo-add-operatore aggiunge riga titolo-operatore-row-0 con select+input+delete. titolo-eredita-polizza presente. 5) PolizzaDetail su polizza flaggata mostra pol-header-regolazione-on (chip 'Soggetta · gestisci') e tab-regolazione. 6) reg-tab-genera-titolo con regolazione_dovuto>0: apre dialog Nuovo Titolo con tipo='Regolazione premio' PRECOMPILATO e importo_lordo=dovuto (verificato 400) — NON crea direttamente ✓. 7) reg-tab-genera-titolo con dovuto=0: toast 'Calcola prima la regolazione' (guard corretto). CLEANUP: 15 titoli TEST_ITER60 eliminati, polizza ripristinata (dovuto=0, stato=da_richiedere).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "PolizzaDetail.jsx",
+        "issue": "CRITICO: RegolazionePremioDialog è IMPORTATO ma MAI RENDERIZZATO nel JSX. Lo stato regolazioneOpen viene settato a true da 3 handler (header button 'Regolazione premio' L80, chip 'Soggetta · gestisci' L134 pol-header-regolazione-on, tab Regolazione bottone 'Calcola regolazione' L516 reg-tab-calcola via onCalcola), ma nessun <RegolazionePremioDialog /> è presente nel render (grep restituisce solo l'import a L25). Effetto: cliccare 'Calcola regolazione' / chip header non apre alcun dialog → l'intero flow di calcolo differenziale UI è INACCESSIBILE dalla polizza. Backend funziona (verificato via curl), ma l'utente non può usarlo dalla polizza detail.",
+        "selector": "[data-testid=\"reg-tab-calcola\"], [data-testid=\"pol-header-regolazione-on\"]",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter60_titoli_regolazione.py",
+    "/app/test_reports/pytest/iter60.xml"
+  ],
+  "action_items": [
+    "FIX CRITICO: In /app/frontend/src/pages/PolizzaDetail.jsx aggiungere il rendering di <RegolazionePremioDialog polizza={pol} onClose={()=>setRegolazioneOpen(false)} onSaved={load} /> condizionale a `regolazioneOpen`. Senza questo fix, il flow di calcolo differenziale via UI è bloccato (backend OK, frontend orfano). NB: sulla pagina /regolazione-premio (RegolazionePremio.jsx L166) il dialog è correttamente montato — copiare il pattern."
+  ],
+  "critical_code_review_comments": [
+    "db_models.py L503: Titolo.tipo Literal include 'annullo' — OK, bug fixato.",
+    "db_models.py L527: provvigioni_operatori: List[dict] default_factory=list — accetta oggetti arbitrari senza validation schema esplicita; funzionalmente corretto ma un TypedDict/Model dedicato migliorerebbe la type-safety.",
+    "server.py L3419-3435 create_titolo auto-calc: se provvigioni non specificate e importo_lordo+polizza presenti, chiama _calcola_provvigione — corretto. La logica NON tocca provvigioni_operatori (buon design: la ripartizione multi-collab è responsabilità del client).",
+    "server.py update_titolo L3442: accetta $set arbitrario da body — nessuna sanitizzazione dei campi non permessi; considerare whitelist per evitare che un client malevolo alteri campi non intenzionali (es. id/created_at). Non critico ma da irrobustire.",
+    "extras_p1p2.py L884 calcola_regolazione differenziale: implementazione corretta e simmetrica (positivo=min applicato, negativo=nessun minimo). Test PASS confermano 100000→120000 @2% = 400.",
+    "PolizzaDetail.jsx: RegolazionePremioDialog importato ma non renderizzato → dead import + UI regression. Vedi action_items.",
+    "TitoloDialog.jsx: buon uso di data-testid parametrici (titolo-operatore-row-{i}/select-{i}/provv-{i}/del-{i}) — ottimo per automazione."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter60_titoli_regolazione.py (nuovo, 14 test PASS)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "85% — 6/7 sotto-flow OK; blocca l'apertura del dialog Regolazione differenziale (bug rendering)"},
+  "test_credentials": "admin@assicura.it / Admin123! — OK (token in access_token)",
+  "seed_data_creation": "Transienti: 12 titoli TEST_ITER60 (uno per tipo + provvigioni_operatori) + set temporaneo regolazione_dovuto=400 sulla polizza 027c7a90. TUTTO ripristinato (titoli eliminati, dovuto=0, stato=da_richiedere).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend feature TITOLI+REGOLAZIONE DIFFERENZIALE production-ready (14/14). UNICO bug residuo: PolizzaDetail.jsx non monta <RegolazionePremioDialog/> — vedi action_items. Dopo fix serve retest: (1) click reg-tab-calcola apre regolazione-dialog, (2) compilazione preventivo/dichiarato/tasso → reg-calcola-salva persiste dovuto, (3) chip pol-header-regolazione-on apre stesso dialog. Il flow Genera titolo è già verificato OK (apre titolo-edit-dialog con tipo='Regolazione premio' e importo=dovuto). Test file /app/backend/tests/test_iter60_titoli_regolazione.py è riusabile come regression suite.",
+  "rca of the issue": "PolizzaDetail.jsx: durante l'aggiunta della feature 'Calcola regolazione' dal tab (iter60), è stato aggiunto lo stato regolazioneOpen e gli handler `setRegolazioneOpen(true)` in 3 punti (header button, chip Soggetta, tab bottone), MA la mount del componente <RegolazionePremioDialog polizza={pol} onClose={...} onSaved={load} /> è stata omessa dal JSX. Il componente esiste, funziona su /regolazione-premio (RegolazionePremio.jsx L166), è stato solo dimenticato in PolizzaDetail. Riproduzione: (1) login admin, (2) apri /polizze/027c7a90-6965-4476-9004-c44e2c87575c, (3) click 'Regolazione premio' (header) o 'Soggetta · gestisci' o tab Regolazione → 'Calcola regolazione'; (4) nessun dialog appare. Mitigazione: aggiungere `{regolazioneOpen && <RegolazionePremioDialog polizza={pol} onClose={()=>setRegolazioneOpen(false)} onSaved={()=>{setRegolazioneOpen(false); load();}} />}` prima della chiusura del componente PolizzaDetail (fuori dai Tabs)."
+}

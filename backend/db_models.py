@@ -404,7 +404,7 @@ class Polizza(BaseDoc):
     prodotto_originale: Optional[str] = None
     # Metodo di pagamento preferito su questa polizza (può differire da quello dell'anagrafica).
     # Se vuoto, viene auto-aggiornato con il mezzo usato all'ultimo incasso.
-    mezzo_pagamento_preferito: Optional[Literal["contanti", "bonifico", "assegno", "pos", "rid", "altro"]] = None
+    mezzo_pagamento_preferito: Optional[str] = None  # tipo pagamento (label libreria, es. "BONIFICO BPER SONDRIO")
     ultimo_mezzo_pagamento: Optional[str] = None
     ultimo_mezzo_pagamento_data: Optional[str] = None
     is_libro_matricola: bool = False  # se True → polizza con applicazioni veicoli (libro matricola RCA)
@@ -419,11 +419,16 @@ class Polizza(BaseDoc):
     regolazione_dovuto: float = 0  # ultimo importo calcolato
     # Giorni dopo la scadenza polizza in cui inviare la lettera di richiesta dati (modificabile)
     regolazione_giorni_invio: int = 30
+    regolazione_base_preventivo: float = 0  # base imponibile di polizza (preventivo) per il differenziale
     # Workflow: None/"da_richiedere" → "lettera_inviata" → "dati_ricevuti" → "calcolata" → "titolo_generato" → "chiusa"
     regolazione_stato: Optional[str] = None
     regolazione_lettera_inviata_data: Optional[str] = None  # YYYY-MM-DD
     regolazione_titolo_id: Optional[str] = None  # titolo di regolazione generato
     regolazione_note: Optional[str] = None
+    # Link pubblico per raccolta dato aggiornato dal cliente
+    regolazione_public_token: Optional[str] = None
+    regolazione_base_dichiarata_cliente: Optional[float] = None
+    regolazione_dato_cliente_data: Optional[str] = None
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     sostituita_da_polizza_id: Optional[str] = None  # backlink dopo sostituzione
@@ -499,7 +504,7 @@ TitoloStato = Literal["incassato", "da_incassare", "insoluto", "stornato"]
 class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
-    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione"] = "rinnovo"
+    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo"] = "rinnovo"
     effetto: str
     scadenza: str
     stato: TitoloStato = "da_incassare"
@@ -522,6 +527,9 @@ class Titolo(BaseDoc):
     mezzo_pagamento: Optional[str] = None
     conto_cassa_id: Optional[str] = None
     collaboratore_id: Optional[str] = None  # operatore/sub-agente assegnato
+    # Ripartizione provvigione su più collaboratori (come la polizza). Se vuoto → usa collaboratore_id/provvigioni.
+    provvigioni_operatori: List[dict] = Field(default_factory=list)
+    # [{operatore_id, operatore_nome, provvigione}]
     id_titolo_exp: Optional[str] = None
     pagamento_in_direzione: bool = False   # premio pagato direttamente in compagnia (no cassa)
     fonte: Literal["manuale", "import_ania"] = "manuale"
@@ -874,6 +882,7 @@ class ProdottoLibreria(BaseDoc):
     descrizione: Optional[str] = None
     termini_mora_giorni: int = 15  # default 15gg; per Vita usare 30gg (vedi DEFAULT_MORA_BY_RAMO)
     is_libro_matricola: bool = False  # se True (solo per RC_AUTO/flotte) → polizza con applicazioni veicoli
+    is_cumulativa_assicurati: bool = False  # se True → polizze con elenco cumulativo assicurati (es. Ritiro Patente)
     mostra_sezione_veicolo: bool = False  # se True, mostra la sezione "Dati veicolo" nelle polizze di questo prodotto (RCAuto è sempre attivo)
     attivo: bool = True
 
@@ -1206,6 +1215,9 @@ class SchemaProvvigionale(BaseDoc):
     percentuale_collaboratore: float = 0.0
     # percentuale di provvigione applicata sul PREMIO LORDO (se l'agenzia non ha già il dato)
     percentuale_su_premio: float = 0.0
+    # RETE PIRAMIDALE: quote che cascatano verso l'upline a partire dalla provvigione del collaboratore.
+    # [{operatore_id, operatore_nome, percentuale}] — percentuale sulla provvigione del collaboratore diretto.
+    upline: List[dict] = Field(default_factory=list)
     descrizione: Optional[str] = None
     attivo: bool = True
 

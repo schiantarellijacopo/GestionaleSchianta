@@ -22,7 +22,89 @@ import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 export default function TitoloDialog({ titolo, onClose, onDelete }) {
     const [f, setF] = useState({ ...titolo });
     const [giornataChiusa, setGiornataChiusa] = useState(false);
+    const [collaboratori, setCollaboratori] = useState([]);
+    // Ripartizione provvigione multi-collaboratore
+    const [operatori, setOperatori] = useState(() => {
+        if (Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0) {
+            return titolo.provvigioni_operatori.map((o) => ({ operatore_id: o.operatore_id || "", provvigione: o.provvigione ?? 0 }));
+        }
+        if (titolo.collaboratore_id) {
+            return [{ operatore_id: titolo.collaboratore_id, provvigione: titolo.provvigioni ?? 0 }];
+        }
+        return [];
+    });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    useEffect(() => {
+        api.get("/auth/users", { params: { role: "collaboratore" } })
+            .then((r) => setCollaboratori(r.data || []))
+            .catch(() => setCollaboratori([]));
+    }, []);
+
+    // Eredita automaticamente i collaboratori dalla polizza se il titolo non ne ha di propri
+    useEffect(() => {
+        const haGiaSuoi = Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0;
+        if (haGiaSuoi || !titolo.polizza_id) return;
+        api.get(`/polizze/${titolo.polizza_id}`).then((r) => {
+            const po = r.data?.provvigioni_operatori || [];
+            if (po.length > 0) {
+                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || "", provvigione: o.provvigione ?? 0 })));
+            } else if (r.data?.collaboratore_id && !titolo.collaboratore_id) {
+                setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: 0 }]);
+            }
+        }).catch(() => {});
+        // eslint-disable-next-line
+    }, [titolo.id]);
+
+    const totOperatori = operatori.reduce((s, o) => s + (parseFloat(o.provvigione) || 0), 0);
+    // Mantiene il totale allineato alla ripartizione quando questa cambia (resta comunque modificabile a mano)
+    useEffect(() => {
+        if (operatori.length > 0) setF((p) => ({ ...p, provvigioni: totOperatori }));
+        // eslint-disable-next-line
+    }, [JSON.stringify(operatori)]);
+    const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
+    const removeOperatore = (i) => setOperatori((p) => p.filter((_, idx) => idx !== i));
+    const setOperatore = (i, k, v) => setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, [k]: v } : o));
+    const ereditaDaPolizza = async () => {
+        try {
+            const r = await api.get(`/polizze/${titolo.polizza_id}`);
+            const po = r.data?.provvigioni_operatori || [];
+            if (po.length > 0) {
+                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || "", provvigione: o.provvigione ?? 0 })));
+                toast.success("Operatori ereditati dalla polizza");
+            } else if (r.data?.collaboratore_id) {
+                setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: 0 }]);
+                toast.info("La polizza ha un solo collaboratore");
+            } else {
+                toast.warning("La polizza non ha operatori configurati");
+            }
+        } catch { toast.error("Errore lettura polizza"); }
+    };
+
+    const recalcProvvigione = async () => {
+        try {
+            const r = await api.get("/provvigioni/calcola", {
+                params: {
+                    premio_lordo: f.importo_lordo || 0,
+                    collaboratore_id: operatori[0]?.operatore_id || f.collaboratore_id || undefined,
+                    ramo: titolo.ramo || undefined,
+                },
+            });
+            if (r.data.provvigione_totale > 0) {
+                set("provvigioni", r.data.provvigione_totale);
+                const collabId = operatori[0]?.operatore_id || f.collaboratore_id || "";
+                // Ripartizione piramidale: collaboratore diretto + upline a cascata
+                const ops = [];
+                if (collabId) ops.push({ operatore_id: collabId, provvigione: r.data.provvigione_collaboratore || 0 });
+                (r.data.upline_breakdown || []).forEach((u) => ops.push({ operatore_id: u.operatore_id, provvigione: u.provvigione }));
+                if (ops.length > 0) setOperatori(ops);
+                const extra = (r.data.upline_breakdown || []).length ? ` · +${r.data.upline_breakdown.length} upline` : "";
+                toast.success(`Provvigione: ${r.data.provvigione_totale}€ (${r.data.schema_nome || "schema"})${extra}`);
+            } else {
+                toast.warning("Nessuno schema provvigionale applicabile");
+            }
+        } catch { toast.error("Errore calcolo provvigione"); }
+    };
 
     // Controlla se la giornata della data_incasso è chiusa → disabilita Salva/Elimina
     useEffect(() => {
@@ -41,19 +123,45 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         "POS", "bollettino", "carta_credito", "compagnia", "altro",
     ];
 
+    // Una volta incassato/coperto il titolo, provvigioni e collaboratori non sono più modificabili
+    const incassato = !titolo._new && (
+        ["incassato", "coperto", "liquidato", "pagato"].includes((titolo.stato || "").toLowerCase())
+        || !!titolo.data_incasso
+    );
+
     const save = async () => {
-        try {
-            await api.put(`/titoli/${titolo.id}`, {
-                tipo: f.tipo, effetto: f.effetto, scadenza: f.scadenza,
-                importo_lordo: parseFloat(f.importo_lordo) || 0,
-                importo_netto: parseFloat(f.importo_netto) || 0,
-                imposte: parseFloat(f.imposte) || 0,
-                provvigioni: parseFloat(f.provvigioni) || 0,
-                mezzo_pagamento: f.mezzo_pagamento || null,
-                data_incasso: f.data_incasso || null,
-                coperto_fino_a: f.coperto_fino_a || null,
+        const isNew = titolo._new || !titolo.id;
+        const opsClean = operatori
+            .filter((o) => o.operatore_id)
+            .map((o) => {
+                const c = collaboratori.find((x) => x.id === o.operatore_id);
+                return { operatore_id: o.operatore_id, operatore_nome: c ? (c.name || c.email) : "", provvigione: parseFloat(o.provvigione) || 0 };
             });
-            toast.success("Titolo aggiornato");
+        const provvTot = (f.provvigioni !== "" && f.provvigioni != null)
+            ? parseFloat(f.provvigioni) || 0
+            : (opsClean.length > 0 ? opsClean.reduce((s, o) => s + o.provvigione, 0) : 0);
+        const payload = {
+            tipo: f.tipo, effetto: f.effetto, scadenza: f.scadenza,
+            importo_lordo: parseFloat(f.importo_lordo) || 0,
+            importo_netto: parseFloat(f.importo_netto) || 0,
+            imposte: parseFloat(f.imposte) || 0,
+            provvigioni: provvTot,
+            provvigioni_operatori: opsClean,
+            collaboratore_id: opsClean[0]?.operatore_id || f.collaboratore_id || null,
+            mezzo_pagamento: f.mezzo_pagamento || null,
+            data_incasso: f.data_incasso || null,
+            coperto_fino_a: f.coperto_fino_a || null,
+        };
+        try {
+            if (isNew) {
+                payload.polizza_id = titolo.polizza_id;
+                if (!payload.tipo) payload.tipo = "quietanza";
+                await api.post(`/titoli`, payload);
+                toast.success("Titolo creato");
+            } else {
+                await api.put(`/titoli/${titolo.id}`, payload);
+                toast.success("Titolo aggiornato");
+            }
             onClose();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
@@ -77,7 +185,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             <DialogContent className="max-w-xl" data-testid="titolo-edit-dialog">
                 <DialogHeader>
                     <DialogTitle>
-                        Modifica titolo {titolo.numero_polizza ? `– Polizza ${titolo.numero_polizza}` : ""}
+                        {titolo._new ? "Nuovo titolo" : "Modifica titolo"} {titolo.numero_polizza ? `– Polizza ${titolo.numero_polizza}` : ""}
                     </DialogTitle>
                     <p className="text-[11px] text-slate-500 mt-1">
                         Lo stato del titolo si aggiorna automaticamente con incasso / copertura / storno.
@@ -86,12 +194,21 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                 <ChiusuraGiornoBanner data={f.data_incasso} />
                 <div className="grid grid-cols-2 gap-3 py-2">
                     <div>
-                        <Label>Tipo</Label>
+                        <Label>Tipo (riferimento)</Label>
                         <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectTrigger data-testid="titolo-tipo-select"><SelectValue placeholder="Seleziona tipo" /></SelectTrigger>
                             <SelectContent>
-                                {["nuova", "rinnovo", "appendice", "regolazione", "storno", "sostituzione"].map((t) => (
-                                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                                {[
+                                    ["quietanza", "Quietanza di rinnovo"],
+                                    ["nuova", "Polizza nuova"],
+                                    ["rinnovo", "Rinnovo"],
+                                    ["appendice", "Appendice"],
+                                    ["annullo", "Annullo"],
+                                    ["sostituzione", "Sostituzione"],
+                                    ["regolazione", "Regolazione premio"],
+                                    ["storno", "Storno"],
+                                ].map(([v, l]) => (
+                                    <SelectItem key={v} value={v}>{l}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -109,7 +226,48 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} onChange={(e) => set("importo_lordo", e.target.value)} /></div>
                     <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
                     <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
-                    <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni || 0} onChange={(e) => set("provvigioni", e.target.value)} /></div>
+                    <div>
+                        <Label>Provvigioni € (totale)</Label>
+                        <div className="flex gap-2">
+                            <Input type="number" step="0.01" value={f.provvigioni ?? 0}
+                                onChange={(e) => set("provvigioni", e.target.value)} disabled={incassato}
+                                data-testid="titolo-provvigioni" />
+                            <Button type="button" variant="outline" size="sm" onClick={recalcProvvigione} disabled={incassato} data-testid="titolo-provv-auto">Auto</Button>
+                        </div>
+                        {operatori.length > 0 && <p className="text-[10px] text-slate-400 mt-0.5">Ripartito fra {operatori.length} collab. · totale {totOperatori.toFixed(2)}€ (modificabile)</p>}
+                    </div>
+                    <div className="col-span-2 border border-slate-200 rounded-lg p-3 bg-slate-50/60">
+                        <div className="flex items-center justify-between mb-2">
+                            <Label className="text-xs font-semibold text-slate-700">Ripartizione provvigione fra collaboratori</Label>
+                            <div className="flex gap-2">
+                                <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={ereditaDaPolizza} disabled={incassato} data-testid="titolo-eredita-polizza">Eredita da polizza</Button>
+                                <Button type="button" size="sm" className="h-7 text-xs bg-sky-700 hover:bg-sky-800" onClick={addOperatore} disabled={incassato} data-testid="titolo-add-operatore">+ Collaboratore</Button>
+                            </div>
+                        </div>
+                        {incassato && <div className="text-[11px] text-amber-600 mb-2">🔒 Titolo incassato: provvigioni e collaboratori non più modificabili.</div>}
+                        {operatori.length === 0 ? (
+                            <div className="text-[11px] text-slate-400 italic">Nessun collaboratore: usa il campo Provvigioni sopra oppure aggiungi uno o più collaboratori.</div>
+                        ) : (
+                            <div className="space-y-2">
+                                {operatori.map((o, i) => (
+                                    <div key={i} className="flex items-center gap-2" data-testid={`titolo-operatore-row-${i}`}>
+                                        <Select value={o.operatore_id || "__none__"} disabled={incassato} onValueChange={(v) => setOperatore(i, "operatore_id", v === "__none__" ? "" : v)}>
+                                            <SelectTrigger className="flex-1 h-8" data-testid={`titolo-operatore-select-${i}`}><SelectValue placeholder="— collaboratore —" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none__">— collaboratore —</SelectItem>
+                                                {collaboratori.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                        <Input type="number" step="0.01" className="w-28 h-8" placeholder="€" disabled={incassato}
+                                            value={o.provvigione} onChange={(e) => setOperatore(i, "provvigione", e.target.value)}
+                                            data-testid={`titolo-operatore-provv-${i}`} />
+                                        {!incassato && <button type="button" onClick={() => removeOperatore(i)} className="text-rose-500 hover:text-rose-700 text-xs px-2" data-testid={`titolo-operatore-del-${i}`}>✕</button>}
+                                    </div>
+                                ))}
+                                <div className="text-right text-xs text-slate-600">Totale ripartito: <b className="text-slate-900">{totOperatori.toFixed(2)} €</b></div>
+                            </div>
+                        )}
+                    </div>
                     <div>
                         <Label>Data incasso</Label>
                         <Input

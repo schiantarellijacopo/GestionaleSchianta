@@ -168,6 +168,7 @@ export default function RegolazionePremio() {
                         id: calcolaRow.polizza_id,
                         numero_polizza: calcolaRow.numero_polizza,
                         regolazione_base: calcolaRow.base_tipo,
+                        regolazione_base_preventivo: calcolaRow.base_preventivo,
                         regolazione_tasso: calcolaRow.tasso,
                         regolazione_minima: calcolaRow.minima,
                     }}

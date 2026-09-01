@@ -1,7 +1,6 @@
 /**
- * RegolazionePremioDialog — calcolo regolazione premio per polizze con flag
- * regolazione_premio=true (es. RC fatturato, monte mercedi, addetti).
- * Mostra anche lo storico calcoli.
+ * RegolazionePremioDialog — calcolo regolazione premio (differenziale).
+ * Regolazione = (base dichiarata − base di preventivo) × tasso.
  */
 import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
@@ -9,12 +8,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Calculator, History } from "lucide-react";
 import { toast } from "sonner";
 
+const BASI = [
+    { v: "fatturato", l: "Fatturato" },
+    { v: "addetti", l: "Numero addetti" },
+    { v: "retribuzioni", l: "Retribuzioni (monte mercedi)" },
+    { v: "ricavi", l: "Ricavi" },
+    { v: "altro", l: "Altro" },
+];
+
 export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
-    const [base, setBase] = useState(0);
+    const [baseTipo, setBaseTipo] = useState(polizza.regolazione_base || "fatturato");
+    const [preventivo, setPreventivo] = useState(polizza.regolazione_base_preventivo ?? 0);
+    const [dichiarato, setDichiarato] = useState(0);
     const [tasso, setTasso] = useState(polizza.regolazione_tasso || 0);
     const [periodo, setPeriodo] = useState(String(new Date().getFullYear() - 1));
     const [note, setNote] = useState("");
@@ -26,12 +36,19 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
         api.get(`/polizze/${polizza.id}/regolazione-premio/storico`).then((r) => setStorico(r.data || []));
     }, [polizza.id]);
 
+    // Anteprima live
+    const differenza = (parseFloat(dichiarato) || 0) - (parseFloat(preventivo) || 0);
+    const premioLive = (differenza * (parseFloat(tasso) || 0)) / 100;
+    const isAddetti = baseTipo === "addetti";
+
     const calcola = async (salva = false) => {
-        if (!base || base <= 0) { toast.error("Inserisci la base imponibile (es. fatturato)"); return; }
+        if (dichiarato === "" || dichiarato === null) { toast.error("Inserisci la base effettivamente dichiarata"); return; }
         setBusy(true);
         try {
             const r = await api.post(`/polizze/${polizza.id}/regolazione-premio/calcola`, {
-                base_imponibile: parseFloat(base),
+                base_preventivo: parseFloat(preventivo) || 0,
+                base_effettiva: parseFloat(dichiarato) || 0,
+                base_tipo: baseTipo,
                 tasso_override: tasso ? parseFloat(tasso) : null,
                 periodo, note, salva,
             });
@@ -46,6 +63,8 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
         finally { setBusy(false); }
     };
 
+    const fmtBase = (n) => isAddetti ? `${n ?? 0}` : fmtEur(n || 0);
+
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-3xl" data-testid="regolazione-dialog">
@@ -59,41 +78,49 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                     {/* Calcolo */}
                     <div className="space-y-3">
                         <h4 className="font-semibold text-sm text-slate-800">Nuovo calcolo</h4>
-                        <div>
-                            <Label className="text-xs">Periodo (es. anno)</Label>
-                            <Input value={periodo} onChange={(e) => setPeriodo(e.target.value)}
-                                placeholder="2025" data-testid="reg-periodo" />
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <Label className="text-xs">Regolazione su</Label>
+                                <Select value={baseTipo} onValueChange={setBaseTipo}>
+                                    <SelectTrigger data-testid="reg-base-tipo"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {BASI.map((b) => <SelectItem key={b.v} value={b.v}>{b.l}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-xs">Periodo (es. anno)</Label>
+                                <Input value={periodo} onChange={(e) => setPeriodo(e.target.value)} placeholder="2025" data-testid="reg-periodo" />
+                            </div>
                         </div>
                         <div>
-                            <Label className="text-xs">
-                                Base imponibile ({polizza.regolazione_base || "fatturato"}) *
-                            </Label>
-                            <Input type="number" step="0.01" value={base}
-                                onChange={(e) => setBase(parseFloat(e.target.value) || 0)}
-                                placeholder="Es. 500000.00" data-testid="reg-base" />
+                            <Label className="text-xs">Base di polizza (preventivo) {isAddetti ? "— n. addetti" : "€"}</Label>
+                            <Input type="number" step={isAddetti ? "1" : "0.01"} value={preventivo}
+                                onChange={(e) => setPreventivo(e.target.value)} placeholder="Es. 100000" data-testid="reg-preventivo" />
+                        </div>
+                        <div>
+                            <Label className="text-xs">Base dichiarata (consuntivo) {isAddetti ? "— n. addetti" : "€"} *</Label>
+                            <Input type="number" step={isAddetti ? "1" : "0.01"} value={dichiarato}
+                                onChange={(e) => setDichiarato(e.target.value)} placeholder="Es. 120000" data-testid="reg-dichiarato" />
                         </div>
                         <div>
                             <Label className="text-xs">Tasso applicato (%) — opzionale, default polizza</Label>
                             <Input type="number" step="0.001" value={tasso}
-                                onChange={(e) => setTasso(parseFloat(e.target.value) || 0)}
+                                onChange={(e) => setTasso(e.target.value)}
                                 placeholder={`Default ${polizza.regolazione_tasso || 0}%`} data-testid="reg-tasso" />
                         </div>
-                        <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
-                            Premio minimo non rimborsabile: <b className="num">{fmtEur(polizza.regolazione_minima || 0)}</b>
+                        {/* Anteprima differenza live */}
+                        <div className="text-xs bg-slate-50 border border-slate-200 rounded p-2 flex justify-between" data-testid="reg-anteprima">
+                            <span className="text-slate-500">Differenza: <b className={differenza < 0 ? "text-rose-600" : "text-slate-800"}>{fmtBase(differenza)}</b></span>
+                            <span className="text-slate-500">Premio: <b className="text-violet-700">{fmtEur(premioLive)}</b></span>
                         </div>
                         <div>
                             <Label className="text-xs">Note</Label>
                             <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
                         </div>
                         <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => calcola(false)} disabled={busy}
-                                data-testid="reg-calcola-prova">
-                                Calcola (prova)
-                            </Button>
-                            <Button onClick={() => calcola(true)} disabled={busy}
-                                className="bg-violet-700 hover:bg-violet-800" data-testid="reg-calcola-salva">
-                                Calcola e salva
-                            </Button>
+                            <Button variant="outline" onClick={() => calcola(false)} disabled={busy} data-testid="reg-calcola-prova">Calcola (prova)</Button>
+                            <Button onClick={() => calcola(true)} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="reg-calcola-salva">Calcola e salva</Button>
                         </div>
                     </div>
 
@@ -103,8 +130,10 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                             <div className="border-2 border-violet-200 bg-violet-50 rounded-lg p-3" data-testid="reg-risultato">
                                 <h4 className="font-semibold text-sm text-violet-800 mb-2">Risultato calcolo</h4>
                                 <div className="grid grid-cols-2 gap-2 text-xs">
-                                    <div><span className="text-slate-500">Tasso applicato:</span> <b className="font-mono">{risultato.tasso_applicato_pct}%</b></div>
-                                    <div><span className="text-slate-500">Base:</span> <b className="font-mono">{fmtEur(risultato.base_imponibile)}</b></div>
+                                    <div><span className="text-slate-500">Base preventivo:</span> <b className="font-mono">{fmtBase(risultato.base_preventivo)}</b></div>
+                                    <div><span className="text-slate-500">Base dichiarata:</span> <b className="font-mono">{fmtBase(risultato.base_effettiva)}</b></div>
+                                    <div><span className="text-slate-500">Differenza:</span> <b className="font-mono">{fmtBase(risultato.differenza)}</b></div>
+                                    <div><span className="text-slate-500">Tasso:</span> <b className="font-mono">{risultato.tasso_applicato_pct}%</b></div>
                                     <div><span className="text-slate-500">Premio calcolato:</span> <b className="font-mono">{fmtEur(risultato.premio_calcolato)}</b></div>
                                     <div><span className="text-slate-500">Minimo non rimb.:</span> <b className="font-mono">{fmtEur(risultato.minimo_non_rimborsabile)}</b></div>
                                 </div>
@@ -128,7 +157,9 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                                             <span className="text-slate-500">{s.data_calcolo}</span>
                                         </div>
                                         <div className="text-slate-600">
-                                            base {fmtEur(s.base_imponibile)} × {s.tasso_applicato_pct}% =
+                                            {s.differenza != null
+                                                ? <>diff {isAddetti ? s.differenza : fmtEur(s.differenza)} × {s.tasso_applicato_pct}% = </>
+                                                : <>base {fmtEur(s.base_imponibile)} × {s.tasso_applicato_pct}% = </>}
                                             <b className="text-violet-700 ml-1">{fmtEur(s.dovuto)}</b>
                                         </div>
                                         {s.note && <div className="text-slate-500 italic mt-0.5">{s.note}</div>}

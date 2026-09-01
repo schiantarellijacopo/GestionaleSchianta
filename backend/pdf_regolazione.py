@@ -47,6 +47,8 @@ def genera_lettera_regolazione(
     scadenza: str,
     base_tipo: Optional[str],
     periodo: str,
+    base_preventivo: Optional[float] = None,
+    public_url: Optional[str] = None,
     testo_extra: Optional[str] = None,
 ) -> bytes:
     buf = io.BytesIO()
@@ -131,7 +133,38 @@ def genera_lettera_regolazione(
         corpo += testo_extra.replace("\n", "<br/>") + "<br/><br/>"
     corpo += "Restiamo a disposizione per ogni chiarimento e cogliamo l'occasione per porgere cordiali saluti."
     els.append(Paragraph(corpo, body))
-    els.append(Spacer(1, 16 * mm))
+    els.append(Spacer(1, 6 * mm))
+
+    # Sezione: dato dichiarato in polizza + spazio per il dato aggiornato
+    base_lbl_short = {
+        "fatturato": "Fatturato", "mercedi": "Monte mercedi", "addetti": "N. addetti",
+        "ricavi": "Ricavi", "altro": "Dato",
+    }.get(base_tipo or "altro", "Dato")
+    prev_str = ("—" if base_preventivo in (None, "") else
+                (f"{int(base_preventivo)}" if base_tipo == "addetti" else f"€ {base_preventivo:,.2f}"))
+    box = [
+        [f"{base_lbl_short} dichiarato in polizza (preventivo)", prev_str],
+        [f"{base_lbl_short} effettivo del periodo (da comunicare)", "_______________________________"],
+    ]
+    tb = Table(box, colWidths=[95 * mm, 65 * mm])
+    tb.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+        ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#fffbeb")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    els.append(tb)
+    if public_url:
+        els.append(Spacer(1, 4 * mm))
+        els.append(Paragraph(
+            f"<b>Modalità rapida:</b> può comunicarci il dato aggiornato online, "
+            f"in pochi secondi, al seguente link: <font color='#0c4a6e'>{public_url}</font>",
+            small,
+        ))
+    els.append(Spacer(1, 14 * mm))
     els.append(Paragraph(f"{ag_nome}", right))
     els.append(Paragraph("__________________________", right))
 

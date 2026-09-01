@@ -19,6 +19,7 @@ const BUILTIN = [
     { key: "polizze", label: "Polizze", editable: true, builtin: true },
     { key: "sinistri", label: "Sinistri", editable: true, builtin: true },
     { key: "titoli", label: "Titoli", editable: true, builtin: true },
+    { key: "regolazione", label: "Regolazione Premio", editable: true, builtin: true },
     { key: "clienti", label: "Clienti", editable: false, builtin: true },
 ];
 
@@ -29,6 +30,8 @@ const COL_COLORS_BUILTIN = {
     chiuso_senza_seguito: "#94A3B8", respinto: "#EF4444",
     da_incassare: "#F59E0B", insoluto: "#EF4444", incassato: "#10B981", stornato: "#94A3B8",
     prospect: "#94A3B8", nuovo: "#0EA5E9", attivo: "#10B981", top: "#7C3AED",
+    da_richiedere: "#94A3B8", lettera_inviata: "#0EA5E9", dati_ricevuti: "#F59E0B",
+    calcolata: "#7C3AED", titolo_generato: "#10B981", chiusa: "#64748B",
 };
 
 const TIPO_ICON = {

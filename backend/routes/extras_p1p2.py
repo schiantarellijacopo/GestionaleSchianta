@@ -871,11 +871,14 @@ async def cerca_polizze_per_targa(
 # 3) REGOLAZIONE PREMIO
 # ===========================================================
 class RegolazioneCalcBody(BaseModel):
-    base_imponibile: float  # fatturato / monte mercedi / numero addetti
-    tasso_override: Optional[float] = None  # override del tasso polizza
-    periodo: Optional[str] = None  # es. "2025"
+    base_imponibile: Optional[float] = None  # legacy: base unica × tasso
+    base_preventivo: Optional[float] = None  # base imponibile di polizza (preventivo)
+    base_effettiva: Optional[float] = None   # base effettivamente dichiarata (consuntivo)
+    base_tipo: Optional[str] = None          # fatturato / addetti / retribuzioni
+    tasso_override: Optional[float] = None   # override del tasso polizza
+    periodo: Optional[str] = None            # es. "2025"
     note: Optional[str] = None
-    salva: bool = True  # se True aggiorna polizza con ultimo calcolo
+    salva: bool = True
 
 
 @router.post("/polizze/{pid}/regolazione-premio/calcola")
@@ -889,14 +892,37 @@ async def calcola_regolazione(
     if not pol.get("regolazione_premio"):
         raise HTTPException(400, "Polizza non flaggata 'regolazione_premio'")
     tasso = body.tasso_override if body.tasso_override is not None else (pol.get("regolazione_tasso") or 0)
-    premio_calcolato = round((body.base_imponibile * tasso) / 100.0, 2)
     minima = float(pol.get("regolazione_minima") or 0)
-    dovuto = max(premio_calcolato, minima)
+
+    # Modalità differenziale: (dichiarato − preventivo) × tasso
+    if body.base_effettiva is not None or body.base_preventivo is not None:
+        base_prev = float(body.base_preventivo or 0)
+        base_eff = float(body.base_effettiva or 0)
+        differenza = round(base_eff - base_prev, 2)
+        premio_calcolato = round((differenza * tasso) / 100.0, 2)
+        base_display = base_eff
+    else:
+        # Legacy: base unica × tasso
+        base_display = float(body.base_imponibile or 0)
+        base_prev = None
+        base_eff = None
+        differenza = None
+        premio_calcolato = round((base_display * tasso) / 100.0, 2)
+
+    # Dovuto: applica il minimo non rimborsabile solo su importi positivi
+    if premio_calcolato >= 0:
+        dovuto = max(premio_calcolato, minima)
+    else:
+        dovuto = premio_calcolato  # regolazione a credito
+
     risultato = {
         "polizza_id": pid,
         "periodo": body.periodo,
-        "base_imponibile": body.base_imponibile,
-        "base_tipo": pol.get("regolazione_base"),
+        "base_imponibile": base_display,
+        "base_preventivo": base_prev,
+        "base_effettiva": base_eff,
+        "differenza": differenza,
+        "base_tipo": body.base_tipo or pol.get("regolazione_base"),
         "tasso_applicato_pct": tasso,
         "premio_calcolato": premio_calcolato,
         "minimo_non_rimborsabile": minima,
@@ -907,11 +933,19 @@ async def calcola_regolazione(
     }
     if body.salva:
         await db.regolazione_storico.insert_one({"id": str(uuid.uuid4()), **risultato, "created_at": _now_iso()})
-        await db.polizze.update_one({"id": pid}, {"$set": {
+        upd = {
             "regolazione_ultimo_calcolo": risultato["data_calcolo"],
             "regolazione_dovuto": dovuto,
             "regolazione_stato": "calcolata",
-        }})
+        }
+        if body.base_tipo:
+            upd["regolazione_base"] = body.base_tipo
+        # Memorizza dato di polizza e tasso: verranno riproposti ogni anno
+        if base_prev is not None:
+            upd["regolazione_base_preventivo"] = base_prev
+        if body.tasso_override is not None:
+            upd["regolazione_tasso"] = tasso
+        await db.polizze.update_one({"id": pid}, {"$set": upd})
     return risultato
 
 

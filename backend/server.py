@@ -2518,13 +2518,16 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             from db_models import default_mora_for_ramo
             mora = default_mora_for_ramo(body.get("ramo"))
         body["termini_mora_giorni"] = mora
-    # Auto-set is_libro_matricola dal prodotto in libreria
-    if body.get("prodotto") and "is_libro_matricola" not in body:
+    # Auto-set is_libro_matricola / is_cumulativa_assicurati dal prodotto in libreria
+    if body.get("prodotto"):
         prod_lm = await db.prodotti.find_one(
-            {"nome": body["prodotto"]}, {"_id": 0, "is_libro_matricola": 1},
-        )
-        if prod_lm and prod_lm.get("is_libro_matricola"):
+            {"nome": body["prodotto"]},
+            {"_id": 0, "is_libro_matricola": 1, "is_cumulativa_assicurati": 1},
+        ) or {}
+        if "is_libro_matricola" not in body and prod_lm.get("is_libro_matricola"):
             body["is_libro_matricola"] = True
+        if "is_cumulativa_assicurati" not in body and prod_lm.get("is_cumulativa_assicurati"):
+            body["is_cumulativa_assicurati"] = True
     # Auto-calcola provvigioni se non specificate manualmente e c'è schema applicabile
     if (not body.get("provvigioni")) and body.get("premio_lordo") and body.get("collaboratore_id"):
         calc = await _calcola_provvigione(
@@ -4239,6 +4242,18 @@ async def _calcola_provvigione(
     pct_collab = float(schema.get("percentuale_collaboratore") or 0)
     provv_tot = round(premio_lordo * pct_su_premio / 100.0, 2)
     provv_collab = round(provv_tot * pct_collab / 100.0, 2)
+    # RETE PIRAMIDALE: quote upline sulla provvigione del collaboratore
+    upline_breakdown = []
+    for up in (schema.get("upline") or []):
+        pct = float(up.get("percentuale") or 0)
+        if not up.get("operatore_id") or pct <= 0:
+            continue
+        upline_breakdown.append({
+            "operatore_id": up.get("operatore_id"),
+            "operatore_nome": up.get("operatore_nome") or "",
+            "percentuale": pct,
+            "provvigione": round(provv_collab * pct / 100.0, 2),
+        })
     return {
         "provvigione_totale": provv_tot,
         "provvigione_collaboratore": provv_collab,
@@ -4246,6 +4261,7 @@ async def _calcola_provvigione(
         "schema_nome": schema.get("nome"),
         "pct_su_premio": pct_su_premio,
         "pct_collab": pct_collab,
+        "upline_breakdown": upline_breakdown,
     }
 
 
@@ -8035,6 +8051,17 @@ async def pipeline_move(
     Supporta sia pipeline built-in (polizze/sinistri/titoli) che pipeline custom.
     """
     nuovo = body.get("nuovo_stato") or body.get("colonna_key")
+    if entita == "regolazione":
+        validi = {"da_richiedere", "lettera_inviata", "dati_ricevuti", "calcolata", "titolo_generato", "chiusa"}
+        if nuovo not in validi:
+            raise HTTPException(400, f"Stato regolazione non valido: {nuovo}")
+        res = await db.polizze.update_one(
+            {"id": eid}, {"$set": {"regolazione_stato": nuovo, "updated_at": _now_iso()}},
+        )
+        if res.matched_count == 0:
+            raise HTTPException(404, "Polizza non trovata")
+        await log_attivita(user, "move_pipeline", "regolazione", eid, f"Stato -> {nuovo}")
+        return {"ok": True, "id": eid, "stato": nuovo}
     if entita in PIPELINE_STATI_VALIDI:
         if nuovo not in PIPELINE_STATI_VALIDI[entita]:
             raise HTTPException(400, f"Stato non valido per {entita}: {nuovo}")
@@ -8134,6 +8161,33 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
                 } for t in cards[:50]],
             })
         return {"entita": "titoli", "colonne": cols}
+
+    if entita == "regolazione":
+        stages = [
+            ("da_richiedere", "Da richiedere"), ("lettera_inviata", "Lettera inviata"),
+            ("dati_ricevuti", "Dati ricevuti"), ("calcolata", "Calcolata"),
+            ("titolo_generato", "Titolo generato"), ("chiusa", "Chiuse"),
+        ]
+        items = await db.polizze.find(
+            {"regolazione_premio": True},
+            {"_id": 0, "documenti": 0, "garanzie": 0},
+        ).to_list(5000)
+        ana_ids = list({i.get("contraente_id") for i in items})
+        anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+        cols = []
+        for stato, label in stages:
+            cards = [i for i in items if (i.get("regolazione_stato") or "da_richiedere") == stato]
+            cols.append({
+                "key": stato, "label": label, "count": len(cards),
+                "cards": [{
+                    "id": p["id"], "title": p.get("numero_polizza") or "—",
+                    "subtitle": anas.get(p.get("contraente_id", ""), {}).get("ragione_sociale", ""),
+                    "footer": f"Dovuto: €{p.get('regolazione_dovuto', 0):.2f}",
+                    "extra": f"{p.get('ramo','')} · base {p.get('regolazione_base') or '—'}",
+                    "date": p.get("scadenza"), "link": f"/polizze/{p['id']}",
+                } for p in cards[:50]],
+            })
+        return {"entita": "regolazione", "colonne": cols}
 
     if entita == "clienti":
         # raggruppamento per quantità polizze

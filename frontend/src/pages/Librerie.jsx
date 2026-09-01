@@ -1005,7 +1005,7 @@ function ProdottoForm({ section, editing, onClose }) {
         return ["VITA", "VITA_RC", "PREVIDENZA"].includes(r) ? 30 : 15;
     };
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, termini_disdetta_giorni: 60, tacito_rinnovo: true, is_libro_matricola: false, attivo: true }}
+        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, termini_disdetta_giorni: 60, tacito_rinnovo: true, is_libro_matricola: false, is_cumulativa_assicurati: false, mostra_sezione_veicolo: false, attivo: true }}
         fields={(f, set) => {
             const ramoUpper = String(f.ramo || "").toUpperCase();
             const isRcAuto = ramoUpper.includes("RCA") || ramoUpper.includes("AUTO");
@@ -1048,22 +1048,20 @@ function ProdottoForm({ section, editing, onClose }) {
                             Default: 15 gg · Vita = 30 gg.
                         </div>
                     </div>
-                    {isRcAuto && (
-                        <div className="bg-amber-50 border border-amber-200 rounded p-2">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={!!f.is_libro_matricola}
-                                    onChange={(e) => set("is_libro_matricola", e.target.checked)}
-                                    data-testid="prodotto-libro-matricola"
-                                />
-                                <span className="text-sm font-medium text-amber-900">È Libro Matricola?</span>
-                            </label>
-                            <div className="text-[10px] text-amber-700 mt-1">
-                                Solo per polizze RCA flotta: le polizze con questo prodotto avranno una tab &quot;Libro Matricola&quot; con applicazioni per veicolo.
-                            </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!f.is_libro_matricola}
+                                onChange={(e) => set("is_libro_matricola", e.target.checked)}
+                                data-testid="prodotto-libro-matricola"
+                            />
+                            <span className="text-sm font-medium text-amber-900">È Libro Matricola?</span>
+                        </label>
+                        <div className="text-[10px] text-amber-700 mt-1">
+                            Per polizze a matricola veicoli (es. RCA flotta): le polizze con questo prodotto avranno una tab &quot;Libro Matricola&quot; con applicazioni per veicolo.
                         </div>
-                    )}
+                    </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                     <div>
@@ -1110,6 +1108,20 @@ function ProdottoForm({ section, editing, onClose }) {
                     </label>
                     <div className="text-[10px] text-sky-700 mt-1">
                         Spunta per prodotti che gestiscono un veicolo (es. RCA, Kasko, ARD, infortuni conducente). Per ramo <b>RCAuto</b> la sezione viene mostrata sempre, anche se non spuntato.
+                    </div>
+                </div>
+                <div className="bg-teal-50 border border-teal-200 rounded p-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={!!f.is_cumulativa_assicurati}
+                            onChange={(e) => set("is_cumulativa_assicurati", e.target.checked)}
+                            data-testid="prodotto-cumulativa"
+                        />
+                        <span className="text-sm font-medium text-teal-900">È polizza cumulativa (elenco assicurati)?</span>
+                    </label>
+                    <div className="text-[10px] text-teal-700 mt-1">
+                        Per polizze con elenco cumulativo di persone assicurate (es. Ritiro Patente): le polizze con questo prodotto avranno una tab &quot;Assicurati&quot; con import da Excel.
                     </div>
                 </div>
                 <div><Label>Descrizione</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
@@ -1778,7 +1790,7 @@ function SchemaProvvForm({ section, editing, onClose }) {
     }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
         defaults={{ nome: "", collaboratore_id: null, compagnia_id: null, ramo: null,
-                    percentuale_collaboratore: 0, percentuale_su_premio: 0,
+                    percentuale_collaboratore: 0, percentuale_su_premio: 0, upline: [],
                     descrizione: "", attivo: true }}
         fields={(f, set) => (
             <>
@@ -1830,6 +1842,33 @@ function SchemaProvvForm({ section, editing, onClose }) {
                     </div>
                 </div>
                 <div><Label>Descrizione / note</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
+                <div className="bg-violet-50 border border-violet-200 rounded-md p-3">
+                    <div className="flex items-center justify-between mb-2">
+                        <Label className="text-violet-800 font-semibold">Rete piramidale (upline)</Label>
+                        <button type="button" className="text-xs bg-violet-700 text-white rounded px-2 py-1 hover:bg-violet-800"
+                            onClick={() => set("upline", [...(f.upline || []), { operatore_id: "", operatore_nome: "", percentuale: 0 }])}
+                            data-testid="sp-add-upline">+ Livello superiore</button>
+                    </div>
+                    <div className="text-[10px] text-violet-700 mb-2">Quota che cascata verso i collaboratori "a monte" a partire dalla provvigione del collaboratore diretto. Alimenta automaticamente polizze e titoli (pulsante "Auto").</div>
+                    {(f.upline || []).length === 0 && <div className="text-[11px] text-slate-400 italic">Nessun livello superiore. Aggiungi per creare una struttura a piramide.</div>}
+                    {(f.upline || []).map((u, i) => (
+                        <div key={i} className="flex items-center gap-2 mb-1.5" data-testid={`sp-upline-row-${i}`}>
+                            <Select value={u.operatore_id || "__none__"} onValueChange={(v) => {
+                                const c = collab.find((x) => x.id === v);
+                                const up = [...f.upline]; up[i] = { ...up[i], operatore_id: v === "__none__" ? "" : v, operatore_nome: c ? c.name : "" }; set("upline", up);
+                            }}>
+                                <SelectTrigger className="flex-1 h-8"><SelectValue placeholder="— collaboratore upline —" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__none__">— collaboratore upline —</SelectItem>
+                                    {collab.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <Input type="number" step="0.01" className="w-24 h-8" placeholder="%" value={u.percentuale || 0}
+                                onChange={(e) => { const up = [...f.upline]; up[i] = { ...up[i], percentuale: parseFloat(e.target.value) || 0 }; set("upline", up); }} />
+                            <button type="button" className="text-rose-500 text-xs px-2" onClick={() => set("upline", f.upline.filter((_, idx) => idx !== i))}>✕</button>
+                        </div>
+                    ))}
+                </div>
                 <div className="flex items-center gap-2">
                     <input type="checkbox" id="sp_attivo" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} />
                     <Label htmlFor="sp_attivo" className="cursor-pointer">Regola attiva</Label>

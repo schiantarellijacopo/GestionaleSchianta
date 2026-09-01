@@ -22,6 +22,7 @@ import Statistiche from "@/pages/Statistiche";
 import Cervello from "@/pages/Cervello";
 import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
 import RegolazionePremio from "@/pages/RegolazionePremio";
+import RegolazionePublic from "@/pages/RegolazionePublic";
 import CorsiIvass from "@/pages/CorsiIvass";
 import AssistentePersonale from "@/pages/AssistentePersonale";
 import NotebookAI from "@/pages/NotebookAI";
@@ -85,6 +86,7 @@ function App() {
                         <Route path="/portale/*" element={<PortaleCliente />} />
                         <Route path="/c/:slug" element={<PortaleLanding />} />
                         <Route path="/upload-doc" element={<UploadDocPublic />} />
+                        <Route path="/rp/:token" element={<RegolazionePublic />} />
 
                         {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}
                         <Route

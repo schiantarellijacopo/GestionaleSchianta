@@ -1,5 +1,31 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-01 (parte 3) — Titoli, Regolazione avanzata, Pipeline, Prodotti
+
+### Titoli
+- POST /api/titoli ora supportato dal dialog (crea + modifica). Fix bug 500: `Titolo.tipo` Literal ora include "annullo". Tipi con etichette: Quietanza/Polizza nuova/Rinnovo/Appendice/Annullo/Sostituzione/Regolazione premio/Storno.
+- Provvigioni multi-collaboratore su titolo (`provvigioni_operatori`), ereditate automaticamente dalla polizza; totale sempre modificabile; blocco quando il titolo è incassato.
+- Selettore pagamento unificato (`SelectTipoPagamento`, stessa lista dei titoli) in: form polizza (mezzo_pagamento_preferito ora str libero), AzioniPolizzaTab sostituzione. Placeholder "Seleziona metodo di pagamento".
+- Auto-calcolo "prossima quietanza" = effetto + intervallo frazionamento.
+
+### Regolazione Premio (avanzata)
+- Calcolo DIFFERENZIALE: (base dichiarata − base preventivo) × tasso; dropdown base (fatturato/addetti/retribuzioni/ricavi); `regolazione_base_preventivo` su polizza.
+- Flag regolazione anche nell'header polizza (chip "Soggetta · gestisci" / "Attiva") + tab "Regolazione" con pannello completo (config, base preventivo/dichiarata, azioni, storico).
+- "Genera titolo" apre il dialog crea-titolo precompilato (tipo=regolazione, importo=dovuto).
+- Annulla calcolo / Elimina regolazione (con opzione elimina titolo).
+- LINK PUBBLICO cliente: POST /genera-link → /rp/{token}; pagina pubblica `RegolazionePublic` (no auth); il cliente inserisce il dato → auto-compila (`regolazione_base_dichiarata_cliente`), stato→dati_ricevuti, alert in-app agli admin/collab. Invio link via Email (SMTP) e WhatsApp (wa.me).
+- Lettera PDF: riporta base dichiarata in polizza + sezione compilabile + link pubblico.
+
+### Pipeline
+- Nuova board builtin "Regolazione Premio" (colonne per stato workflow, drag-drop aggiorna regolazione_stato).
+
+### Prodotti (Librerie)
+- "È Libro Matricola" ora per tutti i rami; nuovo flag "È polizza cumulativa (elenco assicurati)?". Alla creazione polizza il prodotto propaga is_libro_matricola / is_cumulativa_assicurati.
+
+### Fix
+- Lookup veicolo per targa: era MOCK con marca/modello casuali (mismatch). Reso deterministico e COERENTE (coppie marca→modello). ⚠️ MOCKED: dati reali richiedono credenziali OpenAPI.it Automotive.
+
+
 
 ## 2026-09-01 — Regolazione Premio · Cumulativa Assicurati · Automazioni Dashboard · Anagrafiche paginate
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -101,6 +102,7 @@ async def list_regolazioni(
             "effetto": p.get("effetto"),
             "scadenza": p.get("scadenza"),
             "base_tipo": p.get("regolazione_base"),
+            "base_preventivo": p.get("regolazione_base_preventivo") or 0,
             "tasso": p.get("regolazione_tasso"),
             "minima": p.get("regolazione_minima"),
             "periodicita": p.get("regolazione_periodicita"),
@@ -160,6 +162,11 @@ async def _build_lettera(pid: str, body: LetteraBody):
         {"id": pol.get("compagnia_id")}, {"_id": 0, "nome": 1},
     ) or {}
     from pdf_regolazione import genera_lettera_regolazione
+    public_url = None
+    if pol.get("regolazione_public_token"):
+        base = (az.get("public_base_url") or "").rstrip("/")
+        public_url = (f"{base}/rp/{pol['regolazione_public_token']}" if base
+                      else f"/rp/{pol['regolazione_public_token']}")
     pdf = genera_lettera_regolazione(
         azienda=az,
         contraente_nome=_anag_nome(a),
@@ -171,6 +178,8 @@ async def _build_lettera(pid: str, body: LetteraBody):
         scadenza=pol.get("scadenza") or "",
         base_tipo=pol.get("regolazione_base"),
         periodo=body.periodo or "",
+        base_preventivo=pol.get("regolazione_base_preventivo"),
+        public_url=public_url,
         testo_extra=body.testo_extra,
     )
     return pol, a, az, pdf
@@ -320,3 +329,202 @@ async def eventi_regolazione(pid: str, user=Depends(current_user)) -> list[dict]
     return await db.regolazione_storico.find(
         {"polizza_id": pid}, {"_id": 0},
     ).sort("created_at", -1).to_list(200)
+
+
+# ============================================================================
+# MODIFICA / ANNULLA / ELIMINA
+# ============================================================================
+@router.post("/regolazione-premio/{pid}/annulla")
+async def annulla_regolazione(
+    pid: str, user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Azzera lo stato/calcolo della regolazione (la polizza resta soggetta)."""
+    res = await db.polizze.update_one({"id": pid}, {"$set": {
+        "regolazione_stato": "da_richiedere", "regolazione_dovuto": 0,
+        "updated_at": _now_iso(),
+    }, "$unset": {
+        "regolazione_ultimo_calcolo": "", "regolazione_lettera_inviata_data": "",
+        "regolazione_base_dichiarata_cliente": "", "regolazione_dato_cliente_data": "",
+    }})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Polizza non trovata")
+    await db.regolazione_storico.insert_one({
+        "id": str(uuid.uuid4()), "polizza_id": pid, "evento": "annullata",
+        "data": _now_iso()[:10], "operatore_id": user.get("id"), "created_at": _now_iso(),
+    })
+    return {"ok": True}
+
+
+@router.delete("/regolazione-premio/{pid}")
+async def elimina_regolazione(
+    pid: str, elimina_titolo: bool = False,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Rimuove del tutto la regolazione dalla polizza (togli il flag) e lo storico.
+    Se elimina_titolo=True cancella anche il titolo di regolazione generato."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_titolo_id": 1})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    if elimina_titolo and pol.get("regolazione_titolo_id"):
+        await db.titoli.delete_one({"id": pol["regolazione_titolo_id"]})
+    await db.regolazione_storico.delete_many({"polizza_id": pid})
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "regolazione_premio": False, "updated_at": _now_iso(),
+    }, "$unset": {
+        "regolazione_stato": "", "regolazione_dovuto": "", "regolazione_ultimo_calcolo": "",
+        "regolazione_titolo_id": "", "regolazione_lettera_inviata_data": "",
+        "regolazione_public_token": "", "regolazione_base_dichiarata_cliente": "",
+        "regolazione_dato_cliente_data": "",
+    }})
+    await log_attivita(user, "elimina", "regolazione_premio", pid)
+    return {"ok": True}
+
+
+# ============================================================================
+# LINK PUBBLICO — raccolta dato aggiornato dal cliente
+# ============================================================================
+@router.post("/regolazione-premio/{pid}/genera-link")
+async def genera_link(
+    pid: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_public_token": 1, "regolazione_premio": 1})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    if not pol.get("regolazione_premio"):
+        raise HTTPException(400, "Polizza non soggetta a regolazione premio")
+    token = pol.get("regolazione_public_token") or uuid.uuid4().hex
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "regolazione_public_token": token, "updated_at": _now_iso(),
+    }})
+    return {"ok": True, "token": token, "path": f"/rp/{token}"}
+
+
+class InviaLinkBody(BaseModel):
+    canale: str  # "email" | "whatsapp"
+
+
+@router.post("/regolazione-premio/{pid}/invia-link")
+async def invia_link(
+    pid: str, body: InviaLinkBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Invia al contraente il link pubblico via email (SMTP) o restituisce
+    l'URL WhatsApp (wa.me) precompilato."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    token = pol.get("regolazione_public_token") or uuid.uuid4().hex
+    if token != pol.get("regolazione_public_token"):
+        await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_public_token": token}})
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    a = await db.anagrafiche.find_one({"id": pol.get("contraente_id")}, {"_id": 0}) or {}
+    base = (az.get("public_base_url") or "").rstrip("/")
+    public_url = f"{base}/rp/{token}" if base else f"/rp/{token}"
+    testo = (
+        f"Gentile {_anag_nome(a)}, per la regolazione del premio della polizza "
+        f"{pol.get('numero_polizza')} La preghiamo di comunicarci il dato aggiornato "
+        f"a questo link: {public_url}"
+    )
+
+    if body.canale == "email":
+        dest = (a.get("email") or "").strip()
+        if not dest:
+            raise HTTPException(400, "Il contraente non ha un'email registrata")
+        if not (az.get("smtp_host") and az.get("smtp_user")):
+            raise HTTPException(400, "SMTP non configurato")
+        from email_utils import smtp_send
+        try:
+            smtp_send(az, to_addrs=dest,
+                      subject=f"Regolazione premio — Polizza {pol.get('numero_polizza')}",
+                      text=testo)
+        except Exception as e:
+            raise HTTPException(503, f"Errore invio email: {e}")
+        await db.regolazione_storico.insert_one({
+            "id": str(uuid.uuid4()), "polizza_id": pid, "evento": "link_inviato_email",
+            "data": _now_iso()[:10], "email": dest, "created_at": _now_iso(),
+        })
+        return {"ok": True, "canale": "email", "email": dest}
+
+    if body.canale == "whatsapp":
+        tel = (a.get("cellulare") or a.get("telefono") or "").strip()
+        num = "".join(ch for ch in tel if ch.isdigit())
+        if num.startswith("00"):
+            num = num[2:]
+        if num and not num.startswith("39") and len(num) <= 10:
+            num = "39" + num
+        wa_url = f"https://wa.me/{num}?text=" + quote(testo) if num else "https://wa.me/?text=" + quote(testo)
+        await db.regolazione_storico.insert_one({
+            "id": str(uuid.uuid4()), "polizza_id": pid, "evento": "link_inviato_whatsapp",
+            "data": _now_iso()[:10], "created_at": _now_iso(),
+        })
+        return {"ok": True, "canale": "whatsapp", "whatsapp_url": wa_url, "url_pubblico": public_url}
+
+    raise HTTPException(400, "Canale non valido")
+
+
+@router.get("/public/regolazione/{token}")
+async def public_get_regolazione(token: str) -> dict:
+    """Endpoint PUBBLICO (no auth): dati per il form di comunicazione dato aggiornato."""
+    pol = await db.polizze.find_one(
+        {"regolazione_public_token": token},
+        {"_id": 0, "documenti": 0, "garanzie": 0},
+    )
+    if not pol:
+        raise HTTPException(404, "Link non valido o scaduto")
+    az = await db.azienda_config.find_one({}, {"_id": 0, "ragione_sociale": 1, "nome": 1}) or {}
+    a = await db.anagrafiche.find_one({"id": pol.get("contraente_id")}, {"_id": 0}) or {}
+    return {
+        "numero_polizza": pol.get("numero_polizza"),
+        "ramo": pol.get("ramo"), "prodotto": pol.get("prodotto"),
+        "effetto": pol.get("effetto"), "scadenza": pol.get("scadenza"),
+        "base_tipo": pol.get("regolazione_base"),
+        "base_preventivo": pol.get("regolazione_base_preventivo") or 0,
+        "periodicita": pol.get("regolazione_periodicita"),
+        "contraente_nome": _anag_nome(a),
+        "agenzia": az.get("ragione_sociale") or az.get("nome") or "Agenzia",
+        "gia_compilato": pol.get("regolazione_base_dichiarata_cliente") is not None,
+    }
+
+
+class PublicSubmitBody(BaseModel):
+    base_dichiarata: float
+    note: Optional[str] = None
+
+
+@router.post("/public/regolazione/{token}")
+async def public_submit_regolazione(token: str, body: PublicSubmitBody) -> dict:
+    """Endpoint PUBBLICO (no auth): il cliente comunica il dato aggiornato.
+    Auto-compila nel gestionale e crea alert in-app per l'agenzia."""
+    pol = await db.polizze.find_one({"regolazione_public_token": token}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Link non valido o scaduto")
+    pid = pol["id"]
+    oggi = _now_iso()[:10]
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "regolazione_base_dichiarata_cliente": body.base_dichiarata,
+        "regolazione_dato_cliente_data": oggi,
+        "regolazione_stato": "dati_ricevuti",
+        "regolazione_note": body.note or pol.get("regolazione_note"),
+        "updated_at": _now_iso(),
+    }})
+    await db.regolazione_storico.insert_one({
+        "id": str(uuid.uuid4()), "polizza_id": pid, "evento": "dato_cliente_ricevuto",
+        "data": oggi, "base_dichiarata": body.base_dichiarata, "note": body.note,
+        "created_at": _now_iso(),
+    })
+    # Alert in-app a tutti gli admin/collaboratori
+    a = await db.anagrafiche.find_one({"id": pol.get("contraente_id")}, {"_id": 0}) or {}
+    nome = _anag_nome(a)
+    try:
+        from alert_models import Notification
+        async for u in db.users.find({"role": {"$in": ["admin", "collaboratore"]}}, {"_id": 0, "id": 1}):
+            n = Notification(
+                user_id=u["id"], tipo="success", icona="Zap",
+                titolo="Regolazione premio: dato ricevuto",
+                messaggio=f"{nome} ha comunicato il dato aggiornato ({body.base_dichiarata}) per la polizza {pol.get('numero_polizza')}.",
+                link=f"/polizze/{pid}", entita_tipo="polizza", entita_id=pid,
+            )
+            await db.notifications.insert_one(n.model_dump())
+    except Exception:
+        pass
+    return {"ok": True, "messaggio": "Grazie, il dato è stato inviato correttamente all'agenzia."}

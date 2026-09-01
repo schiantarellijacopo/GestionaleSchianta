@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import { Ban, PauseCircle, PlayCircle, ArrowLeftRight, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
@@ -354,25 +355,17 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                     disabled={isLocked} data-testid="sost-scadenza" />
                             </div>
                             <div className="col-span-2">
-                                <Label>Metodo di pagamento preferito</Label>
-                                <select
+                                <Label>Tipo pagamento</Label>
+                                <SelectTipoPagamento
                                     value={sost.mezzo_pagamento_preferito || ""}
-                                    onChange={(e) => setSost((p) => ({ ...p, mezzo_pagamento_preferito: e.target.value }))}
-                                    disabled={isLocked}
-                                    className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:border-sky-500 outline-none"
-                                    data-testid="sost-mezzo-pagamento"
-                                >
-                                    <option value="">
-                                        {polizza.mezzo_pagamento_preferito
-                                            ? `Ereditato: ${polizza.mezzo_pagamento_preferito.toUpperCase()}`
-                                            : polizza.ultimo_mezzo_pagamento
-                                                ? `Auto (ultimo: ${polizza.ultimo_mezzo_pagamento})`
-                                                : "Auto (segue il primo incasso)"}
-                                    </option>
-                                    {mezzi.map((m) => (
-                                        <option key={m.codice} value={m.codice}>{m.label}</option>
-                                    ))}
-                                </select>
+                                    onChange={(v) => setSost((p) => ({ ...p, mezzo_pagamento_preferito: v }))}
+                                    placeholder={polizza.mezzo_pagamento_preferito
+                                        ? `Ereditato: ${polizza.mezzo_pagamento_preferito}`
+                                        : (polizza.ultimo_mezzo_pagamento
+                                            ? `Auto (ultimo: ${polizza.ultimo_mezzo_pagamento})`
+                                            : "Auto (segue il primo incasso)")}
+                                    testid="sost-mezzo-pagamento"
+                                />
                                 <div className="text-[10px] text-slate-400 mt-0.5">
                                     Il metodo NON cambia con la sostituzione: viene ereditato. Modificalo qui solo se il cliente lo richiede.
                                 </div>

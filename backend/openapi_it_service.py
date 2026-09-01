@@ -532,8 +532,16 @@ def _normalize_automotive(data, targa: str) -> dict:
 
 def _mock_automotive_by_targa(targa: str) -> dict:
     random.seed(hash(targa + "_veh_by_targa") % (2**31))
-    marca = random.choice(["FIAT", "VOLKSWAGEN", "BMW", "AUDI", "RENAULT"])
-    modello = random.choice(["500", "PANDA", "GOLF", "SERIE 3", "A4"])
+    # Coppie marca→modello COERENTI (il mock precedente accoppiava marca/modello a caso)
+    modelli_per_marca = {
+        "FIAT": ["500", "PANDA", "PUNTO", "TIPO"],
+        "VOLKSWAGEN": ["GOLF", "POLO", "TIGUAN", "PASSAT"],
+        "BMW": ["SERIE 1", "SERIE 3", "X1", "X3"],
+        "AUDI": ["A1", "A3", "A4", "Q3"],
+        "RENAULT": ["CLIO", "CAPTUR", "MEGANE", "TWINGO"],
+    }
+    marca = random.choice(list(modelli_per_marca.keys()))
+    modello = random.choice(modelli_per_marca[marca])
     return {
         "provider": "openapi.it/automotive (MOCK)",
         "targa": targa,
