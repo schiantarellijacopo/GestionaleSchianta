@@ -18,17 +18,31 @@ _scheduler = None
 
 
 def _detect_face_opencv(img_pil) -> Optional[tuple[int, int, int, int]]:
-    """Ritorna (left, top, right, bottom) del volto più grande, o None."""
+    """Ritorna (left, top, right, bottom) del volto più plausibile, o None."""
     import cv2
     import numpy as np
-    arr = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2GRAY)
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = cascade.detectMultiScale(arr, scaleFactor=1.1, minNeighbors=5,
-                                     minSize=(max(40, arr.shape[1] // 20),) * 2)
-    if len(faces) == 0:
+    gray = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2GRAY)
+    gray = cv2.equalizeHist(gray)
+    H, W = gray.shape[:2]
+    min_side = max(40, min(W, H) // 12)
+    candidates = []
+    for cascade_name in ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml"):
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + cascade_name)
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=6,
+                                         minSize=(min_side, min_side))
+        for (x, y, w, h) in faces:
+            # scarta box implausibili: troppo grandi (documento intero) o proporzioni strane
+            if w > 0.6 * W or h > 0.75 * H:
+                continue
+            if not (0.7 <= w / h <= 1.4):
+                continue
+            candidates.append((int(x), int(y), int(w), int(h)))
+        if candidates:
+            break
+    if not candidates:
         return None
-    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-    return int(x), int(y), int(x + w), int(y + h)
+    x, y, w, h = max(candidates, key=lambda f: f[2] * f[3])
+    return x, y, x + w, y + h
 
 
 def crop_volto_bytes(image_bytes: bytes, ai_bbox: Optional[dict] = None) -> Optional[bytes]:
@@ -54,7 +68,8 @@ def crop_volto_bytes(image_bytes: bytes, ai_bbox: Optional[dict] = None) -> Opti
         y = float(ai_bbox.get("y") or 0)
         w = float(ai_bbox.get("w") or 0)
         h = float(ai_bbox.get("h") or 0)
-        if w > 0.05 and h > 0.05:
+        # accetta solo box plausibili per una fototessera (non il documento intero)
+        if 0.05 < w <= 0.5 and 0.05 < h <= 0.8:
             pad = 0.05
             box = (max(0, int((x - pad) * W)), max(0, int((y - pad) * H)),
                    min(W, int((x + w + pad) * W)), min(H, int((y + h + pad) * H)))
@@ -104,18 +119,23 @@ async def salva_avatar_da_documento(db, anagrafica_id: str, image_bytes: bytes,
     return url
 
 
-async def batch_avatar_notturno(db, limite: int = 300) -> dict:
-    """Processa i clienti SENZA avatar che hanno un documento di identità caricato."""
+async def batch_avatar_notturno(db, limite: int = 300, force: bool = False) -> dict:
+    """Processa i clienti SENZA avatar che hanno un documento di identità caricato.
+    Con force=True rigenera anche gli avatar già creati dai documenti (recrop migliorato)."""
     import storage as obj_storage
     report = {"esaminati": 0, "avatar_creati": 0, "senza_volto": 0, "errori": 0}
-    flt = {
-        "$and": [
+    doc_cond = {"$or": [{f"documenti.{t}.storage_path": {"$exists": True}}
+                        for t in ("carta_identita", "patente", "passaporto")]}
+    if force:
+        flt = {"$and": [doc_cond,
+                        {"$or": [{"avatar_da_documento": True}, {"avatar_url": {"$in": [None, ""]}},
+                                 {"avatar_url": {"$exists": False}}]}]}
+    else:
+        flt = {"$and": [
             {"$or": [{"avatar_url": None}, {"avatar_url": {"$exists": False}}, {"avatar_url": ""}]},
-            {"$or": [{f"documenti.{t}.storage_path": {"$exists": True}}
-                     for t in ("carta_identita", "patente", "passaporto")]},
+            doc_cond,
             {"avatar_batch_fallito": {"$ne": True}},
-        ]
-    }
+        ]}
     async for ana in db.anagrafiche.find(flt, {"_id": 0, "id": 1, "documenti": 1}).limit(limite):
         report["esaminati"] += 1
         docs = ana.get("documenti") or {}
@@ -144,6 +164,12 @@ async def batch_avatar_notturno(db, limite: int = 300) -> dict:
             # non riprovare ogni notte lo stesso documento senza volto rilevabile
             await db.anagrafiche.update_one({"id": ana["id"]},
                                             {"$set": {"avatar_batch_fallito": True}})
+            if force:
+                # se il recrop non trova un volto plausibile, meglio nessun avatar
+                # che il documento intero come immagine profilo
+                await db.anagrafiche.update_one(
+                    {"id": ana["id"], "avatar_da_documento": True},
+                    {"$set": {"avatar_url": None}})
     logger.info("Batch avatar notturno: %s", report)
     return report
 

@@ -39,12 +39,12 @@ const ANAG_COLS = [
         ),
     },
     {
-        key: "cliente", label: "Cliente", sort: "ragione_sociale", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3",
+        key: "cliente", label: "Cliente", sort: "ragione_sociale", thClass: "text-left py-1.5 pr-3 min-w-[260px]", tdClass: "py-1.5 pr-3",
         render: (a, ctx) => (
             <div className="flex items-center gap-2">
                 <AnagraficaAvatar ana={a} size="sm" />
                 <Link to={`/anagrafiche/${a.id}`}
-                      className={`hover:underline font-semibold text-[13px] tracking-wide truncate max-w-[220px] ${ctx.cat.text}`}>
+                      className={`hover:underline font-semibold text-[13px] tracking-wide truncate max-w-[340px] ${ctx.cat.text}`}>
                     {a.ragione_sociale}
                 </Link>
                 {a.tipo === "persona_giuridica" && <span className="text-[9px] text-slate-400 shrink-0">PG</span>}
@@ -104,16 +104,21 @@ const ANAG_COLS = [
         render: (a, ctx) => ctx.net ? fmtEur(ctx.net.root.provvigioni_totale || 0) : <span className="text-slate-300">—</span>,
     },
     {
-        key: "tag", label: "Tag", thClass: "text-left py-1.5 pr-2 w-28", tdClass: "py-1.5 pr-2 w-28",
+        key: "tag", label: "Tag", thClass: "text-left py-1.5 pr-2 w-24", tdClass: "py-1.5 pr-2 w-24",
         render: (a, ctx) => (
-            <div className="flex flex-wrap gap-1">
-                {(a.tags || []).slice(0, 3).map((t) => (
+            <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                {(a.tags || []).slice(0, 2).map((t) => (
                     <button key={t} onClick={() => ctx.onTagClick(t)}
-                            className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700">
+                            title={t}
+                            className="text-[8px] uppercase px-1 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700 truncate max-w-[68px]">
                         {t}
                     </button>
                 ))}
-                {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
+                {(a.tags || []).length > 2 && (
+                    <span className="text-[9px] text-slate-400 shrink-0" title={(a.tags || []).join(", ")}>
+                        +{a.tags.length - 2}
+                    </span>
+                )}
             </div>
         ),
     },
@@ -415,7 +420,7 @@ export default function Anagrafiche() {
             )}
 
             <div className="flex justify-end mb-2">{colsPicker}</div>
-            <div className="tbl-scroll bg-white" style={{ "--c1-w": "32px", "--c2-w": "260px" }}>
+            <div className="tbl-scroll bg-white" style={{ "--c1-w": "32px", "--c2-w": "340px" }}>
                 {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
                     <table className="freeze-3 w-full text-sm">
                         <thead>

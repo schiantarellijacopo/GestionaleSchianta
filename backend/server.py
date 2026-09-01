@@ -12169,10 +12169,12 @@ async def _portale_link_per_ana(ana: dict) -> dict:
 
 
 @_extra.post("/avatar-batch/esegui")
-async def esegui_avatar_batch(user=Depends(require_user("admin", "collaboratore"))):
-    """Esegue SUBITO il batch avatar (normalmente gira alle 02:30 di notte)."""
+async def esegui_avatar_batch(force: bool = False,
+                              user=Depends(require_user("admin", "collaboratore"))):
+    """Esegue SUBITO il batch avatar (normalmente gira alle 02:30 di notte).
+    force=true rigenera anche gli avatar già creati dai documenti."""
     import face_crop
-    report = await face_crop.batch_avatar_notturno(db)
+    report = await face_crop.batch_avatar_notturno(db, force=force)
     return {"ok": True, **report}
 
 
