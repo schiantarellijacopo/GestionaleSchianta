@@ -312,19 +312,34 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div>
-                    <Label>Categoria</Label>
-                    <Select value={f.categoria} onValueChange={(v) => set("categoria", v)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                <div className="col-span-2">
+                    <Label>Categoria / Voce di bilancio</Label>
+                    <Select
+                        value={f.voce_bilancio_id ? `voce:${f.voce_bilancio_id}` : `cat:${f.categoria}`}
+                        onValueChange={(v) => {
+                            if (v.startsWith("voce:")) {
+                                set("voce_bilancio_id", v.slice(5));
+                            } else {
+                                set("categoria", v.slice(4));
+                                set("voce_bilancio_id", "");
+                            }
+                        }}
+                    >
+                        <SelectTrigger data-testid="mov-categoria-select"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="incasso_premio">Incasso premio</SelectItem>
-                            <SelectItem value="pagamento_compagnia">Pagamento compagnia (rimessa E/C)</SelectItem>
-                            <SelectItem value="provvigioni">Provvigioni</SelectItem>
-                            <SelectItem value="rimborso_cliente">Rimborso cliente</SelectItem>
-                            <SelectItem value="sconto_cliente">Sconto cliente</SelectItem>
-                            <SelectItem value="spese_amministrative">Spese amministrative</SelectItem>
-                            <SelectItem value="anticipo">Anticipo / Sospeso</SelectItem>
-                            <SelectItem value="altro">Altro</SelectItem>
+                            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400">Causali standard</div>
+                            <SelectItem value="cat:incasso_premio">Incasso premio</SelectItem>
+                            <SelectItem value="cat:pagamento_compagnia">Pagamento compagnia (rimessa E/C)</SelectItem>
+                            <SelectItem value="cat:provvigioni">Provvigioni</SelectItem>
+                            <SelectItem value="cat:rimborso_cliente">Rimborso cliente</SelectItem>
+                            <SelectItem value="cat:sconto_cliente">Sconto cliente</SelectItem>
+                            <SelectItem value="cat:spese_amministrative">Spese amministrative</SelectItem>
+                            <SelectItem value="cat:anticipo">Anticipo / Sospeso</SelectItem>
+                            <SelectItem value="cat:altro">Altro</SelectItem>
+                            {vociBil.length > 0 && <div className="px-2 py-1 mt-1 text-[10px] uppercase tracking-wide text-slate-400 border-t border-slate-100">Voci di bilancio (mini-bilancio)</div>}
+                            {vociBil.map((v) => (
+                                <SelectItem key={v.id} value={`voce:${v.id}`}>{v.nome} {v.tipo === "ricavo" ? "· Ricavo" : "· Costo"}</SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                 </div>
@@ -345,18 +360,6 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         <SelectTrigger data-testid="mov-tipo-pagamento-select"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
                         <SelectContent>
                             {tipiPag.map((t) => <SelectItem key={t.id} value={t.label}>{t.label}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div>
-                    <Label>Voce di bilancio (mini-bilancio)</Label>
-                    <Select value={f.voce_bilancio_id || ""} onValueChange={(v) => set("voce_bilancio_id", v === "none" ? "" : v)}>
-                        <SelectTrigger data-testid="mov-voce-bilancio-select"><SelectValue placeholder="Automatica" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="none">Automatica (da causale)</SelectItem>
-                            {vociBil.map((v) => (
-                                <SelectItem key={v.id} value={v.id}>{v.nome} {v.tipo === "ricavo" ? "· Ricavo" : "· Costo"}</SelectItem>
-                            ))}
                         </SelectContent>
                     </Select>
                 </div>
