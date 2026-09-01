@@ -541,9 +541,27 @@ async def delete_applicazione(
 
 
 def _norm_intestatario(s: str) -> str:
-    """Normalizza un intestatario per il matching: lower + strip + collapsed spaces."""
+    """Normalizza un intestatario per il matching robusto:
+    lower + rimozione punteggiatura + forme giuridiche uniformate + spazi collassati.
+    Es. 'Maganetti Trasporti S.r.l.' == 'MAGANETTI TRASPORTI SRL'."""
     import re as _re
-    return _re.sub(r"\s+", " ", (s or "").strip().lower())
+    t = (s or "").strip().lower()
+    if not t:
+        return ""
+    t = t.replace("&", " e ")
+    # rimuovi punteggiatura (punti, virgole, apostrofi, trattini) → spazio
+    t = _re.sub(r"[.,;:'\-_/\\]", " ", t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    # uniforma le forme giuridiche (già senza punti dopo lo strip)
+    legal = {
+        r"\bs r l s\b": "srls", r"\bs r l\b": "srl", r"\bs p a\b": "spa",
+        r"\bs n c\b": "snc", r"\bs a s\b": "sas", r"\bs c a r l\b": "scarl",
+        r"\bs c r l\b": "scrl", r"\bs s d\b": "ssd", r"\ba s d\b": "asd",
+    }
+    for pat, repl in legal.items():
+        t = _re.sub(pat, repl, t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    return t
 
 
 @router.post("/libro-matricola/migra-intestatari")
