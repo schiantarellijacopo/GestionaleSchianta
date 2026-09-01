@@ -129,24 +129,44 @@ export default function PolizzaDetail() {
                         </div>
                         <div className="flex flex-col justify-center">
                             <span className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Regolazione premio</span>
-                            {pol.regolazione_premio ? (
-                                <button
-                                    onClick={() => setRegolazioneOpen(true)}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-500/20 border border-violet-300/40 text-violet-100 hover:bg-violet-500/30 transition-colors text-xs font-medium"
-                                    data-testid="pol-header-regolazione-on">
-                                    <Zap size={12} /> Soggetta · gestisci
-                                </button>
-                            ) : canEdit ? (
-                                <button
-                                    onClick={async () => {
-                                        try { await api.put(`/polizze/${pol.id}`, { regolazione_premio: true }); toast.success("Polizza segnata soggetta a regolazione premio"); load(); }
-                                        catch { toast.error("Errore"); }
-                                    }}
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 border border-white/20 text-slate-200 hover:bg-white/20 transition-colors text-xs font-medium"
-                                    data-testid="pol-header-regolazione-off">
-                                    <Zap size={12} /> Attiva
-                                </button>
-                            ) : <span className="text-slate-300 text-xs">—</span>}
+                            {canEdit ? (
+                                <div className="flex items-center gap-1.5">
+                                    <div className="inline-flex rounded-full border border-white/20 overflow-hidden" data-testid="pol-header-regolazione-toggle">
+                                        <button
+                                            onClick={async () => {
+                                                if (pol.regolazione_premio) return;
+                                                try { await api.put(`/polizze/${pol.id}`, { regolazione_premio: true }); toast.success("Polizza soggetta a regolazione premio"); load(); }
+                                                catch { toast.error("Errore"); }
+                                            }}
+                                            className={`px-3 py-1 text-xs font-medium transition-colors ${pol.regolazione_premio ? "bg-violet-500/30 text-violet-100" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                                            data-testid="pol-header-regolazione-si">
+                                            Sì
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (!pol.regolazione_premio) return;
+                                                try { await api.put(`/polizze/${pol.id}`, { regolazione_premio: false }); toast.success("Regolazione premio disattivata"); load(); }
+                                                catch { toast.error("Errore"); }
+                                            }}
+                                            className={`px-3 py-1 text-xs font-medium transition-colors ${!pol.regolazione_premio ? "bg-white/25 text-white" : "bg-white/5 text-slate-300 hover:bg-white/10"}`}
+                                            data-testid="pol-header-regolazione-no">
+                                            No
+                                        </button>
+                                    </div>
+                                    {pol.regolazione_premio && (
+                                        <button
+                                            onClick={() => setRegolazioneOpen(true)}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-violet-500/20 border border-violet-300/40 text-violet-100 hover:bg-violet-500/30 transition-colors text-xs font-medium"
+                                            data-testid="pol-header-regolazione-on">
+                                            <Zap size={12} /> gestisci
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${pol.regolazione_premio ? "bg-violet-500/20 border border-violet-300/40 text-violet-100" : "text-slate-300"}`}>
+                                    {pol.regolazione_premio ? <><Zap size={12} /> Sì</> : "No"}
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>

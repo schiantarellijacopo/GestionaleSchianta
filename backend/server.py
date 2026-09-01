@@ -2279,9 +2279,10 @@ async def list_polizze(
     if scadute_oggi:
         flt["scadenza"] = today_s
     if scadute_da_min is not None:
-        scad_cond["$lte"] = (today - timedelta(days=int(scadute_da_min))).isoformat()
+        # "scaduto da N giorni" = conteggio inclusivo (giorno di scadenza incluso) → scadenza <= oggi-(N-1)
+        scad_cond["$lte"] = (today - timedelta(days=int(scadute_da_min) - 1)).isoformat()
     if scadute_da_max is not None:
-        scad_cond["$gte"] = (today - timedelta(days=int(scadute_da_max))).isoformat()
+        scad_cond["$gte"] = (today - timedelta(days=int(scadute_da_max) - 1)).isoformat()
     if dal:
         scad_cond["$gte"] = dal
     if al:
@@ -2289,7 +2290,9 @@ async def list_polizze(
     if scad_cond and "scadenza" not in flt:
         flt["scadenza"] = scad_cond
 
-    items = await db.polizze.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(limit)
+    # Projection leggera: esclude array/blob pesanti non usati nella lista (velocizza payload e query)
+    _LEAN_POL_PROJ = {"_id": 0, "garanzie": 0, "addizionali": 0, "provvigioni_operatori": 0}
+    items = await db.polizze.find(flt, _LEAN_POL_PROJ).sort("scadenza", 1).to_list(limit)
     # enrich con contraente, compagnia, collaboratore
     ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
     comp_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
@@ -2701,11 +2704,11 @@ async def list_titoli(
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
         cond = {}
         if scadute_da_min is not None:
-            # scadenza <= oggi - min
-            cond["$lte"] = (today - timedelta(days=int(scadute_da_min))).isoformat()
+            # scadenza <= oggi-(min-1)  (conteggio inclusivo del giorno di scadenza)
+            cond["$lte"] = (today - timedelta(days=int(scadute_da_min) - 1)).isoformat()
         if scadute_da_max is not None:
-            # scadenza >= oggi - max
-            cond["$gte"] = (today - timedelta(days=int(scadute_da_max))).isoformat()
+            # scadenza >= oggi-(max-1)
+            cond["$gte"] = (today - timedelta(days=int(scadute_da_max) - 1)).isoformat()
         flt["scadenza"] = cond if isinstance(flt.get("scadenza"), str) is False else {**(flt.get("scadenza") if isinstance(flt.get("scadenza"), dict) else {}), **cond}
 
     if coperti_non_pagati:
@@ -2750,6 +2753,8 @@ async def list_titoli(
     prodotti_map = {pr["id"]: (pr.get("nome") or pr.get("ramo") or "")
                     async for pr in db.prodotti.find(
                         {"id": {"$in": prod_ids}}, {"_id": 0, "id": 1, "nome": 1, "ramo": 1})}
+    # Cache schemi provvigionali per-richiesta: evita N+1 (fino a 7 query per titolo)
+    _schema_cache: dict = {}
     for t in items:
         p = pols.get(t.get("polizza_id"), {})
         t["numero_polizza"] = p.get("numero_polizza")
@@ -2774,6 +2779,7 @@ async def list_titoli(
             t.get("collaboratore_id"),
             p.get("compagnia_id"),
             p.get("ramo"),
+            schema_cache=_schema_cache,
         )
         t["provvigione_totale"] = tbk["provvigione_totale"]
         t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
@@ -4270,6 +4276,7 @@ async def _provv_breakdown(
     collaboratore_id: Optional[str],
     compagnia_id: Optional[str],
     ramo: Optional[str],
+    schema_cache: Optional[dict] = None,
 ) -> dict:
     """Suddivide una provvigione totale REALE (es. quella già impostata sulla polizza/
     titolo) in quota collaboratore e quota margine agenzia, usando la %
@@ -4299,7 +4306,15 @@ async def _provv_breakdown(
     schema_id = None
     schema_nome = None
     if collaboratore_id:
-        schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
+        if schema_cache is not None:
+            ck = (collaboratore_id, compagnia_id, ramo)
+            if ck in schema_cache:
+                schema = schema_cache[ck]
+            else:
+                schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
+                schema_cache[ck] = schema
+        else:
+            schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
         if schema:
             pct_collab = float(schema.get("percentuale_collaboratore") or 0)
             schema_id = schema.get("id")
@@ -9646,11 +9661,12 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
     titoli_scaduti["Oggi"] = await db.titoli.count_documents({
         "stato": _stati_aperti, "scadenza": today_iso})
     for g, lbl in ((5, "5gg"), (10, "10gg"), (15, "15gg")):
-        lim = (today - timedelta(days=g)).isoformat()
+        # conteggio inclusivo: scaduto da g giorni → scadenza <= oggi-(g-1)
+        lim = (today - timedelta(days=g - 1)).isoformat()
         titoli_scaduti[lbl] = await db.titoli.count_documents({
             "stato": _stati_aperti, "scadenza": {"$lte": lim}})
     titoli_scaduti["+15gg"] = await db.titoli.count_documents({
-        "stato": _stati_aperti, "scadenza": {"$lt": (today - timedelta(days=15)).isoformat()}})
+        "stato": _stati_aperti, "scadenza": {"$lt": (today - timedelta(days=14)).isoformat()}})
 
     return {
         "provvigioni_anno": round(provv_anno, 2),

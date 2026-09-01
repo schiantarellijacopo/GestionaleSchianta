@@ -396,12 +396,24 @@ function NuovaPolizzaDialog({ onClose }) {
     // Suggerimenti targa per autocomplete live (search nei veicoli del libro matricola)
     const [targheSuggest, setTargheSuggest] = useState([]);
     const [veicoloInfo, setVeicoloInfo] = useState(null);  // {fonte: "libro_matricola"|"polizza", polizze_collegate: [...]}
+    const [collabQuery, setCollabQuery] = useState("");
+    const [showCollabList, setShowCollabList] = useState(false);
+    const [targaLoading, setTargaLoading] = useState(false);
     const [f, setF] = useState({
         numero_polizza: "", compagnia_id: "", contraente_id: "",
         ramo: "", prodotto: "", effetto: "", scadenza: "",
-        premio_lordo: 0, premio_netto: 0, provvigioni: 0,
+        premio_lordo: 0, premio_netto: 0, premio_tasse: 0, premio_ssn: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
         collaboratore_id: "",
+    });
+    // Premio lordo = netto + imposta (tasse) + ssn (auto-calcolato)
+    const setPremio = (k, v) => setF((p) => {
+        const n = { ...p, [k]: v };
+        const netto = parseFloat(n.premio_netto) || 0;
+        const imposta = parseFloat(n.premio_tasse) || 0;
+        const ssn = parseFloat(n.premio_ssn) || 0;
+        n.premio_lordo = Math.round((netto + imposta + ssn) * 100) / 100;
+        return n;
     });
     useEffect(() => {
         api.get("/compagnie").then((r) => setComp(r.data));
@@ -442,6 +454,71 @@ function NuovaPolizzaDialog({ onClose }) {
     // Lista filtrata = quanto restituito dal server (gia' filtrato per query con AND multi-token).
     const anaFiltrate = ana.slice(0, 50);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    // Lookup targa: Libro Matricola → fallback polizze precedenti. Riusato da onBlur e dal pulsante "Cerca".
+    const lookupTarga = async (raw) => {
+        const t = (raw ?? f.targa ?? "").trim().toUpperCase();
+        if (!t || t.length < 4) {
+            toast.error("Inserisci una targa valida (min 4 caratteri)");
+            return;
+        }
+        setTargaLoading(true);
+        try {
+            try {
+                const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
+                const v = r.data?.veicolo;
+                if (v) {
+                    setF((prev) => ({
+                        ...prev, targa: t,
+                        veicolo_marca: prev.veicolo_marca || v.marca || "",
+                        veicolo_modello: prev.veicolo_modello || v.modello || "",
+                        veicolo_alimentazione: prev.veicolo_alimentazione || v.alimentazione || "",
+                        veicolo_kw: prev.veicolo_kw || v.kw || "",
+                        veicolo_cilindrata: prev.veicolo_cilindrata || v.cilindrata || "",
+                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || v.data_immatricolazione || "",
+                        veicolo_uso: prev.veicolo_uso || v.uso || "",
+                        veicolo_posti: prev.veicolo_posti || v.posti || "",
+                        veicolo_quintali: prev.veicolo_quintali || v.quintali || "",
+                        veicolo_settore: prev.veicolo_settore || v.settore || "",
+                        telaio: prev.telaio || v.telaio || "",
+                        veicolo_id: v.id,
+                    }));
+                    setVeicoloInfo({ fonte: "libro_matricola", veicolo: v, polizze_collegate: r.data?.polizze_collegate || [] });
+                    const npol = (r.data?.polizze_collegate || []).length;
+                    toast.success(`Veicolo dal Libro Matricola: ${v.marca || ""} ${v.modello || ""} ${npol ? `(${npol} polizz${npol === 1 ? "a" : "e"} già collegat${npol === 1 ? "a" : "e"})` : ""}`);
+                    return;
+                }
+            } catch { /* not found, fallback */ }
+            try {
+                const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t } });
+                if (r.data && r.data.trovata) {
+                    setF((prev) => ({
+                        ...prev, targa: t,
+                        veicolo_marca: prev.veicolo_marca || r.data.veicolo_marca || "",
+                        veicolo_modello: prev.veicolo_modello || r.data.veicolo_modello || "",
+                        veicolo_tipo: prev.veicolo_tipo || r.data.veicolo_tipo || "",
+                        veicolo_alimentazione: prev.veicolo_alimentazione || r.data.veicolo_alimentazione || "",
+                        veicolo_kw: prev.veicolo_kw || r.data.veicolo_kw || "",
+                        veicolo_cv_fiscali: prev.veicolo_cv_fiscali || r.data.veicolo_cv_fiscali || "",
+                        veicolo_cilindrata: prev.veicolo_cilindrata || r.data.veicolo_cilindrata || "",
+                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || r.data.veicolo_data_immatricolazione || "",
+                        veicolo_uso: prev.veicolo_uso || r.data.veicolo_uso || "",
+                        veicolo_posti: prev.veicolo_posti || r.data.veicolo_posti || "",
+                        telaio: prev.telaio || r.data.telaio || "",
+                    }));
+                    setVeicoloInfo({ fonte: "polizza", n_polizze: r.data.n_polizze });
+                    toast.success(`Veicolo trovato in polizza precedente: ${r.data.veicolo_marca || ""} ${r.data.veicolo_modello || ""} (${r.data.n_polizze} polizze)`);
+                } else {
+                    toast.info("Nessun veicolo trovato per questa targa");
+                }
+            } catch (err) {
+                console.warn("targa lookup", err?.message);
+                toast.info("Nessun veicolo trovato per questa targa");
+            }
+        } finally {
+            setTargaLoading(false);
+        }
+    };
 
     const onOcrPolizza = async (file) => {
         if (!file) return;
@@ -496,6 +573,8 @@ function NuovaPolizzaDialog({ onClose }) {
                 ...f,
                 premio_lordo: parseFloat(f.premio_lordo) || 0,
                 premio_netto: parseFloat(f.premio_netto) || 0,
+                premio_tasse: parseFloat(f.premio_tasse) || 0,
+                premio_ssn: parseFloat(f.premio_ssn) || 0,
                 provvigioni: parseFloat(f.provvigioni) || 0,
                 assicurato_ids: [f.contraente_id],
             };
@@ -600,6 +679,10 @@ function NuovaPolizzaDialog({ onClose }) {
                                             setContraenteSel(a);
                                             setContraenteQuery("");
                                             setShowContraenteList(false);
+                                            // Auto-imposta il collaboratore collegato all'anagrafica
+                                            if (a.collaboratore_id) {
+                                                setF((prev) => ({ ...prev, collaboratore_id: a.collaboratore_id }));
+                                            }
                                         }}
                                         data-testid={`contraente-opt-${a.id}`}
                                     >
@@ -644,11 +727,17 @@ function NuovaPolizzaDialog({ onClose }) {
                 </div>
                 <div><Label>Effetto *</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
                 <div><Label>Scadenza *</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
-                <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} /></div>
-                <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => set("premio_netto", e.target.value)} /></div>
+                <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => setPremio("premio_netto", e.target.value)} data-testid="pol-premio-netto" /></div>
+                <div><Label>Imposta €</Label><Input type="number" step="0.01" value={f.premio_tasse} onChange={(e) => setPremio("premio_tasse", e.target.value)} data-testid="pol-imposta" /></div>
+                <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => setPremio("premio_ssn", e.target.value)} data-testid="pol-ssn" /></div>
+                <div>
+                    <Label>Premio lordo € <span className="text-[10px] text-slate-400">(netto + imposta + SSN)</span></Label>
+                    <Input type="number" step="0.01" value={f.premio_lordo} readOnly className="bg-slate-50 font-medium" data-testid="pol-premio-lordo" />
+                </div>
                 <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni} onChange={(e) => set("provvigioni", e.target.value)} /></div>
                 <div>
                     <Label>Targa (se RCA)</Label>
+                    <div className="flex gap-2">
                     <Input
                         value={f.targa}
                         list="targhe-suggest"
@@ -667,74 +756,21 @@ function NuovaPolizzaDialog({ onClose }) {
                                 setTargheSuggest([]);
                             }
                         }}
-                        onBlur={async (e) => {
-                            const t = e.target.value.trim().toUpperCase();
-                            if (!t || t.length < 4) return;
-                            // 1) Prima cerca nel Libro Matricola (sorgente "ufficiale" / più completa)
-                            try {
-                                const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
-                                const v = r.data?.veicolo;
-                                if (v) {
-                                    setF((prev) => ({
-                                        ...prev,
-                                        targa: t,
-                                        veicolo_marca: prev.veicolo_marca || v.marca || "",
-                                        veicolo_modello: prev.veicolo_modello || v.modello || "",
-                                        veicolo_alimentazione: prev.veicolo_alimentazione || v.alimentazione || "",
-                                        veicolo_kw: prev.veicolo_kw || v.kw || "",
-                                        veicolo_cilindrata: prev.veicolo_cilindrata || v.cilindrata || "",
-                                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || v.data_immatricolazione || "",
-                                        veicolo_uso: prev.veicolo_uso || v.uso || "",
-                                        veicolo_posti: prev.veicolo_posti || v.posti || "",
-                                        veicolo_quintali: prev.veicolo_quintali || v.quintali || "",
-                                        veicolo_settore: prev.veicolo_settore || v.settore || "",
-                                        telaio: prev.telaio || v.telaio || "",
-                                        veicolo_id: v.id,  // collegamento esplicito
-                                    }));
-                                    setVeicoloInfo({
-                                        fonte: "libro_matricola",
-                                        veicolo: v,
-                                        polizze_collegate: r.data?.polizze_collegate || [],
-                                    });
-                                    const npol = (r.data?.polizze_collegate || []).length;
-                                    toast.success(
-                                        `Veicolo dal Libro Matricola: ${v.marca || ""} ${v.modello || ""} `
-                                        + `${npol ? `(${npol} polizz${npol === 1 ? "a" : "e"} già collegat${npol === 1 ? "a" : "e"})` : ""}`
-                                    );
-                                    return;
-                                }
-                            } catch { /* not found, fallback */ }
-                            // 2) Fallback: lookup nelle polizze precedenti (vecchio endpoint)
-                            try {
-                                const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t } });
-                                if (r.data && r.data.trovata) {
-                                    setF((prev) => ({
-                                        ...prev,
-                                        targa: t,
-                                        veicolo_marca: prev.veicolo_marca || r.data.veicolo_marca || "",
-                                        veicolo_modello: prev.veicolo_modello || r.data.veicolo_modello || "",
-                                        veicolo_tipo: prev.veicolo_tipo || r.data.veicolo_tipo || "",
-                                        veicolo_alimentazione: prev.veicolo_alimentazione || r.data.veicolo_alimentazione || "",
-                                        veicolo_kw: prev.veicolo_kw || r.data.veicolo_kw || "",
-                                        veicolo_cv_fiscali: prev.veicolo_cv_fiscali || r.data.veicolo_cv_fiscali || "",
-                                        veicolo_cilindrata: prev.veicolo_cilindrata || r.data.veicolo_cilindrata || "",
-                                        veicolo_data_immatricolazione: prev.veicolo_data_immatricolazione || r.data.veicolo_data_immatricolazione || "",
-                                        veicolo_uso: prev.veicolo_uso || r.data.veicolo_uso || "",
-                                        veicolo_posti: prev.veicolo_posti || r.data.veicolo_posti || "",
-                                        telaio: prev.telaio || r.data.telaio || "",
-                                    }));
-                                    setVeicoloInfo({ fonte: "polizza", n_polizze: r.data.n_polizze });
-                                    toast.success(
-                                        `Veicolo trovato in polizza precedente: ${r.data.veicolo_marca || ""} `
-                                        + `${r.data.veicolo_modello || ""} (${r.data.n_polizze} polizze)`
-                                    );
-                                }
-                            } catch (err) {
-                                console.warn("targa lookup", err?.message);
-                            }
-                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); lookupTarga(); } }}
+                        onBlur={(e) => lookupTarga(e.target.value)}
                         data-testid="pol-targa-input"
                     />
+                    <Button
+                        type="button" variant="outline"
+                        onClick={() => lookupTarga()}
+                        disabled={targaLoading}
+                        className="shrink-0"
+                        data-testid="pol-targa-search-btn"
+                    >
+                        <Search size={14} className="mr-1" />
+                        {targaLoading ? "..." : "Cerca"}
+                    </Button>
+                    </div>
                     {/* Datalist suggerimenti live mentre digita */}
                     <datalist id="targhe-suggest">
                         {targheSuggest.map((v) => (
@@ -777,18 +813,49 @@ function NuovaPolizzaDialog({ onClose }) {
                 </div>
                 <div className="col-span-2">
                     <Label>Collaboratore (Operatore)</Label>
-                    <Select
-                        value={f.collaboratore_id || "__none__"}
-                        onValueChange={(v) => set("collaboratore_id", v === "__none__" ? "" : v)}
-                    >
-                        <SelectTrigger data-testid="pol-collab-select"><SelectValue placeholder="Nessun collaboratore" /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="__none__">— Nessuno —</SelectItem>
-                            {collaboratori.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    <div className="relative">
+                        {(() => {
+                            const sel = collaboratori.find((c) => c.id === f.collaboratore_id);
+                            return (
+                                <Input
+                                    value={showCollabList ? collabQuery : (sel ? sel.name : "")}
+                                    placeholder="Digita per cercare un collaboratore..."
+                                    onChange={(e) => { setCollabQuery(e.target.value); setShowCollabList(true); }}
+                                    onFocus={() => { setCollabQuery(""); setShowCollabList(true); }}
+                                    onBlur={() => setTimeout(() => setShowCollabList(false), 200)}
+                                    data-testid="pol-collab-search"
+                                />
+                            );
+                        })()}
+                        {showCollabList && (
+                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto" data-testid="collab-suggestions">
+                                <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 text-sm text-slate-500"
+                                    onMouseDown={() => { set("collaboratore_id", ""); setShowCollabList(false); }}
+                                    data-testid="collab-opt-none"
+                                >
+                                    — Nessuno —
+                                </button>
+                                {collaboratori
+                                    .filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase()))
+                                    .map((c) => (
+                                        <button
+                                            type="button"
+                                            key={c.id}
+                                            className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-0 text-sm"
+                                            onMouseDown={() => { set("collaboratore_id", c.id); setShowCollabList(false); }}
+                                            data-testid={`collab-opt-${c.id}`}
+                                        >
+                                            {c.name}
+                                        </button>
+                                    ))}
+                                {collaboratori.filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase())).length === 0 && (
+                                    <div className="p-3 text-xs text-slate-500">Nessun collaboratore trovato</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
             <DialogFooter>

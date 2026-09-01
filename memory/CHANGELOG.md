@@ -1,5 +1,32 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-01 (parte 4) — Nuova polizza, Regolazione multipla, calcolo scaduti, performance, confronto carichi
+
+### Nuova polizza (Polizze.jsx)
+- Aggiunti campi **Imposta €** (premio_tasse) e **SSN €** (premio_ssn); **Premio lordo** ora READ-ONLY e auto-calcolato = netto + imposta + ssn.
+- Targa: aggiunto pulsante **"Cerca"** (lookup esplicito Libro Matricola → fallback polizze) oltre a onBlur/Enter.
+- Collaboratore: campo **ricercabile** (typeahead per nome) e **auto-compilato** dal collaboratore collegato all'anagrafica del contraente selezionato.
+
+### Calcolo "scaduti da N giorni" — CONTEGGIO INCLUSIVO (fix)
+- Semantica: scaduto da N giorni ⟺ scadenza ≤ oggi−(N−1) (il giorno di scadenza conta come giorno 1).
+- Applicato a: filtri Titoli (`scadute_da_min/max`, server.py ~2283 e ~2708), bucket Dashboard admin (`titoli_scaduti` 5gg/10gg/15gg, ~9663), display "gg fa" in Avvisi (+1).
+- La Dashboard usa `/api/stats/dashboard-admin` per i bucket (presetMap → scad_5g/scad_10g/scad15).
+
+### Regolazione premio
+- Header PolizzaDetail: toggle **Sì/No** (attiva/disattiva `regolazione_premio`); con "Sì" appare la tab e la sezione sotto.
+- Dialog: label "**Dato di polizza (base preventivo)**" e "**Dato aggiornato cliente (consuntivo)**"; tasso selezionabile **% o ‰** (‰ convertito in % /10 lato client).
+- Tab Regolazione: nuova sezione **"Regolazioni calcolate"** che elenca TUTTO lo storico calcoli (più regolazioni su parametri/periodi diversi nello stesso anno, consultabili).
+- Banner **dato dichiarato dal cliente** (via link pubblico): mostra il valore e bottone "Importa e calcola" (prefill del dichiarato nel dialog).
+
+### Performance
+- Titoli list: rimosso N+1 (fino a 7 query/titolo) su `_provv_breakdown` con **cache schemi provvigionali per-richiesta** (`schema_cache`). ~0.4s per 1217 titoli.
+- Polizze list: **projection leggera** (`_LEAN_POL_PROJ`) che esclude garanzie/addizionali/provvigioni_operatori. ~0.55s per 1582 polizze, payload ridotto.
+
+### Confronto Carichi anno precedente (carichi_mensili.py + CarichiMensili.jsx)
+- Ricostruito il dialog **ConfrontoAnnualeDialog** (il bottone era rotto: `setConfrontoOpen` non definito, nessun dialog).
+- Endpoint `/api/carichi-mensili/confronto-annuale` ora accetta **dal/al**: confronta il periodo selezionato con lo stesso periodo dell'anno precedente (date −1 anno, gestione 29-feb). Fallback a modalità `anno`; senza parametri → 400.
+
+
 ## 2026-09-01 (parte 3) — Titoli, Regolazione avanzata, Pipeline, Prodotti
 
 ### Titoli

@@ -1,0 +1,37 @@
+{
+  "summary": "Iter61 — Test E2E delle modifiche richieste (filtro 'scaduti da N gg' inclusivo, dashboard buckets, performance titoli/polizze con projection leggera, confronto carichi per intervallo date, regolazione premio con tasso_override float, storico regolazioni multi base_tipo, UI Nuova polizza + auto-calc premio lordo + collab typeahead + toggle regolazione + dialog confronto annuale). BACKEND: 10/10 pytest PASS in test_iter61_features.py (nota: correzione applicata al test — il bucket titoli_scaduti con chiavi 5gg/10gg/15gg è esposto da /api/stats/dashboard-admin, non da /api/stats/dashboard). Verifiche chiave: (1) /api/titoli?scadute_da_min=5 → tutti i titoli hanno scadenza<=oggi-4 (inclusivo) e stato in {da_incassare,insoluto,sospeso}; idem per scadute_da_min=10 (cutoff oggi-9). (2) /api/stats/dashboard-admin.titoli_scaduti contiene {Oggi,5gg,10gg,15gg,+15gg} con conteggi inclusivi (5gg=1187 vs +15gg=1184). (3) /api/titoli?stato_not=incassato,stornato&limit=50000: 0.44s per 1217 titoli, provvigione_totale/collaboratore/margine presenti (cache _schema_cache non ha rotto il breakdown). (4) /api/polizze?limit=50000: 0.55s per 1582 polizze, projection leggera esclude garanzie/addizionali/provvigioni_operatori mentre premio_lordo/netto/contraente_nome/compagnia_nome/collaboratore_nome/ramo/prodotto/stato/scadenza/targa sono presenti. (5) /api/carichi-mensili/confronto-annuale?dal=2026-03-01&al=2026-06-30 → 200 con stats.anno_corrente=2026, anno_precedente=2025 e prev_q = 2025-03-01..2025-06-30 (verificato in codice L421-422). Modalità ?anno=2026 → 200. Senza parametri → 400. (6) POST /polizze/{pid}/regolazione-premio/calcola con tasso_override=0.25 (rappresenta 2.5‰/10), base_prev=100000, base_eff=150000 → differenza=50000, premio_calcolato=125.0, dovuto=max(125,minima=500)=500. (7) Storico: 2 calcoli salva=true con base_tipo diversi ('fatturato' e 'retribuzioni') stesso periodo=2026 → GET storico restituisce ENTRAMBI. FRONTEND (Playwright su preview URL): tutti i data-testid richiesti presenti e funzionanti: pol-premio-netto/pol-imposta/pol-ssn/pol-premio-lordo (readOnly=true, auto-calc 100+22+3=125 verificato), pol-targa-input+pol-targa-search-btn, pol-collab-search+collab-suggestions dropdown+collab-opt-none (typeahead attivo). PolizzaDetail: pol-header-regolazione-toggle+si+no visibili nell'header (chip pol-header-regolazione-on compare solo quando regolazione_premio=true — coerente col codice L134/L160). CarichiMensili: btn-confronto-annuale apre dialog-confronto-annuale mostrando stats (Totale/Confermati/Mancanti/Nuovi/Δ Premio) e tabella righe (Esito/Cliente/Polizza/Compagnia/Premio prec./Premio periodo/Δ/Dettaglio) SENZA errori.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog Nuova polizza & Dialog Confronto annuale", "issues": ["Warning React: Missing `Description` or `aria-describedby={undefined}` for DialogContent (a11y minor, non blocca funzionalità)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter61_features.py",
+    "/app/test_reports/pytest/iter61.xml"
+  ],
+  "action_items": [
+    "(OPZIONALE minor a11y) Aggiungere DialogDescription (o aria-describedby) ai DialogContent di NuovaPolizza e ConfrontoAnnualeDialog per rimuovere warning React su accessibilità."
+  ],
+  "critical_code_review_comments": [
+    "server.py L2283 / L2708: cutoff scaduti da N gg = today-(N-1) applicato coerentemente sia su list_polizze che list_titoli (inclusivo). OK.",
+    "server.py L2294 _LEAN_POL_PROJ: projection Mongo con esclusioni corrette dei 3 array pesanti; ottima ottimizzazione performance (0.55s per 1582 polizze). OK.",
+    "server.py L9663-9669 dashboard-admin titoli_scaduti: itera (5,10,15) con cutoff inclusivo lim=today-(g-1); consistente col filtro API. OK.",
+    "server.py: c'è duplicazione — /api/stats/dashboard NON espone titoli_scaduti buckets 5gg/10gg/15gg mentre /api/stats/dashboard-admin sì. Se il frontend usa entrambi verificare quale endpoint chiama la UI dashboard drilldown. (chiarire con main agent, non blocca)",
+    "carichi_mensili.py L411-416 _minus_year: gestione 29-feb correttamente ricondotta al 28 dell'anno precedente. OK.",
+    "extras_p1p2.py L912: tasso_override accettato come float qualunque, moltiplicazione /100 sempre lato server → il frontend converte ‰→% dividendo per 10 e passa il float. Contratto rispettato. OK.",
+    "extras_p1p2.py L953: insert su regolazione_storico usa uuid4() per id → multipli calcoli stesso periodo/polizza NON collidono (test 7 conferma 2 righe con base_tipo diversi). OK.",
+    "extras_p1p2.py L931-934: minima applicata SOLO su premio_calcolato>=0; a credito nessun floor. Design corretto."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter61_features.py (nuovo, 10 test PASS)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (tutti i data-testid richiesti presenti e interattivi)"},
+  "test_credentials": "admin@assicura.it / Admin123! (token in access_token) — verificato",
+  "seed_data_creation": "Test transient: flag regolazione_premio=true su polizza 027c7a90..., 2 righe storico regolazione con note='TEST_ITER61 A/B'. Il fixture disattiva il flag al termine; le righe storico rimangono in db.regolazione_storico ma sono facilmente identificabili (note='TEST_ITER61 ...'). Nessuna alterazione strutturale.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tutte le 12 feature richieste in iter61 funzionano end-to-end. Il file /app/backend/tests/test_iter61_features.py è riusabile come regression suite (login → 10 assertion, ~5s). Attenzione: il bucket 'titoli_scaduti' è esposto su /api/stats/dashboard-admin (NON su /api/stats/dashboard). Se il main agent vuole spostare i buckets sul dashboard 'generico' occorre allineare frontend e test. Nessun bug bloccante trovato."
+}

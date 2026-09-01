@@ -18,10 +18,12 @@ const STATO_TONE = {
 
 export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGeneraTitolo }) {
     const [eventi, setEventi] = useState([]);
+    const [calcoli, setCalcoli] = useState([]);
     const [busy, setBusy] = useState(false);
 
     const loadEventi = () => api.get(`/regolazione-premio/${pol.id}/eventi`).then((r) => setEventi(r.data || [])).catch(() => {});
-    useEffect(() => { loadEventi(); /* eslint-disable-next-line */ }, [pol.id, pol.regolazione_stato]);
+    const loadCalcoli = () => api.get(`/polizze/${pol.id}/regolazione-premio/storico`).then((r) => setCalcoli(r.data || [])).catch(() => {});
+    useEffect(() => { loadEventi(); loadCalcoli(); /* eslint-disable-next-line */ }, [pol.id, pol.regolazione_stato, pol.regolazione_ultimo_calcolo]);
 
     const stato = pol.regolazione_stato || "da_richiedere";
 
@@ -108,6 +110,22 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
                 <Info label="Lettera inviata" value={fmtDate(pol.regolazione_lettera_inviata_data)} />
             </div>
 
+            {pol.regolazione_base_dichiarata_cliente != null && (
+                <div className="flex flex-wrap items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3" data-testid="reg-dato-cliente-banner">
+                    <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                    <div className="flex-1 min-w-[200px]">
+                        <div className="text-sm text-emerald-900">
+                            Il cliente ha dichiarato: <span className="font-bold">{pol.regolazione_base === "addetti" ? pol.regolazione_base_dichiarata_cliente : fmtEur(pol.regolazione_base_dichiarata_cliente)}</span>
+                            {pol.regolazione_dato_cliente_data && <span className="text-emerald-700 text-xs"> · il {fmtDate(pol.regolazione_dato_cliente_data)}</span>}
+                        </div>
+                        <div className="text-[11px] text-emerald-700">Vuoi importarlo come base dichiarata per il calcolo della regolazione?</div>
+                    </div>
+                    <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800" onClick={onCalcola} data-testid="reg-importa-dato-cliente">
+                        <Calculator size={14} className="mr-1" /> Importa e calcola
+                    </Button>
+                </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" className="bg-violet-700 hover:bg-violet-800" onClick={onCalcola} data-testid="reg-tab-calcola"><Calculator size={14} className="mr-1" /> Calcola regolazione</Button>
                 <Button size="sm" variant="outline" onClick={scaricaLettera} data-testid="reg-tab-lettera-pdf"><Download size={14} className="mr-1" /> Anteprima lettera</Button>
@@ -134,6 +152,51 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
             <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="ghost" className="text-amber-700 hover:bg-amber-50" onClick={annulla} data-testid="reg-tab-annulla">Annulla calcolo</Button>
                 <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50" onClick={elimina} data-testid="reg-tab-elimina">Elimina regolazione</Button>
+            </div>
+
+            <div>
+                <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Regolazioni calcolate</div>
+                    <span className="text-[11px] text-slate-400">Più regolazioni su parametri/periodi diversi</span>
+                </div>
+                {calcoli.length === 0 ? (
+                    <div className="text-sm text-slate-400 italic" data-testid="reg-calcoli-empty">Nessuna regolazione calcolata. Usa "Calcola regolazione" per crearne una.</div>
+                ) : (
+                    <div className="border border-slate-200 rounded-lg overflow-x-auto" data-testid="reg-calcoli-list">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                                <tr>
+                                    <th className="text-left px-3 py-2">Periodo</th>
+                                    <th className="text-left px-3 py-2">Base</th>
+                                    <th className="text-right px-3 py-2">Dato polizza</th>
+                                    <th className="text-right px-3 py-2">Dichiarato</th>
+                                    <th className="text-right px-3 py-2">Differenza</th>
+                                    <th className="text-right px-3 py-2">Tasso</th>
+                                    <th className="text-right px-3 py-2">Dovuto</th>
+                                    <th className="text-right px-3 py-2">Data</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {calcoli.map((c, i) => {
+                                    const addetti = c.base_tipo === "addetti";
+                                    const money = (n) => n == null ? "—" : (addetti ? n : fmtEur(n));
+                                    return (
+                                        <tr key={c.id || i} data-testid={`reg-calcolo-row-${i}`}>
+                                            <td className="px-3 py-2 font-medium text-slate-800">{c.periodo || "—"}</td>
+                                            <td className="px-3 py-2 text-slate-600 capitalize">{c.base_tipo || "—"}</td>
+                                            <td className="px-3 py-2 text-right num">{money(c.base_preventivo)}</td>
+                                            <td className="px-3 py-2 text-right num text-emerald-700">{money(c.base_effettiva)}</td>
+                                            <td className="px-3 py-2 text-right num">{money(c.differenza)}</td>
+                                            <td className="px-3 py-2 text-right num">{c.tasso_applicato_pct != null ? `${c.tasso_applicato_pct}%` : "—"}</td>
+                                            <td className="px-3 py-2 text-right num font-semibold text-violet-700">{fmtEur(c.dovuto || 0)}</td>
+                                            <td className="px-3 py-2 text-right text-xs text-slate-400">{fmtDate(c.data_calcolo)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             <div>

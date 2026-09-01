@@ -448,7 +448,7 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                             </Link>
                                             <span className="text-slate-500 ml-2">{t.compagnia_nome} · {t.ramo}</span>
                                         </td>
-                                        <td className="text-slate-700">scad. {fmtDate(t.scadenza)} ({Math.abs(t.giorni_alla_scadenza ?? 0)}gg fa)</td>
+                                        <td className="text-slate-700">scad. {fmtDate(t.scadenza)} ({Math.abs(t.giorni_alla_scadenza ?? 0) + 1}gg fa)</td>
                                         <td></td>
                                         <td></td>
                                         <td className="num text-right text-rose-700 font-medium">{fmtEur(t.importo_lordo)}</td>

@@ -1148,6 +1148,7 @@ function DiarioTab({ anagrafica_id, canEdit }) {
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const [viewingMsg, setViewingMsg] = useState(null);  // dialog "visualizza + rimanda"
+    const [viewVoce, setViewVoce] = useState(null);  // vista completa voce (email ricevute, note)
     const load = () => api.get(`/anagrafiche/${anagrafica_id}/diario`).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
 
@@ -1221,6 +1222,15 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                                                         </button>
                                                     )}
                                                 </>
+                                            )}
+                                            {!isCom && v.descrizione && (
+                                                <button
+                                                    onClick={() => setViewVoce(v)}
+                                                    className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
+                                                    data-testid={`diario-open-${v.id}`}
+                                                >
+                                                    👁 Apri
+                                                </button>
                                             )}
                                         </div>
                                     </div>

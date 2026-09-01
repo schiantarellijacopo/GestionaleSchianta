@@ -24,8 +24,9 @@ const BASI = [
 export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
     const [baseTipo, setBaseTipo] = useState(polizza.regolazione_base || "fatturato");
     const [preventivo, setPreventivo] = useState(polizza.regolazione_base_preventivo ?? 0);
-    const [dichiarato, setDichiarato] = useState(0);
+    const [dichiarato, setDichiarato] = useState(polizza.regolazione_base_dichiarata_cliente ?? 0);
     const [tasso, setTasso] = useState(polizza.regolazione_tasso || 0);
+    const [tassoUnita, setTassoUnita] = useState("percento"); // "percento" | "permille"
     const [periodo, setPeriodo] = useState(String(new Date().getFullYear() - 1));
     const [note, setNote] = useState("");
     const [storico, setStorico] = useState([]);
@@ -36,9 +37,10 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
         api.get(`/polizze/${polizza.id}/regolazione-premio/storico`).then((r) => setStorico(r.data || []));
     }, [polizza.id]);
 
-    // Anteprima live
+    // Anteprima live — il tasso può essere per cento (÷100) o per mille (÷1000)
+    const tassoDivisore = tassoUnita === "permille" ? 1000 : 100;
     const differenza = (parseFloat(dichiarato) || 0) - (parseFloat(preventivo) || 0);
-    const premioLive = (differenza * (parseFloat(tasso) || 0)) / 100;
+    const premioLive = (differenza * (parseFloat(tasso) || 0)) / tassoDivisore;
     const isAddetti = baseTipo === "addetti";
 
     const calcola = async (salva = false) => {
@@ -49,7 +51,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                 base_preventivo: parseFloat(preventivo) || 0,
                 base_effettiva: parseFloat(dichiarato) || 0,
                 base_tipo: baseTipo,
-                tasso_override: tasso ? parseFloat(tasso) : null,
+                tasso_override: tasso ? (tassoUnita === "permille" ? parseFloat(tasso) / 10 : parseFloat(tasso)) : null,
                 periodo, note, salva,
             });
             setRisultato(r.data);
@@ -94,20 +96,29 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                             </div>
                         </div>
                         <div>
-                            <Label className="text-xs">Base di polizza (preventivo) {isAddetti ? "— n. addetti" : "€"}</Label>
+                            <Label className="text-xs">Dato di polizza (base preventivo) {isAddetti ? "— n. addetti" : "€"}</Label>
                             <Input type="number" step={isAddetti ? "1" : "0.01"} value={preventivo}
                                 onChange={(e) => setPreventivo(e.target.value)} placeholder="Es. 100000" data-testid="reg-preventivo" />
                         </div>
                         <div>
-                            <Label className="text-xs">Base dichiarata (consuntivo) {isAddetti ? "— n. addetti" : "€"} *</Label>
+                            <Label className="text-xs">Dato aggiornato cliente (consuntivo) {isAddetti ? "— n. addetti" : "€"} *</Label>
                             <Input type="number" step={isAddetti ? "1" : "0.01"} value={dichiarato}
                                 onChange={(e) => setDichiarato(e.target.value)} placeholder="Es. 120000" data-testid="reg-dichiarato" />
                         </div>
                         <div>
-                            <Label className="text-xs">Tasso applicato (%) — opzionale, default polizza</Label>
-                            <Input type="number" step="0.001" value={tasso}
-                                onChange={(e) => setTasso(e.target.value)}
-                                placeholder={`Default ${polizza.regolazione_tasso || 0}%`} data-testid="reg-tasso" />
+                            <Label className="text-xs">Tasso applicato — opzionale, default polizza</Label>
+                            <div className="flex gap-2">
+                                <Input type="number" step="0.001" value={tasso}
+                                    onChange={(e) => setTasso(e.target.value)}
+                                    placeholder={`Default ${polizza.regolazione_tasso || 0}%`} data-testid="reg-tasso" />
+                                <Select value={tassoUnita} onValueChange={setTassoUnita}>
+                                    <SelectTrigger className="w-28 shrink-0" data-testid="reg-tasso-unita"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="percento">% (per cento)</SelectItem>
+                                        <SelectItem value="permille">‰ (per mille)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                         {/* Anteprima differenza live */}
                         <div className="text-xs bg-slate-50 border border-slate-200 rounded p-2 flex justify-between" data-testid="reg-anteprima">

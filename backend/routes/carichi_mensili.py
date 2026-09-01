@@ -391,34 +391,47 @@ async def lista_carichi_mensili(
 
 @router.get("/carichi-mensili/confronto-annuale")
 async def confronto_annuale(
-    anno: int = Query(..., description="Anno corrente da confrontare"),
+    anno: Optional[int] = Query(None, description="Anno corrente da confrontare"),
     mese: Optional[str] = Query(None, description="MM 01-12 opzionale per filtrare per mese di decorrenza"),
+    dal: Optional[str] = Query(None, description="Data inizio (YYYY-MM-DD) — confronto per intervallo"),
+    al: Optional[str] = Query(None, description="Data fine (YYYY-MM-DD) — confronto per intervallo"),
     user=Depends(current_user),
 ):
     """Confronto anno precedente vs anno corrente **per data DECORRENZA** dei titoli.
 
-    Trova tutti i titoli con `effetto` nell'anno corrente + anno precedente,
-    li accoppia per polizza+stesso mese di decorrenza, e segnala:
-    - titoli PRESENTI in entrambi gli anni (mostra variazione premio)
-    - titoli ANNO PRECEDENTE mancanti quest'anno (segnala motivo dedotto):
-        · polizza sostituita → mostra nuovo numero polizza
-        · polizza annullata/disdettata → mostra motivo e data
-        · polizza sospesa → mostra data sospensione
-        · scadenza cambiata → segnala nuova scadenza
-        · nessun motivo → segnala anomalia (verifica manuale)
-    - titoli ANNO CORRENTE nuovi (assenti l'anno scorso) → "nuova emissione"
-    """
-    anno_prec = anno - 1
-    prefix_curr = f"{anno}-{mese.zfill(2) if mese else ''}"
-    prefix_prev = f"{anno_prec}-{mese.zfill(2) if mese else ''}"
+    Due modalità:
+    - Per INTERVALLO DATE (dal/al): confronta i titoli nell'intervallo selezionato con
+      lo stesso intervallo dell'anno precedente (stesse date meno 1 anno).
+    - Per ANNO (+ mese opzionale): confronta anno vs anno-1.
 
-    # Query titoli anno corrente
-    titoli_curr = await db.titoli.find(
-        {"effetto": {"$regex": f"^{prefix_curr}"}}, {"_id": 0},
-    ).sort("effetto", 1).to_list(5000)
-    titoli_prev = await db.titoli.find(
-        {"effetto": {"$regex": f"^{prefix_prev}"}}, {"_id": 0},
-    ).sort("effetto", 1).to_list(5000)
+    Accoppia per polizza + stesso mese di decorrenza e segnala confermati / mancanti / nuovi.
+    """
+    from datetime import date as _date
+
+    def _minus_year(iso: str) -> str:
+        d = _date.fromisoformat(iso[:10])
+        try:
+            return d.replace(year=d.year - 1).isoformat()
+        except ValueError:  # 29 feb
+            return d.replace(year=d.year - 1, day=28).isoformat()
+
+    if dal and al:
+        anno = anno or int(dal[:4])
+        anno_prec = anno - 1
+        curr_q = {"effetto": {"$gte": dal, "$lte": al}}
+        prev_q = {"effetto": {"$gte": _minus_year(dal), "$lte": _minus_year(al)}}
+    else:
+        if not anno:
+            raise HTTPException(400, "Specificare 'anno' oppure l'intervallo 'dal'/'al'")
+        anno_prec = anno - 1
+        prefix_curr = f"{anno}-{mese.zfill(2) if mese else ''}"
+        prefix_prev = f"{anno_prec}-{mese.zfill(2) if mese else ''}"
+        curr_q = {"effetto": {"$regex": f"^{prefix_curr}"}}
+        prev_q = {"effetto": {"$regex": f"^{prefix_prev}"}}
+
+    # Query titoli anno corrente / precedente
+    titoli_curr = await db.titoli.find(curr_q, {"_id": 0}).sort("effetto", 1).to_list(5000)
+    titoli_prev = await db.titoli.find(prev_q, {"_id": 0}).sort("effetto", 1).to_list(5000)
 
     # Batch lookup polizze/anagrafiche/compagnie
     all_pol_ids = list({t.get("polizza_id") for t in (titoli_curr + titoli_prev)

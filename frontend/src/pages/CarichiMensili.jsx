@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, fmtEur, fmtDate } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -79,6 +79,7 @@ export default function CarichiMensili() {
     const [selected, setSelected] = useState(new Set());
     const [replicaOpen, setReplicaOpen] = useState(false);
     const [annullaOpen, setAnnullaOpen] = useState(false);
+    const [confrontoOpen, setConfrontoOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
     const [visible, setVisible] = useState(() => {
         try { return JSON.parse(localStorage.getItem(LS_COLS)) || DEFAULT_VISIBLE; }
@@ -342,6 +343,10 @@ export default function CarichiMensili() {
             {/* Dialog: import Excel/CSV con auto-mapping */}
             {importOpen && (
                 <ImportExcelDialog onClose={() => { setImportOpen(false); load(); }} />
+            )}
+            {/* Dialog: confronto anno precedente (in base alle date selezionate) */}
+            {confrontoOpen && (
+                <ConfrontoAnnualeDialog dal={dal} al={al} onClose={() => setConfrontoOpen(false)} />
             )}
             {/* Dialog: personalizza colonne */}
             {colToggleOpen && (
@@ -981,5 +986,127 @@ function ImportExcelDialog({ onClose }) {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+
+
+// ============================================================
+// Confronto anno precedente vs corrente (in base alle date selezionate)
+// ============================================================
+const TIPO_TONE = {
+    confermato: "bg-emerald-100 text-emerald-700",
+    mancante: "bg-rose-100 text-rose-700",
+    nuovo: "bg-sky-100 text-sky-700",
+};
+
+function ConfrontoAnnualeDialog({ dal, al, onClose }) {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const hasRange = !!(dal && al);
+    const annoDefault = new Date().getFullYear();
+
+    useEffect(() => {
+        setLoading(true);
+        const params = hasRange ? { dal, al } : { anno: annoDefault };
+        api.get("/carichi-mensili/confronto-annuale", { params })
+            .then((r) => setData(r.data))
+            .catch((e) => setError(e.response?.data?.detail || "Errore nel confronto"))
+            .finally(() => setLoading(false));
+    }, [dal, al]); // eslint-disable-line
+
+    const s = data?.stats;
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="dialog-confronto-annuale">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <TrendingDown className="text-violet-600" size={18} />
+                        Confronto {hasRange ? "per periodo selezionato" : `anno ${annoDefault}`} vs anno precedente
+                    </DialogTitle>
+                </DialogHeader>
+
+                <div className="text-xs text-slate-500 -mt-2">
+                    {hasRange
+                        ? <>Periodo <strong>{fmtDate(dal)} – {fmtDate(al)}</strong> confrontato con lo <strong>stesso periodo dell'anno precedente</strong>, per data di decorrenza.</>
+                        : <>Nessuna data selezionata: confronto sull'intero anno <strong>{annoDefault}</strong> vs <strong>{annoDefault - 1}</strong>. Imposta le date "Da/A" nella pagina per un confronto sul periodo.</>}
+                </div>
+
+                {loading ? (
+                    <div className="py-10 text-center text-slate-400 text-sm">Calcolo confronto in corso…</div>
+                ) : error ? (
+                    <div className="py-10 text-center text-rose-600 text-sm">{error}</div>
+                ) : (
+                    <>
+                        {s && (
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 my-2">
+                                <StatBox label="Totale" value={s.totale} />
+                                <StatBox label="Confermati" value={s.confermati} tone="text-emerald-700" />
+                                <StatBox label="Mancanti" value={s.mancanti} tone="text-rose-700" />
+                                <StatBox label="Nuovi" value={s.nuovi} tone="text-sky-700" />
+                                <StatBox label="Δ Premio" value={`${s.delta_premio > 0 ? "+" : ""}${fmtEur(s.delta_premio)}`} tone={s.delta_premio >= 0 ? "text-emerald-700" : "text-rose-700"} />
+                            </div>
+                        )}
+                        {s && (
+                            <div className="text-xs text-slate-600 mb-2">
+                                Premio anno prec.: <strong>{fmtEur(s.premio_totale_prec)}</strong> · Premio periodo: <strong>{fmtEur(s.premio_totale_corr)}</strong>
+                            </div>
+                        )}
+                        <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="text-left px-2 py-2">Esito</th>
+                                        <th className="text-left px-2 py-2">Cliente</th>
+                                        <th className="text-left px-2 py-2">Polizza</th>
+                                        <th className="text-left px-2 py-2">Compagnia</th>
+                                        <th className="text-right px-2 py-2">Premio prec.</th>
+                                        <th className="text-right px-2 py-2">Premio periodo</th>
+                                        <th className="text-right px-2 py-2">Δ</th>
+                                        <th className="text-left px-2 py-2">Dettaglio</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {(data?.righe || []).map((r, i) => (
+                                        <tr key={r.id || i} data-testid={`confronto-row-${i}`}>
+                                            <td className="px-2 py-1.5">
+                                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${TIPO_TONE[r.tipo_row] || "bg-slate-100"}`}>{r.motivo_label}</span>
+                                            </td>
+                                            <td className="px-2 py-1.5">{r.cliente_nome || "—"}</td>
+                                            <td className="px-2 py-1.5 num">{r.polizza_numero || "—"}{r.nuova_polizza_numero && <span className="text-sky-700"> → {r.nuova_polizza_numero}</span>}</td>
+                                            <td className="px-2 py-1.5">{r.compagnia_nome || "—"}</td>
+                                            <td className="px-2 py-1.5 text-right num text-slate-500">{r.premio_anno_prec != null ? fmtEur(r.premio_anno_prec) : "—"}</td>
+                                            <td className="px-2 py-1.5 text-right num font-medium">{r.premio_anno_corr != null ? fmtEur(r.premio_anno_corr) : "—"}</td>
+                                            <td className={`px-2 py-1.5 text-right num font-semibold ${r.delta_euro > 0 ? "text-rose-700" : r.delta_euro < 0 ? "text-emerald-700" : "text-slate-400"}`}>
+                                                {r.delta_euro != null ? `${r.delta_euro > 0 ? "+" : ""}${fmtEur(r.delta_euro)}` : "—"}
+                                                {r.delta_pct != null && <span className="text-[10px] ml-1">({r.delta_pct > 0 ? "+" : ""}{r.delta_pct}%)</span>}
+                                            </td>
+                                            <td className="px-2 py-1.5 text-slate-500">{r.dettaglio}</td>
+                                        </tr>
+                                    ))}
+                                    {(data?.righe || []).length === 0 && (
+                                        <tr><td colSpan={8} className="px-2 py-6 text-center text-slate-400">Nessun titolo nel periodo selezionato.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose} data-testid="confronto-close">Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function StatBox({ label, value, tone = "text-slate-800" }) {
+    return (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
+            <div className={`text-lg font-bold ${tone}`}>{value}</div>
+        </div>
     );
 }
