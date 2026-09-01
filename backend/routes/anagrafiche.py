@@ -378,14 +378,30 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
     # una nuova. Restituisce comunque lo status_code=201 + il documento aggiornato.
     overwrite_id = body.pop("overwrite_id", None)
     if overwrite_id:
-        existing = await db.anagrafiche.find_one({"id": overwrite_id}, {"_id": 0, "id": 1})
+        existing = await db.anagrafiche.find_one({"id": overwrite_id}, {"_id": 0})
         if not existing:
             raise HTTPException(404, f"Anagrafica {overwrite_id} non trovata per sovrascrittura")
-        # Rimuovi id/created_at dal payload per non sovrascriverli con valori del form
+        # MERGE conservativo: i dati già presenti vengono mantenuti,
+        # dal payload si integrano SOLO i campi mancanti/vuoti.
         body.pop("id", None)
         body.pop("created_at", None)
-        body["updated_at"] = _now_iso()
-        await db.anagrafiche.update_one({"id": overwrite_id}, {"$set": body})
+
+        def _vuoto(v):
+            return v is None or v == "" or v == [] or v == {}
+
+        upd = {}
+        for k, v in body.items():
+            if _vuoto(v):
+                continue
+            cur = existing.get(k)
+            if k == "tags" and isinstance(v, list) and isinstance(cur, list):
+                merged = list(dict.fromkeys(cur + v))
+                if merged != cur:
+                    upd[k] = merged
+            elif _vuoto(cur):
+                upd[k] = v
+        upd["updated_at"] = _now_iso()
+        await db.anagrafiche.update_one({"id": overwrite_id}, {"$set": upd})
         updated = strip_mongo_id(await db.anagrafiche.find_one({"id": overwrite_id}, {"_id": 0}))
         await log_attivita(user, "overwrite", "anagrafica", overwrite_id,
                            f"Anagrafica sovrascritta da import: {updated.get('ragione_sociale')}")

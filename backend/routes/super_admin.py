@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from auth import require_user
 from database import raw_db  # bypassa il wrapper: super_admin è già bloccato sui dati clienti
-from db_models import Tenant, _now_iso
+from db_models import Tenant, _now_iso, _uid
 from tenant import (
     TENANT_PRINCIPALE_ID, TENANT_DEMO_ID, TENANT_CLEAN_ID,
     is_super_admin, TENANT_SCOPED_COLLECTIONS,
@@ -51,6 +51,82 @@ router = APIRouter(prefix="/super-admin", tags=["super-admin"])
 def _ensure_super_admin(user):
     if not is_super_admin(user):
         raise HTTPException(status_code=403, detail="Solo super_admin")
+
+
+# ---------------------------------------------------------------------------
+# CHIAVI API (firma digitale, Twilio, Spoki, WhatsApp Evolution)
+# Visibili e modificabili SOLO dal super admin: le agenzie usano i servizi
+# senza mai vedere token/chiavi.
+# ---------------------------------------------------------------------------
+_CHIAVI_AZIENDA = [
+    "firma_provider", "firma_environment", "firma_base_url",
+    "firma_api_token", "firma_webhook_secret",
+    "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
+    "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
+]
+
+
+@router.get("/chiavi-api")
+async def sa_get_chiavi_api(user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    az = await raw_db.azienda_config.find_one({}, {"_id": 0}) or {}
+    out = {k: az.get(k) for k in _CHIAVI_AZIENDA}
+    evo = await raw_db.whatsapp_server_config.find_one({}, {"_id": 0}) or {}
+    out["evolution_server_url"] = evo.get("server_url") or (os.environ.get("WHATSAPP_API_URL") or None)
+    out["evolution_api_key"] = evo.get("api_key") or (os.environ.get("WHATSAPP_API_KEY") or None)
+    out["evolution_source"] = ("db" if evo.get("server_url")
+                               else "env" if os.environ.get("WHATSAPP_API_URL") else None)
+    return out
+
+
+@router.put("/chiavi-api")
+async def sa_put_chiavi_api(body: dict, user=Depends(require_user("admin")),
+                            request: Request = None) -> dict:
+    _ensure_super_admin(user)
+    upd = {k: body[k] for k in _CHIAVI_AZIENDA if k in body}
+    if upd.get("whatsapp_provider") not in (None, "wame", "evolution", "twilio", "spoki"):
+        raise HTTPException(400, "whatsapp_provider non valido")
+    if upd:
+        upd["updated_at"] = _now_iso()
+        az = await raw_db.azienda_config.find_one({}, {"_id": 0, "id": 1})
+        if az:
+            await raw_db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
+    if "evolution_server_url" in body or "evolution_api_key" in body:
+        url = (body.get("evolution_server_url") or "").strip().rstrip("/")
+        key = (body.get("evolution_api_key") or "").strip()
+        if url and key:
+            doc = {"server_url": url, "api_key": key,
+                   "updated_at": _now_iso(), "updated_by": user.get("id")}
+            existing = await raw_db.whatsapp_server_config.find_one({}, {"_id": 0, "id": 1})
+            if existing:
+                await raw_db.whatsapp_server_config.update_one({"id": existing["id"]}, {"$set": doc})
+            else:
+                await raw_db.whatsapp_server_config.insert_one({"id": _uid(), "created_at": _now_iso(), **doc})
+        elif not url and not key:
+            await raw_db.whatsapp_server_config.delete_many({})
+    await log_action(user=user, action_type="chiavi_api_update",
+                     details="Aggiornate chiavi API piattaforma", request=request)
+    return {"ok": True}
+
+
+@router.post("/chiavi-api/test-whatsapp")
+async def sa_test_evolution(user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    evo = await raw_db.whatsapp_server_config.find_one({}, {"_id": 0}) or {}
+    url = (evo.get("server_url") or os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
+    key = evo.get("api_key") or os.environ.get("WHATSAPP_API_KEY") or ""
+    if not url or not key:
+        raise HTTPException(400, "Server Evolution non configurato")
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{url}/instance/fetchInstances", headers={"apikey": key})
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+    n = len(data) if isinstance(data, list) else len(data.get("instances", []) if isinstance(data, dict) else [])
+    return {"ok": True, "istanze_sul_server": n}
 
 
 # ---------------------------------------------------------------------------

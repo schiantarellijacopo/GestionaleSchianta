@@ -453,3 +453,10 @@ Usare integration_expert prima di implementare.
 - P1: Carichi Mensili YoY (validare UI), Compagnia logo (UI Librerie), Piramide PDF export (weasyprint)
 - P2: Notifica piramide mensile con toggle per agenzia; doppio passaggio OCR polizze (Flash→Sonnet); split server.py (>12.9k righe)
 - Immagini AI (/immagini-ai): generazione immagini marketing con Gemini Nano Banana via Emergent LLM Key; formati 1:1/9:16/16:9, stili, galleria su object storage (routes/immagini_ai.py, pages/ImmaginiAI.jsx). Testato e2e (11s/immagine)
+
+## Sessione 2026-06 (fork 2) — Implementato
+- Studio Marketing → tab Presentazioni: generazione AI (argomento o punti chiave), stile brand/sfondi AI 16:9, output PPTX editabile (python-pptx) + PDF + anteprime JPEG, slide contatti auto da azienda_config (routes/marketing_presentazioni.py, StudioMarketing.jsx PresentazioniTab). Testato e2e (iter57)
+- Sfondi AI orizzontali: _genera_sfondo(orizzontale=True) in marketing_studio.py
+- Fix anagrafiche: flag Preferenze canale sempre cliccabili (non più disabled senza email/cellulare); auto-flag WhatsApp al blur cellulare, Email al blur email (niente più auto-SMS); sovrascrittura anagrafica (overwrite_id) ora MERGE conservativo: mantiene dati esistenti, integra solo campi vuoti, tags in unione (routes/anagrafiche.py ~380)
+- SICUREZZA CHIAVI API: chiavi firma Namirial/Twilio/Spoki/server Evolution visibili SOLO al super admin. Nuovo tab "Chiavi API" in /super-admin (GET/PUT /super-admin/chiavi-api + test-whatsapp). Redazione segreti in GET/PUT /librerie/azienda e /librerie/comunicazioni per non-super-admin (_SEGRETI_AZIENDA, _CAMPI_SOLO_SUPER_ADMIN in librerie.py). Pagina Firma Elettronica rimossa dal menu agenzia (ImpostazioniFirme.jsx eliminata), sezione Twilio rimossa da Comunicazioni, provider WhatsApp read-only per agenzia (badge wa-provider-attivo), ServerConfigCard rimossa da /whatsapp, PUT/DELETE/test /whatsapp-evo/config → 403 non-super-admin. Email SMTP/IMAP e Google Drive invariati per agenzia (scelta utente). wa.me mantenuto come fallback attivabile dal super admin per agenzie senza Evolution
+- Test: iteration_57.json — backend 9/9 PASS, frontend 100%

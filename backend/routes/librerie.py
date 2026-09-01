@@ -24,6 +24,7 @@ from db_models import (
 )
 from auth import current_user, require_user
 from shared import log_attivita, strip_mongo_id
+from tenant import is_super_admin
 import storage as obj_storage
 
 router = APIRouter()
@@ -323,6 +324,19 @@ _COMUNICAZIONI_FIELDS = [
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
 ]
 
+# Campi gestibili SOLO dal super admin (chiavi API / provider a pagamento)
+_CAMPI_SOLO_SUPER_ADMIN = (
+    "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
+    "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
+)
+
+# Segreti mai esposti agli utenti dell'agenzia (visibili solo in console super admin)
+_SEGRETI_AZIENDA = (
+    "firma_api_token", "firma_webhook_secret", "firma_base_url", "firma_environment",
+    "firma_provider", "smtp_password", "imap_password",
+    "twilio_account_sid", "twilio_auth_token", "spoki_api_key",
+)
+
 
 class ComunicazioniBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -371,6 +385,13 @@ async def get_comunicazioni(user: dict = Depends(require_user("admin", "collabor
         out["spoki_api_key"] = "••••••••"
     else:
         out["spoki_api_key_set"] = False
+    if not is_super_admin(user):
+        # Le chiavi/config dei provider a pagamento sono riservate al super admin.
+        for k in ("twilio_account_sid", "twilio_auth_token", "twilio_sms_from",
+                  "twilio_whatsapp_from", "spoki_api_key", "spoki_sender_name"):
+            out.pop(k, None)
+        out.pop("twilio_auth_token_set", None)
+        out.pop("spoki_api_key_set", None)
     return out
 
 
@@ -380,6 +401,10 @@ async def update_comunicazioni(body: ComunicazioniBody,
     from credentials_utils import clean_password, clean_email
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     upd: dict = {k: getattr(body, k) for k in _COMUNICAZIONI_FIELDS}
+    if not is_super_admin(user):
+        # Gli admin agenzia non possono vedere né modificare chiavi/provider a pagamento
+        for k in _CAMPI_SOLO_SUPER_ADMIN:
+            upd.pop(k, None)
     # Normalizza email e password (rimuove NBSP, doppia concatenazione, ecc.)
     if upd.get("smtp_user"):
         upd["smtp_user"] = clean_email(upd["smtp_user"])
@@ -1049,12 +1074,18 @@ async def get_azienda(user: dict = Depends(current_user)) -> dict:
         cfg = AziendaConfig()
         await db.azienda_config.insert_one(cfg.model_dump())
         doc = cfg.model_dump()
+    if not is_super_admin(user):
+        for k in _SEGRETI_AZIENDA:
+            doc.pop(k, None)
     return doc
 
 
 @router.put("/librerie/azienda")
 async def update_azienda(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body.pop("id", None)
+    if not is_super_admin(user):
+        for k in _SEGRETI_AZIENDA:
+            body.pop(k, None)
     body["updated_at"] = _now_iso()
     existing = await db.azienda_config.find_one({})
     if not existing:

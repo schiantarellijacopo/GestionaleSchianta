@@ -28,7 +28,7 @@ const ESEMPI = [
     "Campagna previdenza: coppia di pensionati felice in riva al mare",
 ];
 
-export default function ImmaginiAI() {
+export default function ImmaginiAI({ embedded = false }) {
     const [prompt, setPrompt] = useState("");
     const [formato, setFormato] = useState("quadrato");
     const [stile, setStile] = useState(null);
@@ -59,10 +59,12 @@ export default function ImmaginiAI() {
 
     return (
         <div data-testid="immagini-ai-page" className="space-y-4">
+            {!embedded && (
             <PageHeader
                 title={<span className="flex items-center gap-2"><ImagePlus className="text-fuchsia-600" /> Immagini AI</span>}
                 subtitle="Genera immagini marketing per post, storie e banner — descrivi cosa vuoi, al resto pensa l'AI"
             />
+            )}
 
             <Card className="p-4 space-y-3">
                 <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)}

@@ -1,0 +1,38 @@
+{
+  "summary": "Iter57 test: (1) redazione segreti in /librerie/comunicazioni e /librerie/azienda per admin; (2) Super Admin /chiavi-api (403 admin, 200 super, PUT persistenza + ripristino); (3) admin PUT /librerie/comunicazioni con twilio_* NON persiste (verificato via super-admin GET); (4) PUT /whatsapp-evo/config 403 per admin (con payload valido); (5) anagrafica overwrite merge conservativo (email/professione preservate, iban aggiunto, tags uniti); (6) marketing presentazioni stile 'brand' 3 slide: genera → poll ready → download pptx/pdf → delete. Backend: 9/9 pytest PASS in ~21s (test_iter57_features.py). Frontend: verificati assenza sidebar 'Firma Elettronica' e pagina /impostazioni/firme, /librerie tab Comunicazioni SENZA sezione Twilio + wa-provider-attivo badge in sola lettura (senza wa-scegli-* buttons) + SMTP/IMAP presenti + com-salva ok; /whatsapp senza wa-server-config-card + Nuova istanza presente; /anagrafiche apertura scheda + Modifica → 4 flag canali (WhatsApp/Email/SMS/UsaApp) NON disabled e cliccabili anche con cellulare vuoto; /studio-marketing tab-presentazioni con tutti i data-testid form + card 'Polizza Casa' visibile + tabs Caroselli/Video/Siti caricano senza errori; /librerie tab Azienda regression OK; super admin /super-admin sa-tab-chiavi con sezioni Namirial/Twilio/Spoki/WhatsApp + sa-chiavi-salva → toast 'Chiavi API salvate'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/whatsapp-evo/config", "issue": "Con admin token e payload incompleto ritorna 422 invece di 403 — la validazione Pydantic viene eseguita prima del guard _solo_super_admin. Con payload valido ritorna correttamente 403. Impatto sicurezza: nessuno (l'endpoint resta non modificabile), ma leak minore del contratto API."},
+      {"endpoint": "POST /api/anagrafiche", "issue": "Ritorna 500 (Pydantic ValidationError su ragione_sociale required) invece di 422 — già segnalato in iter56."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter57_features.py",
+    "/app/test_reports/pytest/iter57.xml"
+  ],
+  "action_items": [
+    "(opzionale) Anticipare il check _solo_super_admin in PUT /api/whatsapp-evo/config prima della validazione body (spostare la Depends prima del BaseModel body o convertire body a dict raw)"
+  ],
+  "critical_code_review_comments": [
+    "routes/whatsapp_evo.py PUT /config: Dependency _solo_super_admin eseguita dopo la validazione Pydantic del body → un admin normale con payload malformato riceve 422 (info schema) invece di 403. Anticipare l'auth check.",
+    "routes/marketing_presentazioni.py: la generazione stile 'brand' 3 slide completa in ~3s (test OK). Verificare che il file pptx/pdf abbia cleanup su DELETE (verificato via test) e size limit sui file caricati.",
+    "routes/librerie.py: PUT /comunicazioni ignora silenziosamente i campi _CAMPI_SOLO_SUPER_ADMIN quando inviati da admin (comportamento corretto e testato) — considerare log-warning per audit.",
+    "routes/anagrafiche.py POST /anagrafiche overwrite_id: merge conservativo funziona correttamente (email/professione/tags preservate, nuovi campi aggiunti). Il codice fa uppercase automatico dei campi (es. professione), documentare comportamento."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter57_features.py (creato)"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (tutti i data-testid trovati e funzionanti)"},
+  "test_credentials": "admin@assicura.it/Admin123! e superadmin@assicura.it/superadmin123! verificati OK",
+  "seed_data_creation": "Creata e cancellata anagrafica 'TEST_MERGE Iter57' via test overwrite (DELETE ?force=true). Creata e cancellata una presentazione marketing generata in stile brand (delete via API). Nessun residuo permanente.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_iter57_features.py. Il PUT /whatsapp-evo/config con payload INCOMPLETO ritorna 422 (Pydantic body validation prima del guard) — usare payload {server_url, api_key, source} per triggerare il 403. In anagrafiche il campo 'professione' viene salvato uppercase dal backend, confrontare in modo case-insensitive. La generazione presentazione stile 'brand' 3 slide completa in ~3-5s; stile 'ai' (Nano Banana) è lentissimo, evitare in test.",
+  "rca of the issue": "N/A - nessun bug funzionale; solo minor: 422 vs 403 su PUT /whatsapp-evo/config con payload incompleto (leak schema, non modifica config)."
+}

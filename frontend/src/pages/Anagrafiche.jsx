@@ -142,7 +142,7 @@ export default function Anagrafiche() {
     const [q, setQ] = useState("");
     const [open, setOpen] = useState(false);
     const [tagFilter, setTagFilter] = useState(null);
-    const [catFilter, setCatFilter] = useState("all");
+    const [catFilter, setCatFilter] = useState("con_polizze");
     const [stats, setStats] = useState(null);
     const [expanded, setExpanded] = useState({});
     const [networks, setNetworks] = useState({});
@@ -186,7 +186,8 @@ export default function Anagrafiche() {
     const filtered = useMemo(() => {
         if (!list) return [];
         let out = list;
-        if (catFilter !== "all") out = out.filter((a) => a.categoria_ui === catFilter);
+        // con ricerca attiva NON limitare alla categoria: cerca su tutto
+        if (catFilter !== "all" && !q.trim()) out = out.filter((a) => a.categoria_ui === catFilter);
 
         // FILTRO COMPLEANNO (?compleanno=oggi|settimana|mese)
         if (compleannoFilter) {
@@ -226,7 +227,7 @@ export default function Anagrafiche() {
             });
         }
         return out;
-    }, [list, catFilter, compleannoFilter, docFilter]);
+    }, [list, catFilter, q, compleannoFilter, docFilter]);
 
     const anagAccessors = useMemo(() => ({
         ragione_sociale: (a) => (a.ragione_sociale || a.denominazione || `${a.cognome || ""} ${a.nome || ""}`).trim(),
@@ -420,9 +421,10 @@ export default function Anagrafiche() {
             )}
 
             <div className="flex justify-end mb-2">{colsPicker}</div>
-            <div className="tbl-scroll bg-white" style={{ "--c1-w": "32px", "--c2-w": "340px" }}>
+            <div className="tbl-scroll bg-white"
+                 style={{ "--c1-w": "32px", "--c2-w": "340px", "--c3-w": "220px", "--c4-w": "150px", "--c5-w": "180px" }}>
                 {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
-                    <table className="freeze-3 w-full text-sm">
+                    <table className="freeze-5 w-full min-w-[1500px] text-sm">
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
                                 {anagCols.map((c) => (

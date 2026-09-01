@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from auth import current_user, require_user
 from database import db
 from db_models import _now_iso
+from tenant import is_super_admin
 
 
 router = APIRouter(prefix="/whatsapp-evo", tags=["whatsapp-evo"])
@@ -78,38 +79,44 @@ class CreateInstanceBody(BaseModel):
 # ---------- Endpoints gestione istanze ----------
 @router.get("/config")
 async def get_config(user=Depends(current_user)) -> dict:
-    """Stato configurazione server Evolution (senza esporre la chiave)."""
+    """Stato configurazione server Evolution (URL/chiave visibili solo al super admin)."""
+    sa = is_super_admin(user)
     doc = await db.whatsapp_server_config.find_one({}, {"_id": 0})
     if doc and doc.get("server_url") and doc.get("api_key"):
-        return {
+        out = {
             "configured": True,
             "source": "agenzia",
-            "url": doc["server_url"],
             "url_set": True,
             "key_set": True,
             "updated_at": doc.get("updated_at"),
         }
+        if sa:
+            out["url"] = doc["server_url"]
+        return out
     url = (os.environ.get("WHATSAPP_API_URL") or "").rstrip("/")
     key = os.environ.get("WHATSAPP_API_KEY") or ""
-    return {
+    out = {
         "configured": bool(url and key),
         "source": "env" if (url and key) else None,
         "url_set": bool(url),
         "key_set": bool(key),
-        "url": url or None,
     }
+    if sa:
+        out["url"] = url or None
+    return out
 
 
-class ServerConfigBody(BaseModel):
-    server_url: str
-    api_key: str
+def _solo_super_admin(user):
+    if not is_super_admin(user):
+        raise HTTPException(403, "Configurazione server riservata al fornitore del software")
 
 
 @router.put("/config")
-async def save_server_config(body: ServerConfigBody, user=Depends(require_user("admin"))) -> dict:
-    """Salva la configurazione del server Evolution della PROPRIA agenzia."""
-    url = body.server_url.strip().rstrip("/")
-    key = body.api_key.strip()
+async def save_server_config(body: dict, user=Depends(require_user("admin"))) -> dict:
+    """Salva la configurazione del server Evolution (solo super admin)."""
+    _solo_super_admin(user)
+    url = (body.get("server_url") or "").strip().rstrip("/")
+    key = (body.get("api_key") or "").strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, "URL server non valido (deve iniziare con http:// o https://)")
     if len(key) < 8:
@@ -131,6 +138,7 @@ async def save_server_config(body: ServerConfigBody, user=Depends(require_user("
 
 @router.delete("/config")
 async def delete_server_config(user=Depends(require_user("admin"))) -> dict:
+    _solo_super_admin(user)
     r = await db.whatsapp_server_config.delete_many({})
     return {"ok": True, "deleted": r.deleted_count}
 
@@ -138,6 +146,7 @@ async def delete_server_config(user=Depends(require_user("admin"))) -> dict:
 @router.post("/config/test")
 async def test_server_config(user=Depends(require_user("admin"))) -> dict:
     """Verifica credenziali chiamando /instance/fetchInstances sul server."""
+    _solo_super_admin(user)
     try:
         resp = await _call("GET", "/instance/fetchInstances", timeout=10.0)
     except HTTPException as e:

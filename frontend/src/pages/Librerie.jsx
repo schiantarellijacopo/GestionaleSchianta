@@ -2238,25 +2238,21 @@ function WhatsAppSection({ f, set }) {
                 </div>
             </div>
 
-            {/* Scelta provider */}
-            <Label className="text-xs uppercase tracking-wide text-slate-600">Provider invio default</Label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                {[
-                    { v: "wame", label: "wa.me (link gratis)", desc: "Apre WhatsApp con testo precompilato. Gratis, universale.", icon: "🔗" },
-                    { v: "evolution", label: "Evolution API (auto)", desc: "Invio server-to-server automatico. Serve almeno 1 istanza connessa.", icon: "⚡" },
-                ].map((p) => (
-                    <button
-                        key={p.v}
-                        type="button"
-                        onClick={() => set("whatsapp_provider", p.v)}
-                        className={`px-3 py-2 text-sm border rounded transition-colors text-left ${provider === p.v ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-700 border-emerald-300 hover:border-emerald-500"}`}
-                        data-testid={`wa-provider-${p.v}`}
-                    >
-                        <div className="font-medium">{p.icon} {p.label}</div>
-                        <div className={`text-[10px] mt-0.5 ${provider === p.v ? "text-emerald-50" : "text-slate-500"}`}>{p.desc}</div>
-                    </button>
-                ))}
+            {/* Modalità invio — gestita dal fornitore del software */}
+            <div className="flex items-center gap-2 flex-wrap">
+                <Label className="text-xs uppercase tracking-wide text-slate-600">Modalità invio attiva</Label>
+                <span data-testid="wa-provider-attivo"
+                    className={`text-xs px-2.5 py-1 rounded-full border font-medium ${provider === "evolution" ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-slate-100 text-slate-700 border-slate-300"}`}>
+                    {provider === "evolution" ? "⚡ Invio automatico (numero collegato via QR)" : "🔗 Link wa.me (gratuito)"}
+                </span>
+                <span className="text-[10px] text-slate-400">gestita dal fornitore del software</span>
             </div>
+            {provider !== "evolution" && (
+                <div className="mt-2 text-[11px] bg-white border border-emerald-200 rounded p-2.5 text-slate-600">
+                    Con la modalità <b>wa.me</b> i messaggi si aprono in WhatsApp già precompilati (gratuito).
+                    Vuoi l&apos;invio automatico con numero collegato via QR? Contatta il fornitore del software per attivarlo.
+                </div>
+            )}
 
             {/* Crea nuova istanza + Lista istanze */}
             {provider === "evolution" && (
@@ -2808,43 +2804,6 @@ function ComunicazioniSezione() {
 
             {/* IMAP — Ricezione email + smistamento per alias */}
             <ImapSection f={f} set={set} onSet={setF} />
-
-            {/* TWILIO SMS (solo SMS — WhatsApp è gestito sotto) */}
-            <section data-testid="lib-com-twilio">
-                <div className="flex items-center gap-2 mb-3">
-                    <Building2 size={16} className="text-rose-600" />
-                    <h4 className="text-sm font-semibold text-slate-800">SMS — Twilio (opzionale)</h4>
-                </div>
-                <div className="text-[11px] text-slate-500 mb-3">
-                    Solo per <strong>SMS</strong>. WhatsApp è gestito nella sezione dedicata più sotto.
-                    {" "}<a href="https://console.twilio.com/" target="_blank" rel="noreferrer"
-                        className="text-sky-700 underline">Apri console Twilio</a>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                        <Label>Account SID</Label>
-                        <Input placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                            value={f.twilio_account_sid || ""}
-                            onChange={(e) => set("twilio_account_sid", e.target.value)}
-                            data-testid="com-twilio-sid" />
-                    </div>
-                    <div>
-                        <Label>Auth Token</Label>
-                        <Input type="password"
-                            placeholder={f.twilio_auth_token_set ? "Token salvato (modifica per cambiare)" : "Token"}
-                            value={f.twilio_auth_token || ""}
-                            onChange={(e) => set("twilio_auth_token", e.target.value)}
-                            data-testid="com-twilio-token" />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label>Numero SMS mittente</Label>
-                        <Input placeholder="+39…"
-                            value={f.twilio_sms_from || ""}
-                            onChange={(e) => set("twilio_sms_from", e.target.value)}
-                            data-testid="com-twilio-sms" />
-                    </div>
-                </div>
-            </section>
 
             {/* WHATSAPP — libreria unica: wa.me + Evolution API */}
             <WhatsAppSection f={f} set={set} />

@@ -198,6 +198,136 @@ def _candidati_numeri_polizza(*testi: str) -> list[str]:
     return out
 
 
+_KEYWORDS_SINISTRO = ("sinistro", "denuncia", "incidente", "danno", "danni", "perizia", "cid", "constatazione")
+
+_DOC_EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".heic", ".webp", ".doc", ".docx", ".xls", ".xlsx")
+
+
+def _allegabili(attachments: list[dict]) -> list[dict]:
+    """Allegati documentali (PDF, immagini, office) — esclude firme/icone minuscole."""
+    out = []
+    for a in attachments:
+        fn = (a.get("filename") or "").lower()
+        if not fn.endswith(_DOC_EXTS):
+            continue
+        if (a.get("size_kb") or 0) < 8 and not fn.endswith(".pdf"):
+            continue  # probabile logo/firma inline
+        out.append(a)
+    return out
+
+
+async def _copia_allegato_su_entita(
+    db: AsyncIOMotorDatabase, att: dict, *, entita_tipo: str, entita_id: str,
+    categoria: str, subject: str,
+) -> Optional[dict]:
+    """Copia un allegato email nello storage dell'entità e crea il record Allegato."""
+    import os as _os
+    import storage as obj_storage
+    from db_models import Allegato
+    # idempotenza: stesso file già copiato su questa entità
+    dup = await db.allegati.find_one(
+        {"entita_tipo": entita_tipo, "entita_id": entita_id,
+         "origine_storage_path": att.get("storage_path")}, {"_id": 1})
+    if dup:
+        return None
+    try:
+        data, ctype = obj_storage.get_object(att["storage_path"])
+    except Exception:
+        logger.exception("Impossibile leggere allegato %s", att.get("storage_path"))
+        return None
+    app_name = _os.environ.get("APP_NAME", "assicura")
+    new_path = f"{app_name}/{entita_tipo}/{entita_id}/email_{_now_iso()[:10]}_{att['filename']}"
+    try:
+        obj_storage.put_object(new_path, data, ctype or "application/octet-stream")
+    except Exception:
+        logger.exception("Errore salvataggio allegato %s per %s", entita_tipo, entita_id)
+        return None
+    alleg = Allegato(
+        entita_tipo=entita_tipo, entita_id=entita_id,
+        nome_file=att["filename"],
+        url=f"/api/storage/{new_path}", storage_path=new_path,
+        mime=ctype or att.get("content_type") or "application/octet-stream",
+        size_kb=round(len(data) / 1024, 1),
+        caricato_da=None,
+    ).model_dump()
+    alleg["fonte"] = "email_imap"
+    alleg["visibile_cliente"] = False
+    alleg["categoria"] = categoria
+    alleg["origine_email_subject"] = (subject or "")[:200]
+    alleg["origine_storage_path"] = att.get("storage_path")
+    await db.allegati.insert_one(alleg)
+    return {"entita_tipo": entita_tipo, "entita_id": entita_id,
+            "filename": att["filename"], "storage_path": new_path}
+
+
+async def _auto_allega_sinistro(
+    db: AsyncIOMotorDatabase, *, subject: str, body_text: str,
+    attachments: list[dict], anagrafica_id: Optional[str],
+) -> list[dict]:
+    """Collega allegati (PDF e foto) a un sinistro: match per numero sinistro /
+    numero interno citato, oppure fallback sull'unico sinistro aperto del cliente
+    se il testo parla di sinistro/denuncia/danno."""
+    docs = _allegabili(attachments)
+    if not docs:
+        return []
+    testi = [subject or "", body_text or ""] + [a.get("filename", "") for a in docs]
+    candidati = _candidati_numeri_polizza(*testi)  # stesso estrattore alfanumerico
+
+    sinistri = []
+    if candidati:
+        q = {"$or": [
+            {"numero_sinistro": {"$in": candidati + [c.lower() for c in candidati]}},
+            {"numero_interno": {"$in": candidati + [c.lower() for c in candidati]}},
+        ]}
+        if anagrafica_id:
+            q = {"$and": [q, {"contraente_id": anagrafica_id}]}
+        sinistri = await db.sinistri.find(
+            q, {"_id": 0, "id": 1, "numero_sinistro": 1, "numero_interno": 1}).to_list(10)
+        if sinistri and not anagrafica_id:
+            pass  # match esplicito per numero: ok anche senza mittente noto
+    if not sinistri and anagrafica_id:
+        # fallback: testo parla di sinistro e il cliente ha UN solo sinistro aperto
+        blob = f"{subject or ''} {body_text or ''}".lower()
+        if any(k in blob for k in _KEYWORDS_SINISTRO):
+            aperti = await db.sinistri.find(
+                {"contraente_id": anagrafica_id, "stato": {"$in": ["aperto", "in_istruttoria"]}},
+                {"_id": 0, "id": 1, "numero_sinistro": 1, "numero_interno": 1}).to_list(3)
+            if len(aperti) == 1:
+                sinistri = aperti
+    if not sinistri:
+        return []
+
+    matches: list[dict] = []
+    for sin in sinistri:
+        for att in docs:
+            m = await _copia_allegato_su_entita(
+                db, att, entita_tipo="sinistro", entita_id=sin["id"],
+                categoria="documentazione_sinistro", subject=subject)
+            if m:
+                m["numero_sinistro"] = sin.get("numero_sinistro") or sin.get("numero_interno")
+                matches.append(m)
+    return matches
+
+
+async def _auto_allega_anagrafica(
+    db: AsyncIOMotorDatabase, *, subject: str,
+    attachments: list[dict], anagrafica_id: str,
+    esclusi_paths: set[str],
+) -> list[dict]:
+    """Fallback: gli allegati del cliente non collegati a polizza/sinistro finiscono
+    nei Documenti della sua anagrafica."""
+    matches: list[dict] = []
+    for att in _allegabili(attachments):
+        if att.get("storage_path") in esclusi_paths:
+            continue
+        m = await _copia_allegato_su_entita(
+            db, att, entita_tipo="anagrafica", entita_id=anagrafica_id,
+            categoria="documento_da_email", subject=subject)
+        if m:
+            matches.append(m)
+    return matches
+
+
 async def _auto_allega_polizza(
     db: AsyncIOMotorDatabase, *, subject: str, body_text: str,
     attachments: list[dict], anagrafica_id: Optional[str],
@@ -440,31 +570,65 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                 await db.email_inbox.insert_one(doc)
                 nuovi += 1
 
-                # Auto-collega PDF firmato → polizza (se numero polizza citato)
+                # Auto-collega allegati → polizza / sinistro / anagrafica
                 polizze_matched: list[dict] = []
+                sinistri_matched: list[dict] = []
+                anagrafica_matched: list[dict] = []
                 if attachments:
                     try:
                         polizze_matched = await _auto_allega_polizza(
                             db, subject=subject or "", body_text=body_text or "",
                             attachments=attachments, anagrafica_id=anagrafica_id,
                         )
-                        if polizze_matched:
-                            # aggiorna email con i match
-                            await db.email_inbox.update_one(
-                                {"uid": str(uid), "folder": folder},
-                                {"$set": {"polizze_matched": polizze_matched}},
-                            )
                     except Exception:
                         logger.exception("Errore auto-allegamento polizza per email UID=%s", uid)
+                    try:
+                        sinistri_matched = await _auto_allega_sinistro(
+                            db, subject=subject or "", body_text=body_text or "",
+                            attachments=attachments, anagrafica_id=anagrafica_id,
+                        )
+                    except Exception:
+                        logger.exception("Errore auto-allegamento sinistro per email UID=%s", uid)
+                    # fallback: mittente = cliente noto → resto degli allegati nei suoi Documenti
+                    if anagrafica_id:
+                        try:
+                            usati = {m.get("storage_path") for m in polizze_matched} | \
+                                    {m.get("storage_path") for m in sinistri_matched}
+                            origine_usate = set()
+                            for m in polizze_matched + sinistri_matched:
+                                origine_usate.add(m.get("filename"))
+                            esclusi = {a.get("storage_path") for a in attachments
+                                       if a.get("filename") in origine_usate}
+                            anagrafica_matched = await _auto_allega_anagrafica(
+                                db, subject=subject or "", attachments=attachments,
+                                anagrafica_id=anagrafica_id, esclusi_paths=esclusi,
+                            )
+                        except Exception:
+                            logger.exception("Errore auto-allegamento anagrafica per email UID=%s", uid)
+                    if polizze_matched or sinistri_matched or anagrafica_matched:
+                        await db.email_inbox.update_one(
+                            {"uid": str(uid), "folder": folder},
+                            {"$set": {"polizze_matched": polizze_matched,
+                                      "sinistri_matched": sinistri_matched,
+                                      "allegati_anagrafica": anagrafica_matched}},
+                        )
 
                 # Se mittente conosciuto → log diario cliente (usa collection `db.diario`)
                 if anagrafica_id:
                     try:
                         from shared import log_diario_cliente
                         desc = f"Email ricevuta da {from_name or from_addr}: {subject or '(no subject)'}"
+                        dettagli = []
                         if polizze_matched:
-                            nums = ", ".join(str(m.get("numero_polizza") or "") for m in polizze_matched)
-                            desc += f" — 📎 auto-collegata a polizza {nums}"
+                            nums = ", ".join(sorted({str(m.get('numero_polizza') or '') for m in polizze_matched}))
+                            dettagli.append(f"📎 allegati collegati a polizza {nums}")
+                        if sinistri_matched:
+                            nums = ", ".join(sorted({str(m.get('numero_sinistro') or '') for m in sinistri_matched}))
+                            dettagli.append(f"📎 allegati collegati a sinistro {nums}")
+                        if anagrafica_matched:
+                            dettagli.append(f"📎 {len(anagrafica_matched)} documenti salvati in anagrafica")
+                        if dettagli:
+                            desc += " — " + " · ".join(dettagli)
                         await log_diario_cliente(
                             anagrafica_id,
                             "email",

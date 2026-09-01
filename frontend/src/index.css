@@ -207,6 +207,38 @@ h1, h2, h3, h4, h5 {
     background-color: #f1f5f9; /* slate-100 — più scuro per distinguere */
 }
 
+/* freeze-5: prime 5 colonne bloccate (Anagrafiche: lo scroll parte da "Comune") */
+.tbl-scroll .freeze-5 tbody td:nth-child(1),
+.tbl-scroll .freeze-5 thead th:nth-child(1) { left: 0; min-width: var(--c1-w, 32px); max-width: var(--c1-w, 32px); }
+.tbl-scroll .freeze-5 tbody td:nth-child(2),
+.tbl-scroll .freeze-5 thead th:nth-child(2) { left: var(--c1-w, 32px); min-width: var(--c2-w, 340px); max-width: var(--c2-w, 340px); }
+.tbl-scroll .freeze-5 tbody td:nth-child(3),
+.tbl-scroll .freeze-5 thead th:nth-child(3) { left: calc(var(--c1-w, 32px) + var(--c2-w, 340px)); min-width: var(--c3-w, 220px); max-width: var(--c3-w, 220px); }
+.tbl-scroll .freeze-5 tbody td:nth-child(4),
+.tbl-scroll .freeze-5 thead th:nth-child(4) { left: calc(var(--c1-w, 32px) + var(--c2-w, 340px) + var(--c3-w, 220px)); min-width: var(--c4-w, 150px); max-width: var(--c4-w, 150px); }
+.tbl-scroll .freeze-5 tbody td:nth-child(5),
+.tbl-scroll .freeze-5 thead th:nth-child(5) { left: calc(var(--c1-w, 32px) + var(--c2-w, 340px) + var(--c3-w, 220px) + var(--c4-w, 150px)); min-width: var(--c5-w, 180px); max-width: var(--c5-w, 180px); }
+
+.tbl-scroll .freeze-5 tbody td:nth-child(-n+5),
+.tbl-scroll .freeze-5 thead th:nth-child(-n+5) {
+    position: sticky;
+    background-color: #ffffff;
+    z-index: 5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: inset -1px 0 0 rgb(241 245 249);
+}
+/* bordo marcato sull'ultima colonna bloccata */
+.tbl-scroll .freeze-5 tbody td:nth-child(5),
+.tbl-scroll .freeze-5 thead th:nth-child(5) {
+    box-shadow: inset -2px 0 0 rgb(203 213 225);
+}
+.tbl-scroll .freeze-5 thead th:nth-child(-n+5) {
+    z-index: 25;
+    background-color: #f1f5f9;
+}
+
 /* Stat label */
 .stat-label {
     @apply text-[11px] uppercase tracking-[0.14em] font-semibold text-slate-500;

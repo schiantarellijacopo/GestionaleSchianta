@@ -28,6 +28,7 @@ import NotebookAIDetail from "@/pages/NotebookAIDetail";
 import ModelliPiramide from "@/pages/ModelliPiramide";
 import PortaleLanding from "@/pages/PortaleLanding";
 import ImmaginiAI from "@/pages/ImmaginiAI";
+import StudioMarketing from "@/pages/StudioMarketing";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
 import Newsletter from "@/pages/Newsletter";
@@ -43,7 +44,6 @@ import Attivita from "@/pages/Attivita";
 import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
-import ImpostazioniFirme from "@/pages/ImpostazioniFirme";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
 import Diario from "@/pages/Diario";
@@ -244,6 +244,7 @@ function App() {
                             <Route path="/notebook-ai/:id" element={<NotebookAIDetail />} />
                             <Route path="/modelli-piramide" element={<ModelliPiramide />} />
                             <Route path="/immagini-ai" element={<ImmaginiAI />} />
+                            <Route path="/studio-marketing" element={<StudioMarketing />} />
                             <Route path="/app-cliente" element={<AppCliente />} />
                             <Route path="/provvigioni" element={
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
@@ -263,11 +264,6 @@ function App() {
                             <Route path="/librerie" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}>
                                     <Librerie />
-                                </ProtectedRoute>
-                            } />
-                            <Route path="/impostazioni/firme" element={
-                                <ProtectedRoute roles={["admin"]}>
-                                    <ImpostazioniFirme />
                                 </ProtectedRoute>
                             } />
                             <Route path="/whatsapp" element={

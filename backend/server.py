@@ -12070,6 +12070,12 @@ api.include_router(_pref_router.router)
 from routes import immagini_ai as _img_ai_router
 api.include_router(_img_ai_router.router)
 
+from routes import marketing_studio as _mkt_router
+api.include_router(_mkt_router.router)
+
+from routes import marketing_presentazioni as _mkt_pres_router
+api.include_router(_mkt_pres_router.router)
+
 from routes import app_cliente as _app_cliente_router
 api.include_router(_app_cliente_router.router)
 

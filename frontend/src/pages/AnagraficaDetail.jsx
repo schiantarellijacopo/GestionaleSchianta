@@ -495,7 +495,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                         onChange={(e) => set("email", e.target.value)}
                         onBlur={(e) => {
                             // auto-flag canale_email quando l'email viene compilata
-                            if (e.target.value && f.canale_email === undefined) set("canale_email", true);
+                            if (e.target.value && !f.canale_email) set("canale_email", true);
                         }}
                         data-testid="anag-email"
                     />
@@ -506,11 +506,8 @@ function DatiTab({ ana, canEdit, onReload }) {
                         value={f.cellulare || ""}
                         onChange={(e) => set("cellulare", e.target.value)}
                         onBlur={(e) => {
-                            // auto-flag WhatsApp + SMS quando il cellulare viene compilato
-                            if (e.target.value) {
-                                if (f.canale_whatsapp === undefined) set("canale_whatsapp", true);
-                                if (f.canale_sms === undefined) set("canale_sms", true);
-                            }
+                            // auto-flag WhatsApp quando il cellulare viene compilato
+                            if (e.target.value && !f.canale_whatsapp) set("canale_whatsapp", true);
                         }}
                         data-testid="anag-cellulare"
                     />
@@ -568,23 +565,23 @@ function DatiTab({ ana, canEdit, onReload }) {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {[
                             { k: "canale_whatsapp", label: "WhatsApp",
-                              hint: f.cellulare ? f.cellulare : "richiede cellulare",
-                              disabled: !f.cellulare, icon: "💬",
+                              hint: f.cellulare ? f.cellulare : "consigliato con cellulare",
+                              icon: "💬",
                               activeCls: "bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300",
                               checkboxCls: "bg-emerald-600 border-emerald-600" },
                             { k: "canale_email", label: "Email",
-                              hint: f.email ? f.email : "richiede email",
-                              disabled: !f.email, icon: "✉️",
+                              hint: f.email ? f.email : "consigliato con email",
+                              icon: "✉️",
                               activeCls: "bg-sky-50 border-sky-400 ring-1 ring-sky-300",
                               checkboxCls: "bg-sky-600 border-sky-600" },
                             { k: "canale_sms", label: "SMS",
-                              hint: f.cellulare ? f.cellulare : "richiede cellulare",
-                              disabled: !f.cellulare, icon: "📱",
+                              hint: f.cellulare ? f.cellulare : "consigliato con cellulare",
+                              icon: "📱",
                               activeCls: "bg-violet-50 border-violet-400 ring-1 ring-violet-300",
                               checkboxCls: "bg-violet-600 border-violet-600" },
                             { k: "usa_app", label: "Usa App",
                               hint: "cliente ha app installata",
-                              disabled: false, icon: "📲",
+                              icon: "📲",
                               activeCls: "bg-amber-50 border-amber-400 ring-1 ring-amber-300",
                               checkboxCls: "bg-amber-600 border-amber-600" },
                         ].map((flag) => {
@@ -595,9 +592,8 @@ function DatiTab({ ana, canEdit, onReload }) {
                                 <button
                                     key={flag.k}
                                     type="button"
-                                    disabled={flag.disabled}
                                     onClick={() => set(flag.k, !active)}
-                                    className={`text-left rounded-lg border-2 p-2.5 transition-all ${cls} ${flag.disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                                    className={`text-left rounded-lg border-2 p-2.5 transition-all cursor-pointer ${cls}`}
                                     data-testid={`anag-flag-${flag.k}`}
                                 >
                                     <div className="flex items-center justify-between">

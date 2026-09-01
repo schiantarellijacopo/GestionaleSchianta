@@ -9,6 +9,7 @@ const TABS = [
     { id: "abbonamenti", label: "Abbonamenti", icon: CreditCard },
     { id: "transazioni", label: "Transazioni", icon: TrendingUp },
     { id: "marketplace", label: "Marketplace", icon: Package },
+    { id: "chiavi", label: "Chiavi API", icon: KeyRound },
     { id: "tickets", label: "Ticket Helpdesk", icon: Headphones },
     { id: "logs", label: "Log Piattaforma", icon: Activity },
 ];
@@ -70,6 +71,7 @@ export default function SuperAdminPanel() {
             {tab === "abbonamenti" && <AbbonamentiTab />}
             {tab === "transazioni" && <TransazioniTab />}
             {tab === "marketplace" && <MarketplaceTab />}
+            {tab === "chiavi" && <ChiaviApiTab />}
             {tab === "tickets" && <TicketsTab />}
             {tab === "logs" && <LogsTab />}
         </div>
@@ -1353,6 +1355,130 @@ function ScambiTab() {
                     <Tabella rows={storico} azioni={false} />
                 </>
             )}
+        </div>
+    );
+}
+
+// ─── CHIAVI API — visibili SOLO al super admin ───────────────────────
+function ChiaviApiTab() {
+    const [f, setF] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const [testingWa, setTestingWa] = useState(false);
+
+    useEffect(() => {
+        api.get("/super-admin/chiavi-api")
+            .then((r) => setF(r.data))
+            .catch((e) => toast.error(e?.response?.data?.detail || "Errore caricamento chiavi"));
+    }, []);
+
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            await api.put("/super-admin/chiavi-api", f);
+            toast.success("Chiavi API salvate");
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore salvataggio"); }
+        finally { setSaving(false); }
+    };
+
+    const testWa = async () => {
+        setTestingWa(true);
+        try {
+            const r = await api.post("/super-admin/chiavi-api/test-whatsapp");
+            if (r.data.ok) toast.success(`Evolution OK — ${r.data.istanze_sul_server} istanze sul server`);
+            else toast.error("Test fallito: " + (r.data.error || "errore sconosciuto"));
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore test"); }
+        finally { setTestingWa(false); }
+    };
+
+    if (!f) return <div className="text-slate-400 text-sm py-8 text-center">Caricamento…</div>;
+
+    return (
+        <div className="space-y-4 max-w-4xl" data-testid="sa-chiavi-api">
+            <div className="text-xs bg-violet-50 border border-violet-200 rounded-md px-3 py-2 text-violet-800">
+                🔑 Queste credenziali sono visibili <b>solo al super admin</b>. Le agenzie clienti usano i servizi
+                (firma digitale, SMS, WhatsApp) senza mai vedere chiavi, token o URL dei server.
+            </div>
+
+            {/* FIRMA ELETTRONICA */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-firma">
+                <div className="font-semibold text-slate-800 text-sm">✍️ Firma Elettronica — Namirial eSignAnyWhere</div>
+                <div className="text-[11px] text-slate-500">Le agenzie firmano documenti (OTP, grafometrica, link remoto) senza vedere queste credenziali.</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Ambiente</label>
+                        <select value={f.firma_environment || "sandbox"} onChange={(e) => set("firma_environment", e.target.value)}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none bg-white"
+                            data-testid="sa-firma-env">
+                            <option value="sandbox">Sandbox (demo)</option>
+                            <option value="production">Produzione</option>
+                        </select>
+                    </div>
+                    <FormField label="URL API Base" value={f.firma_base_url || ""} onChange={(v) => set("firma_base_url", v)} testid="sa-firma-url" />
+                    <FormField label="API Token" type="password" value={f.firma_api_token || ""} onChange={(v) => set("firma_api_token", v)} testid="sa-firma-token" />
+                    <FormField label="Webhook Secret (opzionale)" type="password" value={f.firma_webhook_secret || ""} onChange={(v) => set("firma_webhook_secret", v)} testid="sa-firma-webhook" />
+                </div>
+            </div>
+
+            {/* TWILIO SMS */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-twilio">
+                <div className="font-semibold text-slate-800 text-sm">📱 SMS — Twilio</div>
+                <div className="text-[11px] text-slate-500">Usato dall&apos;invio massa avvisi via SMS delle agenzie.</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <FormField label="Account SID" value={f.twilio_account_sid || ""} onChange={(v) => set("twilio_account_sid", v)} testid="sa-twilio-sid" />
+                    <FormField label="Auth Token" type="password" value={f.twilio_auth_token || ""} onChange={(v) => set("twilio_auth_token", v)} testid="sa-twilio-token" />
+                    <FormField label="Numero SMS mittente" value={f.twilio_sms_from || ""} onChange={(v) => set("twilio_sms_from", v)} testid="sa-twilio-sms" />
+                    <FormField label="Numero WhatsApp Twilio (opz.)" value={f.twilio_whatsapp_from || ""} onChange={(v) => set("twilio_whatsapp_from", v)} testid="sa-twilio-wa" />
+                </div>
+            </div>
+
+            {/* SPOKI */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-spoki">
+                <div className="font-semibold text-slate-800 text-sm">💬 Spoki (opzionale)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <FormField label="API Key" type="password" value={f.spoki_api_key || ""} onChange={(v) => set("spoki_api_key", v)} testid="sa-spoki-key" />
+                    <FormField label="Nome mittente" value={f.spoki_sender_name || ""} onChange={(v) => set("spoki_sender_name", v)} testid="sa-spoki-sender" />
+                </div>
+            </div>
+
+            {/* WHATSAPP */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-whatsapp">
+                <div className="font-semibold text-slate-800 text-sm">🟢 WhatsApp — modalità e server</div>
+                <div className="text-[11px] text-slate-500 mb-3">
+                    <b>wa.me</b> = gratuito, link precompilato (per agenzie che non pagano Evolution).{" "}
+                    <b>Evolution</b> = invio automatico con numero collegato via QR (l&apos;agenzia vede solo il QR).
+                </div>
+                <div className="flex gap-2 mb-3">
+                    {[["wame", "🔗 wa.me (gratis)"], ["evolution", "⚡ Evolution API (auto)"]].map(([v, l]) => (
+                        <button key={v} type="button" onClick={() => set("whatsapp_provider", v)}
+                            className={`px-3 py-2 text-sm border rounded-md transition-colors ${
+                                (f.whatsapp_provider || "wame") === v
+                                    ? "bg-emerald-600 text-white border-emerald-600"
+                                    : "bg-white text-slate-700 border-slate-300 hover:border-emerald-500"}`}
+                            data-testid={`sa-wa-provider-${v}`}>
+                            {l}
+                        </button>
+                    ))}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <FormField label="URL server Evolution API" value={f.evolution_server_url || ""} onChange={(v) => set("evolution_server_url", v)} testid="sa-evo-url" />
+                    <FormField label="API Key Evolution (AUTHENTICATION_API_KEY)" type="password" value={f.evolution_api_key || ""} onChange={(v) => set("evolution_api_key", v)} testid="sa-evo-key" />
+                </div>
+                <button onClick={testWa} disabled={testingWa}
+                    className="mt-3 px-3 py-1.5 text-xs border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700"
+                    data-testid="sa-evo-test">
+                    {testingWa ? "Verifica…" : "Test connessione Evolution"}
+                </button>
+            </div>
+
+            <div className="flex justify-end">
+                <button onClick={salva} disabled={saving}
+                    className="bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-5 py-2 rounded-md disabled:opacity-50"
+                    data-testid="sa-chiavi-salva">
+                    {saving ? "Salvataggio…" : "Salva chiavi API"}
+                </button>
+            </div>
         </div>
     );
 }
