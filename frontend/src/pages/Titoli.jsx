@@ -397,9 +397,9 @@ export default function Titoli({ storicoMode = false } = {}) {
                             </SelectContent>
                         </Select>
                         <Select value={filters.mezzo_pagamento || "all"} onValueChange={(v) => setF("mezzo_pagamento", v === "all" ? "" : v)}>
-                            <SelectTrigger data-testid="f-mezzo-pag"><SelectValue placeholder="Tipo pag." /></SelectTrigger>
+                            <SelectTrigger data-testid="f-mezzo-pag"><SelectValue placeholder="Tipo pagamento" /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">Tutti i mezzi</SelectItem>
+                                <SelectItem value="all">Tipo pagamento</SelectItem>
                                 {mezziPagamento.map((m) => <SelectItem key={m.codice} value={m.codice}>{m.label || m.codice}</SelectItem>)}
                             </SelectContent>
                         </Select>
