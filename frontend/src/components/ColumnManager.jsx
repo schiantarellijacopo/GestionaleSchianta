@@ -42,9 +42,23 @@ export function useTableColumns(tableKey, defaultCols) {
 
     const ordered = useMemo(() => {
         const map = new Map(defaultCols.map((c) => [c.key, c]));
-        const order = (prefs?.order || []).filter((k) => map.has(k));
-        const rest = defaultCols.map((c) => c.key).filter((k) => !order.includes(k));
-        return [...order, ...rest].map((k) => map.get(k));
+        const keys = (prefs?.order || []).filter((k) => map.has(k));
+        // colonne nuove (non presenti nell'ordine salvato): inseriscile nella
+        // posizione naturale del default, non in fondo
+        const defKeys = defaultCols.map((c) => c.key);
+        for (const k of defKeys) {
+            if (keys.includes(k)) continue;
+            const defIdx = defKeys.indexOf(k);
+            let insertAt = keys.length;
+            for (let i = defIdx - 1; i >= 0; i--) {
+                const prevIdx = keys.indexOf(defKeys[i]);
+                if (prevIdx !== -1) { insertAt = prevIdx + 1; break; }
+                if (i === 0) insertAt = 0;
+            }
+            if (defIdx === 0) insertAt = 0;
+            keys.splice(insertAt, 0, k);
+        }
+        return keys.map((k) => map.get(k));
     }, [defaultCols, prefs]);
 
     const hiddenSet = useMemo(() => new Set(prefs?.hidden || []), [prefs]);

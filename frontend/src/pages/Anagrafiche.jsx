@@ -56,12 +56,12 @@ const ANAG_COLS = [
         key: "email", label: "E-mail", sort: "email", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
         render: (a) => a.email
             ? <a href={`mailto:${a.email}`} onClick={(e) => e.stopPropagation()}
-                 className="inline-flex items-center gap-1 text-sky-700 hover:underline"
-                 data-testid={`anag-email-link-${a.id}`}><Mail size={12} className="text-slate-400" />{a.email}</a>
+                 className="inline-flex items-center gap-1 text-sky-700 hover:underline max-w-[210px]"
+                 data-testid={`anag-email-link-${a.id}`}><Mail size={12} className="text-slate-400 shrink-0" /><span className="truncate">{a.email}</span></a>
             : <span className="text-slate-300">—</span>,
     },
     {
-        key: "telefono", label: "Telefono", sort: "telefono", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
+        key: "telefono", label: "Telefono", sort: "telefono", thClass: "text-left py-1.5 pr-3 w-36", tdClass: "py-1.5 pr-3 text-xs whitespace-nowrap",
         render: (a) => (a.cellulare || a.telefono)
             ? <a href={`tel:${telHref(a.cellulare || a.telefono)}`} onClick={(e) => e.stopPropagation()}
                  className="inline-flex items-center gap-1 text-sky-700 hover:underline"
@@ -69,28 +69,42 @@ const ANAG_COLS = [
             : <span className="text-slate-300">—</span>,
     },
     {
-        key: "polizze", label: "Polizze", sort: "num_polizze", thClass: "text-center py-1.5 pr-3 text-emerald-700",
-        tdClass: "py-1.5 pr-3 text-center text-emerald-700 font-semibold num",
-        render: (a) => a.polizze_attive_count || 0,
-    },
-    {
-        key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
-        render: (a) => a.collaboratore_nome
-            ? <span className="text-slate-700">{a.collaboratore_nome}</span>
+        key: "indirizzo", label: "Indirizzo", sort: "indirizzo", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => a.indirizzo
+            ? <span className="text-slate-600 truncate block max-w-[170px]" title={a.indirizzo}>{a.indirizzo}</span>
             : <span className="text-slate-300">—</span>,
     },
     {
-        key: "premio_totale", label: "Premio totale", sort: "premio_totale", thClass: "text-right py-1.5 pr-3",
-        tdClass: "py-1.5 pr-3 text-right font-bold num text-slate-900 text-[13px]",
+        key: "comune", label: "Comune", sort: "comune", thClass: "text-left py-1.5 pr-3 w-28", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => a.comune
+            ? <span className="text-slate-600 truncate block max-w-[110px]" title={`${a.comune}${a.provincia ? ` (${a.provincia})` : ""}`}>
+                {a.comune}{a.provincia ? <span className="text-slate-400"> ({a.provincia})</span> : ""}
+              </span>
+            : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "polizze", label: "Polizze", sort: "num_polizze", thClass: "text-center py-1.5 pr-2 w-14 text-emerald-700",
+        tdClass: "py-1.5 pr-2 text-center text-emerald-700 font-semibold num w-14",
+        render: (a) => a.polizze_attive_count || 0,
+    },
+    {
+        key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "text-left py-1.5 pr-3 w-32", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => a.collaboratore_nome
+            ? <span className="text-slate-700 truncate block max-w-[130px]" title={a.collaboratore_nome}>{a.collaboratore_nome}</span>
+            : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "premio_totale", label: "Premio tot.", sort: "premio_totale", thClass: "text-right py-1.5 pr-2 w-24",
+        tdClass: "py-1.5 pr-2 text-right font-bold num text-slate-900 text-[13px] w-24 whitespace-nowrap",
         render: (a, ctx) => ctx.net ? fmtEur(ctx.net.root.premio_totale || 0) : <span className="text-slate-300">—</span>,
     },
     {
-        key: "provvigioni", label: "Provvigioni", sort: "provvigioni", thClass: "text-right py-1.5 pr-3 text-emerald-700",
-        tdClass: "py-1.5 pr-3 text-right font-semibold num text-emerald-700",
+        key: "provvigioni", label: "Provvigioni", sort: "provvigioni", thClass: "text-right py-1.5 pr-2 w-24 text-emerald-700",
+        tdClass: "py-1.5 pr-2 text-right font-semibold num text-emerald-700 w-24 whitespace-nowrap",
         render: (a, ctx) => ctx.net ? fmtEur(ctx.net.root.provvigioni_totale || 0) : <span className="text-slate-300">—</span>,
     },
     {
-        key: "tag", label: "Tag", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3",
+        key: "tag", label: "Tag", thClass: "text-left py-1.5 pr-2 w-28", tdClass: "py-1.5 pr-2 w-28",
         render: (a, ctx) => (
             <div className="flex flex-wrap gap-1">
                 {(a.tags || []).slice(0, 3).map((t) => (
