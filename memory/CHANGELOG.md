@@ -1,6 +1,31 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-09-01 — Regolazione Premio · Cumulativa Assicurati · Automazioni Dashboard · Anagrafiche paginate
+
+### 🟣 Regolazione Premio (sezione dedicata) — NUOVO
+- Modello `Polizza`: aggiunti `regolazione_giorni_invio` (default 30, modificabile), `regolazione_stato` (workflow), `regolazione_lettera_inviata_data`, `regolazione_titolo_id`, `regolazione_note`.
+- `backend/routes/regolazione_premio.py`: `GET /regolazione-premio` (lista con data_invio_prevista=scadenza+giorni, stato, da_inviare), `/stats`, `POST /{id}/lettera-pdf` (PDF), `POST /{id}/invia-lettera` (manuale o email SMTP con allegato), `POST /{id}/stato`, `POST /{id}/genera-titolo` (crea Titolo tipo=regolazione), `GET /{id}/eventi`.
+- `backend/pdf_regolazione.py`: lettera richiesta dati al contraente.
+- Calcolo esistente (`extras_p1p2.py`) ora imposta stato `calcolata`.
+- Frontend: pagina `/regolazione-premio` (sidebar "Regolazione Premio"), config flag+base+tasso+minima+giorni nel form polizza (tab Altri), dialoghi lettera/calcolo/genera-titolo.
+- Testato: 18/18 backend + frontend (iteration_59).
+
+### 🟦 Cumulativa Assicurati (polizze non-RCA es. Ritiro Patente) — NUOVO
+- Modello `Polizza`: `is_cumulativa_assicurati`.
+- `backend/routes/cumulativa.py`: CRUD `/polizze/{id}/assicurati` (+stats), `PUT/DELETE /assicurati/{id}`, `POST /polizze/{id}/assicurati/import` (Excel/CSV con auto-detect header COGNOME/NOME/DITTA/ENTRATA/USCITA; import reale 145 righe verificato). Stato attivo/uscito calcolato da data_uscita.
+- Frontend: `components/AssicuratiTab.jsx` (tab "Assicurati" nel dettaglio polizza), flag nel form polizza.
+
+### ⚡ Dashboard "Automazioni di oggi" — NUOVO
+- `GET /dashboard/automazioni-oggi`: aggrega `alert_events` di oggi + sinistri aperti/liquidati, raggruppati per categoria (compleanni/scadenze/solleciti/sinistri) con drill-down invii.
+- Frontend: widget `AutomazioniOggiWidget` nella Dashboard con contatori e drill-down espandibile.
+
+### 🚀 Anagrafiche — paginazione server-side (scalabilità 10k+ / multi-utente)
+- `GET /anagrafiche?paged=true`: paginazione + filtri server-side (q, tag, categoria con_polizze/senza_polizze/condominio, compleanno, doc), proiezione LEGGERA (esclude `documenti`), conteggi categoria globali. Ritorna `{items,total,page,pages,conteggi}`. Legacy array preservato per gli altri consumer.
+- Frontend `Anagrafiche.jsx`: rimossi filtri/sort client-side, ora tutto server-side con controlli di paginazione. Perf: pagina 50 in ~0.2s / 28KB su 3188 anagrafiche (prima caricava tutti i doc completi).
+
+
+
 ## 2026-02-11 (parte 2) — Firma Elettronica Namirial + Estensioni Portale
 
 ### 🖊 Firma Elettronica Avanzata (Namirial eSignAnyWhere v6)

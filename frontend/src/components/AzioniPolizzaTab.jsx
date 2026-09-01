@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Ban, PauseCircle, PlayCircle, ArrowLeftRight, Loader2 } from "lucide-react";
+import useMezziPagamento from "@/hooks/useMezziPagamento";
+import { Ban, PauseCircle, PlayCircle, ArrowLeftRight, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -91,7 +92,44 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
         provvigioni: polizza.provvigioni || "",
         crea_titolo: true,
         motivo: "",
+        targa: polizza.targa || "",
+        veicolo_marca: polizza.veicolo_marca || "",
+        veicolo_modello: polizza.veicolo_modello || "",
+        mezzo_pagamento_preferito: polizza.mezzo_pagamento_preferito || "",
     });
+    const { mezzi } = useMezziPagamento();
+    const [garanzieSost, setGaranzieSost] = useState(
+        (polizza.garanzie || []).map((g) => ({
+            garanzia: g.garanzia || g.garanzia_originale || "",
+            massimale: g.massimale ?? g.capitale ?? "",
+            netto: g.netto ?? "",
+        })),
+    );
+    const [targaLoading, setTargaLoading] = useState(false);
+
+    // Cambio mezzo: recupera i dati del veicolo dalla targa (cache interna → OpenAPI)
+    const cercaTarga = async () => {
+        const tg = (sost.targa || "").trim().toUpperCase().replace(/\s/g, "");
+        if (tg.length < 5) { toast.error("Inserisci una targa valida"); return; }
+        setTargaLoading(true);
+        try {
+            const r = await api.get(`/openapi-it/automotive-by-targa/${encodeURIComponent(tg)}`);
+            const v = r.data?.veicolo || {};
+            setSost((p) => ({
+                ...p,
+                targa: tg,
+                veicolo_marca: v.marca || p.veicolo_marca,
+                veicolo_modello: v.modello || p.veicolo_modello,
+                veicolo_alimentazione: v.alimentazione || p.veicolo_alimentazione,
+                veicolo_cilindrata: v.cilindrata || p.veicolo_cilindrata,
+                veicolo_kw: v.potenza_kw || p.veicolo_kw,
+                veicolo_data_immatricolazione: v.data_immatricolazione || p.veicolo_data_immatricolazione,
+            }));
+            toast.success(`Veicolo trovato: ${v.marca || "?"} ${v.modello || ""}`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Veicolo non trovato per questa targa");
+        } finally { setTargaLoading(false); }
+    };
 
     // Cascata Ramo→Prodotto: ricarica prodotti quando cambia ramo o compagnia
     useEffect(() => {
@@ -102,6 +140,17 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     }, [sost.ramo, sost.compagnia_id]);
 
     const [sostLoading, setSostLoading] = useState(false);
+
+    // Premio lordo AUTO = netto + SSN + imposte
+    const setPremioSost = (campo, val) => setSost((p) => {
+        const next = { ...p, [campo]: val };
+        const somma = (parseFloat(next.premio_netto) || 0)
+            + (parseFloat(next.premio_ssn) || 0)
+            + (parseFloat(next.premio_imposte) || 0);
+        next.premio_lordo = somma ? somma.toFixed(2) : "";
+        return next;
+    });
+
     const doSostituisci = async () => {
         if (!sost.numero_polizza || !sost.effetto || !sost.scadenza) {
             toast.error("Numero, effetto e scadenza obbligatori"); return;
@@ -114,11 +163,20 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             numFields.forEach((k) => {
                 payload[k] = parseFloat(payload[k]) || 0;
             });
+            payload.targa = (payload.targa || "").trim().toUpperCase();
+            payload.garanzie = garanzieSost
+                .filter((g) => (g.garanzia || "").trim())
+                .map((g) => ({
+                    garanzia: g.garanzia.trim().toUpperCase(),
+                    massimale: parseFloat(g.massimale) || 0,
+                    netto: parseFloat(g.netto) || 0,
+                }));
             const r = await api.post(`/polizze/${polizza.id}/sostituisci`, payload);
+            const nStorni = r.data?.titoli_stornati || 0;
             if (r.data?.titolo_id) {
-                toast.success("Polizza sostituita + titolo creato");
+                toast.success(`Polizza sostituita + titolo creato${nStorni ? ` · ${nStorni} titoli arretrati stornati` : ""}`);
             } else {
-                toast.success("Polizza sostituita");
+                toast.success(`Polizza sostituita${nStorni ? ` · ${nStorni} titoli arretrati stornati` : ""}`);
             }
             if (r.data?.nuova_polizza_id) {
                 navigate(`/polizze/${r.data.nuova_polizza_id}`);
@@ -295,6 +353,102 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                     onChange={(e) => setSost((p) => ({ ...p, scadenza: e.target.value }))}
                                     disabled={isLocked} data-testid="sost-scadenza" />
                             </div>
+                            <div className="col-span-2">
+                                <Label>Metodo di pagamento preferito</Label>
+                                <select
+                                    value={sost.mezzo_pagamento_preferito || ""}
+                                    onChange={(e) => setSost((p) => ({ ...p, mezzo_pagamento_preferito: e.target.value }))}
+                                    disabled={isLocked}
+                                    className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:border-sky-500 outline-none"
+                                    data-testid="sost-mezzo-pagamento"
+                                >
+                                    <option value="">
+                                        {polizza.mezzo_pagamento_preferito
+                                            ? `Ereditato: ${polizza.mezzo_pagamento_preferito.toUpperCase()}`
+                                            : polizza.ultimo_mezzo_pagamento
+                                                ? `Auto (ultimo: ${polizza.ultimo_mezzo_pagamento})`
+                                                : "Auto (segue il primo incasso)"}
+                                    </option>
+                                    {mezzi.map((m) => (
+                                        <option key={m.codice} value={m.codice}>{m.label}</option>
+                                    ))}
+                                </select>
+                                <div className="text-[10px] text-slate-400 mt-0.5">
+                                    Il metodo NON cambia con la sostituzione: viene ereditato. Modificalo qui solo se il cliente lo richiede.
+                                </div>
+                            </div>
+                        </div>
+                        {(!!polizza.targa || /auto|rca|motocicl|autocarr/i.test(`${sost.ramo || ""} ${polizza.ramo || ""}`)) && (
+                            <div className="border-t border-slate-100 pt-2 mt-2">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
+                                    Veicolo nuovo contratto <span className="normal-case font-normal text-slate-400">(modificalo se hai cambiato mezzo)</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <Label>Targa</Label>
+                                        <div className="flex gap-1">
+                                            <Input value={sost.targa}
+                                                onChange={(e) => setSost((p) => ({ ...p, targa: e.target.value.toUpperCase() }))}
+                                                placeholder="es. AB123CD"
+                                                disabled={isLocked} data-testid="sost-targa" />
+                                            <Button type="button" size="sm" variant="outline" className="h-9 px-2 shrink-0"
+                                                onClick={cercaTarga} disabled={isLocked || targaLoading}
+                                                title="Recupera marca/modello dalla targa"
+                                                data-testid="sost-targa-lookup">
+                                                {targaLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                                            </Button>
+                                        </div>
+                                        {polizza.targa && sost.targa !== polizza.targa && (
+                                            <div className="text-[10px] text-amber-700 mt-0.5">Targa precedente: {polizza.targa}</div>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <Label>Marca</Label>
+                                        <Input value={sost.veicolo_marca}
+                                            onChange={(e) => setSost((p) => ({ ...p, veicolo_marca: e.target.value.toUpperCase() }))}
+                                            placeholder="es. FIAT"
+                                            disabled={isLocked} data-testid="sost-veicolo-marca" />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <Label>Modello</Label>
+                                        <Input value={sost.veicolo_modello}
+                                            onChange={(e) => setSost((p) => ({ ...p, veicolo_modello: e.target.value.toUpperCase() }))}
+                                            placeholder="es. PANDA 1.2"
+                                            disabled={isLocked} data-testid="sost-veicolo-modello" />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {/* GARANZIE nuova polizza */}
+                        <div className="border-t border-slate-100 pt-2 mt-2">
+                            <div className="flex items-center justify-between mb-1.5">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Garanzie nuova polizza</div>
+                                <button type="button"
+                                    onClick={() => setGaranzieSost((g) => [...g, { garanzia: "", massimale: "", netto: "" }])}
+                                    className="text-[11px] text-sky-700 hover:underline disabled:opacity-40"
+                                    disabled={isLocked} data-testid="sost-add-garanzia">+ Aggiungi garanzia</button>
+                            </div>
+                            {garanzieSost.length === 0 ? (
+                                <div className="text-[11px] text-slate-400 italic">Nessuna garanzia — usa &ldquo;+ Aggiungi garanzia&rdquo;.</div>
+                            ) : garanzieSost.map((g, i) => (
+                                <div key={i} className="grid grid-cols-[1fr_92px_82px_22px] gap-1.5 mb-1 items-center">
+                                    <Input className="h-8 text-xs" placeholder="Garanzia (es. RCA, Furto)"
+                                        value={g.garanzia}
+                                        onChange={(e) => setGaranzieSost((gs) => gs.map((x, j) => (j === i ? { ...x, garanzia: e.target.value } : x)))}
+                                        disabled={isLocked} data-testid={`sost-gar-nome-${i}`} />
+                                    <Input className="h-8 text-xs" type="number" placeholder="Massimale"
+                                        value={g.massimale}
+                                        onChange={(e) => setGaranzieSost((gs) => gs.map((x, j) => (j === i ? { ...x, massimale: e.target.value } : x)))}
+                                        disabled={isLocked} data-testid={`sost-gar-max-${i}`} />
+                                    <Input className="h-8 text-xs" type="number" placeholder="Netto €"
+                                        value={g.netto}
+                                        onChange={(e) => setGaranzieSost((gs) => gs.map((x, j) => (j === i ? { ...x, netto: e.target.value } : x)))}
+                                        disabled={isLocked} data-testid={`sost-gar-netto-${i}`} />
+                                    <button type="button" className="text-rose-500 hover:text-rose-700 text-sm"
+                                        onClick={() => setGaranzieSost((gs) => gs.filter((_, j) => j !== i))}
+                                        disabled={isLocked} data-testid={`sost-gar-del-${i}`}>✕</button>
+                                </div>
+                            ))}
                         </div>
                         <div className="border-t border-slate-100 pt-2 mt-2">
                             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Premi & Provvigioni</div>
@@ -302,26 +456,26 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                 <div>
                                     <Label>Premio netto €</Label>
                                     <Input type="number" step="0.01" value={sost.premio_netto}
-                                        onChange={(e) => setSost((p) => ({ ...p, premio_netto: e.target.value }))}
+                                        onChange={(e) => setPremioSost("premio_netto", e.target.value)}
                                         disabled={isLocked} data-testid="sost-pn" />
                                 </div>
                                 <div>
-                                    <Label>Premio lordo €</Label>
+                                    <Label>Premio lordo € <span className="text-[9px] text-slate-400 normal-case">(auto: netto+SSN+imposte)</span></Label>
                                     <Input type="number" step="0.01" value={sost.premio_lordo}
-                                        onChange={(e) => setSost((p) => ({ ...p, premio_lordo: e.target.value }))}
+                                        readOnly className="bg-slate-50 text-slate-700 cursor-default"
                                         disabled={isLocked} data-testid="sost-pl" />
                                 </div>
                                 <div>
                                     <Label>SSN €</Label>
                                     <Input type="number" step="0.01" value={sost.premio_ssn}
-                                        onChange={(e) => setSost((p) => ({ ...p, premio_ssn: e.target.value }))}
-                                        disabled={isLocked} />
+                                        onChange={(e) => setPremioSost("premio_ssn", e.target.value)}
+                                        disabled={isLocked} data-testid="sost-ssn" />
                                 </div>
                                 <div>
                                     <Label>Imposte €</Label>
                                     <Input type="number" step="0.01" value={sost.premio_imposte}
-                                        onChange={(e) => setSost((p) => ({ ...p, premio_imposte: e.target.value }))}
-                                        disabled={isLocked} />
+                                        onChange={(e) => setPremioSost("premio_imposte", e.target.value)}
+                                        disabled={isLocked} data-testid="sost-imposte" />
                                 </div>
                                 <div className="col-span-2">
                                     <Label>Provvigioni €</Label>
@@ -335,7 +489,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                             <span className="inline-flex items-center gap-1 text-violet-700 font-medium">
                                 <ArrowLeftRight size={12} /> Tipo titolo: sostituzione
                             </span>
-                            <span className="text-slate-400">— il titolo iniziale verrà creato in automatico con i dati inseriti</span>
+                            <span className="text-slate-400">— il titolo iniziale (con n° polizza) verrà creato in automatico; gli eventuali titoli arretrati della vecchia polizza saranno stornati</span>
                         </div>
                         <div className="flex items-end gap-2 pt-1">
                             <Checkbox

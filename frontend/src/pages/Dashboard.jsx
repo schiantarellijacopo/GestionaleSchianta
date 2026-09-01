@@ -10,7 +10,7 @@ import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
     PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2, Inbox } from "lucide-react";
+import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2, Inbox, Zap, AlarmClock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +93,8 @@ export default function Dashboard() {
 
             {!isClient && <DashboardTasks />}
 
+            {!isClient && <AutomazioniOggiWidget />}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <ChartCard to="/contabilita" className="lg:col-span-2" testid="dash-chart-incassi">
                     <div className="flex items-center justify-between mb-4">
@@ -165,19 +167,23 @@ export default function Dashboard() {
                                 </div>
                             </Card>
                         </Link>
-                        <Link to="/avvisi" className="block">
-                            <Card className="p-5 border-slate-200 hover:shadow-md hover:border-sky-300 cursor-pointer transition-shadow h-full" data-testid="dash-polizze-scadenze">
-                                <h3 className="font-semibold mb-3">Polizze in scadenza</h3>
-                                <div className="grid grid-cols-5 gap-1">
-                                    {Object.entries(admin.scadenze || {}).map(([k, v]) => (
-                                        <div key={k} className={`text-center rounded p-2 ${v > 0 ? "bg-amber-100" : "bg-slate-50"}`}>
+                        <Card className="p-5 border-slate-200 h-full" data-testid="dash-titoli-scaduti">
+                            <h3 className="font-semibold mb-3">Titoli scaduti da incassare</h3>
+                            <div className="grid grid-cols-5 gap-1">
+                                {Object.entries(admin.titoli_scaduti || admin.scadenze || {}).map(([k, v]) => {
+                                    const presetMap = { "Oggi": "scadute_oggi", "5gg": "scad_5g", "10gg": "scad_10g", "15gg": "scad15", "+15gg": "scad_oltre15" };
+                                    return (
+                                        <Link key={k} to={`/titoli?preset=${presetMap[k] || "tutti_aperti"}`}
+                                            className={`text-center rounded p-2 transition-colors hover:ring-2 hover:ring-amber-300 ${v > 0 ? "bg-amber-100" : "bg-slate-50"}`}
+                                            data-testid={`dash-titoli-scaduti-${k}`}>
                                             <div className="text-xs text-slate-500">{k}</div>
                                             <div className={`font-bold text-lg ${v > 0 ? "text-amber-700" : "text-slate-400"}`}>{v}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </Card>
-                        </Link>
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-2">Clicca un riquadro per aprire i titoli scaduti da N giorni</div>
+                        </Card>
                     </div>
                     <Link to="/polizze" className="block">
                         <Card className="p-5 border-slate-200 hover:shadow-md hover:border-sky-300 cursor-pointer transition-shadow" data-testid="dash-produzione-ramo">
@@ -207,7 +213,13 @@ export default function Dashboard() {
 
 function DashboardTasks() {
     const [tasks, setTasks] = useState(null);
+    const [saldoCassa, setSaldoCassa] = useState(null);
     useEffect(() => { api.get("/dashboard/tasks").then((r) => setTasks(r.data)); }, []);
+    useEffect(() => {
+        api.get("/compagnie/saldi-cassa")
+            .then((r) => setSaldoCassa((r.data || []).reduce((s, c) => s + (c.saldo_da_versare || 0), 0)))
+            .catch(() => {});
+    }, []);
     if (!tasks) return null;
 
     const iconMap = {
@@ -225,7 +237,15 @@ function DashboardTasks() {
     };
 
     // Mostra prima i task con count > 0, poi gli altri (consente comunque navigazione)
-    const sorted = [...tasks].sort((a, b) => (b.count > 0) - (a.count > 0));
+    const allTasks = [...tasks];
+    if (saldoCassa !== null) {
+        allTasks.push({
+            key: "saldo_cassa", label: "Saldo cassa", icon: "Wallet", color: "emerald",
+            count: Math.round(Math.abs(saldoCassa)), count_label: fmtEur(saldoCassa),
+            url: "/compagnie-estratto", descrizione: "Somma saldi cassa di tutte le compagnie",
+        });
+    }
+    const sorted = [...allTasks].sort((a, b) => (b.count > 0) - (a.count > 0));
     const conLavoro = sorted.filter((t) => t.count > 0);
     const senzaLavoro = sorted.filter((t) => t.count === 0);
 
@@ -258,7 +278,7 @@ function DashboardTasks() {
                                         {t.label}
                                     </div>
                                     <div className="text-2xl font-bold num text-slate-900 leading-tight">
-                                        {t.count}
+                                        {t.count_label ?? t.count}
                                     </div>
                                     <div className="text-[11px] opacity-70 mt-1 truncate">
                                         {t.descrizione}
@@ -270,6 +290,83 @@ function DashboardTasks() {
                     );
                 })}
             </div>
+        </Card>
+    );
+}
+
+
+const AUTO_ICONS = { Cake, AlarmClock, CalendarClock, AlertTriangle, Zap };
+const AUTO_TONE = {
+    compleanni: "text-pink-600 bg-pink-50 border-pink-200",
+    scadenze: "text-amber-600 bg-amber-50 border-amber-200",
+    solleciti: "text-rose-600 bg-rose-50 border-rose-200",
+    sinistri: "text-red-600 bg-red-50 border-red-200",
+    altro: "text-sky-600 bg-sky-50 border-sky-200",
+};
+
+function AutomazioniOggiWidget() {
+    const [data, setData] = useState(null);
+    const [openCat, setOpenCat] = useState(null);
+    useEffect(() => {
+        api.get("/dashboard/automazioni-oggi").then((r) => setData(r.data)).catch(() => setData({ categorie: [], totale_invii: 0 }));
+    }, []);
+    if (!data) return null;
+
+    return (
+        <Card className="p-5 border-slate-200 mb-6" data-testid="automazioni-oggi-widget">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                    <Zap size={18} className="text-violet-600" />
+                    <h3 className="text-lg font-medium text-slate-900">Automazioni di oggi</h3>
+                    <span className="text-xs text-slate-400">{data.data}</span>
+                </div>
+                <div className="flex gap-2 text-xs">
+                    <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-600" data-testid="auto-tot">{data.totale_invii} invii</span>
+                    <span className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{data.totale_inviati} ok</span>
+                    {data.totale_errori > 0 && <span className="px-2 py-1 rounded-full bg-rose-100 text-rose-700">{data.totale_errori} errori</span>}
+                </div>
+            </div>
+
+            {(!data.categorie || data.categorie.length === 0) ? (
+                <div className="text-sm text-slate-400 italic py-6 text-center border border-dashed border-slate-200 rounded-lg" data-testid="auto-empty">
+                    Nessuna automazione eseguita oggi. Compleanni, avvisi di scadenza, solleciti e sinistri appariranno qui.
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {data.categorie.map((c) => {
+                        const Icon = AUTO_ICONS[c.icona] || Zap;
+                        const isOpen = openCat === c.key;
+                        return (
+                            <div key={c.key} className={`border rounded-lg overflow-hidden ${AUTO_TONE[c.key] || AUTO_TONE.altro}`} data-testid={`auto-cat-${c.key}`}>
+                                <button className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/40 transition-colors"
+                                    onClick={() => setOpenCat(isOpen ? null : c.key)}>
+                                    <div className="flex items-center gap-2">
+                                        <Icon size={16} />
+                                        <span className="font-medium text-sm text-slate-800">{c.label}</span>
+                                    </div>
+                                    <span className="text-lg font-bold text-slate-800">{c.totale}</span>
+                                </button>
+                                {isOpen && (
+                                    <div className="bg-white/70 border-t border-white/60 max-h-56 overflow-y-auto divide-y divide-slate-100" data-testid={`auto-drill-${c.key}`}>
+                                        {c.items.map((it, i) => (
+                                            <div key={it.id || i} className="px-3 py-2 text-xs flex items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <div className="font-medium text-slate-700 truncate">{it.destinatario}</div>
+                                                    <div className="text-slate-500 truncate">{it.oggetto || "—"}</div>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${it.status === "ok" ? "bg-emerald-100 text-emerald-700" : it.status === "errore" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>{it.canale}</span>
+                                                    {it.ora && <div className="text-slate-400 mt-0.5">{it.ora}</div>}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </Card>
     );
 }

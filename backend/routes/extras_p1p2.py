@@ -910,6 +910,7 @@ async def calcola_regolazione(
         await db.polizze.update_one({"id": pid}, {"$set": {
             "regolazione_ultimo_calcolo": risultato["data_calcolo"],
             "regolazione_dovuto": dovuto,
+            "regolazione_stato": "calcolata",
         }})
     return risultato
 

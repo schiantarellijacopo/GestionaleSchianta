@@ -13,7 +13,7 @@ let _cacheUsers = null;
  *                                  onSaved={onReload} canEdit={canEdit} />
  * Salva con PUT /{entita}/{id} { collaboratore_id }.
  */
-export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, canEdit = true, label = "Operatore" }) {
+export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, canEdit = true, label = "Operatore", fallbackName = null }) {
     const [users, setUsers] = useState(_cacheUsers || []);
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -30,7 +30,8 @@ export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, 
     }, []);
 
     const currentUser = users.find((u) => u.id === value);
-    const displayName = currentUser?.name || currentUser?.email || (value ? value.slice(0, 6) : "—");
+    const displayName = currentUser?.name || currentUser?.email || fallbackName
+        || (value ? "(operatore non trovato)" : "—");
 
     const save = async (newId) => {
         setSaving(true);

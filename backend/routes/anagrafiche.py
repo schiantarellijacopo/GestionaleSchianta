@@ -235,6 +235,14 @@ async def list_anagrafiche(
     q: Optional[str] = None,
     limit: int = 5000,
     tag: Optional[str] = None,
+    paged: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    categoria: Optional[str] = None,   # all | con_polizze | senza_polizze | condominio
+    compleanno: Optional[str] = None,  # oggi | settimana | mese
+    doc: Optional[str] = None,         # scaduti | in_scadenza
+    sort: Optional[str] = None,
+    dir: str = "asc",
     user: dict = Depends(current_user),
 ):
     flt: dict = {}
@@ -257,7 +265,173 @@ async def list_anagrafiche(
             flt["$and"] = and_clauses
     if tag:
         flt["tags"] = tag
+
+    # ------------------------------------------------------------------
+    # MODALITÀ PAGINATA (scalabile su 10k+ anagrafiche, filtri server-side)
+    # ------------------------------------------------------------------
+    if paged:
+        return await _list_anagrafiche_paged(
+            flt=flt, q=q, categoria=categoria, compleanno=compleanno, doc=doc,
+            sort=sort, dir=dir, page=max(1, page), page_size=max(1, min(page_size, 200)),
+        )
+
     items = await db.anagrafiche.find(flt, {"_id": 0}).sort("ragione_sociale", 1).to_list(limit)
+    if not items:
+        return items
+    # arricchimento: conteggio polizze attive per colorazione
+    ids = [a["id"] for a in items]
+    pipeline = [
+        {"$match": {"contraente_id": {"$in": ids}, "stato": "attiva"}},
+        {"$group": {"_id": "$contraente_id", "n": {"$sum": 1}}},
+    ]
+    counts = {row["_id"]: row["n"] async for row in db.polizze.aggregate(pipeline)}
+    # collaboratore lookup
+    collab_ids = list({a.get("collaboratore_id") for a in items if a.get("collaboratore_id")})
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+    for a in items:
+        a["polizze_attive_count"] = counts.get(a["id"], 0)
+        a["collaboratore_nome"] = collab_map.get(a.get("collaboratore_id")) if a.get("collaboratore_id") else None
+        # categoria per colorazione frontend
+        rs = (a.get("ragione_sociale") or "").upper()
+        is_condominio = ("CONDOMINIO" in rs) or ("condominio" in (a.get("tags") or []))
+        if is_condominio:
+            a["categoria_ui"] = "condominio"
+        elif a["polizze_attive_count"] > 0:
+            a["categoria_ui"] = "con_polizze"
+        else:
+            a["categoria_ui"] = "senza_polizze"
+    return items
+
+
+# Proiezione "leggera" per la lista paginata: esclude documenti/allegati e blob pesanti
+_ANAG_LEAN_PROJ = {
+    "_id": 0, "id": 1, "ragione_sociale": 1, "tipo": 1, "nome": 1, "cognome": 1,
+    "email": 1, "telefono": 1, "cellulare": 1, "indirizzo": 1, "comune": 1,
+    "citta": 1, "provincia": 1, "cap": 1, "tags": 1, "collaboratore_id": 1,
+    "data_nascita": 1, "codice_fiscale": 1, "partita_iva": 1, "avatar_url": 1,
+    "consenso_marketing_email": 1, "canale_email": 1, "canale_sms": 1, "canale_whatsapp": 1,
+}
+
+
+async def _ids_con_polizze_attive() -> set:
+    ids = set()
+    async for row in db.polizze.aggregate([
+        {"$match": {"stato": "attiva"}},
+        {"$group": {"_id": "$contraente_id"}},
+    ]):
+        if row["_id"]:
+            ids.add(row["_id"])
+    return ids
+
+
+async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, dir, page, page_size):
+    from datetime import date, timedelta
+    import copy as _copy
+    conteggi_flt = _copy.deepcopy(flt)  # q+tag+role, senza categoria/compleanno
+    ids_con = None
+
+    # Categoria (server-side)
+    if categoria and categoria != "all" and not (q and q.strip()):
+        if categoria == "condominio":
+            flt.setdefault("$and", []).append({"$or": [
+                {"ragione_sociale": {"$regex": "condominio", "$options": "i"}},
+                {"tags": "condominio"},
+            ]})
+        else:
+            ids_con = await _ids_con_polizze_attive()
+            if categoria == "con_polizze":
+                flt["id"] = {"$in": list(ids_con)}
+            elif categoria == "senza_polizze":
+                flt["id"] = {"$nin": list(ids_con)}
+                flt.setdefault("$and", []).append({"$nor": [
+                    {"ragione_sociale": {"$regex": "condominio", "$options": "i"}},
+                    {"tags": "condominio"},
+                ]})
+
+    # Compleanno (server-side su data_nascita YYYY-MM-DD)
+    if compleanno:
+        today = date.today()
+        if compleanno == "oggi":
+            flt["data_nascita"] = {"$regex": f"-{today.strftime('%m-%d')}$"}
+        elif compleanno == "settimana":
+            pats = [(today + timedelta(days=i)).strftime("-%m-%d") for i in range(7)]
+            flt.setdefault("$and", []).append({"$or": [{"data_nascita": {"$regex": re.escape(p) + "$"}} for p in pats]})
+        elif compleanno == "mese":
+            flt["data_nascita"] = {"$regex": f"-{today.strftime('%m')}-"}
+
+    # Sort (solo campi memorizzati; altri → fallback ragione_sociale)
+    sortable = {"ragione_sociale", "email", "telefono", "cellulare", "indirizzo", "comune", "citta", "data_nascita"}
+    sort_field = sort if sort in sortable else "ragione_sociale"
+    sort_dir = -1 if dir == "desc" else 1
+
+    # Filtro documenti: richiede scansione → path lento, applicato solo se richiesto
+    if doc:
+        proj = dict(_ANAG_LEAN_PROJ); proj["documenti"] = 1
+        all_rows = await db.anagrafiche.find(flt, proj).sort(sort_field, sort_dir).to_list(20000)
+        today_iso = date.today().isoformat()
+        in30 = (date.today() + timedelta(days=30)).isoformat()
+
+        def _match_doc(a):
+            docs = a.get("documenti") or {}
+            vals = docs.values() if isinstance(docs, dict) else []
+            if doc == "scaduti":
+                return any(d and d.get("scadenza") and d["scadenza"] < today_iso for d in vals)
+            if doc == "in_scadenza":
+                return any(d and d.get("scadenza") and today_iso <= d["scadenza"] <= in30 for d in vals)
+            return True
+        matched = [a for a in all_rows if _match_doc(a)]
+        for a in matched:
+            a.pop("documenti", None)
+        total = len(matched)
+        items = matched[(page - 1) * page_size: page * page_size]
+    else:
+        total = await db.anagrafiche.count_documents(flt)
+        items = await db.anagrafiche.find(flt, _ANAG_LEAN_PROJ).sort(sort_field, sort_dir).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    # Arricchimento SOLO della pagina corrente
+    ids = [a["id"] for a in items]
+    counts = {}
+    if ids:
+        async for row in db.polizze.aggregate([
+            {"$match": {"contraente_id": {"$in": ids}, "stato": "attiva"}},
+            {"$group": {"_id": "$contraente_id", "n": {"$sum": 1}}},
+        ]):
+            counts[row["_id"]] = row["n"]
+    collab_ids = list({a.get("collaboratore_id") for a in items if a.get("collaboratore_id")})
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+    for a in items:
+        a["polizze_attive_count"] = counts.get(a["id"], 0)
+        a["collaboratore_nome"] = collab_map.get(a.get("collaboratore_id")) if a.get("collaboratore_id") else None
+        rs = (a.get("ragione_sociale") or "").upper()
+        if "CONDOMINIO" in rs or "condominio" in (a.get("tags") or []):
+            a["categoria_ui"] = "condominio"
+        elif a["polizze_attive_count"] > 0:
+            a["categoria_ui"] = "con_polizze"
+        else:
+            a["categoria_ui"] = "senza_polizze"
+
+    # Conteggi categoria globali (per i tab del frontend) — su base q+tag
+    cond_clause = {"$or": [
+        {"ragione_sociale": {"$regex": "condominio", "$options": "i"}},
+        {"tags": "condominio"},
+    ]}
+    ids_con_all = await _ids_con_polizze_attive()
+    tot_all = await db.anagrafiche.count_documents(conteggi_flt)
+    cond_flt = _copy.deepcopy(conteggi_flt)
+    cond_flt.setdefault("$and", []).append(cond_clause)
+    cond_all = await db.anagrafiche.count_documents(cond_flt)
+    con_all = await db.anagrafiche.count_documents({**conteggi_flt, "id": {"$in": list(ids_con_all)}})
+    senza_all = max(0, tot_all - con_all - cond_all)
+    conteggi = {"tutte": tot_all, "con_polizze": con_all, "senza_polizze": senza_all, "condominio": cond_all}
+
+    return {"items": items, "total": total, "page": page, "page_size": page_size,
+            "pages": (total + page_size - 1) // page_size, "conteggi": conteggi}
     if not items:
         return items
     # arricchimento: conteggio polizze attive per colorazione
@@ -719,11 +893,23 @@ async def upload_documento_anagrafica(
             "data_consenso_privacy": _now_iso()[:10],
         })
     await db.anagrafiche.update_one({"id": aid}, {"$set": set_fields})
+    # AUTO-AVATAR: se è un documento con foto, ritaglia il volto e impostalo come avatar
+    avatar_url = None
+    if tipo in ("carta_identita", "patente", "passaporto"):
+        try:
+            import face_crop
+            img_bytes = data
+            if ct == "application/pdf":
+                img_bytes = face_crop._pdf_first_page_jpeg(data)
+            if img_bytes:
+                avatar_url = await face_crop.salva_avatar_da_documento(db, aid, img_bytes)
+        except Exception as e:
+            logging.warning("Face crop avatar da %s fallito per %s: %s", tipo, aid, e)
     await log_attivita(user, "upload", "anagrafica_doc", aid, f"Caricato {tipo}: {file.filename}")
     await log_diario_cliente(aid, "documento",
         titolo=f"Caricato documento: {tipo.replace('_', ' ')}",
         descrizione=f"File: {file.filename} ({doc_entry['size_kb']} KB)", autore=user)
-    return {tipo: doc_entry}
+    return {tipo: doc_entry, "avatar_url": avatar_url}
 
 
 @router.delete("/anagrafiche/{aid}/documenti/{tipo}")

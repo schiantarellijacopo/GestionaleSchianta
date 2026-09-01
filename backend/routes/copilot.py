@@ -1,5 +1,6 @@
 """AI Copilot + TTS endpoints — chat conversazionale con Claude Sonnet 4.6."""
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -34,6 +35,19 @@ async def copilot_chat(body: CopilotRequest, user=Depends(current_user)) -> Copi
         session_id=out["session_id"],
         context_summary=out["context_summary"],
         audio_available=tts_svc.is_configured() and body.use_tts,
+    )
+
+
+@router.post("/chat/stream")
+async def copilot_chat_stream(body: CopilotRequest, user=Depends(current_user)):
+    """Chat in STREAMING SSE (ibrido Haiku/Sonnet, dispatch DB parallelo)."""
+    if not body.message or len(body.message.strip()) < 2:
+        raise HTTPException(400, "Messaggio troppo corto")
+    return StreamingResponse(
+        copilot.copilot_chat_stream(body.message, user, session_id=body.session_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Content-Encoding": "identity"},  # esclude il gzip middleware (bufferizza gli SSE)
     )
 
 

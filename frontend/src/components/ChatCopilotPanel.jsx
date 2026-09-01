@@ -9,6 +9,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import { streamCopilot } from "@/lib/copilotStream";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -97,18 +98,28 @@ export default function ChatCopilotPanel() {
     const send = async (rawText) => {
         const msg = (rawText || input).trim();
         if (!msg || busy) return;
-        setMessages((m) => [...m, { role: "user", text: msg }]);
+        setMessages((m) => [...m, { role: "user", text: msg }, { role: "assistant", text: "", ctx: {} }]);
         setInput("");
         setBusy(true);
+        const patchLast = (patch) => setMessages((m) => {
+            const c = [...m];
+            c[c.length - 1] = { ...c[c.length - 1], ...(typeof patch === "function" ? patch(c[c.length - 1]) : patch) };
+            return c;
+        });
         try {
-            const r = await api.post("/copilot/chat", { message: msg, session_id: sessionId });
-            const { answer, session_id: newSid, context_summary } = r.data;
-            if (!sessionId && newSid) setSessionId(newSid);
-            setMessages((m) => [...m, { role: "assistant", text: answer, ctx: context_summary || {} }]);
+            await streamCopilot({
+                message: msg,
+                sessionId,
+                onMeta: (d) => {
+                    if (!sessionId && d.session_id) setSessionId(d.session_id);
+                    patchLast({ ctx: d.context_summary || {}, modello: d.modello });
+                },
+                onDelta: (t) => patchLast((last) => ({ text: last.text + t })),
+                onError: (d) => patchLast({ text: `⚠️ Errore: ${d.error}` }),
+            });
             loadSessions();  // refresh titoli sessioni
         } catch (e) {
-            const err = e.response?.data?.detail || e.message;
-            setMessages((m) => [...m, { role: "assistant", text: `⚠️ Errore: ${err}` }]);
+            patchLast({ text: `⚠️ Errore: ${e.message}` });
         } finally { setBusy(false); }
     };
 
@@ -181,7 +192,7 @@ export default function ChatCopilotPanel() {
                             <Sparkles className="text-violet-600" size={18} />
                             <div>
                                 <div className="font-semibold text-slate-800 text-sm">Assistente AI Conversazionale</div>
-                                <div className="text-[10px] text-slate-500">Claude Sonnet 4.6 · accesso READ al tuo CRM · rispetta i tuoi permessi</div>
+                                <div className="text-[10px] text-slate-500">AI ibrida ⚡ veloce / 🧠 approfondita · risposte in streaming · accesso READ al tuo CRM</div>
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -218,9 +229,9 @@ export default function ChatCopilotPanel() {
                         {messages.map((m, i) => (
                             <MessageBubble key={i} m={m} />
                         ))}
-                        {busy && (
+                        {busy && messages[messages.length - 1]?.text === "" && (
                             <div className="flex items-center gap-2 text-xs text-violet-600 pl-2">
-                                <Loader2 size={12} className="animate-spin" /> Claude sta pensando…
+                                <Loader2 size={12} className="animate-spin" /> Sto cercando nel CRM…
                             </div>
                         )}
                     </div>
@@ -291,10 +302,16 @@ function MessageBubble({ m }) {
                                 components={MARKDOWN_COMPONENTS}
                             >{m.text}</ReactMarkdown>
                         </div>
-                        {m.ctx && Object.keys(m.ctx).length > 0 && (
+                        {((m.ctx && Object.keys(m.ctx).length > 0) || m.modello) && (
                             <div className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100 flex items-center gap-1 flex-wrap">
                                 <ChevronRight size={9} />
-                                {Object.entries(m.ctx).map(([k, v]) => (
+                                {m.modello && (
+                                    <span className={`px-1.5 py-0.5 rounded font-medium ${m.modello === "veloce" ? "bg-emerald-50 text-emerald-700" : "bg-indigo-50 text-indigo-700"}`}
+                                        data-testid="chat-model-badge">
+                                        {m.modello === "veloce" ? "⚡ veloce" : "🧠 approfondito"}
+                                    </span>
+                                )}
+                                {Object.entries(m.ctx || {}).map(([k, v]) => (
                                     <span key={k} className="bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded font-mono">
                                         {k}: {v}
                                     </span>

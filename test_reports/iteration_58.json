@@ -1,0 +1,46 @@
+{
+  "summary": "Iter58 frontend E2E test dei 10 batch di modifiche recenti. LOGIN admin OK. (1) COPILOT streaming SSE: FAB → invio 'quante polizze attive?' → risposta appare progressivamente (lengths growth [52,76,440,644...]) + badge '⚡ veloce'; seconda domanda 'analizza portafoglio' → badge '🧠 approfondito'; stessa sessione con 2 messaggi in chat. (2) SOSTITUZIONE POLIZZA UI: card azione-sostituisci con TUTTI i campi (sost-numero/effetto/scadenza/mezzo-pagamento con opzione 'Auto (segue il primo incasso)', targa/lookup/marca/modello, add-garanzia + righe editabili sost-gar-nome-{i}/max-{i}/netto-{i}, sost-pn/pl); Premio lordo AUTO-CALCOLATO e READONLY confermato (100+10+20 → 130.00, readOnly=true); ⚠️ sost-ssn e sost-imposte mancavano data-testid → AGGIUNTI (fix minore in AzioniPolizzaTab.jsx). (3) SOSTITUZIONE E2E su polizza di test TEST-5E6C76CF (creata via API): confirm → POST /polizze/{old}/sostituisci 200 → nuova polizza TESTSOST-68907 creata con targa BB111BB, garanzia RCA-NEW, PN 100 SSN 10 imposte 20 PL 130 mezzo pagamento ereditato; navigazione a /polizze/{new_id}; header nuova polizza mostra 'SOSTITUISCE: N. TEST-5E6C76CF' con link (pol-sostituisce-link) cliccabile; tab Titoli mostra il nuovo titolo tipo 'sostituzione' con N° Polizza=TESTSOST-68907. NOTA: non è stato possibile creare titolo arretrato 'da_incassare' via POST /api/titoli (500) quindi lo storno arretrati con etichetta 'polizza prec.' NON è stato verificato via UI in questa iterazione (backend già validato via curl dal main agent). (4) PROVVIGIONI editor multi-collaboratore (provv-operatori-editor + provv-op-add + provv-op-collab-0 + provv-op-tipo-0 + provv-op-valore-0 + provv-op-importo-0 + provv-op-margine + provv-op-salva): tutti i data-testid presenti e visualizzati. (5) NOTE POLIZZA: polizza-note-textarea + polizza-note-salva → scritto 'TEST_NOTE_ITER58' → Salva → reload → persistito. (6) LOGO COMPAGNIA: colonna LOGO in tabella /librerie tab Compagnie presente (1 logo visualizzato); pol-compagnia-logo presente nell'header della polizza di test. (7) PAGAMENTO PREFERITO: label 'Pagamento preferito' visibile nella griglia info polizza (uppercase via CSS). (8) LIBRERIE Comunicazioni: nessuna sezione Twilio (regression OK). (9) STUDIO MARKETING tab Presentazioni carica correttamente. (10) DETTAGLIO POLIZZA regression: tabs Garanzie/Provvigioni/Titoli/Documenti/Sinistri/Altri dati/Azioni cliccabili senza errori. TEST DATA: creata + eliminata anagrafica TESTE2E (79ded1b7) + polizza vecchia (0b39...) + polizza nuova (eea2df...) via API con force=true — nessun residuo.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/titoli", "issue": "500 Internal Server Error quando si crea manualmente un titolo (payload testato: anagrafica_id/polizza_id/tipo=quietanza/importo/data_scadenza/stato=da_incassare) — impedisce test manuale di storno titoli arretrati. Verificare schema Titolo required fields."},
+      {"endpoint": "POST /api/anagrafiche", "issue": "500 (Pydantic ValidationError) invece di 422 quando manca ragione_sociale o tipo non è tra ('persona_fisica','persona_giuridica') — già segnalato in iter57"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AzioniPolizzaTab (form Sostituisci)", "issue": "Gli input SSN e Imposte non avevano data-testid (breaking per test automatici). FIXATO in iter58 aggiungendo data-testid='sost-ssn' e data-testid='sost-imposte'.", "selector": "[data-testid=sost-ssn], [data-testid=sost-imposte]", "priority": "LOW (fixato)"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Polizza detail — vari punti (Comunicazioni tab in Librerie)", "issues": ["React console warning: 'Encountered two children with the same key ac16fa61-799d-4e60-b57d-b9eff80da5f9' (chiave duplicata in una lista) — probabile in un select/map di collaboratori o compagnie. Non blocca funzionalità ma va risolto per correttezza React.", "Hydration warning: '<option> cannot be a child of <span>' su Librerie tab Comunicazioni — HTML invalido (option annidato in span). Non blocca ma sporca la console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/tests/setup_test_data.py"
+  ],
+  "action_items": [
+    "(BACKEND) Fixare POST /api/titoli 500 → validare Pydantic e ritornare 422 con dettaglio campi mancanti. Verificare campi required del modello Titolo.",
+    "(BACKEND) POST /api/anagrafiche: convertire 500 → 422 in caso di ValidationError Pydantic (già in iter57 backlog)",
+    "(FRONTEND) Risolvere warning React duplicate key 'ac16fa61-799d-4e60-b57d-b9eff80da5f9' — investigare i .map che usano quell'id come key (probabile collaboratori o compagnie duplicati nel dataset)",
+    "(FRONTEND) Fix hydration warning '<option> cannot be a child of <span>' in Librerie tab Comunicazioni — struttura DOM di un select con children mal costruita",
+    "(TEST-INFRA — opz.) Aggiungere data-testid stabile ai bottoni Modifica utente nella lista Librerie → Utenti/Collaboratori per abilitare i test UI della sottorete piramidale (utente-parent-collab / utente-parent-pct già presenti nel form ma non sono stato in grado di aprirlo con selettori generici)"
+  ],
+  "critical_code_review_comments": [
+    "AzioniPolizzaTab.jsx (line 468-478): SSN e Imposte inputs mancavano data-testid — aggiunti in iter58. Il campo Provvigioni (row 480-485) è anch'esso privo di data-testid: valutare 'sost-provvigioni' per completezza.",
+    "AzioniPolizzaTab.jsx line 158: usa window.confirm() per la conferma sostituzione — poco elegante ma funziona. Considerare shadcn AlertDialog per UX coerente.",
+    "Anagrafiche.jsx line 160-164: debounce 300ms implementato correttamente con setTimeout + cleanup. Log warning React (chiavi duplicate) proveniente da altre pagine, non da questa.",
+    "Errore hydration '<option> cannot be a child of <span>' in Librerie/Comunicazioni: verificare che i Select shadcn non contengano <option> come figli diretti di span — questo è un HTML invalido a runtime SSR/hydration."
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/AzioniPolizzaTab.jsx (aggiunti data-testid='sost-ssn' e data-testid='sost-imposte')",
+    "/app/tests/setup_test_data.py (creato per generare dati di test anagrafica+polizza)"
+  ],
+  "success_rate": {"backend": "N/A (skipped come da richiesta)", "frontend": "~92% — tutte le feature core verificate; solo storno titoli arretrati non riprodotto per limite creazione titolo di test (POST /api/titoli 500)"},
+  "test_credentials": "admin@assicura.it / Admin123! — verificato OK",
+  "seed_data_creation": "Creata via API: anagrafica TESTE2E Iter58 (79ded1b7...), polizza TEST-5E6C76CF (0b3930e7...), polizza sostitutiva TESTSOST-68907 (eea2df03...). TUTTI eliminati alla fine del test con DELETE ?force=true. Nessun residuo permanente.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend flow E2E sostituzione + copilot streaming + note + logo + provvigioni editor + premio lordo auto-calc verificati e funzionanti. Le testids sost-ssn/sost-imposte sono state aggiunte in iter58 in AzioniPolizzaTab.jsx. Per creare dati di test polizza: usare /app/tests/setup_test_data.py (aggiornato con campi contraente_id/effetto/scadenza). POST /api/titoli restituisce 500 quando manca qualche campo required: se serve testare storno titoli arretrati, prima verificare/aggiornare lo script per matchare il modello Titolo aggiornato. React console mostra 2 warning non bloccanti da segnalare al main agent (duplicate keys + option in span).",
+  "rca of the issue": "N/A - nessun bug funzionale bloccante nel frontend. Fix minore applicato (data-testid mancanti in AzioniPolizzaTab). Sostituzione polizza E2E completata con successo end-to-end incluso link pol-sostituisce, titolo di sostituzione, ereditarietà mezzo pagamento e veicolo/garanzie."
+}

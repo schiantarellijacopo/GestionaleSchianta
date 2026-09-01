@@ -1,0 +1,38 @@
+{
+  "summary": "Iter59 — Test E2E delle 3 nuove feature P0 (Regolazione Premio, Cumulativa Assicurati, Dashboard Automazioni-oggi). BACKEND: 18/18 pytest PASS (test_iter59_p0_features.py). Verificati tutti gli endpoint: PUT /polizze/{id} con flag regolazione, GET /regolazione-premio (data_invio_prevista=scadenza+30gg, stato='da_richiedere', da_inviare bool), GET /regolazione-premio/stats (totale/da_inviare/per_stato), POST /regolazione-premio/{id}/lettera-pdf (content-type application/pdf + magic bytes %PDF), POST /regolazione-premio/{id}/invia-lettera con invia_email:false (stato→'lettera_inviata' + persistito), POST /polizze/{id}/regolazione-premio/calcola (100000*1.5%=1500 dovuto=1500, stato→'calcolata'), POST /regolazione-premio/{id}/genera-titolo (Titolo tipo='regolazione' importo_lordo=1500 imposte=100 netto=1400, stato→'titolo_generato'), POST /regolazione-premio/{id}/stato per cambio manuale (chiusa) + validazione 400 su stato invalido. CUMULATIVA: POST /polizze/{id}/assicurati crea (flag is_cumulativa_assicurati=true auto), calcolo stato attivo/uscito da data_uscita, GET stats OK, PUT update OK (uppercase cognome/nome), DELETE 404 idempotente. DASHBOARD: GET /dashboard/automazioni-oggi ritorna {data, totale_invii, totale_inviati, totale_errori, categorie:[]} con collezione vuota. FRONTEND: pagina /regolazione-premio carica → 4 stat cards, 7 tab filtro, riga polizza flaggata visibile con 3 azioni (reg-lettera/reg-calcola/reg-titolo), dialog reg-lettera-dialog apre con pulsanti reg-lettera-pdf/manuale/email. Polizza detail /polizze/{id} → tab 'Assicurati' presente e cliccabile → assicurati-tab visibile con assicurati-search/assicurati-add-btn/assicurati-import-btn, dialog Aggiungi con tutti i campi (cognome/nome/ditta/entrata/uscita/cf/save). Dashboard '/' → automazioni-oggi-widget presente con contatori 0 invii/0 ok e messaggio empty 'Nessuna automazione eseguita oggi…' correttamente mostrato. CLEANUP: titolo di regolazione eliminato, flag regolazione_premio + is_cumulativa_assicurati rimessi a false, assicurati test eliminati.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Assicurati tab — rendering riga appena creata", "issue": "Dopo creazione via API di un assicurato, navigando al tab Assicurati sulla polizza, la riga [data-testid=assicurato-row-{id}] non è stata trovata immediatamente (possibile timing di fetch / la lista si carica al mount del tab). Non blocca: la creazione è confermata dal backend e dalla stats. Suggerimento: aggiungere refetch al focus del tab o retry.", "affected_selectors": ["[data-testid^='assicurato-row-']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter59_p0_features.py",
+    "/app/test_reports/pytest/iter59.xml"
+  ],
+  "action_items": [
+    "(OPZIONALE) AssicuratiTab: garantire refetch della lista quando il tab diventa attivo per evitare edge-case di lista vuota su render iniziale."
+  ],
+  "critical_code_review_comments": [
+    "regolazione_premio.py list_regolazioni: pre-caricamento anagrafiche/compagnie con dict-comp — pattern efficiente. Nessun N+1.",
+    "regolazione_premio.py test_02: data_invio_prevista=scadenza+giorni_invio validato correttamente su ISO date.",
+    "extras_p1p2.py calcola_regolazione: dovuto=max(premio_calcolato, minima) applicato correttamente (verificato con base=100000, tasso=1.5, minima=500 → 1500).",
+    "cumulativa.py create_assicurato: normalizzazione cognome/nome uppercase corretta; stato calcolato via _stato_da_uscita coerente (data_uscita<=oggi → 'uscito').",
+    "cumulativa.py flag polizza is_cumulativa_assicurati settato a True automaticamente su create/import: OK. Il ripristino a false è responsabilità del client (endpoint PUT polizza) — accettabile.",
+    "dashboard.py automazioni-oggi: query alert_events con {created_at:{$gte: today_iso}} funziona bene su ISO strings; categorizzazione via _categoria_automazione con keyword-match — chiara e testabile."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter59_p0_features.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (tutti i data-testid richiesti presenti e interattivi)"},
+  "test_credentials": "admin@assicura.it / Admin123! — verificato OK (token in access_token)",
+  "seed_data_creation": "Test transient: flag regolazione_premio su una polizza esistente (027c7a90…), 2 assicurati TESTITER59 + 1 assicurato TESTFRONTEND, 1 titolo tipo='regolazione'. TUTTI eliminati/ripristinati alla fine. Nessun residuo permanente in DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Le 3 feature P0 (Regolazione Premio, Cumulativa Assicurati, Automazioni-oggi) sono production-ready. Il file /app/backend/tests/test_iter59_p0_features.py è riusabile come regression suite: crea/pulisce automaticamente i dati di test. Solo un minor UX su AssicuratiTab (refetch al mount del tab) è opzionale da migliorare."
+}

@@ -21,6 +21,7 @@ import SinistroDetail from "@/pages/SinistroDetail";
 import Statistiche from "@/pages/Statistiche";
 import Cervello from "@/pages/Cervello";
 import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
+import RegolazionePremio from "@/pages/RegolazionePremio";
 import CorsiIvass from "@/pages/CorsiIvass";
 import AssistentePersonale from "@/pages/AssistentePersonale";
 import NotebookAI from "@/pages/NotebookAI";
@@ -117,6 +118,7 @@ function App() {
                             <Route path="/statistiche" element={<Statistiche />} />
                             <Route path="/cervello" element={<Cervello />} />
                             <Route path="/libro-matricola" element={<LibroMatricolaPage />} />
+                            <Route path="/regolazione-premio" element={<RegolazionePremio />} />
                             <Route path="/corsi-ivass" element={<CorsiIvass />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={

@@ -121,6 +121,10 @@ class UserPublic(BaseDoc):
     perc_provvigione_default: float = 0.0  # % provvigione standard sui titoli
     perc_ritenuta_acconto: float = 0.0     # % ritenuta d'acconto su provvigione pagata
     perc_inps_inarcassa: float = 0.0       # % contributi previdenziali
+    # Sottorete provvigionale (schema piramidale): questo utente riporta a un
+    # collaboratore "sopra" che matura una % concordata sul suo lavoro.
+    parent_collaboratore_id: Optional[str] = None
+    parent_provvigione_pct: float = 0.0
     note_fiscali: Optional[str] = None
     attivo: bool = True
     # Documenti collaboratore (URL di storage)
@@ -404,6 +408,7 @@ class Polizza(BaseDoc):
     ultimo_mezzo_pagamento: Optional[str] = None
     ultimo_mezzo_pagamento_data: Optional[str] = None
     is_libro_matricola: bool = False  # se True → polizza con applicazioni veicoli (libro matricola RCA)
+    is_cumulativa_assicurati: bool = False  # se True → polizza con elenco cumulativo assicurati (es. Ritiro Patente)
     # Regolazione premio (polizze con premio variabile a posteriori — es. fatturato/dipendenti/addetti)
     regolazione_premio: bool = False
     regolazione_base: Optional[Literal["fatturato", "mercedi", "addetti", "ricavi", "altro"]] = None
@@ -412,6 +417,13 @@ class Polizza(BaseDoc):
     regolazione_minima: Optional[float] = None  # premio minimo non rimborsabile
     regolazione_ultimo_calcolo: Optional[str] = None  # YYYY-MM-DD
     regolazione_dovuto: float = 0  # ultimo importo calcolato
+    # Giorni dopo la scadenza polizza in cui inviare la lettera di richiesta dati (modificabile)
+    regolazione_giorni_invio: int = 30
+    # Workflow: None/"da_richiedere" → "lettera_inviata" → "dati_ricevuti" → "calcolata" → "titolo_generato" → "chiusa"
+    regolazione_stato: Optional[str] = None
+    regolazione_lettera_inviata_data: Optional[str] = None  # YYYY-MM-DD
+    regolazione_titolo_id: Optional[str] = None  # titolo di regolazione generato
+    regolazione_note: Optional[str] = None
     # estensione campi (richiesta utente - dettaglio polizza completo)
     sostituisce_polizza: Optional[str] = None
     sostituita_da_polizza_id: Optional[str] = None  # backlink dopo sostituzione

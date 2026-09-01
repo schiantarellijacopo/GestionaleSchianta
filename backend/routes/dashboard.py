@@ -109,7 +109,7 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
          "descrizione": "Anticipati dall'agenzia, da incassare"},
         {"key": "polizze_in_scadenza_30", "label": "Polizze in scadenza (30gg)",
          "icon": "CalendarClock", "color": "blue", "count": n_pol_scad,
-         "url": "/avvisi", "descrizione": "Prossime al rinnovo"},
+         "url": "/titoli?preset=tutti_aperti", "descrizione": "Prossime al rinnovo — apri i titoli"},
         {"key": "sinistri_aperti_old", "label": "Sinistri aperti da oltre 30 giorni",
          "icon": "AlertOctagon", "color": "red", "count": n_sin_old,
          "url": "/sinistri?stato=aperto&gg_min=30",
@@ -161,6 +161,114 @@ async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaborat
         n_sin_old=n_sin_old, n_provv=n_provv,
         n_richieste=n_richieste,
     )
+
+
+# ---------------------------------------------------------------------------
+# Automazioni di oggi (feed con drill-down invii)
+# ---------------------------------------------------------------------------
+def _categoria_automazione(preset_key: str, rule_nome: str) -> tuple[str, str, str]:
+    """Ritorna (categoria_key, label, icona) in base al preset/nome regola."""
+    pk = (preset_key or "").lower()
+    nm = (rule_nome or "").lower()
+    blob = f"{pk} {nm}"
+    if "compleanno" in blob or "auguri" in blob:
+        return ("compleanni", "Compleanni", "Cake")
+    if "sollecito" in blob or "insoluto" in blob or "scaduta" in blob or "scaduto" in blob:
+        return ("solleciti", "Solleciti", "AlarmClock")
+    if "scadenza" in blob or "rinnovo" in blob or "identita" in blob or "veicolo" in blob:
+        return ("scadenze", "Avvisi scadenza", "CalendarClock")
+    if "sinistro" in blob:
+        return ("sinistri", "Sinistri", "AlertTriangle")
+    return ("altro", "Altre automazioni", "Zap")
+
+
+@router.get("/dashboard/automazioni-oggi")
+async def dashboard_automazioni_oggi(
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Feed delle automazioni eseguite oggi (invii alert + sinistri aperti/liquidati),
+    raggruppate per categoria con drill-down degli invii."""
+    today_iso = date.today().isoformat()
+
+    # 1) Eventi alert di oggi
+    events = await db.alert_events.find(
+        {"created_at": {"$gte": today_iso}},
+        {"_id": 0, "corpo": 0, "payload": 0},
+    ).sort("created_at", -1).to_list(1000)
+
+    rule_ids = list({e.get("rule_id") for e in events if e.get("rule_id")})
+    rules = {}
+    if rule_ids:
+        async for r in db.alert_rules.find(
+            {"id": {"$in": rule_ids}}, {"_id": 0, "id": 1, "preset_key": 1, "nome": 1},
+        ):
+            rules[r["id"]] = r
+
+    cats: dict[str, dict] = {}
+
+    def _bucket(key, label, icona):
+        if key not in cats:
+            cats[key] = {"key": key, "label": label, "icona": icona,
+                         "totale": 0, "inviati": 0, "errori": 0, "items": []}
+        return cats[key]
+
+    for e in events:
+        rule = rules.get(e.get("rule_id"), {})
+        ck, label, icona = _categoria_automazione(rule.get("preset_key"), e.get("rule_nome"))
+        b = _bucket(ck, label, icona)
+        b["totale"] += 1
+        if e.get("status") == "ok":
+            b["inviati"] += 1
+        elif e.get("status") == "errore":
+            b["errori"] += 1
+        b["items"].append({
+            "id": e.get("id"),
+            "destinatario": e.get("destinatario_label") or e.get("destinatario_indirizzo") or "—",
+            "canale": e.get("canale"),
+            "oggetto": e.get("oggetto"),
+            "status": e.get("status"),
+            "ora": (e.get("sent_at") or e.get("created_at") or "")[11:16],
+            "entita_tipo": e.get("entita_tipo"),
+            "entita_id": e.get("entita_id"),
+            "errore": e.get("error_message"),
+        })
+
+    # 2) Sinistri aperti/liquidati oggi
+    sin_aperti = await db.sinistri.find(
+        {"$or": [{"data_apertura": today_iso}, {"data_denuncia": today_iso}]},
+        {"_id": 0, "id": 1, "numero_sinistro": 1, "data_apertura": 1, "data_denuncia": 1, "created_at": 1},
+    ).to_list(200)
+    sin_liq = await db.sinistri.find(
+        {"data_liquidazione": today_iso},
+        {"_id": 0, "id": 1, "numero_sinistro": 1, "liquidazione": 1, "created_at": 1},
+    ).to_list(200)
+    if sin_aperti or sin_liq:
+        b = _bucket("sinistri", "Sinistri", "AlertTriangle")
+        for s in sin_aperti:
+            b["totale"] += 1; b["inviati"] += 1
+            b["items"].append({
+                "id": s.get("id"), "destinatario": f"Sinistro {s.get('numero_sinistro') or ''}".strip(),
+                "canale": "sistema", "oggetto": "Sinistro aperto", "status": "ok",
+                "ora": (s.get("created_at") or "")[11:16], "entita_tipo": "sinistro", "entita_id": s.get("id"),
+            })
+        for s in sin_liq:
+            b["totale"] += 1; b["inviati"] += 1
+            b["items"].append({
+                "id": s.get("id"), "destinatario": f"Sinistro {s.get('numero_sinistro') or ''}".strip(),
+                "canale": "sistema", "oggetto": f"Liquidato € {s.get('liquidazione') or 0:,.2f}",
+                "status": "ok", "ora": "", "entita_tipo": "sinistro", "entita_id": s.get("id"),
+            })
+
+    ordine = ["compleanni", "scadenze", "solleciti", "sinistri", "altro"]
+    categorie = sorted(cats.values(), key=lambda c: ordine.index(c["key"]) if c["key"] in ordine else 99)
+    return {
+        "data": today_iso,
+        "totale_invii": sum(c["totale"] for c in categorie),
+        "totale_inviati": sum(c["inviati"] for c in categorie),
+        "totale_errori": sum(c["errori"] for c in categorie),
+        "categorie": categorie,
+    }
+
 
 
 # ---------------------------------------------------------------------------

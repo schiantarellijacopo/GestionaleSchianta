@@ -1,10 +1,10 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
-import SortHeader, { useTableSort } from "@/components/SortHeader";
+import SortHeader from "@/components/SortHeader";
 import { useTableColumns } from "@/components/ColumnManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,7 +139,15 @@ export default function Anagrafiche() {
     const { user } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const [list, setList] = useState(null);
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [page, setPage] = useState(1);
+    const [pageSize] = useState(50);
+    const [catCounts, setCatCounts] = useState({ tutte: 0, con_polizze: 0, senza_polizze: 0, condominio: 0 });
+    const [allTags, setAllTags] = useState([]);
+    const [srt, setSrt] = useState({ key: "ragione_sociale", dir: "asc" });
     const [q, setQ] = useState("");
+    const [qDeb, setQDeb] = useState("");
     const [open, setOpen] = useState(false);
     const [tagFilter, setTagFilter] = useState(null);
     const [catFilter, setCatFilter] = useState("con_polizze");
@@ -156,13 +164,34 @@ export default function Anagrafiche() {
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
     const canDelete = user?.role === "admin";
 
+    // debounce: la lista viene ricaricata max 1 volta ogni 300ms mentre si digita
+    useEffect(() => {
+        const t = setTimeout(() => setQDeb(q), 300);
+        return () => clearTimeout(t);
+    }, [q]);
+
     const load = useCallback(() => {
-        api.get("/anagrafiche", { params: { q: q || undefined, tag: tagFilter || undefined } })
-            .then((r) => setList(r.data));
-    }, [q, tagFilter]);
+        const params = {
+            paged: true, page, page_size: pageSize,
+            q: qDeb || undefined, tag: tagFilter || undefined,
+            categoria: catFilter !== "all" ? catFilter : undefined,
+            compleanno: compleannoFilter || undefined,
+            doc: docFilter || undefined,
+            sort: srt.key, dir: srt.dir,
+        };
+        api.get("/anagrafiche", { params }).then((r) => {
+            setList(r.data.items || []);
+            setTotal(r.data.total || 0);
+            setPages(r.data.pages || 1);
+            if (r.data.conteggi) setCatCounts(r.data.conteggi);
+        });
+    }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt]);
 
     useEffect(() => { load(); }, [load]);
+    // reset alla pagina 1 quando cambiano ricerca o filtri
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter]);
     useEffect(() => { api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {}); }, []);
+    useEffect(() => { api.get("/anagrafiche/tags").then((r) => setAllTags(r.data || [])).catch(() => {}); }, []);
 
     const toggleExpand = async (aid) => {
         const next = !expanded[aid];
@@ -175,70 +204,14 @@ export default function Anagrafiche() {
         }
     };
 
-    // Tag univoci per chip filtri
-    const tagsUnivoci = useMemo(() => {
-        if (!list) return [];
-        const all = new Set();
-        list.forEach((a) => (a.tags || []).forEach((t) => all.add(t)));
-        return Array.from(all).sort();
-    }, [list]);
+    // Tag univoci per chip filtri (dal server: tutti i tag esistenti)
+    const tagsUnivoci = allTags;
 
-    const filtered = useMemo(() => {
-        if (!list) return [];
-        let out = list;
-        // con ricerca attiva NON limitare alla categoria: cerca su tutto
-        if (catFilter !== "all" && !q.trim()) out = out.filter((a) => a.categoria_ui === catFilter);
-
-        // FILTRO COMPLEANNO (?compleanno=oggi|settimana|mese)
-        if (compleannoFilter) {
-            const today = new Date();
-            const md = (d) => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-            const todayMd = md(today);
-            const weekSet = new Set();
-            for (let i = 0; i < 7; i++) {
-                const d = new Date(today); d.setDate(today.getDate() + i); weekSet.add(md(d));
-            }
-            const monthMd = String(today.getMonth() + 1).padStart(2, "0");
-            out = out.filter((a) => {
-                const dn = (a.data_nascita || "");
-                if (dn.length < 10) return false;
-                const m = dn.substring(5, 10);
-                if (compleannoFilter === "oggi") return m === todayMd;
-                if (compleannoFilter === "settimana") return weekSet.has(m);
-                if (compleannoFilter === "mese") return dn.substring(5, 7) === monthMd;
-                return true;
-            });
-        }
-
-        // FILTRO DOCUMENTI (?doc=scaduti|in_scadenza)
-        if (docFilter) {
-            const todayIso = new Date().toISOString().slice(0, 10);
-            const in30 = new Date(); in30.setDate(in30.getDate() + 30);
-            const in30Iso = in30.toISOString().slice(0, 10);
-            out = out.filter((a) => {
-                const docs = a.documenti || {};
-                if (docFilter === "scaduti") {
-                    return Object.values(docs).some((d) => d && d.scadenza && d.scadenza < todayIso);
-                }
-                if (docFilter === "in_scadenza") {
-                    return Object.values(docs).some((d) => d && d.scadenza && d.scadenza >= todayIso && d.scadenza <= in30Iso);
-                }
-                return true;
-            });
-        }
-        return out;
-    }, [list, catFilter, q, compleannoFilter, docFilter]);
-
-    const anagAccessors = useMemo(() => ({
-        ragione_sociale: (a) => (a.ragione_sociale || a.denominazione || `${a.cognome || ""} ${a.nome || ""}`).trim(),
-        num_polizze: (a) => (a.polizze_count ?? a.num_polizze ?? 0),
-        collaboratore_nome: (a) => a.collaboratore_nome || "",
-        premio_totale: (a) => Number(a.premio_totale || 0),
-        provvigioni: (a) => Number(a.provvigioni_totali || a.provvigioni || 0),
-    }), []);
-    const { sorted: sortedFiltered, sortKey, dir, toggle } = useTableSort(
-        filtered, "ragione_sociale", "asc", anagAccessors,
-    );
+    // La lista arriva già filtrata e ordinata dal server (paginata)
+    const sortedFiltered = list || [];
+    const sortKey = srt.key;
+    const dir = srt.dir;
+    const toggle = (k) => setSrt((s) => ({ key: k, dir: s.key === k && s.dir === "asc" ? "desc" : "asc" }));
     const { cols: anagCols, picker: colsPicker } = useTableColumns(
         "anagrafiche", canDelete ? [...ANAG_COLS, ANAG_DELETE_COL] : ANAG_COLS,
     );
@@ -251,14 +224,7 @@ export default function Anagrafiche() {
         setSearchParams(p);
     };
 
-    const counts = useMemo(() => {
-        if (!list) return { con: 0, senza: 0, cond: 0 };
-        return {
-            con: list.filter((a) => a.categoria_ui === "con_polizze").length,
-            senza: list.filter((a) => a.categoria_ui === "senza_polizze").length,
-            cond: list.filter((a) => a.categoria_ui === "condominio").length,
-        };
-    }, [list]);
+    const counts = { con: catCounts.con_polizze, senza: catCounts.senza_polizze, cond: catCounts.condominio };
 
     return (
         <div data-testid="anagrafiche-page">
@@ -362,7 +328,7 @@ export default function Anagrafiche() {
                     />
                 </div>
                 <span className="text-sm text-slate-500 num">
-                    {list ? `${filtered.length} risultati` : ""}
+                    {list ? `${total} risultati` : ""}
                 </span>
             </div>
 
@@ -378,7 +344,7 @@ export default function Anagrafiche() {
                         {compleannoFilter === "mese" && <span>Compleanni nel mese in corso</span>}
                         {docFilter === "scaduti" && <span>Documenti di riconoscimento scaduti</span>}
                         {docFilter === "in_scadenza" && <span>Documenti in scadenza (30gg)</span>}
-                        <span className="text-amber-700 num">— {filtered.length} risultati</span>
+                        <span className="text-amber-700 num">— {total} risultati</span>
                     </div>
                     <Button size="sm" variant="ghost" onClick={clearTaskFilter} data-testid="anag-clear-task-filter">
                         <X size={14} className="mr-1" /> Rimuovi filtro
@@ -388,7 +354,7 @@ export default function Anagrafiche() {
 
             {/* Chips filtri categoria */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
-                <CatChip active={catFilter === "all"} onClick={() => setCatFilter("all")} dot="bg-slate-300" label={`Tutte (${list?.length || 0})`} />
+                <CatChip active={catFilter === "all"} onClick={() => setCatFilter("all")} dot="bg-slate-300" label={`Tutte (${catCounts.tutte})`} />
                 <CatChip active={catFilter === "con_polizze"} onClick={() => setCatFilter("con_polizze")} dot="bg-sky-500" label={`Con polizze (${counts.con})`} />
                 <CatChip active={catFilter === "senza_polizze"} onClick={() => setCatFilter("senza_polizze")} dot="bg-red-500" label={`Senza polizze (${counts.senza})`} />
                 <CatChip active={catFilter === "condominio"} onClick={() => setCatFilter("condominio")} dot="bg-emerald-500" label={`Condomini (${counts.cond})`} />
@@ -423,7 +389,7 @@ export default function Anagrafiche() {
             <div className="flex justify-end mb-2">{colsPicker}</div>
             <div className="tbl-scroll bg-white"
                  style={{ "--c1-w": "32px", "--c2-w": "340px", "--c3-w": "220px", "--c4-w": "150px", "--c5-w": "180px" }}>
-                {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
+                {list === null ? <Loading /> : sortedFiltered.length === 0 ? <Empty /> : (
                     <table className="freeze-5 w-full min-w-[1500px] text-sm">
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
@@ -461,7 +427,25 @@ export default function Anagrafiche() {
                 )}
             </div>
 
-            <UnisciDoppioniDialog open={dedupOpen} onClose={() => setDedupOpen(false)} onMerged={load} />
+            {/* Paginazione */}
+            {list && pages > 1 && (
+                <div className="flex items-center justify-between mt-3 flex-wrap gap-2" data-testid="anag-pagination">
+                    <span className="text-xs text-slate-500">
+                        Pagina {page} di {pages} · {total} anagrafiche
+                    </span>
+                    <div className="flex items-center gap-1">
+                        <Button size="sm" variant="outline" disabled={page <= 1}
+                            onClick={() => setPage(1)} data-testid="anag-page-first">«</Button>
+                        <Button size="sm" variant="outline" disabled={page <= 1}
+                            onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="anag-page-prev">‹ Prec</Button>
+                        <span className="px-3 text-sm text-slate-600 num">{page}</span>
+                        <Button size="sm" variant="outline" disabled={page >= pages}
+                            onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="anag-page-next">Succ ›</Button>
+                        <Button size="sm" variant="outline" disabled={page >= pages}
+                            onClick={() => setPage(pages)} data-testid="anag-page-last">»</Button>
+                    </div>
+                </div>
+            )}
 
             <PersonalizzaKpiDialog
                 open={kpiDialogOpen}

@@ -484,10 +484,15 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
     if (section.key === "compagnie") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Codice</th><th>Ragione sociale</th><th>Referente</th><th>Email</th><th>Trattiene Provv.</th><th>Attiva</th><th></th></tr></thead>
+                <thead><tr><th className="w-16">Logo</th><th>Codice</th><th>Ragione sociale</th><th>Referente</th><th>Email</th><th>Trattiene Provv.</th><th>Attiva</th><th></th></tr></thead>
                 <tbody>
                     {list.map((c) => (
                         <tr key={c.id}>
+                            <td>
+                                {c.logo_url
+                                    ? <img src={c.logo_url} alt={c.ragione_sociale} className="h-7 w-12 object-contain" data-testid={`compagnia-logo-${c.id}`} />
+                                    : <span className="text-slate-300 text-xs">—</span>}
+                            </td>
                             <td className="num text-xs">{c.codice}</td>
                             <td className="font-medium">{c.ragione_sociale}</td>
                             <td>{c.referente || "-"}</td>
@@ -1192,6 +1197,32 @@ function CompagniaForm({ section, editing, onClose }) {
                     <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
                 </div>
                 <div><Label>Sito web</Label><Input value={f.sito_web || ""} onChange={(e) => set("sito_web", e.target.value)} /></div>
+                <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
+                    <Label className="mb-1.5 block">Logo compagnia <span className="text-[10px] text-slate-400 font-normal">(visibile nella polizza)</span></Label>
+                    <div className="flex items-center gap-3">
+                        {f.logo_url
+                            ? <img src={f.logo_url} alt="logo" className="h-10 w-20 object-contain bg-white rounded border border-slate-200" data-testid="compagnia-logo-preview" />
+                            : <span className="text-xs text-slate-400">Nessun logo</span>}
+                        <input
+                            type="file" accept="image/*" className="text-xs"
+                            data-testid="compagnia-logo-input"
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                if (!editing?.id) { toast.error("Salva prima la compagnia, poi carica il logo"); return; }
+                                const fd = new FormData();
+                                fd.append("file", file);
+                                try {
+                                    const r = await api.post(`/compagnie/${editing.id}/logo`, fd,
+                                        { headers: { "Content-Type": "multipart/form-data" } });
+                                    set("logo_url", r.data.logo_url);
+                                    toast.success("Logo caricato");
+                                } catch (err) { toast.error(err.response?.data?.detail || "Errore upload logo"); }
+                            }}
+                        />
+                    </div>
+                    {!editing?.id && <div className="text-[10px] text-slate-400 mt-1">Disponibile dopo il primo salvataggio della compagnia.</div>}
+                </div>
                 <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
                     <div className="flex items-center gap-2">
                         <input
@@ -1221,12 +1252,17 @@ function CompagniaForm({ section, editing, onClose }) {
 
 function UtenteForm({ section, editing, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
+    const [staff, setStaff] = useState([]);
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
+    useEffect(() => {
+        api.get("/auth/users").then((r) => setStaff(r.data.filter((u) => u.role !== "cliente"))).catch(() => {});
+    }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose} dialogClass="max-w-3xl"
         defaults={{
             name: "", email: "", password: "", role: "dipendente", anagrafica_id: null,
             codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
             perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
+            parent_collaboratore_id: null, parent_provvigione_pct: 0,
             note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
             profilo_permessi_id: null, avatar_url: null,
         }}
@@ -1315,6 +1351,33 @@ function UtenteForm({ section, editing, onClose }) {
                         </div>
                         <div className="col-span-3 text-xs text-amber-800">
                             Valori di default usati nei pagamenti provvigioni. Le regole specifiche per compagnia/ramo si gestiscono in <strong>Sistema provvigionale</strong>.
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 bg-violet-50 border border-violet-200 rounded-md p-3">
+                        <div>
+                            <Label>Riporta a (sottorete — collaboratore sopra)</Label>
+                            <select
+                                value={f.parent_collaboratore_id || ""}
+                                onChange={(e) => set("parent_collaboratore_id", e.target.value || null)}
+                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white"
+                                data-testid="utente-parent-collab"
+                            >
+                                <option value="">— Nessuno (diretto agenzia) —</option>
+                                {staff.filter((u) => u.id !== editing?.id).map((u) => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <Label>% provvigione al collaboratore sopra</Label>
+                            <Input type="number" step="0.01" value={f.parent_provvigione_pct || 0}
+                                onChange={(e) => set("parent_provvigione_pct", parseFloat(e.target.value) || 0)}
+                                disabled={!f.parent_collaboratore_id}
+                                data-testid="utente-parent-pct" />
+                        </div>
+                        <div className="col-span-2 text-xs text-violet-800">
+                            Schema piramidale: quando questo utente lavora una polizza, il collaboratore sopra matura la % concordata.
+                            Viene proposta in automatico nella sezione <strong>Provvigioni</strong> della polizza.
                         </div>
                     </div>
                     <div><Label>Note fiscali</Label><Input value={f.note_fiscali || ""} onChange={(e) => set("note_fiscali", e.target.value)} /></div>

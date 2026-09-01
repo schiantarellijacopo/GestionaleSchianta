@@ -1090,6 +1090,27 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     }
 
 
+@api.post("/compagnie/{cid}/logo")
+async def upload_logo_compagnia(cid: str, file: UploadFile = File(...),
+                                user=Depends(require_user("admin", "collaboratore"))):
+    """Carica/sostituisce il logo della compagnia (visibile in polizza)."""
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    data = await file.read()
+    if len(data) > 3 * 1024 * 1024:
+        raise HTTPException(400, "Logo troppo grande (max 3 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if not ct.startswith("image/"):
+        raise HTTPException(400, "Il logo deve essere un'immagine (PNG/JPG/SVG/WEBP)")
+    ext = (file.filename or "logo.png").rsplit(".", 1)[-1].lower() or "png"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/compagnie/{cid}/logo_{_uid()}.{ext}"
+    res = obj_storage.put_object(path, data, ct)
+    url = f"/api/storage/{res['path']}"
+    await db.compagnie.update_one({"id": cid}, {"$set": {"logo_url": url, "updated_at": _now_iso()}})
+    return {"logo_url": url}
+
+
 @api.get("/compagnie/{cid}/estratto-conto")
 async def compagnia_estratto_conto(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,
@@ -2395,6 +2416,12 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         )
         if u:
             doc["collaboratore_nome"] = u.get("name") or u.get("email")
+    # Arricchimento polizza sostituita: numero leggibile per la UI
+    doc["sostituisce_numero"] = None
+    if doc.get("sostituisce_polizza"):
+        _sp = await db.polizze.find_one({"id": doc["sostituisce_polizza"]}, {"_id": 0, "numero_polizza": 1})
+        if _sp:
+            doc["sostituisce_numero"] = _sp.get("numero_polizza")
     # Breakdown provvigione (totale REALE polizza -> collab + margine via schema)
     bk = await _provv_breakdown(
         float(doc.get("provvigioni") or 0),
@@ -4564,6 +4591,17 @@ async def sostituisci_polizza(
         "targa": old.get("targa"),
         "frazionamento": old.get("frazionamento") or "annuale",
         "termini_mora_giorni": old.get("termini_mora_giorni") or 15,
+        # eredita metodo di pagamento (override manuale possibile dal body)
+        "mezzo_pagamento_preferito": old.get("mezzo_pagamento_preferito"),
+        "ultimo_mezzo_pagamento": old.get("ultimo_mezzo_pagamento"),
+        "ultimo_mezzo_pagamento_data": old.get("ultimo_mezzo_pagamento_data"),
+        # eredita la ripartizione provvigioni multi-collaboratore
+        "provvigioni_operatori": old.get("provvigioni_operatori") or [],
+        # eredita dati veicolo (override dal body se il mezzo è cambiato)
+        **{k: old.get(k) for k in (
+            "veicolo_marca", "veicolo_modello", "veicolo_tipo", "veicolo_settore",
+            "veicolo_alimentazione", "veicolo_uso", "veicolo_data_immatricolazione",
+            "veicolo_cilindrata", "veicolo_cv_fiscali", "veicolo_kw") if old.get(k) is not None},
         # override dal body (compagnia, ramo, prodotto, numero, date, premi, ecc.)
         **{k: v for k, v in body.items() if v not in (None, "")},
         # link sostituzione (sempre)
@@ -4584,6 +4622,15 @@ async def sostituisci_polizza(
         "updated_at": _now_iso(),
     }})
 
+    # STORNO titoli arretrati/aperti della polizza sostituita (non più esigibili)
+    storno = await db.titoli.update_many(
+        {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+        {"$set": {"stato": "stornato",
+                  "nota": f"Stornato per sostituzione con polizza {obj.numero_polizza}",
+                  "updated_at": _now_iso()}},
+    )
+    titoli_stornati = storno.modified_count
+
     # Crea titolo iniziale (prima rata) se richiesto
     titolo_id = None
     if crea_titolo:
@@ -4602,17 +4649,25 @@ async def sostituisci_polizza(
             imposte=float(nuovo.get("premio_imposte") or 0),
             provvigioni=float(nuovo.get("provvigioni") or 0),
         )
-        await db.titoli.insert_one(titolo_obj.model_dump())
+        doc_titolo = titolo_obj.model_dump()
+        # arricchimento: numero polizza + contraente per ricerche/liste
+        doc_titolo["numero_polizza"] = obj.numero_polizza
+        _contr = await db.anagrafiche.find_one(
+            {"id": old.get("contraente_id")}, {"_id": 0, "ragione_sociale": 1})
+        doc_titolo["contraente_nome"] = _contr.get("ragione_sociale") if _contr else None
+        await db.titoli.insert_one(doc_titolo)
         titolo_id = titolo_obj.id
 
     await log_attivita(user, "sostituisci", "polizza", obj.id,
                        f"{old.get('numero_polizza')} -> {obj.numero_polizza}"
-                       + (f" + titolo {titolo_id[:8]}" if titolo_id else ""))
+                       + (f" + titolo {titolo_id[:8]}" if titolo_id else "")
+                       + (f" + {titoli_stornati} titoli stornati" if titoli_stornati else ""))
     return {
         "ok": True,
         "nuova_polizza_id": obj.id,
         "nuova": obj.model_dump(),
         "titolo_id": titolo_id,
+        "titoli_stornati": titoli_stornati,
     }
 
 
@@ -9522,7 +9577,7 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
         else:
             cat_counts["Privato"] += 1
 
-    # Scadenze a 5, 10, 15 giorni
+    # Scadenze polizze a 5, 10, 15 giorni (legacy)
     scadenze = {}
     for g in (5, 10, 15, 30, 60):
         fine = (today + timedelta(days=g)).isoformat()
@@ -9530,6 +9585,18 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
             "stato": "attiva", "scadenza": {"$gte": today_iso, "$lte": fine},
         })
         scadenze[f"{g}gg"] = cnt
+
+    # Titoli SCADUTI da incassare (per drill-down su /titoli con i preset)
+    _stati_aperti = {"$in": ["da_incassare", "insoluto", "sospeso"]}
+    titoli_scaduti = {}
+    titoli_scaduti["Oggi"] = await db.titoli.count_documents({
+        "stato": _stati_aperti, "scadenza": today_iso})
+    for g, lbl in ((5, "5gg"), (10, "10gg"), (15, "15gg")):
+        lim = (today - timedelta(days=g)).isoformat()
+        titoli_scaduti[lbl] = await db.titoli.count_documents({
+            "stato": _stati_aperti, "scadenza": {"$lte": lim}})
+    titoli_scaduti["+15gg"] = await db.titoli.count_documents({
+        "stato": _stati_aperti, "scadenza": {"$lt": (today - timedelta(days=15)).isoformat()}})
 
     return {
         "provvigioni_anno": round(provv_anno, 2),
@@ -9540,6 +9607,7 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
         "sinistri_per_stato": sinistri_by_stato,
         "clienti_per_categoria": cat_counts,
         "scadenze": scadenze,
+        "titoli_scaduti": titoli_scaduti,
     }
 
 
@@ -10884,28 +10952,32 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
     if not q or len(q.strip()) < 2:
         return {"anagrafiche": [], "polizze": [], "sinistri": [], "titoli": [], "compagnie": []}
     qclean = q.strip()
-    qrx = {"$regex": qclean, "$options": "i"}
+    qrx = {"$regex": re.escape(qclean), "$options": "i"}
+    # Multi-parola: ogni token deve combaciare in almeno uno dei campi (AND di OR).
+    # Così "JACOPO", "SCHIANTARELLI JACOPO" e "JACOPO SCHIANTARELLI" trovano lo stesso cliente.
+    _tokens = [re.escape(t) for t in qclean.split() if len(t) >= 2][:5] or [re.escape(qclean)]
+
+    def _multi_token(fields: list[str]) -> dict:
+        return {"$and": [
+            {"$or": [{f: {"$regex": tok, "$options": "i"}} for f in fields]}
+            for tok in _tokens
+        ]}
     is_client = user["role"] == "cliente"
     # === ANAGRAFICHE: cerca su molti campi ===
-    ana_filter = {"id": user.get("anagrafica_id")} if is_client else {"$or": [
-        {"ragione_sociale": qrx}, {"nome": qrx}, {"cognome": qrx},
-        {"codice_fiscale": qrx}, {"partita_iva": qrx},
-        {"email": qrx}, {"telefono": qrx}, {"cellulare": qrx},
-        {"comune": qrx}, {"indirizzo": qrx}, {"professione": qrx},
-        {"tags": qrx},
-    ]}
+    ana_filter = {"id": user.get("anagrafica_id")} if is_client else _multi_token([
+        "ragione_sociale", "nome", "cognome", "codice_fiscale", "partita_iva",
+        "email", "telefono", "cellulare", "comune", "indirizzo", "professione", "tags",
+    ])
     anas = await db.anagrafiche.find(
         ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1,
                      "comune": 1, "email": 1, "cellulare": 1, "telefono": 1},
     ).limit(limit).to_list(limit)
 
     # === POLIZZE: numero, targa, ramo, prodotto, oggetto assicurato, note ===
-    pol_filter = {"$or": [
-        {"numero_polizza": qrx}, {"targa": qrx},
-        {"ramo": qrx}, {"prodotto": qrx},
-        {"oggetto_assicurato": qrx},
-        {"veicolo_marca": qrx}, {"veicolo_modello": qrx},
-    ]}
+    pol_filter = _multi_token([
+        "numero_polizza", "targa", "ramo", "prodotto",
+        "oggetto_assicurato", "veicolo_marca", "veicolo_modello",
+    ])
     if is_client:
         pol_filter = {"$and": [pol_filter, {"contraente_id": user.get("anagrafica_id")}]}
     polizze = await db.polizze.find(
@@ -10935,7 +11007,7 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
         polizze = polizze[:limit * 2]
 
     # === SINISTRI ===
-    sin_filter = {"$or": [{"numero_sinistro": qrx}, {"luogo": qrx}, {"descrizione": qrx}]}
+    sin_filter = _multi_token(["numero_sinistro", "luogo", "descrizione"])
     if is_client:
         sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
     sinistri = await db.sinistri.find(
@@ -10946,7 +11018,7 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
     titoli = []
     if not is_client:
         titoli = await db.titoli.find(
-            {"$or": [{"numero_titolo": qrx}, {"numero_polizza": qrx}, {"contraente_nome": qrx}]},
+            _multi_token(["numero_titolo", "numero_polizza", "contraente_nome"]),
             {"_id": 0, "id": 1, "numero_titolo": 1, "numero_polizza": 1, "polizza_id": 1,
              "contraente_nome": 1, "importo_lordo": 1, "stato": 1, "data_scadenza": 1},
         ).limit(limit).to_list(limit)
@@ -10955,7 +11027,7 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
     compagnie = []
     if not is_client:
         compagnie = await db.compagnie.find(
-            {"$or": [{"ragione_sociale": qrx}, {"codice": qrx}]},
+            _multi_token(["ragione_sociale", "codice"]),
             {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
         ).limit(limit).to_list(limit)
 
@@ -12061,6 +12133,12 @@ api.include_router(_bibl_prev_router.router)
 from routes import notebooklm as _notebooklm_router
 api.include_router(_notebooklm_router.router)
 
+from routes import regolazione_premio as _regprem_router
+api.include_router(_regprem_router.router)
+
+from routes import cumulativa as _cumulativa_router
+api.include_router(_cumulativa_router.router)
+
 from routes import piramide_templates as _pir_tmpl_router
 api.include_router(_pir_tmpl_router.router)
 
@@ -12680,6 +12758,10 @@ app.include_router(_chat_portale_router)
 # ============================================================
 from firma_router import router as _firma_router  # noqa: E402
 app.include_router(_firma_router)
+
+# GZip: comprime le risposte JSON grandi (liste 5-6MB → ~500KB) per ricerche veloci
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 
 app.add_middleware(
     CORSMiddleware,

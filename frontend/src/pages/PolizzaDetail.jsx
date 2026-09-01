@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -19,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import DialogIncassoCopertura from "@/components/DialogIncassoCopertura";
 import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
+import AssicuratiTab from "@/components/AssicuratiTab";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
@@ -97,10 +99,17 @@ export default function PolizzaDetail() {
             {/* Header tipo Cattolica */}
             <Card className="border-slate-200 mb-4 overflow-hidden">
                 <div className="bg-gradient-to-r from-sky-900 to-slate-900 text-slate-100 px-6 py-5 flex items-center justify-between flex-wrap gap-4">
-                    <div>
-                        <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
-                        <div className="text-xl font-semibold mt-0.5">{pol.prodotto || pol.ramo}</div>
-                        <div className="text-xs text-slate-300 mt-1">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
+                    <div className="flex items-center gap-3">
+                        {pol.compagnia?.logo_url && (
+                            <img src={pol.compagnia.logo_url} alt={pol.compagnia?.ragione_sociale || "logo compagnia"}
+                                className="h-11 w-auto max-w-[130px] object-contain bg-white rounded-md p-1 shrink-0"
+                                data-testid="pol-compagnia-logo" />
+                        )}
+                        <div>
+                            <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
+                            <div className="text-xl font-semibold mt-0.5">{pol.prodotto || pol.ramo}</div>
+                            <div className="text-xs text-slate-300 mt-1">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
+                        </div>
                     </div>
                     <div className="flex gap-6 text-xs">
                         <Hd label="Ultimo titolo" value={fmtDate(pol.ultimo_titolo_scadenza || pol.titoli?.[0]?.data_incasso || pol.effetto)} />
@@ -111,6 +120,7 @@ export default function PolizzaDetail() {
                                 entita="polizze"
                                 id={pol.id}
                                 value={pol.collaboratore_id}
+                                fallbackName={pol.collaboratore_nome}
                                 canEdit={canEdit}
                                 onSaved={load}
                                 label="Operatore"
@@ -120,7 +130,12 @@ export default function PolizzaDetail() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-3 px-6 py-4 text-sm">
                     <F label="N° contratto" value={pol.numero_polizza} mono />
-                    <F label="Sostituisce" value={pol.sostituisce_polizza} />
+                    <F label="Sostituisce" value={pol.sostituisce_numero
+                        ? <Link to={`/polizze/${pol.sostituisce_polizza}`} className="text-sky-700 hover:underline" data-testid="pol-sostituisce-link">N. {pol.sostituisce_numero}</Link>
+                        : pol.sostituisce_polizza} />
+                    <F label="Pagamento preferito" value={pol.mezzo_pagamento_preferito
+                        ? pol.mezzo_pagamento_preferito.toUpperCase()
+                        : (pol.ultimo_mezzo_pagamento ? `${pol.ultimo_mezzo_pagamento} (ultimo usato)` : null)} />
                     <F label="Compagnia" value={pol.compagnia?.ragione_sociale} />
                     <F label="Contraente" value={<Link to={`/anagrafiche/${pol.contraente?.id}`} className="text-sky-700 hover:underline">{pol.contraente?.ragione_sociale}</Link>} />
                     <F label="Iter" value={pol.iter_status} />
@@ -161,6 +176,11 @@ export default function PolizzaDetail() {
                     {pol.is_libro_matricola && (
                         <TabsTrigger value="libro-matricola" data-testid="tab-libro-matricola">
                             <Car size={13} className="mr-1" />Libro Matricola
+                        </TabsTrigger>
+                    )}
+                    {pol.is_cumulativa_assicurati && (
+                        <TabsTrigger value="assicurati" data-testid="tab-assicurati">
+                            <ShieldCheck size={13} className="mr-1" />Assicurati
                         </TabsTrigger>
                     )}
                     <TabsTrigger value="altri"><Info size={13} className="mr-1" />Altri dati</TabsTrigger>
@@ -324,23 +344,7 @@ export default function PolizzaDetail() {
                                 Collaboratore polizza: <strong>{pol.collaboratore_nome}</strong>
                             </div>
                         )}
-                        {pol.provvigioni_operatori?.length > 0 && (
-                            <>
-                                <SezioneTitolo titolo="Provvigioni operatori" extra />
-                                <table className="tbl w-full">
-                                    <thead><tr><th>Operatore</th><th className="text-right">Provvigione</th><th className="text-right">Su addizionali</th></tr></thead>
-                                    <tbody>
-                                        {pol.provvigioni_operatori.map((o, i) => (
-                                            <tr key={i}>
-                                                <td>{o.operatore_nome}</td>
-                                                <td className="num text-right">{fmtEur(o.provvigione)}</td>
-                                                <td className="num text-right">{fmtEur(o.provvigione_addizionali)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </>
-                        )}
+                        <ProvvigioniOperatoriEditor pol={pol} canEdit={canEdit} onSaved={load} />
                     </Card>
                 </TabsContent>
 
@@ -361,7 +365,7 @@ export default function PolizzaDetail() {
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
                             <table className="tbl w-full">
-                                <thead><tr><th>Tipo</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th>Nota</th><th className="text-center">Allegati</th><th className="text-center w-40">Azioni</th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>N° Polizza</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th>Nota</th><th className="text-center">Allegati</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
                                         <tr key={t.id}
@@ -380,6 +384,9 @@ export default function PolizzaDetail() {
                                                         polizza prec. {t.polizza_origine_numero}
                                                     </div>
                                                 )}
+                                            </td>
+                                            <td className="num text-xs" data-testid={`titolo-numpol-${t.id}`}>
+                                                {t.polizza_origine_numero || t.numero_polizza || pol.numero_polizza}
                                             </td>
                                             <td className="num">{fmtDate(t.effetto)}</td>
                                             <td className="num">{fmtDate(t.scadenza)}</td>
@@ -469,6 +476,11 @@ export default function PolizzaDetail() {
                         <LibroMatricolaTab polizzaId={pol.id} polizza={pol} />
                     </TabsContent>
                 )}
+                {pol.is_cumulativa_assicurati && (
+                    <TabsContent value="assicurati">
+                        <AssicuratiTab polizzaId={pol.id} />
+                    </TabsContent>
+                )}
 
                 <TabsContent value="documenti">
                     <DocumentiPolizzaTab polizzaId={pol.id} canEdit={canEdit} onAfterOCR={load} />
@@ -552,11 +564,9 @@ export default function PolizzaDetail() {
                     <Card className="p-6 border-slate-200 mt-4 space-y-3">
                         <SezioneTitolo titolo="Note polizza" />
                         <div className="text-xs text-slate-500 -mt-3">
-                            💡 Sezione unificata. Annota qui informazioni libere sulla polizza (caratteristiche, da restituire, note interne, appunti).
+                            💡 Sezione unificata e modificabile. Annota qui informazioni libere sulla polizza (caratteristiche, da restituire, note interne, appunti).
                         </div>
-                        <div className="text-sm whitespace-pre-line min-h-[120px] bg-slate-50 border border-slate-200 rounded p-3">
-                            {[pol.note_interne, pol.note, pol.caratteristiche, pol.da_restituire].filter(Boolean).join("\n\n") || "—"}
-                        </div>
+                        <NotePolizzaEditor pol={pol} canEdit={canEdit} onSaved={load} />
                     </Card>
                 </TabsContent>
 
@@ -660,6 +670,14 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         provincia_intestatario: pol.provincia_intestatario || "",
         massimali: pol.massimali || "",
         note: pol.note || "",
+        is_cumulativa_assicurati: !!pol.is_cumulativa_assicurati,
+        // Regolazione premio
+        regolazione_premio: !!pol.regolazione_premio,
+        regolazione_base: pol.regolazione_base || "",
+        regolazione_tasso: pol.regolazione_tasso ?? "",
+        regolazione_minima: pol.regolazione_minima ?? "",
+        regolazione_periodicita: pol.regolazione_periodicita || "annuale",
+        regolazione_giorni_invio: pol.regolazione_giorni_invio ?? 30,
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
@@ -679,6 +697,13 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
             } else if (payload.veicolo_quintali !== undefined) {
                 payload.veicolo_quintali = parseFloat(payload.veicolo_quintali) || 0;
             }
+            // Regolazione premio numerici (nullable)
+            ["regolazione_tasso", "regolazione_minima"].forEach((k) => {
+                payload[k] = (payload[k] === "" || payload[k] === null || payload[k] === undefined)
+                    ? null : parseFloat(payload[k]);
+            });
+            payload.regolazione_giorni_invio = parseInt(payload.regolazione_giorni_invio, 10) || 30;
+            if (!payload.regolazione_base) payload.regolazione_base = null;
             await api.put(`/polizze/${pol.id}`, payload);
             toast.success("Polizza aggiornata");
             onSaved();
@@ -942,6 +967,60 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                 value={f.note} onChange={(e) => set("note", e.target.value)}
                             />
                         </div>
+                        <div className="border-t border-slate-200 pt-3 mt-1">
+                            <div className="flex items-center gap-2 mb-3">
+                                <input type="checkbox" id="cumulativa-assic" checked={f.is_cumulativa_assicurati}
+                                    onChange={(e) => set("is_cumulativa_assicurati", e.target.checked)}
+                                    data-testid="edit-pol-cumulativa-flag" />
+                                <Label htmlFor="cumulativa-assic" className="cursor-pointer font-semibold text-teal-700">
+                                    Gestione cumulativa assicurati (es. Ritiro Patente)
+                                </Label>
+                            </div>
+                            <div className="text-[11px] text-slate-500 -mt-2 mb-3">
+                                Abilita la scheda "Assicurati" nella polizza per gestire l'elenco cumulativo delle persone assicurate (con import da Excel).
+                            </div>
+                        </div>
+                        <div className="border-t border-slate-200 pt-3 mt-1">
+                            <div className="flex items-center gap-2 mb-3">
+                                <input type="checkbox" id="reg-premio" checked={f.regolazione_premio}
+                                    onChange={(e) => set("regolazione_premio", e.target.checked)}
+                                    data-testid="edit-pol-regolazione-flag" />
+                                <Label htmlFor="reg-premio" className="cursor-pointer font-semibold text-violet-700">
+                                    Soggetta a regolazione premio
+                                </Label>
+                            </div>
+                            {f.regolazione_premio && (
+                                <div className="grid grid-cols-2 gap-3 bg-violet-50/50 border border-violet-100 rounded-lg p-3">
+                                    <div>
+                                        <Label>Base di calcolo</Label>
+                                        <Select value={f.regolazione_base || "fatturato"} onValueChange={(v) => set("regolazione_base", v)}>
+                                            <SelectTrigger data-testid="edit-pol-reg-base"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {[["fatturato", "Fatturato"], ["mercedi", "Monte mercedi"], ["addetti", "N. addetti"], ["ricavi", "Ricavi"], ["altro", "Altro"]].map(([v, l]) => (
+                                                    <SelectItem key={v} value={v}>{l}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Periodicità</Label>
+                                        <Select value={f.regolazione_periodicita || "annuale"} onValueChange={(v) => set("regolazione_periodicita", v)}>
+                                            <SelectTrigger data-testid="edit-pol-reg-periodicita"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {["annuale", "biennale"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div><Label>Tasso (%)</Label><Input type="number" step="0.001" value={f.regolazione_tasso} onChange={(e) => set("regolazione_tasso", e.target.value)} placeholder="Es. 1.5" data-testid="edit-pol-reg-tasso" /></div>
+                                    <div><Label>Premio minimo non rimb. €</Label><Input type="number" step="0.01" value={f.regolazione_minima} onChange={(e) => set("regolazione_minima", e.target.value)} data-testid="edit-pol-reg-minima" /></div>
+                                    <div className="col-span-2">
+                                        <Label>Giorni dopo scadenza per invio lettera</Label>
+                                        <Input type="number" value={f.regolazione_giorni_invio} onChange={(e) => set("regolazione_giorni_invio", e.target.value)} data-testid="edit-pol-reg-giorni" />
+                                        <div className="text-[10px] text-slate-500 mt-1">La lettera di richiesta dati sarà segnalata come "da inviare" trascorsi questi giorni dalla scadenza.</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </TabsContent>
                 </Tabs>
                 <DialogFooter>
@@ -950,6 +1029,207 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+    );
+}
+
+// Editor multi-collaboratore delle provvigioni (% o importo fisso, con sottorete piramidale)
+function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
+    const totale = Number(pol.provvigione_totale ?? pol.provvigioni ?? 0);
+    const [users, setUsers] = useState([]);
+    const [rows, setRows] = useState([]);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        api.get("/auth/users")
+            .then((r) => setUsers(r.data.filter((u) => u.role !== "cliente" && u.attivo !== false)))
+            .catch(() => {});
+    }, []);
+    useEffect(() => {
+        setRows((pol.provvigioni_operatori || []).map((o) => ({
+            collaboratore_id: o.collaboratore_id || "",
+            operatore_nome: o.operatore_nome || "",
+            tipo: o.tipo || "importo",
+            valore: o.valore ?? o.provvigione ?? 0,
+            origine: o.origine || "manuale",
+        })));
+    }, [pol.id, pol.provvigioni_operatori]);
+
+    const importoRiga = (r) => {
+        const v = parseFloat(r.valore) || 0;
+        return Math.round((r.tipo === "percentuale" ? (totale * v) / 100 : v) * 100) / 100;
+    };
+    const totAssegnato = rows.reduce((s, r) => s + importoRiga(r), 0);
+    const margine = Math.round((totale - totAssegnato) * 100) / 100;
+
+    const patch = (i, p) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, ...p } : x)));
+
+    const selezionaCollab = (i, uid) => {
+        const u = users.find((x) => x.id === uid);
+        if (!u) return;
+        patch(i, {
+            collaboratore_id: u.id,
+            operatore_nome: u.name,
+            tipo: rows[i].tipo,
+            valore: rows[i].valore || u.perc_provvigione_default || 0,
+            ...(rows[i].valore ? {} : { tipo: "percentuale" }),
+        });
+        // SOTTORETE: se il collaboratore riporta a qualcuno, proponi la riga del "padre"
+        if (u.parent_collaboratore_id && !rows.some((r) => r.collaboratore_id === u.parent_collaboratore_id)) {
+            const padre = users.find((x) => x.id === u.parent_collaboratore_id);
+            if (padre) {
+                setRows((rs) => [...rs, {
+                    collaboratore_id: padre.id,
+                    operatore_nome: padre.name,
+                    tipo: "percentuale",
+                    valore: u.parent_provvigione_pct || 0,
+                    origine: "sottorete",
+                }]);
+                toast.info(`Sottorete: aggiunto ${padre.name} (${u.parent_provvigione_pct || 0}%) — rimuovilo se non dovuto`);
+            }
+        }
+    };
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            await api.put(`/polizze/${pol.id}`, {
+                provvigioni_operatori: rows
+                    .filter((r) => r.operatore_nome || r.collaboratore_id)
+                    .map((r) => ({
+                        collaboratore_id: r.collaboratore_id || null,
+                        operatore_nome: r.operatore_nome,
+                        tipo: r.tipo,
+                        valore: parseFloat(r.valore) || 0,
+                        provvigione: importoRiga(r),
+                        origine: r.origine || "manuale",
+                    })),
+            });
+            toast.success("Ripartizione provvigioni salvata");
+            onSaved?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio provvigioni"); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <div className="mt-4 border-t border-slate-100 pt-3" data-testid="provv-operatori-editor">
+            <div className="flex items-center justify-between mb-2">
+                <SezioneTitolo titolo="Ripartizione provvigioni per collaboratore" extra />
+                {canEdit && (
+                    <button type="button"
+                        onClick={() => setRows((rs) => [...rs, { collaboratore_id: "", operatore_nome: "", tipo: "percentuale", valore: 0, origine: "manuale" }])}
+                        className="text-xs text-sky-700 hover:underline" data-testid="provv-op-add">
+                        + Aggiungi collaboratore
+                    </button>
+                )}
+            </div>
+            {rows.length === 0 ? (
+                <div className="text-xs text-slate-400 italic">Nessuna ripartizione — le provvigioni seguono lo schema provvigionale standard.</div>
+            ) : (
+                <table className="tbl w-full">
+                    <thead><tr><th>Collaboratore</th><th className="w-28">Calcolo</th><th className="w-28 text-right">Valore</th><th className="w-28 text-right">Provvigione €</th><th className="w-20"></th></tr></thead>
+                    <tbody>
+                        {rows.map((r, i) => (
+                            <tr key={i}>
+                                <td>
+                                    {canEdit ? (
+                                        <select value={r.collaboratore_id || ""} onChange={(e) => selezionaCollab(i, e.target.value)}
+                                            className="w-full h-8 px-1.5 text-xs border border-slate-200 rounded bg-white"
+                                            data-testid={`provv-op-collab-${i}`}>
+                                            <option value="">{r.operatore_nome || "— Seleziona —"}</option>
+                                            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                        </select>
+                                    ) : (r.operatore_nome || "—")}
+                                    {r.origine === "sottorete" && (
+                                        <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-violet-100 text-violet-700">sottorete</span>
+                                    )}
+                                </td>
+                                <td>
+                                    <select value={r.tipo} onChange={(e) => patch(i, { tipo: e.target.value })} disabled={!canEdit}
+                                        className="w-full h-8 px-1 text-xs border border-slate-200 rounded bg-white"
+                                        data-testid={`provv-op-tipo-${i}`}>
+                                        <option value="percentuale">% su provv.</option>
+                                        <option value="importo">Importo €</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <Input type="number" step="0.01" value={r.valore}
+                                        onChange={(e) => patch(i, { valore: e.target.value })} readOnly={!canEdit}
+                                        className="h-8 text-xs text-right" data-testid={`provv-op-valore-${i}`} />
+                                </td>
+                                <td className="num text-right font-medium text-emerald-700" data-testid={`provv-op-importo-${i}`}>
+                                    {fmtEur(importoRiga(r))}
+                                </td>
+                                <td className="text-center">
+                                    {canEdit && (
+                                        <button type="button" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}
+                                            className="text-rose-500 hover:text-rose-700 text-sm" data-testid={`provv-op-del-${i}`}>✕</button>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            {rows.length > 0 && (
+                <div className="flex items-center justify-between mt-2 text-xs">
+                    <div className="text-slate-600">
+                        Assegnato: <strong className="num">{fmtEur(totAssegnato)}</strong> su <strong className="num">{fmtEur(totale)}</strong>
+                        {" "}· Margine agenzia residuo:{" "}
+                        <strong className={`num ${margine < 0 ? "text-rose-600" : "text-amber-700"}`} data-testid="provv-op-margine">{fmtEur(margine)}</strong>
+                        {margine < 0 && <span className="text-rose-600 ml-1">⚠ superi la provvigione totale</span>}
+                    </div>
+                    {canEdit && (
+                        <Button size="sm" onClick={salva} disabled={saving} className="bg-sky-700 hover:bg-sky-800 h-7 text-xs" data-testid="provv-op-salva">
+                            {saving ? "Salvataggio…" : "Salva ripartizione"}
+                        </Button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Editor inline delle note polizza (sezione unificata, scrivibile)
+function NotePolizzaEditor({ pol, canEdit, onSaved }) {
+    const initial = [pol.note_interne, pol.note, pol.caratteristiche, pol.da_restituire]
+        .filter(Boolean).join("\n\n");
+    const [txt, setTxt] = useState(initial);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => { setTxt(initial); }, [initial]);
+    const dirty = txt !== initial;
+    const salva = async () => {
+        setSaving(true);
+        try {
+            // consolida tutto nel campo `note` e svuota i campi legacy per evitare duplicati
+            await api.put(`/polizze/${pol.id}`, {
+                note: txt, note_interne: "", caratteristiche: "", da_restituire: "",
+            });
+            toast.success("Note polizza salvate");
+            onSaved?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio note"); }
+        finally { setSaving(false); }
+    };
+    return (
+        <div className="space-y-2">
+            <Textarea
+                value={txt}
+                onChange={(e) => setTxt(e.target.value)}
+                rows={7}
+                readOnly={!canEdit}
+                placeholder="Scrivi qui le note della polizza…"
+                className="text-sm min-h-[140px] bg-slate-50 focus:bg-white"
+                data-testid="polizza-note-textarea"
+            />
+            {canEdit && (
+                <div className="flex justify-end">
+                    <Button size="sm" onClick={salva} disabled={saving || !dirty}
+                        className="bg-sky-700 hover:bg-sky-800"
+                        data-testid="polizza-note-salva">
+                        {saving ? "Salvataggio…" : "Salva note"}
+                    </Button>
+                </div>
+            )}
+        </div>
     );
 }
 

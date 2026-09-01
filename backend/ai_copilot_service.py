@@ -15,6 +15,8 @@ RBAC:
 Le query MongoDB sono sempre in READ-ONLY (safety by design).
 """
 from __future__ import annotations
+import asyncio
+import json
 import logging
 import os
 import re
@@ -28,8 +30,26 @@ logger = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 COPILOT_MODEL_PROVIDER = "anthropic"
-COPILOT_MODEL_NAME = "claude-sonnet-4-6"
+COPILOT_MODEL_NAME = "claude-sonnet-4-6"                 # domande complesse/analitiche
+COPILOT_FAST_MODEL_NAME = "claude-haiku-4-5-20251001"    # lookup semplici (veloce)
 MAX_HISTORY_MESSAGES = 10  # ultimi 10 messaggi passati al modello per contesto
+
+# Parole che indicano una domanda complessa → modello approfondito
+_COMPLEX_HINTS = (
+    "perché", "perche", "analizza", "analisi", "confronta", "confronto", "strategia",
+    "consiglia", "consigli", "suggerisci", "suggeriment", "piano", "valuta", "valutazione",
+    "previdenz", "pension", "calcola", "simula", "proiezione", "cross-sell", "cross sell",
+    "spiega", "come posso", "come faccio", "miglior", "ottimizza", "riassumi", "riassunto",
+    "report", "relazione", "scoperture", "protezione", "piramide",
+)
+
+
+def _modo_modello(user_message: str) -> tuple[str, str]:
+    """Ibrido: (model_name, etichetta) — Haiku per lookup semplici, Sonnet per analisi."""
+    msg = (user_message or "").lower()
+    if any(k in msg for k in _COMPLEX_HINTS) or len(user_message or "") > 220:
+        return COPILOT_MODEL_NAME, "approfondito"
+    return COPILOT_FAST_MODEL_NAME, "veloce"
 
 
 def _now() -> str:
@@ -559,17 +579,22 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
         tentativi.append(" ".join(keep[-2:]))  # ultimi 2
     tentativi.extend(keep[:4])  # singoli
     tried = set()
+    cands = []
     for cand in tentativi:
         if cand.lower() in tried or len(cand) < 3:
             continue
         tried.add(cand.lower())
-        found = await tool_search_clienti(cand, user, limit=5)
-        if found:
+        cands.append(cand)
+    if cands:
+        # ricerche candidati in PARALLELO, si usa il primo match in ordine di priorità
+        found_lists = await asyncio.gather(
+            *[tool_search_clienti(c, user, limit=5) for c in cands[:5]],
+            return_exceptions=True)
+        for cand, found in zip(cands, found_lists):
+            if isinstance(found, Exception) or not found:
+                continue
             ctx[f"Clienti trovati per '{cand}'"] = found
-            if len(found) == 1:
-                anagrafica_id = found[0]["id"]
-            elif len(found) <= 3:
-                # Se pochi match, prendi il primo per successivi tool
+            if len(found) <= 3:
                 anagrafica_id = found[0]["id"]
             break
 
@@ -580,52 +605,54 @@ async def dispatch_query(user_message: str, user: dict) -> dict:
         v = await tool_veicoli(user, targa=targa, limit=5)
         ctx[f"Veicoli con targa '{targa}'"] = v
 
-    # KEYWORD DISPATCH
-    async_ran = False
+    # KEYWORD DISPATCH — tool eseguiti in PARALLELO (asyncio.gather)
     ask_premio = any(k in msg for k in ["quanto costa", "quanto costano", "prezzo", "importo", "quanto pago", "quanto è", "quanto ho pagato"])
+    ramo = None
+    for r in ["auto", "casa", "vita", "salute", "infortuni", "cyber"]:
+        if r in msg:
+            ramo = r
+            break
+
+    tasks: list[tuple[str, object]] = []
     if any(k in msg for k in KEYWORDS_SCADENZA) and not any(k in msg for k in KEYWORDS_PAGAMENTI):
-        ctx[f"Polizze in scadenza nei prossimi {giorni_scad} giorni"] = await tool_polizze_in_scadenza(user, giorni=giorni_scad)
-        async_ran = True
+        tasks.append((f"Polizze in scadenza nei prossimi {giorni_scad} giorni",
+                      tool_polizze_in_scadenza(user, giorni=giorni_scad)))
     if any(k in msg for k in KEYWORDS_PAGAMENTI):
         if "sospes" in msg or "arretrat" in msg or "scadut" in msg or "da incass" in msg or "non pagat" in msg:
-            ctx["Titoli sospesi/da incassare"] = await tool_titoli_sospesi(user, limit=40)
+            tasks.append(("Titoli sospesi/da incassare", tool_titoli_sospesi(user, limit=40)))
         else:
-            ctx["Titoli/pagamenti"] = await tool_titoli(user, anagrafica_id=anagrafica_id, anno=anno)
-        async_ran = True
+            tasks.append(("Titoli/pagamenti", tool_titoli(user, anagrafica_id=anagrafica_id, anno=anno)))
     if any(k in msg for k in KEYWORDS_POLIZZE) and "scadenz" not in msg:
-        ramo = None
-        for r in ["auto", "casa", "vita", "salute", "infortuni", "cyber"]:
-            if r in msg:
-                ramo = r
-                break
-        ctx["Polizze"] = await tool_polizze(user, anagrafica_id=anagrafica_id, ramo=ramo, anno_scadenza=anno)
-        async_ran = True
+        tasks.append(("Polizze", tool_polizze(user, anagrafica_id=anagrafica_id, ramo=ramo, anno_scadenza=anno)))
     if any(k in msg for k in KEYWORDS_SINISTRI):
-        ctx["Sinistri"] = await tool_sinistri(user, anagrafica_id=anagrafica_id, anno=anno,
-                                              solo_aperti=("apert" in msg or "in corso" in msg))
-        async_ran = True
+        tasks.append(("Sinistri", tool_sinistri(user, anagrafica_id=anagrafica_id, anno=anno,
+                                                solo_aperti=("apert" in msg or "in corso" in msg))))
     if any(k in msg for k in KEYWORDS_VEICOLI) and not targa_m:
-        ctx["Veicoli"] = await tool_veicoli(user, proprietario_id=anagrafica_id, limit=15)
-        async_ran = True
+        tasks.append(("Veicoli", tool_veicoli(user, proprietario_id=anagrafica_id, limit=15)))
     if any(k in msg for k in KEYWORDS_CROSS_SELL) and anagrafica_id:
-        ctx["Analisi cross-sell"] = await tool_cross_sell(user, anagrafica_id)
-        async_ran = True
+        tasks.append(("Analisi cross-sell", tool_cross_sell(user, anagrafica_id)))
     if any(k in msg for k in KEYWORDS_RIEPILOGO):
-        ctx["Riepilogo portafoglio"] = await tool_portafoglio_summary(user)
-        async_ran = True
+        tasks.append(("Riepilogo portafoglio", tool_portafoglio_summary(user)))
 
     # Se ha chiesto "quanto costa" e ha trovato un cliente ma non ha già le polizze
-    if ask_premio and anagrafica_id and "Polizze" not in ctx:
-        ctx["Polizze del cliente (con premio)"] = await tool_polizze(user, anagrafica_id=anagrafica_id)
-        async_ran = True
+    if ask_premio and anagrafica_id and not any(lbl == "Polizze" for lbl, _ in tasks):
+        tasks.append(("Polizze del cliente (con premio)", tool_polizze(user, anagrafica_id=anagrafica_id)))
 
-    # Fallback: se ha trovato un cliente ma nessuna keyword specifica, mostra polizze + titoli
-    if not async_ran:
+    # Fallback: cliente trovato ma nessuna keyword → polizze + titoli; niente di niente → riepilogo
+    if not tasks:
         if anagrafica_id:
-            ctx["Polizze del cliente"] = await tool_polizze(user, anagrafica_id=anagrafica_id)
-            ctx["Titoli del cliente"] = await tool_titoli(user, anagrafica_id=anagrafica_id, limit=15)
+            tasks = [("Polizze del cliente", tool_polizze(user, anagrafica_id=anagrafica_id)),
+                     ("Titoli del cliente", tool_titoli(user, anagrafica_id=anagrafica_id, limit=15))]
         elif not ctx:
-            ctx["Riepilogo portafoglio"] = await tool_portafoglio_summary(user)
+            tasks = [("Riepilogo portafoglio", tool_portafoglio_summary(user))]
+
+    if tasks:
+        results = await asyncio.gather(*[coro for _, coro in tasks], return_exceptions=True)
+        for (label, _), res in zip(tasks, results):
+            if isinstance(res, Exception):
+                logger.warning("Copilot tool '%s' errore: %s", label, res)
+            else:
+                ctx[label] = res
 
     return ctx
 
@@ -804,11 +831,12 @@ async def copilot_chat(
 
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
+        model_name, _ = _modo_modello(user_message)
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"copilot_{sid}",
             system_message=SYSTEM_PROMPT,
-        ).with_model(COPILOT_MODEL_PROVIDER, COPILOT_MODEL_NAME)
+        ).with_model(COPILOT_MODEL_PROVIDER, model_name)
         resp = await chat.send_message(UserMessage(text=full_prompt))
         answer = str(resp) if resp else "(nessuna risposta)"
     except Exception as e:
@@ -835,6 +863,65 @@ async def copilot_chat(
         "session_id": sid,
         "context_summary": summary,
     }
+
+
+# =========================================================
+# STREAMING SSE — meta → delta token → done
+# =========================================================
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def copilot_chat_stream(user_message: str, user: dict, session_id: Optional[str] = None):
+    """Generatore SSE: dispatch DB parallelo, modello ibrido, token in streaming."""
+    if not EMERGENT_LLM_KEY:
+        yield _sse("error", {"error": "Emergent LLM Key non configurata. Contatta l'amministratore."})
+        return
+
+    sid = await _get_or_create_session(session_id, user)
+    history, ctx = await asyncio.gather(_get_history(sid), dispatch_query(user_message, user))
+    ctx_str = _serialize_ctx(ctx)
+    summary = {k: (len(v) if isinstance(v, list) else 1) for k, v in ctx.items()}
+    model_name, modo = _modo_modello(user_message)
+    yield _sse("meta", {"session_id": sid, "context_summary": summary, "modello": modo})
+
+    history_text = ""
+    if history:
+        hp = [f"{h['role'].upper()}: {h['content'][:400]}" for h in history[-8:]]
+        history_text = "\n\nCronologia conversazione recente:\n" + "\n".join(hp) + "\n"
+    full_prompt = (
+        f"Data odierna: {_iso_today()}. Utente: role={user.get('role')} name={user.get('name') or user.get('email')}."
+        f"{history_text}"
+        f"\n\nDati recuperati dal DB:\n{ctx_str or '(nessun dato)'}"
+        f"\n\nDomanda utente: {user_message}"
+    )
+
+    parts: list[str] = []
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"copilot_{sid}",
+            system_message=SYSTEM_PROMPT,
+        ).with_model(COPILOT_MODEL_PROVIDER, model_name)
+        async for ev in chat.stream_message(UserMessage(text=full_prompt)):
+            if isinstance(ev, TextDelta):
+                parts.append(ev.content)
+                yield _sse("delta", {"t": ev.content})
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        logger.exception("Errore streaming Copilot: %s", e)
+        yield _sse("error", {"error": str(e)[:200]})
+        return
+
+    answer = "".join(parts) or "(nessuna risposta)"
+    await _save_message(sid, "user", user_message, {})
+    await _save_message(sid, "assistant", answer, summary)
+    sess = await db.copilot_sessions.find_one({"id": sid}, {"_id": 0, "title": 1})
+    if sess and not sess.get("title"):
+        await db.copilot_sessions.update_one({"id": sid}, {"$set": {"title": user_message[:60].strip()}})
+    yield _sse("done", {"session_id": sid})
 
 
 # =========================================================
