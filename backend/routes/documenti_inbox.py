@@ -125,6 +125,72 @@ async def _ocr_classifica(image_bytes: bytes, mime: str) -> dict:
         raise HTTPException(502, f"JSON malformato: {e}")
 
 
+_PROMPT_LIBRETTO = """Sei un OCR di libretti di circolazione italiani (carta di circolazione).
+Estrai i dati del veicolo e restituisci SOLO questo JSON:
+{
+  "targa": "MAIUSCOLO o null",
+  "telaio": "VIN o null",
+  "marca": "MAIUSCOLO o null (campo D.1)",
+  "modello": "MAIUSCOLO o null (campo D.3 / tipo-variante-versione)",
+  "categoria": "AUTOVETTURA | AUTOCARRO | MOTOCICLO | CICLOMOTORE | RIMORCHIO | null",
+  "alimentazione": "BENZINA | DIESEL | GPL | METANO | ELETTRICA | IBRIDA | null (campo P.3)",
+  "cilindrata": "numero cc o null (campo P.1)",
+  "potenza_kw": "numero kW o null (campo P.2)",
+  "potenza_cv": "numero CV fiscali o null",
+  "posti": "numero posti o null (campo S.1)",
+  "data_immatricolazione": "YYYY-MM-DD o null (campo B)"
+}
+REGOLE: null per campi non leggibili; date YYYY-MM-DD; nessun markdown, nessun testo extra."""
+
+
+@router.post("/documenti-inbox/ocr-veicolo")
+async def ocr_veicolo(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """OCR dedicato al libretto di circolazione: estrae i dati veicolo per
+    auto-compilare l'applicazione del Libro Matricola."""
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 20 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    if ct == "application/pdf":
+        img_bytes, img_ct = await _convert_pdf_to_jpeg(contents)
+    elif ct.startswith("image/"):
+        img_bytes, img_ct = contents, ct
+    else:
+        raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG/WEBP)")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+    b64 = base64.b64encode(img_bytes).decode("ascii")
+    chat = LlmChat(
+        api_key=key, session_id=f"ocrveic-{os.urandom(4).hex()}",
+        system_message="Sei un OCR di libretti di circolazione italiani.",
+    ).with_model("gemini", "gemini-3-flash-preview")
+    msg = UserMessage(text=_PROMPT_LIBRETTO, file_contents=[ImageContent(image_base64=b64)])
+    resp = ""
+    try:
+        async for ev in chat.stream_message(msg):
+            if isinstance(ev, TextDelta):
+                resp += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        raise HTTPException(503, f"OCR fallito: {e}")
+    raw = re.sub(r"^```(?:json)?|```$", "", resp.strip(), flags=re.IGNORECASE).strip()
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        raise HTTPException(502, "Impossibile leggere il libretto")
+    try:
+        return {"ok": True, "veicolo": json.loads(m.group(0))}
+    except json.JSONDecodeError:
+        raise HTTPException(502, "Dati libretto non leggibili")
+
+
+
 @router.post("/documenti-inbox/analyze")
 async def analizza_documento(
     file: UploadFile = File(...),

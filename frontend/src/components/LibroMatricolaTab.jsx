@@ -12,8 +12,8 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2 } from "lucide-react";
 import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
@@ -394,6 +394,64 @@ function ApplicazioneDialog({ polizzaId, initial, onClose }) {
         note: initial.note || "",
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const [cercaBusy, setCercaBusy] = useState(false);
+
+    const cercaTarga = async () => {
+        const tg = (f.targa || "").trim().toUpperCase();
+        if (!tg) { toast.error("Inserisci prima la targa"); return; }
+        setCercaBusy(true);
+        try {
+            const r = await api.get(`/openapi-it/automotive-by-targa/${encodeURIComponent(tg)}`);
+            const v = r.data?.veicolo || r.data || {};
+            const catMap = { AUTOVETTURA: "Autovettura", AUTOCARRO: "Autocarro", MOTOCICLO: "Motociclo", CICLOMOTORE: "Ciclomotore", RIMORCHIO: "Rimorchio" };
+            setF((p) => ({
+                ...p,
+                marca: v.marca || p.marca,
+                modello: v.modello || p.modello,
+                tipo_veicolo: catMap[(v.categoria || "").toUpperCase()] || p.tipo_veicolo,
+                tipo_alimentazione: v.alimentazione || p.tipo_alimentazione,
+                cv_fiscali: v.potenza_cv ?? p.cv_fiscali,
+                kw: v.potenza_kw ?? p.kw,
+                cilindrata: v.cilindrata ?? p.cilindrata,
+                data_immatricolazione: v.data_immatricolazione || p.data_immatricolazione,
+            }));
+            const src = (v.provider || "").includes("MOCK") ? " (dato demo)" : "";
+            toast.success(`Veicolo trovato: ${v.marca || ""} ${v.modello || ""}${src}`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Targa non trovata");
+        } finally { setCercaBusy(false); }
+    };
+
+    const [ocrBusy, setOcrBusy] = useState(false);
+    const applicaVeicolo = (v) => {
+        const catMap = { AUTOVETTURA: "Autovettura", AUTOCARRO: "Autocarro", MOTOCICLO: "Motociclo", CICLOMOTORE: "Ciclomotore", RIMORCHIO: "Rimorchio" };
+        setF((p) => ({
+            ...p,
+            targa: v.targa || p.targa,
+            marca: v.marca || p.marca,
+            modello: v.modello || p.modello,
+            tipo_veicolo: catMap[(v.categoria || "").toUpperCase()] || p.tipo_veicolo,
+            tipo_alimentazione: v.alimentazione || p.tipo_alimentazione,
+            cv_fiscali: v.potenza_cv ?? p.cv_fiscali,
+            kw: v.potenza_kw ?? p.kw,
+            cilindrata: v.cilindrata ?? p.cilindrata,
+            posti: v.posti ?? p.posti,
+            data_immatricolazione: v.data_immatricolazione || p.data_immatricolazione,
+        }));
+    };
+    const ocrLibretto = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setOcrBusy(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const r = await api.post("/documenti-inbox/ocr-veicolo", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            applicaVeicolo(r.data?.veicolo || {});
+            toast.success("Dati veicolo compilati dal libretto");
+        } catch (err) { toast.error(err.response?.data?.detail || "OCR libretto fallito"); }
+        finally { setOcrBusy(false); e.target.value = ""; }
+    };
 
     const save = async () => {
         if (!f.targa) { toast.error("Targa obbligatoria"); return; }
@@ -425,7 +483,15 @@ function ApplicazioneDialog({ polizzaId, initial, onClose }) {
                 </DialogHeader>
                 <div className="grid grid-cols-3 gap-3 py-2 max-h-[70vh] overflow-y-auto">
                     <div><Label>Numero</Label><Input type="number" value={f.numero} onChange={(e) => set("numero", e.target.value)} placeholder="auto" /></div>
-                    <div><Label>Targa *</Label><Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="lm-targa" /></div>
+                    <div>
+                        <Label>Targa *</Label>
+                        <div className="flex gap-1">
+                            <Input value={f.targa} onChange={(e) => set("targa", e.target.value.toUpperCase())} data-testid="lm-targa" />
+                            <Button type="button" variant="outline" size="icon" className="shrink-0" onClick={cercaTarga} disabled={cercaBusy} title="Cerca dati veicolo dalla targa" data-testid="lm-cerca-targa">
+                                {cercaBusy ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                            </Button>
+                        </div>
+                    </div>
                     <div>
                         <Label>Stato</Label>
                         <Select value={f.stato} onValueChange={(v) => set("stato", v)}>
@@ -460,7 +526,14 @@ function ApplicazioneDialog({ polizzaId, initial, onClose }) {
                     <div><Label>Valore veicolo €</Label><Input type="number" step="0.01" value={f.valore_veicolo} onChange={(e) => set("valore_veicolo", e.target.value)} data-testid="lm-valore-veicolo" /></div>
                     <div><Label>Valore residuo €</Label><Input type="number" step="0.01" value={f.valore_residuo} onChange={(e) => set("valore_residuo", e.target.value)} /></div>
                     <div><Label>Valore accessori €</Label><Input type="number" step="0.01" value={f.valore_accessori} onChange={(e) => set("valore_accessori", e.target.value)} /></div>
-                    <div className="col-span-3 mt-2 text-xs uppercase tracking-wider text-slate-500 font-semibold">Dati veicolo</div>
+                    <div className="col-span-3 mt-2 flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Dati veicolo</span>
+                        <label className="text-xs text-sky-700 hover:text-sky-900 cursor-pointer flex items-center gap-1" data-testid="lm-ocr-libretto">
+                            {ocrBusy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                            {ocrBusy ? "Lettura libretto…" : "Allega libretto (OCR compila)"}
+                            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={ocrLibretto} disabled={ocrBusy} />
+                        </label>
+                    </div>
                     <div><Label>Marca</Label><Input value={f.marca} onChange={(e) => set("marca", e.target.value)} /></div>
                     <div><Label>Modello</Label><Input value={f.modello} onChange={(e) => set("modello", e.target.value)} /></div>
                     <div>
