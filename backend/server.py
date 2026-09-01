@@ -12067,6 +12067,9 @@ api.include_router(_pir_tmpl_router.router)
 from routes import preferenze as _pref_router
 api.include_router(_pref_router.router)
 
+from routes import immagini_ai as _img_ai_router
+api.include_router(_img_ai_router.router)
+
 from routes import app_cliente as _app_cliente_router
 api.include_router(_app_cliente_router.router)
 

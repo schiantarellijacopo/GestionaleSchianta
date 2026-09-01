@@ -9,7 +9,7 @@ import {
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
-    Smartphone,
+    Smartphone, ImagePlus,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -59,6 +59,7 @@ const ALL_MENU_ITEMS = [
     { id: "biblioteca_previdenza", path: "/biblioteca-previdenza", icon: "Library", label: "Biblioteca", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "notebook_ai", path: "/notebook-ai", icon: "Sparkles", label: "Notebook AI", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "modelli_piramide", path: "/modelli-piramide", icon: "PenLine", label: "Modelli Piramide", section: "strumenti", roles: ["admin", "collaboratore"] },
+    { id: "immagini_ai", path: "/immagini-ai", icon: "ImagePlus", label: "Immagini AI", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rubrica_compagnie", path: "/rubrica-compagnie", icon: "BookUser", label: "Rubrica compagnie", section: "amministrazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "agenzie", path: "/agenzie", icon: "Building2", label: "Agenzie (partner)", section: "amministrazione", roles: ["admin"] },
     { id: "setup_iniziale", path: "/setup-iniziale", icon: "Banknote", label: "Setup iniziale", section: "amministrazione", roles: ["admin"] },
@@ -75,7 +76,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus,
 };
 
 const SECTION_LABELS = {

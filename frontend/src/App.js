@@ -27,6 +27,7 @@ import NotebookAI from "@/pages/NotebookAI";
 import NotebookAIDetail from "@/pages/NotebookAIDetail";
 import ModelliPiramide from "@/pages/ModelliPiramide";
 import PortaleLanding from "@/pages/PortaleLanding";
+import ImmaginiAI from "@/pages/ImmaginiAI";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
 import Newsletter from "@/pages/Newsletter";
@@ -242,6 +243,7 @@ function App() {
                             <Route path="/notebook-ai" element={<NotebookAI />} />
                             <Route path="/notebook-ai/:id" element={<NotebookAIDetail />} />
                             <Route path="/modelli-piramide" element={<ModelliPiramide />} />
+                            <Route path="/immagini-ai" element={<ImmaginiAI />} />
                             <Route path="/app-cliente" element={<AppCliente />} />
                             <Route path="/provvigioni" element={
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
