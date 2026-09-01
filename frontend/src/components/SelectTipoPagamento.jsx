@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import useTipiPagamento from "@/hooks/useTipiPagamento";
 
 export default function SelectTipoPagamento({
-    value, onChange, placeholder = "Seleziona tipo pagamento",
+    value, onChange, placeholder = "Seleziona metodo di pagamento",
     allowAll = false, allLabel = "Tutti", testid = "tipo-pagamento",
     className,
 }) {
