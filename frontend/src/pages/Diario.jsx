@@ -48,6 +48,7 @@ export default function Diario() {
     const [items, setItems] = useState(null);
     const [filtro, setFiltro] = useState("all");
     const [q, setQ] = useState("");
+    const [viewItem, setViewItem] = useState(null);
     const [openNew, setOpenNew] = useState(false);
 
     const load = async () => {
@@ -144,7 +145,7 @@ export default function Diario() {
                         className="p-3 hover:bg-slate-50/60 flex items-start gap-3"
                         data-testid={`diario-item-${it.id}`}>
                         <div className="mt-0.5">{ICONA[it.tipo] || ICONA.nota}</div>
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setViewItem(it)} data-testid={`diario-open-${it.id}`}>
                             <div className="flex items-center justify-between gap-2">
                                 <div className="font-medium text-slate-800 text-sm truncate">{it.titolo}</div>
                                 <div className="text-[10px] text-slate-400 whitespace-nowrap">{fmtDate(it.at)}</div>
@@ -172,6 +173,7 @@ export default function Diario() {
             </Card>
 
             {openNew && <NuovaNotaDialog onClose={() => { setOpenNew(false); load(); }} />}
+            {viewItem && <DiarioViewDialog item={viewItem} onClose={() => setViewItem(null)} />}
         </div>
     );
 }
@@ -233,6 +235,58 @@ function NuovaNotaDialog({ onClose }) {
                         data-testid="diario-salva">
                         {saving ? "Salvataggio…" : "Salva nota"}
                     </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
+const TIPO_LABEL = { email: "Email", sms: "SMS", whatsapp: "WhatsApp", chat: "Chat", nota: "Nota", pec: "PEC" };
+
+function DiarioViewDialog({ item, onClose }) {
+    const allegati = item.allegati || item.documenti || [];
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" data-testid="diario-view-dialog">
+                <DialogHeader>
+                    <DialogTitle className="text-base">{item.titolo || "(senza oggetto)"}</DialogTitle>
+                    <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 pt-1">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100">{TIPO_LABEL[item.tipo] || item.tipo}</span>
+                        <span>{fmtDate(item.at)}</span>
+                        {item.direzione && <span>{item.direzione === "in" ? "↓ Ricevuta" : "↑ Inviata"}</span>}
+                        {item.destinatario && <span>a/da: {item.destinatario}</span>}
+                        {item.mittente && <span>da: {item.mittente}</span>}
+                    </div>
+                </DialogHeader>
+                {item.contenuto_html ? (
+                    <div className="prose prose-sm max-w-none text-sm border border-slate-200 rounded-lg p-3 bg-white"
+                        dangerouslySetInnerHTML={{ __html: item.contenuto_html }} />
+                ) : (
+                    <div className="text-sm text-slate-700 whitespace-pre-wrap border border-slate-200 rounded-lg p-3 bg-slate-50" data-testid="diario-view-body">
+                        {item.contenuto || "(nessun contenuto)"}
+                    </div>
+                )}
+                {allegati.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Allegati ({allegati.length})</div>
+                        <div className="flex flex-wrap gap-2">
+                            {allegati.map((a, i) => {
+                                const url = a.url || a.download_url || a.link;
+                                const nome = a.nome || a.filename || a.name || `Allegato ${i + 1}`;
+                                return url ? (
+                                    <a key={i} href={url} target="_blank" rel="noreferrer"
+                                        className="text-xs px-2 py-1 rounded border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                                        data-testid={`diario-allegato-${i}`}>📎 {nome}</a>
+                                ) : (
+                                    <span key={i} className="text-xs px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-600">📎 {nome}</span>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
