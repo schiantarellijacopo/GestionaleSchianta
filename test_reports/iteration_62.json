@@ -1,0 +1,49 @@
+{
+  "summary": "Iter62 — Test E2E Import Massivo Intelligente (multi-file, mapping AI Claude, dedup fill-missing). BACKEND: 2/5 test pytest PASS su /app/backend/tests/test_import_massivo.py. Test 1 (upload multi-file anagrafica+polizza) PASS: mapping_source='ai', mapping corretto con header ESATTI ('Codice Fiscale'→codice_fiscale, 'Numero Polizza'→numero_polizza, 'Metodo Pagamento'→mezzo_pagamento_preferito), total_rows corretto, preview presente. Test 3 (dedup fill-missing) PASS: ri-upload stesso CSV con Email aggiunta → creati=0, aggiornati=1 (dedup su CF/PIVA + fill dei soli campi vuoti). FRONTEND: 100% PASS — /importazioni con tab-massivo default, import-massivo-dropzone, import-massivo-file-input, file-card-0 (badge entità + badge AI 99%), file-entity-0 (Select entità), tabella map-0-<header> per ogni colonna, cambio entità aggiorna correttamente le opzioni mapping (verificato: switching su 'polizza' mostra 'Numero polizza' nel dropdown), import-massivo-commit avvia il flusso, import-massivo-progress → import-massivo-result con contatori Creati/Aggiornati/Saltati/Errori. TROVATI 2 BUG BLOCCANTI BACKEND (dettagli in backend_issues.critical).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/import-massivo/{sid}/commit — entity=polizza",
+        "issue": "Import polizza FALLISCE con 'validation error for Polizza: compagnia_id Field required' quando il nome compagnia nel CSV non esiste esattamente in db.compagnie. In routes/import_massivo.py L559 _compagnia_id() usa regex '^{nome}$' case-insensitive senza fuzzy/creazione on-the-fly; se ritorna None, doc['compagnia_id'] non viene mai settato ma Polizza (db_models) lo richiede obbligatoriamente. Effetto: TUTTE le polizze di test (Generali, AXA — non presenti in db.compagnie di questo tenant, solo Allianz esiste) vengono rigettate. Cascade: senza polizza create, titoli falliscono con 'polizza X non trovata' (saltati=1) e sinistri falliscono per polizza_id mancante. Riproduzione: CSV con 'Compagnia=Generali' → r={'creati':0,'aggiornati':0,'errori':2,'errori_dettaglio':[{...compagnia_id Field required...}]}. Fix suggerito: (a) auto-crea compagnia se non trovata, oppure (b) rendi compagnia_id opzionale nel modello Polizza, oppure (c) salva 'compagnia_nome' come stringa libera quando l'id non è risolvibile (già memorizzato nel mapping ma scartato).",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "/api/import-massivo/{sid}/commit — entity=sinistro",
+        "issue": "Import sinistro FALLISCE con 'validation error for Sinistro: polizza_id Field required' quando la polizza referenziata dal 'Numero Polizza' non è ancora presente in db (o non è stata creata a causa del bug precedente). routes/import_massivo.py L617-620 imposta polizza_id SOLO se trova la polizza; ma il modello Sinistro lo richiede obbligatorio. Effetto: sinistri orfani (comune in migrazione da agenzia dove la polizza storica potrebbe non essere ancora migrata) causano errore invece di essere caricati come 'sinistri senza polizza'. Riproduzione: upload CSV sinistro con 'Numero Polizza=ZZTESTPOL001' (non esistente) → errori=1, reason='4 validation errors for Sinistro polizza_id Field required'. Fix suggerito: rendi polizza_id opzionale sul modello Sinistro (o skip/saltati=1 con messaggio user-friendly invece di errore di validazione)."
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_import_massivo.py",
+    "/app/test_reports/pytest/import_massivo.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Rendere robusto il matching della compagnia in routes/import_massivo.py::_compagnia_id — es. fuzzy match, oppure creare la compagnia on-the-fly, oppure rendere compagnia_id opzionale in db_models.Polizza (con fallback su campo compagnia_nome).",
+    "CRITICAL: Rendere polizza_id opzionale sul modello Sinistro (o gestire il caso 'polizza non trovata' come saltati=1 con reason chiara, invece di Pydantic validation error).",
+    "OPZIONALE: Considerare il caso polizza con contraente_id NULL (già gestito) → aggiungere fallback 'contraente_nome' testuale se non risolto."
+  ],
+  "critical_code_review_comments": [
+    "routes/import_massivo.py L558-564: se _compagnia_id/_find_anagrafica ritornano None, i campi contraente_id/compagnia_id NON vengono valorizzati; se il modello Pydantic li richiede obbligatori (Polizza→compagnia_id, Sinistro→polizza_id) l'import esplode con validation error invece di skip/warning. BUG CRITICO in scenari reali di migrazione storica.",
+    "routes/import_massivo.py L242 chat.with_model('anthropic','claude-sonnet-4-6'): OK, mapping AI funziona (99% confidence, header ESATTI preservati come chiavi mapping).",
+    "routes/import_massivo.py L449-458 _fill_missing: gestisce correttamente vuoti (None, '', []) e caso speciale numeri==0 vs valore>0. OK — verificato via test 3 (aggiornati=1 sulla riga con Email prima vuota, altre righe saltate).",
+    "routes/import_massivo.py L497-504 fuzzy anagrafica soglia 0.9: efficace — nel test la polizza (quando creata) collega correttamente contraente_id per nome (ZZTEST ALFA SPA → anagrafica creata precedentemente).",
+    "ImportMassivo.jsx L70-80 setEntity: correttamente resetta i mapping non compatibili con la nuova entità. Verificato in UI test — passando da 'anagrafica' a 'polizza' le opzioni mapping mostrano campi polizza (Numero polizza, Compagnia, ecc.). OK.",
+    "ImportMassivo.jsx L96-107 polling status ogni 1200ms: nessuna gestione di errore progressiva (catch silenzioso). Adeguato per il caso normale ma se lo status va in 500 il polling loop continua all'infinito. Suggerimento: aggiungere counter max fallimenti."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_import_massivo.py (nuovo)"
+  ],
+  "success_rate": {"backend": "40% (2/5)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (token in access_token) — verificato",
+  "seed_data_creation": "Dati di test creati (prefisso ZZTEST per pulizia): (a) db.anagrafiche: 'ZZTEST ALFA SPA' (P.IVA 99000000011), 'ZZTEST ROSSI TIZIO' (CF ZZTTZO80A01H501Z) — email popolate nel test 3 fill-missing; (b) da UI test: 'ZZTEST UI ALFA' (P.IVA 99000000012), 'ZZTEST UI BETA' (CF ZZTUIA80A01H501Z). NESSUNA polizza/titolo/sinistro creato (i test sono falliti per i bug sopra). Cleanup: db.anagrafiche.deleteMany({ragione_sociale:/^ZZTEST/}). Diverse sessioni di import in db.import_massivo_sessioni (status completato) — non impattano.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il flusso base upload→AI mapping→commit background→status funziona (test 1 e 3 PASS + UI 100%). I 2 fallimenti sono causati da 2 bug di design nel modello dati: (1) Polizza.compagnia_id required + resolver naive (regex esatta) senza fuzzy né auto-create; (2) Sinistro.polizza_id required senza fallback. Dopo il fix del main agent, ri-eseguire pytest /app/backend/tests/test_import_massivo.py (60-90s per l'AI Claude). Test data usa prefisso ZZTEST — facile cleanup. Nota: nel test 2 il risultato del commit conta creati=2 (le 2 anagrafiche) mentre le 2 polizze finiscono in errori=2 → il campo result.creati NON distingue per entità, considerare split-by-entity in future.",
+  "rca of the issue": "RCA (bug critico polizza): routes/import_massivo.py::_run_commit() blocco 'elif entity == polizza' (L554-578) chiama _compagnia_id(nome) che fa regex esatto (^nome$) su db.compagnie. Se non trova match, ritorna None e la chiave 'compagnia_id' non viene aggiunta a `doc`. Ma db_models.Polizza.compagnia_id è dichiarato obbligatorio → Polizza(**doc) solleva ValidationError, catturata dal try/except del loop → riga contata come errore. IMPATTO REALE: in una migrazione storica di agenzia (target use case dichiarato) è quasi certo che alcune compagnie del CSV non esistano ancora in db.compagnie con nome ESATTO → tutte quelle polizze falliscono. STESSA PATOLOGIA per Sinistro→polizza_id. MITIGAZIONE: (a) opzione minima: in _run_commit aggiungere 'if not doc.get(compagnia_id): pop del field o assegnare id di compagnia placeholder \"Sconosciuta\" auto-creata'; (b) opzione robusta: modificare db_models rendendo compagnia_id/polizza_id Optional[str]=None e adeguare le UI di dettaglio a mostrare 'Compagnia non collegata / Polizza sconosciuta' con azione manuale successiva di riaggancio."
+}

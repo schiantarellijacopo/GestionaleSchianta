@@ -555,11 +555,11 @@ SinistroStato = Literal["aperto", "in_istruttoria", "liquidato", "chiuso_senza_s
 class Sinistro(BaseDoc):
     numero_sinistro: str
     numero_interno: Optional[str] = None
-    polizza_id: str
-    compagnia_id: str
-    contraente_id: str
-    data_avvenimento: str
-    data_denuncia: str
+    polizza_id: Optional[str] = None
+    compagnia_id: Optional[str] = None
+    contraente_id: Optional[str] = None
+    data_avvenimento: Optional[str] = None
+    data_denuncia: Optional[str] = None
     data_apertura: Optional[str] = None  # default = data_denuncia
     anno: Optional[int] = None
     tipologia_sinistro: Optional[str] = None  # es. "SINISTRI FENOMENO ELETTRICO"

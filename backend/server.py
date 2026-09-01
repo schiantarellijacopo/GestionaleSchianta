@@ -12161,6 +12161,7 @@ from routes import super_admin_logs as _sa_logs_router  # noqa: E402
 from routes import openapi_it as _openapi_router  # noqa: E402
 from routes import lookup as _lookup_router  # noqa: E402
 from routes import import_anagrafiche as _import_anag_router  # noqa: E402
+from routes import import_massivo as _import_massivo_router  # noqa: E402
 from routes import import_polizze as _import_pol_router  # noqa: E402
 from routes import import_sinistri as _import_sin_router  # noqa: E402
 from routes import cloud_storage as _cloud_router  # noqa: E402
@@ -12192,6 +12193,7 @@ api.include_router(_sa_logs_router.router)
 api.include_router(_openapi_router.router)
 api.include_router(_lookup_router.router)
 api.include_router(_import_anag_router.router)
+api.include_router(_import_massivo_router.router)
 api.include_router(_import_pol_router.router)
 api.include_router(_import_sin_router.router)
 api.include_router(_cloud_router.router)

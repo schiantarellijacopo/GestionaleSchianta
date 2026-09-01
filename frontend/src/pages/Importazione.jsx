@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import ImportAnagraficheExcel from "@/pages/ImportAnagraficheExcel";
+import ImportMassivo from "@/pages/ImportMassivo";
 
 
 const TIPO_LABEL = {
@@ -41,7 +42,7 @@ const TIPO_PLURAL = {
 
 
 export default function Importazioni() {
-    const [tab, setTab] = useState("omnia");
+    const [tab, setTab] = useState("massivo");
     const [showWizard, setShowWizard] = useState(false);
 
     return (
@@ -61,6 +62,7 @@ export default function Importazioni() {
             />
             <div className="flex gap-2 mb-4 border-b">
                 {[
+                    { v: "massivo", label: "Import Massivo AI", Icon: Wand2 },
                     { v: "omnia", label: "Importazione OMNIA", Icon: FileArchive },
                     { v: "excel", label: "Anagrafiche Excel/CSV", Icon: FileSpreadsheet },
                     { v: "targhe", label: "Targhe / Libri Matricola", Icon: Car },
@@ -76,6 +78,7 @@ export default function Importazioni() {
                     </button>
                 ))}
             </div>
+            {tab === "massivo" && <ImportMassivo />}
             {tab === "omnia" && <ImportOmnia onOpenWizard={() => setShowWizard(true)} />}
             {tab === "excel" && <ImportAnagraficheExcel />}
             {tab === "targhe" && <ImportTargheStub />}

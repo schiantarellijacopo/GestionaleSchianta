@@ -1,5 +1,22 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-01 (parte 5) — Import Massivo Intelligente (P0) ✅
+
+Nuovo importatore multi-file Excel/CSV con mapping AI e gestione duplicati. Testato E2E (upload → AI mapping → commit background → status → dedup) su tutte e 4 le entità.
+
+- **Backend** `routes/import_massivo.py` (nuovo, registrato in server.py):
+  - `POST /api/import-massivo/upload` (multipart, più file): parse Excel/CSV, rilevamento entità + mapping colonne via **Claude Sonnet** (anthropic/claude-sonnet-4-6, Emergent LLM key) con fallback euristico su alias header. Salva i byte file in `import_massivo_files`, sessione in `import_massivo_sessioni`.
+  - `POST /api/import-massivo/{sid}/commit` (JSON plan): esegue import in **background** (ordine forzato anagrafica→polizza→titolo→sinistro), aggiorna progress.
+  - `GET /api/import-massivo/{sid}/status`: progress + result (creati/aggiornati/saltati/errori + dettaglio errori).
+  - Entità: **Anagrafiche + Polizze + Titoli/Quietanze + Sinistri** (con **metodi di pagamento**: `mezzo_pagamento` sui titoli, `mezzo_pagamento_preferito`/`preferenza_pagamento`).
+  - Deduplica: anagrafiche per CF/P.IVA + **fuzzy** su ragione sociale (soglia 0.9, con rimozione acronimi SRL/SPA); polizze per numero polizza; titoli per (polizza+numero/effetto); sinistri per numero sinistro.
+  - Policy duplicati: **fill-missing** (aggiorna solo campi vuoti/mancanti).
+  - Collegamenti: polizza→contraente (CF/nome), titolo→polizza (numero), sinistro→polizza/contraente.
+  - **Robustezza migrazione**: compagnia non trovata → fuzzy match poi **auto-creazione**; enum non validi (stato/tipo/frazionamento) scartati con `_coerce_enums`; default per campi obbligatori mancanti (ramo→N/D, date→"").
+- **Modello dati**: `Sinistro.polizza_id/compagnia_id/contraente_id/date` resi Optional → consente import di **sinistri orfani** (polizza storica non ancora migrata).
+- **Frontend** `pages/ImportMassivo.jsx` (nuovo) + tab default "Import Massivo AI" in `Importazione.jsx`: dropzone multi-file, card per file con entità + badge AI/euristica + confidenza, tabella mapping editabile (cambio entità aggiorna i campi), barra di avanzamento con polling (guardia max 5 fallimenti), riepilogo con contatori + dettaglio errori.
+
+
 ## 2026-09-01 (parte 4) — Nuova polizza, Regolazione multipla, calcolo scaduti, performance, confronto carichi
 
 ### Nuova polizza (Polizze.jsx)
