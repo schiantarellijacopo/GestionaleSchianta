@@ -681,6 +681,19 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    // Calcola la prossima scadenza quietanza = effetto + intervallo frazionamento
+    const MESI_FRAZ = { annuale: 12, semestrale: 6, quadrimestrale: 4, trimestrale: 3, mensile: 1, unica: 12 };
+    const calcQuietanza = (effetto, fraz) => {
+        if (!effetto) return "";
+        const mesi = MESI_FRAZ[fraz] ?? 12;
+        const d = new Date(effetto + "T00:00:00");
+        if (isNaN(d.getTime())) return "";
+        d.setMonth(d.getMonth() + mesi);
+        return d.toISOString().slice(0, 10);
+    };
+    const setEffetto = (v) => setF((p) => ({ ...p, effetto: v, prossima_quietanza: calcQuietanza(v, p.frazionamento) }));
+    const setFrazionamento = (v) => setF((p) => ({ ...p, frazionamento: v, prossima_quietanza: calcQuietanza(p.effetto, v) }));
+
     const save = async () => {
         try {
             const payload = { ...f };
@@ -789,13 +802,13 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div><Label>Effetto</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
+                            <div><Label>Effetto</Label><Input type="date" value={f.effetto} onChange={(e) => setEffetto(e.target.value)} /></div>
                             <div><Label>Scadenza</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
                             <div><Label>Scad. copertura</Label><Input type="date" value={f.scadenza_copertura} onChange={(e) => set("scadenza_copertura", e.target.value)} /></div>
-                            <div><Label>Prossima quietanza</Label><Input type="date" value={f.prossima_quietanza} onChange={(e) => set("prossima_quietanza", e.target.value)} /></div>
+                            <div><Label>Prossima quietanza</Label><Input type="date" value={f.prossima_quietanza} onChange={(e) => set("prossima_quietanza", e.target.value)} data-testid="edit-pol-prossima-quietanza" /><div className="text-[10px] text-slate-400 mt-0.5">Calcolata da effetto + frazionamento (modificabile)</div></div>
                             <div>
                                 <Label>Frazionamento</Label>
-                                <Select value={f.frazionamento} onValueChange={(v) => set("frazionamento", v)}>
+                                <Select value={f.frazionamento} onValueChange={(v) => setFrazionamento(v)}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         {["annuale", "semestrale", "quadrimestrale", "trimestrale", "mensile", "unica"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
