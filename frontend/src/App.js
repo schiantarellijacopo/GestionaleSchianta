@@ -23,6 +23,10 @@ import Cervello from "@/pages/Cervello";
 import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
 import CorsiIvass from "@/pages/CorsiIvass";
 import AssistentePersonale from "@/pages/AssistentePersonale";
+import NotebookAI from "@/pages/NotebookAI";
+import NotebookAIDetail from "@/pages/NotebookAIDetail";
+import ModelliPiramide from "@/pages/ModelliPiramide";
+import PortaleLanding from "@/pages/PortaleLanding";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
 import Newsletter from "@/pages/Newsletter";
@@ -77,6 +81,7 @@ function App() {
                         <Route path="/login" element={<Login />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
                         <Route path="/portale/*" element={<PortaleCliente />} />
+                        <Route path="/c/:slug" element={<PortaleLanding />} />
                         <Route path="/upload-doc" element={<UploadDocPublic />} />
 
                         {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}
@@ -234,6 +239,9 @@ function App() {
                             />
                             <Route path="/pensioni" element={<Pensioni />} />
                             <Route path="/biblioteca-previdenza" element={<BibliotecaPrevidenza />} />
+                            <Route path="/notebook-ai" element={<NotebookAI />} />
+                            <Route path="/notebook-ai/:id" element={<NotebookAIDetail />} />
+                            <Route path="/modelli-piramide" element={<ModelliPiramide />} />
                             <Route path="/app-cliente" element={<AppCliente />} />
                             <Route path="/provvigioni" element={
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>

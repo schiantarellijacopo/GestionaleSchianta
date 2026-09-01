@@ -20,7 +20,6 @@ from typing import Optional
 # Tabella statica ABI → banca (top 60 istituti italiani per market share).
 # ABI code (5 cifre, come nell'IBAN posizioni 6-10) → dati banca.
 ABI_TO_BANK: dict[str, dict] = {
-    "01005": {"ragione_sociale": "Banca Nazionale del Lavoro (BNL)", "bic": "BNLIITRR"},
     "01015": {"ragione_sociale": "BPER Banca", "bic": "BPMOIT22"},
     "01030": {"ragione_sociale": "Monte dei Paschi di Siena", "bic": "PASCITMMXXX"},
     "02008": {"ragione_sociale": "UniCredit S.p.A.", "bic": "UNCRITMM"},
@@ -37,17 +36,12 @@ ABI_TO_BANK: dict[str, dict] = {
     "03500": {"ragione_sociale": "Banco di Desio e della Brianza", "bic": "DESBIT21XXX"},
     "05034": {"ragione_sociale": "Banca Popolare dell'Alto Adige", "bic": "BPAAIT2B"},
     "05048": {"ragione_sociale": "Banca Popolare di Sondrio", "bic": "POSOIT22"},
-    "05387": {"ragione_sociale": "Banca Popolare dell'Emilia Romagna", "bic": "BPMOIT22XXX"},
     "05424": {"ragione_sociale": "Cassa di Risparmio di Fossano", "bic": "CRFOIT2FXXX"},
     "05428": {"ragione_sociale": "Banco BPM", "bic": "BAPPIT21"},
-    "05584": {"ragione_sociale": "Banca Popolare di Bari", "bic": "BPBAIT3B"},
-    "05696": {"ragione_sociale": "Banca Popolare di Milano (Banco BPM)", "bic": "BPMIITMMXXX"},
     "06015": {"ragione_sociale": "Banca del Fucino", "bic": "BAFUIT31XXX"},
     "06055": {"ragione_sociale": "Banca Popolare del Cassinate", "bic": "BPCAIT31"},
     "06170": {"ragione_sociale": "Banco di Sardegna", "bic": "BPMOIT22XXX"},
     "07072": {"ragione_sociale": "Banca Popolare di Cortona", "bic": "POCIIT31XXX"},
-    "07601": {"ragione_sociale": "Poste Italiane (BancoPosta)", "bic": "BPPIITRRXXX"},
-    "08000": {"ragione_sociale": "ICCREA / BCC", "bic": "ICRAITMMXXX"},
     "08327": {"ragione_sociale": "Banca Progetto", "bic": "PGTBITMMXXX"},
     "10634": {"ragione_sociale": "Cassa Rurale ed Artigiana", "bic": "CCRTIT2TXXX"},
     "11700": {"ragione_sociale": "IBL Banca", "bic": "IBSPITTMXXX"},

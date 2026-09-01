@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
+    { id: "scambi", label: "Scambi Dati", icon: ArrowRightLeft },
     { id: "abbonamenti", label: "Abbonamenti", icon: CreditCard },
     { id: "transazioni", label: "Transazioni", icon: TrendingUp },
     { id: "marketplace", label: "Marketplace", icon: Package },
@@ -65,6 +66,7 @@ export default function SuperAdminPanel() {
             </div>
 
             {tab === "agenzie" && <AgenzieTab />}
+            {tab === "scambi" && <ScambiTab />}
             {tab === "abbonamenti" && <AbbonamentiTab />}
             {tab === "transazioni" && <TransazioniTab />}
             {tab === "marketplace" && <MarketplaceTab />}
@@ -101,6 +103,7 @@ function AgenzieTab() {
     const [showNew, setShowNew] = useState(false);
     const [editAgenzia, setEditAgenzia] = useState(null);
     const [resetAgenzia, setResetAgenzia] = useState(null);
+    const [dominiAgenzia, setDominiAgenzia] = useState(null);
 
     const load = () => {
         setLoading(true);
@@ -213,6 +216,12 @@ function AgenzieTab() {
                                             <Pause size={14} />
                                         </button>
                                     )}
+                                    <button onClick={() => setDominiAgenzia(a)}
+                                        title="Dominio & credenziali dedicate"
+                                        className="p-1 text-violet-600 hover:bg-violet-50 rounded"
+                                        data-testid={`sa-dominio-${a.id}`}>
+                                        <Globe size={14} />
+                                    </button>
                                     <button onClick={() => setEditAgenzia(a)}
                                         title="Modifica agenzia"
                                         className="p-1 text-slate-600 hover:bg-slate-100 rounded"
@@ -240,6 +249,7 @@ function AgenzieTab() {
             {showNew && <NuovaAgenziaDialog onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
             {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
             {resetAgenzia && <ResetDatiDialog agenzia={resetAgenzia} onClose={() => setResetAgenzia(null)} onDone={() => { setResetAgenzia(null); load(); }} />}
+            {dominiAgenzia && <DominiCredenzialiDialog agenzia={dominiAgenzia} onClose={() => { setDominiAgenzia(null); load(); }} />}
         </div>
     );
 }
@@ -1067,6 +1077,282 @@ function TicketsTab() {
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+// ============================================================
+// DOMINI & CREDENZIALI — sottodominio dedicato + accessi agenzia
+// ============================================================
+function DominiCredenzialiDialog({ agenzia, onClose }) {
+    const [slug, setSlug] = useState(agenzia.sottodominio || "");
+    const [attivo, setAttivo] = useState(agenzia.dominio_attivo !== false);
+    const [url, setUrl] = useState(null);
+    const [savingDom, setSavingDom] = useState(false);
+    const [credEmail, setCredEmail] = useState(agenzia.email || "");
+    const [credRole, setCredRole] = useState("admin");
+    const [credResult, setCredResult] = useState(null);
+    const [savingCred, setSavingCred] = useState(false);
+    const [utenti, setUtenti] = useState([]);
+
+    const loadUtenti = () => api.get(`/super-admin/agenzie/${agenzia.id}/utenti`).then((r) => setUtenti(r.data || []));
+    useEffect(() => { loadUtenti(); }, []); // eslint-disable-line
+
+    const salvaDominio = async () => {
+        setSavingDom(true);
+        try {
+            const r = await api.post(`/super-admin/agenzie/${agenzia.id}/dominio`, { sottodominio: slug, attivo });
+            setUrl(r.data.url);
+            toast.success(`Sottodominio "${r.data.sottodominio}" attivato`);
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore"); }
+        finally { setSavingDom(false); }
+    };
+
+    const generaCredenziali = async () => {
+        if (!credEmail.trim()) { toast.error("Inserisci l'email"); return; }
+        setSavingCred(true);
+        try {
+            const r = await api.post(`/super-admin/agenzie/${agenzia.id}/credenziali`, { email: credEmail, role: credRole });
+            setCredResult(r.data);
+            loadUtenti();
+            toast.success(r.data.azione === "creato" ? "Credenziali create" : "Password resettata");
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore"); }
+        finally { setSavingCred(false); }
+    };
+
+    const copia = (txt) => { navigator.clipboard.writeText(txt); toast.success("Copiato"); };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-5"
+                 onClick={(e) => e.stopPropagation()} data-testid="sa-domini-dialog">
+                <div className="flex items-center gap-2 mb-4">
+                    <Globe size={18} className="text-violet-600" />
+                    <h3 className="font-bold text-slate-800">Dominio & credenziali — {agenzia.ragione_sociale}</h3>
+                </div>
+
+                {/* SOTTODOMINIO */}
+                <div className="border border-slate-200 rounded-lg p-3 mb-4">
+                    <div className="text-xs font-semibold text-slate-600 uppercase mb-2">Sottodominio dedicato</div>
+                    <div className="flex items-center gap-2">
+                        <input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase())}
+                               placeholder="es. agenzia-rossi"
+                               className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm font-mono"
+                               data-testid="sa-dominio-input" />
+                        <label className="flex items-center gap-1 text-xs text-slate-600">
+                            <input type="checkbox" checked={attivo} onChange={(e) => setAttivo(e.target.checked)} /> Attivo
+                        </label>
+                        <button onClick={salvaDominio} disabled={savingDom || slug.length < 3}
+                                className="text-xs font-semibold px-3 py-1.5 rounded bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+                                data-testid="sa-dominio-salva">
+                            {savingDom ? "…" : "Attiva"}
+                        </button>
+                    </div>
+                    {(url || agenzia.sottodominio) && (
+                        <div className="mt-2 flex items-center gap-2 text-xs bg-violet-50 border border-violet-200 rounded p-2">
+                            <span className="font-mono text-violet-800 truncate" data-testid="sa-dominio-url">
+                                {url || `https://${agenzia.sottodominio}.…`}
+                            </span>
+                            {url && <button onClick={() => copia(url)} className="text-violet-600 hover:text-violet-900"><Copy size={12} /></button>}
+                        </div>
+                    )}
+                    <div className="text-[10px] text-slate-400 mt-1.5">
+                        In produzione richiede un record DNS wildcard (*.tuodominio.it) puntato al server.
+                    </div>
+                </div>
+
+                {/* CREDENZIALI */}
+                <div className="border border-slate-200 rounded-lg p-3 mb-4">
+                    <div className="text-xs font-semibold text-slate-600 uppercase mb-2 flex items-center gap-1">
+                        <KeyRound size={12} /> Credenziali dedicate
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <input value={credEmail} onChange={(e) => setCredEmail(e.target.value)}
+                               placeholder="admin@agenzia.it" type="email"
+                               className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm"
+                               data-testid="sa-cred-email" />
+                        <select value={credRole} onChange={(e) => setCredRole(e.target.value)}
+                                className="border border-slate-300 rounded px-2 py-1.5 text-xs">
+                            <option value="admin">Admin</option>
+                            <option value="collaboratore">Collaboratore</option>
+                            <option value="dipendente">Dipendente</option>
+                        </select>
+                        <button onClick={generaCredenziali} disabled={savingCred}
+                                className="text-xs font-semibold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                data-testid="sa-cred-genera">
+                            {savingCred ? "…" : "Genera"}
+                        </button>
+                    </div>
+                    {credResult && (
+                        <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded p-2 text-xs space-y-1"
+                             data-testid="sa-cred-result">
+                            <div className="font-semibold text-emerald-800">
+                                Credenziali {credResult.azione === "creato" ? "create" : "resettate"} — salvale ora, la password non sarà più visibile:
+                            </div>
+                            <div className="flex items-center gap-2 font-mono">
+                                <span>{credResult.email}</span>
+                                <button onClick={() => copia(credResult.email)} className="text-emerald-600"><Copy size={11} /></button>
+                            </div>
+                            <div className="flex items-center gap-2 font-mono">
+                                <span>🔑 {credResult.password}</span>
+                                <button onClick={() => copia(credResult.password)} className="text-emerald-600"><Copy size={11} /></button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* UTENTI ESISTENTI */}
+                <div className="border border-slate-200 rounded-lg p-3">
+                    <div className="text-xs font-semibold text-slate-600 uppercase mb-2">Utenti dell'agenzia ({utenti.length})</div>
+                    {utenti.length === 0 ? (
+                        <div className="text-xs text-slate-400">Nessun utente ancora.</div>
+                    ) : utenti.map((u) => (
+                        <div key={u.id} className="flex items-center gap-2 text-xs py-1 border-b border-slate-50 last:border-0">
+                            <span className="font-mono text-slate-700 truncate flex-1">{u.email}</span>
+                            <span className="uppercase text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{u.role}</span>
+                            <span className={`text-[9px] ${u.attivo ? "text-emerald-600" : "text-rose-500"}`}>{u.attivo ? "attivo" : "disattivo"}</span>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="flex justify-end mt-4">
+                    <button onClick={onClose} className="text-xs font-semibold px-4 py-2 rounded border border-slate-300 hover:bg-slate-50">
+                        Chiudi
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
+// SCAMBI DATI — console approvazione scambi tra agenzie
+// ============================================================
+function ScambiTab() {
+    const [items, setItems] = useState(null);
+    const [busy, setBusy] = useState(null);
+
+    const load = () => api.get("/super-admin/scambi").then((r) => setItems(r.data || [])).catch(() => setItems([]));
+    useEffect(() => { load(); }, []);
+
+    const approva = async (r) => {
+        if (!window.confirm(`Approvare ed eseguire lo scambio richiesto da ${r.agenzia_richiedente_nome} (operatore ${r.operatore_email})?`)) return;
+        setBusy(r.id);
+        try {
+            const res = await api.post(`/super-admin/scambi/${r.id}/approva`);
+            const k = res.data.risultato || {};
+            toast.success(`Scambio eseguito: ${k.anagrafiche || 0} anagrafiche, ${k.polizze || 0} polizze, ${k.titoli || 0} titoli`);
+            load();
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore"); }
+        finally { setBusy(null); }
+    };
+
+    const rifiuta = async (r) => {
+        const motivo = window.prompt("Motivo del rifiuto (facoltativo):") ?? null;
+        if (motivo === null) return;
+        setBusy(r.id);
+        try {
+            await api.post(`/super-admin/scambi/${r.id}/rifiuta`, { motivo });
+            toast.success("Richiesta rifiutata");
+            load();
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore"); }
+        finally { setBusy(null); }
+    };
+
+    if (items === null) return <Loader2 className="animate-spin text-slate-400 mx-auto my-8" />;
+
+    const inAttesa = items.filter((i) => i.stato === "in_attesa");
+    const storico = items.filter((i) => i.stato !== "in_attesa");
+
+    const RigaScambio = ({ r, azioni }) => (
+        <tr className="hover:bg-slate-50" data-testid={`sa-scambio-${r.id}`}>
+            <td className="px-3 py-2 text-xs">{new Date(r.richiesto_at).toLocaleString("it-IT")}</td>
+            <td className="px-3 py-2">
+                <div className="font-medium text-slate-800 text-xs">{r.agenzia_richiedente_nome}</div>
+                <div className="text-[10px] text-slate-500">{r.richiesto_da_email}</div>
+            </td>
+            <td className="px-3 py-2 text-xs">{r.agenzia_sorgente_nome}</td>
+            <td className="px-3 py-2 font-mono text-xs">{r.operatore_email}</td>
+            <td className="px-3 py-2 text-[10px] text-slate-500">
+                {["importa_anagrafiche", "importa_polizze", "importa_titoli", "importa_sinistri", "importa_documenti"]
+                    .filter((k) => r[k]).map((k) => k.replace("importa_", "")).join(", ")}
+            </td>
+            <td className="px-3 py-2">
+                <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded ${
+                    r.stato === "in_attesa" ? "bg-amber-100 text-amber-700"
+                        : r.stato === "eseguito" ? "bg-emerald-100 text-emerald-700"
+                        : "bg-rose-100 text-rose-700"
+                }`}>{r.stato.replace("_", " ")}</span>
+                {r.stato === "eseguito" && r.risultato && (
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                        {r.risultato.anagrafiche}a · {r.risultato.polizze}p · {r.risultato.titoli}t
+                    </div>
+                )}
+                {r.stato === "rifiutato" && r.motivo_rifiuto && (
+                    <div className="text-[10px] text-rose-500 mt-0.5 max-w-[150px] truncate" title={r.motivo_rifiuto}>{r.motivo_rifiuto}</div>
+                )}
+            </td>
+            <td className="px-3 py-2 text-right">
+                {azioni && (
+                    <div className="flex justify-end gap-1">
+                        <button onClick={() => approva(r)} disabled={busy === r.id}
+                                title="Approva ed esegui"
+                                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded border border-emerald-200"
+                                data-testid={`sa-scambio-approva-${r.id}`}>
+                            {busy === r.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                        <button onClick={() => rifiuta(r)} disabled={busy === r.id}
+                                title="Rifiuta"
+                                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded border border-rose-200"
+                                data-testid={`sa-scambio-rifiuta-${r.id}`}>
+                            <X size={13} />
+                        </button>
+                    </div>
+                )}
+            </td>
+        </tr>
+    );
+
+    const Tabella = ({ rows, azioni }) => (
+        <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-600">
+                    <tr>
+                        <th className="text-left px-3 py-2">Data</th>
+                        <th className="text-left px-3 py-2">Richiedente</th>
+                        <th className="text-left px-3 py-2">Sorgente</th>
+                        <th className="text-left px-3 py-2">Operatore</th>
+                        <th className="text-left px-3 py-2">Dati</th>
+                        <th className="text-left px-3 py-2">Stato</th>
+                        <th className="text-right px-3 py-2">Azioni</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {rows.map((r) => <RigaScambio key={r.id} r={r} azioni={azioni} />)}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    return (
+        <div data-testid="sa-scambi-tab">
+            <div className="mb-4 border border-amber-200 bg-amber-50/60 rounded-lg p-3 text-xs text-amber-900">
+                <strong>Scambio controllato:</strong> le agenzie richiedono lo scambio dati dalla loro pagina
+                "Scambio Dati"; qui approvi o rifiuti. All'approvazione l'importazione viene eseguita subito
+                (i titoli importati restano "da pagare arretrato").
+            </div>
+            <h2 className="text-sm font-semibold text-slate-700 mb-2">
+                In attesa di approvazione ({inAttesa.length})
+            </h2>
+            {inAttesa.length === 0
+                ? <div className="text-xs text-slate-400 mb-4" data-testid="sa-scambi-vuoto">Nessuna richiesta in attesa.</div>
+                : <div className="mb-5"><Tabella rows={inAttesa} azioni /></div>}
+            {storico.length > 0 && (
+                <>
+                    <h2 className="text-sm font-semibold text-slate-700 mb-2">Storico decisioni ({storico.length})</h2>
+                    <Tabella rows={storico} azioni={false} />
+                </>
+            )}
         </div>
     );
 }

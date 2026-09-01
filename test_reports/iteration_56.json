@@ -1,0 +1,34 @@
+{
+  "summary": "Iter56 full-stack test suite for: colonne preferenze utente, anagrafiche duplicati+unisci, modelli piramide (privati/aziende), piramide-v2 tipo per anagrafica, NotebookLM (create/upload txt/chat SSE/genera riassunto/crm-docs/audio-overview 202), Super Admin (dominio+dup 409+credenziali+utenti), scambio controllato (richiedi/richieste/esegui 403/super scambi/rifiuta), search globale (limit default 50). Backend: 9/9 pytest PASS (test_iter56_features.py) in ~41s incluso 90s polling riassunto AI. Frontend: verificati tutti i data-testid principali su /polizze, /anagrafiche, /modelli-piramide, /notebook-ai, /super-admin e scheda Marco Rossi. Piramide regression (+ input persistente, digitare, cambio pallino) verificato: bottone piramide-add-voce-danni renderizza input piramide-input-danni_veicoli che rimane visibile con valore '50.000 €' anche dopo debounce, e pallino cliccabile (colore inline via style non class).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter56_features.py",
+    "/app/test_reports/pytest/iter56.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py POST /polizze restituisce 500 (ValidationError Pydantic) per campi mancanti invece di 422/400: catturare ValidationError e ritornare 422 con detail chiaro (currently only nel log, response è 500).",
+    "routes/notebooklm.py chat SSE non protegge quando EMERGENT_LLM_KEY manca: cattura eccezione ma non ha timeout esplicito sul stream — un LLM lento può tenere aperta la connessione a lungo. Aggiungere asyncio.wait_for con budget (es. 60s).",
+    "routes/preferenze.py get_colonne non tipizza table_key: chiavi arbitrarie possono essere iniettate dal client via PUT; considerare whitelist (polizze, anagrafiche, titoli, sinistri).",
+    "routes/anagrafiche.py POST /anagrafiche-unisci: se un dup viene passato con lo stesso id del principale il codice filtra correttamente, ma non fa dedup della lista dup_ids (ok, ma manca cap: si potrebbe passare 500 ids). Aggiungere limite 20.",
+    "routes/super_admin.py POST /agenzie/{tid}/credenziali: password token_urlsafe(9) genera ~12 chars: OK ma non forza complessità; il messaggio 'mostrata UNA SOLA volta' è corretto — ok. Considerare audit log includendo email destinataria."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter56_features.py (creato)"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (tutti i data-testid trovati e cliccabili)"},
+  "test_credentials": "admin@assicura.it/Admin123! e superadmin@assicura.it/superadmin123! verificati OK",
+  "seed_data_creation": "Creati e poi cancellati/uniti: 2 anagrafiche con CF fittizio TSTDUP80A01H501X + 1 polizza TESTPOL-*. Notebook NotebookLM 'TEST iter56 notebook' creato e cancellato in teardown. Credenziali test-cred-*@iter56test.it e sottodomini test-iter56-* residuano sui tenant non principali (Agenzia Clean Master + Agenzia Demo) — sono utenti amministrativi disattivabili dal Super Admin panel se necessario. Richiesta scambio-dati di test in stato 'rifiutato' come richiesto.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_iter56_features.py (9 test class-based, ~41s incluso 90s polling riassunto AI). Test NotebookLM chat SSE consuma tokens: ~1 domanda + generazione riassunto per run. Tenant NON principali disponibili: cerca in GET /api/super-admin/agenzie tutti gli id != 'tenant-principale-schiantarelli' (~5 disponibili incl Clean Master, Demo). Il pallino piramide cambia colore via inline style, NON via class: per verificarlo con playwright leggere l'attributo `style` non `class`. Il data-testid `sa-scambi-tab` wrappa il CONTENUTO del tab, non il trigger — count=0 se il tab non è aperto (comportamento corretto). Nel scheda cliente Marco Rossi il badge piramide-badge-privati è correttamente presente (senza P.IVA).",
+  "rca of the issue": "N/A - nessun bug funzionale rilevato. Il POST /polizze fallisce con 500 se mancano campi obbligatori (compagnia_id/ramo/effetto/scadenza): non è un bug funzionale ma miglioramento code-quality (ritornare 422 invece di 500 su ValidationError Pydantic)."
+}

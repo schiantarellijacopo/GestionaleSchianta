@@ -292,12 +292,59 @@ async def scambio_dati_esegui(
     body: ScambioBody,
     user=Depends(require_user("admin")),
 ) -> dict:
-    """Esegue lo scambio dati: clona anagrafiche/polizze/titoli/sinistri/allegati
-    dell'operatore dalla agenzia sorgente alla destinazione (qui = stesso DB).
+    """Esecuzione DIRETTA dello scambio: riservata al super admin.
+    Gli admin di agenzia devono passare da /scambio-dati/richiedi (approvazione)."""
+    from tenant import is_super_admin
+    if not is_super_admin(user):
+        raise HTTPException(403, "Solo il super admin può eseguire direttamente. Usa 'Richiedi scambio' per l'approvazione.")
+    return await esegui_scambio_core(body, user.get("id"))
 
-    I titoli importati restano sempre in stato `da_pagare` con flag
-    `is_importato_arretrato=True` e senza metodo di pagamento.
-    """
+
+# ------------------------------------------------------------
+# Flusso controllato: richiesta agenzia → approvazione super admin
+# ------------------------------------------------------------
+@router.post("/scambio-dati/richiedi", status_code=201)
+async def scambio_dati_richiedi(
+    body: ScambioBody,
+    user=Depends(require_user("admin")),
+) -> dict:
+    """L'admin di agenzia richiede lo scambio: resta in attesa finché il
+    super admin non lo approva dalla console Scambi."""
+    from tenant import user_tenant_id, TENANT_PRINCIPALE_ID
+    doc = {
+        "id": str(uuid.uuid4()),
+        "agenzia_richiedente_id": user_tenant_id(user) or TENANT_PRINCIPALE_ID,
+        "richiesto_da_user_id": user.get("id"),
+        "richiesto_da_email": user.get("email"),
+        "agenzia_sorgente_id": body.agenzia_sorgente_id,
+        "operatore_email": body.operatore_email,
+        "importa_anagrafiche": body.importa_anagrafiche,
+        "importa_polizze": body.importa_polizze,
+        "importa_titoli": body.importa_titoli,
+        "importa_sinistri": body.importa_sinistri,
+        "importa_documenti": body.importa_documenti,
+        "stato": "in_attesa",
+        "richiesto_at": _now_iso(),
+        "deciso_da": None, "deciso_at": None, "motivo_rifiuto": None, "risultato": None,
+    }
+    await db.scambi_richieste.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/scambio-dati/richieste")
+async def scambio_dati_richieste(user=Depends(require_user("admin"))) -> list[dict]:
+    """Le richieste di scambio della propria agenzia (o tutte per il super admin)."""
+    from tenant import is_super_admin, user_tenant_id, TENANT_PRINCIPALE_ID
+    flt = {} if is_super_admin(user) else {
+        "agenzia_richiedente_id": user_tenant_id(user) or TENANT_PRINCIPALE_ID}
+    return await db.scambi_richieste.find(flt, {"_id": 0}).sort("richiesto_at", -1).to_list(200)
+
+
+async def esegui_scambio_core(body: ScambioBody, destinatario_user_id: str) -> dict:
+    """Clona anagrafiche/polizze/titoli/sinistri/allegati dell'operatore dalla
+    agenzia sorgente alla destinazione. I titoli importati restano sempre in
+    stato `da_pagare` con flag `is_importato_arretrato=True`."""
     operator = await db.users.find_one(
         {"email": body.operatore_email.lower().strip()}, {"_id": 0, "id": 1, "email": 1},
     )
@@ -318,7 +365,7 @@ async def scambio_dati_esegui(
             a["importato_da_agenzia_id"] = body.agenzia_sorgente_id
             a["importato_at"] = _now_iso()
             a["importato_da_operatore"] = body.operatore_email
-            a["collaboratore_id"] = user.get("id")
+            a["collaboratore_id"] = destinatario_user_id
             try:
                 await db.anagrafiche.insert_one(a)
                 log["anagrafiche"] += 1
@@ -335,7 +382,7 @@ async def scambio_dati_esegui(
             p["contraente_id"] = mappa_ana.get(p.get("contraente_id"), p.get("contraente_id"))
             p["importato_da_agenzia_id"] = body.agenzia_sorgente_id
             p["importato_at"] = _now_iso()
-            p["collaboratore_id"] = user.get("id")
+            p["collaboratore_id"] = destinatario_user_id
             try:
                 await db.polizze.insert_one(p)
                 log["polizze"] += 1
@@ -369,7 +416,7 @@ async def scambio_dati_esegui(
             s["polizza_id"] = mappa_pol.get(s.get("polizza_id"), s.get("polizza_id"))
             s["importato_da_agenzia_id"] = body.agenzia_sorgente_id
             s["importato_at"] = _now_iso()
-            s["collaboratore_id"] = user.get("id")
+            s["collaboratore_id"] = destinatario_user_id
             try:
                 await db.sinistri.insert_one(s)
                 log["sinistri"] += 1
@@ -396,7 +443,7 @@ async def scambio_dati_esegui(
         "data": _now_iso(),
         "agenzia_sorgente_id": body.agenzia_sorgente_id,
         "operatore_email": body.operatore_email,
-        "destinatario_user_id": user.get("id"),
+        "destinatario_user_id": destinatario_user_id,
         "risultato": log,
     })
     return {"ok": True, **log}

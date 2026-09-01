@@ -25,6 +25,7 @@ Endpoints:
   GET    /super-admin/stats                  → KPI piattaforma (senza PII)
 """
 from __future__ import annotations
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal
 
@@ -780,3 +781,169 @@ async def _clone_from_demo(target_tid: str) -> dict[str, int]:
             await raw_db[coll].insert_many(docs)
             report[coll] = len(docs)
     return report
+
+
+# ============================================================
+# DOMINI AGENZIA — sottodominio e credenziali dedicate
+# ============================================================
+class DominioBody(BaseModel):
+    sottodominio: str
+    attivo: bool = True
+
+
+@router.post("/agenzie/{tid}/dominio")
+async def imposta_dominio(tid: str, body: DominioBody, request: Request,
+                          user=Depends(require_user("admin"))) -> dict:
+    """Attiva/aggiorna il sottodominio dedicato dell'agenzia."""
+    _ensure_super_admin(user)
+    import re as _re
+    slug = (body.sottodominio or "").strip().lower()
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]{1,38}[a-z0-9]", slug):
+        raise HTTPException(400, "Sottodominio non valido: usa 3-40 caratteri (lettere, numeri, trattini)")
+    t = await raw_db.tenants.find_one({"id": tid}, {"_id": 0, "id": 1, "ragione_sociale": 1})
+    if not t:
+        raise HTTPException(404, "Tenant non trovato")
+    dup = await raw_db.tenants.find_one({"sottodominio": slug, "id": {"$ne": tid}}, {"_id": 1})
+    if dup:
+        raise HTTPException(409, f"Sottodominio '{slug}' già assegnato ad un'altra agenzia")
+    await raw_db.tenants.update_one({"id": tid}, {"$set": {
+        "sottodominio": slug, "dominio_attivo": bool(body.attivo), "updated_at": _now_iso()}})
+    base = os.environ.get("BASE_APP_DOMAIN") or (request.headers.get("host") or "").split(":")[0]
+    url = f"https://{slug}.{base}" if base else f"https://{slug}.tuodominio.it"
+    await log_action(user=user, action_type="DOMAIN_SET", target_agency_id=tid,
+                     target_agency_name=t["ragione_sociale"],
+                     details=f"Sottodominio: {slug} (attivo={body.attivo})", request=request)
+    return {"ok": True, "sottodominio": slug, "dominio_attivo": bool(body.attivo), "url": url}
+
+
+class CredenzialiBody(BaseModel):
+    email: str
+    name: Optional[str] = None
+    role: str = "admin"
+
+
+@router.post("/agenzie/{tid}/credenziali")
+async def crea_credenziali(tid: str, body: CredenzialiBody, request: Request,
+                           user=Depends(require_user("admin"))) -> dict:
+    """Crea (o resetta) le credenziali dedicate per l'agenzia.
+    La password generata viene mostrata UNA SOLA volta."""
+    _ensure_super_admin(user)
+    import secrets as _secrets
+    import uuid as _uuid
+    from auth import hash_password
+    t = await raw_db.tenants.find_one({"id": tid}, {"_id": 0, "id": 1, "ragione_sociale": 1})
+    if not t:
+        raise HTTPException(404, "Tenant non trovato")
+    email = body.email.lower().strip()
+    if "@" not in email:
+        raise HTTPException(400, "Email non valida")
+    role = body.role if body.role in ("admin", "collaboratore", "dipendente") else "admin"
+    password = _secrets.token_urlsafe(9)
+    existing = await raw_db.users.find_one({"email": email}, {"_id": 0, "id": 1, "agenzia_tenant_id": 1})
+    if existing:
+        if existing.get("agenzia_tenant_id") not in (None, tid):
+            raise HTTPException(409, "Email già usata da un utente di un'altra agenzia")
+        await raw_db.users.update_one({"email": email}, {"$set": {
+            "password_hash": hash_password(password), "role": role, "attivo": True,
+            "agenzia_tenant_id": tid, "updated_at": _now_iso()}})
+        azione = "reset"
+    else:
+        await raw_db.users.insert_one({
+            "id": str(_uuid.uuid4()), "email": email,
+            "name": body.name or t["ragione_sociale"],
+            "role": role, "attivo": True, "is_super_admin": False,
+            "agenzia_tenant_id": tid,
+            "password_hash": hash_password(password),
+            "created_at": _now_iso(), "updated_at": _now_iso(),
+        })
+        azione = "creato"
+    await log_action(user=user, action_type="CREDENTIALS_ISSUED", target_agency_id=tid,
+                     target_agency_name=t["ragione_sociale"],
+                     details=f"Credenziali {azione} per {email} (role={role})", request=request)
+    return {"ok": True, "email": email, "password": password, "azione": azione, "role": role}
+
+
+@router.get("/agenzie/{tid}/utenti")
+async def utenti_agenzia(tid: str, user=Depends(require_user("admin"))) -> list[dict]:
+    _ensure_super_admin(user)
+    return await raw_db.users.find(
+        {"agenzia_tenant_id": tid},
+        {"_id": 0, "id": 1, "email": 1, "name": 1, "role": 1, "attivo": 1, "created_at": 1},
+    ).sort("created_at", 1).to_list(200)
+
+
+# ============================================================
+# SCAMBIO CONTROLLATO — console approvazione scambi dati
+# ============================================================
+@router.get("/scambi")
+async def lista_scambi(user=Depends(require_user("admin"))) -> list[dict]:
+    _ensure_super_admin(user)
+    items = await raw_db.scambi_richieste.find({}, {"_id": 0}).sort("richiesto_at", -1).to_list(300)
+    tids = {i.get("agenzia_richiedente_id") for i in items} | {i.get("agenzia_sorgente_id") for i in items}
+    nomi = {t["id"]: t["ragione_sociale"] async for t in raw_db.tenants.find(
+        {"id": {"$in": [t for t in tids if t]}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    for i in items:
+        i["agenzia_richiedente_nome"] = nomi.get(i.get("agenzia_richiedente_id"), i.get("agenzia_richiedente_id"))
+        i["agenzia_sorgente_nome"] = nomi.get(i.get("agenzia_sorgente_id"), i.get("agenzia_sorgente_id"))
+    return items
+
+
+@router.post("/scambi/{rid}/approva")
+async def approva_scambio(rid: str, request: Request,
+                          user=Depends(require_user("admin"))) -> dict:
+    """Approva ed esegue subito lo scambio dati richiesto da un'agenzia."""
+    _ensure_super_admin(user)
+    r = await raw_db.scambi_richieste.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Richiesta non trovata")
+    if r.get("stato") != "in_attesa":
+        raise HTTPException(400, f"Richiesta già {r.get('stato')}")
+    from routes.setup_scambio import ScambioBody, esegui_scambio_core
+    body = ScambioBody(
+        agenzia_sorgente_id=r["agenzia_sorgente_id"],
+        operatore_email=r["operatore_email"],
+        importa_anagrafiche=r.get("importa_anagrafiche", True),
+        importa_polizze=r.get("importa_polizze", True),
+        importa_titoli=r.get("importa_titoli", True),
+        importa_sinistri=r.get("importa_sinistri", True),
+        importa_documenti=r.get("importa_documenti", True),
+    )
+    try:
+        risultato = await esegui_scambio_core(body, r["richiesto_da_user_id"])
+    except HTTPException as e:
+        await raw_db.scambi_richieste.update_one({"id": rid}, {"$set": {
+            "stato": "errore", "deciso_da": user.get("email"), "deciso_at": _now_iso(),
+            "motivo_rifiuto": f"Errore esecuzione: {e.detail}"}})
+        raise
+    await raw_db.scambi_richieste.update_one({"id": rid}, {"$set": {
+        "stato": "eseguito", "deciso_da": user.get("email"),
+        "deciso_at": _now_iso(), "risultato": risultato}})
+    await log_action(user=user, action_type="EXCHANGE_APPROVED",
+                     target_agency_id=r.get("agenzia_richiedente_id"),
+                     target_agency_name=await get_agency_name(r.get("agenzia_richiedente_id")),
+                     details=f"Scambio approvato ed eseguito (operatore {r['operatore_email']}): {risultato}",
+                     request=request)
+    return {"ok": True, "risultato": risultato}
+
+
+class RifiutoBody(BaseModel):
+    motivo: Optional[str] = None
+
+
+@router.post("/scambi/{rid}/rifiuta")
+async def rifiuta_scambio(rid: str, body: RifiutoBody, request: Request,
+                          user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    r = await raw_db.scambi_richieste.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Richiesta non trovata")
+    if r.get("stato") != "in_attesa":
+        raise HTTPException(400, f"Richiesta già {r.get('stato')}")
+    await raw_db.scambi_richieste.update_one({"id": rid}, {"$set": {
+        "stato": "rifiutato", "deciso_da": user.get("email"),
+        "deciso_at": _now_iso(), "motivo_rifiuto": body.motivo or ""}})
+    await log_action(user=user, action_type="EXCHANGE_REJECTED",
+                     target_agency_id=r.get("agenzia_richiedente_id"),
+                     target_agency_name=await get_agency_name(r.get("agenzia_richiedente_id")),
+                     details=f"Scambio rifiutato: {body.motivo or 'senza motivo'}", request=request)
+    return {"ok": True}

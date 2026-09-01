@@ -431,3 +431,24 @@ Usare integration_expert prima di implementare.
 - Fix: sync dalle prop solo su cambio di CONTENUTO (firma JSON.stringify come dipendenza degli effect).
 - Fix secondario: `cycleStato` ora parte dallo stato attualmente visualizzato (prima il primo click su un pallino già "adeguato" non cambiava colore).
 - Testato via browser automation: + aggiunge riga ✓, digitazione label/capitale/input standard ✓, ciclo pallino rosso→verde→giallo→rosso ✓, salvataggio + persistenza dopo reload ✓.
+
+## Sessione 2026-09 (fork) — Implementato
+- Fix Piramide: stato non si resetta più (useEffect firma JSON); pallino cambia colore al 1° click
+- Fix crash Assistente Personale: CopilotWidget spostato dentro BrowserRouter
+- NotebookLM assicurativo (/notebook-ai): notebook + fonti (upload/CRM) + chat streaming con citazioni + riassunti/FAQ/guide + Audio Overview podcast 2 voci (routes/notebooklm.py)
+- Modelli Piramide (/modelli-piramide): template globali Privati/Aziende modificabili (righe custom) propagati a tutti; Aziende auto per P.IVA/persona_giuridica (routes/piramide_templates.py)
+- Sistema colonne tabelle: useTableColumns + ColumnPicker (drag&drop, salvataggio per utente su DB) applicato a Polizze/Anagrafiche/Titoli/Sinistri (components/ColumnManager.jsx, routes/preferenze.py)
+- Unisci doppioni anagrafiche (stesso CF/P.IVA) con riassegnazione polizze/sinistri/allegati/utenti (routes/anagrafiche.py: /anagrafiche-duplicati, /anagrafiche-unisci)
+- Indici DB allo startup (indexes.py); /api/search limit default 50
+- Super Admin: Domini Agenzia (sottodominio + credenziali dedicate) + console Scambi Dati con approvazione (super_admin.py, setup_scambio.py richiedi/richieste)
+- Link portale personalizzato /c/{slug} formato https://{sottodominio-agenzia}.{dominio}/c/{cliente} (server.py _portale_link_per_ana, pages/PortaleLanding.jsx) + bottone copia in AnagraficaDetail
+- Avatar automatico da documento identità: OpenCV face crop al caricamento OCR + batch notturno 02:30 + POST /api/avatar-batch/esegui (face_crop.py)
+- Tabella Anagrafiche compattata (righe 45px, badge inline)
+- Test: iteration_56.json 9/9 backend PASS + frontend OK; avatar e2e verificato manualmente
+
+## Backlog (scelte utente già confermate)
+- P0: Copilot ibrido (Haiku semplici/Sonnet complesse) + streaming SSE + query DB parallele (scelta c+d)
+- P1: Studio Marketing: reel slideshow MP4 (ffmpeg da installare), caroselli IG, sito web AI + ZIP export (dominio esterno), piano editoriale con calendario; fal.ai quando utente fornirà key
+- P1: Confronto Preventivi (2-4+ PDF → estrazione garanzie/massimali/franchigie → tabella + giudizio AI)
+- P1: Carichi Mensili YoY (validare UI), Compagnia logo (UI Librerie), Piramide PDF export (weasyprint)
+- P2: Notifica piramide mensile con toggle per agenzia; doppio passaggio OCR polizze (Flash→Sonnet); split server.py (>12.9k righe)

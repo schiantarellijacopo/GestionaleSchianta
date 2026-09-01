@@ -132,16 +132,15 @@ async def upload_doc_veicolo(
     categoria = MOTIVI_CATEGORIE.get(app.get("tipo_cessazione") or "sostituita", "atto_vendita")
 
     # Salva file (usa storage locale, semplice - lo scanner OCR usa lo stesso pattern)
-    storage_root = os.environ.get("STORAGE_ROOT", "/data/uploads")
-    os.makedirs(storage_root, exist_ok=True)
-    ext = (file.filename or "").split(".")[-1].lower() if file.filename else "bin"
-    fname = f"{uuid.uuid4()}.{ext}"
-    fpath = os.path.join(storage_root, fname)
     content = await file.read()
     if len(content) > 15 * 1024 * 1024:
         raise HTTPException(413, "File troppo grande (>15 MB)")
-    with open(fpath, "wb") as f:
-        f.write(content)
+    import storage as obj_storage
+    ext = (file.filename or "").split(".")[-1].lower() if file.filename else "bin"
+    fname = f"{uuid.uuid4()}.{ext}"
+    spath = f"{os.environ.get('APP_NAME', 'assicura')}/matricole/{aid}/{fname}"
+    res = obj_storage.put_object(spath, content, file.content_type or "application/octet-stream")
+    fpath = res["path"]
 
     allegato = {
         "id": str(uuid.uuid4()),

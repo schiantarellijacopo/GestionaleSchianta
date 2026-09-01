@@ -425,6 +425,20 @@ function DatiTab({ ana, canEdit, onReload }) {
         <Card className="p-6 border-slate-200 mt-4">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <h3 className="font-medium text-slate-900">Modifica anagrafica</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                <button
+                    onClick={async () => {
+                        try {
+                            const r = await api.get(`/anagrafiche/${f.id}/portale-link`);
+                            await navigator.clipboard.writeText(r.data.url);
+                            toast.success(`Link personalizzato copiato: ${r.data.url}`);
+                        } catch (e) { toast.error(e.response?.data?.detail || "Errore generazione link"); }
+                    }}
+                    className="text-xs px-3 py-1.5 rounded border border-violet-300 text-violet-700 hover:bg-violet-50 font-medium"
+                    data-testid="copia-link-portale-btn"
+                >
+                    🔗 Copia link Portale personalizzato
+                </button>
                 <button
                     onClick={async () => {
                         if (!window.confirm("Vuoi inviare le credenziali del Portale Cliente a questo cliente via Email + WhatsApp?")) return;
@@ -439,6 +453,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                 >
                     📩 Invia credenziali Portale Cliente
                 </button>
+                </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div><Label>Ragione sociale</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>

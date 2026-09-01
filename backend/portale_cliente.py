@@ -532,13 +532,12 @@ async def upload_documento(
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(413, "File troppo grande (>20 MB)")
-    storage_root = os.environ.get("STORAGE_ROOT", "/data/uploads")
-    os.makedirs(storage_root, exist_ok=True)
+    import storage as obj_storage
     ext = (file.filename or "").split(".")[-1].lower() if file.filename else "bin"
     fname = f"{uuid.uuid4()}.{ext}"
-    fpath = os.path.join(storage_root, fname)
-    with open(fpath, "wb") as f:
-        f.write(content)
+    spath = f"{os.environ.get('APP_NAME', 'assicura')}/portale-upload/{cliente['id']}/{fname}"
+    res = obj_storage.put_object(spath, content, file.content_type or "application/octet-stream")
+    fpath = res["path"]
     doc = {
         "id": str(uuid.uuid4()),
         "tenant_id": cliente.get("tenant_id"),
@@ -674,9 +673,11 @@ async def portale_piramide_protezione(cliente=Depends(current_cliente)):
     auto-popolate dalle polizze attive + dati salvati (reddito, testamento, eredi).
     """
     from server import db, _piramide_v2_calcola_voci
+    from routes.piramide_templates import template_for_anagrafica
     ac = await db.analisi_cliente.find_one({"anagrafica_id": cliente["id"]}, {"_id": 0}) or {}
     piramide = ac.get("piramide_v2") or {}
     voci = await _piramide_v2_calcola_voci(cliente["id"])
+    tipo_p, tmpl = await template_for_anagrafica(cliente)
     return {
         "voci_calcolate": voci,
         "dati_reddito": piramide.get("dati_reddito") or {},
@@ -685,6 +686,8 @@ async def portale_piramide_protezione(cliente=Depends(current_cliente)):
         "override_voci": piramide.get("override_voci") or {},
         "stato_voci": piramide.get("stato_voci") or {},
         "voci_custom": piramide.get("voci_custom") or {},
+        "tipo_piramide": tipo_p,
+        "template": tmpl,
         "cliente_nome": (cliente.get("ragione_sociale") or cliente.get("cognome_nome")
                          or f"{cliente.get('cognome', '') or ''} {cliente.get('nome', '') or ''}".strip()),
     }

@@ -223,7 +223,7 @@ function NavList({ sezione, onSelect }) {
 
 // ─── LOGIN ────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-    const [email, setEmail] = useState("");
+    const [email, setEmail] = useState(() => sessionStorage.getItem("portale_prefill_email") || "");
     const [password, setPassword] = useState("");
     const [busy, setBusy] = useState(false);
     const submit = async (e) => {
@@ -360,6 +360,7 @@ function PiramideView({ cliente }) {
                 override_voci={data.override_voci}
                 stato_voci={data.stato_voci}
                 voci_custom={data.voci_custom}
+                template={data.template}
                 clienteNome={data.cliente_nome || cliente?.nome}
                 onSave={null /* read-only per il cliente */}
                 onRichiediPreventivo={richiediPreventivo}

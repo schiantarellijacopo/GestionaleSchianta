@@ -56,7 +56,9 @@ class Tenant(BaseDoc):
     partita_iva: Optional[str] = None
     codice_fiscale: Optional[str] = None
     note: Optional[str] = None
-    # ---- Licensing & Abbonamenti (SaaS) ----
+    # ---- Dominio dedicato (sottodominio per agenzia) ----
+    sottodominio: Optional[str] = None
+    dominio_attivo: bool = False
     stato_abbonamento: Literal["attiva", "in_prova", "sospesa", "scaduta", "cancellata"] = "in_prova"
     piano: Literal["trial", "starter", "professional", "enterprise", "custom"] = "trial"
     prezzo_mensile_eur: float = 0.0

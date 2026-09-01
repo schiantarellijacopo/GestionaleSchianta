@@ -1903,6 +1903,7 @@ async def ocr_documento_identita(
         raise HTTPException(503, f"Errore OCR: {e}")
 
     documento_url = None
+    avatar_url_doc = None
     if anagrafica_id:
         # salva file fronte (o PDF) come documento principale; retro come allegato
         ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
@@ -1935,10 +1936,20 @@ async def ocr_documento_identita(
         except Exception:
             pass
 
+        # AUTO-AVATAR: rileva e ritaglia il volto dal documento (OpenCV locale)
+        try:
+            import face_crop
+            avatar_url_doc = await face_crop.salva_avatar_da_documento(
+                db, anagrafica_id, file_for_ocr, ai_bbox=data.get("foto_volto_bbox"))
+        except Exception as e:
+            logging.warning("Face crop → avatar fallito per %s: %s", anagrafica_id, e)
+
     await log_attivita(user, "ocr", tipo, anagrafica_id,
                        f"OCR {tipo}{'(fronte+retro)' if contents_retro else ''}: {data.get('cognome')} {data.get('nome')}")
     if documento_url:
         data["_documento_salvato"] = documento_url
+    if avatar_url_doc:
+        data["_avatar_salvato"] = avatar_url_doc
     return data
 
 
@@ -2085,46 +2096,13 @@ async def ocr_carta_identita(
         except Exception:
             pass  # OCR ha successo anche se l'upload fallisce
 
-        # AUTO-AVATAR: ritaglia la foto volto dal documento e la salva come avatar
-        bbox = data.get("foto_volto_bbox") or {}
-        if bbox and isinstance(bbox, dict):
-            try:
-                from PIL import Image
-                from io import BytesIO
-                img_pil = Image.open(BytesIO(file_for_ocr)).convert("RGB")
-                W, H = img_pil.size
-                x = float(bbox.get("x") or 0)
-                y = float(bbox.get("y") or 0)
-                w = float(bbox.get("w") or 0)
-                h = float(bbox.get("h") or 0)
-                if w > 0.05 and h > 0.05:
-                    pad = 0.05
-                    left = max(0, int((x - pad) * W))
-                    top = max(0, int((y - pad) * H))
-                    right = min(W, int((x + w + pad) * W))
-                    bottom = min(H, int((y + h + pad) * H))
-                    face = img_pil.crop((left, top, right, bottom))
-                    # square crop centered
-                    fw, fh = face.size
-                    side = min(fw, fh)
-                    lx = (fw - side) // 2
-                    ly = (fh - side) // 2
-                    face_sq = face.crop((lx, ly, lx + side, ly + side))
-                    # resize a max 512px
-                    if side > 512:
-                        face_sq = face_sq.resize((512, 512), Image.LANCZOS)
-                    face_out = BytesIO()
-                    face_sq.save(face_out, format="JPEG", quality=88)
-                    face_bytes = face_out.getvalue()
-                    avatar_path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/avatar_{_uid()}.jpg"
-                    ar = obj_storage.put_object(avatar_path, face_bytes, "image/jpeg")
-                    avatar_url = f"/api/storage/{ar['path']}"
-                    await db.anagrafiche.update_one(
-                        {"id": anagrafica_id},
-                        {"$set": {"avatar_url": avatar_url, "updated_at": _now_iso()}},
-                    )
-            except Exception as e:
-                logging.warning("Face crop → avatar fallito per %s: %s", anagrafica_id, e)
+        # AUTO-AVATAR: rileva e ritaglia il volto (OpenCV locale, fallback bbox AI)
+        try:
+            import face_crop
+            avatar_url = await face_crop.salva_avatar_da_documento(
+                db, anagrafica_id, file_for_ocr, ai_bbox=data.get("foto_volto_bbox"))
+        except Exception as e:
+            logging.warning("Face crop → avatar fallito per %s: %s", anagrafica_id, e)
 
     await log_attivita(user, "ocr", "carta_identita", anagrafica_id,
                        f"OCR CI: {data.get('cognome')} {data.get('nome')}")
@@ -3717,7 +3695,7 @@ async def _user_firma_to_b64(firma_url: str) -> str:
     mime = "image/png" if ext == "png" else (
         "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
     )
-    return f"data:{mime};base64,{_b64lib.b64encode(data).decode('ascii')}"
+    return f"data:{mime};base64,{__import__('base64').b64encode(data).decode('ascii')}"
 
 
 async def _build_lettera_abbuono_pdf(letid: str) -> tuple[bytes, dict]:
@@ -7457,6 +7435,8 @@ async def get_piramide_v2(aid: str, user=Depends(current_user)):
     piramide.setdefault("cliente_nome",
                         ana.get("ragione_sociale") or ana.get("cognome_nome")
                         or f"{ana.get('cognome', '') or ''} {ana.get('nome', '') or ''}".strip())
+    from routes.piramide_templates import template_for_anagrafica
+    piramide["tipo_piramide"], piramide["template"] = await template_for_anagrafica(ana)
     return piramide
 
 
@@ -10434,7 +10414,7 @@ async def newsletter_invia(body: dict, user=Depends(require_user("admin", "colla
 
 
 @api.get("/anagrafiche/{aid}/diario")
-async def list_diario(aid: str, user=Depends(current_user)):
+async def list_diario_anagrafica(aid: str, user=Depends(current_user)):
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
     items = await db.diario.find({"anagrafica_id": aid}, {"_id": 0}).sort("data_evento", -1).to_list(500)
@@ -10896,7 +10876,7 @@ async def notifiche_sommario(user=Depends(current_user)):
 
 
 @api.get("/search")
-async def search_globale(q: str, limit: int = 8, user=Depends(current_user)):
+async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
     """Ricerca rapida cross-entità per la barra in alto.
     Cerca su: anagrafiche (nome, CF, P.IVA, email, telefono, cellulare, comune, indirizzo),
     polizze (numero, ramo, prodotto, targa, contraente), sinistri (numero, luogo),
@@ -12078,6 +12058,15 @@ api.include_router(_copilot_router.router)
 from routes import biblioteca_previdenza as _bibl_prev_router
 api.include_router(_bibl_prev_router.router)
 
+from routes import notebooklm as _notebooklm_router
+api.include_router(_notebooklm_router.router)
+
+from routes import piramide_templates as _pir_tmpl_router
+api.include_router(_pir_tmpl_router.router)
+
+from routes import preferenze as _pref_router
+api.include_router(_pref_router.router)
+
 from routes import app_cliente as _app_cliente_router
 api.include_router(_app_cliente_router.router)
 
@@ -12144,6 +12133,75 @@ async def _rifiuta_richiesta_cliente(rid: str, body: dict = None,
     return {"ok": True}
 
 
+def _slugify_nome(nome: str) -> str:
+    import unicodedata as _ud
+    s = _ud.normalize("NFKD", (nome or "cliente")).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    return s[:50] or "cliente"
+
+
+async def _portale_link_per_ana(ana: dict) -> dict:
+    """Link personalizzato del Portale: https://{sottodominio-agenzia}.{dominio}/c/{cliente-slug}."""
+    slug = ana.get("portale_slug")
+    if not slug:
+        base_slug = _slugify_nome(ana.get("ragione_sociale")
+                                  or f"{ana.get('cognome', '')}-{ana.get('nome', '')}")
+        slug = base_slug
+        i = 2
+        while await db.anagrafiche.find_one({"portale_slug": slug, "id": {"$ne": ana["id"]}}, {"_id": 1}):
+            slug = f"{base_slug}-{i}"
+            i += 1
+        await db.anagrafiche.update_one({"id": ana["id"]}, {"$set": {"portale_slug": slug}})
+    public_base = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+    dominio_base = os.environ.get("BASE_APP_DOMAIN") or public_base.replace("https://", "").replace("http://", "")
+    tenant = None
+    tid = ana.get("tenant_id") or ana.get("agenzia_tenant_id")
+    if tid:
+        tenant = await db.tenants.find_one({"id": tid}, {"_id": 0, "sottodominio": 1, "dominio_attivo": 1})
+    if tenant and tenant.get("sottodominio") and tenant.get("dominio_attivo") and dominio_base:
+        base = f"https://{tenant['sottodominio']}.{dominio_base}"
+    else:
+        base = public_base or ""
+    return {"url": f"{base}/c/{slug}" if base else f"/c/{slug}", "slug": slug}
+
+
+@_extra.post("/avatar-batch/esegui")
+async def esegui_avatar_batch(user=Depends(require_user("admin", "collaboratore"))):
+    """Esegue SUBITO il batch avatar (normalmente gira alle 02:30 di notte)."""
+    import face_crop
+    report = await face_crop.batch_avatar_notturno(db)
+    return {"ok": True, **report}
+
+
+@_extra.get("/anagrafiche/{aid}/portale-link")
+async def get_portale_link(aid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    return await _portale_link_per_ana(ana)
+
+
+@_extra.get("/public/portale-info/{slug}")
+async def public_portale_info(slug: str):
+    """Info pubbliche minime per la landing personalizzata /c/{slug}."""
+    ana = await db.anagrafiche.find_one({"portale_slug": slug}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Link non valido")
+    agenzia_nome = None
+    tid = ana.get("tenant_id") or ana.get("agenzia_tenant_id")
+    if tid:
+        t = await db.tenants.find_one({"id": tid}, {"_id": 0, "ragione_sociale": 1})
+        agenzia_nome = (t or {}).get("ragione_sociale")
+    if not agenzia_nome:
+        cfg = await db.azienda_config.find_one({}, {"_id": 0, "ragione_sociale": 1}) or {}
+        agenzia_nome = cfg.get("ragione_sociale") or "La tua agenzia"
+    return {
+        "agenzia_nome": agenzia_nome,
+        "cliente_nome": ana.get("ragione_sociale") or f"{ana.get('cognome', '')} {ana.get('nome', '')}".strip(),
+        "email": ana.get("email"),
+    }
+
+
 async def _do_invia_credenziali_portale_one(ana: dict, user: dict) -> dict:
     """Invia le credenziali del Portale a UN cliente. Non solleva mai.
 
@@ -12163,7 +12221,10 @@ async def _do_invia_credenziali_portale_one(ana: dict, user: dict) -> dict:
         or os.environ.get("BACKEND_PUBLIC_URL")
         or ""
     ).rstrip("/")
-    link = f"{base_url}/portale" if base_url else "/portale"
+    try:
+        link = (await _portale_link_per_ana(ana))["url"]
+    except Exception:
+        link = f"{base_url}/portale" if base_url else "/portale"
     nome = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip() or "Cliente"
     tipo_credenziale = "Codice Fiscale" if tipo == "fisico" else "Partita IVA"
     tenant_id = ana.get("tenant_id") or user.get("agenzia_tenant_id")
@@ -12631,14 +12692,14 @@ app.add_middleware(
 # In caso di request anonima (login, webhook WhatsApp, health-check) → nessun
 # filtro applicato → il wrapper fa passthrough puro.
 # ============================================================
-from auth import get_token_from_request, decode_token as _decode_tok  # noqa: E402
+from auth import get_token_from_request as _get_tok_from_req, decode_token as _decode_tok  # noqa: E402
 from database import raw_db, _current_user_ctx  # noqa: E402
 
 
 @app.middleware("http")
 async def tenant_context_middleware(request, call_next):
     user = None
-    token = get_token_from_request(request)
+    token = _get_tok_from_req(request)
     if token:
         try:
             payload = _decode_tok(token)
@@ -12662,19 +12723,15 @@ async def tenant_context_middleware(request, call_next):
 # ----- Startup -----
 @app.on_event("startup")
 async def startup():
-    # indexes
+    # indexes (base + estesi per ricerche veloci senza limiti)
     await db.users.create_index("email", unique=True)
-    await db.anagrafiche.create_index("ragione_sociale")
-    await db.anagrafiche.create_index("codice_fiscale")
     await db.anagrafiche.create_index("id_anagrafica_exp")
-    await db.polizze.create_index("numero_polizza")
-    await db.polizze.create_index("contraente_id")
     await db.polizze.create_index("id_polizza_exp")
-    await db.titoli.create_index("polizza_id")
     await db.titoli.create_index("id_titolo_exp")
-    await db.sinistri.create_index("polizza_id")
     await db.sinistri.create_index("id_sinistro_exp")
     await db.attivita_log.create_index("created_at")
+    from indexes import ensure_indexes
+    await ensure_indexes()
 
     # admin seed (admin agenzia principale — NON super_admin)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@assicura.it").lower()
@@ -12797,6 +12854,8 @@ async def startup():
     # Scheduler: avvisi scadenze giornalieri (08:00 locale)
     try:
         avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
+        import face_crop as _face_crop
+        _face_crop.start_scheduler(db, hour=2, minute=30)
     except Exception as e:
         logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
 
@@ -12869,6 +12928,8 @@ async def startup():
 async def shutdown():
     try:
         avvisi_scadenze.stop_scheduler()
+        import face_crop as _face_crop_stop
+        _face_crop_stop.stop_scheduler()
     except Exception:
         pass
     try:

@@ -1501,7 +1501,13 @@ function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
         <div className="space-y-3 mt-4">
             <div className="bg-sky-50 border border-sky-200 rounded p-3 text-xs text-sky-900 flex items-center justify-between flex-wrap gap-2">
                 <div>
-                    <strong>Piramide delle Coperture</strong> — mappa visuale della protezione del cliente.
+                    <strong>Piramide delle Coperture</strong>
+                    {data.tipo_piramide === "aziende" ? (
+                        <span className="ml-2 bg-indigo-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" data-testid="piramide-badge-aziende">Modello Aziende (P.IVA)</span>
+                    ) : (
+                        <span className="ml-2 bg-sky-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" data-testid="piramide-badge-privati">Modello Privati</span>
+                    )}
+                    {" "}— mappa visuale della protezione del cliente.
                     Valori auto-popolati dalle polizze attive; puoi sovrascriverli e salvare i dati reddito/testamento.
                 </div>
                 <div className="text-[10px] text-sky-700">
@@ -1516,6 +1522,7 @@ function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
                 override_voci={data.override_voci}
                 stato_voci={data.stato_voci}
                 voci_custom={data.voci_custom}
+                template={data.template}
                 clienteNome={data.cliente_nome}
                 onSave={canEdit ? salva : null}
                 onPrepopolate={canEdit ? prepopola : null}

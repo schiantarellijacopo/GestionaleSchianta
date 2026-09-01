@@ -130,6 +130,7 @@ async def create_profilo(body: ProfiloPermessiBody,
         "created_at": _now_iso(),
     }
     await db.profili_permessi.insert_one(doc)
+    doc.pop("_id", None)
     doc["effective_permissions"] = _merge_permissions(
         doc.get("area_levels") or {}, doc.get("area_permissions") or {},
     )

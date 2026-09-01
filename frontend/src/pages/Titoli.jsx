@@ -6,6 +6,7 @@ import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import KpiBarSection from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import { useTableColumns } from "@/components/ColumnManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -179,6 +180,126 @@ export default function Titoli({ storicoMode = false } = {}) {
     const exportXlsx = () => window.open(`${API_BASE}/export/titoli.xlsx`, "_blank");
     const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
 
+    // Colonne tabella — selezionabili/riordinabili per utente
+    const showStorico = storicoMode || ["storico", "storico_anno", "storico_mese"].includes(filters.preset);
+    const titoliColsDefault = [
+        {
+            key: "sel", label: "Selezione", locked: true, thClass: "w-8 text-center", tdClass: "text-center",
+            header: () => (
+                <input type="checkbox" data-testid="select-all-checkbox"
+                       checked={displayed.length > 0 && selected.size === displayed.length}
+                       onChange={toggleAll} />
+            ),
+            render: (t) => (
+                <input type="checkbox" data-testid={`select-${t.id}`}
+                       checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
+            ),
+        },
+        {
+            key: "contratto", label: "Contratto", sort: "numero_polizza", thClass: "w-[140px]",
+            render: (t) => (
+                <>
+                    <Link to={`/polizze/${t.polizza_id}`} className="text-amber-600 hover:underline font-medium block">
+                        {t.numero_polizza || "—"}
+                    </Link>
+                    <div className="text-[11px] text-slate-500">{t.prodotto || t.ramo}</div>
+                </>
+            ),
+        },
+        {
+            key: "targa", label: "Targa", sort: "targa", thClass: "w-[100px]",
+            tdClass: "text-xs text-sky-700 font-mono font-medium uppercase",
+            render: (t) => t.targa || <span className="text-slate-300">—</span>,
+        },
+        { key: "contraente", label: "Contraente", sort: "contraente_nome", tdClass: "text-xs", render: (t) => t.contraente_nome || "-" },
+        { key: "compagnia", label: "Compagnia", sort: "compagnia_nome", thClass: "w-[120px]", tdClass: "text-xs text-slate-700", render: (t) => t.compagnia_nome || "-" },
+        {
+            key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "w-[100px]", tdClass: "text-xs text-slate-700",
+            render: (t) => t.collaboratore_nome ? <CollaboratoreCell nome={t.collaboratore_nome} avatarUrl={t.collaboratore_avatar_url} /> : "-",
+        },
+        {
+            key: "premio", label: "Premio €", sort: "importo_lordo", thClass: "text-right w-[80px]", tdClass: "num text-right font-medium",
+            render: (t) => <span data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</span>,
+        },
+        {
+            key: "provv_tot", label: "Provv. tot.", sort: "provv_totale", thClass: "text-right w-[70px]", tdClass: "num text-right text-slate-700",
+            render: (t) => <span data-testid={`titolo-provv-tot-${t.id}`}>{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</span>,
+        },
+        {
+            key: "provv_collab", label: "Collab.", sort: "provv_collaboratore", thClass: "text-right w-[70px]", tdClass: "num text-right text-sky-700 font-medium",
+            render: (t) => (
+                <span data-testid={`titolo-provv-collab-${t.id}`}
+                      title={t.provvigione_pct_collab > 0 ? `${t.provvigione_pct_collab}%` : "Nessuno schema"}>
+                    {fmtEur(t.provvigione_collaboratore || 0)}
+                </span>
+            ),
+        },
+        {
+            key: "margine", label: "Margine", sort: "margine_agenzia", thClass: "text-right w-[70px]", tdClass: "num text-right text-amber-700 font-medium",
+            render: (t) => <span data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</span>,
+        },
+        { key: "scadenza", label: "Scadenza", sort: "data_scadenza", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs whitespace-nowrap", render: (t) => fmtDate(t.scadenza) },
+        { key: "copertura", label: "Copertura", sort: "data_copertura", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs text-emerald-700 whitespace-nowrap", render: (t) => t.data_copertura ? fmtDate(t.data_copertura) : "—" },
+        ...(showStorico ? [
+            {
+                key: "incassato_il", label: "Incassato il", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs whitespace-nowrap text-emerald-700",
+                render: (t) => <span data-testid={`titolo-incassato-il-${t.id}`}>{t.data_incasso ? fmtDate(t.data_incasso) : "—"}</span>,
+            },
+            {
+                key: "mezzo_pag", label: "Pagato con", thClass: "w-[90px]", tdClass: "text-xs text-slate-700",
+                render: (t) => <span data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</span>,
+            },
+        ] : []),
+        {
+            key: "stato", label: "Stato", thClass: "w-[90px]",
+            render: (t) => (
+                <div className="flex items-center gap-1.5">
+                    <StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} />
+                    <ChiusuraPill data={t.data_incasso} />
+                </div>
+            ),
+        },
+        {
+            key: "da_pagare", label: "Da pagare", thClass: "text-right w-[80px]", tdClass: "num text-right font-semibold text-rose-700",
+            render: (t) => {
+                const daPagare = t.stato === "incassato" ? 0 : (t.importo_lordo || 0);
+                return daPagare > 0 ? fmtEur(daPagare) : "—";
+            },
+        },
+        {
+            key: "allegati", label: "All.", thClass: "w-[44px] text-center", tdClass: "text-center",
+            render: (t) => (
+                <AllegatiCell entita_tipo="titolo" entita_id={t.id} count={t.allegati_count}
+                              hint={t.data_incasso ? "Allega ricevuta bonifico / assegno" : "Allega documento"}
+                              onChange={load} />
+            ),
+        },
+        {
+            key: "azione", label: "Azione", locked: true, thClass: "w-[110px] text-center", tdClass: "text-center",
+            render: (t) => (
+                t.stato !== "incassato" && t.stato !== "stornato" ? (
+                    <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => setPaying(t)} data-testid={`titolo-incassa-${t.id}`}>
+                        Incasso/Copertura
+                    </Button>
+                ) : (
+                    <span className="text-xs text-emerald-700">✓ {fmtDate(t.data_incasso)}</span>
+                )
+            ),
+        },
+        {
+            key: "menu", label: "Menu ⋮", locked: true, thClass: "w-[36px]", tdClass: "text-right",
+            render: (t) => (
+                <RowActions testid={`titolo-actions-${t.id}`}
+                            onEdit={canEdit ? () => setEditing(t) : null}
+                            onDelete={() => elimina(t.id)}
+                            canDelete={canDelete}
+                            label="titolo" />
+            ),
+        },
+    ];
+    const { cols: titoliCols, picker: colsPicker } = useTableColumns("titoli", titoliColsDefault);
+
     return (
         <div data-testid={storicoMode ? "titoli-storici-page" : "titoli-page"}>
             <PageHeader
@@ -302,133 +423,38 @@ export default function Titoli({ storicoMode = false } = {}) {
             </div>
 
             {/* Tabella con header sticky + prime 3 colonne congelate */}
+            <div className="flex justify-end mb-2">{colsPicker}</div>
             <div className="tbl-scroll" style={{ "--c1-w": "36px", "--c2-w": "140px", "--c3-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl-compact freeze-3 w-full text-xs">
                         <thead>
                             <tr>
-                                <th className="w-8 text-center">
-                                    <input
-                                        type="checkbox"
-                                        data-testid="select-all-checkbox"
-                                        checked={displayed.length > 0 && selected.size === displayed.length}
-                                        onChange={toggleAll}
-                                    />
-                                </th>
-                                <th className="w-[140px]"><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Contratto</SortHeader></th>
-                                <th className="w-[100px]"><SortHeader k="targa" sortKey={sortKey} dir={dir} toggle={toggle}>Targa</SortHeader></th>
-                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Contraente</SortHeader></th>
-                                <th className="w-[120px]"><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
-                                <th className="w-[100px]"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
-                                <th className="text-right w-[80px]"><SortHeader k="importo_lordo" sortKey={sortKey} dir={dir} toggle={toggle}>Premio €</SortHeader></th>
-                                <th className="text-right w-[70px]" title="Provvigione totale"><SortHeader k="provv_totale" sortKey={sortKey} dir={dir} toggle={toggle}>Provv. tot.</SortHeader></th>
-                                <th className="text-right w-[70px]" title="Quota collaboratore"><SortHeader k="provv_collaboratore" sortKey={sortKey} dir={dir} toggle={toggle}>Collab.</SortHeader></th>
-                                <th className="text-right w-[70px]" title="Margine agenzia"><SortHeader k="margine_agenzia" sortKey={sortKey} dir={dir} toggle={toggle}>Margine</SortHeader></th>
-                                <th className="w-[80px] whitespace-nowrap"><SortHeader k="data_scadenza" sortKey={sortKey} dir={dir} toggle={toggle}>Scadenza</SortHeader></th>
-                                <th className="w-[80px] whitespace-nowrap"><SortHeader k="data_copertura" sortKey={sortKey} dir={dir} toggle={toggle}>Copertura</SortHeader></th>
-                                {(storicoMode || filters.preset === "storico" || filters.preset === "storico_anno" || filters.preset === "storico_mese") && (
-                                    <>
-                                        <th className="w-[80px] whitespace-nowrap" data-testid="th-incassato-il">Incassato il</th>
-                                        <th className="w-[90px]" data-testid="th-mezzo-pag">Pagato con</th>
-                                    </>
-                                )}
-                                <th className="w-[90px]">Stato</th>
-                                <th className="text-right w-[80px]">Da pagare</th>
-                                <th className="w-[44px] text-center">All.</th>
-                                <th className="w-[110px] text-center">Azione</th>
-                                <th className="w-[36px]"></th>
+                                {titoliCols.map((c) => (
+                                    <th key={c.key} className={c.thClass}>
+                                        {c.header ? c.header()
+                                            : c.sort ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggleSort}>{c.label}</SortHeader>
+                                            : (c.label === "Menu ⋮" ? "" : c.label)}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {displayed.map((t) => {
-                                const daPagare = t.stato === "incassato" ? 0 : (t.importo_lordo || 0);
-                                return (
-                                    <tr
-                                        key={t.id}
-                                        data-testid={`titolo-row-${t.id}`}
-                                        className={`${selected.has(t.id) ? "bg-sky-50" : ""} hover:bg-sky-50/60 cursor-pointer`}
-                                        onClick={(e) => {
-                                            // ignora click su elementi interattivi (checkbox, link, button, menu)
-                                            if (e.target.closest("button, a, input, [role='menuitem'], [data-row-noclick]")) return;
-                                            if (canEdit) setEditing(t);
-                                        }}
-                                    >
-                                        <td className="text-center">
-                                            <input
-                                                type="checkbox"
-                                                data-testid={`select-${t.id}`}
-                                                checked={selected.has(t.id)}
-                                                onChange={() => toggle(t.id)}
-                                            />
-                                        </td>
-                                        <td>
-                                            <Link to={`/polizze/${t.polizza_id}`} className="text-amber-600 hover:underline font-medium block">
-                                                {t.numero_polizza || "—"}
-                                            </Link>
-                                            <div className="text-[11px] text-slate-500">{t.prodotto || t.ramo}</div>
-                                        </td>
-                                        <td className="text-xs text-sky-700 font-mono font-medium uppercase">
-                                            {t.targa || <span className="text-slate-300">—</span>}
-                                        </td>
-                                        <td className="text-xs">{t.contraente_nome || "-"}</td>
-                                        <td className="text-xs text-slate-700">{t.compagnia_nome || "-"}</td>
-                                        <td className="text-xs text-slate-700">{t.collaboratore_nome ? <CollaboratoreCell nome={t.collaboratore_nome} avatarUrl={t.collaboratore_avatar_url} /> : "-"}</td>
-                                        <td className="num text-right font-medium" data-testid={`titolo-premio-${t.id}`}>{fmtEur(t.importo_lordo)}</td>
-                                        <td className="num text-right text-slate-700" data-testid={`titolo-provv-tot-${t.id}`}>{fmtEur(t.provvigione_totale ?? t.provvigioni ?? 0)}</td>
-                                        <td className="num text-right text-sky-700 font-medium" data-testid={`titolo-provv-collab-${t.id}`} title={t.provvigione_pct_collab > 0 ? `${t.provvigione_pct_collab}%` : "Nessuno schema"}>{fmtEur(t.provvigione_collaboratore || 0)}</td>
-                                        <td className="num text-right text-amber-700 font-medium" data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</td>
-                                        <td className="num text-xs whitespace-nowrap">{fmtDate(t.scadenza)}</td>
-                                        <td className="num text-xs text-emerald-700 whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
-                                        {(storicoMode || filters.preset === "storico" || filters.preset === "storico_anno" || filters.preset === "storico_mese") && (
-                                            <>
-                                                <td className="num text-xs whitespace-nowrap text-emerald-700" data-testid={`titolo-incassato-il-${t.id}`}>{t.data_incasso ? fmtDate(t.data_incasso) : "—"}</td>
-                                                <td className="text-xs text-slate-700" data-testid={`titolo-mezzo-${t.id}`}>{t.mezzo_pagamento || "—"}</td>
-                                            </>
-                                        )}
-                                        <td>
-                                            <div className="flex items-center gap-1.5">
-                                                <StatusBadge stato={t.stato} titolo_coperto={t.titolo_coperto} data_copertura={t.data_copertura} />
-                                                <ChiusuraPill data={t.data_incasso} />
-                                            </div>
-                                        </td>
-                                        <td className="num text-right font-semibold text-rose-700">
-                                            {daPagare > 0 ? fmtEur(daPagare) : "—"}
-                                        </td>
-                                        <td className="text-center">
-                                            <AllegatiCell
-                                                entita_tipo="titolo"
-                                                entita_id={t.id}
-                                                count={t.allegati_count}
-                                                hint={t.data_incasso ? "Allega ricevuta bonifico / assegno" : "Allega documento"}
-                                                onChange={load}
-                                            />
-                                        </td>
-                                        <td className="text-center">
-                                            {t.stato !== "incassato" && t.stato !== "stornato" ? (
-                                                <Button
-                                                    size="sm"
-                                                    className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                                                    onClick={() => setPaying(t)}
-                                                    data-testid={`titolo-incassa-${t.id}`}
-                                                >
-                                                    Incasso/Copertura
-                                                </Button>
-                                            ) : (
-                                                <span className="text-xs text-emerald-700">✓ {fmtDate(t.data_incasso)}</span>
-                                            )}
-                                        </td>
-                                        <td className="text-right">
-                                            <RowActions
-                                                testid={`titolo-actions-${t.id}`}
-                                                onEdit={canEdit ? () => setEditing(t) : null}
-                                                onDelete={() => elimina(t.id)}
-                                                canDelete={canDelete}
-                                                label="titolo"
-                                            />
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {displayed.map((t) => (
+                                <tr
+                                    key={t.id}
+                                    data-testid={`titolo-row-${t.id}`}
+                                    className={`${selected.has(t.id) ? "bg-sky-50" : ""} hover:bg-sky-50/60 cursor-pointer`}
+                                    onClick={(e) => {
+                                        // ignora click su elementi interattivi (checkbox, link, button, menu)
+                                        if (e.target.closest("button, a, input, [role='menuitem'], [data-row-noclick]")) return;
+                                        if (canEdit) setEditing(t);
+                                    }}
+                                >
+                                    {titoliCols.map((c) => (
+                                        <td key={c.key} className={c.tdClass}>{c.render(t)}</td>
+                                    ))}
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 )}

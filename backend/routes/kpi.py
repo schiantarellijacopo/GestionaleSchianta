@@ -68,6 +68,7 @@ async def create_kpi_custom(body: KpiCustomBody,
         "created_at": _now_iso(),
     }
     await db.kpi_custom.insert_one(doc)
+    doc.pop("_id", None)
     return doc
 
 
@@ -433,24 +434,6 @@ async def kpi_filter_options(
         async for c in db.conti_cassa.find({}, {"_id": 0, "id": 1, "nome": 1}).sort("nome", 1):
             out.append({"value": c["id"], "label": c.get("nome") or c["id"]})
     return out
-
-
-    sub = None
-    if sum_field and n:
-        agg = await coll.aggregate([
-            {"$match": flt}, {"$group": {"_id": None, "t": {"$sum": f"${sum_field}"}}},
-        ]).to_list(1)
-        if agg:
-            t = _eur(agg[0]["t"])
-            sub = f"€ {t:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    # costruisci link verso la pagina sezione con i filtri applicati
-    sezione_route = {
-        "polizze": "/polizze", "titoli": "/titoli", "sinistri": "/sinistri",
-        "avvisi": "/avvisi", "prima_nota": "/contabilita",
-    }.get(sezione, "/")
-    qs = "&".join(f"{k}={v}" for k, v in link_params)
-    link = f"{sezione_route}?{qs}" if qs else sezione_route
-    return {"value": n, "sub": sub, "link": link}
 
 
 @router.get("/kpi/{sezione}/stats")

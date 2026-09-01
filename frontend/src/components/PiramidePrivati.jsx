@@ -34,88 +34,99 @@ const DOT_LABEL = {
 };
 const DOT_CYCLE = ["adeguato", "non_adeguato", "assente"];
 
-// Livelli dal vertice alla base. baseH = altezza minima; cresce con le voci custom.
-const LEVELS = [
-    {
-        id: "crescita", baseH: 130, color: COLORS.tealApex,
-        strip: { top: 56, h: 38, maxW: 88, font: 8 },
-        titolo: "CRESCITA DEL CAPITALE",
-        inputVoce: "crescita_capitale",
-        customW: null, // apice troppo stretto per voci custom
-    },
-    {
-        id: "cassa_grandi", baseH: 66, color: COLORS.teal,
-        strip: { top: 0, h: 26, maxW: 150, font: 8.5 },
-        titolo: "CASSA PER LE GRANDI ESIGENZE",
-        inputVoce: "cassa_grandi",
-        customW: 180,
-    },
-    {
-        id: "cassa_lievi", baseH: 66, color: COLORS.teal,
-        strip: { top: 0, h: 26, maxW: 220, font: 9 },
-        titolo: "CASSA PER LE LIEVI ESIGENZE",
-        inputVoce: "cassa_lievi",
-        customW: 240,
-    },
-    {
-        id: "liquidita", baseH: 66, color: COLORS.teal,
-        strip: { top: 0, h: 26, maxW: 300, font: 9 },
-        titolo: "LIQUIDITÀ GIORNALIERA - CONTO CORRENTE -",
-        inputVoce: "liquidita_giornaliera",
-        customW: 290,
-    },
-    {
-        id: "perdita", baseH: 82, color: COLORS.green,
-        strip: { top: 0, h: 32, maxW: 350, font: 7.5 },
-        titolo: "PERDITA DEI BENI DOVUTA DA INCENDI/ EVENTI ATMOSFERICI/ ALLUVIONI/TERREMOTI:",
-        voci: [
-            { id: "perdita_beni_immobili", label: "IMMOBILI, sei protetto fino a" },
-            { id: "perdita_beni_aziende", label: "AZIENDE, sei protetto fino a" },
-        ],
-        customW: 340,
-    },
-    {
-        id: "danni", baseH: 108, color: COLORS.green,
-        strip: { top: 0, h: 24, maxW: 430, font: 9 },
-        titolo: "IN CASO DI DANNI PROVOCATI AD ALTRI, DOVUTI A:",
-        voci: [
-            { id: "danni_veicoli", label: "VEICOLI, sei protetto fino a" },
-            { id: "danni_immobili", label: "IMMOBILI, sei protetto fino a" },
-            { id: "danni_professioni", label: "PROFESSIONI, sei protetto fino a" },
-            { id: "danni_vita_privata", label: "VITA PRIVATA, sei protetto fino a" },
-        ],
-        customW: 340,
-    },
-    {
-        id: "premorienza", baseH: 72, color: COLORS.red,
-        strip: { top: 0, h: 24, maxW: 500, font: 9 },
-        titolo: "IN CASO DI PREMORIENZA DOVUTA A:",
-        voci: [
-            { id: "premorienza_malattia", label: "MALATTIA, sei protetto fino a" },
-            { id: "premorienza_infortunio", label: "INFORTUNIO, sei protetto fino a" },
-        ],
-        customW: 340,
-    },
-    {
-        id: "invalidita", baseH: 90, color: COLORS.red,
-        strip: { top: 0, h: 24, maxW: 580, font: 9 },
-        titolo: "IN CASO DI INVALIDITÀ DOVUTA A:",
-        voci: [
-            { id: "invalidita_malattia", label: "MALATTIA, sei protetto fino a" },
-            { id: "invalidita_infortunio", label: "INFORTUNIO, sei protetto fino a" },
-            { id: "invalidita_non_autosufficienza", label: "NON AUTOSUFFICIENZA, sei protetto fino a" },
-        ],
-        customW: 340,
-    },
-];
+// Geometria fissa per livello (id → colore, strip, larghezza voci custom).
+const GEOM = {
+    crescita: { baseH: 130, color: COLORS.tealApex, strip: { top: 56, h: 38, maxW: 88, font: 8 }, customW: null },
+    cassa_grandi: { baseH: 66, color: COLORS.teal, strip: { top: 0, h: 26, maxW: 150, font: 8.5 }, customW: 180 },
+    cassa_lievi: { baseH: 66, color: COLORS.teal, strip: { top: 0, h: 26, maxW: 220, font: 9 }, customW: 240 },
+    liquidita: { baseH: 66, color: COLORS.teal, strip: { top: 0, h: 26, maxW: 300, font: 9 }, customW: 290 },
+    perdita: { color: COLORS.green, strip: { top: 0, h: 32, maxW: 350, font: 7.5 }, customW: 340 },
+    danni: { color: COLORS.green, strip: { top: 0, h: 24, maxW: 430, font: 9 }, customW: 340 },
+    premorienza: { color: COLORS.red, strip: { top: 0, h: 24, maxW: 500, font: 9 }, customW: 340 },
+    invalidita: { color: COLORS.red, strip: { top: 0, h: 24, maxW: 580, font: 9 }, customW: 340 },
+};
 
-// Zone a destra: colori coerenti con i livelli che raggruppano
-const WEDGE_DEFS = [
-    { label: "INVESTIMENTO", from: "crescita", to: "crescita", color: COLORS.tealApex },
-    { label: "RISPARMIO", from: "cassa_grandi", to: "liquidita", color: COLORS.teal },
-    { label: "PROTEZIONE DEL PATRIMONIO", from: "perdita", to: "danni", color: COLORS.green },
-    { label: "PROTEZIONE DEL REDDITO", from: "premorienza", to: "invalidita", color: COLORS.red },
-];
+// Template di default (modello PRIVATI) usato se il backend non ne fornisce uno.
+const DEFAULT_TEMPLATE = {
+    mostra_testamento: true,
+    levels: [
+        { id: "crescita", modo: "input", input_voce: "crescita_capitale", titolo: "CRESCITA DEL CAPITALE" },
+        { id: "cassa_grandi", modo: "input", input_voce: "cassa_grandi", titolo: "CASSA PER LE GRANDI ESIGENZE" },
+        { id: "cassa_lievi", modo: "input", input_voce: "cassa_lievi", titolo: "CASSA PER LE LIEVI ESIGENZE" },
+        { id: "liquidita", modo: "input", input_voce: "liquidita_giornaliera", titolo: "LIQUIDITÀ GIORNALIERA - CONTO CORRENTE -" },
+        {
+            id: "perdita", modo: "voci",
+            titolo: "PERDITA DEI BENI DOVUTA DA INCENDI/ EVENTI ATMOSFERICI/ ALLUVIONI/TERREMOTI:",
+            voci: [
+                { id: "perdita_beni_immobili", label: "IMMOBILI, sei protetto fino a" },
+                { id: "perdita_beni_aziende", label: "AZIENDE, sei protetto fino a" },
+            ],
+        },
+        {
+            id: "danni", modo: "voci",
+            titolo: "IN CASO DI DANNI PROVOCATI AD ALTRI, DOVUTI A:",
+            voci: [
+                { id: "danni_veicoli", label: "VEICOLI, sei protetto fino a" },
+                { id: "danni_immobili", label: "IMMOBILI, sei protetto fino a" },
+                { id: "danni_professioni", label: "PROFESSIONI, sei protetto fino a" },
+                { id: "danni_vita_privata", label: "VITA PRIVATA, sei protetto fino a" },
+            ],
+        },
+        {
+            id: "premorienza", modo: "voci",
+            titolo: "IN CASO DI PREMORIENZA DOVUTA A:",
+            voci: [
+                { id: "premorienza_malattia", label: "MALATTIA, sei protetto fino a" },
+                { id: "premorienza_infortunio", label: "INFORTUNIO, sei protetto fino a" },
+            ],
+        },
+        {
+            id: "invalidita", modo: "voci",
+            titolo: "IN CASO DI INVALIDITÀ DOVUTA A:",
+            voci: [
+                { id: "invalidita_malattia", label: "MALATTIA, sei protetto fino a" },
+                { id: "invalidita_infortunio", label: "INFORTUNIO, sei protetto fino a" },
+                { id: "invalidita_non_autosufficienza", label: "NON AUTOSUFFICIENZA, sei protetto fino a" },
+            ],
+        },
+    ],
+    wedges: [
+        { label: "INVESTIMENTO", from: "crescita", to: "crescita" },
+        { label: "RISPARMIO", from: "cassa_grandi", to: "liquidita" },
+        { label: "PROTEZIONE DEL PATRIMONIO", from: "perdita", to: "danni" },
+        { label: "PROTEZIONE DEL REDDITO", from: "premorienza", to: "invalidita" },
+    ],
+};
+
+const WEDGE_COLORS = [COLORS.tealApex, COLORS.teal, COLORS.green, COLORS.red];
+
+// Costruisce i livelli renderizzabili dal template (altezza in base al n° di voci).
+function buildLevels(template) {
+    const src = template?.levels?.length ? template.levels : DEFAULT_TEMPLATE.levels;
+    return src.map((l) => {
+        const g = GEOM[l.id] || GEOM.danni;
+        const voci = l.modo === "voci" ? (l.voci || []) : null;
+        const baseH = voci
+            ? g.strip.top + g.strip.h + Math.max(1, voci.length) * 22 + 6
+            : g.baseH;
+        return {
+            id: l.id, baseH, color: g.color, strip: g.strip, titolo: l.titolo,
+            voci: voci || undefined,
+            inputVoce: l.modo === "input" ? l.input_voce : undefined,
+            customW: g.customW,
+        };
+    });
+}
+
+function buildWedges(template) {
+    const src = (template?.wedges?.length === 4 ? template.wedges : DEFAULT_TEMPLATE.wedges);
+    return src.map((w, i) => ({
+        label: w.label,
+        from: DEFAULT_TEMPLATE.wedges[i].from,
+        to: DEFAULT_TEMPLATE.wedges[i].to,
+        color: WEDGE_COLORS[i],
+    }));
+}
 
 export function fmtEur(v) {
     if (v == null || v === "" || Number.isNaN(Number(v))) return "";
@@ -152,6 +163,7 @@ export default function PiramidePrivati({
     onSave,                 // (payload) => Promise | null → read-only
     onPrepopolate,          // () => Promise<datiRedditoSuggeriti> — bottone "Prepopola"
     onRichiediPreventivo,   // (voce_id, label) => void (portale)
+    template = null,        // modello globale (privati/aziende) dal backend
     agenziaLogo,
     agenziaName = "Assicurazioni",
     clienteNome = "",
@@ -182,6 +194,11 @@ export default function PiramidePrivati({
     useEffect(() => { setStati(stato_voci || {}); }, [sigStati]);
     useEffect(() => { setCustom(voci_custom || {}); }, [sigCustom]);
     /* eslint-enable react-hooks/exhaustive-deps */
+
+    // ── template → livelli e cunei renderizzabili ──
+    const LEVELS = buildLevels(template);
+    const WEDGE_DEFS = buildWedges(template);
+    const mostraTestamento = !template || template.mostra_testamento !== false;
 
     // ── geometria dinamica: la piramide cresce con le voci custom ──
     const layout = (() => {
@@ -446,7 +463,8 @@ export default function PiramidePrivati({
                 </div>
             </div>
 
-            {/* FOOTER: testamento + eredi */}
+            {/* FOOTER: testamento + eredi (solo modello privati) */}
+            {mostraTestamento && (
             <div className="mt-4 pt-4 border-t border-slate-300 text-[11px]">
                 <div className="text-center mb-3 font-semibold">
                     TESTAMENTO:{" "}
@@ -474,6 +492,7 @@ export default function PiramidePrivati({
                     ))}
                 </div>
             </div>
+            )}
 
             {editable && (
                 <div className="mt-4 flex justify-end">

@@ -455,7 +455,7 @@ async def delete_anagrafica(
         )
 
     # Cascade: recupera IDs delle polizze per eliminare titoli
-    polizze_ids: List[str] = []
+    polizze_ids: list[str] = []
     async for p in db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1}):
         polizze_ids.append(p["id"])
 
@@ -946,3 +946,140 @@ async def create_intervista(aid: str, body: dict, user: dict = Depends(require_u
     await db.interviste.insert_one(obj.model_dump())
     await log_attivita(user, "create", "intervista", obj.id, f"Intervista per {aid}")
     return obj.model_dump()
+
+
+# ============================================================
+# DOPPIONI — rileva e unisce anagrafiche con stesso CF / P.IVA
+# ============================================================
+@router.get("/anagrafiche-duplicati")
+async def anagrafiche_duplicati(user=Depends(require_user("admin", "collaboratore"))):
+    """Gruppi di anagrafiche doppie (stesso codice fiscale o stessa partita IVA)."""
+    groups = []
+    for campo, tipo in (("codice_fiscale", "cf"), ("partita_iva", "piva")):
+        pipe = [
+            {"$match": {campo: {"$nin": [None, ""]}}},
+            {"$group": {
+                "_id": {"$toUpper": {"$trim": {"input": f"${campo}"}}},
+                "ids": {"$push": "$id"}, "n": {"$sum": 1},
+            }},
+            {"$match": {"n": {"$gt": 1}}},
+            {"$limit": 200},
+        ]
+        async for row in db.anagrafiche.aggregate(pipe):
+            docs = await db.anagrafiche.find(
+                {"id": {"$in": row["ids"]}},
+                {"_id": 0, "id": 1, "ragione_sociale": 1, "email": 1, "telefono": 1,
+                 "cellulare": 1, "codice_fiscale": 1, "partita_iva": 1,
+                 "created_at": 1, "fonte": 1},
+            ).sort("created_at", 1).to_list(20)
+            for d in docs:
+                d["n_polizze"] = await db.polizze.count_documents({"contraente_id": d["id"]})
+            groups.append({"tipo": tipo, "valore": row["_id"], "anagrafiche": docs})
+    seen, out = set(), []
+    for g in groups:
+        key = tuple(sorted(a["id"] for a in g["anagrafiche"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(g)
+    return out
+
+
+_MERGE_FILL_FIELDS = [
+    "email", "telefono", "cellulare", "indirizzo", "comune", "provincia", "cap",
+    "nazione", "iban", "professione", "stato_civile", "titolo_studio",
+    "data_nascita", "comune_nascita", "provincia_nascita", "sesso",
+    "codice_fiscale", "partita_iva", "consenso_privacy", "data_consenso_privacy",
+    "consenso_commerciale", "consenso_profilazione", "parente_di", "compagnia_id",
+]
+
+
+@router.post("/anagrafiche-unisci")
+async def anagrafiche_unisci(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Unisce i duplicati nell'anagrafica principale: riassegna polizze, titoli
+    (via polizza), sinistri, allegati, diario, utenti portale, relazioni; poi
+    completa i campi vuoti del principale ed elimina i duplicati."""
+    principale_id = body.get("principale_id")
+    dup_ids = [d for d in (body.get("duplicati_ids") or []) if d and d != principale_id]
+    if not principale_id or not dup_ids:
+        raise HTTPException(400, "principale_id e duplicati_ids obbligatori")
+    principale = await db.anagrafiche.find_one({"id": principale_id}, {"_id": 0})
+    if not principale:
+        raise HTTPException(404, "Anagrafica principale non trovata")
+    dups = await db.anagrafiche.find({"id": {"$in": dup_ids}}, {"_id": 0}).to_list(len(dup_ids))
+    if not dups:
+        raise HTTPException(404, "Nessun duplicato trovato")
+
+    din = {"$in": dup_ids}
+    n_polizze = (await db.polizze.update_many(
+        {"contraente_id": din}, {"$set": {"contraente_id": principale_id}})).modified_count
+    await db.polizze.update_many(
+        {"assicurato_ids": din},
+        {"$set": {"assicurato_ids.$[e]": principale_id}},
+        array_filters=[{"e": din}])
+    n_sinistri = (await db.sinistri.update_many(
+        {"contraente_id": din}, {"$set": {"contraente_id": principale_id}})).modified_count
+    await db.allegati.update_many(
+        {"entita_tipo": "anagrafica", "entita_id": din}, {"$set": {"entita_id": principale_id}})
+    await db.diario_note.update_many({"anagrafica_id": din}, {"$set": {"anagrafica_id": principale_id}})
+    await db.users.update_many({"anagrafica_id": din}, {"$set": {"anagrafica_id": principale_id}})
+    await db.veicoli.update_many({"proprietario_id": din}, {"$set": {"proprietario_id": principale_id}})
+    for coll in ("trattative", "interviste", "chat_portale", "attivita"):
+        try:
+            await db[coll].update_many({"anagrafica_id": din}, {"$set": {"anagrafica_id": principale_id}})
+        except Exception:
+            pass
+
+    # analisi cliente: tieni quella del principale, altrimenti promuovi la prima dei duplicati
+    if await db.analisi_cliente.find_one({"anagrafica_id": principale_id}, {"_id": 1}):
+        await db.analisi_cliente.delete_many({"anagrafica_id": din})
+    else:
+        first = await db.analisi_cliente.find_one({"anagrafica_id": din}, {"_id": 0, "anagrafica_id": 1})
+        if first:
+            await db.analisi_cliente.update_one(
+                {"anagrafica_id": first["anagrafica_id"]},
+                {"$set": {"anagrafica_id": principale_id}})
+            await db.analisi_cliente.delete_many({"anagrafica_id": din})
+
+    # relazioni che puntano ai duplicati
+    try:
+        await db.anagrafiche.update_many(
+            {"relazioni.anagrafica_id": din},
+            {"$set": {"relazioni.$[r].anagrafica_id": principale_id}},
+            array_filters=[{"r.anagrafica_id": din}])
+    except Exception:
+        pass
+    await db.anagrafiche.update_many({"parente_di": din}, {"$set": {"parente_di": principale_id}})
+
+    # completa i campi vuoti del principale con i valori dei duplicati
+    upd = {}
+    for f in _MERGE_FILL_FIELDS:
+        if principale.get(f) in (None, ""):
+            for d in dups:
+                if d.get(f) not in (None, ""):
+                    upd[f] = d[f]
+                    break
+    tags = list(dict.fromkeys((principale.get("tags") or []) + [t for d in dups for t in (d.get("tags") or [])]))
+    if tags != (principale.get("tags") or []):
+        upd["tags"] = tags
+    note_extra = " | ".join(d["note"] for d in dups if d.get("note"))
+    if note_extra:
+        upd["note"] = ((principale.get("note") or "") + " | " + note_extra).strip(" |")
+    upd["updated_at"] = _now_iso()
+    await db.anagrafiche.update_one({"id": principale_id}, {"$set": upd})
+
+    await db.anagrafiche.delete_many({"id": din})
+
+    nomi_dup = ", ".join(d.get("ragione_sociale") or d["id"] for d in dups)
+    try:
+        await log_diario_cliente(
+            principale_id, "sistema", "Anagrafiche unite",
+            f"Unite {len(dups)} anagrafiche doppie ({nomi_dup}). "
+            f"Riassegnate {n_polizze} polizze e {n_sinistri} sinistri.",
+            autore=user)
+        await log_attivita(user, "merge", "anagrafica", principale_id,
+                           f"Unione doppioni: {nomi_dup}")
+    except Exception:
+        pass
+    return {"ok": True, "polizze_riassegnate": n_polizze,
+            "sinistri_riassegnati": n_sinistri, "anagrafiche_eliminate": len(dups)}

@@ -27,11 +27,14 @@ export default function ScambioDati() {
     const [preview, setPreview] = useState(null);
     const [busy, setBusy] = useState(false);
     const [log, setLog] = useState(null);
+    const [richieste, setRichieste] = useState([]);
 
     const loadLog = () => api.get("/scambio-dati/log").then((r) => setLog(r.data));
+    const loadRichieste = () => api.get("/scambio-dati/richieste").then((r) => setRichieste(r.data || [])).catch(() => {});
     useEffect(() => {
         api.get("/agenzie").then((r) => setAgenzie((r.data || []).filter((a) => a.tipo === "partner")));
         loadLog();
+        loadRichieste();
     }, []);
 
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -50,12 +53,12 @@ export default function ScambioDati() {
 
     const doImport = async () => {
         if (!preview) { toast.error("Esegui prima la preview"); return; }
-        if (!window.confirm(`Importare ${preview.anagrafiche} anagrafiche, ${preview.polizze} polizze, ${preview.titoli} titoli, ${preview.sinistri} sinistri, ${preview.documenti} documenti?`)) return;
+        if (!window.confirm(`Richiedere lo scambio di ${preview.anagrafiche} anagrafiche, ${preview.polizze} polizze, ${preview.titoli} titoli, ${preview.sinistri} sinistri, ${preview.documenti} documenti? La richiesta dovrà essere approvata dal Super Admin.`)) return;
         setBusy(true);
         try {
-            const r = await api.post("/scambio-dati/esegui", f);
-            toast.success(`Import completato: ${r.data.anagrafiche} anagrafiche, ${r.data.polizze} polizze, ${r.data.titoli} titoli (in stato arretrato)`);
-            loadLog();
+            await api.post("/scambio-dati/richiedi", f);
+            toast.success("Richiesta inviata — in attesa di approvazione del Super Admin");
+            loadRichieste();
             setPreview(null);
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setBusy(false); }
@@ -128,8 +131,40 @@ export default function ScambioDati() {
                         <PreviewStat icon={Paperclip} v={preview.documenti} l="Documenti" />
                     </div>
                     <Button onClick={doImport} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="sc-import">
-                        <Download size={14} className="mr-1" /> {busy ? "Importazione…" : "Esegui importazione"}
+                        <Download size={14} className="mr-1" /> {busy ? "Invio richiesta…" : "Richiedi scambio (approvazione Super Admin)"}
                     </Button>
+                </Card>
+            )}
+
+            {/* RICHIESTE INVIATE */}
+            {richieste.length > 0 && (
+                <Card className="p-4" data-testid="sc-richieste">
+                    <h2 className="font-semibold text-slate-800 mb-3">Le tue richieste di scambio</h2>
+                    <table className="tbl-compact w-full text-xs">
+                        <thead><tr>
+                            <th>Data</th><th>Operatore</th><th>Stato</th><th>Esito / Motivo</th>
+                        </tr></thead>
+                        <tbody>
+                            {richieste.map((r) => (
+                                <tr key={r.id} data-testid={`sc-richiesta-${r.id}`}>
+                                    <td>{new Date(r.richiesto_at).toLocaleString("it-IT")}</td>
+                                    <td className="font-mono">{r.operatore_email}</td>
+                                    <td>
+                                        <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded ${
+                                            r.stato === "in_attesa" ? "bg-amber-100 text-amber-700"
+                                                : r.stato === "eseguito" ? "bg-emerald-100 text-emerald-700"
+                                                : "bg-rose-100 text-rose-700"
+                                        }`}>{r.stato.replace("_", " ")}</span>
+                                    </td>
+                                    <td className="text-slate-600">
+                                        {r.stato === "eseguito" && r.risultato
+                                            ? `${r.risultato.anagrafiche} anagr. · ${r.risultato.polizze} polizze · ${r.risultato.titoli} titoli`
+                                            : r.motivo_rifiuto || "—"}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </Card>
             )}
 

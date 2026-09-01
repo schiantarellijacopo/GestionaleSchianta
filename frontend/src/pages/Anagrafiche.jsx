@@ -5,6 +5,7 @@ import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import { useTableColumns } from "@/components/ColumnManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload, Send } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload, Send, GitMerge, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
@@ -23,6 +24,96 @@ const CAT_BADGE = {
     con_polizze: { dot: "bg-sky-500", label: "Con polizze", text: "text-sky-700" },
     senza_polizze: { dot: "bg-red-500", label: "Senza polizze", text: "text-red-700" },
     condominio: { dot: "bg-emerald-500", label: "Condominio", text: "text-emerald-700" },
+};
+
+// Colonne tabella Anagrafiche — selezionabili/riordinabili per utente (render(a, ctx))
+const ANAG_COLS = [
+    {
+        key: "expand", label: "Espandi network", locked: true, thClass: "w-7 py-1.5", tdClass: "py-1.5 pl-2",
+        render: (a, ctx) => (
+            <button onClick={ctx.onToggle}
+                    className="text-slate-400 hover:text-sky-600 transition-colors"
+                    data-testid={`anag-expand-${a.id}`} aria-label="Espandi network">
+                <ChevronRight size={15} className={`transform transition-transform ${ctx.isOpen ? "rotate-90" : ""}`} />
+            </button>
+        ),
+    },
+    {
+        key: "cliente", label: "Cliente", sort: "ragione_sociale", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3",
+        render: (a, ctx) => (
+            <div className="flex items-center gap-2">
+                <AnagraficaAvatar ana={a} size="sm" />
+                <Link to={`/anagrafiche/${a.id}`}
+                      className={`hover:underline font-semibold text-[13px] tracking-wide truncate max-w-[220px] ${ctx.cat.text}`}>
+                    {a.ragione_sociale}
+                </Link>
+                {a.tipo === "persona_giuridica" && <span className="text-[9px] text-slate-400 shrink-0">PG</span>}
+                <ComplianceBadges ana={a} />
+            </div>
+        ),
+    },
+    {
+        key: "email", label: "E-mail", sort: "email", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => a.email
+            ? <a href={`mailto:${a.email}`} onClick={(e) => e.stopPropagation()}
+                 className="inline-flex items-center gap-1 text-sky-700 hover:underline"
+                 data-testid={`anag-email-link-${a.id}`}><Mail size={12} className="text-slate-400" />{a.email}</a>
+            : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "telefono", label: "Telefono", sort: "telefono", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => (a.cellulare || a.telefono)
+            ? <a href={`tel:${telHref(a.cellulare || a.telefono)}`} onClick={(e) => e.stopPropagation()}
+                 className="inline-flex items-center gap-1 text-sky-700 hover:underline"
+                 data-testid={`anag-phone-link-${a.id}`}><Phone size={12} className="text-slate-400" />{formatPhone(a.cellulare || a.telefono)}</a>
+            : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "polizze", label: "Polizze", sort: "num_polizze", thClass: "text-center py-1.5 pr-3 text-emerald-700",
+        tdClass: "py-1.5 pr-3 text-center text-emerald-700 font-semibold num",
+        render: (a) => a.polizze_attive_count || 0,
+    },
+    {
+        key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3 text-xs",
+        render: (a) => a.collaboratore_nome
+            ? <span className="text-slate-700">{a.collaboratore_nome}</span>
+            : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "premio_totale", label: "Premio totale", sort: "premio_totale", thClass: "text-right py-1.5 pr-3",
+        tdClass: "py-1.5 pr-3 text-right font-bold num text-slate-900 text-[13px]",
+        render: (a, ctx) => ctx.net ? fmtEur(ctx.net.root.premio_totale || 0) : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "provvigioni", label: "Provvigioni", sort: "provvigioni", thClass: "text-right py-1.5 pr-3 text-emerald-700",
+        tdClass: "py-1.5 pr-3 text-right font-semibold num text-emerald-700",
+        render: (a, ctx) => ctx.net ? fmtEur(ctx.net.root.provvigioni_totale || 0) : <span className="text-slate-300">—</span>,
+    },
+    {
+        key: "tag", label: "Tag", thClass: "text-left py-1.5 pr-3", tdClass: "py-1.5 pr-3",
+        render: (a, ctx) => (
+            <div className="flex flex-wrap gap-1">
+                {(a.tags || []).slice(0, 3).map((t) => (
+                    <button key={t} onClick={() => ctx.onTagClick(t)}
+                            className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700">
+                        {t}
+                    </button>
+                ))}
+                {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
+            </div>
+        ),
+    },
+];
+
+const ANAG_DELETE_COL = {
+    key: "elimina", label: "Elimina", locked: true, thClass: "w-8 py-1.5", tdClass: "py-1.5 pr-2 text-right",
+    render: (a, ctx) => (
+        <button onClick={(e) => { e.stopPropagation(); ctx.onDelete(a); }}
+                className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors"
+                data-testid={`anag-delete-${a.id}`} title="Elimina anagrafica" aria-label="Elimina anagrafica">
+            <Trash2 size={14} />
+        </button>
+    ),
 };
 
 export default function Anagrafiche() {
@@ -128,6 +219,10 @@ export default function Anagrafiche() {
     const { sorted: sortedFiltered, sortKey, dir, toggle } = useTableSort(
         filtered, "ragione_sociale", "asc", anagAccessors,
     );
+    const { cols: anagCols, picker: colsPicker } = useTableColumns(
+        "anagrafiche", canDelete ? [...ANAG_COLS, ANAG_DELETE_COL] : ANAG_COLS,
+    );
+    const [dedupOpen, setDedupOpen] = useState(false);
 
     const clearTaskFilter = () => {
         const p = new URLSearchParams(searchParams);
@@ -153,6 +248,12 @@ export default function Anagrafiche() {
                 actions={
                     canCreate && (
                         <div className="flex items-center gap-2">
+                            <Button variant="outline"
+                                    onClick={() => setDedupOpen(true)}
+                                    data-testid="anagrafica-unisci-doppioni-btn"
+                                    className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                                <GitMerge size={16} className="mr-1" /> Unisci doppioni
+                            </Button>
                             <Button variant="outline"
                                     onClick={() => setCredMassivoOpen(true)}
                                     data-testid="anagrafica-invia-credenziali-massivo"
@@ -299,21 +400,19 @@ export default function Anagrafiche() {
                 </div>
             )}
 
+            <div className="flex justify-end mb-2">{colsPicker}</div>
             <div className="tbl-scroll bg-white" style={{ "--c1-w": "32px", "--c2-w": "260px" }}>
                 {list === null ? <Loading /> : filtered.length === 0 ? <Empty /> : (
                     <table className="freeze-3 w-full text-sm">
                         <thead>
                             <tr className="text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-200">
-                                <th className="w-8 py-3"></th>
-                                <th className="text-left py-3 pr-3"><SortHeader k="ragione_sociale" sortKey={sortKey} dir={dir} toggle={toggle}>Cliente</SortHeader></th>
-                                <th className="text-left py-3 pr-3"><SortHeader k="email" sortKey={sortKey} dir={dir} toggle={toggle}>E-mail</SortHeader></th>
-                                <th className="text-left py-3 pr-3"><SortHeader k="telefono" sortKey={sortKey} dir={dir} toggle={toggle}>Telefono</SortHeader></th>
-                                <th className="text-center py-3 pr-3 text-emerald-700"><SortHeader k="num_polizze" sortKey={sortKey} dir={dir} toggle={toggle}>Polizze</SortHeader></th>
-                                <th className="text-left py-3 pr-3"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
-                                <th className="text-right py-3 pr-3"><SortHeader k="premio_totale" sortKey={sortKey} dir={dir} toggle={toggle}>Premio totale</SortHeader></th>
-                                <th className="text-right py-3 pr-3 text-emerald-700"><SortHeader k="provvigioni" sortKey={sortKey} dir={dir} toggle={toggle}>Provvigioni</SortHeader></th>
-                                <th className="text-left py-3 pr-3">Tag</th>
-                                {canDelete && <th className="w-8 py-3"></th>}
+                                {anagCols.map((c) => (
+                                    <th key={c.key} className={c.thClass}>
+                                        {c.sort
+                                            ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggle}>{c.label}</SortHeader>
+                                            : (c.key === "expand" || c.key === "elimina" ? "" : c.label)}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
@@ -325,6 +424,7 @@ export default function Anagrafiche() {
                                     <RigaAnagrafica
                                         key={a.id}
                                         a={a}
+                                        cols={anagCols}
                                         cat={cat}
                                         isOpen={isOpen}
                                         net={net}
@@ -339,6 +439,8 @@ export default function Anagrafiche() {
                     </table>
                 )}
             </div>
+
+            <UnisciDoppioniDialog open={dedupOpen} onClose={() => setDedupOpen(false)} onMerged={load} />
 
             <PersonalizzaKpiDialog
                 open={kpiDialogOpen}
@@ -364,6 +466,122 @@ export default function Anagrafiche() {
                 onClose={() => setCredMassivoOpen(false)}
             />
         </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// UnisciDoppioniDialog — rileva e unisce anagrafiche con stesso CF/P.IVA
+// ─────────────────────────────────────────────────────────────────────
+function UnisciDoppioniDialog({ open, onClose, onMerged }) {
+    const [groups, setGroups] = useState(null);
+    const [principali, setPrincipali] = useState({});
+    const [merging, setMerging] = useState(null);
+
+    useEffect(() => {
+        if (!open) return;
+        setGroups(null);
+        api.get("/anagrafiche-duplicati").then((r) => {
+            setGroups(r.data || []);
+            const init = {};
+            (r.data || []).forEach((g, i) => {
+                const best = [...g.anagrafiche].sort((a, b) => (b.n_polizze || 0) - (a.n_polizze || 0))[0];
+                init[i] = best?.id;
+            });
+            setPrincipali(init);
+        }).catch((e) => {
+            toast.error(e.response?.data?.detail || "Errore ricerca doppioni");
+            setGroups([]);
+        });
+    }, [open]);
+
+    const unisci = async (gIdx) => {
+        const g = groups[gIdx];
+        const principale = principali[gIdx];
+        const dupIds = g.anagrafiche.map((a) => a.id).filter((id) => id !== principale);
+        if (!principale || dupIds.length === 0) return;
+        if (!window.confirm(`Unire ${dupIds.length} doppion${dupIds.length === 1 ? "e" : "i"} nell'anagrafica principale? Le polizze e tutti i dati collegati verranno riassegnati. Operazione NON reversibile.`)) return;
+        setMerging(gIdx);
+        try {
+            const r = await api.post("/anagrafiche-unisci", { principale_id: principale, duplicati_ids: dupIds });
+            toast.success(`Unite: ${r.data.anagrafiche_eliminate} anagrafiche · ${r.data.polizze_riassegnate} polizze riassegnate`);
+            setGroups((gs) => gs.filter((_, i) => i !== gIdx));
+            onMerged();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore unione");
+        } finally { setMerging(null); }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+            <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto" data-testid="dialog-unisci-doppioni">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <GitMerge size={17} className="text-amber-600" /> Anagrafiche doppie (stesso CF / P.IVA)
+                    </DialogTitle>
+                </DialogHeader>
+                {groups === null ? (
+                    <div className="py-8 text-center text-slate-500 text-sm">
+                        <Loader2 size={20} className="animate-spin mx-auto mb-2" /> Ricerca doppioni in corso…
+                    </div>
+                ) : groups.length === 0 ? (
+                    <div className="py-8 text-center text-slate-500 text-sm" data-testid="doppioni-vuoto">
+                        Nessun doppione trovato. Tutte le anagrafiche hanno CF/P.IVA univoci.
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        <div className="text-xs text-slate-500">
+                            {groups.length} grupp{groups.length === 1 ? "o" : "i"} di doppioni.
+                            Scegli l'anagrafica <strong>principale</strong> (le altre verranno unite ed eliminate,
+                            polizze e dati collegati riassegnati).
+                        </div>
+                        {groups.map((g, gIdx) => (
+                            <div key={`${g.tipo}-${g.valore}`} className="border border-slate-200 rounded p-3"
+                                 data-testid={`doppioni-gruppo-${gIdx}`}>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-semibold text-slate-700">
+                                        {g.tipo === "cf" ? "Codice fiscale" : "Partita IVA"}:{" "}
+                                        <span className="font-mono text-amber-700">{g.valore}</span>
+                                    </span>
+                                    <Button size="sm" className="h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                                            disabled={merging !== null}
+                                            onClick={() => unisci(gIdx)}
+                                            data-testid={`doppioni-unisci-${gIdx}`}>
+                                        {merging === gIdx ? <Loader2 size={12} className="animate-spin mr-1" /> : <GitMerge size={12} className="mr-1" />}
+                                        Unisci gruppo
+                                    </Button>
+                                </div>
+                                <div className="space-y-1">
+                                    {g.anagrafiche.map((a) => (
+                                        <label key={a.id}
+                                               className={`flex items-center gap-2 text-xs p-1.5 rounded cursor-pointer border ${
+                                                   principali[gIdx] === a.id ? "border-emerald-300 bg-emerald-50/60" : "border-transparent hover:bg-slate-50"
+                                               }`}
+                                               data-testid={`doppioni-record-${a.id}`}>
+                                            <input type="radio" name={`gruppo-${gIdx}`}
+                                                   checked={principali[gIdx] === a.id}
+                                                   onChange={() => setPrincipali((s) => ({ ...s, [gIdx]: a.id }))} />
+                                            <Link to={`/anagrafiche/${a.id}`} target="_blank" onClick={(e) => e.stopPropagation()}
+                                                  className="font-semibold text-sky-700 hover:underline truncate max-w-[220px]">
+                                                {a.ragione_sociale || "(senza nome)"}
+                                            </Link>
+                                            <span className="text-slate-400">{a.email || "no email"}</span>
+                                            <span className="ml-auto flex items-center gap-2 shrink-0">
+                                                <span className={`px-1.5 py-0.5 rounded font-semibold ${a.n_polizze > 0 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                                                    {a.n_polizze} polizze
+                                                </span>
+                                                {principali[gIdx] === a.id && (
+                                                    <span className="text-[10px] uppercase font-bold text-emerald-700">Principale</span>
+                                                )}
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -724,98 +942,18 @@ function PersonalizzaKpiDialog({ open, onOpenChange, onChanged }) {
     );
 }
 
-function RigaAnagrafica({ a, cat, isOpen, net, onToggle, onTagClick, onDelete, canDelete }) {
+function RigaAnagrafica({ a, cols, cat, isOpen, net, onToggle, onTagClick, onDelete, canDelete }) {
+    const ctx = { cat, isOpen, net, onToggle, onTagClick, onDelete, canDelete };
     return (
         <>
             <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors" data-testid={`anagrafica-row-${a.id}`}>
-                <td className="py-3 pl-2">
-                    <button
-                        onClick={onToggle}
-                        className="text-slate-400 hover:text-sky-600 transition-colors"
-                        data-testid={`anag-expand-${a.id}`}
-                        aria-label="Espandi network"
-                    >
-                        <ChevronRight size={16} className={`transform transition-transform ${isOpen ? "rotate-90" : ""}`} />
-                    </button>
-                </td>
-                <td className="py-3 pr-3">
-                    <div className="flex items-center gap-2">
-                        <AnagraficaAvatar ana={a} size="sm" />
-                        <Link
-                            to={`/anagrafiche/${a.id}`}
-                            className={`hover:underline font-semibold text-[15px] tracking-wide ${cat.text}`}
-                        >
-                            {a.ragione_sociale}
-                        </Link>
-                        {a.tipo === "persona_giuridica" && <span className="ml-1 text-[9px] text-slate-400">PG</span>}
-                    </div>
-                    <ComplianceBadges ana={a} />
-                </td>
-                <td className="py-3 pr-3 text-xs">
-                    {a.email
-                        ? <a
-                            href={`mailto:${a.email}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 text-sky-700 hover:underline"
-                            data-testid={`anag-email-link-${a.id}`}
-                          ><Mail size={12} className="text-slate-400" />{a.email}</a>
-                        : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="py-3 pr-3 text-xs">
-                    {a.cellulare || a.telefono
-                        ? <a
-                            href={`tel:${telHref(a.cellulare || a.telefono)}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 text-sky-700 hover:underline"
-                            data-testid={`anag-phone-link-${a.id}`}
-                          ><Phone size={12} className="text-slate-400" />{formatPhone(a.cellulare || a.telefono)}</a>
-                        : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="py-3 pr-3 text-center text-emerald-700 font-semibold num">
-                    {a.polizze_attive_count || 0}
-                </td>
-                <td className="py-3 pr-3 text-xs">
-                    {a.collaboratore_nome
-                        ? <span className="text-slate-700">{a.collaboratore_nome}</span>
-                        : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="py-3 pr-3 text-right font-bold num text-slate-900 text-base">
-                    {net ? fmtEur(net.root.premio_totale || 0) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="py-3 pr-3 text-right font-semibold num text-emerald-700">
-                    {net ? fmtEur(net.root.provvigioni_totale || 0) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="py-3 pr-3">
-                    <div className="flex flex-wrap gap-1">
-                        {(a.tags || []).slice(0, 3).map((t) => (
-                            <button
-                                key={t}
-                                onClick={() => onTagClick(t)}
-                                className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-sky-100 hover:text-sky-700"
-                            >
-                                {t}
-                            </button>
-                        ))}
-                        {(a.tags || []).length > 3 && <span className="text-[9px] text-slate-400">+{a.tags.length - 3}</span>}
-                    </div>
-                </td>
-                {canDelete && (
-                    <td className="py-3 pr-2 text-right">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onDelete(a); }}
-                            className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors"
-                            data-testid={`anag-delete-${a.id}`}
-                            title="Elimina anagrafica"
-                            aria-label="Elimina anagrafica"
-                        >
-                            <Trash2 size={14} />
-                        </button>
-                    </td>
-                )}
+                {cols.map((c) => (
+                    <td key={c.key} className={c.tdClass}>{c.render(a, ctx)}</td>
+                ))}
             </tr>
             {isOpen && net && (
                 <tr className="bg-slate-50/60 border-b border-slate-200" data-testid={`anag-network-${a.id}`}>
-                    <td colSpan={canDelete ? 10 : 9} className="px-12 py-4">
+                    <td colSpan={cols.length} className="px-12 py-4">
                         {net.collegati.length === 0 ? (
                             <div className="text-xs text-slate-500 italic">
                                 Nessuna anagrafica collegata. Aggiungi familiari, aziende rappresentate o relazioni dalla scheda &gt; Relazione.

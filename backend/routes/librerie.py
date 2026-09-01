@@ -928,6 +928,7 @@ async def create_tipologia_sinistro(
         "created_at": _now_iso(),
     }
     await db.tipologie_sinistri.insert_one(doc)
+    doc.pop("_id", None)
     await log_attivita(user, "create", "tipologia_sinistro", doc["id"], nome)
     return doc
 

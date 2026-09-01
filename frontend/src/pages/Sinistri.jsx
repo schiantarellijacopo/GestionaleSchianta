@@ -12,6 +12,7 @@ import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import KpiBar from "@/components/KpiBar";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import { useTableColumns } from "@/components/ColumnManager";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,47 @@ const STATI = [
     { v: "chiuso", l: "Chiusi" },
     { v: "chiuso_senza_seguito", l: "Chiusi senza seguito" },
     { v: "respinto", l: "Respinti" },
+];
+
+// Colonne tabella Sinistri — selezionabili/riordinabili per utente
+const SINISTRI_COLS = [
+    { key: "numero_interno", label: "Num. Int.", sort: "numero_interno", thClass: "w-[120px]", tdClass: "font-medium text-amber-700", render: (s) => s.numero_interno || "—" },
+    { key: "numero_sinistro", label: "N. Sinistro", sort: "numero_sinistro", thClass: "w-[140px]", tdClass: "font-medium", render: (s) => s.numero_sinistro },
+    {
+        key: "contratto", label: "Contratto", sort: "numero_polizza", thClass: "w-[110px]",
+        render: (s) => (
+            <Link to={`/polizze/${s.polizza_id}`} onClick={(e) => e.stopPropagation()}
+                  className="text-sky-700 hover:underline">{s.numero_polizza || "—"}</Link>
+        ),
+    },
+    { key: "data", label: "Data", sort: "data_avvenimento", thClass: "w-[90px]", tdClass: "num", render: (s) => fmtDate(s.data_avvenimento) },
+    { key: "contraente", label: "Contraente", sort: "contraente_nome", tdClass: "truncate max-w-[180px]", render: (s) => s.contraente_nome },
+    { key: "compagnia", label: "Compagnia", sort: "compagnia_nome", thClass: "w-[110px]", render: (s) => s.compagnia_nome || "—" },
+    { key: "tipologia", label: "Tipologia", sort: "tipologia_sinistro", thClass: "w-[150px]", tdClass: "truncate max-w-[150px]", render: (s) => <span title={s.tipologia_sinistro}>{s.tipologia_sinistro || "—"}</span> },
+    { key: "danneggiato", label: "Danneggiato", sort: "danneggiato_nome", thClass: "w-[140px]", render: (s) => s.danneggiato_nome || "—" },
+    { key: "targa", label: "Targa", sort: "targa", thClass: "w-[80px]", tdClass: "font-mono", render: (s) => s.targa || "—" },
+    {
+        key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "w-[110px]",
+        render: (s) => s.collaboratore_nome ? <CollaboratoreCell nome={s.collaboratore_nome} avatarUrl={s.collaboratore_avatar_url} /> : "—",
+    },
+    { key: "riserva", label: "Riserva €", sort: "riserva", thClass: "text-right w-[80px]", tdClass: "num text-right", render: (s) => fmtEur(s.riserva) },
+    { key: "liquidato", label: "Liquidato €", sort: "liquidazione", thClass: "text-right w-[90px]", tdClass: "num text-right", render: (s) => fmtEur(s.liquidazione) },
+    {
+        key: "stato", label: "Stato", sort: "stato", thClass: "w-[80px]",
+        render: (s) => {
+            const stato = (s.stato || "").toLowerCase();
+            const dotColor = stato === "aperto" ? "bg-emerald-500"
+                : stato === "liquidato" ? "bg-sky-500"
+                : stato === "respinto" ? "bg-rose-500"
+                : "bg-slate-400";
+            return (
+                <div className="flex items-center gap-1.5">
+                    <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
+                    <span className="capitalize">{(s.stato || "").replace("_", " ")}</span>
+                </div>
+            );
+        },
+    },
 ];
 
 export default function Sinistri() {
@@ -92,6 +134,7 @@ export default function Sinistri() {
     }, []);
 
     const { sorted, sortKey, dir, toggle } = useTableSort(list || [], "data_avvenimento", "desc");
+    const { cols, picker } = useTableColumns("sinistri", SINISTRI_COLS);
 
     const totali = useMemo(() => {
         const src = list || [];
@@ -219,70 +262,39 @@ export default function Sinistri() {
                 </div>
             )}
 
+            <div className="flex justify-end mb-2">{picker}</div>
             <div className="tbl-scroll" style={{ "--c1-w": "120px", "--c2-w": "140px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl-compact freeze-2 w-full text-xs">
                         <thead>
                             <tr>
-                                <th className="w-[120px]"><SortHeader k="numero_interno" sortKey={sortKey} dir={dir} toggle={toggle}>Num. Int.</SortHeader></th>
-                                <th className="w-[140px]"><SortHeader k="numero_sinistro" sortKey={sortKey} dir={dir} toggle={toggle}>N. Sinistro</SortHeader></th>
-                                <th className="w-[110px]"><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Contratto</SortHeader></th>
-                                <th className="w-[90px]"><SortHeader k="data_avvenimento" sortKey={sortKey} dir={dir} toggle={toggle}>Data</SortHeader></th>
-                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Contraente</SortHeader></th>
-                                <th className="w-[110px]"><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
-                                <th className="w-[150px]"><SortHeader k="tipologia_sinistro" sortKey={sortKey} dir={dir} toggle={toggle}>Tipologia</SortHeader></th>
-                                <th className="w-[140px]"><SortHeader k="danneggiato_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Danneggiato</SortHeader></th>
-                                <th className="w-[80px]"><SortHeader k="targa" sortKey={sortKey} dir={dir} toggle={toggle}>Targa</SortHeader></th>
-                                <th className="w-[110px]"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
-                                <th className="text-right w-[80px]"><SortHeader k="riserva" sortKey={sortKey} dir={dir} toggle={toggle}>Riserva €</SortHeader></th>
-                                <th className="text-right w-[90px]"><SortHeader k="liquidazione" sortKey={sortKey} dir={dir} toggle={toggle}>Liquidato €</SortHeader></th>
-                                <th className="w-[80px]"><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                                {cols.map((c) => (
+                                    <th key={c.key} className={c.thClass}>
+                                        {c.sort
+                                            ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggle}>{c.label}</SortHeader>
+                                            : c.label}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {sorted.map((s) => {
-                                const stato = (s.stato || "").toLowerCase();
-                                const dotColor = stato === "aperto" ? "bg-emerald-500"
-                                    : stato === "liquidato" ? "bg-sky-500"
-                                    : stato === "respinto" ? "bg-rose-500"
-                                    : "bg-slate-400";
-                                return (
-                                    <tr key={s.id} data-testid={`sinistro-row-${s.id}`}
-                                        className="hover:bg-sky-50/60 cursor-pointer"
-                                        onClick={() => navigate(`/sinistri/${s.id}`)}>
-                                        <td className="font-medium text-amber-700">{s.numero_interno || "—"}</td>
-                                        <td className="font-medium">{s.numero_sinistro}</td>
-                                        <td>
-                                            <Link to={`/polizze/${s.polizza_id}`} onClick={(e) => e.stopPropagation()}
-                                                  className="text-sky-700 hover:underline">{s.numero_polizza || "—"}</Link>
-                                        </td>
-                                        <td className="num">{fmtDate(s.data_avvenimento)}</td>
-                                        <td className="truncate max-w-[180px]">{s.contraente_nome}</td>
-                                        <td>{s.compagnia_nome || "—"}</td>
-                                        <td className="truncate max-w-[150px]" title={s.tipologia_sinistro}>{s.tipologia_sinistro || "—"}</td>
-                                        <td>{s.danneggiato_nome || "—"}</td>
-                                        <td className="font-mono">{s.targa || "—"}</td>
-                                        <td>{s.collaboratore_nome ? <CollaboratoreCell nome={s.collaboratore_nome} avatarUrl={s.collaboratore_avatar_url} /> : "—"}</td>
-                                        <td className="num text-right">{fmtEur(s.riserva)}</td>
-                                        <td className="num text-right">{fmtEur(s.liquidazione)}</td>
-                                        <td>
-                                            <div className="flex items-center gap-1.5">
-                                                <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
-                                                <span className="capitalize">{(s.stato || "").replace("_", " ")}</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {sorted.map((s) => (
+                                <tr key={s.id} data-testid={`sinistro-row-${s.id}`}
+                                    className="hover:bg-sky-50/60 cursor-pointer"
+                                    onClick={() => navigate(`/sinistri/${s.id}`)}>
+                                    {cols.map((c) => (
+                                        <td key={c.key} className={c.tdClass}>{c.render(s)}</td>
+                                    ))}
+                                </tr>
+                            ))}
                         </tbody>
                         <tfoot className="bg-slate-50 border-t-2 border-slate-300 font-semibold sticky bottom-0">
                             <tr>
-                                <td colSpan={10} className="px-2 py-2">
+                                <td colSpan={cols.length} className="px-2 py-2">
                                     Totale: <span className="text-slate-900">{totali.n}</span> sinistri
+                                    <span className="ml-4 font-normal text-slate-500">Riserva:</span> <span className="num">{fmtEur(totali.stimato)}</span>
+                                    <span className="ml-4 font-normal text-slate-500">Liquidato:</span> <span className="num">{fmtEur(totali.liquidato)}</span>
                                 </td>
-                                <td className="text-right num">{fmtEur(totali.stimato)}</td>
-                                <td className="text-right num">{fmtEur(totali.liquidato)}</td>
-                                <td></td>
                             </tr>
                         </tfoot>
                     </table>

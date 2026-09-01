@@ -22,6 +22,59 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import KpiBar from "@/components/KpiBar";
 import ImportExcelDialog from "@/components/ImportExcelDialog";
+import { useTableColumns } from "@/components/ColumnManager";
+
+// Colonne tabella Polizze — selezionabili/riordinabili per utente
+const POLIZZE_COLS = [
+    {
+        key: "numero_polizza", label: "Numero polizza", sort: "numero_polizza",
+        render: (p) => <Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline font-medium">{p.numero_polizza}</Link>,
+    },
+    {
+        key: "targa", label: "Targa", sort: "targa",
+        tdClass: "text-xs text-sky-700 font-mono font-medium uppercase",
+        render: (p) => p.targa || <span className="text-slate-300">—</span>,
+    },
+    { key: "contraente", label: "Contraente", sort: "contraente_nome", tdClass: "text-xs", render: (p) => p.contraente_nome || "—" },
+    { key: "compagnia", label: "Compagnia", sort: "compagnia_nome", tdClass: "text-xs text-slate-600", render: (p) => p.compagnia_nome || "—" },
+    {
+        key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", tdClass: "text-xs text-slate-600",
+        render: (p) => p.collaboratore_nome ? <CollaboratoreCell nome={p.collaboratore_nome} avatarUrl={p.collaboratore_avatar_url} /> : "—",
+    },
+    {
+        key: "ramo", label: "Ramo", sort: "ramo",
+        render: (p) => (
+            <>
+                <div className="flex items-center gap-1.5">
+                    <span className="inline-flex w-6 h-6 rounded-md items-center justify-center bg-slate-100 text-slate-600" title={p.ramo}>
+                        <IconForRamo ramo={p.ramo} size={13} />
+                    </span>
+                    <span className="badge badge-neutral">{p.ramo}</span>
+                </div>
+                {p.catastrofale && (
+                    <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded font-bold" title="Garanzia catastrofale (terremoto/alluvione)">🌊 CAT</span>
+                )}
+                {p.check_up && (
+                    <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded font-bold" title="Garanzia Check-up sanitario">🏥 CHK</span>
+                )}
+                {p.inabilita_malattia && (
+                    <span className="ml-1 text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded font-bold" title="Inabilità da malattia">🤒 INA</span>
+                )}
+                {p.tutela_legale && (
+                    <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-800 border border-indigo-300 px-1 py-0.5 rounded font-bold" title="Tutela legale">⚖️ TL</span>
+                )}
+                {p.infortuni_conducente && (
+                    <span className="ml-1 text-[9px] bg-violet-100 text-violet-800 border border-violet-300 px-1 py-0.5 rounded font-bold" title="Infortuni conducente">🚗 IC</span>
+                )}
+            </>
+        ),
+    },
+    { key: "stato", label: "Stato", sort: "stato", render: (p) => <StatusBadge stato={p.stato} /> },
+    { key: "effetto", label: "Effetto", sort: "data_effetto", tdClass: "num text-xs", render: (p) => fmtDate(p.effetto) },
+    { key: "scadenza", label: "Scadenza", sort: "data_scadenza", tdClass: "num text-xs", render: (p) => fmtDate(p.scadenza) },
+    { key: "premio_lordo", label: "Premio lordo", sort: "premio_lordo", thClass: "text-right", tdClass: "num text-right font-medium", render: (p) => fmtEur(p.premio_lordo) },
+    { key: "provvigioni", label: "Provvigioni", sort: "provvigioni", thClass: "text-right", tdClass: "num text-right text-slate-600", render: (p) => fmtEur(p.provvigioni) },
+];
 
 const PRESETS = [
     { key: "tutti", label: "Tutte" },
@@ -98,6 +151,7 @@ export default function Polizze() {
 
     const baseList = list || [];
     const { sorted, sortKey, dir, toggle } = useTableSort(baseList, "data_scadenza", "asc");
+    const { cols, picker } = useTableColumns("polizze", POLIZZE_COLS);
     const displayed = sorted;
 
     const totali = useMemo(() => {
@@ -262,64 +316,27 @@ export default function Polizze() {
                 )}
             </div>
 
+            <div className="flex justify-end mb-2">{picker}</div>
             <div className="tbl-scroll" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
                             <tr>
-                                <th><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Numero polizza</SortHeader></th>
-                                <th><SortHeader k="targa" sortKey={sortKey} dir={dir} toggle={toggle}>Targa</SortHeader></th>
-                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Contraente</SortHeader></th>
-                                <th><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
-                                <th><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
-                                <th><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo</SortHeader></th>
-                                <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
-                                <th><SortHeader k="data_effetto" sortKey={sortKey} dir={dir} toggle={toggle}>Effetto</SortHeader></th>
-                                <th><SortHeader k="data_scadenza" sortKey={sortKey} dir={dir} toggle={toggle}>Scadenza</SortHeader></th>
-                                <th className="text-right"><SortHeader k="premio_lordo" sortKey={sortKey} dir={dir} toggle={toggle}>Premio lordo</SortHeader></th>
-                                <th className="text-right"><SortHeader k="provvigioni" sortKey={sortKey} dir={dir} toggle={toggle}>Provvigioni</SortHeader></th>
+                                {cols.map((c) => (
+                                    <th key={c.key} className={c.thClass}>
+                                        {c.sort
+                                            ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggle}>{c.label}</SortHeader>
+                                            : c.label}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
                             {displayed.map((p) => (
                                 <tr key={p.id} data-testid={`polizza-row-${p.id}`}>
-                                    <td>
-                                        <Link to={`/polizze/${p.id}`} className="text-sky-700 hover:underline font-medium">{p.numero_polizza}</Link>
-                                    </td>
-                                    <td className="text-xs text-sky-700 font-mono font-medium uppercase">
-                                        {p.targa || <span className="text-slate-300">—</span>}
-                                    </td>
-                                    <td className="text-xs">{p.contraente_nome || "—"}</td>
-                                    <td className="text-xs text-slate-600">{p.compagnia_nome || "—"}</td>
-                                    <td className="text-xs text-slate-600">{p.collaboratore_nome ? <CollaboratoreCell nome={p.collaboratore_nome} avatarUrl={p.collaboratore_avatar_url} /> : "—"}</td>
-                                    <td>
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="inline-flex w-6 h-6 rounded-md items-center justify-center bg-slate-100 text-slate-600" title={p.ramo}>
-                                                <IconForRamo ramo={p.ramo} size={13} />
-                                            </span>
-                                            <span className="badge badge-neutral">{p.ramo}</span>
-                                        </div>
-                                        {p.catastrofale && (
-                                            <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.5 rounded font-bold" title="Garanzia catastrofale (terremoto/alluvione)">🌊 CAT</span>
-                                        )}
-                                        {p.check_up && (
-                                            <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.5 rounded font-bold" title="Garanzia Check-up sanitario">🏥 CHK</span>
-                                        )}
-                                        {p.inabilita_malattia && (
-                                            <span className="ml-1 text-[9px] bg-rose-100 text-rose-800 border border-rose-300 px-1 py-0.5 rounded font-bold" title="Inabilità da malattia">🤒 INA</span>
-                                        )}
-                                        {p.tutela_legale && (
-                                            <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-800 border border-indigo-300 px-1 py-0.5 rounded font-bold" title="Tutela legale">⚖️ TL</span>
-                                        )}
-                                        {p.infortuni_conducente && (
-                                            <span className="ml-1 text-[9px] bg-violet-100 text-violet-800 border border-violet-300 px-1 py-0.5 rounded font-bold" title="Infortuni conducente">🚗 IC</span>
-                                        )}
-                                    </td>
-                                    <td><StatusBadge stato={p.stato} /></td>
-                                    <td className="num text-xs">{fmtDate(p.effetto)}</td>
-                                    <td className="num text-xs">{fmtDate(p.scadenza)}</td>
-                                    <td className="num text-right font-medium">{fmtEur(p.premio_lordo)}</td>
-                                    <td className="num text-right text-slate-600">{fmtEur(p.provvigioni)}</td>
+                                    {cols.map((c) => (
+                                        <td key={c.key} className={c.tdClass}>{c.render(p)}</td>
+                                    ))}
                                 </tr>
                             ))}
                         </tbody>

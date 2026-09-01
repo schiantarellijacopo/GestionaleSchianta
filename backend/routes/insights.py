@@ -731,6 +731,7 @@ async def create_ritenuta(body: RitenutaBody,
             float(doc["imponibile"]) * float(doc.get("aliquota") or 0) / 100.0, 2,
         )
     await db.ritenute.insert_one(doc)
+    doc.pop("_id", None)
     return doc
 
 
