@@ -25,6 +25,7 @@ import RegolazionePolizzaTab from "@/components/RegolazionePolizzaTab";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
