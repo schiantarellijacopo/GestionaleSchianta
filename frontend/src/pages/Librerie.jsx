@@ -511,7 +511,7 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
     if (section.key === "schema-provvigionale") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Nome</th><th>Collaboratore</th><th>Compagnia</th><th>Ramo</th><th className="text-right">% Collab</th><th className="text-right">% Premio</th><th>Attivo</th><th></th></tr></thead>
+                <thead><tr><th>Nome</th><th>Collaboratore</th><th>Compagnia</th><th>Ramo</th><th className="text-right">% Collab</th><th className="text-right">% Premio</th><th className="text-right">% Netto</th><th>Attivo</th><th></th></tr></thead>
                 <tbody>
                     {list.map((s) => (
                         <tr key={s.id}>
@@ -521,6 +521,7 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
                             <td><span className="badge badge-neutral">{s.ramo || "tutti"}</span></td>
                             <td className="num text-right font-semibold text-emerald-700">{s.percentuale_collaboratore}%</td>
                             <td className="num text-right text-slate-600">{s.percentuale_su_premio}%</td>
+                            <td className="num text-right text-sky-700">{s.percentuale_su_premio_netto || 0}%</td>
                             <td>{s.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(s)} onDelete={() => onDelete(s.id)} label="schema" />
@@ -1790,7 +1791,7 @@ function SchemaProvvForm({ section, editing, onClose }) {
     }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
         defaults={{ nome: "", collaboratore_id: null, compagnia_id: null, ramo: null,
-                    percentuale_collaboratore: 0, percentuale_su_premio: 0, upline: [],
+                    percentuale_collaboratore: 0, percentuale_su_premio: 0, percentuale_su_premio_netto: 0, upline: [],
                     descrizione: "", attivo: true }}
         fields={(f, set) => (
             <>

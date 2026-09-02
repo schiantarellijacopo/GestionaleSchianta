@@ -138,6 +138,19 @@ ENTITY_FIELDS = {
         "liquidazione": "importo liquidato",
         "note": "note",
     },
+    "movimento": {
+        "data_movimento": "data del movimento/pagamento (Data Pagamento o Data CoGe)",
+        "tipo": "tipo operazione: Entrata o Uscita",
+        "importo": "importo del movimento (€)",
+        "descrizione": "descrizione del pagamento/movimento",
+        "mezzo_pagamento": "tipo pagamento (contanti/bonifico/assegno...)",
+        "categoria": "categoria contabile (opzionale)",
+        "numero_documento": "numero documento (opzionale)",
+        "compagnia_nome": "compagnia/mandato (estratto conto compagnia → versamento)",
+        "numero_estratto": "numero estratto conto compagnia",
+        "data_estratto": "data dell'estratto conto",
+        "note": "note prima nota",
+    },
 }
 
 _POL_ALIASES = {
@@ -209,13 +222,26 @@ _SIN_ALIASES = {
     "liquidazione": ["liquidazione", "liquidato", "importo liquidato"],
     "note": ["note"],
 }
+_MOV_ALIASES = {
+    "data_movimento": ["data pagamento", "data coge", "datapagamento", "data movimento", "data"],
+    "tipo": ["tipo operazione", "tipooperazione", "entrata/uscita", "segno", "dare/avere"],
+    "importo": ["importo pagato", "importopagato", "importo", "totale"],
+    "descrizione": ["descrizione pagamento", "descrizione", "causale"],
+    "mezzo_pagamento": ["tipo pagam", "tipo pagamento", "modalita pagamento", "mezzo pagamento"],
+    "compagnia_nome": ["mandato", "compagnia", "impresa", "agenzia partner"],
+    "numero_estratto": ["num estratto", "numero estratto", "n estratto", "estratto"],
+    "data_estratto": ["data estratto"],
+    "numero_documento": ["numero documento", "num documento", "documento"],
+    "note": ["note prima nota", "note", "annotazioni"],
+}
 _ALIAS_BY_ENTITY = {
     "anagrafica": ANAG_ALIASES,
     "polizza": _POL_ALIASES,
     "titolo": _TIT_ALIASES,
     "sinistro": _SIN_ALIASES,
+    "movimento": _MOV_ALIASES,
 }
-ENTITY_ORDER = ["anagrafica", "polizza", "titolo", "sinistro"]
+ENTITY_ORDER = ["anagrafica", "polizza", "titolo", "sinistro", "movimento"]
 
 _ENUM_VALUES = {
     "polizza": {
@@ -257,19 +283,83 @@ def _coerce_enums(entity: str, doc: dict):
             doc.pop(field, None)
 
 
+_HEADER_TOKENS = None
+
+
+def _all_header_tokens() -> set:
+    """Insieme di tutti i token di intestazione noti (per rilevare la riga header)."""
+    global _HEADER_TOKENS
+    if _HEADER_TOKENS is None:
+        toks: set = set()
+        for aliases in _ALIAS_BY_ENTITY.values():
+            for al in aliases.values():
+                for a in al:
+                    toks.add(_normalize_header(a))
+        _HEADER_TOKENS = toks
+    return _HEADER_TOKENS
+
+
+def _reframe_header(raw: pd.DataFrame) -> pd.DataFrame:
+    """Rileva la riga di intestazione reale (salta righe di preambolo vuote,
+    tipiche degli export Excel) e ritorna un DataFrame con header corretto."""
+    if raw.empty:
+        return raw
+    toks = _all_header_tokens()
+    best_idx, best_score = 0, -1
+    scan = min(25, len(raw))
+    for i in range(scan):
+        cells = [_normalize_header(str(x)) for x in raw.iloc[i].tolist()]
+        nonempty = [c for c in cells if c and c != "nan"]
+        if len(nonempty) < 2:
+            continue
+        matches = sum(1 for c in nonempty if c in toks)
+        score = matches * 10 + len(nonempty)
+        if score > best_score:
+            best_score, best_idx = score, i
+    header = [str(x).strip() for x in raw.iloc[best_idx].tolist()]
+    seen: dict = {}
+    cols: List[str] = []
+    for j, h in enumerate(header):
+        name = h if (h and h.lower() != "nan") else f"col_{j}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        cols.append(name)
+    body = raw.iloc[best_idx + 1:].copy()
+    body.columns = cols
+    # elimina righe completamente vuote (vettoriale)
+    nonempty_row = (body != "").any(axis=1)
+    body = body[nonempty_row]
+    # elimina colonne segnaposto (col_N) completamente vuote
+    if len(body):
+        nonempty_col = (body != "").any(axis=0)
+        keep = [c for c in cols if (not str(c).startswith("col_")) or bool(nonempty_col.get(c, False))]
+        body = body[keep]
+    return body.reset_index(drop=True)
+
+
 def _read_df(content: bytes, filename: str, nrows: Optional[int] = None) -> pd.DataFrame:
     fn = (filename or "").lower()
     if fn.endswith((".xlsx", ".xls", ".xlsm")):
-        return pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False, nrows=nrows)
+        raw = pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False, header=None)
+        df = _reframe_header(raw)
+        return df.head(nrows) if nrows is not None else df
+    raw = None
     for enc in (None, "latin-1"):
         try:
-            return pd.read_csv(io.BytesIO(content), sep=None, engine="python", dtype=str,
-                               keep_default_na=False, nrows=nrows, encoding=enc)
+            raw = pd.read_csv(io.BytesIO(content), sep=None, engine="python", dtype=str,
+                              keep_default_na=False, header=None, encoding=enc)
+            break
         except UnicodeDecodeError:
             continue
         except Exception as e:
             raise HTTPException(400, f"Impossibile leggere il file: {e}")
-    raise HTTPException(400, "Impossibile leggere il file (encoding)")
+    if raw is None:
+        raise HTTPException(400, "Impossibile leggere il file (encoding)")
+    df = _reframe_header(raw)
+    return df.head(nrows) if nrows is not None else df
 
 
 def _count_rows(content: bytes, filename: str) -> int:
@@ -288,6 +378,9 @@ def _count_rows(content: bytes, filename: str) -> int:
 def _detect_entity_heuristic(headers: List[str]) -> str:
     blob = " | ".join(_normalize_header(h) for h in headers)
     has = lambda *ks: any(k in blob for k in ks)
+    if has("tipo operazione", "importo pagato", "descrizione pagamento", "data coge",
+           "prima nota", "tipo pagam", "num estratto", "numero estratto", "mandato"):
+        return "movimento"
     if has("numero sinistro", "numero interno", "avvenimento", "denuncia", "liquidato", "riserva"):
         return "sinistro"
     if has("modalitapagamento", "importoincassato", "datapagamento", "numappendice", "quietanza", "rata"):
@@ -370,9 +463,11 @@ async def _ai_detect(headers: List[str], samples: List[dict]) -> Optional[dict]:
 
 
 _DATE_FIELDS = {"data_nascita", "effetto", "scadenza", "data_incasso", "data_avvenimento",
-                "data_denuncia", "data_annullamento", "data_sospensione", "contraente_data_nascita"}
+                "data_denuncia", "data_annullamento", "data_sospensione", "contraente_data_nascita",
+                "data_movimento", "data_estratto", "data_copertura"}
 _NUM_FIELDS = {"premio_lordo", "premio_netto", "premio_tasse", "premio_ssn", "provvigioni",
-               "importo_lordo", "importo_netto", "imposte", "importo_pagato", "riserva", "liquidazione"}
+               "importo_lordo", "importo_netto", "imposte", "importo_pagato", "riserva", "liquidazione",
+               "importo"}
 _UPPER_FIELDS = {"ragione_sociale", "nome", "cognome", "contraente_nome", "compagnia_nome",
                  "comune", "indirizzo", "contraente_comune", "contraente_indirizzo", "provincia",
                  "contraente_provincia"}
@@ -606,7 +701,7 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
 
 
 async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
-    from db_models import Anagrafica, Polizza, Titolo, Sinistro, Compagnia, MezzoPagamento, Banca, UserPublic
+    from db_models import Anagrafica, Polizza, Titolo, Sinistro, Compagnia, MezzoPagamento, Banca, UserPublic, MovimentoContabile
     from auth import hash_password
 
     sess = await db.import_massivo_sessioni.find_one({"id": sid}, {"_id": 0})
@@ -626,7 +721,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
     auto_creati = {"compagnie": [], "mezzi_pagamento": [], "banche": [],
                    "collaboratori": [], "polizze_da_titolo": []}
     geocode_queue: List[str] = []
-    buffers = {"anagrafiche": [], "polizze": [], "titoli": [], "sinistri": []}
+    buffers = {"anagrafiche": [], "polizze": [], "titoli": [], "sinistri": [], "movimenti": []}
 
     async def _flush(col: Optional[str] = None):
         for c in ([col] if col else list(buffers.keys())):
@@ -1004,7 +1099,53 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                             await _flush("sinistri")
                         stats["creati"] += 1
 
-                await _progress()
+                elif entity == "movimento":
+                    imp = rec.get("importo")
+                    if imp in (None, "", 0):
+                        stats["saltati"] += 1
+                        if len(errori_dett) < _ERR_CAP:
+                            errori_dett.append({"row": int(ridx) + 2, "entity": "movimento", "reason": "importo mancante"})
+                        await _progress(); continue
+                    t_compagnia = rec.get("compagnia_nome")
+                    num_estratto = rec.get("numero_estratto")
+                    tipo_raw = str(rec.get("tipo") or "").strip().lower()
+                    # Estratto conto compagnia (Mandato + Num. Estratto): è un VERSAMENTO
+                    # alla compagnia → uscita, categoria pagamento_compagnia.
+                    is_estratto = bool(t_compagnia or num_estratto)
+                    if tipo_raw.startswith("u") or "uscit" in tipo_raw or tipo_raw in ("avere", "-"):
+                        tipo = "uscita"
+                    elif is_estratto:
+                        tipo = "uscita"
+                    else:
+                        tipo = "entrata"
+                    comp_id = await _compagnia_id(t_compagnia) if t_compagnia else None
+                    descr = rec.get("descrizione")
+                    if not descr and is_estratto:
+                        parti = []
+                        if t_compagnia:
+                            parti.append(str(t_compagnia))
+                        if num_estratto:
+                            parti.append(f"Estratto n. {num_estratto}")
+                        descr = "Versamento compagnia — " + " · ".join(parti) if parti else "Versamento compagnia"
+                    mdoc = {
+                        "data_movimento": rec.get("data_movimento") or rec.get("data_estratto") or now_iso[:10],
+                        "tipo": tipo,
+                        "categoria": "pagamento_compagnia" if is_estratto else (rec.get("categoria") or "altro"),
+                        "importo": abs(float(imp)),
+                        "descrizione": descr or "Movimento importato",
+                        "mezzo_pagamento": rec.get("mezzo_pagamento"),
+                        "numero_documento": rec.get("numero_documento") or num_estratto,
+                        "compagnia_id": comp_id,
+                        "note": rec.get("note"),
+                        "origine_import": True,
+                    }
+                    _coerce_enums("movimento", mdoc)
+                    obj = MovimentoContabile(**{k: v for k, v in mdoc.items() if k in MovimentoContabile.model_fields})
+                    buffers["movimenti"].append(obj.model_dump())
+                    if len(buffers["movimenti"]) >= _FLUSH:
+                        await _flush("movimenti")
+                    stats["creati"] += 1
+
             except Exception as e:
                 stats["errori"] += 1
                 if len(errori_dett) < _ERR_CAP:

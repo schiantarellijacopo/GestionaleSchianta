@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,19 +21,24 @@ import {
 import { toast } from "sonner";
 
 const TABS = [
-    { key: "previdenza", label: "Biblioteca Previdenza", icon: Landmark },
+    { key: "previdenza", label: "Biblioteca Previdenza", icon: Landmark, superAdminOnly: true },
     { key: "condizioni", label: "Condizioni di Polizza", icon: ShieldCheck },
-    { key: "schede", label: "Schede di Calcolo", icon: Calculator },
+    { key: "schede", label: "Schede di Calcolo", icon: Calculator, superAdminOnly: true },
 ];
 
 export default function BibliotecaPrevidenza() {
-    const [tab, setTab] = useState("previdenza");
+    const { user } = useAuth();
+    const isSuper = !!user?.is_super_admin;
+    const visibleTabs = TABS.filter((t) => isSuper || !t.superAdminOnly);
+    const [tab, setTab] = useState(isSuper ? "previdenza" : "condizioni");
     return (
         <div className="space-y-4" data-testid="biblioteca-page">
             <PageHeader title="Biblioteca"
-                subtitle="PDF normativi e condizioni di polizza usati dall'AI: calcoli pensione, analisi cliente e verifiche annuali" />
+                subtitle={isSuper
+                    ? "PDF normativi, condizioni di polizza e schede di calcolo (gestione centralizzata, propagata a tutte le agenzie)"
+                    : "Condizioni di polizza suddivise per compagnia e ramo"} />
             <div className="flex flex-wrap gap-2">
-                {TABS.map((t) => (
+                {visibleTabs.map((t) => (
                     <button key={t.key} onClick={() => setTab(t.key)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${tab === t.key ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-700 border-slate-300 hover:border-sky-500"}`}
                             data-testid={`biblioteca-tab-${t.key}`}>

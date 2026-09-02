@@ -1,5 +1,38 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — Avvisi programmati + Import Excel estratto conto + Tag KPI + Biblioteca visibilità
+
+### ✅ P0 — Esecutore AVVISI PROGRAMMATI (schedule/soglia) — nuovo `scheduler_alert.py`
+- Prima le regole `tipo=schedule/soglia` (compleanno, polizza scaduta 0/5/10/14/15gg, polizza in scadenza, titolo scaduto oltre soglia) NON venivano mai eseguite: mancava il loop giornaliero.
+- Nuovo tick ogni 10 min multi-tenant: per ogni tenant legge orario configurabile (`azienda_config.alert_scheduler_hour/minute/attivo`, default 08:00) e, all'ora impostata, esegue le regole (una sola volta al giorno via `alert_scheduler_state`).
+- **Canale in base alla scelta del cliente in anagrafica**: `alert_dispatcher._dest_cliente` espone `canali_cliente` (da flag `canale_email/whatsapp/sms`); `dispatch_rule` filtra i canali per il destinatario cliente (inapp sempre).
+- Rotte: `GET/PUT /api/alert-scheduler/config` (orario), `POST /api/alert-rules/{id}/run-now` (esecuzione immediata).
+- Frontend `Alert.jsx`: card "Avvisi programmati" con ora:minuti + toggle attivo + Salva; pulsante "Esegui ora" per regole schedule/soglia.
+- **Testato e2e** sull'agenzia TEST: polizza scaduta da 5gg → regola trova 1 entità, canale email ESCLUSO (cliente ha scelto solo WhatsApp), inapp ok.
+
+### ✅ P0 — Import Massivo: Excel ESTRATTI CONTO COMPAGNIA → MovimentoContabile
+- `_read_df` ora rileva la riga di intestazione reale saltando le righe di preambolo (Excel export con 6 righe vuote). Vale per CSV ed Excel.
+- Nuovi campi movimento: `compagnia_nome` (Mandato), `numero_estratto`, `data_estratto`. Entity detection → movimento.
+- Ramo movimento: estratto conto compagnia = VERSAMENTO → tipo `uscita`, categoria `pagamento_compagnia`, descrizione "Versamento compagnia — {mandato} · Estratto n. {n}", compagnia_id risolto.
+- **BUG FIX**: importo con separatore decimale "." (2897.03) veniva moltiplicato x100 → aggiunto `importo` a `_NUM_FIELDS` (usa `_to_float`).
+- **Testato e2e**: 596 movimenti importati, 0 errori, importi corretti (2897.03, 317.71…).
+
+### ✅ Provvigioni su premio netto (Librerie → Sistema provvigionale)
+- Input `% premio netto` già presente nel form; aggiunta colonna "% Netto" nella lista + default. Logica backend `_calcola_provvigione` già usa `percentuale_su_premio_netto` + piramide (100€→50%→10%).
+
+### ✅ Tag anagrafiche: suggerimento canonico + KPI robuste
+- `GET /anagrafiche/tags` include sempre i tag canonici `condominio/parrocchia/azienda` (autocomplete propone anche in agenzie nuove → niente doppioni CONDOMINI/CONDOMINIO). TagsEditor normalizza già a minuscolo.
+- KPI `/anagrafiche/stats` ora confronta i tag case-insensitive. Testato: creata anagrafica CONDOMINIO → KPI condomini +1.
+
+### ✅ Biblioteca: visibilità
+- `BibliotecaPrevidenza.jsx`: tab "Biblioteca Previdenza" e "Schede di Calcolo" ora `superAdminOnly` (nascosti alle agenzie). Le agenzie vedono SOLO "Condizioni di Polizza". Default tab agenzia = condizioni.
+
+### 🔜 Prossimi task richiesti dall'utente (da costruire)
+- **Modulo TASK stile Google Tasks** (P0): bacheca per operatore (ognuno vede il suo), condivisione task con 1+ operatori, allegati documenti, STAMPA. Nuovo modulo (collection `tasks`, CRUD, sharing, object storage, print view, board UI).
+- **Biblioteca super-admin globale** (P1): gestione centralizzata di Biblioteca Previdenza + Schede di Calcolo nella console super-admin con propagazione a tutte le agenzie (richiede rendere GLOBALI i dati sezione previdenza/schede, oggi tenant-scoped) + Condizioni per compagnia→ramo.
+
+
+
 ## Sessione 12/02/2026 — VERIFICA UFFICIALE PARAMETRI INPS + PIRAMIDE COMPATTA + JOB ASYNC SCHEDE + IMAP AUTO-ALLEGA
 
 ### 🔴 P0 — Parametri INPS 2025-2026 VERIFICATI E CORRETTI su fonti ufficiali

@@ -146,11 +146,18 @@ async def rimuovi_kpi_custom(kid: str, user: dict = Depends(require_user("admin"
 # ============================================================
 @router.get("/anagrafiche/tags")
 async def list_tags(user: dict = Depends(current_user)):
-    """Restituisce la lista di tutti i tag univoci usati nelle anagrafiche."""
+    """Restituisce la lista di tutti i tag univoci usati nelle anagrafiche.
+
+    Include SEMPRE i tag "canonici" collegati alle KPI (condominio, parrocchia,
+    azienda) così che l'autocomplete li proponga anche in agenzie nuove, evitando
+    doppioni come CONDOMINI vs CONDOMINIO.
+    """
     if user["role"] == "cliente":
         return []
     tags = await db.anagrafiche.distinct("tags")
-    return sorted([t for t in tags if t])
+    canonici = {"condominio", "parrocchia", "azienda"}
+    uniti = {str(t).strip().lower() for t in tags if t} | canonici
+    return sorted(uniti)
 
 
 @router.get("/anagrafiche/stats")
@@ -171,7 +178,7 @@ async def anagrafiche_stats(user: dict = Depends(current_user)):
     bucket: dict[str, list] = {"privati": [], "aziende": [], "condomini": [], "parrocchie": []}
     for a in anas:
         rs = (a.get("ragione_sociale") or "").upper()
-        tags = a.get("tags") or []
+        tags = [str(t).strip().lower() for t in (a.get("tags") or [])]
         if "PARROCCHIA" in rs or "parrocchia" in tags:
             bucket["parrocchie"].append(a["id"])
         elif "CONDOMINIO" in rs or "condominio" in tags:

@@ -13044,6 +13044,10 @@ async def startup():
         avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
         import face_crop as _face_crop
         _face_crop.start_scheduler(db, hour=2, minute=30)
+        # Esecutore avvisi programmati (schedule/soglia) multi-tenant
+        from scheduler_alert import start_alert_scheduler
+        from database import raw_db as _raw_db
+        start_alert_scheduler(_raw_db)
     except Exception as e:
         logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
 

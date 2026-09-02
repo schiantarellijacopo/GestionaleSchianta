@@ -87,6 +87,17 @@ export default function Alert() {
         }
     };
 
+    const runNow = async (rid) => {
+        try {
+            toast.info("Esecuzione avviso in corso...");
+            const r = await api.post(`/alert-rules/${rid}/run-now`, {});
+            toast.success(`Avviso eseguito: ${r.data.sent} inviati · ${r.data.skipped} saltati · ${r.data.errors} errori`);
+            loadRules();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore esecuzione");
+        }
+    };
+
     const removeRule = async (rid) => {
         if (!window.confirm("Eliminare questa regola? L'operazione è irreversibile.")) return;
         try {
@@ -180,6 +191,7 @@ export default function Alert() {
 
             {tab === "regole" && (
                 <>
+                    <SchedulerConfigCard />
                     {/* Toolbar: filtro tipo + actions */}
                     <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
                         <div className="flex gap-2">
@@ -250,6 +262,12 @@ export default function Alert() {
                                                     data-testid={`toggle-${r.preset_key || r.id}`}
                                                 />
                                                 <div className="flex gap-1">
+                                                    {(r.tipo === "schedule" || r.tipo === "soglia") && (
+                                                        <Button size="sm" variant="outline" onClick={() => runNow(r.id)}
+                                                            className="text-sky-700 hover:bg-sky-50" data-testid={`run-now-${r.preset_key || r.id}`}>
+                                                            <Zap size={13} className="mr-1" /> Esegui ora
+                                                        </Button>
+                                                    )}
                                                     <Button size="sm" variant="outline" onClick={() => test(r.id)} data-testid={`test-${r.preset_key || r.id}`}>
                                                         <Send size={13} className="mr-1" /> Test
                                                     </Button>
@@ -320,6 +338,65 @@ export default function Alert() {
             {editing && <RuleEditor rule={editing} onClose={() => { setEditing(null); loadRules(); }} />}
             {showCatalog && <CatalogDialog onClose={() => { setShowCatalog(false); loadRules(); }} />}
         </div>
+    );
+}
+
+
+// ============================================================
+// CONFIG ORARIO AVVISI PROGRAMMATI (schedule/soglia)
+// ============================================================
+function SchedulerConfigCard() {
+    const [cfg, setCfg] = useState(null);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => {
+        api.get("/alert-scheduler/config").then((r) => setCfg(r.data)).catch(() => {});
+    }, []);
+    if (!cfg) return null;
+    const save = async (next) => {
+        setSaving(true);
+        try {
+            const r = await api.put("/alert-scheduler/config", next);
+            setCfg(r.data);
+            toast.success("Orario avvisi aggiornato");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        } finally { setSaving(false); }
+    };
+    return (
+        <Card className="p-4 mb-4 border-sky-200 bg-sky-50/40" data-testid="scheduler-config-card">
+            <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                    <Calendar size={18} className="text-sky-700" />
+                    <div>
+                        <div className="text-sm font-semibold text-slate-800">Avvisi programmati</div>
+                        <div className="text-[11px] text-slate-500">Esecuzione giornaliera automatica (compleanni, polizze scadute, titoli insoluti…)</div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    <Label className="text-xs text-slate-600">Ora</Label>
+                    <Input type="number" min={0} max={23} value={cfg.alert_scheduler_hour}
+                        onChange={(e) => setCfg({ ...cfg, alert_scheduler_hour: parseInt(e.target.value || "0", 10) })}
+                        className="w-16 h-9" data-testid="scheduler-hour" />
+                    <span className="text-slate-400">:</span>
+                    <Input type="number" min={0} max={59} value={cfg.alert_scheduler_minute}
+                        onChange={(e) => setCfg({ ...cfg, alert_scheduler_minute: parseInt(e.target.value || "0", 10) })}
+                        className="w-16 h-9" data-testid="scheduler-minute" />
+                    <div className="flex items-center gap-2 ml-2">
+                        <Switch checked={cfg.alert_scheduler_attivo}
+                            onCheckedChange={(v) => save({ ...cfg, alert_scheduler_attivo: v })}
+                            data-testid="scheduler-attivo" />
+                        <Label className="text-xs text-slate-600">{cfg.alert_scheduler_attivo ? "Attivo" : "Sospeso"}</Label>
+                    </div>
+                    <Button size="sm" disabled={saving} onClick={() => save(cfg)}
+                        className="bg-sky-700 hover:bg-sky-800" data-testid="scheduler-save">
+                        Salva orario
+                    </Button>
+                </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">
+                I messaggi vengono inviati al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
+            </div>
+        </Card>
     );
 }
 

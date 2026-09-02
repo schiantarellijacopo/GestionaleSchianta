@@ -159,6 +159,60 @@ async def toggle_alert_rule(rid: str, user: dict = Depends(require_user("admin")
     return {"id": rid, "attivo": new_val}
 
 
+# ============================================================
+# AVVISI PROGRAMMATI — config orario + esecuzione manuale
+# ============================================================
+@router.get("/alert-scheduler/config")
+async def get_scheduler_config(user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    """Orario giornaliero di esecuzione degli avvisi programmati (per agenzia)."""
+    cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    return {
+        "alert_scheduler_attivo": bool(cfg.get("alert_scheduler_attivo", True)),
+        "alert_scheduler_hour": int(cfg.get("alert_scheduler_hour", 8)),
+        "alert_scheduler_minute": int(cfg.get("alert_scheduler_minute", 0)),
+    }
+
+
+class SchedulerConfigBody(BaseModel):
+    alert_scheduler_attivo: Optional[bool] = None
+    alert_scheduler_hour: Optional[int] = None
+    alert_scheduler_minute: Optional[int] = None
+
+
+@router.put("/alert-scheduler/config")
+async def set_scheduler_config(body: SchedulerConfigBody, user: dict = Depends(require_user("admin"))) -> dict:
+    upd: dict = {}
+    if body.alert_scheduler_attivo is not None:
+        upd["alert_scheduler_attivo"] = bool(body.alert_scheduler_attivo)
+    if body.alert_scheduler_hour is not None:
+        upd["alert_scheduler_hour"] = max(0, min(23, int(body.alert_scheduler_hour)))
+    if body.alert_scheduler_minute is not None:
+        upd["alert_scheduler_minute"] = max(0, min(59, int(body.alert_scheduler_minute)))
+    if not upd:
+        raise HTTPException(400, "Nessun campo da aggiornare")
+    existing = await db.azienda_config.find_one({}, {"_id": 0, "id": 1})
+    if existing:
+        await db.azienda_config.update_one({"id": existing["id"]}, {"$set": upd})
+    else:
+        await db.azienda_config.insert_one({**upd, "id": _now_iso()})
+    return await get_scheduler_config(user)
+
+
+@router.post("/alert-rules/{rid}/run-now")
+async def run_schedule_now(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    """Esegue SUBITO una regola schedule/soglia (invia realmente ai destinatari)."""
+    r = await db.alert_rules.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Regola non trovata")
+    if r.get("tipo") not in ("schedule", "soglia"):
+        raise HTTPException(400, "Solo le regole schedule/soglia sono eseguibili manualmente")
+    from tenant import user_tenant_id, TENANT_PRINCIPALE_ID
+    from scheduler_alert import esegui_schedule_tenant
+    tid = user_tenant_id(user) or TENANT_PRINCIPALE_ID
+    res = await esegui_schedule_tenant(tid, only_rule_id=rid)
+    return {"ok": True, **res}
+
+
 @router.post("/alert-rules/{rid}/test")
 async def test_alert_rule(rid: str, body: dict | None = None, user: dict = Depends(require_user("admin"))) -> dict:
     """Esegue la regola in modalità test. Il payload viene preso da `body`

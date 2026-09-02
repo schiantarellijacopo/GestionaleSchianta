@@ -59,12 +59,24 @@ async def _dest_cliente(payload: dict) -> list[dict]:
     ana = await db.anagrafiche.find_one({"id": anag_id}, {"_id": 0})
     if not ana:
         return []
+    # Canali OPERATIVI scelti dal cliente in anagrafica (Preferenze canale).
+    # Se il cliente ne ha scelto almeno uno, l'invio è ristretto a quelli
+    # (inapp sempre consentito). Se non ne ha scelto nessuno → nessuna
+    # restrizione (si usano i canali della regola).
+    canali_cli: list[str] = []
+    if ana.get("canale_email") and ana.get("email"):
+        canali_cli.append("email")
+    if ana.get("canale_whatsapp") and (ana.get("whatsapp") or ana.get("cellulare")):
+        canali_cli.append("whatsapp")
+    if ana.get("canale_sms") and (ana.get("cellulare") or ana.get("telefono")):
+        canali_cli.append("sms")
     return [{
         "tipo": "cliente", "anagrafica_id": anag_id,
         "label": ana.get("ragione_sociale"),
         "email": ana.get("email"),
         "cellulare": ana.get("cellulare") or ana.get("telefono"),
         "whatsapp": ana.get("whatsapp") or ana.get("cellulare"),
+        "canali_cliente": canali_cli,
     }]
 
 
@@ -416,7 +428,14 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
         ctx_dest["entita_tipo"] = payload.get("entita_tipo")
         ctx_dest["entita_id"] = payload.get("entita_id")
 
-        for canale in canali:
+        # Canale in base alla scelta del cliente in anagrafica: se il
+        # destinatario è un cliente con preferenze canale, restringe i canali.
+        canali_dest = canali
+        cc = dest.get("canali_cliente")
+        if dest.get("tipo") == "cliente" and cc:
+            canali_dest = [c for c in canali if c == "inapp" or c in cc]
+
+        for canale in canali_dest:
             adapter = CHANNEL_ADAPTERS.get(canale)
             indirizzo = {
                 "inapp": dest.get("user_id"),
