@@ -378,6 +378,21 @@ export default function Polizze() {
     );
 }
 
+const _MESI_FRAZ = { annuale: 12, semestrale: 6, quadrimestrale: 4, trimestrale: 3, mensile: 1, unica: 12 };
+function addPeriodo(dateStr, frazionamento) {
+    if (!dateStr) return "";
+    const m = _MESI_FRAZ[frazionamento] ?? 12;
+    const [y, mo, d] = dateStr.slice(0, 10).split("-").map(Number);
+    if (!y || !mo || !d) return "";
+    const base = new Date(y, mo - 1, d);
+    const target = new Date(base.getFullYear(), base.getMonth() + m, 1);
+    // clamp del giorno all'ultimo giorno valido del mese target
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(d, lastDay));
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+}
+
 function NuovaPolizzaDialog({ onClose }) {
     const navigate = useNavigate();
     const [ana, setAna] = useState([]);
@@ -407,6 +422,15 @@ function NuovaPolizzaDialog({ onClose }) {
         targa: "", frazionamento: "annuale", stato: "attiva",
         prossima_quietanza: "", collaboratore_id: "",
     });
+    const [quietanzaTouched, setQuietanzaTouched] = useState(false);
+    // Auto-calcolo Data prima quietanza = effetto + periodo del frazionamento
+    // (resta modificabile: se l'utente la cambia a mano non viene ricalcolata).
+    useEffect(() => {
+        if (quietanzaTouched || !f.effetto || !f.frazionamento) return;
+        const q = addPeriodo(f.effetto, f.frazionamento);
+        if (q && q !== f.prossima_quietanza) setF((p) => ({ ...p, prossima_quietanza: q }));
+        /* eslint-disable-next-line */
+    }, [f.effetto, f.frazionamento]);
     // Premio lordo = netto + imposta (tasse) + ssn (auto-calcolato)
     const setPremio = (k, v) => setF((p) => {
         const n = { ...p, [k]: v };
@@ -743,7 +767,7 @@ function NuovaPolizzaDialog({ onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div><Label>Data prima quietanza</Label><Input type="date" value={f.prossima_quietanza || ""} onChange={(e) => set("prossima_quietanza", e.target.value)} data-testid="pol-prima-quietanza" /></div>
+                <div><Label>Data prima quietanza</Label><Input type="date" value={f.prossima_quietanza || ""} onChange={(e) => { setQuietanzaTouched(true); set("prossima_quietanza", e.target.value); }} data-testid="pol-prima-quietanza" /></div>
                 <div className="col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
                     💡 Premi (netto/lordo/imposte/SSN), provvigioni e dati veicolo (targa) si inseriscono e si modificano nella scheda della polizza dopo la creazione.
                 </div>

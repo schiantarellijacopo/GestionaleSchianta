@@ -1,5 +1,20 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — parte 5: Auto-quietanza + Promemoria upload
+
+### ✅ Data prima quietanza calcolata automaticamente (Polizze.jsx)
+- Nel modale nuova polizza la "Data prima quietanza" si compila da sola = effetto + periodo del frazionamento (annuale +12m, semestrale +6m, quadrimestrale +4m, trimestrale +3m, mensile +1m). Resta modificabile a mano (se toccata non viene più ricalcolata). Helper `addPeriodo`.
+
+### ✅ Promemoria Upload documenti (scheduler_alert.py + upload_link.py)
+- I link documento non ancora caricati vengono ri-sollecitati automaticamente ogni `reminder_giorni` (default 3, impostabile alla creazione), max 3 solleciti, sul canale scelto dal cliente in anagrafica (email/whatsapp/sms). Job cron 07:00. Riusa i sender di alert_dispatcher (CHANNEL_ADAPTERS). Smoke test OK (invio saltato in TEST perché provider non configurato, nessun crash).
+
+### ⏳ Biblioteca Centralizzata (#2) — NON ancora implementata: serve scelta di approccio
+- Le sezioni Previdenza + Schede sono lette dalla knowledge base AI (notebooklm RAG, ai_copilot schede). Renderle globali richiede una scelta:
+  - A) **Libreria globale condivisa** (una sola copia; super-admin scrive, tutte le agenzie leggono la stessa): modifica dell'isolamento per previdenza/schede + adeguamento dei percorsi di lettura AI. Più pulito ma tocca l'isolamento.
+  - B) **Propagazione a copie**: super-admin gestisce una libreria master e un pulsante "Propaga" copia i documenti su tutte le agenzie. Sicuro, nessun cambio isolamento, ma va ri-propagato ad ogni modifica.
+
+
+
 ## Sessione 02/09/2026 (fork) — parte 4: Categorie documenti + Modifica premi rapida
 
 ### ✅ Categorie documenti polizza (PolizzaDetail → DocumentiSezioneSplit)

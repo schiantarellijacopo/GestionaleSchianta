@@ -45,6 +45,7 @@ class CreateLinkBody(BaseModel):
     descrizione: str
     polizza_id: Optional[str] = None
     giorni_validita: int = 14
+    reminder_giorni: int = 3
 
 
 @router.post("/upload-links")
@@ -68,6 +69,9 @@ async def create_upload_link(body: CreateLinkBody, user: dict = Depends(require_
         "expires_at": (now + timedelta(days=max(1, body.giorni_validita))).isoformat(),
         "used": False,
         "uploads": [],
+        "reminder_giorni": max(0, body.reminder_giorni),
+        "reminder_count": 0,
+        "last_reminder_at": None,
     }
     await raw_db.upload_links.insert_one(doc.copy())
     return {"token": token, "url": _full_url(token), "descrizione": doc["descrizione"], "expires_at": doc["expires_at"]}

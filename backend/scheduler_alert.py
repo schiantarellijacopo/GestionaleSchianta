@@ -16,6 +16,7 @@ loop giornaliero. Questo modulo colma la lacuna:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -304,6 +305,78 @@ async def _daily_auto_diario(raw_db: AsyncIOMotorDatabase) -> None:
             reset_current_user(token)
 
 
+async def _daily_upload_reminders(raw_db: AsyncIOMotorDatabase) -> None:
+    """Ri-sollecita i link documento non ancora caricati (ogni `reminder_giorni`),
+    inviando al cliente sul canale scelto in anagrafica. Max 3 solleciti."""
+    from datetime import datetime as _dt
+    from alert_dispatcher import CHANNEL_ADAPTERS as CHANNEL_SENDERS
+    now_iso = _now_iso()
+    async for t in raw_db.tenants.find({"attivo": True}, {"_id": 0, "id": 1}):
+        tid = t.get("id")
+        if not tid:
+            continue
+        links = await raw_db.upload_links.find({
+            "agenzia_tenant_id": tid, "used": False,
+            "reminder_giorni": {"$gt": 0},
+        }, {"_id": 0}).to_list(1000)
+        if not links:
+            continue
+        user = {"id": "scheduler", "role": "admin", "agenzia_tenant_id": tid, "is_super_admin": False}
+        token = set_current_user(user)
+        try:
+            for link in links:
+                try:
+                    if link.get("expires_at") and link["expires_at"] < now_iso:
+                        continue
+                    if int(link.get("reminder_count") or 0) >= 3:
+                        continue
+                    riferimento = link.get("last_reminder_at") or link.get("created_at")
+                    if riferimento:
+                        giorni = (_dt.fromisoformat(now_iso[:19]) - _dt.fromisoformat(str(riferimento)[:19])).days
+                        if giorni < int(link.get("reminder_giorni") or 3):
+                            continue
+                    ana = await db.anagrafiche.find_one({"id": link["anagrafica_id"]}, {"_id": 0})
+                    if not ana:
+                        continue
+                    base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+                    url = f"{base}/carica/{link['token']}" if base else f"/carica/{link['token']}"
+                    corpo = (f"Gentile {ana.get('ragione_sociale') or ''},\n\n"
+                             f"non abbiamo ancora ricevuto: {link.get('descrizione')}.\n"
+                             f"Può caricarlo comodamente da qui:\n{url}\n\nGrazie.")
+                    dest = {
+                        "tipo": "cliente", "anagrafica_id": ana["id"],
+                        "email": ana.get("email") if ana.get("canale_email") else None,
+                        "cellulare": ana.get("cellulare") or ana.get("telefono"),
+                        "whatsapp": ana.get("whatsapp") or ana.get("cellulare"),
+                    }
+                    ctx = {"oggetto": f"Promemoria documento — {link.get('descrizione')}", "corpo": corpo}
+                    canali = []
+                    if ana.get("canale_email") and ana.get("email"):
+                        canali.append("email")
+                    if ana.get("canale_whatsapp") and (ana.get("whatsapp") or ana.get("cellulare")):
+                        canali.append("whatsapp")
+                    if ana.get("canale_sms") and ana.get("cellulare"):
+                        canali.append("sms")
+                    if not canali and ana.get("email"):
+                        canali = ["email"]
+                    inviato = False
+                    for c in canali:
+                        sender = CHANNEL_SENDERS.get(c)
+                        if not sender:
+                            continue
+                        res = await sender({"nome": "Promemoria documento"}, dest, ctx)
+                        if res.get("status") == "ok":
+                            inviato = True
+                    await raw_db.upload_links.update_one({"id": link["id"]}, {"$set": {
+                        "last_reminder_at": now_iso,
+                        "reminder_count": int(link.get("reminder_count") or 0) + (1 if inviato else 0),
+                    }})
+                except Exception:  # noqa: BLE001
+                    logger.exception("Errore promemoria upload link %s", link.get("id"))
+        finally:
+            reset_current_user(token)
+
+
 def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     """Avvia il tick ricorrente degli avvisi programmati (ogni 10 minuti)."""
     global _scheduler
@@ -326,11 +399,17 @@ def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     async def _diario_job() -> None:
         await _daily_auto_diario(raw_db)
 
+    async def _reminder_job() -> None:
+        await _daily_upload_reminders(raw_db)
+
     sched.add_job(_job, IntervalTrigger(minutes=_TICK_MINUTES),
                   id="avvisi_programmati_tick", replace_existing=True,
                   misfire_grace_time=600)
     sched.add_job(_diario_job, CronTrigger(hour=6, minute=30),
                   id="auto_diario_whatsapp", replace_existing=True,
+                  misfire_grace_time=3600)
+    sched.add_job(_reminder_job, CronTrigger(hour=7, minute=0),
+                  id="promemoria_upload_documenti", replace_existing=True,
                   misfire_grace_time=3600)
     sched.start()
     _scheduler = sched
