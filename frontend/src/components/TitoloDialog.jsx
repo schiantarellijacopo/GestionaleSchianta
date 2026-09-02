@@ -44,11 +44,17 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     // Eredita automaticamente i collaboratori dalla polizza se il titolo non ne ha di propri
     useEffect(() => {
         const haGiaSuoi = Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0;
-        if (haGiaSuoi || !titolo.polizza_id) return;
+        if (!titolo.polizza_id) return;
         api.get(`/polizze/${titolo.polizza_id}`).then((r) => {
+            // Tipo di pagamento: eredita dal preferito della polizza se il titolo non ne ha uno
+            const preferito = r.data?.mezzo_pagamento_preferito || r.data?.ultimo_mezzo_pagamento;
+            if (preferito && !titolo.mezzo_pagamento) {
+                setF((p) => (p.mezzo_pagamento ? p : { ...p, mezzo_pagamento: preferito }));
+            }
+            if (haGiaSuoi) return;
             const po = r.data?.provvigioni_operatori || [];
             if (po.length > 0) {
-                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || "", provvigione: o.provvigione ?? 0 })));
+                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || o.collaboratore_id || "", provvigione: o.provvigione ?? 0 })));
             } else if (r.data?.collaboratore_id && !titolo.collaboratore_id) {
                 setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: 0 }]);
             }
@@ -70,7 +76,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             const r = await api.get(`/polizze/${titolo.polizza_id}`);
             const po = r.data?.provvigioni_operatori || [];
             if (po.length > 0) {
-                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || "", provvigione: o.provvigione ?? 0 })));
+                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || o.collaboratore_id || "", provvigione: o.provvigione ?? 0 })));
                 toast.success("Operatori ereditati dalla polizza");
             } else if (r.data?.collaboratore_id) {
                 setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: 0 }]);
@@ -286,27 +292,6 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                                 <div className="text-right text-xs text-slate-600 mt-2">Totale ripartito: <b className="text-slate-900">{totOperatori.toFixed(2)} €</b></div>
                             </div>
                         )}
-                    </div>
-                    <div>
-                        <Label>Data incasso</Label>
-                        <Input
-                            type="date"
-                            value={f.data_incasso || ""}
-                            onChange={(e) => set("data_incasso", e.target.value)}
-                            placeholder="Si compila ad incasso"
-                            data-testid="titolo-data-incasso"
-                        />
-                        <p className="text-[10px] text-slate-400 mt-0.5">Si compila automaticamente all&apos;incasso.</p>
-                    </div>
-                    <div>
-                        <Label>Copertura fino al</Label>
-                        <Input
-                            type="date"
-                            value={f.coperto_fino_a || ""}
-                            onChange={(e) => set("coperto_fino_a", e.target.value)}
-                            data-testid="titolo-copertura"
-                        />
-                        <p className="text-[10px] text-slate-400 mt-0.5">Si compila quando il titolo entra in copertura.</p>
                     </div>
                 </div>
                 <DialogFooter className="flex justify-between sm:justify-between">

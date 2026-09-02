@@ -51,6 +51,7 @@ async def _salva_allegato_libretto(polizza_id: str, file: UploadFile,
             storage_path=result["path"],
             content_type=ct, size=result.get("size", len(contents)),
             descrizione="OCR libretto di circolazione",
+            categoria="libretto_veicolo", visibile_cliente=True,
             autore_id=user.get("id"),
         )
         await db.allegati.insert_one(alleg.model_dump())

@@ -38,6 +38,16 @@ export default function PolizzaDetail() {
     const { user } = useAuth();
     const [pol, setPol] = useState(null);
     const [editOpen, setEditOpen] = useState(false);
+    const [premiEdit, setPremiEdit] = useState(false);
+    const [premiForm, setPremiForm] = useState(null);
+    const [premiSaving, setPremiSaving] = useState(false);
+    const [librettoUp, setLibrettoUp] = useState(false);
+    const [veicoloEdit, setVeicoloEdit] = useState(false);
+    const [veicoloForm, setVeicoloForm] = useState(null);
+    const [veicoloSaving, setVeicoloSaving] = useState(false);
+    const [provvEdit, setProvvEdit] = useState(false);
+    const [provvVal, setProvvVal] = useState("");
+    const [provvSaving, setProvvSaving] = useState(false);
     const [searchParams, setSearchParams] = useSearchParams();
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);
@@ -67,6 +77,156 @@ export default function PolizzaDetail() {
     const incassa = async (tid) => {
         try { await api.post(`/titoli/${tid}/incassa`, { mezzo_pagamento: "bonifico" }); toast.success("Incassato"); load(); }
         catch { toast.error("Errore"); }
+    };
+
+    const startPremiEdit = () => {
+        setPremiForm({
+            premio_netto: pol.premio_netto ?? 0,
+            premio_tasse: pol.premio_tasse ?? 0,
+            premio_imposte: pol.premio_imposte ?? 0,
+            premio_ssn: pol.premio_ssn ?? 0,
+            premio_accessori: pol.premio_accessori ?? 0,
+            diritti: pol.diritti ?? 0,
+        });
+        setPremiEdit(true);
+    };
+    const calcLordo = (f) => (
+        (parseFloat(f.premio_netto) || 0) +
+        (parseFloat(f.premio_tasse) || 0) +
+        (parseFloat(f.premio_imposte) || 0) +
+        (parseFloat(f.premio_ssn) || 0) +
+        (parseFloat(f.premio_accessori) || 0) +
+        (parseFloat(f.diritti) || 0)
+    );
+    const savePremi = async () => {
+        setPremiSaving(true);
+        try {
+            const payload = {};
+            Object.entries(premiForm).forEach(([k, v]) => { payload[k] = parseFloat(v) || 0; });
+            payload.premio_lordo = calcLordo(premiForm);
+            await api.put(`/polizze/${pol.id}`, payload);
+            toast.success("Premi aggiornati");
+            setPremiEdit(false);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setPremiSaving(false); }
+    };
+
+    const uploadLibretto = async (file) => {
+        if (!file) return;
+        setLibrettoUp(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("polizza_id", pol.id);
+            const r = await api.post(`/ocr/libretto`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            const dati = r.data?.dati || {};
+            const campi = Object.keys(dati).filter((k) => dati[k] !== null && dati[k] !== "" && dati[k] !== undefined);
+            if (campi.length) {
+                await api.post(`/ocr/libretto/apply`, {
+                    polizza_id: pol.id,
+                    dati,
+                    allegato_id: r.data?.allegato_id,
+                    campi,
+                });
+            }
+            toast.success("Libretto caricato e dati veicolo aggiornati");
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore caricamento libretto");
+        } finally { setLibrettoUp(false); }
+    };
+
+    const VEICOLO_NUM_FIELDS = ["veicolo_quintali", "franchigia", "valore_veicolo", "valore_residuo_veicolo", "valore_accessori"];
+    const startVeicoloEdit = () => {
+        setVeicoloForm({
+            targa: pol.targa || "",
+            veicolo_marca: pol.veicolo_marca || "",
+            veicolo_modello: pol.veicolo_modello || "",
+            veicolo_tipo: pol.veicolo_tipo || "",
+            veicolo_alimentazione: pol.veicolo_alimentazione || "",
+            veicolo_uso: pol.veicolo_uso || "",
+            veicolo_data_immatricolazione: pol.veicolo_data_immatricolazione || "",
+            veicolo_cv_fiscali: pol.veicolo_cv_fiscali || "",
+            veicolo_kw: pol.veicolo_kw || "",
+            veicolo_quintali: pol.veicolo_quintali ?? "",
+            veicolo_cilindrata: pol.veicolo_cilindrata || "",
+            veicolo_posti: pol.veicolo_posti || "",
+            veicolo_gancio_traino: !!pol.veicolo_gancio_traino,
+            veicolo_targa_rimorchio: pol.veicolo_targa_rimorchio || "",
+            tipo_tariffa: pol.tipo_tariffa || "",
+            bm_provenienza: pol.bm_provenienza || "",
+            bm_assegnata: pol.bm_assegnata || "",
+            bm_assegnata_cu: pol.bm_assegnata_cu || "",
+            pejus: pol.pejus ?? "",
+            franchigia: pol.franchigia ?? 0,
+            valore_veicolo: pol.valore_veicolo ?? 0,
+            valore_residuo_veicolo: pol.valore_residuo_veicolo ?? 0,
+            valore_accessori: pol.valore_accessori ?? 0,
+            guida_esperta: !!pol.guida_esperta,
+            guida_esclusiva: !!pol.guida_esclusiva,
+            rinuncia_rivalsa: !!pol.rinuncia_rivalsa,
+            intestatario: pol.intestatario || "",
+            provincia_intestatario: pol.provincia_intestatario || "",
+            massimali: pol.massimali || "",
+        });
+        setVeicoloEdit(true);
+    };
+    const setVeic = (k, v) => setVeicoloForm((p) => ({ ...p, [k]: v }));
+    const saveVeicolo = async () => {
+        setVeicoloSaving(true);
+        try {
+            const payload = { ...veicoloForm };
+            VEICOLO_NUM_FIELDS.forEach((k) => {
+                payload[k] = (payload[k] === "" || payload[k] === null || payload[k] === undefined)
+                    ? (k === "veicolo_quintali" ? null : 0) : parseFloat(payload[k]) || 0;
+            });
+            await api.put(`/polizze/${pol.id}`, payload);
+            const tg = (veicoloForm.targa || "").trim();
+            if (tg) {
+                try {
+                    await api.put(`/veicoli/by-targa/${encodeURIComponent(tg)}`, {
+                        marca: veicoloForm.veicolo_marca,
+                        modello: veicoloForm.veicolo_modello,
+                        tipo_veicolo: veicoloForm.veicolo_tipo,
+                        alimentazione: veicoloForm.veicolo_alimentazione,
+                        uso: veicoloForm.veicolo_uso,
+                        data_immatricolazione: veicoloForm.veicolo_data_immatricolazione,
+                        cv: veicoloForm.veicolo_cv_fiscali,
+                        kw: veicoloForm.veicolo_kw,
+                        quintali: veicoloForm.veicolo_quintali,
+                        cilindrata: veicoloForm.veicolo_cilindrata,
+                        posti: veicoloForm.veicolo_posti,
+                        targa_rimorchio: veicoloForm.veicolo_targa_rimorchio,
+                        proprietario: veicoloForm.intestatario,
+                        provincia: veicoloForm.provincia_intestatario,
+                    });
+                } catch (_) { /* sync archivio best-effort */ }
+            }
+            toast.success("Dati veicolo aggiornati (anche in archivio)");
+            setVeicoloEdit(false);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setVeicoloSaving(false); }
+    };
+
+    const startProvvEdit = () => {
+        setProvvVal(pol.provvigioni != null ? String(pol.provvigioni) : "");
+        setProvvEdit(true);
+    };
+    const saveProvv = async () => {
+        setProvvSaving(true);
+        try {
+            const num = parseFloat((provvVal || "").replace(",", ".").replace(/[€\s]/g, "")) || 0;
+            await api.put(`/polizze/${pol.id}`, { provvigioni: num });
+            toast.success("Provvigioni aggiornate");
+            setProvvEdit(false);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setProvvSaving(false); }
     };
 
     const handleDelete = async () => {
@@ -193,7 +353,7 @@ export default function PolizzaDetail() {
                     <F label="Compagnia" value={pol.compagnia?.ragione_sociale} />
                     <F label="Contraente" value={<Link to={`/anagrafiche/${pol.contraente?.id}`} className="text-sky-700 hover:underline">{pol.contraente?.ragione_sociale}</Link>} />
                     <F label="Iter" value={pol.iter_status} />
-                    <F label="Frazionamento" value={`${pol.frazionamento}${pol.tacito_rinnovo ? " · tacito rinnovo" : ""}`} />
+                    <F label="Frazionamento" value={pol.frazionamento ? `${pol.frazionamento}${pol.tacito_rinnovo ? " · tacito rinnovo" : ""}` : "—"} />
                     <F label="Effetto" value={fmtDate(pol.effetto)} />
                     <F label="Presa in carico" value={fmtDate(pol.presa_in_carico)} />
                     <F label="Prossima quietanza" value={fmtDate(pol.prossima_quietanza)} />
@@ -213,8 +373,8 @@ export default function PolizzaDetail() {
             <Tabs defaultValue={isVeicoloPol ? "veicolo" : "garanzie"}>
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     {isVeicoloPol && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
-                    <TabsTrigger value="premi"><Banknote size={13} className="mr-1" />Premi</TabsTrigger>
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
+                    <TabsTrigger value="premi"><Banknote size={13} className="mr-1" />Premi</TabsTrigger>
                     <TabsTrigger value="provvigioni"><Banknote size={13} className="mr-1" />Provvigioni</TabsTrigger>
                     <TabsTrigger value="titoli"><FileText size={13} className="mr-1" />Titoli ({pol.titoli?.length || 0})</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti">
@@ -247,41 +407,175 @@ export default function PolizzaDetail() {
                 {isVeicoloPol && (
                     <TabsContent value="veicolo">
                         <Card className="p-6 border-slate-200 mt-4">
-                            <SezioneTitolo titolo="Dati veicolo" />
-                            <Grid items={[
-                                ["Targa", pol.targa],
-                                ["Marca", pol.veicolo_marca],
-                                ["Modello", pol.veicolo_modello],
-                                ["Tipo veicolo", pol.veicolo_tipo],
-                                ["Alimentazione", pol.veicolo_alimentazione],
-                                ["Tipo uso", pol.veicolo_uso],
-                                ["Immatricolazione", fmtDate(pol.veicolo_data_immatricolazione)],
-                                ["CV fiscali", pol.veicolo_cv_fiscali],
-                                ["KW", pol.veicolo_kw],
-                                ["Quintali P.C.", pol.veicolo_quintali],
-                                ["Cilindrata", pol.veicolo_cilindrata],
-                                ["Numero posti", pol.veicolo_posti],
-                                ["Gancio traino", pol.veicolo_gancio_traino ? "SÌ" : "NO"],
-                                ["Targa rimorchio", pol.veicolo_targa_rimorchio],
-                            ]} />
-                            <SezioneTitolo titolo="Dati associazione contratto" extra />
-                            <Grid items={[
-                                ["Tipo tariffa", pol.tipo_tariffa],
-                                ["B-M provenienza", pol.bm_provenienza],
-                                ["B-M assegnata", pol.bm_assegnata],
-                                ["B-M ass. CU", pol.bm_assegnata_cu],
-                                ["Pejus", pol.pejus],
-                                ["Franchigia", fmtEur(pol.franchigia)],
-                                ["Valore veicolo", fmtEur(pol.valore_veicolo)],
-                                ["Valore residuo", fmtEur(pol.valore_residuo_veicolo)],
-                                ["Valore accessori", fmtEur(pol.valore_accessori)],
-                                ["Guida esperta", pol.guida_esperta ? "SÌ" : "NO"],
-                                ["Guida esclusiva", pol.guida_esclusiva ? "SÌ" : "NO"],
-                                ["Rinuncia rivalsa", pol.rinuncia_rivalsa ? "SÌ" : "NO"],
-                                ["Intestatario", pol.intestatario],
-                                ["Prov. intestatario", pol.provincia_intestatario],
-                                ["Massimali", pol.massimali],
-                            ]} />
+                            <div className="flex items-center justify-between mb-3">
+                                <SezioneTitolo titolo="Dati veicolo" />
+                                <div className="flex items-center gap-2">
+                                    {!veicoloEdit && (
+                                        <label className="text-xs px-3 py-1.5 rounded-md border border-sky-300 text-sky-700 hover:bg-sky-50 cursor-pointer flex items-center gap-1" data-testid="veicolo-libretto-upload">
+                                            <FileText size={13} /> {librettoUp ? "Carico…" : "Carica libretto"}
+                                            <input type="file" hidden disabled={librettoUp}
+                                                onChange={(e) => uploadLibretto(e.target.files?.[0])} />
+                                        </label>
+                                    )}
+                                    {canEdit && !veicoloEdit && (
+                                        <Button size="sm" onClick={startVeicoloEdit} data-testid="veicolo-edit-btn" className="bg-sky-700 hover:bg-sky-800">
+                                            <Pencil size={13} className="mr-1" /> Modifica veicolo
+                                        </Button>
+                                    )}
+                                    {canEdit && veicoloEdit && (
+                                        <>
+                                            <Button size="sm" variant="ghost" onClick={() => setVeicoloEdit(false)} disabled={veicoloSaving} data-testid="veicolo-cancel-btn">Annulla</Button>
+                                            <Button size="sm" onClick={saveVeicolo} disabled={veicoloSaving} className="bg-sky-700 hover:bg-sky-800" data-testid="veicolo-save-btn">{veicoloSaving ? "Salvo…" : "Salva"}</Button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                            {!veicoloEdit ? (
+                                <>
+                                    <p className="text-[11px] text-slate-500 -mt-2 mb-3">Da "Modifica veicolo" puoi modificare i dati direttamente qui. Il libretto caricato viene salvato nei Documenti (categoria "Libretto veicolo").</p>
+                                    <Grid items={[
+                                        ["Targa", pol.targa],
+                                        ["Marca", pol.veicolo_marca],
+                                        ["Modello", pol.veicolo_modello],
+                                        ["Tipo veicolo", pol.veicolo_tipo],
+                                        ["Alimentazione", pol.veicolo_alimentazione],
+                                        ["Tipo uso", pol.veicolo_uso],
+                                        ["Immatricolazione", fmtDate(pol.veicolo_data_immatricolazione)],
+                                        ["CV fiscali", pol.veicolo_cv_fiscali],
+                                        ["KW", pol.veicolo_kw],
+                                        ["Quintali P.C.", pol.veicolo_quintali],
+                                        ["Cilindrata", pol.veicolo_cilindrata],
+                                        ["Numero posti", pol.veicolo_posti],
+                                        ["Gancio traino", pol.veicolo_gancio_traino ? "SÌ" : "NO"],
+                                        ["Targa rimorchio", pol.veicolo_targa_rimorchio],
+                                    ]} />
+                                    <SezioneTitolo titolo="Dati associazione contratto" extra />
+                                    <Grid items={[
+                                        ["Tipo tariffa", pol.tipo_tariffa],
+                                        ["B-M provenienza", pol.bm_provenienza],
+                                        ["B-M assegnata", pol.bm_assegnata],
+                                        ["B-M ass. CU", pol.bm_assegnata_cu],
+                                        ["Pejus", pol.pejus],
+                                        ["Franchigia", fmtEur(pol.franchigia)],
+                                        ["Valore veicolo", fmtEur(pol.valore_veicolo)],
+                                        ["Valore residuo", fmtEur(pol.valore_residuo_veicolo)],
+                                        ["Valore accessori", fmtEur(pol.valore_accessori)],
+                                        ["Guida esperta", pol.guida_esperta ? "SÌ" : "NO"],
+                                        ["Guida esclusiva", pol.guida_esclusiva ? "SÌ" : "NO"],
+                                        ["Rinuncia rivalsa", pol.rinuncia_rivalsa ? "SÌ" : "NO"],
+                                        ["Intestatario", pol.intestatario],
+                                        ["Prov. intestatario", pol.provincia_intestatario],
+                                        ["Massimali", pol.massimali],
+                                    ]} />
+                                </>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="max-w-md">
+                                        <TargaSearchWithLentina
+                                            value={veicoloForm.targa}
+                                            onChange={(targa, veicolo) => setVeicoloForm((p) => {
+                                                if (!veicolo) return { ...p, targa: targa || "" };
+                                                const pick = (...vals) => {
+                                                    for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+                                                    return "";
+                                                };
+                                                const s = (v) => (v === "" || v === undefined || v === null ? "" : String(v));
+                                                return {
+                                                    ...p,
+                                                    targa: targa || "",
+                                                    veicolo_marca: s(pick(veicolo.marca)),
+                                                    veicolo_modello: s(pick(veicolo.modello)),
+                                                    veicolo_tipo: s(pick(veicolo.tipo_veicolo, veicolo.tipo, veicolo.categoria, veicolo.codice_oggetto)),
+                                                    veicolo_alimentazione: s(pick(veicolo.alimentazione)),
+                                                    veicolo_uso: s(pick(veicolo.uso, veicolo.codice_uso)),
+                                                    veicolo_data_immatricolazione: s(pick(veicolo.data_immatricolazione, veicolo.anno_immatricolazione)),
+                                                    veicolo_cv_fiscali: s(pick(veicolo.cv, veicolo.cv_fiscali, veicolo.potenza_cv)),
+                                                    veicolo_kw: s(pick(veicolo.kw, veicolo.potenza_kw)),
+                                                    veicolo_quintali: s(pick(veicolo.quintali)),
+                                                    veicolo_cilindrata: s(pick(veicolo.cilindrata)),
+                                                    veicolo_posti: s(pick(veicolo.posti, veicolo.numero_posti)),
+                                                    veicolo_targa_rimorchio: s(pick(veicolo.targa_rimorchio)),
+                                                    veicolo_gancio_traino: !!(veicolo.rimorchio || veicolo.gancio_traino),
+                                                    intestatario: veicolo.proprietario ? String(veicolo.proprietario) : p.intestatario,
+                                                    provincia_intestatario: veicolo.provincia ? String(veicolo.provincia) : p.provincia_intestatario,
+                                                };
+                                            })}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        {[
+                                            ["veicolo_marca", "Marca", "text"],
+                                            ["veicolo_modello", "Modello", "text"],
+                                            ["veicolo_tipo", "Tipo veicolo", "text"],
+                                            ["veicolo_alimentazione", "Alimentazione", "text"],
+                                            ["veicolo_uso", "Tipo uso", "text"],
+                                            ["veicolo_data_immatricolazione", "Immatricolazione", "date"],
+                                            ["veicolo_cv_fiscali", "CV fiscali", "text"],
+                                            ["veicolo_kw", "KW", "text"],
+                                            ["veicolo_quintali", "Quintali P.C.", "number"],
+                                            ["veicolo_cilindrata", "Cilindrata", "text"],
+                                            ["veicolo_posti", "Numero posti", "text"],
+                                            ["veicolo_targa_rimorchio", "Targa rimorchio", "text"],
+                                        ].map(([k, lbl, type]) => (
+                                            <div key={k}>
+                                                <Label className="text-xs text-slate-500">{lbl}</Label>
+                                                <Input type={type} value={veicoloForm[k]}
+                                                    onChange={(e) => setVeic(k, e.target.value)}
+                                                    data-testid={`veicolo-input-${k}`} />
+                                            </div>
+                                        ))}
+                                        <label className="flex items-center gap-2 mt-6 text-sm cursor-pointer">
+                                            <input type="checkbox" checked={veicoloForm.veicolo_gancio_traino}
+                                                onChange={(e) => setVeic("veicolo_gancio_traino", e.target.checked)}
+                                                data-testid="veicolo-input-veicolo_gancio_traino" />
+                                            Gancio traino
+                                        </label>
+                                    </div>
+                                    <SezioneTitolo titolo="Dati associazione contratto" extra />
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        {[
+                                            ["tipo_tariffa", "Tipo tariffa", "text"],
+                                            ["bm_provenienza", "B-M provenienza", "text"],
+                                            ["bm_assegnata", "B-M assegnata", "text"],
+                                            ["bm_assegnata_cu", "B-M ass. CU", "text"],
+                                            ["pejus", "Pejus", "text"],
+                                            ["franchigia", "Franchigia", "number"],
+                                            ["valore_veicolo", "Valore veicolo", "number"],
+                                            ["valore_residuo_veicolo", "Valore residuo", "number"],
+                                            ["valore_accessori", "Valore accessori", "number"],
+                                            ["intestatario", "Intestatario", "text"],
+                                            ["provincia_intestatario", "Prov. intestatario", "text"],
+                                        ].map(([k, lbl, type]) => (
+                                            <div key={k}>
+                                                <Label className="text-xs text-slate-500">{lbl}</Label>
+                                                <Input type={type} value={veicoloForm[k]}
+                                                    onChange={(e) => setVeic(k, e.target.value)}
+                                                    data-testid={`veicolo-input-${k}`} />
+                                            </div>
+                                        ))}
+                                        <div>
+                                            <Label className="text-xs text-slate-500">Massimali</Label>
+                                            <Input type="text" inputMode="numeric"
+                                                value={(() => { const d = String(veicoloForm.massimali ?? "").replace(/\D/g, ""); return d ? Number(d).toLocaleString("it-IT") : ""; })()}
+                                                onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setVeic("massimali", d ? Number(d).toLocaleString("it-IT") : ""); }}
+                                                placeholder="es. 6.000.000"
+                                                data-testid="veicolo-input-massimali" />
+                                        </div>
+                                        {[
+                                            ["guida_esperta", "Guida esperta"],
+                                            ["guida_esclusiva", "Guida esclusiva"],
+                                            ["rinuncia_rivalsa", "Rinuncia rivalsa"],
+                                        ].map(([k, lbl]) => (
+                                            <label key={k} className="flex items-center gap-2 mt-6 text-sm cursor-pointer">
+                                                <input type="checkbox" checked={veicoloForm[k]}
+                                                    onChange={(e) => setVeic(k, e.target.checked)}
+                                                    data-testid={`veicolo-input-${k}`} />
+                                                {lbl}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </Card>
                     </TabsContent>
                 )}
@@ -290,20 +584,53 @@ export default function PolizzaDetail() {
                     <Card className="p-4">
                         <div className="flex items-center justify-between mb-3">
                             <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Premi di polizza</div>
-                            {canEdit && (
-                                <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="premi-edit-btn">Modifica premi</Button>
+                            {canEdit && !premiEdit && (
+                                <Button size="sm" variant="outline" onClick={startPremiEdit} data-testid="premi-edit-btn">Modifica premi</Button>
+                            )}
+                            {canEdit && premiEdit && (
+                                <div className="flex gap-2">
+                                    <Button size="sm" variant="ghost" onClick={() => setPremiEdit(false)} disabled={premiSaving} data-testid="premi-cancel-btn">Annulla</Button>
+                                    <Button size="sm" onClick={savePremi} disabled={premiSaving} className="bg-sky-700 hover:bg-sky-800" data-testid="premi-save-btn">{premiSaving ? "Salvo…" : "Salva"}</Button>
+                                </div>
                             )}
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
-                            <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
-                            <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
-                            <F label="SSN" value={fmtEur(pol.premio_ssn)} />
-                            <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
-                            <F label="Provvigioni" value={fmtEur(pol.provvigioni)} />
-                            <F label="Frazionamento" value={pol.frazionamento || "—"} />
-                            <F label="Ultimo premio pagato" value={fmtEur(pol.ultimo_premio_pagato ?? pol.ultimo_titolo_importo)} />
-                        </div>
+                        {!premiEdit ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
+                                <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
+                                <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
+                                <F label="SSN" value={fmtEur(pol.premio_ssn)} />
+                                <F label="Accessori" value={fmtEur(pol.premio_accessori)} />
+                                <F label="Diritti" value={fmtEur(pol.diritti)} />
+                                <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                {[
+                                    ["premio_netto", "Premio netto"],
+                                    ["premio_tasse", "Tasse"],
+                                    ["premio_imposte", "Imposte"],
+                                    ["premio_ssn", "SSN"],
+                                    ["premio_accessori", "Accessori"],
+                                    ["diritti", "Diritti"],
+                                ].map(([k, lbl]) => (
+                                    <div key={k}>
+                                        <Label className="text-xs text-slate-500">{lbl}</Label>
+                                        <Input type="number" step="0.01" value={premiForm[k]}
+                                            onChange={(e) => setPremiForm((p) => ({ ...p, [k]: e.target.value }))}
+                                            data-testid={`premi-input-${k}`} />
+                                    </div>
+                                ))}
+                                <div>
+                                    <Label className="text-xs text-slate-500">Premio lordo (automatico)</Label>
+                                    <Input type="number" step="0.01" readOnly disabled
+                                        value={calcLordo(premiForm).toFixed(2)}
+                                        className="bg-slate-100 font-semibold"
+                                        data-testid="premi-input-premio_lordo" />
+                                    <div className="text-[10px] text-slate-400 mt-0.5">Netto + Tasse + Imposte + SSN + Accessori + Diritti</div>
+                                </div>
+                            </div>
+                        )}
                     </Card>
                 </TabsContent>
 
@@ -372,7 +699,9 @@ export default function PolizzaDetail() {
                                         <td className="num text-right">{fmtEur(pol.garanzie.reduce((s, g) => s + (g.ssn || 0), 0))}</td>
                                         <td className="num text-right">{fmtEur(pol.premio_lordo)}</td>
                                         <td className="num text-right">{fmtEur(pol.diritti || 0)}</td>
-                                        <td className="num text-right">{fmtEur(pol.provvigioni)}</td>
+                                        <td className="num text-right p-0">
+                                            <ProvvigioniTotaleCell polizzaId={pol.id} current={pol.provvigioni} canEdit={canEdit} onSaved={load} />
+                                        </td>
                                     </tr>
                                 </tfoot>
                             </table>
@@ -389,6 +718,27 @@ export default function PolizzaDetail() {
 
                 <TabsContent value="provvigioni">
                     <Card className="p-6 border-slate-200 mt-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Provvigioni</div>
+                            {canEdit && !provvEdit && (
+                                <Button size="sm" variant="outline" onClick={startProvvEdit} data-testid="provv-edit-btn"><Pencil size={13} className="mr-1" /> Modifica</Button>
+                            )}
+                            {canEdit && provvEdit && (
+                                <div className="flex gap-2">
+                                    <Button size="sm" variant="ghost" onClick={() => setProvvEdit(false)} disabled={provvSaving} data-testid="provv-cancel-btn">Annulla</Button>
+                                    <Button size="sm" onClick={saveProvv} disabled={provvSaving} className="bg-sky-700 hover:bg-sky-800" data-testid="provv-save-btn">{provvSaving ? "Salvo…" : "Salva"}</Button>
+                                </div>
+                            )}
+                        </div>
+                        {provvEdit ? (
+                            <div className="max-w-xs">
+                                <Label className="text-xs text-slate-500">Provv. totali (agenzia) €</Label>
+                                <Input type="number" step="0.01" value={provvVal}
+                                    onChange={(e) => setProvvVal(e.target.value)}
+                                    data-testid="provv-totali-input" autoFocus />
+                                <p className="text-[11px] text-slate-400 mt-1">Le quote collaboratore e margine vengono ricalcolate in automatico dallo schema provvigionale al salvataggio.</p>
+                            </div>
+                        ) : (
                         <Grid items={[
                             [
                                 "Provv. totali (agenzia)",
@@ -414,6 +764,7 @@ export default function PolizzaDetail() {
                                 </span>,
                             ],
                         ]} />
+                        )}
                         {pol.collaboratore_nome && (
                             <div className="mt-2 text-xs text-slate-600">
                                 Collaboratore polizza: <strong>{pol.collaboratore_nome}</strong>
@@ -1172,7 +1523,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
 
     const patch = (i, p) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
-    const selezionaCollab = (i, uid) => {
+    const selezionaCollab = async (i, uid) => {
         const u = users.find((x) => x.id === uid);
         if (!u) return;
         patch(i, {
@@ -1182,7 +1533,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
             valore: rows[i].valore || u.perc_provvigione_default || 0,
             ...(rows[i].valore ? {} : { tipo: "percentuale" }),
         });
-        // SOTTORETE: se il collaboratore riporta a qualcuno, proponi la riga del "padre"
+        // SOTTORETE (da campo utente): se il collaboratore riporta a qualcuno
         if (u.parent_collaboratore_id && !rows.some((r) => r.collaboratore_id === u.parent_collaboratore_id)) {
             const padre = users.find((x) => x.id === u.parent_collaboratore_id);
             if (padre) {
@@ -1196,6 +1547,29 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                 toast.info(`Sottorete: aggiunto ${padre.name} (${u.parent_provvigione_pct || 0}%) — rimuovilo se non dovuto`);
             }
         }
+        // RETE PIRAMIDALE (da schema provvigionale): proponi i livelli superiori (upline)
+        try {
+            const r = await api.get("/librerie/schema-provvigionale", { params: { collaboratore_id: uid } });
+            const schemi = r.data || [];
+            const schema = schemi.find((s) => s.attivo !== false) || schemi[0];
+            const upline = (schema?.upline || []).filter((up) => up.operatore_id && (parseFloat(up.percentuale) || 0) > 0);
+            if (upline.length) {
+                setRows((rs) => {
+                    const nuovi = upline
+                        .filter((up) => !rs.some((row) => row.collaboratore_id === up.operatore_id))
+                        .map((up) => ({
+                            collaboratore_id: up.operatore_id,
+                            operatore_nome: up.operatore_nome || (users.find((x) => x.id === up.operatore_id)?.name) || "Livello superiore",
+                            tipo: "percentuale",
+                            valore: parseFloat(up.percentuale) || 0,
+                            origine: "upline",
+                        }));
+                    return nuovi.length ? [...rs, ...nuovi] : rs;
+                });
+                const nomi = upline.map((up) => `${up.operatore_nome || "superiore"} (${up.percentuale}%)`).join(", ");
+                toast.info(`Rete piramidale: aggiunti livelli superiori — ${nomi}. Rimuovili se non dovuti.`);
+            }
+        } catch (_) { /* nessuno schema o errore: ignora */ }
     };
 
     const salva = async () => {
@@ -1271,6 +1645,9 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                                     ) : (r.operatore_nome || "—")}
                                     {r.origine === "sottorete" && (
                                         <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-violet-100 text-violet-700">sottorete</span>
+                                    )}
+                                    {r.origine === "upline" && (
+                                        <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">livello superiore</span>
                                     )}
                                 </td>
                                 <td>
@@ -1458,6 +1835,53 @@ function MassimaleCell({ polizzaId, index, current, canEdit, onSaved }) {
                 data-testid={`massimale-cell-${index}`}
                 className={`w-full text-right ${display ? "hover:bg-sky-50 rounded px-2 py-0.5" : "text-slate-400 hover:text-sky-600"}`}>
             {display || (canEdit ? <span className="text-[11px]">+ inserisci</span> : <span className="text-slate-300">—</span>)}
+        </button>
+    );
+}
+
+
+function ProvvigioniTotaleCell({ polizzaId, current, canEdit, onSaved }) {
+    const [editing, setEditing] = useState(false);
+    const [val, setVal] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    const start = () => {
+        if (!canEdit) return;
+        setVal(current != null ? String(current) : "");
+        setEditing(true);
+    };
+
+    const commit = async () => {
+        setEditing(false);
+        const num = parseFloat((val || "").replace(",", ".").replace(/[€\s]/g, "")) || 0;
+        setSaving(true);
+        try {
+            await api.put(`/polizze/${polizzaId}`, { provvigioni: num });
+            toast.success("Provvigioni salvate");
+            onSaved && onSaved();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio provvigioni");
+        } finally { setSaving(false); }
+    };
+
+    if (editing) {
+        return (
+            <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+                   onBlur={commit}
+                   onKeyDown={(e) => { if (e.key === "Enter") commit();
+                                        if (e.key === "Escape") setEditing(false); }}
+                   data-testid="provvigioni-totale-input"
+                   placeholder="es. 120,50"
+                   className="w-28 text-sm border border-sky-300 rounded px-2 py-0.5 text-right focus:outline-none focus:ring-2 focus:ring-sky-200" />
+        );
+    }
+    if (saving) return <span className="text-slate-400 italic pr-2">salvo…</span>;
+    return (
+        <button onClick={start} disabled={!canEdit}
+                data-testid="provvigioni-totale-cell"
+                className="w-full text-right hover:bg-sky-50 rounded px-2 py-0.5 inline-flex items-center justify-end gap-1">
+            {fmtEur(current || 0)}
+            {canEdit && <Pencil size={11} className="text-slate-400" />}
         </button>
     );
 }

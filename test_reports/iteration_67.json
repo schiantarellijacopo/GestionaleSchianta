@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only testing on PolizzaDetail (test@sandbox.it, polizza RCA d06be8eb...). Verified all 7 requested user requirements: (1) page loads without runtime overlay/errors; (2) tab order Veicolo/Garanzie/Premi/Provvigioni - Garanzie is BEFORE Premi as required; (3) Premi inline edit works (no dialog), all data-testid inputs present, premio_lordo auto = 128.00 for netto=100+tasse=20+accessori=5+diritti=3, read-only enforced, no Provvigioni field, toast 'Premi aggiornati' shown, read view shows 128,00 €; (4) Premi read view no longer contains Frazionamento or 'Ultimo premio pagato'; (5) Provvigioni edit inline (no popup), provv-totali-input saved value 50 -> toast 'Provvigioni aggiornate' and provv-totali shows 50,00 €; (6) Veicolo edit inline (no popup), targa-search-input with correct placeholder, massimali 6000000 formatted to 6.000.000, save produces 'Dati veicolo aggiornati'; (7) Garanzie tab shows 'Nessuna garanzia di dettaglio importata' (acceptable per spec, polizza has no garanzie so provvigioni-totale-cell absent).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PolizzaDetail.jsx is 1843 lines - consider splitting into smaller sub-components (PremiTab, VeicoloTab, ProvvigioniTab) for maintainability.",
+    "Some background API calls return 401 in console (non-blocking, page renders fine) - worth investigating which endpoints and whether auth token propagation is missing."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "test_credentials": "test@sandbox.it / Test1234!",
+  "seed_data_creation": "None - used existing polizza d06be8eb-777b-4b3e-b32b-2fa7c31c8ea8",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 7 requirements for the PolizzaDetail inline-edit refactor are verified working on agenzia test@sandbox.it. Tab order correct, no popups, all data-testid present, toasts appear, calcLordo works, massimali thousands separator works. Garanzie provvigioni-totale-cell was not testable in this polizza (no garanzie present) - would need a polizza with garanzie to test that specific inline edit.",
+  "rca of the issue": "N/A - no issues found"
+}

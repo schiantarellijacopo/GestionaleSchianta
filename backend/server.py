@@ -2412,8 +2412,8 @@ async def get_polizza(pid: str, user=Depends(current_user)):
                 {"id": pid},
                 {"$set": {"prodotto": prod_lib["nome"], "updated_at": _now_iso()}},
             )
-    doc["contraente"] = await db.anagrafiche.find_one({"id": doc["contraente_id"]}, {"_id": 0})
-    doc["compagnia"] = await db.compagnie.find_one({"id": doc["compagnia_id"]}, {"_id": 0})
+    doc["contraente"] = await db.anagrafiche.find_one({"id": doc.get("contraente_id")}, {"_id": 0}) if doc.get("contraente_id") else None
+    doc["compagnia"] = await db.compagnie.find_one({"id": doc.get("compagnia_id")}, {"_id": 0}) if doc.get("compagnia_id") else None
     # Arricchimento collaboratore (operatore)
     doc["collaboratore_nome"] = None
     if doc.get("collaboratore_id"):
@@ -6586,6 +6586,38 @@ async def get_veicolo_by_targa(
          "compagnia_id": 1, "effetto": 1, "scadenza_originale": 1},
     ).to_list(50)
     return {"veicolo": v, "polizze_collegate": pol}
+
+
+@api.put("/veicoli/by-targa/{targa}")
+async def update_veicolo_by_targa(
+    targa: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Aggiorna (o crea) il veicolo in archivio partendo dalla targa, con i
+    dati corretti dall'utente sul dettaglio polizza. Evita che una ricerca
+    successiva riproponga dati errati importati (es. da openapi_mock)."""
+    tg = (targa or "").upper().strip()
+    if not tg:
+        raise HTTPException(400, "Targa non valida")
+    ALLOWED = {"marca", "modello", "tipo_veicolo", "alimentazione", "uso",
+               "data_immatricolazione", "cv", "kw", "quintali", "cilindrata",
+               "posti", "targa_rimorchio", "proprietario", "provincia"}
+    patch = {k: v for k, v in (body or {}).items()
+             if k in ALLOWED and v not in (None, "")}
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    existing = await db.veicoli.find_one({"targa": tg}, {"_id": 0, "id": 1})
+    if existing:
+        await db.veicoli.update_one({"targa": tg}, {"$set": patch})
+        vid = existing["id"]
+    else:
+        doc = {"id": str(uuid.uuid4()), "targa": tg,
+               "created_at": datetime.now(timezone.utc).isoformat(),
+               "fonte": "manuale_polizza", **patch}
+        await db.veicoli.insert_one(doc)
+        vid = doc["id"]
+    await log_attivita(user, "update", "veicolo", vid, f"Aggiornato veicolo {tg} da dettaglio polizza")
+    return {"ok": True, "id": vid, "veicolo": await db.veicoli.find_one({"targa": tg}, {"_id": 0})}
+
 
 
 @api.post("/veicoli", status_code=201)

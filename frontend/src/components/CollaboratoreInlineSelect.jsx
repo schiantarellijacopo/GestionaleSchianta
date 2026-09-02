@@ -77,12 +77,12 @@ export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, 
                 value={selValue}
                 onChange={(e) => setSelValue(e.target.value)}
                 onBlur={(e) => { if (!e.relatedTarget) save(selValue); }}
-                className="text-xs border border-sky-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-sky-200"
+                className="text-xs border border-sky-300 rounded px-2 py-1 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-200"
                 data-testid="collaboratore-inline-select"
             >
-                <option value="">— Nessuno —</option>
+                <option value="" className="text-slate-800">— Nessuno —</option>
                 {users.map((u) => (
-                    <option key={u.id} value={u.id}>
+                    <option key={u.id} value={u.id} className="text-slate-800">
                         {u.name || u.email}{u.attivo === false ? " (inattivo)" : ""}
                     </option>
                 ))}
