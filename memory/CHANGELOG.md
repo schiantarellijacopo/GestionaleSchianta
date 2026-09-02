@@ -1,5 +1,11 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 (parte 2) — Report righe non importate (Import Massivo) ✅
+- **Backend `routes/import_massivo.py`**: `result.errori_dettaglio` ora include anche le righe saltate per "numero polizza/sinistro mancante"; limite dettaglio alzato a 500 (`_ERR_CAP`) + nuovo campo `errori_dettaglio_totali`. Aggiunto try/except di livello superiore in `_run_commit` → se il setup fallisce lo stato diventa `errore` con messaggio (niente più spinner infinito).
+- **Frontend `ImportMassivo.jsx`**: sezione "Righe non importate — motivo" con riga/entità/motivo, conteggio "mostrate X di Y", pulsante **Scarica CSV** (`import-massivo-scarica-csv`) e gestione stato `errore`.
+- **Verificato E2E**: upload titoli con polizze inesistenti → 3 righe saltate con motivo, `errori_dettaglio_totali=3`.
+
+
 ## 2026-09-02 — Isolamento multi-tenant completo + Filtro Collaboratori ✅
 
 ### Fix: nuove agenzie non più "vergini" (data leak multi-tenant) — P0

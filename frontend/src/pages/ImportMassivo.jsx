@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import {
     UploadCloud, FileSpreadsheet, Sparkles, Wand2, CheckCircle2,
-    AlertTriangle, X, ArrowRight, Loader2, Users, FileText, Receipt, ShieldAlert,
+    AlertTriangle, X, ArrowRight, Loader2, Users, FileText, Receipt, ShieldAlert, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -104,6 +104,11 @@ export default function ImportMassivo() {
                         setResult(st.data.result);
                         setCommitting(false);
                         toast.success("Importazione completata");
+                    } else if (st.data.status === "errore") {
+                        clearInterval(pollRef.current);
+                        setResult(st.data.result || { errore: "Errore sconosciuto" });
+                        setCommitting(false);
+                        toast.error("Importazione interrotta da un errore");
                     }
                 } catch {
                     if (++fails >= 5) {
@@ -123,26 +128,59 @@ export default function ImportMassivo() {
 
     // ---- RISULTATO ----
     if (result) {
+        const errs = result.errori_dettaglio || [];
+        const errTot = result.errori_dettaglio_totali ?? errs.length;
+        const scaricaCsv = () => {
+            const head = "riga;entita;motivo\n";
+            const body = errs.map((e) => `${e.row};${e.entity};"${String(e.reason || "").replace(/"/g, "'")}"`).join("\n");
+            const blob = new Blob(["\ufeff" + head + body], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `righe_non_importate_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
         return (
             <Card className="p-6" data-testid="import-massivo-result">
-                <div className="flex items-center gap-2 mb-4">
-                    <CheckCircle2 className="text-emerald-600" size={22} />
-                    <h3 className="text-lg font-semibold">Importazione completata</h3>
-                </div>
+                {result.errore ? (
+                    <div className="flex items-center gap-2 mb-4">
+                        <AlertTriangle className="text-rose-600" size={22} />
+                        <h3 className="text-lg font-semibold text-rose-700">Importazione interrotta</h3>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 mb-4">
+                        <CheckCircle2 className="text-emerald-600" size={22} />
+                        <h3 className="text-lg font-semibold">Importazione completata</h3>
+                    </div>
+                )}
+                {result.errore && (
+                    <div className="bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 text-sm text-rose-700 mb-4" data-testid="import-massivo-errore">
+                        {result.errore}
+                    </div>
+                )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                     <StatBox label="Creati" value={result.creati} tone="text-emerald-700" />
                     <StatBox label="Aggiornati" value={result.aggiornati} tone="text-sky-700" />
                     <StatBox label="Saltati" value={result.saltati} tone="text-slate-500" />
                     <StatBox label="Errori" value={result.errori} tone="text-rose-700" />
                 </div>
-                {(result.errori_dettaglio || []).length > 0 && (
-                    <div className="border border-rose-200 rounded-lg overflow-hidden mb-4">
-                        <div className="bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">Dettaglio errori (primi 100)</div>
+                {errs.length > 0 && (
+                    <div className="border border-rose-200 rounded-lg overflow-hidden mb-4" data-testid="import-massivo-errori-report">
+                        <div className="bg-rose-50 px-3 py-2 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-rose-700">
+                                Righe non importate — motivo{" "}
+                                {errTot > errs.length ? `(mostrate ${errs.length} di ${errTot})` : `(${errs.length})`}
+                            </span>
+                            <Button size="sm" variant="outline" onClick={scaricaCsv} className="h-7 text-xs gap-1" data-testid="import-massivo-scarica-csv">
+                                <Download size={13} /> Scarica CSV
+                            </Button>
+                        </div>
                         <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 text-xs">
-                            {result.errori_dettaglio.map((e, i) => (
+                            {errs.map((e, i) => (
                                 <div key={i} className="px-3 py-1.5 flex gap-3" data-testid={`import-err-${i}`}>
-                                    <span className="text-slate-400">riga {e.row}</span>
-                                    <Badge variant="outline" className="text-[10px]">{e.entity}</Badge>
+                                    <span className="text-slate-400 shrink-0">riga {e.row}</span>
+                                    <Badge variant="outline" className="text-[10px] shrink-0">{e.entity}</Badge>
                                     <span className="text-rose-600">{e.reason}</span>
                                 </div>
                             ))}

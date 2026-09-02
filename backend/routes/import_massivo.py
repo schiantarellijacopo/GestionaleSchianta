@@ -40,6 +40,7 @@ router = APIRouter(prefix="/import-massivo", tags=["import-massivo"])
 _BUCKET = "import_massivo_fs"
 _FLUSH = 1000
 _PROGRESS_EVERY = 200
+_ERR_CAP = 500
 
 
 def _gridfs() -> AsyncIOMotorGridFSBucket:
@@ -527,6 +528,18 @@ def _fill_missing(existing: dict, new: dict) -> dict:
 
 
 async def _run_commit(sid: str, plan: List[dict], user: dict):
+    try:
+        await _run_commit_inner(sid, plan, user)
+    except Exception as e:
+        await db.import_massivo_sessioni.update_one({"id": sid}, {"$set": {
+            "status": "errore",
+            "progress.fase": "errore",
+            "result": {"errore": str(e)[:300], "creati": 0, "aggiornati": 0,
+                       "saltati": 0, "errori": 0, "errori_dettaglio": []},
+        }})
+
+
+async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
     from db_models import Anagrafica, Polizza, Titolo, Sinistro, Compagnia
 
     sess = await db.import_massivo_sessioni.find_one({"id": sid}, {"_id": 0})
@@ -668,7 +681,11 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
                 elif entity == "polizza":
                     num = rec.get("numero_polizza")
                     if not num:
-                        stats["saltati"] += 1; await _progress(); continue
+                        stats["saltati"] += 1
+                        if len(errori_dett) < _ERR_CAP:
+                            errori_dett.append({"row": int(ridx) + 2, "entity": "polizza",
+                                                "reason": "numero polizza mancante"})
+                        await _progress(); continue
                     ana = {ak: rec[ck] for ck, ak in _CONTR_TO_ANAG.items() if rec.get(ck)}
                     contr_id = await _upsert_anagrafica(ana) if ana else None
                     comp_id = await _compagnia_id(rec.get("compagnia_nome"))
@@ -700,7 +717,7 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
                         doc["scadenza"] = doc.get("scadenza") or ""
                         if not doc.get("contraente_id"):
                             stats["saltati"] += 1
-                            if len(errori_dett) < 100:
+                            if len(errori_dett) < _ERR_CAP:
                                 errori_dett.append({"row": int(ridx) + 2, "entity": "polizza",
                                                     "reason": f"contraente non trovato per polizza '{num}'"})
                             await _progress(); continue
@@ -719,7 +736,7 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
                     pol_id = await _polizza_id(num_pol)
                     if not pol_id:
                         stats["saltati"] += 1
-                        if len(errori_dett) < 100:
+                        if len(errori_dett) < _ERR_CAP:
                             errori_dett.append({"row": int(ridx) + 2, "entity": "titolo",
                                                 "reason": f"polizza '{num_pol}' non trovata"})
                         await _progress(); continue
@@ -739,7 +756,11 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
                 elif entity == "sinistro":
                     num = rec.get("numero_sinistro")
                     if not num:
-                        stats["saltati"] += 1; await _progress(); continue
+                        stats["saltati"] += 1
+                        if len(errori_dett) < _ERR_CAP:
+                            errori_dett.append({"row": int(ridx) + 2, "entity": "sinistro",
+                                                "reason": "numero sinistro mancante"})
+                        await _progress(); continue
                     num_pol = rec.pop("numero_polizza", None)
                     if num_pol and num_pol not in pol_cache:
                         await _flush("polizze")
@@ -779,7 +800,7 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
                 await _progress()
             except Exception as e:
                 stats["errori"] += 1
-                if len(errori_dett) < 100:
+                if len(errori_dett) < _ERR_CAP:
                     errori_dett.append({"row": int(ridx) + 2, "entity": entity, "reason": str(e)[:200]})
                 await _progress()
 
@@ -791,7 +812,8 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
         "progress.fase": "completato",
         "progress.elaborate": processed,
         **{f"progress.{k}": v for k, v in stats.items()},
-        "result": {**stats, "errori_dettaglio": errori_dett[:100]},
+        "result": {**stats, "errori_dettaglio": errori_dett[:_ERR_CAP],
+                   "errori_dettaglio_totali": len(errori_dett)},
         "completed_at": now_iso,
     }})
     try:
