@@ -60,6 +60,8 @@ export default function PolizzaDetail() {
     if (!pol) return <Loading />;
 
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const isVeicoloPol = /rca|rc\s*auto|autovettur|autocarr|motocicl|ciclomotor|\bauto\b|\bmoto\b|veicol|natant|imbarcaz/i
+        .test(`${pol.ramo || ""} ${pol.prodotto || ""}`);
     const canDelete = user?.role === "admin";
 
     const incassa = async (tid) => {
@@ -200,12 +202,7 @@ export default function PolizzaDetail() {
                     <F label="Termini mora" value={pol.termini_mora_giorni ? `${pol.termini_mora_giorni} gg` : "—"} />
                     <F label="Termini disdetta" value={pol.termini_disdetta_giorni ? `${pol.termini_disdetta_giorni} gg` : "—"} />
                     <F label="Oggetto assicurato" value={pol.oggetto_assicurato || pol.targa} />
-                    <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
-                    <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
-                    <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
-                    <F label="SSN" value={fmtEur(pol.premio_ssn)} />
-                    <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
-                    <F label="Provvigioni" value={fmtEur(pol.provvigioni)} />
+                    <F label="Ultimo premio pagato" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.ultimo_premio_pagato ?? pol.ultimo_titolo_importo)}</span>} />
                 </div>
             </Card>
 
@@ -213,9 +210,10 @@ export default function PolizzaDetail() {
                 <TargaConflictWidget targa={pol.targa} excludeId={pol.id} compact />
             )}
 
-            <Tabs defaultValue={(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) ? "veicolo" : "garanzie"}>
+            <Tabs defaultValue={isVeicoloPol ? "veicolo" : "garanzie"}>
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
-                    {(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
+                    {isVeicoloPol && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
+                    <TabsTrigger value="premi"><Banknote size={13} className="mr-1" />Premi</TabsTrigger>
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
                     <TabsTrigger value="provvigioni"><Banknote size={13} className="mr-1" />Provvigioni</TabsTrigger>
                     <TabsTrigger value="titoli"><FileText size={13} className="mr-1" />Titoli ({pol.titoli?.length || 0})</TabsTrigger>
@@ -246,7 +244,7 @@ export default function PolizzaDetail() {
                     </TabsTrigger>
                 </TabsList>
 
-                {(((pol.ramo || "") + " " + (pol.prodotto || "")).toUpperCase().includes("RCA")) && (
+                {isVeicoloPol && (
                     <TabsContent value="veicolo">
                         <Card className="p-6 border-slate-200 mt-4">
                             <SezioneTitolo titolo="Dati veicolo" />
@@ -287,6 +285,27 @@ export default function PolizzaDetail() {
                         </Card>
                     </TabsContent>
                 )}
+
+                <TabsContent value="premi">
+                    <Card className="p-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Premi di polizza</div>
+                            {canEdit && (
+                                <Button size="sm" variant="outline" onClick={() => setEditOpen(true)} data-testid="premi-edit-btn">Modifica premi</Button>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
+                            <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
+                            <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
+                            <F label="SSN" value={fmtEur(pol.premio_ssn)} />
+                            <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
+                            <F label="Provvigioni" value={fmtEur(pol.provvigioni)} />
+                            <F label="Frazionamento" value={pol.frazionamento || "—"} />
+                            <F label="Ultimo premio pagato" value={fmtEur(pol.ultimo_premio_pagato ?? pol.ultimo_titolo_importo)} />
+                        </div>
+                    </Card>
+                </TabsContent>
 
                 <TabsContent value="garanzie">
                     <Card className="border-slate-200 mt-4 overflow-hidden">
