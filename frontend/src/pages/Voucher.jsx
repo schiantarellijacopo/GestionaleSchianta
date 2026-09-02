@@ -33,7 +33,7 @@ export default function Voucher() {
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data));
         api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data));
-        api.get("/utenti").then((r) => setCollaboratori(
+        api.get("/collaboratori").then((r) => setCollaboratori(
             (r.data || []).filter((u) => ["collaboratore", "dipendente", "admin"].includes(u.role))
         )).catch(() => setCollaboratori([]));
     }, []);

@@ -23,7 +23,7 @@ export default function CorsiIvass() {
     const [dialogOpen, setDialogOpen] = useState(false);
 
     useEffect(() => {
-        api.get("/utenti").then((r) => {
+        api.get("/collaboratori").then((r) => {
             const arr = (r.data || []).filter((u) => ["collaboratore", "dipendente", "admin"].includes(u.role));
             setCollaboratori(arr);
             if (arr.length && !selected) setSelected(arr[0].id);

@@ -19,6 +19,9 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
+    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
     Filter, CheckCircle2, XCircle, RotateCw, Search,
     Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload,
 } from "lucide-react";
@@ -102,6 +105,7 @@ export default function CarichiMensili() {
     const load = async () => {
         try {
             const params = { stato_carico: statoCarico };
+            if (collabId) params.collaboratore_id = collabId;
             // Se ci sono date esplicite, hanno priorità sul range preset
             if (dal && al) { params.dal = dal; params.al = al; }
             else if (range !== "tutti") params.range_filter = range;
@@ -113,7 +117,11 @@ export default function CarichiMensili() {
             setRows([]);
         }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al, collabId]);
+
+    useEffect(() => {
+        api.get("/collaboratori").then((r) => setCollaboratori(r.data || [])).catch(() => {});
+    }, []);
 
     useEffect(() => {
         localStorage.setItem(LS_COLS, JSON.stringify(visible));
@@ -231,6 +239,18 @@ export default function CarichiMensili() {
                             {r === "mese_corrente" ? "Mese corrente" : r === "mese_successivo" ? "Mese successivo" : "Tutti"}
                         </Button>
                     ))}
+                    <div className="w-px h-6 bg-slate-200 mx-1" />
+                    <Select value={collabId || "all"} onValueChange={(v) => setCollabId(v === "all" ? "" : v)}>
+                        <SelectTrigger className="w-52 h-9" data-testid="filter-collaboratore">
+                            <SelectValue placeholder="Collaboratore" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tutti i collaboratori</SelectItem>
+                            {collaboratori.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                     <div className="flex-1" />
                     <div className="relative">
                         <Search size={14} className="absolute left-2 top-2.5 text-slate-400" />

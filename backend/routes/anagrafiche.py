@@ -235,6 +235,7 @@ async def list_anagrafiche(
     q: Optional[str] = None,
     limit: int = 5000,
     tag: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
     paged: bool = False,
     page: int = 1,
     page_size: int = 50,
@@ -265,6 +266,8 @@ async def list_anagrafiche(
             flt["$and"] = and_clauses
     if tag:
         flt["tags"] = tag
+    if collaboratore_id:
+        flt["collaboratore_id"] = collaboratore_id
 
     # ------------------------------------------------------------------
     # MODALITÀ PAGINATA (scalabile su 10k+ anagrafiche, filtri server-side)

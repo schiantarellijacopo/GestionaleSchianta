@@ -1,5 +1,21 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 — Isolamento multi-tenant completo + Filtro Collaboratori ✅
+
+### Fix: nuove agenzie non più "vergini" (data leak multi-tenant) — P0
+Le agenzie appena create vedevano i dati dell'agenzia principale perché ~40 collezioni con dati per-agenzia NON erano in `TENANT_SCOPED_COLLECTIONS`.
+- **`database.py`**: il wrapper `TenantAwareCollection` ora **auto-assegna `agenzia_tenant_id`** su `insert_one`/`insert_many` (solo collezioni scoped, quando c'è un utente in contesto). Colma i write-path che non chiamavano `assign_tenant`.
+- **`tenant.py`**: aggiunte a `TENANT_SCOPED_COLLECTIONS` tutte le collezioni dati per-agenzia (applicazioni, avvisi, storico_avvisi, notifiche_*, notifications, analisi_cliente, schede_calcolo, schema_provvigionale, diario, diario_note, email, lead, lead_liste, lettere_abbuono, movimenti, pipeline_cards, pipelines_custom, piramide_templates, rappel, regolazione_storico, richieste_cliente, chat, chat_portale, veicoli, corsi, voci_bilancio, ai_chat_messages, copilot_messages, copilot_sessions, cloud_*, mkt_*, costi_annuali, dashboard_links, calendario, immagini_ai, alert_events, alert_rules, tipologie_sinistri, ritenute_compagnia, whatsapp_chat_meta, nb_fonti, nb_notebooks).
+- **CONDIVISE (globali) su richiesta utente**: `rami`, `tipi_pagamento`, `mezzi_pagamento`. Restano globali anche: tenants, users, subscriptions, transactions, azienda_config (API keys super-admin), marketplace_*, super_admin_logs, biblioteca_previdenza*, template_modelli, alert_providers, tickets.
+- **Backfill**: `migrate_existing_data_to_principale()` (già eseguito allo startup) assegna gli orfani → `tenant-principale-schiantarelli`. Verificato: 0 orfani rimasti.
+- **`routes/openapi_it.py`**: insert veicolo cache spostato da `raw_db.veicoli` a `db.veicoli` (per auto-tag tenant).
+- **Verificato E2E**: agenzia nuova (clean) = vuota su veicoli/email/rappel/pipelines/anagrafiche/polizze/titoli/sinistri; dato creato dalla nuova agenzia visibile solo a lei, non alla principale; principale conserva tutti i dati (veicoli 100, tipologie-sinistri 39, ritenute 12).
+
+### Feature/Fix: filtro "Collaboratore" (P1) — testato 100% (iteration_63)
+- Bug: 4 pagine chiamavano l'endpoint inesistente `/utenti` → dropdown vuoto. Corretto a `/collaboratori` in `EstrattoContoCompagnie.jsx`, `Voucher.jsx`, `Avvisi.jsx`, `CorsiIvass.jsx`.
+- Aggiunto filtro collaboratore mancante in `CarichiMensili.jsx` (endpoint già supportava `collaboratore_id`) e `Anagrafiche.jsx` (+ nuovo param `collaboratore_id` in `routes/anagrafiche.py list_anagrafiche`).
+
+
 ## 2026-09-01 (parte 5) — Import Massivo Intelligente (P0) ✅
 
 Nuovo importatore multi-file Excel/CSV con mapping AI e gestione duplicati. Testato E2E (upload → AI mapping → commit background → status → dedup) su tutte e 4 le entità.

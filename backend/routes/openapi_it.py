@@ -219,7 +219,7 @@ async def lookup_targa(
         payload["id"] = str(uuid.uuid4())
         payload["created_at"] = _now_iso()
         payload["fonte"] = fonte
-        await raw_db.veicoli.insert_one(payload)
+        await db.veicoli.insert_one(payload)
         vid = payload["id"]
 
     fresh = await db.veicoli.find_one({"id": vid}, {"_id": 0})

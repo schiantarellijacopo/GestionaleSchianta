@@ -150,6 +150,8 @@ export default function Anagrafiche() {
     const [qDeb, setQDeb] = useState("");
     const [open, setOpen] = useState(false);
     const [tagFilter, setTagFilter] = useState(null);
+    const [collabFilter, setCollabFilter] = useState("");
+    const [collaboratoriList, setCollaboratoriList] = useState([]);
     const [catFilter, setCatFilter] = useState("con_polizze");
     const [stats, setStats] = useState(null);
     const [expanded, setExpanded] = useState({});
@@ -174,6 +176,7 @@ export default function Anagrafiche() {
         const params = {
             paged: true, page, page_size: pageSize,
             q: qDeb || undefined, tag: tagFilter || undefined,
+            collaboratore_id: collabFilter || undefined,
             categoria: catFilter !== "all" ? catFilter : undefined,
             compleanno: compleannoFilter || undefined,
             doc: docFilter || undefined,
@@ -185,11 +188,12 @@ export default function Anagrafiche() {
             setPages(r.data.pages || 1);
             if (r.data.conteggi) setCatCounts(r.data.conteggi);
         });
-    }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt]);
+    }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt, collabFilter]);
 
     useEffect(() => { load(); }, [load]);
     // reset alla pagina 1 quando cambiano ricerca o filtri
-    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, collabFilter]);
+    useEffect(() => { api.get("/collaboratori").then((r) => setCollaboratoriList(r.data || [])).catch(() => {}); }, []);
     useEffect(() => { api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {}); }, []);
     useEffect(() => { api.get("/anagrafiche/tags").then((r) => setAllTags(r.data || [])).catch(() => {}); }, []);
 
@@ -363,6 +367,19 @@ export default function Anagrafiche() {
                         Tag: {tagFilter} <X size={10} />
                     </button>
                 )}
+                <div className="ml-auto">
+                    <Select value={collabFilter || "all"} onValueChange={(v) => setCollabFilter(v === "all" ? "" : v)}>
+                        <SelectTrigger className="w-56 h-9" data-testid="anag-filter-collaboratore">
+                            <SelectValue placeholder="Collaboratore" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tutti i collaboratori</SelectItem>
+                            {collaboratoriList.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
 
             {/* Chips tag univoci */}

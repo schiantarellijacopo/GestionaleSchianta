@@ -46,7 +46,7 @@ export default function Avvisi() {
     });
 
     useEffect(() => {
-        api.get("/utenti").then((r) => setCollaboratori(
+        api.get("/collaboratori").then((r) => setCollaboratori(
             (r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))
         )).catch(() => {});
     }, []);

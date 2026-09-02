@@ -124,7 +124,30 @@ class TenantAwareCollection:
     async def replace_one(self, filter, replacement, *args, **kwargs):
         return await self._coll.replace_one(self._inject(filter), replacement, *args, **kwargs)
 
-    # ---- Passthrough per insert_*, create_index, drop, watch, ecc. -------
+    # ---- Insert: auto-assegna il tenant corrente (collezioni scoped) -----
+    def _assign_tenant_doc(self, doc):
+        from tenant import TENANT_SCOPED_COLLECTIONS, user_tenant_id
+        if self._coll_name not in TENANT_SCOPED_COLLECTIONS:
+            return doc
+        if not isinstance(doc, dict) or doc.get("agenzia_tenant_id"):
+            return doc
+        user = _current_user_ctx.get()
+        if user is None:
+            return doc
+        tid = user_tenant_id(user)
+        if not tid:  # super_admin senza contesto tenant
+            return doc
+        doc["agenzia_tenant_id"] = tid
+        return doc
+
+    async def insert_one(self, document, *args, **kwargs):
+        return await self._coll.insert_one(self._assign_tenant_doc(document), *args, **kwargs)
+
+    async def insert_many(self, documents, *args, **kwargs):
+        docs = [self._assign_tenant_doc(d) for d in documents]
+        return await self._coll.insert_many(docs, *args, **kwargs)
+
+    # ---- Passthrough per create_index, drop, watch, ecc. -----------------
     def __getattr__(self, name):
         return getattr(self._coll, name)
 
