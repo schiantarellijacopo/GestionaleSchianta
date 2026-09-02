@@ -41,6 +41,7 @@ import Importazione from "@/pages/Importazione";
 import Pensioni from "@/pages/Pensioni";
 import BibliotecaPrevidenza from "@/pages/BibliotecaPrevidenza";
 import Tasks from "@/pages/Tasks";
+import CaricaDocumento from "@/pages/CaricaDocumento";
 import AppCliente from "@/pages/AppCliente";
 import Email from "@/pages/Email";
 import Attivita from "@/pages/Attivita";
@@ -87,6 +88,7 @@ function App() {
                         <Route path="/portale/*" element={<PortaleCliente />} />
                         <Route path="/c/:slug" element={<PortaleLanding />} />
                         <Route path="/upload-doc" element={<UploadDocPublic />} />
+                        <Route path="/carica/:token" element={<CaricaDocumento />} />
                         <Route path="/rp/:token" element={<RegolazionePublic />} />
 
                         {/* Route dedicate Super Admin (layout separato, no sidebar clienti) */}

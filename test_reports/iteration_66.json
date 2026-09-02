@@ -1,0 +1,21 @@
+{
+  "summary": "Testato frontend E2E su tenant TEST (test@sandbox.it) per le 3 funzionalità richieste. Tutte le funzionalità funzionano correttamente: (1) Biblioteca > Condizioni con navigazione a 2 livelli compagnia→ramo su CATTOLICA (chip 'Tutti i rami', 'RC AUTO', 'INFORTUNI' e input 'Nuovo ramo...' presenti; il filtro RC AUTO aggiorna il titolo card in 'Documenti in CATTOLICA › RC AUTO (1)' e mostra solo il documento del ramo). (2) Richiedi documento nell'anagrafica MARIO TEST: box, input descrizione, bottone 'Genera link' funzionanti; dopo submit toast 'Link creato' e nuova riga 'Carta identità · 0 file caricati (in attesa)' con icona copia (richiedi-doc-copy-<id>). (3) Pagina pubblica /carica/GSJtLwJU12EsEZD9zefWIcFjxzgbFA73 in contesto anonimo: mostra 'Agenzia TEST Sandbox', 'Carica documento', 'Libretto veicolo', area upload (data-testid public-upload-drop) SENZA richiesta di login. NB: al login la pagina /clienti reindirizza al dashboard (route effettiva è /anagrafiche), ma testualmente il menu voce si chiama 'Clienti' — non è un bug, solo naming discrepancy nel prompt.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Menu label 'Clienti' punta alla route /anagrafiche. Considerare alias /clienti per coerenza con label o rinominare la voce di menu in 'Anagrafiche'."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend only)", "frontend": "100%"},
+  "test_credentials": "test@sandbox.it / Test1234! (tenant TEST)",
+  "seed_data_creation": "Creato 1 upload-link 'Carta identità' per MARIO TEST durante il test (feature 2).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Le 3 feature testate sono verdi. Attenzione: menu 'Clienti' apre /anagrafiche, non /clienti. Il link pubblico GSJtLwJU12EsEZD9zefWIcFjxzgbFA73 è funzionante e non richiede autenticazione."
+}

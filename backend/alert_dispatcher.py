@@ -420,6 +420,29 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
         ctx_dest["nome"] = dest.get("label") or ""
         og_src = (modello_libreria or {}).get("oggetto") or rule.get("template_oggetto") or rule.get("nome") or ""
         cp_src = (modello_libreria or {}).get("corpo") or rule.get("template_corpo") or ""
+        # Placeholder {link_carica_documenti}: genera un link pubblico sicuro dove
+        # il cliente carica il documento richiesto → lo ritroviamo negli allegati.
+        if "{link_carica_documenti}" in (og_src + cp_src) and dest.get("tipo") == "cliente" and dest.get("anagrafica_id"):
+            try:
+                import os as _os, secrets as _secrets
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                from database import raw_db as _rdb
+                from db_models import _now_iso as _niso, _uid as _guid
+                from tenant import user_tenant_id as _utid, TENANT_PRINCIPALE_ID as _TP
+                _tid = _utid(dest) or _utid(rule) or _TP
+                _tok = _secrets.token_urlsafe(24)
+                await _rdb.upload_links.insert_one({
+                    "id": _guid(), "token": _tok, "agenzia_tenant_id": _tid,
+                    "anagrafica_id": dest["anagrafica_id"], "anagrafica_nome": dest.get("label"),
+                    "descrizione": rule.get("nome") or "Documento richiesto",
+                    "created_by": "alert", "created_at": _niso(),
+                    "expires_at": (_dt.now(_tz.utc) + _td(days=30)).isoformat(),
+                    "used": False, "uploads": [],
+                })
+                _base = (_os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+                ctx_dest["link_carica_documenti"] = f"{_base}/carica/{_tok}" if _base else f"/carica/{_tok}"
+            except Exception:
+                ctx_dest["link_carica_documenti"] = ""
         oggetto = render_template(og_src, ctx_dest)
         corpo = render_template(cp_src, ctx_dest)
         ctx_dest["oggetto"] = oggetto

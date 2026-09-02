@@ -12203,6 +12203,8 @@ from routes import import_sinistri as _import_sin_router  # noqa: E402
 from routes import cloud_storage as _cloud_router  # noqa: E402
 from routes import tasks as _tasks_router  # noqa: E402
 api.include_router(_tasks_router.router)
+from routes import upload_link as _upload_link_router  # noqa: E402
+api.include_router(_upload_link_router.router)
 from routes import carichi_mensili as _carichi_router  # noqa: E402
 api.include_router(_carichi_router.router)
 from routes import copilot as _copilot_router  # noqa: E402

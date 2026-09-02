@@ -404,7 +404,7 @@ function NuovaPolizzaDialog({ onClose }) {
         ramo: "", prodotto: "", effetto: "", scadenza: "",
         premio_lordo: 0, premio_netto: 0, premio_tasse: 0, premio_ssn: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
-        collaboratore_id: "",
+        prossima_quietanza: "", collaboratore_id: "",
     });
     // Premio lordo = netto + imposta (tasse) + ssn (auto-calcolato)
     const setPremio = (k, v) => setF((p) => {
@@ -727,89 +727,23 @@ function NuovaPolizzaDialog({ onClose }) {
                 </div>
                 <div><Label>Effetto *</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
                 <div><Label>Scadenza *</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
-                <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => setPremio("premio_netto", e.target.value)} data-testid="pol-premio-netto" /></div>
-                <div><Label>Imposta €</Label><Input type="number" step="0.01" value={f.premio_tasse} onChange={(e) => setPremio("premio_tasse", e.target.value)} data-testid="pol-imposta" /></div>
-                <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => setPremio("premio_ssn", e.target.value)} data-testid="pol-ssn" /></div>
                 <div>
-                    <Label>Premio lordo € <span className="text-[10px] text-slate-400">(netto + imposta + SSN)</span></Label>
-                    <Input type="number" step="0.01" value={f.premio_lordo} readOnly className="bg-slate-50 font-medium" data-testid="pol-premio-lordo" />
+                    <Label>Frazionamento</Label>
+                    <Select value={f.frazionamento} onValueChange={(v) => set("frazionamento", v)}>
+                        <SelectTrigger data-testid="pol-frazionamento-select"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="annuale">Annuale</SelectItem>
+                            <SelectItem value="semestrale">Semestrale</SelectItem>
+                            <SelectItem value="quadrimestrale">Quadrimestrale</SelectItem>
+                            <SelectItem value="trimestrale">Trimestrale</SelectItem>
+                            <SelectItem value="mensile">Mensile</SelectItem>
+                            <SelectItem value="unica">Unica</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
-                <div><Label>Provvigioni €</Label><Input type="number" step="0.01" value={f.provvigioni} onChange={(e) => set("provvigioni", e.target.value)} /></div>
-                <div>
-                    <Label>Targa (se RCA)</Label>
-                    <div className="flex gap-2">
-                    <Input
-                        value={f.targa}
-                        list="targhe-suggest"
-                        autoComplete="off"
-                        onChange={async (e) => {
-                            const t = e.target.value.toUpperCase();
-                            set("targa", t);
-                            setVeicoloInfo(null);
-                            // Live search nei veicoli (>= 2 caratteri)
-                            if (t.length >= 2) {
-                                try {
-                                    const r = await api.get("/veicoli", { params: { q: t, limit: 10 } });
-                                    setTargheSuggest(r.data || []);
-                                } catch { /* silenzio */ }
-                            } else {
-                                setTargheSuggest([]);
-                            }
-                        }}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); lookupTarga(); } }}
-                        onBlur={(e) => lookupTarga(e.target.value)}
-                        data-testid="pol-targa-input"
-                    />
-                    <Button
-                        type="button" variant="outline"
-                        onClick={() => lookupTarga()}
-                        disabled={targaLoading}
-                        className="shrink-0"
-                        data-testid="pol-targa-search-btn"
-                    >
-                        <Search size={14} className="mr-1" />
-                        {targaLoading ? "..." : "Cerca"}
-                    </Button>
-                    </div>
-                    {/* Datalist suggerimenti live mentre digita */}
-                    <datalist id="targhe-suggest">
-                        {targheSuggest.map((v) => (
-                            <option key={v.id} value={v.targa}>
-                                {[v.marca, v.modello, v.proprietario].filter(Boolean).join(" · ")}
-                            </option>
-                        ))}
-                    </datalist>
-                    {/* Info box veicolo trovato + polizze collegate */}
-                    {veicoloInfo && (
-                        <div className="mt-2 p-2 bg-sky-50 border border-sky-200 rounded text-xs" data-testid="veicolo-info-box">
-                            <div className="flex items-center gap-1.5 font-medium text-sky-900">
-                                <Car size={12} />
-                                {veicoloInfo.fonte === "libro_matricola"
-                                    ? "Dati dal Libro Matricola"
-                                    : "Dati da polizza precedente"}
-                            </div>
-                            {veicoloInfo.veicolo && (
-                                <div className="text-slate-700 mt-0.5">
-                                    {veicoloInfo.veicolo.marca} {veicoloInfo.veicolo.modello}
-                                    {veicoloInfo.veicolo.proprietario && <> · <span className="text-slate-500">Proprietario: {veicoloInfo.veicolo.proprietario}</span></>}
-                                </div>
-                            )}
-                            {(veicoloInfo.polizze_collegate || []).length > 0 && (
-                                <div className="mt-1.5">
-                                    <div className="font-medium text-slate-600 text-[11px]">Polizze già su questa targa:</div>
-                                    <ul className="list-disc pl-4 mt-0.5">
-                                        {(veicoloInfo.polizze_collegate || []).map((p) => (
-                                            <li key={p.id} className="text-[11px]">
-                                                <span className="font-mono">{p.numero_polizza}</span>
-                                                {p.ramo && <> · {p.ramo}</>}
-                                                {p.stato && <span className="ml-1 text-slate-500">[{p.stato}]</span>}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-                    )}
+                <div><Label>Data prima quietanza</Label><Input type="date" value={f.prossima_quietanza || ""} onChange={(e) => set("prossima_quietanza", e.target.value)} data-testid="pol-prima-quietanza" /></div>
+                <div className="col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
+                    💡 Premi (netto/lordo/imposte/SSN), provvigioni e dati veicolo (targa) si inseriscono e si modificano nella scheda della polizza dopo la creazione.
                 </div>
                 <div className="col-span-2">
                     <Label>Collaboratore (Operatore)</Label>

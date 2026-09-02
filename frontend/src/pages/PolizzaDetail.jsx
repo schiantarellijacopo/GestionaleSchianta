@@ -361,9 +361,8 @@ export default function PolizzaDetail() {
                 <TabsContent value="provvigioni">
                     <Card className="p-6 border-slate-200 mt-4">
                         <Grid items={[
-                            ["Provv. struttura rata", fmtEur(pol.provv_struttura)],
                             [
-                                "Provv. totali",
+                                "Provv. totali (agenzia)",
                                 <span key="provv-totali" className="font-semibold text-emerald-700 num" data-testid="provv-totali">
                                     {fmtEur(pol.provvigione_totale ?? pol.provvigioni ?? 0)}
                                 </span>,
@@ -380,9 +379,9 @@ export default function PolizzaDetail() {
                                 </span>,
                             ],
                             [
-                                "Provv. margine (agenzia)",
+                                "Provv. margine (agenzia netto)",
                                 <span key="provv-margine" className="num font-semibold text-amber-700" data-testid="provv-margine">
-                                    {fmtEur(pol.provvigione_margine || ((pol.provvigione_totale ?? pol.provvigioni ?? 0) - (pol.provvigione_collaboratore || 0)))}
+                                    {fmtEur(pol.provvigione_margine ?? ((pol.provvigione_totale ?? pol.provvigioni ?? 0) - (pol.provvigione_collaboratore || 0)))}
                                 </span>,
                             ],
                         ]} />
@@ -1197,7 +1196,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                 <SezioneTitolo titolo="Ripartizione provvigioni per operatore" extra />
                 <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1.5 text-xs text-slate-600">
-                        <span className="uppercase tracking-wide text-[10px] text-slate-400">Provv. struttura (rata)</span>
+                        <span className="uppercase tracking-wide text-[10px] text-slate-400">Provv. totali rata (agenzia)</span>
                         <Input type="number" step="0.01" value={provvStruttura}
                             onChange={(e) => setProvvStruttura(e.target.value)} readOnly={!canEdit}
                             className="h-8 w-28 text-xs text-right" data-testid="provv-struttura-input" />

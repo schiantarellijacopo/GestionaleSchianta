@@ -21,7 +21,7 @@ import RowActions, { PrintButton } from "@/components/RowActions";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
-    Pencil, Trash2, Briefcase,
+    Pencil, Trash2, Briefcase, Link2, Copy, Send,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -217,7 +217,7 @@ export default function AnagraficaDetail() {
                     <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
                 )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
-                <TabsContent value="documenti"><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
@@ -1878,3 +1878,69 @@ function InlineChannelsField({ label, emailEnabled, smsEnabled, waEnabled, canEd
         </div>
     );
 }
+
+// ============================================================
+// Richiesta documento al cliente via link pubblico sicuro
+// ============================================================
+function RichiediDocumentoBox({ anagrafica_id, ana }) {
+    const [descrizione, setDescrizione] = useState("");
+    const [creating, setCreating] = useState(false);
+    const [links, setLinks] = useState([]);
+
+    const load = () => api.get(`/upload-links?anagrafica_id=${anagrafica_id}`).then((r) => setLinks(r.data || [])).catch(() => {});
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
+
+    const crea = async () => {
+        if (!descrizione.trim()) { toast.error("Indica quale documento serve"); return; }
+        setCreating(true);
+        try {
+            await api.post("/upload-links", { anagrafica_id, descrizione: descrizione.trim(), giorni_validita: 30 });
+            toast.success("Link creato");
+            setDescrizione("");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setCreating(false); }
+    };
+    const copia = (url) => { navigator.clipboard.writeText(url); toast.success("Link copiato"); };
+    const waLink = (url) => {
+        const num = (ana?.cellulare || ana?.telefono || "").replace(/\D/g, "");
+        const msg = encodeURIComponent(`Salve, per completare la pratica carichi qui il documento richiesto: ${url}`);
+        return num ? `https://wa.me/${num.length <= 10 ? "39" + num : num}?text=${msg}` : null;
+    };
+
+    return (
+        <Card className="p-4 mb-4 border-sky-200 bg-sky-50/40" data-testid="richiedi-documento-box">
+            <div className="flex items-center gap-2 mb-2 text-sky-800 font-semibold text-sm">
+                <Link2 size={15} /> Richiedi un documento al cliente
+            </div>
+            <div className="text-[11px] text-slate-500 mb-2">
+                Genera un link sicuro: il cliente carica il file (es. libretto) e lo ritrovi qui negli allegati.
+            </div>
+            <div className="flex gap-2">
+                <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)}
+                    placeholder="Es. Libretto veicolo, Carta d'identità…" data-testid="richiedi-doc-descr" />
+                <Button onClick={crea} disabled={creating} className="bg-sky-700 hover:bg-sky-800 shrink-0" data-testid="richiedi-doc-crea">
+                    {creating ? "…" : "Genera link"}
+                </Button>
+            </div>
+            {links.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                    {links.slice(0, 8).map((l) => {
+                        const wa = waLink(l.url);
+                        return (
+                            <div key={l.id} className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+                                <span className="flex-1 min-w-0">
+                                    <span className="font-medium text-slate-700">{l.descrizione}</span>
+                                    <span className="text-slate-400 ml-1">· {(l.uploads || []).length} file caricati{l.used ? "" : " (in attesa)"}</span>
+                                </span>
+                                <button onClick={() => copia(l.url)} className="text-sky-600 hover:text-sky-800" title="Copia link" data-testid={`richiedi-doc-copy-${l.id}`}><Copy size={13} /></button>
+                                {wa && <a href={wa} target="_blank" rel="noreferrer" className="text-emerald-600 hover:text-emerald-800" title="Invia su WhatsApp"><Send size={13} /></a>}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </Card>
+    );
+}
+

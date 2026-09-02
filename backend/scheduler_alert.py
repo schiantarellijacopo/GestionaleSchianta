@@ -284,6 +284,26 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
             logger.exception("Errore tick avvisi programmati tenant %s", tid)
 
 
+async def _daily_auto_diario(raw_db: AsyncIOMotorDatabase) -> None:
+    """Salva automaticamente le conversazioni WhatsApp nel diario cliente,
+    una volta al giorno, per ogni tenant (upsert → nessun doppione)."""
+    from routes.whatsapp_evo import run_auto_diario_tenant
+    async for t in raw_db.tenants.find({"attivo": True}, {"_id": 0, "id": 1}):
+        tid = t.get("id")
+        if not tid:
+            continue
+        user = {"id": "scheduler", "role": "admin", "agenzia_tenant_id": tid, "is_super_admin": False}
+        token = set_current_user(user)
+        try:
+            res = await run_auto_diario_tenant()
+            if res.get("salvati"):
+                logger.info("Auto-diario WhatsApp tenant %s: %s conversazioni salvate", tid, res["salvati"])
+        except Exception:  # noqa: BLE001
+            logger.exception("Errore auto-diario WhatsApp tenant %s", tid)
+        finally:
+            reset_current_user(token)
+
+
 def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     """Avvia il tick ricorrente degli avvisi programmati (ogni 10 minuti)."""
     global _scheduler
@@ -291,6 +311,7 @@ def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
         return
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.interval import IntervalTrigger
+    from apscheduler.triggers.cron import CronTrigger
     try:
         from tzlocal import get_localzone
         tz = get_localzone()
@@ -302,12 +323,18 @@ def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     async def _job() -> None:
         await _tick(raw_db)
 
+    async def _diario_job() -> None:
+        await _daily_auto_diario(raw_db)
+
     sched.add_job(_job, IntervalTrigger(minutes=_TICK_MINUTES),
                   id="avvisi_programmati_tick", replace_existing=True,
                   misfire_grace_time=600)
+    sched.add_job(_diario_job, CronTrigger(hour=6, minute=30),
+                  id="auto_diario_whatsapp", replace_existing=True,
+                  misfire_grace_time=3600)
     sched.start()
     _scheduler = sched
-    logger.info("Scheduler avvisi programmati avviato (tick ogni %d min, tz=%s)", _TICK_MINUTES, tz)
+    logger.info("Scheduler avvisi programmati avviato (tick ogni %d min, tz=%s) + auto-diario 06:30", _TICK_MINUTES, tz)
 
 
 def stop_alert_scheduler() -> None:

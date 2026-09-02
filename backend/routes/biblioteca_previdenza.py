@@ -129,14 +129,30 @@ async def create_cartella(body: dict, user=Depends(require_user("admin", "collab
 
 
 @router.get("/documenti")
-async def list_documenti(cartella: Optional[str] = None, sezione: str = "previdenza",
-                         user=Depends(current_user)):
+async def list_documenti(cartella: Optional[str] = None, sottocartella: Optional[str] = None,
+                         sezione: str = "previdenza", user=Depends(current_user)):
     q = _sez_query(sezione)
     if cartella:
         q["cartella"] = cartella
+    if sottocartella:
+        q["sottocartella"] = sottocartella
     docs = await db.biblioteca_previdenza.find(
         q, {"_id": 0, "testo": 0}).sort("created_at", -1).to_list(1500)
     return docs
+
+
+@router.get("/sottocartelle")
+async def list_sottocartelle(cartella: str, sezione: str = "condizioni", user=Depends(current_user)):
+    """Rami (sottocartelle) presenti dentro una compagnia (cartella) — per le
+    Condizioni di Polizza organizzate su due livelli compagnia → ramo."""
+    q = _sez_query(sezione)
+    q["cartella"] = cartella
+    rows = await db.biblioteca_previdenza.aggregate([
+        {"$match": q},
+        {"$group": {"_id": "$sottocartella", "n": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]).to_list(500)
+    return [{"nome": r["_id"], "documenti": r["n"]} for r in rows if r["_id"]]
 
 
 # ------------------------------------------------------------
@@ -177,6 +193,7 @@ async def _drive_push(sezione: str, cartella: str, filename: str,
 async def upload_documenti(
     files: list[UploadFile] = File(...),
     cartella: str = Form(...),
+    sottocartella: Optional[str] = Form(None),
     sezione: str = Form("previdenza"),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
@@ -184,6 +201,7 @@ async def upload_documenti(
     e carica una copia anche su Google Drive (se collegato)."""
     from routes.cloud_storage import _tenant_id
     cartella = (cartella or "").strip().upper() or "ALTRE CATEGORIE"
+    sottocartella = ((sottocartella or "").strip().upper() or None)
     tenant = _tenant_id(user)
     importati, saltati, errori = [], [], []
     su_drive = 0
@@ -194,7 +212,7 @@ async def upload_documenti(
                 errori.append({"file": f.filename, "errore": "oltre 25 MB"})
                 continue
             dup_q = _sez_query(sezione)
-            dup_q.update({"cartella": cartella, "nome_file": f.filename})
+            dup_q.update({"cartella": cartella, "sottocartella": sottocartella, "nome_file": f.filename})
             dup = await db.biblioteca_previdenza.find_one(dup_q, {"_id": 0, "id": 1})
             if dup:
                 saltati.append(f.filename)
@@ -212,7 +230,7 @@ async def upload_documenti(
                 "id": _uid(),
                 "sezione": sezione,
                 "cartella": cartella,
-                "sottocartella": None,
+                "sottocartella": sottocartella,
                 "nome_file": f.filename,
                 "mime": f.content_type or "application/pdf",
                 "size_kb": round(len(contents) / 1024, 1),

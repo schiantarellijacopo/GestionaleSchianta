@@ -639,23 +639,24 @@ class SaveToDiaryBody(BaseModel):
     anagrafica_id: str
 
 
-@router.post("/instances/{name}/save-to-diary")
-async def save_conversation_to_diary(
-    name: str, body: SaveToDiaryBody,
-    user=Depends(require_user("admin", "collaboratore", "dipendente")),
-) -> dict:
-    """Copia l'intera conversazione WhatsApp con `number` nel diario cliente
-    dell'anagrafica indicata. Salva 1 sola voce di riepilogo con il transcript.
-    """
-    anag = await db.anagrafiche.find_one({"id": body.anagrafica_id}, {"_id": 0, "id": 1, "nome": 1, "cognome": 1, "ragione_sociale": 1})
+async def _save_conv_to_diary(name: str, number: str, anagrafica_id: str, user: dict, auto: bool = False) -> dict:
+    """Salva/aggiorna (UPSERT, dedup per conv_key) la conversazione WhatsApp nel diario.
+
+    Una sola voce per conversazione (chiave `whatsapp_conv_key = instance:number`):
+    alle esecuzioni successive aggiorna il transcript invece di creare doppioni."""
+    anag = await db.anagrafiche.find_one(
+        {"id": anagrafica_id}, {"_id": 0, "id": 1, "nome": 1, "cognome": 1, "ragione_sociale": 1})
     if not anag:
+        if auto:
+            return {"ok": False, "skipped": "anagrafica_non_trovata"}
         raise HTTPException(404, "Anagrafica non trovata")
 
     msgs = await db.whatsapp_messages.find(
-        {"instance_name": name, "number": body.number},
-        {"_id": 0},
-    ).sort("created_at", 1).to_list(500)
+        {"instance_name": name, "number": number}, {"_id": 0},
+    ).sort("created_at", 1).to_list(1000)
     if not msgs:
+        if auto:
+            return {"ok": False, "skipped": "nessun_messaggio"}
         raise HTTPException(400, "Nessun messaggio da salvare")
 
     lines = []
@@ -665,29 +666,91 @@ async def save_conversation_to_diary(
         text = m.get("text") or "(allegato)"
         lines.append(f"[{ts}] {dir_marker} {text}")
     transcript = "\n".join(lines)
-    nome_cli = (
-        anag.get("ragione_sociale")
-        or f"{anag.get('nome') or ''} {anag.get('cognome') or ''}".strip()
-    )
+    conv_key = f"{name}:{number}"
+    now = _now_iso()
 
+    existing = await db.diario.find_one({"anagrafica_id": anagrafica_id, "whatsapp_conv_key": conv_key}, {"_id": 0, "id": 1})
+    campi = {
+        "tipo": "whatsapp",
+        "titolo": f"Conversazione WhatsApp ({len(msgs)} messaggi) — {number}",
+        "descrizione": transcript,
+        "instance_name": name,
+        "numero": number,
+        "whatsapp_conv_key": conv_key,
+        "messaggi_count": len(msgs),
+        "auto": auto,
+        "updated_at": now,
+    }
+    if existing:
+        await db.diario.update_one({"id": existing["id"]}, {"$set": campi})
+        return {"ok": True, "diario_id": existing["id"], "messaggi_salvati": len(msgs), "aggiornato": True}
     entry = {
         "id": str(uuid.uuid4()),
-        "anagrafica_id": body.anagrafica_id,
-        "data_evento": _now_iso()[:10],
-        "tipo": "whatsapp",
-        "titolo": f"Conversazione WhatsApp ({len(msgs)} messaggi) — {body.number}",
-        "descrizione": transcript,
+        "anagrafica_id": anagrafica_id,
+        "data_evento": now[:10],
         "autore_id": user.get("id"),
-        "autore_nome": user.get("name"),
-        "instance_name": name,
-        "numero": body.number,
-        "messaggi_count": len(msgs),
-        "created_at": _now_iso(),
+        "autore_nome": user.get("name") or ("Automatico" if auto else None),
+        "created_at": now,
+        **campi,
     }
-    # Salva nella collection `diario` (quella letta da GET /anagrafiche/{aid}/diario)
     await db.diario.insert_one(entry.copy())
-    entry.pop("_id", None)
-    return {"ok": True, "diario_id": entry["id"], "messaggi_salvati": len(msgs)}
+    return {"ok": True, "diario_id": entry["id"], "messaggi_salvati": len(msgs), "aggiornato": False}
+
+
+@router.post("/instances/{name}/save-to-diary")
+async def save_conversation_to_diary(
+    name: str, body: SaveToDiaryBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Copia l'intera conversazione WhatsApp con `number` nel diario cliente (dedup)."""
+    return await _save_conv_to_diary(name, body.number, body.anagrafica_id, user, auto=False)
+
+
+async def _anagrafica_id_by_number(num: str) -> Optional[str]:
+    digits = "".join(c for c in (num or "") if c.isdigit())
+    if len(digits) < 6:
+        return None
+    tail = digits[-9:] if len(digits) >= 9 else digits
+    anag = await db.anagrafiche.find_one(
+        {"$or": [
+            {"cellulare": {"$regex": tail + "$"}},
+            {"telefono": {"$regex": tail + "$"}},
+            {"whatsapp": {"$regex": tail + "$"}},
+        ]}, {"_id": 0, "id": 1})
+    return anag["id"] if anag else None
+
+
+async def run_auto_diario_tenant() -> dict:
+    """Salva/aggiorna nel diario tutte le conversazioni WhatsApp del tenant corrente
+    collegabili a un'anagrafica (upsert per conv_key → nessun doppione).
+    Richiede che il ContextVar utente sia già impostato sul tenant."""
+    sysuser = {"id": "auto", "name": "Automatico"}
+    pairs = await db.whatsapp_messages.aggregate(
+        [{"$group": {"_id": {"i": "$instance_name", "n": "$number"}}}]
+    ).to_list(10000)
+    salvati = 0
+    saltati = 0
+    for p in pairs:
+        i = (p.get("_id") or {}).get("i")
+        n = (p.get("_id") or {}).get("n")
+        if not i or not n:
+            saltati += 1
+            continue
+        aid = await _anagrafica_id_by_number(n)
+        if not aid:
+            saltati += 1
+            continue
+        r = await _save_conv_to_diary(i, n, aid, sysuser, auto=True)
+        salvati += 1 if r.get("ok") else 0
+        saltati += 0 if r.get("ok") else 1
+    return {"salvati": salvati, "saltati": saltati}
+
+
+@router.post("/auto-diario/run")
+async def trigger_auto_diario(user=Depends(require_user("admin"))) -> dict:
+    """Esegue subito l'auto-salvataggio nel diario delle conversazioni WhatsApp
+    del tenant corrente (upsert, nessun doppione)."""
+    return await run_auto_diario_tenant()
 
 
 

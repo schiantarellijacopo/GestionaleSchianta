@@ -60,6 +60,10 @@ function SezioneBiblioteca({ sezione }) {
     const [syncing, setSyncing] = useState(false);
     const [dragOver, setDragOver] = useState(false);
     const [nuovaCartella, setNuovaCartella] = useState("");
+    const [sottocartelle, setSottocartelle] = useState([]);
+    const [selRamo, setSelRamo] = useState(null);
+    const [nuovoRamo, setNuovoRamo] = useState("");
+    const isCondizioni = sezione === "condizioni";
     const fileRef = useRef(null);
 
     const loadCartelle = async () => {
@@ -67,16 +71,26 @@ function SezioneBiblioteca({ sezione }) {
         setCartelle(r.data);
         return r.data;
     };
-    const loadDocs = async (cart) => {
-        const r = await api.get("/biblioteca-previdenza/documenti", { params: { sezione, cartella: cart } });
+    const loadDocs = async (cart, ramo) => {
+        const params = { sezione, cartella: cart };
+        if (ramo) params.sottocartella = ramo;
+        const r = await api.get("/biblioteca-previdenza/documenti", { params });
         setDocs(r.data);
+    };
+    const loadSottocartelle = async (cart) => {
+        if (!isCondizioni || !cart) { setSottocartelle([]); return; }
+        try {
+            const r = await api.get("/biblioteca-previdenza/sottocartelle", { params: { sezione, cartella: cart } });
+            setSottocartelle(r.data || []);
+        } catch { setSottocartelle([]); }
     };
     useEffect(() => {
         loadCartelle().then((c) => {
             if (c?.length) setSel(c[0].nome);
         }).catch((e) => toast.error("Errore caricamento: " + e.message));
     }, []);
-    useEffect(() => { if (sel) loadDocs(sel).catch(() => {}); }, [sel]);
+    useEffect(() => { if (sel) { loadSottocartelle(sel); } /* eslint-disable-next-line */ }, [sel]);
+    useEffect(() => { if (sel) loadDocs(sel, selRamo).catch(() => {}); /* eslint-disable-next-line */ }, [sel, selRamo]);
 
     const uploadFiles = async (fileList) => {
         const files = Array.from(fileList || []);
@@ -86,6 +100,7 @@ function SezioneBiblioteca({ sezione }) {
             const fd = new FormData();
             files.forEach((f) => fd.append("files", f));
             fd.append("cartella", sel);
+            if (isCondizioni && selRamo) fd.append("sottocartella", selRamo);
             fd.append("sezione", sezione);
             const r = await api.post("/biblioteca-previdenza/upload", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
@@ -97,7 +112,7 @@ function SezioneBiblioteca({ sezione }) {
             }
             if (saltati.length) toast.info(`${saltati.length} già presenti (saltati)`);
             (errori || []).forEach((e) => toast.error(`${e.file}: ${e.errore}`));
-            await Promise.all([loadCartelle(), loadDocs(sel)]);
+            await Promise.all([loadCartelle(), loadSottocartelle(sel), loadDocs(sel, selRamo)]);
         } catch (e) {
             toast.error("Errore upload: " + (e.response?.data?.detail || e.message));
         } finally { setUploading(false); }
@@ -160,7 +175,7 @@ function SezioneBiblioteca({ sezione }) {
             {/* Cartelle */}
             <div className="flex flex-wrap gap-2 items-center">
                 {cartelle.map((c) => (
-                    <button key={c.nome} onClick={() => setSel(c.nome)}
+                    <button key={c.nome} onClick={() => { setSel(c.nome); setSelRamo(null); }}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${sel === c.nome ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-700 border-slate-300 hover:border-sky-500"}`}
                             data-testid={`cartella-${c.nome.toLowerCase().replace(/ /g, "-")}`}>
                         {sel === c.nome ? <FolderOpen size={13} /> : <Folder size={13} />}
@@ -170,7 +185,7 @@ function SezioneBiblioteca({ sezione }) {
                 ))}
                 <div className="flex items-center gap-1">
                     <Input value={nuovaCartella} onChange={(e) => setNuovaCartella(e.target.value)}
-                           placeholder="Nuova cartella..." className="h-8 w-36 text-xs"
+                           placeholder={isCondizioni ? "Nuova compagnia..." : "Nuova cartella..."} className="h-8 w-36 text-xs"
                            onKeyDown={(e) => e.key === "Enter" && creaCartella()}
                            data-testid="nuova-cartella-input" />
                     <Button size="sm" variant="outline" onClick={creaCartella} data-testid="nuova-cartella-btn">
@@ -178,6 +193,38 @@ function SezioneBiblioteca({ sezione }) {
                     </Button>
                 </div>
             </div>
+
+            {/* Ramo (sottocartella) — solo Condizioni: livello 2 compagnia → ramo */}
+            {isCondizioni && sel && (
+                <div className="flex flex-wrap gap-2 items-center pl-4 border-l-2 border-sky-200">
+                    <span className="text-[11px] text-slate-400 mr-1">Ramo:</span>
+                    <button onClick={() => setSelRamo(null)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${!selRamo ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-300 hover:border-emerald-500"}`}
+                            data-testid="ramo-tutti">
+                        Tutti i rami
+                    </button>
+                    {sottocartelle.map((s) => (
+                        <button key={s.nome} onClick={() => setSelRamo(s.nome)}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${selRamo === s.nome ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-300 hover:border-emerald-500"}`}
+                                data-testid={`ramo-${s.nome.toLowerCase().replace(/ /g, "-")}`}>
+                            <Folder size={11} /> {s.nome}
+                            <span className={`rounded-full px-1.5 text-[10px] ${selRamo === s.nome ? "bg-white/20" : "bg-slate-100"}`}>{s.documenti}</span>
+                        </button>
+                    ))}
+                    <div className="flex items-center gap-1">
+                        <Input value={nuovoRamo}
+                               onChange={(e) => setNuovoRamo(e.target.value)}
+                               onKeyDown={(e) => { if (e.key === "Enter" && nuovoRamo.trim()) { setSelRamo(nuovoRamo.trim().toUpperCase()); setNuovoRamo(""); } }}
+                               placeholder="Nuovo ramo..." className="h-7 w-32 text-[11px]"
+                               data-testid="nuovo-ramo-input" />
+                        <Button size="sm" variant="outline" className="h-7 px-2"
+                                onClick={() => { if (nuovoRamo.trim()) { setSelRamo(nuovoRamo.trim().toUpperCase()); setNuovoRamo(""); } }}
+                                data-testid="nuovo-ramo-btn">
+                            <Plus size={12} />
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             {/* Upload area */}
             <Card
@@ -215,7 +262,7 @@ function SezioneBiblioteca({ sezione }) {
             {/* Documenti */}
             <Card className="p-5 border-slate-200">
                 <div className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
-                    <FileText size={15} /> Documenti in {sel} ({docs.length})
+                    <FileText size={15} /> Documenti in {sel}{isCondizioni && selRamo ? ` › ${selRamo}` : ""} ({docs.length})
                 </div>
                 {docs.length === 0 ? (
                     <div className="text-xs text-slate-400 italic">Nessun documento in questa cartella.</div>

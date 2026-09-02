@@ -1,5 +1,31 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — parte 3: Auto-diario, Link upload, Condizioni 2 livelli, Creazione polizza snella
+
+### ✅ Auto-diario WhatsApp (dedup) — `whatsapp_evo.py` + `scheduler_alert.py`
+- Salvataggio conversazione reso idempotente (UPSERT per `whatsapp_conv_key = instance:number`): niente doppioni.
+- Job giornaliero 06:30 multi-tenant che salva/aggiorna nel diario le conversazioni collegate a un'anagrafica. Endpoint manuale `POST /api/whatsapp-evo/auto-diario/run`. Testato: 2 run → 1 sola voce.
+- FIX Diario "Apri": aggiunto dialog `diario-voce-dialog` (prima non si apriva nulla).
+
+### ✅ Link Upload Documenti — `routes/upload_link.py` + `pages/CaricaDocumento.jsx`
+- `POST /api/upload-links` crea link sicuro (token) per un'anagrafica; pubblici (no auth): `GET/POST /api/public/upload/{token}`. Il file caricato dal cliente finisce negli allegati dell'anagrafica (tenant risolto dal token). Testato e2e.
+- Placeholder `{link_carica_documenti}` negli alert: genera il link al volo per il cliente destinatario.
+- UI: pagina pubblica `/carica/:token` + box "Richiedi documento" nel tab Documenti anagrafica (copia link + invia WhatsApp).
+
+### ✅ Condizioni di Polizza a 2 livelli (compagnia → ramo) — `biblioteca_previdenza.py` + `BibliotecaPrevidenza.jsx`
+- Nuovo campo `sottocartella` (ramo) + endpoint `GET /sottocartelle`. Upload accetta compagnia+ramo. UI condizioni: naviga compagnia → riga rami → documenti filtrati. Testato via API.
+
+### ✅ Creazione polizza SNELLA — `Polizze.jsx`
+- Il modale "Nuova polizza" ora chiede solo i dati base (numero, stato, compagnia, contraente, ramo/prodotto, effetto/scadenza) + **Frazionamento**, **Data prima quietanza**, **Collaboratore**. Premi/provvigioni/veicolo rimossi dal modale (nota informativa): si inseriscono/modificano nella scheda polizza (tab Modifica → premi header, Veicolo con TargaSearch, Provvigioni). Testato: creazione ok.
+
+### ✅ Provvigioni terminologia (PolizzaDetail)
+- Rimosso il doppione "Provv. struttura rata" (uguale a totali). Ora: **Provv. totali (agenzia)**, **Provv. collaboratore**, **Provv. margine (agenzia netto) = totali − collaboratore**. Editor: label "Provv. totali rata (agenzia)".
+
+### ⏳ Ancora da fare (concordato)
+- **Biblioteca Centralizzata (super-admin globale)**: spostare Previdenza+Schede nella console super-admin con dati GLOBALI propagati a tutte le agenzie. NON ancora implementato: richiede rendere globali (fuori tenant) le sezioni previdenza/schede toccando anche i percorsi di lettura AI (RAG, calcolo pensione) — va fatto con attenzione per non rompere l'isolamento delle condizioni (che restano per-agenzia). Da affrontare in un passo dedicato.
+
+
+
 ## Sessione 02/09/2026 (fork) — parte 2: Tasks, Duplica regole, Preset pagamento, Fix tabelle, Archivio chat, Diario
 
 ### ✅ Modulo TASK (stile Google Tasks) — `routes/tasks.py` + `pages/Tasks.jsx`
