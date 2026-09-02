@@ -1,5 +1,19 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 (parte 6) — Import Massivo: arricchimento & auto-creazione ✅
+Mapping titolo esteso + logica commit potenziata (tutto verificato E2E su agenzia nuova):
+- **Nuovi campi mappabili (Titolo/Quietanza)**: compagnia, ramo, operatore, DataCopertura, CF/nome contraente, mandato → ora appaiono nella tendina di mapping (risolve select_14_2 "manca RAMO/COLLABORATORI").
+- **Titolo**: se c'è Data Pagamento → stato "incassato" (appare nei Titoli Storici); DataCopertura → "titolo_coperto"; metodo di pagamento mancante → auto-creato; operatore → collegato/creato come collaboratore bozza (con solo nome, da completare in Librerie, taggato al tenant); polizza inesistente → creata al volo (compagnia+ramo) e segnalata nel report.
+- **Anagrafica**: dal codice fiscale calcola sesso, data_nascita, comune/provincia nascita; email→canale email, cellulare→canale whatsapp+sms; tag generazionale automatico (Boomer/Gen X/Millennial/Gen Z/Alpha); indirizzo → geocoding automatico throttled in background (Nominatim ~1 req/s).
+- **Report esito**: sezione "Creati automaticamente" (compagnie, metodi pagamento, banche, collaboratori, polizze-da-titolo) in `ImportMassivo.jsx`.
+- File: `routes/import_massivo.py` (ENTITY_FIELDS titolo + alias, helper `_mezzo_pagamento_codice`/`_banca_id`/`_operatore_id`/`_enrich_anagrafica`/`_tag_generazionale`/`_geocode_anagrafiche`), `ImportMassivo.jsx`.
+
+### BACKLOG UI (richieste utente, non ancora fatte)
+- Customer Insights (AnagraficaDetail): aggiungere KPI polizze Annullate/Sostituite/Sospese.
+- Redesign sezione "Provvigioni" (Polizze + Titoli) in stile tabella operatori.
+- PolizzaDetail: mostrare nome prodotto oltre al ramo; riposizionare elemento poco visibile (line ~119).
+
+
 ## 2026-09-02 (parte 5) — Filtri Titoli scaduti a GIORNO ESATTO ✅
 Prima i filtri "5gg/10gg/15gg" erano cumulativi (≥N giorni) → quasi identici (~1187). Ora a giorno esatto (richiesta utente):
 - **`server.py list_titoli`**: nuovi param `scaduta_giorni_esatti` (scadenza == oggi−N) e `scaduta_giorni_oltre` (scadenza < oggi−N).

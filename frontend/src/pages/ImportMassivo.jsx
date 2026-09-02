@@ -165,6 +165,27 @@ export default function ImportMassivo() {
                     <StatBox label="Saltati" value={result.saltati} tone="text-slate-500" />
                     <StatBox label="Errori" value={result.errori} tone="text-rose-700" />
                 </div>
+                {result.auto_creati && Object.values(result.auto_creati_totali || {}).some((n) => n > 0) && (
+                    <div className="border border-emerald-200 rounded-lg overflow-hidden mb-4" data-testid="import-massivo-autocreati">
+                        <div className="bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                            Creati automaticamente
+                        </div>
+                        <div className="p-3 space-y-2 text-xs">
+                            {[
+                                ["polizze_da_titolo", "Polizze create dai titoli"],
+                                ["compagnie", "Compagnie"],
+                                ["mezzi_pagamento", "Metodi di pagamento"],
+                                ["banche", "Banche"],
+                                ["collaboratori", "Collaboratori/Operatori (da completare in Librerie)"],
+                            ].filter(([k]) => (result.auto_creati_totali?.[k] || 0) > 0).map(([k, label]) => (
+                                <div key={k} data-testid={`autocreati-${k}`}>
+                                    <span className="font-medium text-slate-700">{label} ({result.auto_creati_totali[k]}):</span>{" "}
+                                    <span className="text-slate-500">{(result.auto_creati[k] || []).slice(0, 30).join(", ")}{(result.auto_creati_totali[k] > 30) ? "…" : ""}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {errs.length > 0 && (
                     <div className="border border-rose-200 rounded-lg overflow-hidden mb-4" data-testid="import-massivo-errori-report">
                         <div className="bg-rose-50 px-3 py-2 flex items-center justify-between">

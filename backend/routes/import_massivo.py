@@ -28,6 +28,7 @@ from bson import ObjectId
 import pandas as pd
 
 from database import db
+import cf_calc
 from auth import require_user
 from shared import log_attivita
 from routes.import_anagrafiche import (
@@ -112,6 +113,14 @@ ENTITY_FIELDS = {
         "provvigioni": "provvigioni",
         "data_incasso": "data incasso/pagamento",
         "mezzo_pagamento": "METODO DI PAGAMENTO del titolo (contanti/assegno/bonifico/RID/...)",
+        "data_copertura": "data copertura del titolo (se presente → titolo COPERTO)",
+        "compagnia_nome": "compagnia (per collegare/creare la polizza se mancante)",
+        "ramo": "ramo (per collegare/creare la polizza se mancante)",
+        "operatore_nome": "operatore/collaboratore assegnato al titolo",
+        "mandato": "mandato / agenzia partner",
+        "contraente_cf": "CF/P.IVA del contraente (per creare la polizza se mancante)",
+        "contraente_piva": "partita IVA del contraente",
+        "contraente_nome": "nome/ragione sociale del contraente",
         "note": "note",
     },
     "sinistro": {
@@ -175,6 +184,14 @@ _TIT_ALIASES = {
     "provvigioni": ["provvigioni", "provvigione"],
     "data_incasso": ["data incasso", "datapagamento", "data pagamento", "datafatture", "pagato il"],
     "mezzo_pagamento": ["modalitapagamento", "modalita pagamento", "mezzo pagamento", "metodo pagamento", "forma pagamento", "tipo pagamento"],
+    "data_copertura": ["data copertura", "datacopertura", "copertura", "coperto il"],
+    "compagnia_nome": ["compagnia", "impresa", "compagnia assicurativa"],
+    "ramo": ["ramo", "rischio", "ramo assicurativo"],
+    "operatore_nome": ["operatori", "operatore", "collaboratore", "produttore", "sub agente", "subagente", "agente"],
+    "mandato": ["mandato", "agenzia partner", "partner"],
+    "contraente_cf": ["cfcontraente", "cf contraente", "codice fiscale contraente", "cfclientipaganti"],
+    "contraente_piva": ["piva contraente", "partita iva contraente"],
+    "contraente_nome": ["contraente", "cliente", "nominativo"],
     "note": ["note", "annotazioni"],
 }
 _SIN_ALIASES = {
@@ -527,6 +544,55 @@ def _fill_missing(existing: dict, new: dict) -> dict:
     return upd
 
 
+def _tag_generazionale(data_nascita: Optional[str]) -> Optional[str]:
+    """Ritorna il tag generazionale in base all'anno di nascita (YYYY-MM-DD)."""
+    if not data_nascita or len(str(data_nascita)) < 4:
+        return None
+    try:
+        anno = int(str(data_nascita)[:4])
+    except ValueError:
+        return None
+    if anno <= 1945:
+        return "Generazione Silenziosa"
+    if anno <= 1964:
+        return "Baby Boomer"
+    if anno <= 1980:
+        return "Generazione X"
+    if anno <= 1996:
+        return "Millennial"
+    if anno <= 2012:
+        return "Generazione Z"
+    return "Generazione Alpha"
+
+
+def _enrich_anagrafica(ana: dict) -> None:
+    """Arricchisce l'anagrafica dai dati inferibili (mutazione in-place):
+    - dal CF: sesso, data_nascita, comune_nascita, provincia_nascita
+    - canali avvisi: email→email, cellulare→whatsapp+sms
+    - tag generazionale dall'anno di nascita
+    """
+    cf = ana.get("codice_fiscale")
+    if cf:
+        try:
+            dec = cf_calc.decodifica_cf(cf)
+            for k in ("sesso", "data_nascita", "comune_nascita", "provincia_nascita"):
+                if dec.get(k) and not ana.get(k):
+                    ana[k] = dec[k]
+        except Exception:
+            pass
+    if ana.get("email"):
+        ana["canale_email"] = True
+    if ana.get("cellulare"):
+        ana["canale_whatsapp"] = True
+        ana["canale_sms"] = True
+    tag = _tag_generazionale(ana.get("data_nascita"))
+    if tag:
+        tags = list(ana.get("tags") or [])
+        if tag not in tags:
+            tags.append(tag)
+        ana["tags"] = tags
+
+
 async def _run_commit(sid: str, plan: List[dict], user: dict):
     try:
         await _run_commit_inner(sid, plan, user)
@@ -540,7 +606,8 @@ async def _run_commit(sid: str, plan: List[dict], user: dict):
 
 
 async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
-    from db_models import Anagrafica, Polizza, Titolo, Sinistro, Compagnia
+    from db_models import Anagrafica, Polizza, Titolo, Sinistro, Compagnia, MezzoPagamento, Banca, UserPublic
+    from auth import hash_password
 
     sess = await db.import_massivo_sessioni.find_one({"id": sid}, {"_id": 0})
     files_meta = {f["file_index"]: f for f in (sess.get("files") or []) if not f.get("error")}
@@ -552,6 +619,13 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
     comp_cache: dict = {}
     anag_cache: dict = {}
     pol_cache: dict = {}
+    mezzo_cache: dict = {}
+    banca_cache: dict = {}
+    operatore_cache: dict = {}
+    # Elementi auto-creati durante l'import (per il riepilogo finale)
+    auto_creati = {"compagnie": [], "mezzi_pagamento": [], "banche": [],
+                   "collaboratori": [], "polizze_da_titolo": []}
+    geocode_queue: List[str] = []
     buffers = {"anagrafiche": [], "polizze": [], "titoli": [], "sinistri": []}
 
     async def _flush(col: Optional[str] = None):
@@ -604,6 +678,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         nome = ana.get("ragione_sociale")
         if not (cf or piva or nome):
             return None
+        _enrich_anagrafica(ana)
         ck = cf or piva or _norm_name(nome)
         if ck in anag_cache:
             return anag_cache[ck]
@@ -643,6 +718,8 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         if len(buffers["anagrafiche"]) >= _FLUSH:
             await _flush("anagrafiche")
         anag_cache[ck] = obj.id
+        if ana.get("indirizzo"):
+            geocode_queue.append(obj.id)
         stats["creati"] += 1
         return obj.id
 
@@ -654,6 +731,80 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         doc = await db.polizze.find_one({"numero_polizza": numero}, {"_id": 0, "id": 1})
         pol_cache[numero] = doc["id"] if doc else None
         return pol_cache[numero]
+
+    async def _mezzo_pagamento_codice(nome: Optional[str]) -> Optional[str]:
+        """Trova (o crea) un mezzo di pagamento e ritorna il suo codice."""
+        if not nome or not str(nome).strip():
+            return None
+        raw = str(nome).strip()
+        key = _norm_name(raw)
+        if key in mezzo_cache:
+            return mezzo_cache[key]
+        doc = await db.mezzi_pagamento.find_one({"$or": [
+            {"codice": {"$regex": f"^{re.escape(raw)}$", "$options": "i"}},
+            {"label": {"$regex": f"^{re.escape(raw)}$", "$options": "i"}},
+        ]}, {"_id": 0, "codice": 1})
+        if doc:
+            mezzo_cache[key] = doc["codice"]
+            return doc["codice"]
+        codice = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_") or "altro"
+        obj = MezzoPagamento(codice=codice, label=raw, tipo_conto="altro")
+        await db.mezzi_pagamento.insert_one(obj.model_dump())
+        mezzo_cache[key] = codice
+        auto_creati["mezzi_pagamento"].append(raw)
+        return codice
+
+    async def _banca_id(nome: Optional[str]) -> Optional[str]:
+        """Trova (o crea) una banca e ritorna il suo id."""
+        if not nome or not str(nome).strip():
+            return None
+        raw = str(nome).strip()
+        key = _norm_name(raw)
+        if key in banca_cache:
+            return banca_cache[key]
+        doc = await db.banche.find_one(
+            {"nome": {"$regex": f"^{re.escape(raw)}$", "$options": "i"}}, {"_id": 0, "id": 1})
+        if doc:
+            banca_cache[key] = doc["id"]
+            return doc["id"]
+        obj = Banca(nome=raw.upper(), note="Creata automaticamente da Import Massivo")
+        newdoc = obj.model_dump()
+        await db.banche.insert_one(newdoc)
+        banca_cache[key] = newdoc["id"]
+        auto_creati["banche"].append(raw)
+        return newdoc["id"]
+
+    async def _operatore_id(nome: Optional[str]) -> Optional[str]:
+        """Collega l'operatore a un collaboratore esistente (per nome).
+        Se non esiste, crea un collaboratore con solo nome (da completare in Librerie)."""
+        if not nome or not str(nome).strip():
+            return None
+        raw = str(nome).strip()
+        key = _norm_name(raw)
+        if key in operatore_cache:
+            return operatore_cache[key]
+        tid = user.get("agenzia_tenant_id")
+        # match per nome tra gli utenti della STESSA agenzia
+        q = {"role": {"$in": ["collaboratore", "dipendente", "admin"]}}
+        if tid:
+            q["agenzia_tenant_id"] = tid
+        cand = await db.users.find(q, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+        for c in cand:
+            if _norm_name(c.get("name") or "") == key:
+                operatore_cache[key] = c["id"]
+                return c["id"]
+        # crea collaboratore "bozza" con solo nome (da completare in Librerie)
+        slug = re.sub(r"[^a-z0-9]+", ".", raw.lower()).strip(".") or "operatore"
+        email = f"{slug}.{uuid.uuid4().hex[:6]}@import.assicurapro.it"
+        udoc = UserPublic(email=email, name=raw.upper(), role="collaboratore").model_dump()
+        udoc["password_hash"] = hash_password(uuid.uuid4().hex)
+        udoc["da_completare"] = True  # flag: creato da import, da ultimare in Librerie
+        if tid:
+            udoc["agenzia_tenant_id"] = tid
+        await db.users.insert_one(udoc)
+        operatore_cache[key] = udoc["id"]
+        auto_creati["collaboratori"].append(raw)
+        return udoc["id"]
 
     plan_sorted = sorted(plan, key=lambda p: ENTITY_ORDER.index(p["entity"]) if p.get("entity") in ENTITY_ORDER else 99)
 
@@ -731,18 +882,74 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
 
                 elif entity == "titolo":
                     num_pol = rec.pop("numero_polizza", None)
+                    # campi extra (non del modello Titolo) per collegamenti/auto-creazione
+                    t_compagnia = rec.pop("compagnia_nome", None)
+                    t_ramo = rec.pop("ramo", None)
+                    t_operatore = rec.pop("operatore_nome", None)
+                    t_mandato = rec.pop("mandato", None)
+                    t_contr_cf = rec.pop("contraente_cf", None)
+                    t_contr_piva = rec.pop("contraente_piva", None)
+                    t_contr_nome = rec.pop("contraente_nome", None)
+                    # Operatore → collaboratore (crea bozza se manca) — risolto subito
+                    op_id = await _operatore_id(t_operatore)
                     if num_pol and num_pol not in pol_cache:
                         await _flush("polizze")
                     pol_id = await _polizza_id(num_pol)
                     if not pol_id:
-                        stats["saltati"] += 1
-                        if len(errori_dett) < _ERR_CAP:
-                            errori_dett.append({"row": int(ridx) + 2, "entity": "titolo",
-                                                "reason": f"polizza '{num_pol}' non trovata"})
-                        await _progress(); continue
+                        if not num_pol:
+                            stats["saltati"] += 1
+                            if len(errori_dett) < _ERR_CAP:
+                                errori_dett.append({"row": int(ridx) + 2, "entity": "titolo",
+                                                    "reason": "numero polizza mancante"})
+                            await _progress(); continue
+                        # Polizza inesistente → la creo al volo (minima) e la segnalo
+                        ana = {}
+                        if t_contr_cf:
+                            ana["codice_fiscale"] = t_contr_cf
+                        if t_contr_piva:
+                            ana["partita_iva"] = t_contr_piva
+                        if t_contr_nome:
+                            ana["ragione_sociale"] = t_contr_nome
+                        contr_id = await _upsert_anagrafica(ana) if ana else None
+                        if not contr_id:
+                            ana = {"ragione_sociale": f"CONTRAENTE POLIZZA {num_pol}"}
+                            contr_id = await _upsert_anagrafica(ana)
+                        pol_doc = {
+                            "numero_polizza": num_pol,
+                            "compagnia_id": await _compagnia_id(t_compagnia or "SCONOSCIUTA"),
+                            "contraente_id": contr_id,
+                            "ramo": (t_ramo or "N/D"),
+                            "effetto": rec.get("effetto") or "",
+                            "scadenza": rec.get("scadenza") or "",
+                            "collaboratore_id": op_id or user.get("id"),
+                            "creata_da_import": True,
+                        }
+                        if t_mandato:
+                            pol_doc["mandato"] = t_mandato
+                        polobj = Polizza(**{k: v for k, v in pol_doc.items() if k in Polizza.model_fields})
+                        buffers["polizze"].append(polobj.model_dump())
+                        await _flush("polizze")
+                        pol_cache[num_pol] = polobj.id
+                        pol_id = polobj.id
+                        stats["creati"] += 1
+                        if len(auto_creati["polizze_da_titolo"]) < 500:
+                            auto_creati["polizze_da_titolo"].append(num_pol)
                     doc = {k: v for k, v in rec.items() if k in Titolo.model_fields}
                     doc["polizza_id"] = pol_id
-                    doc.setdefault("collaboratore_id", user.get("id"))
+                    # Operatore già risolto sopra → assegnato anche al titolo
+                    doc["collaboratore_id"] = op_id or doc.get("collaboratore_id") or user.get("id")
+                    # Metodo di pagamento → codice (auto-crea se manca)
+                    if rec.get("mezzo_pagamento"):
+                        cod = await _mezzo_pagamento_codice(rec.get("mezzo_pagamento"))
+                        if cod:
+                            doc["mezzo_pagamento"] = cod
+                    # Se c'è la data pagamento → titolo INCASSATO (visibile nei Titoli Storici)
+                    if doc.get("data_incasso"):
+                        doc["stato"] = "incassato"
+                        doc.setdefault("importo_pagato", doc.get("importo_lordo"))
+                    # Data copertura → titolo COPERTO
+                    if doc.get("data_copertura"):
+                        doc["titolo_coperto"] = True
                     doc["caricato_da_import"] = True
                     doc["effetto"] = doc.get("effetto") or ""
                     doc["scadenza"] = doc.get("scadenza") or ""
@@ -807,13 +1014,16 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         await _flush()
 
     await _flush()
+    auto_creati_tot = {k: len(v) for k, v in auto_creati.items()}
     await db.import_massivo_sessioni.update_one({"id": sid}, {"$set": {
         "status": "completato",
         "progress.fase": "completato",
         "progress.elaborate": processed,
         **{f"progress.{k}": v for k, v in stats.items()},
         "result": {**stats, "errori_dettaglio": errori_dett[:_ERR_CAP],
-                   "errori_dettaglio_totali": len(errori_dett)},
+                   "errori_dettaglio_totali": len(errori_dett),
+                   "auto_creati": {k: v[:200] for k, v in auto_creati.items()},
+                   "auto_creati_totali": auto_creati_tot},
         "completed_at": now_iso,
     }})
     try:
@@ -829,3 +1039,26 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                            f"{stats['saltati']} saltati, {stats['errori']} errori")
     except Exception:
         pass
+    # Geocoding automatico (best-effort, throttled) delle nuove anagrafiche con indirizzo
+    if geocode_queue:
+        asyncio.create_task(_geocode_anagrafiche(geocode_queue[:500]))
+
+
+async def _geocode_anagrafiche(ids: List[str]):
+    """Geocoding throttled (~1 req/sec Nominatim) delle anagrafiche appena create."""
+    import geocoder as geocoder_svc
+    for aid in ids:
+        try:
+            ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+            if not ana or ana.get("lat") or not ana.get("indirizzo"):
+                continue
+            res = await geocoder_svc.geocoda_indirizzo(
+                indirizzo=ana.get("indirizzo") or "", comune=ana.get("comune"),
+                cap=ana.get("cap"), provincia=ana.get("provincia"), nazione="Italia")
+            if res and res.get("lat"):
+                await db.anagrafiche.update_one({"id": aid}, {"$set": {
+                    "lat": res["lat"], "lng": res["lng"],
+                    "indirizzo_geocoded": res.get("display_name")}})
+        except Exception:
+            pass
+        await asyncio.sleep(1.1)
