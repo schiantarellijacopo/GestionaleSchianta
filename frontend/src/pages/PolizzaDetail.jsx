@@ -783,7 +783,18 @@ export default function PolizzaDetail() {
                             <Button
                                 size="sm"
                                 className="bg-sky-700 hover:bg-sky-800"
-                                onClick={() => setTitoloEditing({ _new: true, polizza_id: pol.id })}
+                                onClick={() => setTitoloEditing({
+                                    _new: true, polizza_id: pol.id,
+                                    ...((pol.titoli?.length || 0) === 0 ? {
+                                        tipo: "nuova",
+                                        effetto: pol.effetto || "",
+                                        scadenza: pol.scadenza || "",
+                                        importo_lordo: pol.premio_lordo || 0,
+                                        importo_netto: pol.premio_netto || 0,
+                                        imposte: pol.premio_imposte || 0,
+                                        provvigioni: pol.provvigioni || 0,
+                                    } : {}),
+                                })}
                                 data-testid="new-titolo-btn"
                             >+ Nuovo titolo</Button>
                         </div>

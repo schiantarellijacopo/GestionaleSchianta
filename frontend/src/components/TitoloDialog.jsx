@@ -56,21 +56,41 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             if (po.length > 0) {
                 setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || o.collaboratore_id || "", provvigione: o.provvigione ?? 0 })));
             } else if (r.data?.collaboratore_id && !titolo.collaboratore_id) {
-                setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: 0 }]);
+                const base = titolo.provvigioni ?? r.data?.provvigioni ?? 0;
+                quotaCollaboratore(r.data.collaboratore_id, base).then((q) => {
+                    setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: (q ?? 0) }]);
+                });
             }
         }).catch(() => {});
         // eslint-disable-next-line
     }, [titolo.id]);
 
     const totOperatori = operatori.reduce((s, o) => s + (parseFloat(o.provvigione) || 0), 0);
-    // Mantiene il totale allineato alla ripartizione quando questa cambia (resta comunque modificabile a mano)
-    useEffect(() => {
-        if (operatori.length > 0) setF((p) => ({ ...p, provvigioni: totOperatori }));
-        // eslint-disable-next-line
-    }, [JSON.stringify(operatori)]);
+    // Quota spettante al collaboratore = totale provvigioni titolo × % collaboratore (dallo schema)
+    const quotaCollaboratore = async (collabId, baseTotale) => {
+        try {
+            const r = await api.get("/librerie/schema-provvigionale", { params: { collaboratore_id: collabId } });
+            const schemi = r.data || [];
+            const schema = schemi.find((s) => s.attivo !== false) || schemi[0];
+            const pct = parseFloat(schema?.percentuale_collaboratore) || 0;
+            if (pct <= 0) return null;
+            return Math.round((parseFloat(baseTotale) || 0) * pct / 100 * 100) / 100;
+        } catch { return null; }
+    };
     const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
     const removeOperatore = (i) => setOperatori((p) => p.filter((_, idx) => idx !== i));
-    const setOperatore = (i, k, v) => setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, [k]: v } : o));
+    const setOperatore = (i, k, v) => {
+        setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, [k]: v } : o));
+        // AUTO-CALCOLO provvigioni dallo schema del collaboratore appena selezionato
+        if (k === "operatore_id" && v) {
+            quotaCollaboratore(v, f.provvigioni).then((q) => {
+                if (q !== null && q > 0) {
+                    setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, provvigione: q } : o));
+                    toast.success(`Provvigione calcolata dallo schema: ${q.toFixed(2)} €`);
+                }
+            });
+        }
+    };
     const ereditaDaPolizza = async () => {
         try {
             const r = await api.get(`/polizze/${titolo.polizza_id}`);
