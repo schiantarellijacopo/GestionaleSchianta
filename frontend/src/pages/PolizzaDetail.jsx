@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading } from "@/components/Shared";
 import CollaboratoreInlineSelect from "@/components/CollaboratoreInlineSelect";
@@ -37,6 +37,7 @@ export default function PolizzaDetail() {
     const { user } = useAuth();
     const [pol, setPol] = useState(null);
     const [editOpen, setEditOpen] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);
     const [letteraAbbuonoTitolo, setLetteraAbbuonoTitolo] = useState(null);
@@ -44,6 +45,14 @@ export default function PolizzaDetail() {
     const [regolazioneOpen, setRegolazioneOpen] = useState(false);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+    useEffect(() => {
+        if (pol && searchParams.get("edit") === "1") {
+            setEditOpen(true);
+            searchParams.delete("edit");
+            setSearchParams(searchParams, { replace: true });
+        }
+        /* eslint-disable-next-line */
+    }, [pol]);
     useEffect(() => {
         api.get("/librerie/conti-cassa").then((r) => setConti(r.data || [])).catch(() => {});
     }, []);
@@ -557,13 +566,15 @@ export default function PolizzaDetail() {
                             titolo="Documenti polizza · gestione visibilità"
                             sottotitolo="Polizza, condizioni, quietanze, libretto di pagamento, atto di vendita sono visibili al cliente. Preventivi, appunti e altro restano interni."
                             categorie={[
-                                { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true },
-                                { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true },
-                                { key: "libretto_pagamento", label: "Libretto pagam.", icon: "📕", default_visibile: true, descrizione: "Libretto pagamento (più di 1 all'anno secondo frazionamento)" },
-                                { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, descrizione: "Atto di vendita / passaggio proprietà" },
-                                { key: "quietanza", label: "Quietanza", icon: "🧾", default_visibile: true, descrizione: "Quietanze pagate (multiple secondo frazionamento)", multiple: true },
-                                { key: "preventivo", label: "Preventivo", icon: "📋", default_visibile: false },
-                                { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false },
+                                { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true, multiple: true },
+                                { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true, multiple: true },
+                                { key: "appendici", label: "Appendici", icon: "➕", default_visibile: true, multiple: true, descrizione: "Appendici / variazioni di polizza" },
+                                { key: "libretto_veicolo", label: "Libretto veicolo", icon: "📕", default_visibile: true, multiple: true, descrizione: "Libretto di circolazione del veicolo" },
+                                { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true, descrizione: "Atto di vendita / passaggio proprietà" },
+                                { key: "quietanza", label: "Quietanze", icon: "🧾", default_visibile: true, multiple: true, descrizione: "Documenti di pagamento rilasciati al cliente (più quietanze secondo frazionamento)" },
+                                { key: "preventivo", label: "Preventivi", icon: "📋", default_visibile: false, multiple: true },
+                                { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false, multiple: true },
+                                { key: "altri", label: "Documenti altri (foto)", icon: "🖼️", default_visibile: false, multiple: true, descrizione: "Altri documenti / foto ad uso interno" },
                             ]}
                         />
                     </div>

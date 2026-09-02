@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
@@ -379,6 +379,7 @@ export default function Polizze() {
 }
 
 function NuovaPolizzaDialog({ onClose }) {
+    const navigate = useNavigate();
     const [ana, setAna] = useState([]);
     const [comp, setComp] = useState([]);
     const [rami, setRami] = useState([]);
@@ -591,8 +592,9 @@ function NuovaPolizzaDialog({ onClose }) {
                 api.post("/utility/ocr-polizza", fd,
                     { headers: { "Content-Type": "multipart/form-data" } }).catch(() => {});
             }
-            toast.success("Polizza creata");
+            toast.success("Polizza creata — ora inserisci premi e provvigioni");
             onClose();
+            if (created.data?.id) navigate(`/polizze/${created.data.id}?edit=1`);
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
         }

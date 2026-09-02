@@ -39,21 +39,25 @@ export default function DocumentiSezioneSplit({
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [entita_tipo, entita_id, applicazione_matricola_id]);
 
-    const upload = async (file, { visibile, categoria }) => {
-        if (!file) return;
+    const upload = async (fileOrList, { visibile, categoria }) => {
+        const files = fileOrList && fileOrList.length !== undefined && !(fileOrList instanceof File)
+            ? Array.from(fileOrList) : (fileOrList ? [fileOrList] : []);
+        if (!files.length) return;
         setUploading(categoria || (visibile ? "visibile" : "interno"));
         try {
-            const fd = new FormData(); fd.append("file", file);
-            const params = new URLSearchParams({
-                entita_tipo, entita_id,
-                visibile_cliente: visibile ? "true" : "false",
-            });
-            if (categoria) params.set("categoria", categoria);
-            if (applicazione_matricola_id) params.set("applicazione_matricola_id", applicazione_matricola_id);
-            await api.post(`/allegati?${params.toString()}`, fd, {
-                headers: { "Content-Type": "multipart/form-data" },
-            });
-            toast.success(`Documento caricato${visibile ? " (visibile al cliente)" : " (interno)"}`);
+            for (const file of files) {
+                const fd = new FormData(); fd.append("file", file);
+                const params = new URLSearchParams({
+                    entita_tipo, entita_id,
+                    visibile_cliente: visibile ? "true" : "false",
+                });
+                if (categoria) params.set("categoria", categoria);
+                if (applicazione_matricola_id) params.set("applicazione_matricola_id", applicazione_matricola_id);
+                await api.post(`/allegati?${params.toString()}`, fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            }
+            toast.success(`${files.length > 1 ? files.length + " documenti caricati" : "Documento caricato"}${visibile ? " (visibile al cliente)" : " (interno)"}`);
             await load();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore upload"); }
         finally { setUploading(null); }
@@ -94,7 +98,7 @@ export default function DocumentiSezioneSplit({
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {categorie.map((c) => (
                             <CategoriaUpload key={c.key} categoria={c}
-                                onPick={(f) => upload(f, { visibile: c.default_visibile ?? false, categoria: c.key })}
+                                onPick={(files) => upload(files, { visibile: c.default_visibile ?? false, categoria: c.key })}
                                 busy={uploading === c.key} />
                         ))}
                     </div>
@@ -187,7 +191,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
                         data-testid={`docs-upload-${color === "emerald" ? "visibile" : "interno"}`}>
                         <Upload size={13} className="inline mr-1" />
                         {uploading ? "Caricamento…" : "Carica documento qui"}
-                        <input type="file" hidden onChange={(e) => onUpload(e.target.files?.[0])} />
+                        <input type="file" multiple hidden onChange={(e) => onUpload(e.target.files)} />
                     </label>
                 )}
             </div>
@@ -206,7 +210,7 @@ function CategoriaUpload({ categoria, onPick, busy }) {
                 {categoria.default_visibile === false && <Lock size={10} className="text-slate-500" />}
             </div>
             <span className="text-[9px] text-violet-600 block mt-0.5">{busy ? "Caricamento…" : "Click per caricare"}</span>
-            <input type="file" hidden onChange={(e) => onPick(e.target.files?.[0])} />
+            <input type="file" multiple={categoria.multiple !== false} hidden onChange={(e) => onPick(e.target.files)} />
         </label>
     );
 }

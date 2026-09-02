@@ -1,5 +1,22 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — parte 4: Categorie documenti + Modifica premi rapida
+
+### ✅ Categorie documenti polizza (PolizzaDetail → DocumentiSezioneSplit)
+- Visibili al cliente: Polizza, Condizioni, **Appendici** (nuova), **Libretto veicolo** (rinominata da "Libretto pagam."), Atto di vendita, **Quietanze** (documenti di pagamento rilasciati al cliente).
+- NON visibili (interni): Preventivi, Appunti, **Documenti altri (foto)** (nuova).
+- Multi-file per categoria: il selettore accetta più file in una volta (`multiple`), upload in ciclo. Testato: 2 appendici caricate (visibile_cliente=true).
+
+### ✅ Modifica Premi Rapida (Polizze.jsx + PolizzaDetail.jsx)
+- Dopo la creazione (snella) la polizza si apre in dettaglio con `?edit=1` → si apre automaticamente il dialog di modifica per inserire subito premi/provvigioni/veicolo.
+
+### 🔜 Backlog rimanente
+- Biblioteca Centralizzata (super-admin globale) — vedi nota parte 3.
+- Promemoria Upload: rinvio automatico del link documento se il cliente non carica entro X giorni.
+- Report Provvigioni: vista riepilogo totali agenzia / quote collaboratori / margine per periodo.
+
+
+
 ## Sessione 02/09/2026 (fork) — parte 3: Auto-diario, Link upload, Condizioni 2 livelli, Creazione polizza snella
 
 ### ✅ Auto-diario WhatsApp (dedup) — `whatsapp_evo.py` + `scheduler_alert.py`
