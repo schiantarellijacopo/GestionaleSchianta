@@ -31,6 +31,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from auth import current_user, require_user
+from tenant import GLOBAL_LIBRARY_TENANT, is_super_admin
+
+
+def _guard_libreria_globale(sezione: str, user: dict):
+    """Previdenza e Schede sono una LIBRERIA GLOBALE: le può gestire solo il
+    super-admin; le agenzie le usano (lettura) per i calcoli ma non le modificano."""
+    if sezione == "previdenza" and not is_super_admin(user):
+        from fastapi import HTTPException
+        raise HTTPException(403, "La Biblioteca Previdenza è gestita solo dal super-admin")
 from database import db
 from db_models import _now_iso, _uid
 import storage as obj_storage
@@ -119,6 +128,7 @@ async def list_cartelle(sezione: str = "previdenza", user=Depends(current_user))
 async def create_cartella(body: dict, user=Depends(require_user("admin", "collaboratore"))):
     nome = (body.get("nome") or "").strip().upper()
     sezione = body.get("sezione") or "previdenza"
+    _guard_libreria_globale(sezione, user)
     if not nome:
         raise HTTPException(400, "Nome cartella obbligatorio")
     if sezione != "previdenza" or nome not in DEFAULT_CARTELLE:
@@ -200,6 +210,7 @@ async def upload_documenti(
     """Upload multiplo (drag&drop). Estrae il testo per la knowledge base AI
     e carica una copia anche su Google Drive (se collegato)."""
     from routes.cloud_storage import _tenant_id
+    _guard_libreria_globale(sezione, user)
     cartella = (cartella or "").strip().upper() or "ALTRE CATEGORIE"
     sottocartella = ((sottocartella or "").strip().upper() or None)
     tenant = _tenant_id(user)
@@ -229,6 +240,7 @@ async def upload_documenti(
             await db.biblioteca_previdenza.insert_one({
                 "id": _uid(),
                 "sezione": sezione,
+                "agenzia_tenant_id": GLOBAL_LIBRARY_TENANT if sezione == "previdenza" else None,
                 "cartella": cartella,
                 "sottocartella": sottocartella,
                 "nome_file": f.filename,
@@ -257,6 +269,7 @@ async def delete_documento(did: str, user=Depends(require_user("admin", "collabo
     doc = await db.biblioteca_previdenza.find_one({"id": did}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Documento non trovato")
+    _guard_libreria_globale(doc.get("sezione") or "previdenza", user)
     await db.biblioteca_previdenza.delete_one({"id": did})
     return {"ok": True}
 

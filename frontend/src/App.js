@@ -100,6 +100,7 @@ function App() {
                             }
                         >
                             <Route path="/super-admin" element={<SuperAdminPanel />} />
+                            <Route path="/super-admin/biblioteca" element={<BibliotecaPrevidenza />} />
                         </Route>
 
                         <Route

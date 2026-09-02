@@ -51,10 +51,21 @@ class TenantAwareCollection:
 
     def _tenant_filter(self):
         # Import lazy per evitare cicli (tenant.py importa da database)
-        from tenant import tenant_filter, TENANT_SCOPED_COLLECTIONS
+        from tenant import (tenant_filter, TENANT_SCOPED_COLLECTIONS,
+                            FULLY_SHARED_COLLECTIONS, MIXED_SHARED_COLLECTIONS,
+                            GLOBAL_LIBRARY_TENANT, user_tenant_id)
+        # Collezioni interamente condivise → sempre la libreria globale
+        if self._coll_name in FULLY_SHARED_COLLECTIONS:
+            return {"agenzia_tenant_id": GLOBAL_LIBRARY_TENANT}
+        user = _current_user_ctx.get()
+        # Collezioni miste (previdenza globale + condizioni per-agenzia)
+        if self._coll_name in MIXED_SHARED_COLLECTIONS:
+            tid = user_tenant_id(user) if user else None
+            if not tid:  # super_admin o nessun contesto → solo globale
+                return {"agenzia_tenant_id": GLOBAL_LIBRARY_TENANT}
+            return {"agenzia_tenant_id": {"$in": [tid, GLOBAL_LIBRARY_TENANT]}}
         if self._coll_name not in TENANT_SCOPED_COLLECTIONS:
             return None
-        user = _current_user_ctx.get()
         if user is None:
             return None
         tf = tenant_filter(user)
@@ -126,10 +137,15 @@ class TenantAwareCollection:
 
     # ---- Insert: auto-assegna il tenant corrente (collezioni scoped) -----
     def _assign_tenant_doc(self, doc):
-        from tenant import TENANT_SCOPED_COLLECTIONS, user_tenant_id
-        if self._coll_name not in TENANT_SCOPED_COLLECTIONS:
-            return doc
+        from tenant import (TENANT_SCOPED_COLLECTIONS, user_tenant_id,
+                            FULLY_SHARED_COLLECTIONS, GLOBAL_LIBRARY_TENANT)
         if not isinstance(doc, dict) or doc.get("agenzia_tenant_id"):
+            return doc
+        # Collezioni interamente condivise → sempre libreria globale
+        if self._coll_name in FULLY_SHARED_COLLECTIONS:
+            doc["agenzia_tenant_id"] = GLOBAL_LIBRARY_TENANT
+            return doc
+        if self._coll_name not in TENANT_SCOPED_COLLECTIONS:
             return doc
         user = _current_user_ctx.get()
         if user is None:

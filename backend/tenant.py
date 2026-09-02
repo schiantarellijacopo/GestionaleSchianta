@@ -25,6 +25,15 @@ from db_models import _now_iso, _uid
 # nel codice/frontend/scripts di migrazione senza doverli cercare per nome.
 # ---------------------------------------------------------------------------
 TENANT_PRINCIPALE_ID = "tenant-principale-schiantarelli"
+
+# Libreria globale unica (Previdenza + Schede di calcolo): gestita SOLO dal
+# super-admin, letta da TUTTE le agenzie per i calcoli INPS/pensione.
+GLOBAL_LIBRARY_TENANT = "__global_library__"
+# Collezioni interamente condivise (una sola libreria globale)
+FULLY_SHARED_COLLECTIONS = {"schede_calcolo", "biblioteca_jobs"}
+# Collezioni MISTE: contengono sia dati globali (sezione=previdenza) sia
+# per-agenzia (sezione=condizioni). Lettura = tenant corrente OPPURE globale.
+MIXED_SHARED_COLLECTIONS = {"biblioteca_previdenza", "biblioteca_previdenza_cartelle"}
 TENANT_DEMO_ID = "tenant-demo-staging"
 TENANT_CLEAN_ID = "tenant-clean-master"
 

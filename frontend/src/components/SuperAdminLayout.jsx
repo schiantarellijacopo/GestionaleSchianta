@@ -1,6 +1,6 @@
 import { Outlet, useNavigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Shield, LogOut, LayoutDashboard } from "lucide-react";
+import { Shield, LogOut, LayoutDashboard, BookMarked } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -38,6 +38,13 @@ export default function SuperAdminLayout() {
                         }`}
                         data-testid="sa-nav-dashboard">
                         <LayoutDashboard size={14} /> Dashboard
+                    </Link>
+                    <Link to="/super-admin/biblioteca"
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors ${
+                            loc.pathname.startsWith("/super-admin/biblioteca") ? "bg-violet-600 text-white" : "text-violet-200 hover:bg-violet-800"
+                        }`}
+                        data-testid="sa-nav-biblioteca">
+                        <BookMarked size={14} /> Biblioteca
                     </Link>
                     <div className="text-right hidden sm:block">
                         <div className="text-xs font-semibold">{user?.name || user?.email}</div>

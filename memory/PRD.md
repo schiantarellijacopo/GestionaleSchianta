@@ -1,5 +1,18 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — parte 6: Biblioteca Centralizzata (globale) + note Veicolo
+
+### ✅ Biblioteca Centralizzata (opzione A — libreria unica globale)
+- `database.py` (TenantAwareCollection): `schede_calcolo` e `biblioteca_jobs` sono ora FULLY_SHARED (una sola libreria globale, tenant `__global_library__`). `biblioteca_previdenza` e `_cartelle` sono MIXED: lettura = tenant corrente OPPURE globale (così le agenzie vedono le proprie Condizioni + la Previdenza globale); super-admin (senza tenant) → solo globale.
+- `biblioteca_previdenza.py`: gli upload/cartelle/delete della sezione **previdenza** sono consentiti SOLO al super-admin (403 per le agenzie); gli insert previdenza vanno su tenant globale. Le agenzie leggono (per i calcoli INPS/pensione via RAG/AI) ma non gestiscono.
+- Frontend: le agenzie NON vedono i tab Previdenza/Schede (già nascosti). Super-admin: nuovo link "Biblioteca" → `/super-admin/biblioteca` (pagina con Previdenza + Schede + gestione). 
+- Verificato via API: super-admin carica previdenza (cartella INPS) → l'agenzia TEST la legge; upload previdenza da agenzia → HTTP 403.
+
+### ℹ️ Veicolo in polizza (già presente)
+- Il tab "Veicolo" nel form di Modifica polizza usa già `TargaSearchWithLentina`: si digita la targa (editabile), ricerca live in archivio; se manca → "Crea nuova targa" con dati manuali + upload libretto. Nessuna modifica necessaria.
+
+
+
 ## Sessione 02/09/2026 (fork) — parte 5: Auto-quietanza + Promemoria upload
 
 ### ✅ Data prima quietanza calcolata automaticamente (Polizze.jsx)
