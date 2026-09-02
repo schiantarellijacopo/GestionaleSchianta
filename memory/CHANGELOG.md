@@ -1,5 +1,20 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 (parte 5) — Filtri Titoli scaduti a GIORNO ESATTO ✅
+Prima i filtri "5gg/10gg/15gg" erano cumulativi (≥N giorni) → quasi identici (~1187). Ora a giorno esatto (richiesta utente):
+- **`server.py list_titoli`**: nuovi param `scaduta_giorni_esatti` (scadenza == oggi−N) e `scaduta_giorni_oltre` (scadenza < oggi−N).
+- **`server.py` dashboard-admin `titoli_scaduti`**: bucket a giorno esatto — Oggi=oggi, 5gg=oggi−5, 10gg=oggi−10, 15gg=oggi−15, +15gg=oltre 15gg.
+- **`Titoli.jsx` preset**: scad_5g/10g/15 → `scaduta_giorni_esatti`; scad_oltre15 → `scaduta_giorni_oltre:15` (prima usava erroneamente `scadenza_oltre_giorni`=futuro).
+- **Verificato**: bucket ora {Oggi:0, 5gg:0, 10gg:0, 15gg:1, +15gg:1184}; tab "Scadute da 15gg" mostra 1 titolo (scad. 18/08 = oggi−15).
+
+
+## 2026-09-02 (parte 4) — Isolamento Collaboratori + Dati Azienda ✅
+Requisito utente: ogni agenzia ha i propri collaboratori, propri dati azienda (vuoti alla creazione), e un solo admin (l'agente).
+- **`server.py`**: `GET /api/collaboratori` e `GET /api/auth/users` ora filtrano per tenant (`tenant_filter(user)`), la collezione `users` è globale ma gli endpoint applicano il filtro manuale. Prima mostravano gli utenti di tutte le agenzie.
+- **`tenant.py`**: aggiunta `azienda_config` a `TENANT_SCOPED_COLLECTIONS` → dati azienda (ragione sociale, logo, RUI, indirizzo, SMTP/IMAP/firma) ora per-agenzia. Backfill doc esistente → principale. Le chiavi API super-admin restano gestite via `raw_db` sul doc principale.
+- **Verificato**: nuova agenzia → /collaboratori=0, /auth/users=1 (solo l'admin/agente), azienda ragione_sociale="" (vuota). Principale invariata (11 collaboratori, ASSICURAZIONI SCHIANTARELLI).
+
+
 ## 2026-09-02 (parte 3) — Isolamento tenant: collezioni residue ✅
 Dopo il primo giro, "Axicura Cattolica" mostrava ancora dati da queste collezioni non isolate. Ora isolate + backfill orfani→principale (verificato Axicura=0):
 - `biblioteca_previdenza` (1051 doc), `biblioteca_jobs`, `biblioteca_previdenza_cartelle`

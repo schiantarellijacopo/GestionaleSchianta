@@ -185,6 +185,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "scambi_richieste",
     "import_massivo_sessioni",
     "import_massivo_files",
+    "azienda_config",
 ]
 
 

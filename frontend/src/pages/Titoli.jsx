@@ -59,11 +59,11 @@ const presetParams = (key) => {
         case "storico": return { stato: "incassato" };
         case "storico_anno": return { stato: "incassato", dal: firstOfYearISO(), al: todayISO() };
         case "storico_mese": return { stato: "incassato", dal: firstOfMonthISO(), al: todayISO() };
-        case "scad15": return { scadute_da_min: 15 };
-        case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
+        case "scad15": return { scaduta_giorni_esatti: 15 };
+        case "scad_oltre15": return { scaduta_giorni_oltre: 15 };
         case "scadute_oggi": return { scadute_oggi: true };
-        case "scad_5g": return { scadute_da_min: 5 };
-        case "scad_10g": return { scadute_da_min: 10 };
+        case "scad_5g": return { scaduta_giorni_esatti: 5 };
+        case "scad_10g": return { scaduta_giorni_esatti: 10 };
         default: return { stato_not: "incassato,stornato" };
     }
 };

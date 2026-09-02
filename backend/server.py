@@ -156,8 +156,9 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
 
 @api.get("/auth/users")
 async def list_users(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    # Visibility: solo admin vede tutti. Gli altri vedono solo se stessi.
-    flt: dict = {}
+    # Visibility: solo utenti della propria agenzia; i non-admin vedono solo se stessi.
+    from tenant import tenant_filter
+    flt: dict = dict(tenant_filter(user) or {})
     if user["role"] != "admin":
         flt["id"] = user["id"]
     users = await db.users.find(flt, {"password_hash": 0, "_id": 0}).to_list(500)
@@ -195,9 +196,11 @@ async def delete_user(uid: str, user=Depends(require_user("admin"))):
 # ============================================================
 @api.get("/collaboratori")
 async def list_collaboratori(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Tutti gli utenti con ruolo collaboratore/dipendente."""
+    """Utenti collaboratore/dipendente della propria agenzia."""
+    from tenant import tenant_filter
+    flt = {"role": {"$in": ["collaboratore", "dipendente"]}, **(tenant_filter(user) or {})}
     items = await db.users.find(
-        {"role": {"$in": ["collaboratore", "dipendente"]}},
+        flt,
         {"_id": 0, "password_hash": 0},
     ).sort("name", 1).to_list(500)
     return items
@@ -2630,6 +2633,8 @@ async def list_titoli(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,    # es. 5 (scadute da almeno 5 giorni)
     scadute_da_max: Optional[int] = None,    # es. 14 (scadute al massimo da 14 giorni)
+    scaduta_giorni_esatti: Optional[int] = None,  # scadenza == oggi - N (giorno esatto)
+    scaduta_giorni_oltre: Optional[int] = None,   # scadenza < oggi - N (scaduti da oltre N giorni)
     scadenza_oltre_giorni: Optional[int] = None,  # in scadenza oltre N gg
     # filtro periodo (sulla scadenza)
     dal: Optional[str] = None,
@@ -2710,6 +2715,16 @@ async def list_titoli(
             # scadenza >= oggi-(max-1)
             cond["$gte"] = (today - timedelta(days=int(scadute_da_max) - 1)).isoformat()
         flt["scadenza"] = cond if isinstance(flt.get("scadenza"), str) is False else {**(flt.get("scadenza") if isinstance(flt.get("scadenza"), dict) else {}), **cond}
+
+    if scaduta_giorni_esatti is not None:
+        # scaduti ESATTAMENTE da N giorni: scadenza == oggi - N
+        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
+        flt["scadenza"] = (today - timedelta(days=int(scaduta_giorni_esatti))).isoformat()
+
+    if scaduta_giorni_oltre is not None:
+        # scaduti da OLTRE N giorni: scadenza < oggi - N
+        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
+        flt["scadenza"] = {"$lt": (today - timedelta(days=int(scaduta_giorni_oltre))).isoformat()}
 
     if coperti_non_pagati:
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
@@ -9656,17 +9671,17 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
         scadenze[f"{g}gg"] = cnt
 
     # Titoli SCADUTI da incassare (per drill-down su /titoli con i preset)
+    # Giorno ESATTO: Oggi=scadenza oggi, 5gg=scadenza oggi-5, 10gg=oggi-10, 15gg=oggi-15
     _stati_aperti = {"$in": ["da_incassare", "insoluto", "sospeso"]}
     titoli_scaduti = {}
     titoli_scaduti["Oggi"] = await db.titoli.count_documents({
         "stato": _stati_aperti, "scadenza": today_iso})
     for g, lbl in ((5, "5gg"), (10, "10gg"), (15, "15gg")):
-        # conteggio inclusivo: scaduto da g giorni → scadenza <= oggi-(g-1)
-        lim = (today - timedelta(days=g - 1)).isoformat()
+        giorno = (today - timedelta(days=g)).isoformat()
         titoli_scaduti[lbl] = await db.titoli.count_documents({
-            "stato": _stati_aperti, "scadenza": {"$lte": lim}})
+            "stato": _stati_aperti, "scadenza": giorno})
     titoli_scaduti["+15gg"] = await db.titoli.count_documents({
-        "stato": _stati_aperti, "scadenza": {"$lt": (today - timedelta(days=14)).isoformat()}})
+        "stato": _stati_aperti, "scadenza": {"$lt": (today - timedelta(days=15)).isoformat()}})
 
     return {
         "provvigioni_anno": round(provv_anno, 2),
