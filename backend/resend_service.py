@@ -111,6 +111,28 @@ async def send_welcome_user(*, to: str, name: str, agency_name: str,
     return await _send(to, f"Benvenuto in {agency_name}", _html_wrap("Benvenuto sulla piattaforma!", body, login_url, "Accedi ora"))
 
 
+async def send_agency_credentials(*, to: str, name: str, agency_name: str,
+                                  login_email: str, password: str,
+                                  login_url: str = "https://gestionaleschianta.it") -> dict:
+    """Email con le CREDENZIALI DI ACCESSO alla creazione di una nuova agenzia."""
+    body = f"""
+    <p>Ciao <b>{name}</b>,<br>
+    è stato creato l'account amministratore per l'agenzia <b>{agency_name}</b> sulla piattaforma.</p>
+    <p>Ecco le tue <b>credenziali di accesso</b>:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;background:#f1f5f9;border-radius:8px;margin:12px 0;">
+      <tr><td style="padding:14px 16px;font-size:14px;">
+        <div style="margin-bottom:6px;"><span style="color:#64748b;">Email:</span> <b style="color:#1e293b;">{login_email}</b></div>
+        <div><span style="color:#64748b;">Password:</span>
+          <b style="color:#1e293b;font-family:monospace;font-size:15px;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #e2e8f0;">{password}</b>
+        </div>
+      </td></tr>
+    </table>
+    <p style="font-size:13px;color:#64748b;">Per sicurezza ti consigliamo di cambiare la password al primo accesso.</p>
+    """
+    return await _send(to, f"Credenziali di accesso — {agency_name}",
+                       _html_wrap("Il tuo accesso alla piattaforma", body, login_url, "Accedi ora"))
+
+
 async def send_policy_expiring(*, to: str, contraente: str, numero_polizza: str,
                                scadenza: str, ramo: Optional[str] = None) -> dict:
     body = f"""

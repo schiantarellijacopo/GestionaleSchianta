@@ -42,6 +42,7 @@ from tenant import (
 from audit_super_admin import log_action, get_agency_name
 from resend_service import (
     send_marketplace_activation, send_ticket_reply, send_welcome_user,
+    send_agency_credentials,
 )
 
 
@@ -460,12 +461,15 @@ async def create_agenzia(body: AgenziaNuovaBody, request: Request,
             }
             await raw_db.users.insert_one(admin_doc)
             tenant["admin_created"] = body.admin_email
-            # Welcome email
-            await send_welcome_user(
+            # Invia le CREDENZIALI DI ACCESSO via email (email + password)
+            cred_res = await send_agency_credentials(
                 to=body.admin_email.lower(),
                 name=admin_doc["name"],
                 agency_name=tenant["ragione_sociale"],
+                login_email=body.admin_email.lower(),
+                password=body.admin_password,
             )
+            tenant["credenziali_email"] = cred_res.get("status")
 
     # Se template == demo → clona i dati fittizi del tenant demo
     if body.template == "demo":
