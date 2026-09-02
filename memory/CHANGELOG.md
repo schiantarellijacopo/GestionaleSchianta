@@ -1,5 +1,12 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 (parte 3) — Isolamento tenant: collezioni residue ✅
+Dopo il primo giro, "Axicura Cattolica" mostrava ancora dati da queste collezioni non isolate. Ora isolate + backfill orfani→principale (verificato Axicura=0):
+- `biblioteca_previdenza` (1051 doc), `biblioteca_jobs`, `biblioteca_previdenza_cartelle`
+- `template_modelli`, `scambi_richieste`, `import_massivo_sessioni`, `import_massivo_files`
+Note: i 4 `conti_cassa` di una nuova agenzia sono predefiniti creati da `super_admin.create_agenzia` (Cassa Contanti/Assegni/Banca/Pagamento Direzione) — NON un leak. Ticket già isolati via `tenant_id` manuale. `postal_codes`/`banks_registry` restano lookup globali. Condivise come richiesto: `rami`, `tipi_pagamento`, `mezzi_pagamento`.
+
+
 ## 2026-09-02 (parte 2) — Report righe non importate (Import Massivo) ✅
 - **Backend `routes/import_massivo.py`**: `result.errori_dettaglio` ora include anche le righe saltate per "numero polizza/sinistro mancante"; limite dettaglio alzato a 500 (`_ERR_CAP`) + nuovo campo `errori_dettaglio_totali`. Aggiunto try/except di livello superiore in `_run_commit` → se il setup fallisce lo stato diventa `errore` con messaggio (niente più spinner infinito).
 - **Frontend `ImportMassivo.jsx`**: sezione "Righe non importate — motivo" con riga/entità/motivo, conteggio "mostrate X di Y", pulsante **Scarica CSV** (`import-massivo-scarica-csv`) e gestione stato `errore`.

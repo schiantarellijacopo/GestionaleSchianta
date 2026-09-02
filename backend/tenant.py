@@ -178,6 +178,13 @@ TENANT_SCOPED_COLLECTIONS = [
     "whatsapp_chat_meta",
     "nb_fonti",
     "nb_notebooks",
+    "biblioteca_previdenza",
+    "biblioteca_jobs",
+    "biblioteca_previdenza_cartelle",
+    "template_modelli",
+    "scambi_richieste",
+    "import_massivo_sessioni",
+    "import_massivo_files",
 ]
 
 
