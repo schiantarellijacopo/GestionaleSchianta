@@ -40,6 +40,7 @@ import Compagnie from "@/pages/Compagnie";
 import Importazione from "@/pages/Importazione";
 import Pensioni from "@/pages/Pensioni";
 import BibliotecaPrevidenza from "@/pages/BibliotecaPrevidenza";
+import Tasks from "@/pages/Tasks";
 import AppCliente from "@/pages/AppCliente";
 import Email from "@/pages/Email";
 import Attivita from "@/pages/Attivita";
@@ -244,6 +245,7 @@ function App() {
                             />
                             <Route path="/pensioni" element={<Pensioni />} />
                             <Route path="/biblioteca-previdenza" element={<BibliotecaPrevidenza />} />
+                            <Route path="/tasks" element={<Tasks />} />
                             <Route path="/notebook-ai" element={<NotebookAI />} />
                             <Route path="/notebook-ai/:id" element={<NotebookAIDetail />} />
                             <Route path="/modelli-piramide" element={<ModelliPiramide />} />

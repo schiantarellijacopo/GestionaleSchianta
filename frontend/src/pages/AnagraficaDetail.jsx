@@ -1244,6 +1244,22 @@ function DiarioTab({ anagrafica_id, canEdit }) {
             {viewingMsg && (
                 <VisualizzaMessaggioDialog voce={viewingMsg} onClose={() => { setViewingMsg(null); load(); }} />
             )}
+            {viewVoce && (
+                <Dialog open onOpenChange={(o) => !o && setViewVoce(null)}>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="diario-voce-dialog">
+                        <DialogHeader><DialogTitle>{viewVoce.titolo || "Voce di diario"}</DialogTitle></DialogHeader>
+                        <div className="text-[11px] text-slate-500 mb-2">
+                            {viewVoce.data_evento || (viewVoce.created_at || "").slice(0, 10)}
+                            {viewVoce.autore_nome ? ` · ${viewVoce.autore_nome}` : ""}
+                            {viewVoce.tipo ? ` · ${String(viewVoce.tipo).toUpperCase()}` : ""}
+                        </div>
+                        <div className="text-sm text-slate-800 whitespace-pre-wrap bg-slate-50 rounded-md p-3 border border-slate-100" data-testid="diario-voce-content">
+                            {viewVoce.descrizione || "—"}
+                        </div>
+                        <DialogFooter><Button variant="outline" onClick={() => setViewVoce(null)}>Chiudi</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     );
 }

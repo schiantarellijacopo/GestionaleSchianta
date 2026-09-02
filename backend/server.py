@@ -3680,9 +3680,22 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             )
         except Exception as _e:
             logger.warning("Auto-gen lettera abbuono fallita: %s", _e)
+    # Evento per Alert & Automazioni: polizza pagata → messaggio di ringraziamento /
+    # questionario di soddisfazione (se l'agenzia ha creato la regola relativa).
+    from alert_dispatcher import safe_dispatch
+    await safe_dispatch("titolo.incassato", {
+        "entita_tipo": "titolo",
+        "entita_id": tid,
+        "anagrafica_id": pol.get("contraente_id") if pol else None,
+        "contraente_id": pol.get("contraente_id") if pol else None,
+        "polizza_id": titolo["polizza_id"],
+        "collaboratore_id": titolo.get("collaboratore_id") or (pol.get("collaboratore_id") if pol else None),
+        "numero_polizza": pol.get("numero_polizza") if pol else "-",
+        "ramo": pol.get("ramo") if pol else "-",
+        "importo": f"{importo_pagato:,.2f} €".replace(",", "X").replace(".", ",").replace("X", "."),
+        "link": f"/polizze/{titolo['polizza_id']}",
+    })
     return {
-        "ok": True,
-        "importo_pagato": importo_pagato,
         "residuo": residuo,
         "tipo_chiusura": tipo_chiusura,
         "sconto_applicato": sconto_applicato,
@@ -12188,6 +12201,8 @@ from routes import import_massivo as _import_massivo_router  # noqa: E402
 from routes import import_polizze as _import_pol_router  # noqa: E402
 from routes import import_sinistri as _import_sin_router  # noqa: E402
 from routes import cloud_storage as _cloud_router  # noqa: E402
+from routes import tasks as _tasks_router  # noqa: E402
+api.include_router(_tasks_router.router)
 from routes import carichi_mensili as _carichi_router  # noqa: E402
 api.include_router(_carichi_router.router)
 from routes import copilot as _copilot_router  # noqa: E402

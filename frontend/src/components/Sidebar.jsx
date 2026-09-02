@@ -55,6 +55,7 @@ const ALL_MENU_ITEMS = [
     { id: "chat", path: "/chat", icon: "MessageCircle", label: "Chat", section: "strumenti", roles: null },
     { id: "posta", path: "/posta", icon: "Inbox", label: "Posta", section: "strumenti", roles: null },
     { id: "diario", path: "/diario", icon: "NotebookPen", label: "Diario", section: "strumenti", roles: null },
+    { id: "tasks", path: "/tasks", icon: "ListChecks", label: "Attività (Tasks)", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "email", path: "/email", icon: "Mail", label: "Pipeline Email", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "pensioni", path: "/pensioni", icon: "Calculator", label: "Calcolo INPS", section: "strumenti", roles: null },
     { id: "biblioteca_previdenza", path: "/biblioteca-previdenza", icon: "Library", label: "Biblioteca", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },

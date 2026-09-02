@@ -476,6 +476,8 @@ async def set_chat_meta(
     if body.archived is not None:
         upd["archived"] = body.archived
         upd["archived_at"] = _now_iso() if body.archived else None
+        upd["archived_by"] = user.get("id") if body.archived else None
+        upd["archived_by_name"] = (user.get("name") or user.get("email")) if body.archived else None
     if body.tags is not None:
         # normalizza (rimuove duplicati, trim, max 10)
         clean = list(dict.fromkeys(t.strip() for t in body.tags if t and t.strip()))[:10]
@@ -535,6 +537,8 @@ async def list_chats(
         r["number"] = num
         meta = metas.get(num) or {}
         r["archived"] = bool(meta.get("archived"))
+        r["archived_by_name"] = meta.get("archived_by_name")
+        r["archived_at"] = meta.get("archived_at")
         r["tags"] = meta.get("tags") or []
         # applica filtro archived
         if archived != r["archived"]:

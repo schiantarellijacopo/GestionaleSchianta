@@ -24,7 +24,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import {
     Bell, Mail, MessageCircle, Smartphone, Edit3, Send, Trash2, Plus, Library,
-    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink,
+    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink, Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -95,6 +95,17 @@ export default function Alert() {
             loadRules();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore esecuzione");
+        }
+    };
+
+    const duplica = async (rid) => {
+        try {
+            const r = await api.post(`/alert-rules/${rid}/duplica`);
+            toast.success("Regola duplicata: modificala e attivala");
+            await loadRules();
+            setEditing(r.data);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore duplicazione");
         }
     };
 
@@ -268,6 +279,10 @@ export default function Alert() {
                                                             <Zap size={13} className="mr-1" /> Esegui ora
                                                         </Button>
                                                     )}
+                                                    <Button size="sm" variant="outline" onClick={() => duplica(r.id)}
+                                                        className="text-violet-700 hover:bg-violet-50" data-testid={`duplica-${r.preset_key || r.id}`}>
+                                                        <Copy size={13} className="mr-1" /> Duplica
+                                                    </Button>
                                                     <Button size="sm" variant="outline" onClick={() => test(r.id)} data-testid={`test-${r.preset_key || r.id}`}>
                                                         <Send size={13} className="mr-1" /> Test
                                                     </Button>

@@ -59,7 +59,24 @@ PRESETS: list[dict] = [
         "template_oggetto": "Polizza {numero_polizza} attiva",
         "template_corpo": "Gentile {nome},\n\nLa polizza {numero_polizza} ({ramo}) è ora attiva.\nEffetto: {data_effetto}\nPremio: {premio_totale} €\n\nLa ringraziamo per la fiducia.",
     },
-    # ============ SCHEDULE ============
+    {
+        "preset_key": "polizza_pagata_ringraziamento",
+        "nome": "Ringraziamento pagamento polizza",
+        "descrizione": "Quando il cliente paga (titolo incassato) invia un messaggio di ringraziamento per la fiducia.",
+        "tipo": "evento", "evento": "titolo.incassato",
+        "canali": ["email", "whatsapp"], "destinatari": ["cliente"],
+        "template_oggetto": "Grazie per la fiducia — polizza {numero_polizza}",
+        "template_corpo": "Gentile {nome},\n\nabbiamo ricevuto il pagamento della polizza {numero_polizza} ({ramo}) di {importo}.\n\nLa ringraziamo per la fiducia accordataci. Siamo a Sua disposizione per qualsiasi necessità.\n\nUn cordiale saluto.",
+    },
+    {
+        "preset_key": "polizza_pagata_questionario",
+        "nome": "Questionario di soddisfazione",
+        "descrizione": "Quando il cliente paga (titolo incassato) invia un breve questionario di soddisfazione.",
+        "tipo": "evento", "evento": "titolo.incassato",
+        "canali": ["email"], "destinatari": ["cliente"],
+        "template_oggetto": "La Sua opinione è importante — polizza {numero_polizza}",
+        "template_corpo": "Gentile {nome},\n\ngrazie per aver rinnovato la fiducia con la polizza {numero_polizza}.\n\nCi aiuterebbe a migliorare rispondendo a un brevissimo questionario di soddisfazione (2 minuti):\n\n👉 [Inserisci qui il link al questionario]\n\nGrazie per il Suo tempo!",
+    },
     {
         "preset_key": "compleanno_cliente",
         "nome": "Auguri di compleanno",

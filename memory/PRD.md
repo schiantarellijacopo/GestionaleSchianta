@@ -1,5 +1,37 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 02/09/2026 (fork) — parte 2: Tasks, Duplica regole, Preset pagamento, Fix tabelle, Archivio chat, Diario
+
+### ✅ Modulo TASK (stile Google Tasks) — `routes/tasks.py` + `pages/Tasks.jsx`
+- Bacheca a colonne per operatore. **Isolamento**: di default ognuno vede SOLO le proprie attività + quelle condivise con lui; l'ADMIN ha una checkbox "Vedi tutti gli operatori" (scelta esplicita, default OFF).
+- Condivisione con 1+ operatori, allegati documenti (object storage), priorità, scadenza, completamento, "Mostra completate", STAMPA (window.print con CSS print-friendly).
+- Endpoint `/api/tasks` (GET con `?tutti=true` solo admin), POST/PUT/DELETE, `/toggle`, `/allegati` (upload/download/delete), `/operatori`. Collection `tasks` tenant-scoped.
+- Rotta `/tasks` + voce menu "Attività (Tasks)" (sezione Strumenti). Verificato e2e (iter 64/65).
+
+### ✅ Alert & Automazioni: Duplica + Preset pagamento
+- `POST /api/alert-rules/{id}/duplica`: copia una regola (attivo=false, "(copia)") per modificarla senza rifarla. Pulsante "Duplica" in UI.
+- Nuovi preset evento `titolo.incassato`: "Ringraziamento pagamento polizza" e "Questionario di soddisfazione". Dispatch `titolo.incassato` cablato nell'endpoint incasso (`server.py`). Quando il cliente paga parte il messaggio (sul canale scelto in anagrafica).
+- Chiarito: l'esecutore avvisi programmati (parte 1) È la parte automatica di Alert & Automazioni (nessun doppione); la card orario vive in /alert.
+
+### ✅ FIX BUG TABELLE (colonne congelate sovrapposte) — `index.css`
+- Le colonne sticky (`.freeze-1/2/3`) avevano solo `max-width` → larghezza reale non coincideva con gli offset `left` → sovrapposizione con la colonna adiacente (illeggibile). Ora larghezza FISSA (`width`+`min-width`+`max-width` = var --cN-w), come già faceva `freeze-5`. Verificato su Contabilità con 500+ movimenti (desktop+tablet, scroll orizzontale): nessuna sovrapposizione. Vale per TUTTE le tabelle del programma.
+
+### ✅ Archivio chat WhatsApp — `whatsapp_evo.py` + `Chat.jsx`
+- Pulsante "Archivia/Ripristina" sulla conversazione + toggle "Archiviate" nella lista (non intasa le conversazioni in arrivo). Registra e mostra il TAG "Archiviata da {nome}" (chi ha archiviato). Backend `meta` salva `archived_by_name`.
+
+### ✅ FIX Diario "Apri" — `AnagraficaDetail.jsx`
+- Cliccando "👁 Apri" su una voce di diario (es. conversazione salvata) lo stato `viewVoce` veniva impostato ma NESSUN dialog lo renderizzava → non si apriva nulla. Aggiunto il dialog `diario-voce-dialog` che mostra il contenuto completo. Verificato e2e.
+
+### ✅ Tag anagrafiche + Biblioteca visibilità (parte 1, già fatte)
+
+### 🔜 Backlog concordato (da discutere al "punto della situazione")
+- **Auto-salvataggio conversazione WhatsApp nel diario cliente** (con dedup per evitare doppioni). Oggi è manuale ("Salva nel diario").
+- **Link pubblico upload documenti**: quando un alert chiede al cliente un documento mancante/scaduto (libretto ecc.), il cliente lo allega via link sicuro e lo ritroviamo nel gestionale sul cliente/polizza.
+- **Biblioteca super-admin globale** (Previdenza + Schede propagate a tutte le agenzie; dati oggi tenant-scoped).
+- **Condizioni di Polizza per compagnia → ramo** (navigazione a cartelle a due livelli).
+
+
+
 ## Sessione 02/09/2026 (fork) — Avvisi programmati + Import Excel estratto conto + Tag KPI + Biblioteca visibilità
 
 ### ✅ P0 — Esecutore AVVISI PROGRAMMATI (schedule/soglia) — nuovo `scheduler_alert.py`

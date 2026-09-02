@@ -390,6 +390,8 @@ function WhatsAppInbox() {
     const [reconnecting, setReconnecting] = useState(false);
     const [savingDiary, setSavingDiary] = useState(false);
     const [uploadingFile, setUploadingFile] = useState(false);
+    const [showArchived, setShowArchived] = useState(false);
+    const [archiving, setArchiving] = useState(false);
     const scrollRef = useRef();
     const fileInputRef = useRef();
 
@@ -408,7 +410,7 @@ function WhatsAppInbox() {
         let stopped = false;
         const load = async () => {
             try {
-                const r = await api.get(`/whatsapp-evo/instances/${selInst}/chats`);
+                const r = await api.get(`/whatsapp-evo/instances/${selInst}/chats?archived=${showArchived}`);
                 if (!stopped) { setChats(r.data || []); setReconnecting(false); }
             } catch {
                 if (!stopped) setReconnecting(true);
@@ -417,7 +419,21 @@ function WhatsAppInbox() {
         load();
         const t = setInterval(load, 5000);
         return () => { stopped = true; clearInterval(t); };
-    }, [selInst]);
+    }, [selInst, showArchived]);
+
+    const toggleArchivia = async () => {
+        if (!selChat) return;
+        setArchiving(true);
+        try {
+            const newVal = !selChat.archived;
+            await api.post(`/whatsapp-evo/instances/${selInst}/chats/${selChat.number}/meta`, { archived: newVal });
+            toast.success(newVal ? "Conversazione archiviata" : "Conversazione ripristinata");
+            setChats((prev) => prev.filter((c) => c.number !== selChat.number));
+            setSelChat(null);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore archiviazione");
+        } finally { setArchiving(false); }
+    };
 
     // Carica messaggi conversazione selezionata
     useEffect(() => {
@@ -559,11 +575,18 @@ function WhatsAppInbox() {
                     <div className="col-span-4 border-r border-slate-200 overflow-y-auto bg-slate-50/40 min-h-0" data-testid="wa-chats-list">
                         <div className="px-3 py-2 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                             <div className="text-xs font-medium text-slate-700">
-                                Conversazioni ({chats.length})
+                                {showArchived ? "Archiviate" : "Conversazioni"} ({chats.length})
                             </div>
-                            <button onClick={() => { setSelChat(null); }} className="text-slate-400 hover:text-slate-700" title="Refresh">
-                                <RefreshCcw size={12} />
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => { setShowArchived((v) => !v); setSelChat(null); }}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${showArchived ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-white text-slate-500 border-slate-300 hover:border-amber-400"}`}
+                                    data-testid="wa-toggle-archived" title="Mostra archiviate">
+                                    {showArchived ? "← Attive" : "Archiviate"}
+                                </button>
+                                <button onClick={() => { setSelChat(null); }} className="text-slate-400 hover:text-slate-700" title="Refresh">
+                                    <RefreshCcw size={12} />
+                                </button>
+                            </div>
                         </div>
                         {chats.length === 0 ? (
                             <div className="p-6 text-center text-xs text-slate-400">
@@ -602,6 +625,11 @@ function WhatsAppInbox() {
                                                 <div className="text-[10px] text-slate-400">
                                                     {c.count_in} in · {c.count_out} out
                                                 </div>
+                                                {c.archived && c.archived_by_name && (
+                                                    <div className="text-[9px] mt-0.5 inline-flex items-center gap-1 px-1 py-0 rounded bg-amber-100 text-amber-700 border border-amber-200">
+                                                        📥 Archiviata da {c.archived_by_name}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </li>
@@ -650,6 +678,15 @@ function WhatsAppInbox() {
                                             {savingDiary ? "Salvataggio…" : "💾 Salva nel diario"}
                                         </Button>
                                     )}
+                                    <Button
+                                        size="sm" variant="outline"
+                                        onClick={toggleArchivia}
+                                        disabled={archiving}
+                                        className={`text-xs ${selChat.archived ? "text-emerald-700" : "text-amber-700 hover:bg-amber-50"}`}
+                                        data-testid="wa-archive-btn"
+                                    >
+                                        {archiving ? "…" : (selChat.archived ? "↩ Ripristina" : "📥 Archivia")}
+                                    </Button>
                                 </div>
                                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
                                     {msgs.map((m) => (

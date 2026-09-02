@@ -149,6 +149,25 @@ async def alert_catalog(user: dict = Depends(require_user("admin", "collaborator
     ]
 
 
+@router.post("/alert-rules/{rid}/duplica", status_code=201)
+async def duplica_alert_rule(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    """Copia una regola esistente in una nuova (modificabile) senza rifarla."""
+    src = await db.alert_rules.find_one({"id": rid}, {"_id": 0})
+    if not src:
+        raise HTTPException(404, "Regola non trovata")
+    body = {k: v for k, v in src.items() if k not in (
+        "id", "created_at", "updated_at", "last_run_at", "last_event_at",
+        "invii_totali", "errori_totali", "is_preset", "preset_key",
+    )}
+    body["nome"] = f"{src.get('nome') or 'Regola'} (copia)"
+    body["is_preset"] = False
+    body["preset_key"] = None
+    body["attivo"] = False
+    obj = AlertRule(**body)
+    await db.alert_rules.insert_one(obj.model_dump())
+    return obj.model_dump()
+
+
 @router.post("/alert-rules/{rid}/toggle")
 async def toggle_alert_rule(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
     r = await db.alert_rules.find_one({"id": rid}, {"_id": 0, "attivo": 1})
