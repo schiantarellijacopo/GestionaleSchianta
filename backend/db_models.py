@@ -1215,6 +1215,8 @@ class SchemaProvvigionale(BaseDoc):
     percentuale_collaboratore: float = 0.0
     # percentuale di provvigione applicata sul PREMIO LORDO (se l'agenzia non ha già il dato)
     percentuale_su_premio: float = 0.0
+    # percentuale di provvigione applicata sul PREMIO NETTO (se l'agenzia non ha già il dato)
+    percentuale_su_premio_netto: float = 0.0
     # RETE PIRAMIDALE: quote che cascatano verso l'upline a partire dalla provvigione del collaboratore.
     # [{operatore_id, operatore_nome, percentuale}] — percentuale sulla provvigione del collaboratore diretto.
     upline: List[dict] = Field(default_factory=list)

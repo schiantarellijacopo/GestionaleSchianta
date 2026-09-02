@@ -38,9 +38,12 @@ export default function CustomerInsightsWidget({ anagrafica_id, onTabChange }) {
                 <Sparkles className="text-violet-600" size={16} />
                 <h3 className="font-semibold text-violet-900 text-sm">Customer Insights · AI Snapshot</h3>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-center">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-2 text-center">
                 <KpiMini icon={FileText} label="Polizze attive" value={kpi.n_polizze_attive} color="sky" onClick={() => go("polizze", { filter: "attiva" })} testid="kpi-polizze-attive" />
                 <KpiMini icon={FileText} label="Polizze scadute" value={kpi.n_polizze_scadute} color="amber" onClick={() => go("polizze", { filter: "scaduta" })} testid="kpi-polizze-scadute" />
+                <KpiMini icon={FileText} label="Annullate" value={kpi.n_polizze_annullate} color="rose" onClick={() => go("polizze", { filter: "annullata" })} testid="kpi-polizze-annullate" />
+                <KpiMini icon={FileText} label="Sospese" value={kpi.n_polizze_sospese} color="amber" onClick={() => go("polizze", { filter: "sospesa" })} testid="kpi-polizze-sospese" />
+                <KpiMini icon={FileText} label="Sostituite" value={kpi.n_polizze_sostituite} color="slate" onClick={() => go("polizze", { filter: "sostituita" })} testid="kpi-polizze-sostituite" />
                 <KpiMini icon={TrendingUp} label="Rami coperti" value={kpi.n_rami_coperti} color="emerald" onClick={() => go("analisi")} testid="kpi-rami" />
                 <KpiMini icon={AlertTriangle} label="Sinistri (anno)" value={kpi.n_sinistri_anno_corrente} color="rose" onClick={goSinistri} testid="kpi-sinistri" />
                 <KpiMini icon={FileText} label="Premio attivo" value={fmtEur(kpi.premio_totale_attivo)} color="violet" mono onClick={() => go("analisi")} testid="kpi-premio" />

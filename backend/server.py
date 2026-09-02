@@ -196,9 +196,9 @@ async def delete_user(uid: str, user=Depends(require_user("admin"))):
 # ============================================================
 @api.get("/collaboratori")
 async def list_collaboratori(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Utenti collaboratore/dipendente della propria agenzia."""
+    """Utenti operatori (admin/collaboratore/dipendente) della propria agenzia."""
     from tenant import tenant_filter
-    flt = {"role": {"$in": ["collaboratore", "dipendente"]}, **(tenant_filter(user) or {})}
+    flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, **(tenant_filter(user) or {})}
     items = await db.users.find(
         flt,
         {"_id": 0, "password_hash": 0},
@@ -4246,6 +4246,7 @@ async def _calcola_provvigione(
     collaboratore_id: Optional[str],
     compagnia_id: Optional[str],
     ramo: Optional[str],
+    premio_netto: Optional[float] = None,
 ) -> dict:
     """Calcola provvigioni in base allo schema risolto.
 
@@ -4260,10 +4261,16 @@ async def _calcola_provvigione(
         return {"provvigione_totale": 0.0, "provvigione_collaboratore": 0.0,
                 "schema_id": None, "schema_nome": None}
     pct_su_premio = float(schema.get("percentuale_su_premio") or 0)
+    pct_su_premio_netto = float(schema.get("percentuale_su_premio_netto") or 0)
     pct_collab = float(schema.get("percentuale_collaboratore") or 0)
-    provv_tot = round(premio_lordo * pct_su_premio / 100.0, 2)
+    # Provvigione TOTALE agenzia: da premio netto (se configurato e disponibile) altrimenti da premio lordo
+    if pct_su_premio_netto > 0 and premio_netto and premio_netto > 0:
+        provv_tot = round(premio_netto * pct_su_premio_netto / 100.0, 2)
+    else:
+        provv_tot = round(premio_lordo * pct_su_premio / 100.0, 2)
     provv_collab = round(provv_tot * pct_collab / 100.0, 2)
-    # RETE PIRAMIDALE: quote upline sulla provvigione del collaboratore
+    # RETE PIRAMIDALE: le quote upline sono % sulla PROVVIGIONE TOTALE AGENZIA (provv_tot),
+    # coerente con l'esempio: agenzia 100€ → collab sottorete 50% = 50€, capo-rete 10% = 10€.
     upline_breakdown = []
     for up in (schema.get("upline") or []):
         pct = float(up.get("percentuale") or 0)
@@ -4273,7 +4280,7 @@ async def _calcola_provvigione(
             "operatore_id": up.get("operatore_id"),
             "operatore_nome": up.get("operatore_nome") or "",
             "percentuale": pct,
-            "provvigione": round(provv_collab * pct / 100.0, 2),
+            "provvigione": round(provv_tot * pct / 100.0, 2),
         })
     return {
         "provvigione_totale": provv_tot,
@@ -4281,6 +4288,7 @@ async def _calcola_provvigione(
         "schema_id": schema.get("id"),
         "schema_nome": schema.get("nome"),
         "pct_su_premio": pct_su_premio,
+        "pct_su_premio_netto": pct_su_premio_netto,
         "pct_collab": pct_collab,
         "upline_breakdown": upline_breakdown,
     }

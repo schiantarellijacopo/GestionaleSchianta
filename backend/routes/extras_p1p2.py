@@ -1195,9 +1195,12 @@ async def customer_insights_widget(aid: str, user=Depends(current_user)) -> dict
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
-    polizze = await db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1, "ramo": 1, "stato": 1, "premio_lordo": 1, "data_scadenza": 1}).to_list(200)
+    polizze = await db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1, "ramo": 1, "stato": 1, "premio_lordo": 1, "data_scadenza": 1, "sostituita_da_polizza_id": 1}).to_list(200)
     n_attive = sum(1 for p in polizze if p.get("stato") in ("attiva", "in_emissione"))
     n_scadute = sum(1 for p in polizze if p.get("stato") == "scaduta")
+    n_annullate = sum(1 for p in polizze if p.get("stato") == "annullata")
+    n_sospese = sum(1 for p in polizze if p.get("stato") == "sospesa")
+    n_sostituite = sum(1 for p in polizze if p.get("sostituita_da_polizza_id"))
     rami_distinti = list({p.get("ramo") for p in polizze if p.get("ramo")})
     n_sinistri = await db.sinistri.count_documents({"anagrafica_id": aid})
     n_sinistri_anno = await db.sinistri.count_documents({
@@ -1216,6 +1219,9 @@ async def customer_insights_widget(aid: str, user=Depends(current_user)) -> dict
         "kpi": {
             "n_polizze_attive": n_attive,
             "n_polizze_scadute": n_scadute,
+            "n_polizze_annullate": n_annullate,
+            "n_polizze_sospese": n_sospese,
+            "n_polizze_sostituite": n_sostituite,
             "n_rami_coperti": len(rami_distinti),
             "n_sinistri_totali": n_sinistri,
             "n_sinistri_anno_corrente": n_sinistri_anno,

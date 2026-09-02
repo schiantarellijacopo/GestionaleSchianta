@@ -1,5 +1,17 @@
 # Programma Assicurativo - CHANGELOG
 
+## 2026-09-02 (parte 7) — Filtri, contatori, provvigioni, KPI ✅
+- **Filtro collaboratori**: `/api/collaboratori` ora include anche l'admin/agente → la tendina non è più vuota nelle agenzie con un solo utente (verificato).
+- **Contatore "Senza polizze"**: era 0 per overlap con i condomini; ora le 3 categorie (con_polizze/senza_polizze/condominio) sono mutuamente esclusive (verificato: 964+2122+102=3188).
+- **Nuovi filtri Anagrafiche**: professione, comune, età (min/max via data_nascita), "genitori con figli" (numero_figli>0) — backend `list_anagrafiche` + UI in `Anagrafiche.jsx` (verificato età 30-50 → 605).
+- **Customer Insights (AnagraficaDetail)**: aggiunti KPI Polizze Annullate/Sospese/Sostituite (`extras_p1p2.py` + `CustomerInsightsWidget.jsx`).
+- **PolizzaDetail**: header mostra ora Ramo · Prodotto; selettore Operatore spostato nel blocco titolo (più visibile).
+- **Provvigioni redesign**: `ProvvigioniOperatoriEditor` (PolizzaDetail) e ripartizione in `TitoloDialog` rifatte in stile tabella operatori (# / Operatore / Provvigione € / Provv. su addizionali € / Azioni) + campo "Provv. struttura (rata)".
+- **Schema provvigionale**: nuovo campo `percentuale_su_premio_netto` (modello + dialog Librerie); calcolo usa il netto se valorizzato e disponibile.
+- **RETE PIRAMIDALE (fix calcolo)**: le quote upline ora sono calcolate sulla PROVVIGIONE TOTALE AGENZIA (es. 100€ → collab sottorete 50% = 50€, capo-rete 10% = 10€), non più sulla quota del collaboratore diretto. In `server.py _calcola_provvigione`.
+- **Import mapping**: alias "data rata"/"datarata" → campo effetto del titolo.
+
+
 ## 2026-09-02 (parte 6) — Import Massivo: arricchimento & auto-creazione ✅
 Mapping titolo esteso + logica commit potenziata (tutto verificato E2E su agenzia nuova):
 - **Nuovi campi mappabili (Titolo/Quietanza)**: compagnia, ramo, operatore, DataCopertura, CF/nome contraente, mandato → ora appaiono nella tendina di mapping (risolve select_14_2 "manca RAMO/COLLABORATORI").

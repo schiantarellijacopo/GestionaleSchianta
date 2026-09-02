@@ -151,6 +151,11 @@ export default function Anagrafiche() {
     const [open, setOpen] = useState(false);
     const [tagFilter, setTagFilter] = useState(null);
     const [collabFilter, setCollabFilter] = useState("");
+    const [profFilter, setProfFilter] = useState("");
+    const [comuneFilter, setComuneFilter] = useState("");
+    const [conFigliFilter, setConFigliFilter] = useState(false);
+    const [etaMinFilter, setEtaMinFilter] = useState("");
+    const [etaMaxFilter, setEtaMaxFilter] = useState("");
     const [collaboratoriList, setCollaboratoriList] = useState([]);
     const [catFilter, setCatFilter] = useState("con_polizze");
     const [stats, setStats] = useState(null);
@@ -177,6 +182,11 @@ export default function Anagrafiche() {
             paged: true, page, page_size: pageSize,
             q: qDeb || undefined, tag: tagFilter || undefined,
             collaboratore_id: collabFilter || undefined,
+            professione: profFilter || undefined,
+            comune: comuneFilter || undefined,
+            con_figli: conFigliFilter || undefined,
+            eta_min: etaMinFilter || undefined,
+            eta_max: etaMaxFilter || undefined,
             categoria: catFilter !== "all" ? catFilter : undefined,
             compleanno: compleannoFilter || undefined,
             doc: docFilter || undefined,
@@ -188,11 +198,11 @@ export default function Anagrafiche() {
             setPages(r.data.pages || 1);
             if (r.data.conteggi) setCatCounts(r.data.conteggi);
         });
-    }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt, collabFilter]);
+    }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt, collabFilter, profFilter, comuneFilter, conFigliFilter, etaMinFilter, etaMaxFilter]);
 
     useEffect(() => { load(); }, [load]);
     // reset alla pagina 1 quando cambiano ricerca o filtri
-    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, collabFilter]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, collabFilter, profFilter, comuneFilter, conFigliFilter, etaMinFilter, etaMaxFilter]);
     useEffect(() => { api.get("/collaboratori").then((r) => setCollaboratoriList(r.data || [])).catch(() => {}); }, []);
     useEffect(() => { api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {}); }, []);
     useEffect(() => { api.get("/anagrafiche/tags").then((r) => setAllTags(r.data || [])).catch(() => {}); }, []);
@@ -380,6 +390,29 @@ export default function Anagrafiche() {
                         </SelectContent>
                     </Select>
                 </div>
+            </div>
+
+            {/* Filtri demografici avanzati */}
+            <div className="flex flex-wrap items-center gap-2 mb-3" data-testid="anag-filtri-demografici">
+                <Input value={profFilter} onChange={(e) => setProfFilter(e.target.value)}
+                    placeholder="Professione" className="h-9 w-40" data-testid="anag-filter-professione" />
+                <Input value={comuneFilter} onChange={(e) => setComuneFilter(e.target.value)}
+                    placeholder="Comune" className="h-9 w-40" data-testid="anag-filter-comune" />
+                <Input type="number" value={etaMinFilter} onChange={(e) => setEtaMinFilter(e.target.value)}
+                    placeholder="Età min" className="h-9 w-24" data-testid="anag-filter-eta-min" />
+                <Input type="number" value={etaMaxFilter} onChange={(e) => setEtaMaxFilter(e.target.value)}
+                    placeholder="Età max" className="h-9 w-24" data-testid="anag-filter-eta-max" />
+                <button type="button" onClick={() => setConFigliFilter((v) => !v)}
+                    className={`inline-flex items-center gap-1 text-xs px-3 h-9 rounded-md border transition-colors ${conFigliFilter ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+                    data-testid="anag-filter-con-figli">
+                    Genitori con figli
+                </button>
+                {(profFilter || comuneFilter || etaMinFilter || etaMaxFilter || conFigliFilter) && (
+                    <button type="button" onClick={() => { setProfFilter(""); setComuneFilter(""); setEtaMinFilter(""); setEtaMaxFilter(""); setConFigliFilter(false); }}
+                        className="text-xs text-slate-400 hover:text-rose-600 underline" data-testid="anag-filter-reset">
+                        Azzera filtri
+                    </button>
+                )}
             </div>
 
             {/* Chips tag univoci */}

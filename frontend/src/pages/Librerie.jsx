@@ -1840,6 +1840,13 @@ function SchemaProvvForm({ section, editing, onClose }) {
                                onChange={(e) => set("percentuale_su_premio", parseFloat(e.target.value) || 0)} />
                         <div className="text-[10px] text-emerald-800 mt-1">Solo se non importata da ANIA</div>
                     </div>
+                    <div>
+                        <Label>% Provvigione su premio netto</Label>
+                        <Input type="number" step="0.01" value={f.percentuale_su_premio_netto || 0}
+                               onChange={(e) => set("percentuale_su_premio_netto", parseFloat(e.target.value) || 0)}
+                               data-testid="schema-pct-premio-netto" />
+                        <div className="text-[10px] text-emerald-800 mt-1">Se valorizzata, la provvigione totale è calcolata sul premio netto</div>
+                    </div>
                 </div>
                 <div><Label>Descrizione / note</Label><Input value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
                 <div className="bg-violet-50 border border-violet-200 rounded-md p-3">

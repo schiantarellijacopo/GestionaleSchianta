@@ -108,25 +108,25 @@ export default function PolizzaDetail() {
                         )}
                         <div>
                             <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
-                            <div className="text-xl font-semibold mt-0.5">{pol.prodotto || pol.ramo}</div>
+                            <div className="text-xl font-semibold mt-0.5">{pol.ramo || "—"}{pol.prodotto ? ` · ${pol.prodotto}` : ""}</div>
                             <div className="text-xs text-slate-300 mt-1">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
+                            <div className="mt-2 inline-flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1" data-testid="pol-header-operatore">
+                                <CollaboratoreInlineSelect
+                                    entita="polizze"
+                                    id={pol.id}
+                                    value={pol.collaboratore_id}
+                                    fallbackName={pol.collaboratore_nome}
+                                    canEdit={canEdit}
+                                    onSaved={load}
+                                    label="Operatore"
+                                />
+                            </div>
                         </div>
                     </div>
                     <div className="flex gap-6 text-xs">
                         <Hd label="Ultimo titolo" value={fmtDate(pol.ultimo_titolo_scadenza || pol.titoli?.[0]?.data_incasso || pol.effetto)} />
                         <Hd label="Stato" value={<StatusBadge stato={pol.stato} />} />
                         <Hd label="Copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />
-                        <div className="flex flex-col justify-center">
-                            <CollaboratoreInlineSelect
-                                entita="polizze"
-                                id={pol.id}
-                                value={pol.collaboratore_id}
-                                fallbackName={pol.collaboratore_nome}
-                                canEdit={canEdit}
-                                onSaved={load}
-                                label="Operatore"
-                            />
-                        </div>
                         <div className="flex flex-col justify-center">
                             <span className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Regolazione premio</span>
                             {canEdit ? (
@@ -1114,6 +1114,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
     const [users, setUsers] = useState([]);
     const [rows, setRows] = useState([]);
     const [saving, setSaving] = useState(false);
+    const [provvStruttura, setProvvStruttura] = useState(pol.provv_struttura ?? 0);
 
     useEffect(() => {
         api.get("/auth/users")
@@ -1121,14 +1122,16 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
             .catch(() => {});
     }, []);
     useEffect(() => {
+        setProvvStruttura(pol.provv_struttura ?? 0);
         setRows((pol.provvigioni_operatori || []).map((o) => ({
             collaboratore_id: o.collaboratore_id || "",
             operatore_nome: o.operatore_nome || "",
             tipo: o.tipo || "importo",
             valore: o.valore ?? o.provvigione ?? 0,
+            provvigione_addizionali: o.provvigione_addizionali ?? 0,
             origine: o.origine || "manuale",
         })));
-    }, [pol.id, pol.provvigioni_operatori]);
+    }, [pol.id, pol.provvigioni_operatori, pol.provv_struttura]);
 
     const importoRiga = (r) => {
         const v = parseFloat(r.valore) || 0;
@@ -1169,6 +1172,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
         setSaving(true);
         try {
             await api.put(`/polizze/${pol.id}`, {
+                provv_struttura: parseFloat(provvStruttura) || 0,
                 provvigioni_operatori: rows
                     .filter((r) => r.operatore_nome || r.collaboratore_id)
                     .map((r) => ({
@@ -1177,6 +1181,7 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                         tipo: r.tipo,
                         valore: parseFloat(r.valore) || 0,
                         provvigione: importoRiga(r),
+                        provvigione_addizionali: parseFloat(r.provvigione_addizionali) || 0,
                         origine: r.origine || "manuale",
                     })),
             });
@@ -1188,24 +1193,43 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
 
     return (
         <div className="mt-4 border-t border-slate-100 pt-3" data-testid="provv-operatori-editor">
-            <div className="flex items-center justify-between mb-2">
-                <SezioneTitolo titolo="Ripartizione provvigioni per collaboratore" extra />
-                {canEdit && (
-                    <button type="button"
-                        onClick={() => setRows((rs) => [...rs, { collaboratore_id: "", operatore_nome: "", tipo: "percentuale", valore: 0, origine: "manuale" }])}
-                        className="text-xs text-sky-700 hover:underline" data-testid="provv-op-add">
-                        + Aggiungi collaboratore
-                    </button>
-                )}
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <SezioneTitolo titolo="Ripartizione provvigioni per operatore" extra />
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                        <span className="uppercase tracking-wide text-[10px] text-slate-400">Provv. struttura (rata)</span>
+                        <Input type="number" step="0.01" value={provvStruttura}
+                            onChange={(e) => setProvvStruttura(e.target.value)} readOnly={!canEdit}
+                            className="h-8 w-28 text-xs text-right" data-testid="provv-struttura-input" />
+                    </label>
+                    {canEdit && (
+                        <button type="button"
+                            onClick={() => setRows((rs) => [...rs, { collaboratore_id: "", operatore_nome: "", tipo: "percentuale", valore: 0, provvigione_addizionali: 0, origine: "manuale" }])}
+                            className="inline-flex items-center gap-1 text-xs font-medium bg-sky-700 hover:bg-sky-800 text-white rounded px-2.5 py-1.5" data-testid="provv-op-add">
+                            + Aggiungi
+                        </button>
+                    )}
+                </div>
             </div>
             {rows.length === 0 ? (
                 <div className="text-xs text-slate-400 italic">Nessuna ripartizione — le provvigioni seguono lo schema provvigionale standard.</div>
             ) : (
-                <table className="tbl w-full">
-                    <thead><tr><th>Collaboratore</th><th className="w-28">Calcolo</th><th className="w-28 text-right">Valore</th><th className="w-28 text-right">Provvigione €</th><th className="w-20"></th></tr></thead>
+                <table className="tbl w-full text-xs">
+                    <thead>
+                        <tr className="bg-slate-800 text-slate-100">
+                            <th className="w-10 text-center">#</th>
+                            <th className="text-left">Operatore</th>
+                            <th className="w-28">Calcolo</th>
+                            <th className="w-24 text-right">Valore</th>
+                            <th className="w-32 text-right">Provvigione €</th>
+                            <th className="w-36 text-right">Provv. su addizionali €</th>
+                            <th className="w-16 text-center">Azioni</th>
+                        </tr>
+                    </thead>
                     <tbody>
                         {rows.map((r, i) => (
-                            <tr key={i}>
+                            <tr key={i} className={i % 2 ? "bg-slate-50" : ""}>
+                                <td className="text-center text-slate-400">{i + 1}</td>
                                 <td>
                                     {canEdit ? (
                                         <select value={r.collaboratore_id || ""} onChange={(e) => selezionaCollab(i, e.target.value)}
@@ -1234,6 +1258,11 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                                 </td>
                                 <td className="num text-right font-medium text-emerald-700" data-testid={`provv-op-importo-${i}`}>
                                     {fmtEur(importoRiga(r))}
+                                </td>
+                                <td>
+                                    <Input type="number" step="0.01" value={r.provvigione_addizionali ?? 0}
+                                        onChange={(e) => patch(i, { provvigione_addizionali: e.target.value })} readOnly={!canEdit}
+                                        className="h-8 text-xs text-right" data-testid={`provv-op-addizionali-${i}`} />
                                 </td>
                                 <td className="text-center">
                                     {canEdit && (

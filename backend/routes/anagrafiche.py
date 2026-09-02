@@ -236,6 +236,11 @@ async def list_anagrafiche(
     limit: int = 5000,
     tag: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
+    professione: Optional[str] = None,
+    comune: Optional[str] = None,
+    con_figli: Optional[bool] = None,
+    eta_min: Optional[int] = None,
+    eta_max: Optional[int] = None,
     paged: bool = False,
     page: int = 1,
     page_size: int = 50,
@@ -268,6 +273,21 @@ async def list_anagrafiche(
         flt["tags"] = tag
     if collaboratore_id:
         flt["collaboratore_id"] = collaboratore_id
+    if professione:
+        flt["professione"] = {"$regex": re.escape(professione), "$options": "i"}
+    if comune:
+        flt["comune"] = {"$regex": re.escape(comune), "$options": "i"}
+    if con_figli:
+        flt["numero_figli"] = {"$gt": 0}
+    if eta_min is not None or eta_max is not None:
+        from datetime import date as _date
+        oggi = _date.today()
+        cond = {}
+        if eta_min is not None:  # età >= eta_min → nato entro (oggi - eta_min anni)
+            cond["$lte"] = (oggi.replace(year=oggi.year - int(eta_min))).isoformat()
+        if eta_max is not None:  # età <= eta_max → nato dopo (oggi - (eta_max+1) anni)
+            cond["$gte"] = (oggi.replace(year=oggi.year - int(eta_max) - 1)).isoformat()
+        flt["data_nascita"] = cond
 
     # ------------------------------------------------------------------
     # MODALITÀ PAGINATA (scalabile su 10k+ anagrafiche, filtri server-side)
@@ -347,6 +367,10 @@ async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, d
             ids_con = await _ids_con_polizze_attive()
             if categoria == "con_polizze":
                 flt["id"] = {"$in": list(ids_con)}
+                flt.setdefault("$and", []).append({"$nor": [
+                    {"ragione_sociale": {"$regex": "condominio", "$options": "i"}},
+                    {"tags": "condominio"},
+                ]})
             elif categoria == "senza_polizze":
                 flt["id"] = {"$nin": list(ids_con)}
                 flt.setdefault("$and", []).append({"$nor": [
@@ -429,8 +453,15 @@ async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, d
     cond_flt = _copy.deepcopy(conteggi_flt)
     cond_flt.setdefault("$and", []).append(cond_clause)
     cond_all = await db.anagrafiche.count_documents(cond_flt)
-    con_all = await db.anagrafiche.count_documents({**conteggi_flt, "id": {"$in": list(ids_con_all)}})
-    senza_all = max(0, tot_all - con_all - cond_all)
+    # con_polizze e senza_polizze ESCLUDONO i condomini (categorie mutuamente esclusive)
+    con_flt = _copy.deepcopy(conteggi_flt)
+    con_flt["id"] = {"$in": list(ids_con_all)}
+    con_flt.setdefault("$and", []).append({"$nor": [cond_clause]})
+    con_all = await db.anagrafiche.count_documents(con_flt)
+    senza_flt = _copy.deepcopy(conteggi_flt)
+    senza_flt["id"] = {"$nin": list(ids_con_all)}
+    senza_flt.setdefault("$and", []).append({"$nor": [cond_clause]})
+    senza_all = await db.anagrafiche.count_documents(senza_flt)
     conteggi = {"tutte": tot_all, "con_polizze": con_all, "senza_polizze": senza_all, "condominio": cond_all}
 
     return {"items": items, "total": total, "page": page, "page_size": page_size,

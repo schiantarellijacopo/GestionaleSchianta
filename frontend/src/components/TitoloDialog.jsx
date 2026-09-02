@@ -248,23 +248,42 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         {operatori.length === 0 ? (
                             <div className="text-[11px] text-slate-400 italic">Nessun collaboratore: usa il campo Provvigioni sopra oppure aggiungi uno o più collaboratori.</div>
                         ) : (
-                            <div className="space-y-2">
-                                {operatori.map((o, i) => (
-                                    <div key={i} className="flex items-center gap-2" data-testid={`titolo-operatore-row-${i}`}>
-                                        <Select value={o.operatore_id || "__none__"} disabled={incassato} onValueChange={(v) => setOperatore(i, "operatore_id", v === "__none__" ? "" : v)}>
-                                            <SelectTrigger className="flex-1 h-8" data-testid={`titolo-operatore-select-${i}`}><SelectValue placeholder="— collaboratore —" /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="__none__">— collaboratore —</SelectItem>
-                                                {collaboratori.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                        <Input type="number" step="0.01" className="w-28 h-8" placeholder="€" disabled={incassato}
-                                            value={o.provvigione} onChange={(e) => setOperatore(i, "provvigione", e.target.value)}
-                                            data-testid={`titolo-operatore-provv-${i}`} />
-                                        {!incassato && <button type="button" onClick={() => removeOperatore(i)} className="text-rose-500 hover:text-rose-700 text-xs px-2" data-testid={`titolo-operatore-del-${i}`}>✕</button>}
-                                    </div>
-                                ))}
-                                <div className="text-right text-xs text-slate-600">Totale ripartito: <b className="text-slate-900">{totOperatori.toFixed(2)} €</b></div>
+                            <div>
+                                <table className="w-full text-xs">
+                                    <thead>
+                                        <tr className="bg-slate-800 text-slate-100">
+                                            <th className="w-8 text-center py-1 rounded-l">#</th>
+                                            <th className="text-left px-2 py-1">Operatore</th>
+                                            <th className="w-32 text-right px-2 py-1">Provvigione €</th>
+                                            <th className="w-14 text-center py-1 rounded-r">Azioni</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {operatori.map((o, i) => (
+                                            <tr key={i} className={i % 2 ? "bg-white" : "bg-slate-50/60"} data-testid={`titolo-operatore-row-${i}`}>
+                                                <td className="text-center text-slate-400">{i + 1}</td>
+                                                <td className="px-1 py-1">
+                                                    <Select value={o.operatore_id || "__none__"} disabled={incassato} onValueChange={(v) => setOperatore(i, "operatore_id", v === "__none__" ? "" : v)}>
+                                                        <SelectTrigger className="w-full h-8" data-testid={`titolo-operatore-select-${i}`}><SelectValue placeholder="— collaboratore —" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="__none__">— collaboratore —</SelectItem>
+                                                            {collaboratori.map((c) => <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>)}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </td>
+                                                <td className="px-1 py-1">
+                                                    <Input type="number" step="0.01" className="w-full h-8 text-right" placeholder="€" disabled={incassato}
+                                                        value={o.provvigione} onChange={(e) => setOperatore(i, "provvigione", e.target.value)}
+                                                        data-testid={`titolo-operatore-provv-${i}`} />
+                                                </td>
+                                                <td className="text-center">
+                                                    {!incassato && <button type="button" onClick={() => removeOperatore(i)} className="text-rose-500 hover:text-rose-700 text-sm" data-testid={`titolo-operatore-del-${i}`}>✕</button>}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                <div className="text-right text-xs text-slate-600 mt-2">Totale ripartito: <b className="text-slate-900">{totOperatori.toFixed(2)} €</b></div>
                             </div>
                         )}
                     </div>
