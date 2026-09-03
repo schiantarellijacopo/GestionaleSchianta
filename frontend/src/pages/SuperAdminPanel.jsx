@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
+    { id: "biblioteca", label: "Biblioteca & Schede Calcolo", icon: BookMarked, route: "/super-admin/biblioteca" },
     { id: "scambi", label: "Scambi Dati", icon: ArrowRightLeft },
     { id: "abbonamenti", label: "Abbonamenti", icon: CreditCard },
     { id: "transazioni", label: "Transazioni", icon: TrendingUp },
@@ -30,6 +32,7 @@ const STATO_COLORS = {
 };
 
 export default function SuperAdminPanel() {
+    const navigate = useNavigate();
     const [tab, setTab] = useState("agenzie");
     const [stats, setStats] = useState(null);
 
@@ -53,7 +56,7 @@ export default function SuperAdminPanel() {
                 {TABS.map((t) => {
                     const Icon = t.icon;
                     return (
-                        <button key={t.id} onClick={() => setTab(t.id)}
+                        <button key={t.id} onClick={() => t.route ? navigate(t.route) : setTab(t.id)}
                             className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
                                 tab === t.id
                                     ? "border-violet-600 text-violet-700"

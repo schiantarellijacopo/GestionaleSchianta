@@ -626,3 +626,11 @@ Usare integration_expert prima di implementare.
 - VERIFICATO: il tracciato è GIÀ pienamente supportato da ania_importer.importa_zip (endpoint POST /api/import/ania e alias /api/import/omnia). Nessuna modifica di codice necessaria.
 - Test reale su agenzia sandbox: campione allineato → 5 polizze, 20 titoli con premi corretti (lordo=netto+imposte, provvigioni), anagrafiche collegate; entità non mappate tracciate (compagnia CAT, 41 prodotti, 12 collaboratori, rami). Wizard di mappatura disponibile in pagina /importazioni tab OMNIA.
 - CAVEAT: file completo molto grande (~500MB); l'upload via browser potrebbe essere lento/pesante e l'endpoint è sincrono → valutare upload chunked/import in background se l'upload fallisce.
+
+## Sessione 2026-06 (fork continuazione, parte 5) — Recupero Biblioteca Previdenza Super Admin
+- PROBLEMA: dopo lo spostamento della Biblioteca Previdenza al tenant globale (__global_library__), i ~1011 PDF caricati in precedenza (sotto tenant-principale-schiantarelli) non erano più visibili nella console Super Admin (che legge solo il globale). biblioteca_previdenza è MIXED_SHARED.
+- FIX (migrazione dati): spostati 1011 documenti previdenza (sezione None/previdenza) + 1 cartella custom da tenant-principale-schiantarelli → __global_library__ (sezione impostata a 'previdenza'). Le 40 "Condizioni di Polizza" restano per-agenzia (corretto). L'agenzia principale continua a vederli (MIXED legge tenant+globale).
+- Consolidata categoria duplicata: 'PENSIONE INTEGRATIVE' (6) → 'PENSIONE INTEGRATIVA' (default). Totale previdenza globale: 1012.
+- Discoverability: aggiunto tab "Biblioteca & Schede Calcolo" nel pannello Super Admin (SuperAdminPanel.jsx) che naviga a /super-admin/biblioteca (prima raggiungibile solo dal pulsante header). Verificato via screenshot: categorie e Schede di Calcolo tutte presenti.
+
+- CONFERMA collegamento calcoli: verificato via API che l'agenzia principale (admin@assicura.it) legge i 1012 PDF previdenza dal globale (cartelle con conteggi corretti). Il widget "Consulto AI · Biblioteca Previdenza" nelle schermate di analisi cliente (Pensione INPS, Approfondimento Redditi, Successione, Riepilogo Pensionistico) usa questi PDF per categoria. Gestione centralizzata Super Admin → propagata a tutte le agenzie.
