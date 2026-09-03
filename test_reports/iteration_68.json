@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only testing of OpenAPI.it integration (Catasto + Visengine) on ALTRAVIA TEST CATASTO anagrafica. All non-paid flows verified successfully. NON eseguito il click su Catasto e Richiedi documenti come da vincolo di costo.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "VisengineDialog", "issues": ["Console warning: Missing Description or aria-describedby={undefined} for DialogContent (accessibility, non-blocking)"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional a11y) Aggiungere DialogDescription o aria-describedby al DialogContent di VisengineDialog per silenziare il warning React di Radix."
+  ],
+  "critical_code_review_comments": [
+    "VisengineDialog: mancante DialogDescription -> warning a11y in console.",
+    "OpenApiActions: buon uso di data-testid; button 'Visure & Doc.' correttamente separato dal costo, apre selettore in step select senza chiamate live.",
+    "Login form: il campo email è precompilato con admin@assicura.it; per test SDET conviene usare fill('') + fill(value) altrimenti si logga admin (comportamento riprodotto). Non blocca l'utente ma può confondere test automatici."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "test_credentials": "test@sandbox.it / Test1234! (tenant sandbox); anagrafica 931835cd-9de5-41fb-a352-9996e03be47e",
+  "seed_data_creation": "Nessuna: usati i dati esistenti (immobile catastale + PDF visura già presenti dal seed backend).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Verificati tutti i requisiti richiesti senza spendere crediti OpenAPI.it: (1) card OpenApiActions con 5 bottoni presenti/abilitati e badge LIVE + Credito €76.70; (2) VisengineDialog apre con 16 documenti in 2 categorie (Camerali 3 + Patronato 13) e 'Seleziona tutti' funzionante; (3) selezionati 2 documenti (Visura Centrale Rischi persona fisica + Visura Centrale Rischi Persona Giuridica come primi 2), click Avanti (2) carica schema con 6 campi testo + 5 file input, valori precompilati 'ALTRAVIA TEST CATASTO' e '12485671007' visibili, warning allegati mostrato 2 volte; (4) submit-btn NON cliccato per vincolo di costo; (5) Analisi Cliente -> subtab Patrimonio -> sezione Immobili (1) mostra: Tipo=Ufficio, Comune=ROMA, Cat.Catastale=A/10, Rendita=2566.79, Titolo=Proprietà, %=100, Indirizzo=VIALE FILIPPO TOMMASO MARINETTI n. 221; (6) tab 'Altri allegati' mostra visura_catastale_12485671007_2026-09-03.pdf 14 KB application/pdf; (7) console: nessun errore JS runtime bloccante, solo 401 su fetch iniziale non autenticato prima del login e warning Radix a11y non bloccante. NB: il bottone 'Catasto' (oapi-btn-cadastre) e 'Richiedi documenti' (visengine-submit-btn) non sono stati cliccati come richiesto.",
+  "rca of the issue": "N/A - nessun problema riscontrato"
+}

@@ -59,15 +59,98 @@ async def fetch_company_for_anagrafica(aid: str, user=Depends(current_user)) -> 
     return data
 
 
+async def _save_allegato(aid: str, user, filename: str, content: bytes,
+                         categoria: str, content_type: str = "application/pdf",
+                         fonte: str = "openapi.it") -> Optional[str]:
+    """Salva un file come Allegato standard (obj_storage + modello Allegato),
+    così compare nel tab Allegati ed è scaricabile. Ritorna allegato_id."""
+    import os
+    import logging
+    import storage as obj_storage
+    from db_models import Allegato
+    try:
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "pdf"
+        file_id = str(__import__("uuid").uuid4())
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafica/{aid}/{file_id}.{ext}"
+        result = obj_storage.put_object(path, content, content_type)
+        obj = Allegato(
+            entita_tipo="anagrafica", entita_id=aid,
+            nome_file=filename, storage_path=result["path"],
+            content_type=content_type, size=result.get("size", len(content)),
+            descrizione=f"Documento {fonte}", autore_id=user.get("id"),
+            categoria=categoria, visibile_cliente=False,
+        )
+        await db.allegati.insert_one(obj.model_dump())
+        return obj.id
+    except Exception as e:
+        logging.getLogger(__name__).warning("Salvataggio allegato fallito: %s", e)
+        return None
+
+
 @router.post("/cadastre/{aid}")
 async def fetch_cadastre_for_anagrafica(aid: str, user=Depends(current_user)) -> dict:
+    """Genera la visura catastale LIVE per il soggetto: estrae gli immobili
+    strutturati (per il selettore di import) e salva il PDF ufficiale negli Allegati.
+    NON inietta gli immobili: la scelta 'tutti o alcuni' avviene lato UI e poi
+    viene chiamato /cadastre/{aid}/importa-immobili."""
     ana = await _get_anagrafica(aid, user)
     key = ana.get("codice_fiscale") or ana.get("partita_iva")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
-    data = await svc.fetch_cadastre(key)
-    await _update_openapi_field(aid, "cadastre", data)
-    return {"count": len(data), "immobili": data}
+    res = await svc.fetch_cadastre_detailed(key, want_pdf=True)
+    allegato_id = None
+    if res.get("pdf_bytes"):
+        allegato_id = await _save_allegato(
+            aid, user, res.get("pdf_filename") or f"visura_catastale_{key}.pdf",
+            res["pdf_bytes"], "visura_catastale", "application/pdf", "openapi.it/catasto")
+    immobili = res.get("immobili") or []
+    await _update_openapi_field(aid, "cadastre", immobili)
+    return {
+        "count": len(immobili),
+        "immobili": immobili,
+        "soggetto": res.get("soggetto"),
+        "provider": res.get("provider"),
+        "message": res.get("message"),
+        "pdf_salvato": bool(allegato_id),
+        "allegato_id": allegato_id,
+        "mock": res.get("mock", False),
+    }
+
+
+@router.post("/cadastre/{aid}/importa-immobili")
+async def importa_immobili_catasto(aid: str, body: dict, user=Depends(current_user)) -> dict:
+    """Aggiunge gli immobili selezionati all'Analisi Cliente (analisi_cliente.immobili).
+    Body: {immobili: [ImmobileItem...]}"""
+    from db_models import ImmobileItem
+    await _get_anagrafica(aid, user)
+    selected = body.get("immobili") or []
+    if not selected:
+        raise HTTPException(status_code=400, detail="Nessun immobile selezionato")
+    ac = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
+    if not ac:
+        ac = {"anagrafica_id": aid, "immobili": []}
+        await db.analisi_cliente.insert_one({**ac, "created_at": _now_iso()})
+    esistenti = list(ac.get("immobili") or [])
+    # Dedup su foglio+particella+comune
+    seen = {(str(i.get("foglio")), str(i.get("particella")), (i.get("comune") or "").upper())
+            for i in esistenti}
+    aggiunti = []
+    for raw in selected:
+        try:
+            im = ImmobileItem(**raw).model_dump()
+        except Exception:
+            im = {k: raw.get(k) for k in raw}
+        chiave = (str(im.get("foglio")), str(im.get("particella")), (im.get("comune") or "").upper())
+        if chiave in seen and chiave != ("", "", ""):
+            continue
+        seen.add(chiave)
+        esistenti.append(im)
+        aggiunti.append(im)
+    await db.analisi_cliente.update_one(
+        {"anagrafica_id": aid},
+        {"$set": {"immobili": esistenti, "updated_at": _now_iso()}},
+    )
+    return {"aggiunti": len(aggiunti), "totale": len(esistenti)}
 
 
 @router.post("/vehicles/{aid}")
@@ -293,3 +376,116 @@ async def associa_proprietario_veicolo(
         }},
     )
     return {"ok": True, "storico": storico}
+
+
+
+# ============================================================
+# VISENGINE · Selettore documenti (Camerali / Patronato / INPS)
+# ============================================================
+@router.get("/visengine/catalog")
+async def visengine_catalog(user=Depends(current_user)) -> dict:
+    """Lista FISSA dei documenti disponibili, raggruppati per categoria."""
+    items = svc.visengine_catalog()
+    gruppi: dict[str, list] = {}
+    for it in items:
+        gruppi.setdefault(it["categoria"], []).append(it)
+    return {"catalog": items, "gruppi": gruppi}
+
+
+@router.get("/visengine/schema/{hash_visura}")
+async def visengine_schema(hash_visura: str, aid: Optional[str] = None,
+                           user=Depends(current_user)) -> dict:
+    """Struttura campi del documento + valori suggeriti dall'anagrafica."""
+    schema = await svc.visengine_get_schema(hash_visura)
+    if not schema:
+        raise HTTPException(status_code=502, detail="Impossibile leggere la struttura del documento")
+    ana = {}
+    if aid:
+        ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
+    return svc.visengine_schema_prefilled(schema, ana)
+
+
+async def _save_visengine_richiesta(aid: str, record: dict) -> None:
+    await raw_db.anagrafiche.update_one(
+        {"id": aid},
+        {"$push": {"openapi_data.visengine_richieste": record},
+         "$set": {"openapi_data.last_sync": _now_iso(), "updated_at": _now_iso()}},
+    )
+
+
+@router.post("/visengine/request/{aid}")
+async def visengine_request(aid: str, body: dict, user=Depends(current_user)) -> dict:
+    """Crea una pratica Visengine per un documento.
+    Body: {hash_visura, nome_visura, json_visura, opzioni?}
+    Se la pratica è già pronta (sincrona) scarica e salva subito il PDF."""
+    import uuid as _uuid
+    await _get_anagrafica(aid, user)
+    hash_visura = body.get("hash_visura")
+    json_visura = body.get("json_visura") or {}
+    if not hash_visura or not json_visura:
+        raise HTTPException(status_code=400, detail="hash_visura e json_visura obbligatori")
+    created = await svc.visengine_create_request(hash_visura, json_visura, body.get("opzioni"))
+    if not created.get("ok"):
+        raise HTTPException(status_code=400, detail=created.get("error") or "Errore Visengine")
+    rid = created.get("id")
+    record = {
+        "id": str(_uuid.uuid4()),
+        "richiesta_id": rid,
+        "hash_visura": hash_visura,
+        "nome_visura": body.get("nome_visura") or hash_visura,
+        "stato": created.get("stato") or "in_lavorazione",
+        "allegato_id": None,
+        "created_at": _now_iso(),
+        "created_by": user.get("id"),
+    }
+    # Tentativo di download immediato (documenti sincroni)
+    if rid:
+        import asyncio
+        for _ in range(3):
+            d = await svc.visengine_get_request(rid)
+            if svc.visengine_is_ready(d.get("stato")):
+                status, content, ctype = await svc.visengine_download(rid)
+                if status == 200 and content:
+                    fn = f"{record['nome_visura'].replace(' ', '_')}_{rid}.pdf"
+                    aid_alleg = await _save_allegato(aid, user, fn, content,
+                                                     "visengine", ctype or "application/pdf",
+                                                     "openapi.it/visengine")
+                    record["allegato_id"] = aid_alleg
+                    record["stato"] = "evasa"
+                break
+            await asyncio.sleep(2.0)
+    await _save_visengine_richiesta(aid, record)
+    return record
+
+
+@router.post("/visengine/refresh/{aid}/{record_id}")
+async def visengine_refresh(aid: str, record_id: str, user=Depends(current_user)) -> dict:
+    """Ricontrolla lo stato di una pratica Visengine e, se pronta, salva il PDF."""
+    ana = await _get_anagrafica(aid, user)
+    richieste = (ana.get("openapi_data") or {}).get("visengine_richieste") or []
+    rec = next((r for r in richieste if r.get("id") == record_id), None)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Richiesta non trovata")
+    rid = rec.get("richiesta_id")
+    if not rid:
+        raise HTTPException(status_code=400, detail="Richiesta senza id remoto")
+    d = await svc.visengine_get_request(rid)
+    stato = d.get("stato") or rec.get("stato")
+    allegato_id = rec.get("allegato_id")
+    if svc.visengine_is_ready(stato) and not allegato_id:
+        status, content, ctype = await svc.visengine_download(rid)
+        if status == 200 and content:
+            fn = f"{(rec.get('nome_visura') or 'documento').replace(' ', '_')}_{rid}.pdf"
+            allegato_id = await _save_allegato(aid, user, fn, content,
+                                               "visengine", ctype or "application/pdf",
+                                               "openapi.it/visengine")
+    # aggiorna il record
+    await raw_db.anagrafiche.update_one(
+        {"id": aid, "openapi_data.visengine_richieste.id": record_id},
+        {"$set": {
+            "openapi_data.visengine_richieste.$.stato": stato,
+            "openapi_data.visengine_richieste.$.allegato_id": allegato_id,
+            "updated_at": _now_iso(),
+        }},
+    )
+    return {"id": record_id, "stato": stato, "allegato_id": allegato_id}

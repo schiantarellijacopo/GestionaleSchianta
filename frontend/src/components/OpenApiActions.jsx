@@ -7,15 +7,34 @@ import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Building2, Home, Car, FileSearch, Loader2, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { Building2, Home, Car, FileSearch, Loader2, ChevronDown, ChevronUp, Info, FileStack } from "lucide-react";
 import { toast } from "sonner";
+import CatastoImportDialog from "@/components/CatastoImportDialog";
+import VisengineDialog from "@/components/VisengineDialog";
 
 export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [mode, setMode] = useState(null); // "mock" | "live"
     const [credit, setCredit] = useState(null);
     const [loading, setLoading] = useState(null); // key attualmente in caricamento
     const [expanded, setExpanded] = useState(null);
+    const [catastoData, setCatastoData] = useState(null); // {immobili, soggetto}
+    const [showVisengine, setShowVisengine] = useState(false);
     const openapi = ana.openapi_data || {};
+
+    const estraiCatasto = async () => {
+        setLoading("cadastre");
+        try {
+            const r = await api.post(`/openapi-it/cadastre/${ana.id}`);
+            if (r.data.pdf_salvato) toast.success("Visura catastale PDF salvata negli Allegati");
+            if ((r.data.count || 0) === 0 && !r.data.pdf_salvato) {
+                toast.info(r.data.message || "Nessun immobile trovato al Catasto");
+            }
+            setCatastoData({ immobili: r.data.immobili || [], soggetto: r.data.soggetto });
+            onReload?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore Catasto");
+        } finally { setLoading(null); }
+    };
 
     useEffect(() => {
         api.get("/openapi-it/status").then((r) => {
@@ -63,7 +82,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                 )}
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                 <ActionBtn
                     icon={Building2} label="Camerale" testid="oapi-btn-company"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "company"}
@@ -76,7 +95,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Home} label="Catasto" testid="oapi-btn-cadastre"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre"}
                     loading={loading === "cadastre"}
-                    onClick={() => call("cadastre", "cadastre", "Catasto")}
+                    onClick={estraiCatasto}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.cadastre) && openapi.cadastre.length > 0}
                 />
@@ -89,6 +108,14 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     hasData={Array.isArray(openapi.automotive) && openapi.automotive.length > 0}
                 />
                 <ActionBtn
+                    icon={FileStack} label="Visure & Doc." testid="oapi-btn-visengine"
+                    disabled={!canEdit || (!hasPiva && !hasCf)}
+                    loading={false}
+                    onClick={() => setShowVisengine(true)}
+                    hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
+                    hasData={Array.isArray(openapi.visengine_richieste) && openapi.visengine_richieste.length > 0}
+                />
+                <ActionBtn
                     icon={FileSearch} label="Visura" testid="oapi-btn-visura"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "visura"}
                     loading={loading === "visura"}
@@ -97,6 +124,24 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     hasData={!!openapi.visura}
                 />
             </div>
+
+            {catastoData && (
+                <CatastoImportDialog
+                    aid={ana.id}
+                    immobili={catastoData.immobili}
+                    soggetto={catastoData.soggetto}
+                    onClose={() => setCatastoData(null)}
+                    onImported={onReload}
+                />
+            )}
+            {showVisengine && (
+                <VisengineDialog
+                    ana={ana}
+                    aid={ana.id}
+                    onClose={() => setShowVisengine(false)}
+                    onReload={onReload}
+                />
+            )}
 
             {/* Pannelli dati */}
             {expanded === "company" && openapi.company && <CompanyPanel data={openapi.company} onClose={() => setExpanded(null)} />}

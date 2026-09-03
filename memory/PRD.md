@@ -667,3 +667,23 @@ Usare integration_expert prima di implementare.
 - OPENAPI_IT_BEARER_TOKEN rimesso a "" (il token "Lista Produzione" 6a99.. non è un Bearer valido → "Wrong Token"). L'app usa OAuth client_credentials: token 200 per Catasto e Visengine; "imprese.openapi.it" ancora 406 "API not enabled".
 - VISURA CAMERALE: da fare come richiesto dall'utente → cliccando "Camerale" mostrare SELETTORE documenti (Visura ordinaria imprese individuali / società capitali / società persone; Visura storica x3; Bilancio Aziendale; Certificato Camerale iscrizione; Certificato con vigenza; Elenco Soci Attivi) con opzione "tutti / seleziona alcuni". API = "Visure Camerali" (imprese/visurecamerali.openapi.it). RICHIEDE che l'utente ATTIVI l'API "Visure Camerali/Imprese" su console.openapi.com (ora 406). Poi implementare: lista prodotti + POST richiesta con json per tipo + polling + salvataggio PDF/dati.
 - Anche i doc Visengine (Estratto Contributivo, ISEE, 730, pensioni, Visura PRA) richiedono json_visura per-prodotto (HTTP 412 "insufficient data" se mancano campi): da costruire con schema per prodotto.
+
+## Sessione 2026-06 (parte 11) — Catasto dettaglio bloccato su endpoint
+- Catasto: ricerca_nazionale LIVE OK (comune+conteggio: TIRANO 3 fabbricati). Ma il DETTAGLIO (foglio/particella/categoria/rendita) richiede un secondo endpoint non ancora individuato: provati POST /richiesta/{ricerca|ricerca_immobili|immobili|visura_catastale|ricerca_immobili_soggetto} → tutti HTTP 400 "wrong endpoint". Lo scope GET:catasto.openapi.it/visura_catastale esiste → probabile endpoint GET top-level (non sotto /richiesta) con id_soggetto/provincia. DA CONFERMARE da doc OpenAPI.it Catasto.
+- Widget UI "Autocompilazione OpenAPI.it" mostra colonne foglio/particella/cat/sup/rendita → attualmente vuote perché ricerca_nazionale non le fornisce.
+
+## Sessione 2026-06 (parte 12) — Catasto estrazione REALE + Selettore Visengine (COMPLETATO)
+- CATASTO (LIVE, testato end-to-end): implementato `fetch_cadastre_detailed` in openapi_it_service.py.
+  Flusso: POST /richiesta/ricerca_nazionale (id_soggetto) → POST /visura_catastale {entita:"soggetto",tipo_visura:"ordinaria",tipo_formato:"json",tipo_dettaglio:"analitica"} → polling GET /visura_catastale/{id} → download JSON strutturato → parsing immobili (foglio/particella/sub/categoria/rendita/superficie/indirizzo/comune/titolo/quota). In parallelo genera anche la visura PDF ufficiale (ordinaria) salvata negli Allegati.
+  Parser `_parse_visura_json` legge VisuraSoggettoAttuale.GruppoUnitaImmobiliari[].ImmobileFabbricatiS/ImmobileTerreniS. Titolo/quota dal match CF su IntestazioneGruppo.
+  Endpoint: POST /openapi-it/cadastre/{aid} (estrae + salva PDF, ritorna immobili) e POST /openapi-it/cadastre/{aid}/importa-immobili (aggiunge gli immobili selezionati a analisi_cliente.immobili, dedup foglio+particella+comune, usa `db` tenant-aware).
+  UI: pulsante "Catasto" → CatastoImportDialog.jsx (selettore "tutti o alcuni") → import in Analisi Cliente > Patrimonio > Immobili.
+  Test LIVE: P.IVA 12485671007 (ALTRAVIA) → 1 ufficio ROMA A/10 Fg872 Part405 rendita 2566.79, PDF salvato, import OK.
+- VISENGINE / VISURE & DOCUMENTI (LIVE plumbing testato): nuovo pulsante "Visure & Doc." → VisengineDialog.jsx.
+  Lista FISSA di 16 documenti (Camerali 3 + Patronato 13) con hash reali (VISENGINE_CATALOG in openapi_it_service.py).
+  Flusso: step "select" (checkbox + Seleziona tutti) → step "compile" (GET /visengine/schema/{hash} carica json_struttura, campi precompilati dai dati anagrafica, input file per documenti che richiedono allegati identità/tessera/mandato) → POST /visengine/request/{aid} (crea pratica, se sincrona scarica subito il PDF in Allegati) + storico richieste con refresh (POST /visengine/refresh/{aid}/{rid}).
+  Endpoint: GET /visengine/catalog, GET /visengine/schema/{hash}, POST /visengine/request/{aid}, POST /visengine/refresh/{aid}/{rid}.
+  NOTA COSTI: ogni documento Visengine e ogni visura catastale è a pagamento (POST /richiesta). Il POST live è stato validato solo su error-path (HTTP 412 su dati incompleti, nessun addebito). L'invio reale di documenti Visengine NON è stato test-fired per non addebitare crediti: da testare dall'utente.
+  Allegati salvati via obj_storage + modello Allegato standard (is_deleted=False) così compaiono nel tab "Altri allegati" e sono scaricabili.
+- Test: testing_agent frontend 100% (iteration_68.json). Credito OpenAPI.it residuo ~€76.
+- Dati di test creati nel tenant sandbox: anagrafica 931835cd-... "ALTRAVIA TEST CATASTO" (P.IVA 12485671007) con 1 immobile importato + PDF visura.

@@ -673,3 +673,425 @@ def _mock_risk(key: str) -> dict:
         "eventi_negativi_count": n_prot + n_preg,
         "data_report": "2026-02-04",
     }
+
+
+# ===================================================================
+# SERVIZIO 7 · CATASTO DETTAGLIATO (visura per soggetto → immobili + PDF)
+# ===================================================================
+_CAT_HOST = "catasto.openapi.it"
+
+
+async def _catasto_bytes(url: str) -> tuple[int, bytes, str]:
+    """Scarica un file binario (PDF/JSON) dal catasto usando il token."""
+    token = await _get_token([f"GET:{_CAT_HOST}/visura_catastale"])
+    if not token:
+        return 0, b"", ""
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        return r.status_code, r.content, r.headers.get("content-type", "")
+    except Exception as e:
+        logger.warning("Catasto download error: %s", e)
+        return 0, b"", ""
+
+
+def _tipo_from_categoria(cat: str) -> str:
+    c = (cat or "").upper().strip()
+    letter = c[:1]
+    code = c.split(":")[0].strip()
+    if letter == "A":
+        return "ufficio" if code in ("A/10",) else "abitativo"
+    if letter == "C":
+        if code in ("C/6", "C/7"):
+            return "garage"
+        return "commerciale"
+    if letter == "D":
+        return "commerciale"
+    return "altro"
+
+
+def _parse_quota(q: str) -> float:
+    """'per 1/1' → 100.0 ; ' 1/2' → 50.0"""
+    import re
+    m = re.search(r"(\d+)\s*/\s*(\d+)", q or "")
+    if m:
+        num, den = int(m.group(1)), int(m.group(2))
+        if den:
+            return round(num / den * 100, 2)
+    return 100.0
+
+
+def _map_titolo(desc: str) -> str:
+    d = (desc or "").lower()
+    if "nuda" in d:
+        return "nuda_proprieta"
+    if "usufrutto" in d:
+        return "usufrutto"
+    if "propriet" in d:
+        return "proprieta"
+    return "proprieta"
+
+
+def _as_list(v):
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def _parse_visura_json(jdata: dict, cf: str) -> list[dict]:
+    """Estrae gli immobili strutturati dal JSON della visura catastale per soggetto."""
+    root = jdata.get("VisuraSoggettoAttuale") or jdata.get("VisuraSoggetto") or jdata
+    gruppi = _as_list(root.get("GruppoUnitaImmobiliari"))
+    out: list[dict] = []
+    cf_up = (cf or "").upper().strip()
+    for gr in gruppi:
+        if not isinstance(gr, dict):
+            continue
+        gattr = gr.get("@attributes") or {}
+        comune = gattr.get("Descrizione") or ""
+        tipo_catasto = (gattr.get("TipoCatasto") or "F").upper()
+        # Titolo/quota dal gruppo intestazione (match sul CF del soggetto)
+        titolo, quota = "proprieta", 100.0
+        try:
+            intest = ((gr.get("IntestazioneGruppo") or {}).get("MutazioneSoggettiva") or {})
+            intest = (intest.get("Intestazione") or {})
+            for it in _as_list(intest.get("Intestato")):
+                ia = it.get("@attributes") or it
+                if (ia.get("CF") or "").upper() == cf_up:
+                    dr = (ia.get("DirittiReali") or {}).get("@attributes") or {}
+                    titolo = _map_titolo(dr.get("Descrizione"))
+                    quota = _parse_quota(dr.get("Quota"))
+                    break
+        except Exception:
+            pass
+        # Fabbricati
+        for im in _as_list(gr.get("ImmobileFabbricatiS")):
+            if not isinstance(im, dict):
+                continue
+            ident = ((im.get("DatiIdentificativi") or {}).get("IdentificativoDefinitivo") or {}).get("@attributes") or {}
+            clas = (im.get("DatiClassamentoF") or {}).get("@attributes") or {}
+            cons = ((im.get("DatiClassamentoF") or {}).get("Consistenza") or {}).get("@attributes") or {}
+            sup = (im.get("SuperficieF") or {}).get("@attributes") or {}
+            indirizzo = (im.get("DatiIndirizzo") or {}).get("IndirizzoImm") or ""
+            cat_full = clas.get("Categoria") or ""
+            cat_code = cat_full.split(":")[0].strip()
+            rendita = 0.0
+            try:
+                rendita = float((clas.get("RenditaEuro") or "0").replace(".", "").replace(",", "."))
+            except Exception:
+                rendita = 0.0
+            superficie = 0.0
+            try:
+                superficie = float(str(sup.get("Totale") or "0").replace(",", "."))
+            except Exception:
+                superficie = 0.0
+            out.append({
+                "tipo": _tipo_from_categoria(cat_code),
+                "indirizzo": indirizzo.strip(),
+                "comune": comune,
+                "provincia": ident.get("Provincia"),
+                "foglio": str(ident.get("Foglio") or ""),
+                "particella": str(ident.get("ParticellaNum") or ""),
+                "sub": str(ident.get("Subalterno") or ""),
+                "categoria_catastale": cat_code,
+                "rendita_catastale": rendita,
+                "superficie_mq": superficie,
+                "titolo": titolo,
+                "percentuale_proprieta": quota,
+                "note": f"Importato da Catasto — consistenza {cons.get('Valore','')} {cons.get('Unita','')}".strip(),
+                "fonte": "openapi.it/catasto",
+            })
+        # Terreni
+        for im in _as_list(gr.get("ImmobileTerreniS")):
+            if not isinstance(im, dict):
+                continue
+            ident = ((im.get("DatiIdentificativi") or {}).get("IdentificativoDefinitivo") or {}).get("@attributes") or {}
+            clas = (im.get("DatiClassamentoT") or {}).get("@attributes") or {}
+            rd = 0.0
+            try:
+                rd = float((clas.get("RedditoDominicaleEuro") or clas.get("RenditaEuro") or "0").replace(".", "").replace(",", "."))
+            except Exception:
+                rd = 0.0
+            out.append({
+                "tipo": "terreno",
+                "indirizzo": "",
+                "comune": comune,
+                "provincia": ident.get("Provincia"),
+                "foglio": str(ident.get("Foglio") or ""),
+                "particella": str(ident.get("ParticellaNum") or ""),
+                "sub": str(ident.get("Subalterno") or ""),
+                "categoria_catastale": clas.get("Qualita") or "TERRENO",
+                "rendita_catastale": rd,
+                "superficie_mq": 0.0,
+                "titolo": titolo,
+                "percentuale_proprieta": quota,
+                "note": "Importato da Catasto (terreno)",
+                "fonte": "openapi.it/catasto",
+            })
+    return out
+
+
+async def _poll_richiesta(rid: str, ready=("evasa", "completato", "success", "done")) -> dict:
+    import asyncio
+    for _ in range(10):
+        r = await _call_api([f"GET:{_CAT_HOST}/richiesta"], "GET", f"https://{_CAT_HOST}/richiesta/{rid}")
+        d = (r or {}).get("data") or {}
+        if (d.get("stato") or "").lower() in ready or d.get("risultato"):
+            return d
+        await asyncio.sleep(2.5)
+    return {}
+
+
+async def _poll_visura(vid: str) -> dict:
+    import asyncio
+    for _ in range(14):
+        r = await _call_api([f"GET:{_CAT_HOST}/visura_catastale"], "GET", f"https://{_CAT_HOST}/visura_catastale/{vid}")
+        d = (r or {}).get("data") or {}
+        if (d.get("stato") or "").lower() == "evasa" and d.get("documento"):
+            return d
+        await asyncio.sleep(2.5)
+    return {}
+
+
+async def fetch_cadastre_detailed(cf_or_piva: str, want_pdf: bool = True) -> dict:
+    """Flusso completo Catasto:
+      1) ricerca_nazionale → id_soggetto
+      2) visura_catastale (JSON analitica) → immobili strutturati
+      3) visura_catastale (PDF ordinaria) → documento ufficiale (bytes)
+    Ritorna {found, immobili, soggetto, pdf_bytes, pdf_filename, provider, message}.
+    """
+    key = (cf_or_piva or "").strip()
+    if not has_credentials():
+        return {"found": False, "mock": True, "immobili": _mock_cadastre(key),
+                "soggetto": None, "pdf_bytes": None, "provider": "openapi.it (MOCK)",
+                "message": "Credenziali OpenAPI.it non configurate — dati simulati."}
+
+    # 1) ricerca_nazionale
+    r = await _call_api([f"POST:{_CAT_HOST}/richiesta"], "POST",
+                        f"https://{_CAT_HOST}/richiesta/ricerca_nazionale",
+                        json={"cf_piva": key, "tipo_catasto": "TF"})
+    data = (r or {}).get("data") or {}
+    if (data.get("stato") or "").lower() != "evasa" and data.get("id"):
+        data = await _poll_richiesta(data["id"]) or data
+    ris = data.get("risultato") or {}
+    soggetti = _as_list(ris.get("soggetti"))
+    if not soggetti:
+        return {"found": False, "immobili": [], "soggetto": None, "pdf_bytes": None,
+                "provider": "openapi.it/catasto (LIVE)",
+                "message": "Nessun immobile trovato al Catasto per questo soggetto."}
+    # soggetto: match sul CF, altrimenti il primo
+    sog = next((s for s in soggetti if (s.get("cf") or "").upper() == key.upper()), soggetti[0])
+    id_soggetto = sog.get("id_soggetto")
+    soggetto_info = {
+        "denominazione": sog.get("denominazione") or " ".join(x for x in [sog.get("cognome"), sog.get("nome")] if x),
+        "cf": sog.get("cf") or key,
+        "sede": sog.get("sede") or sog.get("luogo_nascita"),
+    }
+    if not id_soggetto:
+        return {"found": False, "immobili": [], "soggetto": soggetto_info, "pdf_bytes": None,
+                "provider": "openapi.it/catasto (LIVE)", "message": "id_soggetto non disponibile."}
+
+    # 2) visura JSON analitica → immobili
+    immobili: list[dict] = []
+    rv = await _call_api([f"POST:{_CAT_HOST}/visura_catastale"], "POST",
+                         f"https://{_CAT_HOST}/visura_catastale",
+                         json={"entita": "soggetto", "id_soggetto": id_soggetto,
+                               "tipo_visura": "ordinaria", "tipo_formato": "json",
+                               "tipo_dettaglio": "analitica", "richiedente": "CRM Assicura"})
+    vd = (rv or {}).get("data") or {}
+    vid_json = vd.get("id")
+    if vid_json:
+        vd = await _poll_visura(vid_json) or vd
+        if vd.get("documento"):
+            status, content, _ct = await _catasto_bytes(
+                f"https://{_CAT_HOST}/visura_catastale/{vid_json}/documento")
+            if status == 200 and content:
+                try:
+                    import json as _json
+                    immobili = _parse_visura_json(_json.loads(content.decode("utf-8", "ignore")), key)
+                except Exception as e:
+                    logger.warning("Parse visura JSON error: %s", e)
+
+    # 3) visura PDF ufficiale (opzionale)
+    pdf_bytes, pdf_filename = None, None
+    if want_pdf:
+        rp = await _call_api([f"POST:{_CAT_HOST}/visura_catastale"], "POST",
+                             f"https://{_CAT_HOST}/visura_catastale",
+                             json={"entita": "soggetto", "id_soggetto": id_soggetto,
+                                   "tipo_visura": "ordinaria", "richiedente": "CRM Assicura"})
+        pd = (rp or {}).get("data") or {}
+        vid_pdf = pd.get("id")
+        if vid_pdf:
+            pd = await _poll_visura(vid_pdf) or pd
+            if pd.get("documento"):
+                status, content, _ct = await _catasto_bytes(
+                    f"https://{_CAT_HOST}/visura_catastale/{vid_pdf}/documento")
+                if status == 200 and content:
+                    pdf_bytes = content
+                    pdf_filename = f"visura_catastale_{key}_{_iso_day()}.pdf"
+
+    # Fallback immobili dal riepilogo se il parsing JSON non ha prodotto nulla
+    if not immobili:
+        immobili = _normalize_cadastre_nazionale(data, key)
+
+    return {
+        "found": bool(immobili) or bool(pdf_bytes),
+        "immobili": immobili,
+        "soggetto": soggetto_info,
+        "pdf_bytes": pdf_bytes,
+        "pdf_filename": pdf_filename,
+        "provider": "openapi.it/catasto (LIVE)",
+        "message": f"{len(immobili)} immobili trovati." if immobili else "Visura generata senza dettaglio strutturato.",
+    }
+
+
+def _iso_day() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+# ===================================================================
+# SERVIZIO 8 · VISENGINE — catalogo documenti + richieste
+# ===================================================================
+_VIS_HOST = "visengine2.altravia.com"
+
+# Lista FISSA curata dei documenti (hash reali verificati sull'account).
+VISENGINE_CATALOG = [
+    # Camerali
+    {"hash": "526b6c8415936433f5a217d2bf7d2a72", "nome": "Visura Centrale Rischi persona fisica", "categoria": "Camerali"},
+    {"hash": "8e238ef3e28fd887c014879179ece1b0", "nome": "Visura Centrale Rischi Persona Giuridica", "categoria": "Camerali"},
+    {"hash": "b56c410cdfd569bfc0160821d4b3b26b", "nome": "Visura Experian", "categoria": "Camerali"},
+    # Patronato / INPS
+    {"hash": "cf711d0121f5a2f95a8694d960124bd1", "nome": "Estratto Contributivo", "categoria": "Patronato"},
+    {"hash": "6aa0789f5ba34684b2bc5ccf364f8929", "nome": "ISEE", "categoria": "Patronato"},
+    {"hash": "57c24ad72bd57ba4d796622504086e02", "nome": "ISEE Corrente", "categoria": "Patronato"},
+    {"hash": "38934ffe45179c4d5b88e2a6b849799a", "nome": "730 Singolo", "categoria": "Patronato"},
+    {"hash": "38a18478a1b223e0da81a6e0fcc730df", "nome": "730 Congiunto", "categoria": "Patronato"},
+    {"hash": "5fec14002548c9ae115758500c8981ee", "nome": "Pensione di vecchiaia", "categoria": "Patronato"},
+    {"hash": "079e2c420c93f633ac4c8954f27c1299", "nome": "Pensione Superstiti", "categoria": "Patronato"},
+    {"hash": "1f9dfd7e9a73918756470d9618fb317d", "nome": "Calcolo e Previsione Pensione", "categoria": "Patronato"},
+    {"hash": "df66c5f10a4ce1162c56f762c562d79c", "nome": "CUD Pensionati", "categoria": "Patronato"},
+    {"hash": "bc74d769203eb5c33f2a40e91c076ec3", "nome": "OBIS-M", "categoria": "Patronato"},
+    {"hash": "89031e957e9cebc4f6e64948f2353727", "nome": "Visura Proprietari PRA", "categoria": "Patronato"},
+    {"hash": "4d085e4448d523d18aa7f76f53662ff8", "nome": "IMU Calcolo", "categoria": "Patronato"},
+    {"hash": "224fcc49770edad354cdd9c480a7e50e", "nome": "Domanda Assegno Unico", "categoria": "Patronato"},
+]
+
+
+def visengine_catalog() -> list[dict]:
+    return VISENGINE_CATALOG
+
+
+async def visengine_get_schema(hash_visura: str) -> Optional[dict]:
+    res = await _call_api([f"GET:{_VIS_HOST}/visure"], "GET", f"https://{_VIS_HOST}/visure/{hash_visura}")
+    if not res:
+        return None
+    return res.get("data") or res
+
+
+def _prefill_value(label: str, tipo: str, ana: dict) -> str:
+    """Suggerisce un valore per un campo Visengine dai dati dell'anagrafica."""
+    lab = (label or "").lower()
+    is_pg = (ana.get("tipo") == "persona_giuridica") or bool(ana.get("ragione_sociale"))
+    nome = (ana.get("nome") or "").strip()
+    cognome = (ana.get("cognome") or "").strip()
+    full = ana.get("ragione_sociale") or f"{cognome} {nome}".strip()
+    if tipo == "email" or "email" in lab:
+        return ana.get("email") or ""
+    if "cellulare" in lab or "telefono" in lab:
+        return ana.get("cellulare") or ana.get("telefono") or ""
+    if "partita iva" in lab or ("piva" in lab):
+        return ana.get("partita_iva") or ""
+    if tipo in ("codice_fiscale", "codice_fiscale_persona_fisica") or "codice fiscale" in lab:
+        if is_pg:
+            return ana.get("codice_fiscale") or ana.get("partita_iva") or ""
+        return ana.get("codice_fiscale") or ""
+    if "denominazione" in lab and "cognome" not in lab:
+        return full
+    if "cognome" in lab:
+        return cognome
+    if "nome" in lab:
+        # "Nome e Cognome o Denominazione" → nome completo
+        if "cognome" in lab or "denominazione" in lab:
+            return full
+        return nome
+    return ""
+
+
+def visengine_schema_prefilled(schema: dict, ana: dict) -> dict:
+    """Trasforma json_struttura in una lista campi con valori suggeriti."""
+    js = (schema or {}).get("json_struttura") or {}
+    campi = js.get("campi") or {}
+    fields = []
+    for key in sorted(campi.keys(), key=lambda k: int((campi[k].get("ordine") or k.strip("$") or 0)) if str(campi[k].get("ordine") or k.strip("$") or "0").isdigit() else 999):
+        c = campi[key]
+        tipo = c.get("tipo") or "testo"
+        is_file = tipo == "file"
+        fields.append({
+            "key": key,
+            "nome": c.get("nome") or key,
+            "tipo": tipo,
+            "istruzioni": c.get("istruzioni") or "",
+            "required": c.get("null") is False,
+            "is_file": is_file,
+            "value": "" if is_file else _prefill_value(c.get("nome"), tipo, ana),
+        })
+    return {
+        "hash_visura": schema.get("hash_visura"),
+        "nome_visura": schema.get("nome_visura"),
+        "nome_categoria": schema.get("nome_categoria"),
+        "prezzo_visura": schema.get("prezzo_visura"),
+        "validazione": js.get("validazione"),
+        "opzioni": schema.get("opzioni"),
+        "sincrona": schema.get("sincrona"),
+        "campi": fields,
+    }
+
+
+async def visengine_create_request(hash_visura: str, json_visura: dict, opzioni: Optional[list] = None) -> dict:
+    """POST /richiesta → crea la pratica Visengine. Ritorna {ok, id, stato, error}."""
+    body = {"hash_visura": hash_visura, "json_visura": json_visura}
+    if opzioni:
+        body["opzioni"] = opzioni
+    token = await _get_token([f"POST:{_VIS_HOST}/richiesta"])
+    if not token:
+        return {"ok": False, "error": "Token non disponibile"}
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            r = await client.post(f"https://{_VIS_HOST}/richiesta", json=body,
+                                  headers={"Authorization": f"Bearer {token}",
+                                           "Content-Type": "application/json"})
+        try:
+            j = r.json()
+        except Exception:
+            j = {"raw": r.text}
+        if r.status_code >= 400 or not j.get("success", True):
+            return {"ok": False, "error": j.get("message") or f"HTTP {r.status_code}", "raw": j}
+        d = j.get("data") or {}
+        rid = d.get("id") or d.get("id_richiesta") or d.get("_id") or j.get("id")
+        return {"ok": True, "id": rid, "stato": d.get("stato") or "in_lavorazione", "raw": d}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+async def visengine_get_request(rid: str) -> dict:
+    res = await _call_api([f"GET:{_VIS_HOST}/richiesta"], "GET", f"https://{_VIS_HOST}/richiesta/{rid}")
+    return (res or {}).get("data") or {}
+
+
+async def visengine_download(rid: str) -> tuple[int, bytes, str]:
+    token = await _get_token([f"GET:{_VIS_HOST}/documento"])
+    if not token:
+        return 0, b"", ""
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            r = await client.get(f"https://{_VIS_HOST}/documento/{rid}",
+                                 headers={"Authorization": f"Bearer {token}"})
+        return r.status_code, r.content, r.headers.get("content-type", "")
+    except Exception as e:
+        logger.warning("Visengine download error: %s", e)
+        return 0, b"", ""
+
+
+def visengine_is_ready(stato: str) -> bool:
+    return (stato or "").lower() in ("evasa", "evaso", "completato", "completata", "success", "done", "pronto", "pronta")
