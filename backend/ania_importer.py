@@ -259,6 +259,12 @@ _MAP_STATO_POLIZZA = {
     "s": "sospesa", "sospesa": "sospesa",
     "x": "annullata", "annullata": "annullata",
     "e": "scaduta", "scaduta": "scaduta",
+    # Codici tracciato OWEB/SHARE (cod_stato_share)
+    "at": "attiva",       # ATtiva
+    "st": "annullata",    # STornata / annullata
+    "so": "sospesa",      # SOspesa / sostituita
+    "sp": "sospesa",      # SosPesa
+    "an": "annullata",    # ANnullata
 }
 _MAP_STATO_TITOLO = {
     "i": "incassato", "incassato": "incassato",
@@ -574,6 +580,10 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                 tracker=tracker, import_mappings=import_mappings,
             )
             stato = _MAP_STATO_POLIZZA.get((row.get("cod_stato_share") or "").lower(), "attiva")
+            # Se presente una data di annullamento, la polizza NON è attiva:
+            # il tracciato OWEB valorizza data_annullamento per storni/sostituzioni/annulli.
+            if (row.get("data_annullamento") or "").strip() and stato == "attiva":
+                stato = "annullata"
             operatore_codice, collaboratore_id = await _resolve_operatore_codice(
                 db, row, mapping_operatori, tracker=tracker, import_mappings=import_mappings,
             )

@@ -634,3 +634,12 @@ Usare integration_expert prima di implementare.
 - Discoverability: aggiunto tab "Biblioteca & Schede Calcolo" nel pannello Super Admin (SuperAdminPanel.jsx) che naviga a /super-admin/biblioteca (prima raggiungibile solo dal pulsante header). Verificato via screenshot: categorie e Schede di Calcolo tutte presenti.
 
 - CONFERMA collegamento calcoli: verificato via API che l'agenzia principale (admin@assicura.it) legge i 1012 PDF previdenza dal globale (cartelle con conteggi corretti). Il widget "Consulto AI · Biblioteca Previdenza" nelle schermate di analisi cliente (Pensione INPS, Approfondimento Redditi, Successione, Riepilogo Pensionistico) usa questi PDF per categoria. Gestione centralizzata Super Admin → propagata a tutte le agenzie.
+
+## Sessione 2026-06 (fork continuazione, parte 6) — Stato polizze import OWEB + protezione metodi di calcolo
+- BUG stato polizze: il tracciato OWEB usa cod_stato_share con codici AT/ST/SO/SP, ma _MAP_STATO_POLIZZA in ania_importer.py mappava solo a/s/x → TUTTE le polizze importate finivano "attiva" (incl. 28k stornate). FIX: aggiunti codici at→attiva, st→annullata, so/sp→sospesa, an→annullata; inoltre se data_annullamento è valorizzata e lo stato calcolato è attiva → annullata.
+- Correzione dati esistenti: l'import di questo file era già stato eseguito oggi sull'agenzia principale (49.219 polizze tutte "attiva"). Script di correzione mirata via id_polizza_exp incrociato col rec20: aggiornate 43.389 polizze → distribuzione reale annullata 28.156, sospesa 15.232, attiva 5.758. Verificate le polizze dello screenshot utente: ora "annullata".
+- Protezione metodi di calcolo (richiesta utente: nessuna manomissione dalle agenzie, propagazione dal Super Admin):
+  * genera_scheda (POST /schede-calcolo/genera): aggiunto _guard_libreria_globale("previdenza") → agenzia 403, super admin 200.
+  * sync_drive: la sezione previdenza viene sincronizzata SOLO dal super admin (le agenzie sincronizzano solo le proprie Condizioni).
+  * upload/delete/create_cartella previdenza già protetti. Docs previdenza vivono nel tenant globale (__global_library__) → un'unica copia, ogni modifica del super admin è propagata a tutte le agenzie in lettura (MIXED_SHARED).
+  * Verificato via curl: agenzia upload/genera previdenza = 403; super admin = 200/consentito.

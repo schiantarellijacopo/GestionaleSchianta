@@ -448,6 +448,9 @@ async def genera_scheda(body: dict, user=Depends(require_user("admin", "collabor
     fino a stato "done" (evita i timeout del proxy sulle chiamate AI lunghe).
     """
     import asyncio
+    # I metodi di calcolo (schede previdenza) sono una LIBRERIA GLOBALE:
+    # solo il Super Admin può generarli/rigenerarli. Le agenzie li usano in sola lettura.
+    _guard_libreria_globale("previdenza", user)
     categoria = (body.get("cartella") or body.get("categoria") or "").strip()
     if not categoria:
         raise HTTPException(400, "Categoria obbligatoria")
@@ -685,6 +688,10 @@ async def sync_drive(body: dict, user=Depends(require_user("admin", "collaborato
         roots = []  # (id, sezione)
         cartelle_create = []
         for root_name, sez in SEZIONI_DRIVE.items():
+            # La sezione previdenza è globale: solo il Super Admin può sincronizzarla.
+            # Le agenzie possono sincronizzare solo le proprie "Condizioni di Polizza".
+            if sez == "previdenza" and not is_super_admin(user):
+                continue
             found = await _drive_list(
                 x, token,
                 f"name='{root_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false")
