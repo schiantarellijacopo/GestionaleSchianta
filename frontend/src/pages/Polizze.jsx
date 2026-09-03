@@ -137,7 +137,29 @@ export default function Polizze() {
     const load = () => {
         api.get("/polizze", { params: buildParams() }).then((r) => setList(r.data));
     };
+    const [conteggi, setConteggi] = useState({});
+    const [marcandoScadute, setMarcandoScadute] = useState(false);
+    const loadConteggi = () => {
+        api.get("/polizze/conteggi-stato").then((r) => setConteggi(r.data || {})).catch(() => {});
+    };
+    const contaPreset = (key) => {
+        const map = { tutti: "_tot", attive: "attiva", scadute: "scaduta", sospese: "sospesa", annullate: "annullata" };
+        const k = map[key];
+        return k ? (conteggi[k] ?? 0) : null;
+    };
+    const segnaScadute = async () => {
+        if (!window.confirm("Marcare come 'scadute' le polizze attive con scadenza passata e senza rinnovo attivo?")) return;
+        setMarcandoScadute(true);
+        try {
+            const r = await api.post("/polizze/ricalcola-scadute");
+            toast.success(`${r.data.marcate_scadute} polizze marcate come scadute`);
+            loadConteggi(); load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally { setMarcandoScadute(false); }
+    };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
+    useEffect(() => { loadConteggi(); /* eslint-disable-next-line */ }, []);
 
     useEffect(() => {
         Promise.all([
@@ -211,8 +233,10 @@ export default function Polizze() {
             <KpiBar sezione="polizze" />
 
             {/* Preset rapidi */}
-            <div className="flex flex-wrap gap-2 mb-3">
-                {PRESETS.map((p) => (
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+                {PRESETS.map((p) => {
+                    const cnt = contaPreset(p.key);
+                    return (
                     <button
                         key={p.key}
                         onClick={() => setF("preset", p.key)}
@@ -224,8 +248,25 @@ export default function Polizze() {
                         }`}
                     >
                         {p.label}
+                        {cnt !== null && (
+                            <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                filters.preset === p.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                            }`} data-testid={`pol-preset-count-${p.key}`}>{cnt}</span>
+                        )}
                     </button>
-                ))}
+                    );
+                })}
+                {canCreate && (
+                    <button
+                        onClick={segnaScadute}
+                        disabled={marcandoScadute}
+                        data-testid="pol-segna-scadute"
+                        className="ml-auto px-3 py-1.5 rounded-md text-xs font-medium border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                        title="Marca come scadute le polizze attive con scadenza passata e senza rinnovo"
+                    >
+                        {marcandoScadute ? "Aggiorno…" : "⚑ Segna scadute"}
+                    </button>
+                )}
             </div>
 
             {/* Toolbar */}

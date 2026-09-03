@@ -2352,6 +2352,45 @@ async def list_polizze(
     return items
 
 
+@api.get("/polizze/conteggi-stato")
+async def conteggi_stato_polizze(user=Depends(current_user)):
+    """Conteggi delle polizze per stato (per i filtri rapidi in elenco)."""
+    flt = await visibility_filter(user)
+    out = {}
+    async for r in db.polizze.aggregate([
+        {"$match": flt},
+        {"$group": {"_id": "$stato", "n": {"$sum": 1}}},
+    ]):
+        out[(r["_id"] or "attiva")] = r["n"]
+    out["_tot"] = sum(out.values())
+    return out
+
+
+@api.post("/polizze/ricalcola-scadute")
+async def ricalcola_scadute(user=Depends(require_user("admin"))):
+    """Marca come 'scaduta' le polizze ATTIVE con scadenza passata e senza
+    rinnovo attivo (nessun titolo che copre oltre oggi). L'elenco delle attive
+    rispecchia così solo i contratti realmente in corso."""
+    from datetime import date
+    flt = await visibility_filter(user)
+    today = date.today().isoformat()
+    # polizze con copertura attiva (rinnovo in corso) → NON scadute
+    coperte = set()
+    async for t in db.titoli.find({"coperto_fino_a": {"$gte": today}}, {"_id": 0, "polizza_id": 1}):
+        if t.get("polizza_id"):
+            coperte.add(t["polizza_id"])
+    q = {**flt, "stato": "attiva", "scadenza": {"$gt": "", "$lt": today}}
+    ids = [p["id"] async for p in db.polizze.find(q, {"_id": 0, "id": 1})]
+    da_marcare = [i for i in ids if i not in coperte]
+    n = 0
+    for i in range(0, len(da_marcare), 5000):
+        chunk = da_marcare[i:i + 5000]
+        r = await db.polizze.update_many({"id": {"$in": chunk}}, {"$set": {"stato": "scaduta"}})
+        n += r.modified_count
+    return {"ok": True, "marcate_scadute": n, "valutate": len(ids), "coperte_da_rinnovo": len(ids) - len(da_marcare)}
+
+
+
 @api.get("/polizze/veicolo-by-targa")
 async def veicolo_by_targa(
     targa: str,

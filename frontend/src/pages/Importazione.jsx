@@ -194,6 +194,11 @@ function ImportReport({ log, onOpenWizard }) {
                     <Stat label="Titoli" value={log.titoli_creati} />
                     <Stat label="Sinistri" value={log.sinistri_creati} />
                 </div>
+                {((log.polizze_aggiornate || 0) + (log.anagrafiche_aggiornate || 0)) > 0 && (
+                    <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-3 py-2" data-testid="import-duplicati-banner">
+                        ⚑ <b>Doppioni rilevati e sovrascritti</b>: {log.polizze_aggiornate || 0} polizze e {log.anagrafiche_aggiornate || 0} anagrafiche erano già presenti e sono state aggiornate (nessun duplicato creato).
+                    </div>
+                )}
                 <div className="mt-3 text-xs text-slate-600">
                     <span className="font-medium text-slate-700">Record types:</span>{" "}
                     {Object.entries(log.record_types_processati || {}).map(([k, v]) => (

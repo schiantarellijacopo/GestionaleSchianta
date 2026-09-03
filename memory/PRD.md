@@ -643,3 +643,9 @@ Usare integration_expert prima di implementare.
   * sync_drive: la sezione previdenza viene sincronizzata SOLO dal super admin (le agenzie sincronizzano solo le proprie Condizioni).
   * upload/delete/create_cartella previdenza già protetti. Docs previdenza vivono nel tenant globale (__global_library__) → un'unica copia, ogni modifica del super admin è propagata a tutte le agenzie in lettura (MIXED_SHARED).
   * Verificato via curl: agenzia upload/genera previdenza = 403; super admin = 200/consentito.
+
+## Sessione 2026-06 (fork continuazione, parte 7) — Stato scadute, filtri conteggi, import duplicati
+- Stato "scaduta": nuovo endpoint POST /polizze/ricalcola-scadute (admin) → marca 'scaduta' le polizze attive con scadenza passata (scadenza > "" e < oggi) e SENZA rinnovo attivo (nessun titolo con coperto_fino_a >= oggi). Eseguito su agenzia principale: 1746 marcate → attive 5826→4080, scadute →1747. Pulsante "Segna scadute" in Polizze.jsx (admin).
+- Filtri rapidi con conteggi: nuovo endpoint GET /polizze/conteggi-stato (aggregazione per stato, rispetta visibility_filter). Chip preset in Polizze.jsx (Tutte/Attive/Scadute/Sospese/Annullate) mostrano il conteggio.
+- Import duplicati: l'import ANIA/OMNIA fa già upsert (_upsert_polizza per id_polizza_exp) → i doppioni vengono SOVRASCRITTI/aggiornati, mai duplicati. Aggiunto banner nel report import (Importazione.jsx) "Doppioni rilevati e sovrascritti: N polizze e M anagrafiche già presenti aggiornate".
+- Nota: endpoint statici /polizze/conteggi-stato e /polizze/ricalcola-scadute inseriti PRIMA di /polizze/{pid} per evitare cattura del path param.
