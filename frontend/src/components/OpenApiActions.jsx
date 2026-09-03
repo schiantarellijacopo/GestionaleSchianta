@@ -244,11 +244,11 @@ function CadastrePanel({ data, onClose }) {
                         {data.map((im, i) => (
                             <tr key={i} className="border-b border-slate-100">
                                 <td className="py-1">{im.comune}<div className="text-[10px] text-slate-500">{im.indirizzo}</div></td>
-                                <td className="text-center num">{im.foglio}/{im.particella}/{im.subalterno}</td>
-                                <td className="text-center">{im.categoria}</td>
-                                <td className="text-center num">{im.superficie_catastale_mq}</td>
-                                <td className="text-right num">{fmtEur(im.rendita_eur)}</td>
-                                <td>{im.titolo}</td>
+                                <td className="text-center num">{im.foglio}/{im.particella}/{im.sub || im.subalterno || ""}</td>
+                                <td className="text-center">{im.categoria_catastale || im.categoria || "—"}</td>
+                                <td className="text-center num">{im.superficie_mq || im.superficie_catastale_mq || "—"}</td>
+                                <td className="text-right num">{fmtEur(im.rendita_catastale ?? im.rendita_eur ?? 0)}</td>
+                                <td>{im.titolo}{im.percentuale_proprieta ? ` (${im.percentuale_proprieta}%)` : ""}</td>
                             </tr>
                         ))}
                     </tbody>
