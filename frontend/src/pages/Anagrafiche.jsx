@@ -808,7 +808,7 @@ function KpiCard({ icon, color, label, n, premio, testid, onClick }) {
             </div>
             <div className="mt-1 flex items-baseline gap-2">
                 <span className="text-3xl font-bold num text-slate-900">{n}</span>
-                <span className="text-[10px] uppercase tracking-wider text-slate-400">tot.</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-400">con pol.</span>
             </div>
             <div className="mt-1 text-xs text-slate-600">
                 Premi: <span className={`font-semibold num ${p.hint}`}>{fmtEur(premio || 0)}</span>

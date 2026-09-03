@@ -190,13 +190,17 @@ async def anagrafiche_stats(user: dict = Depends(current_user)):
     out: dict = {}
     for k, ids in bucket.items():
         premio = 0.0
+        n_con_polizze = 0
         if ids:
             agg = await db.polizze.aggregate([
                 {"$match": {"contraente_id": {"$in": ids}, "stato": {"$in": ["attiva", "in_emissione"]}}},
-                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"}}},
+                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"},
+                            "contraenti": {"$addToSet": "$contraente_id"}}},
             ]).to_list(1)
-            premio = float(agg[0]["tot"]) if agg else 0.0
-        out[k] = {"n": len(ids), "premio_totale": round(premio, 2)}
+            if agg:
+                premio = float(agg[0]["tot"])
+                n_con_polizze = len(agg[0].get("contraenti") or [])
+        out[k] = {"n": n_con_polizze, "premio_totale": round(premio, 2)}
     out["totale"] = {
         "n": sum(v["n"] for v in out.values()),
         "premio_totale": round(sum(v["premio_totale"] for v in out.values()), 2),
@@ -214,20 +218,24 @@ async def anagrafiche_stats(user: dict = Depends(current_user)):
             {"tags": tag}, {"_id": 0, "id": 1},
         )]
         premio = 0.0
+        n_con_polizze = 0
         if ids_tag:
             agg = await db.polizze.aggregate([
                 {"$match": {"contraente_id": {"$in": ids_tag},
                             "stato": {"$in": ["attiva", "in_emissione"]}}},
-                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"}}},
+                {"$group": {"_id": None, "tot": {"$sum": "$premio_lordo"},
+                            "contraenti": {"$addToSet": "$contraente_id"}}},
             ]).to_list(1)
-            premio = float(agg[0]["tot"]) if agg else 0.0
+            if agg:
+                premio = float(agg[0]["tot"])
+                n_con_polizze = len(agg[0].get("contraenti") or [])
         custom_out.append({
             "id": k["id"],
             "label": k["label"],
             "tag": tag,
             "color": k.get("color", "sky"),
             "icon": k.get("icon", "Star"),
-            "n": len(ids_tag),
+            "n": n_con_polizze,
             "premio_totale": round(premio, 2),
         })
     out["custom"] = custom_out
