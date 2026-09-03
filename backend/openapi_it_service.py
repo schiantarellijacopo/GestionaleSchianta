@@ -275,24 +275,63 @@ async def fetch_cadastre(cf_or_piva: str) -> list[dict]:
             [f"POST:{host}/richiesta"], "POST",
             f"https://{host}/richiesta/ricerca_nazionale", json=body,
         )
-        if res and res.get("success"):
-            rid = (res.get("data") or {}).get("id") or res.get("id")
-            if rid:
-                import asyncio
-                for _ in range(4):
-                    await asyncio.sleep(2.0)
-                    r2 = await _call_api(
-                        [f"GET:{host}/richiesta"], "GET",
-                        f"https://{host}/richiesta/{rid}",
-                    )
-                    if r2 and r2.get("success"):
-                        payload = r2.get("data") or {}
-                        stato = (payload.get("stato") or "").lower()
-                        if stato in ("completato", "success", "done", "evaso"):
-                            return _normalize_cadastre(payload, key)
-                return _mock_cadastre(key)
-        logger.info("OpenAPI.it Catasto fallback MOCK per '%s'", key)
+        data = (res or {}).get("data") or {}
+        stato = (data.get("stato") or "").lower()
+        # La ricerca_nazionale è sincrona: se "evasa" i dati sono già in data.risultato
+        if stato in ("evasa", "completato", "success", "done") or data.get("risultato"):
+            out = _normalize_cadastre_nazionale(data, key)
+            if out:
+                return out
+        # Eventuale flusso asincrono con id (fallback)
+        rid = data.get("id") or (res or {}).get("id")
+        if rid and stato not in ("evasa",):
+            import asyncio
+            for _ in range(4):
+                await asyncio.sleep(2.0)
+                r2 = await _call_api(
+                    [f"GET:{host}/richiesta"], "GET",
+                    f"https://{host}/richiesta/{rid}",
+                )
+                d2 = (r2 or {}).get("data") or {}
+                if (d2.get("stato") or "").lower() in ("evasa", "completato", "success", "done"):
+                    out = _normalize_cadastre_nazionale(d2, key)
+                    if out:
+                        return out
+        logger.info("OpenAPI.it Catasto fallback MOCK per '%s' (stato=%s)", key, stato)
     return _mock_cadastre(key)
+
+
+def _normalize_cadastre_nazionale(data: dict, key: str) -> list[dict]:
+    """Parsa la risposta 'ricerca_nazionale' del Catasto OpenAPI.it:
+    data.risultato.soggetti[].catasti[].comuni[] → riepilogo immobili per comune."""
+    ris = data.get("risultato") or {}
+    soggetti = ris.get("soggetti") or ris.get("immobili") or []
+    if isinstance(soggetti, dict):
+        soggetti = [soggetti]
+    out = []
+    for sog in soggetti:
+        if not isinstance(sog, dict):
+            continue
+        intest = " ".join([x for x in [sog.get("cognome"), sog.get("nome")] if x]) or sog.get("denominazione") or ""
+        for cat in (sog.get("catasti") or []):
+            prov = cat.get("provincia")
+            for com in (cat.get("comuni") or [{"comune": cat.get("citta"), "fabbricati": cat.get("fabbricati"), "terreni": cat.get("terreni")}]):
+                fab = com.get("fabbricati") or 0
+                ter = com.get("terreni") or 0
+                if not (fab or ter):
+                    continue
+                out.append({
+                    "provider": "openapi.it/catasto (LIVE)",
+                    "comune": com.get("comune"),
+                    "provincia": prov,
+                    "intestatario": intest,
+                    "fabbricati": fab,
+                    "terreni": ter,
+                    "titolo": "Proprietà",
+                    "id_soggetto": sog.get("id_soggetto"),
+                    "note": f"{fab} fabbricati, {ter} terreni a {com.get('comune')} ({prov})",
+                })
+    return out
 
 
 def _normalize_cadastre(payload: dict, key: str) -> list[dict]:
