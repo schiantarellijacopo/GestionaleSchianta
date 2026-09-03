@@ -7126,15 +7126,29 @@ async def auto_popola_veicoli(aid: str, user=Depends(current_user)):
     targa + marca/modello + valore veicolo (se presenti in polizza)."""
     ac = await _ensure_analisi(aid)
     oggi = datetime.now(timezone.utc).date().isoformat()
+    # Considera anche eventuali anagrafiche DUPLICATE con lo stesso codice fiscale/partita IVA
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "codice_fiscale": 1, "partita_iva": 1})
+    ids_collegati = {aid}
+    cf = ((ana or {}).get("codice_fiscale") or "").strip().upper()
+    piva = ((ana or {}).get("partita_iva") or "").strip()
+    or_cf = []
+    if cf:
+        or_cf.append({"codice_fiscale": cf})
+    if piva:
+        or_cf.append({"partita_iva": piva})
+    if or_cf:
+        async for a in db.anagrafiche.find({"$or": or_cf}, {"_id": 0, "id": 1}):
+            ids_collegati.add(a["id"])
     polizze = await db.polizze.find(
         {
-            "contraente_id": aid,
+            "contraente_id": {"$in": list(ids_collegati)},
             "targa": {"$nin": [None, ""]},
-            "stato": {"$nin": ["disdettata", "annullata", "sospesa"]},
+            "stato": {"$nin": ["disdettata", "annullata", "sospesa", "scaduta"]},
             "$or": [
                 {"scadenza": {"$gte": oggi}},
                 {"scadenza": {"$exists": False}},
                 {"scadenza": None},
+                {"scadenza": ""},
             ],
         },
         {"_id": 0, "numero_polizza": 1, "targa": 1, "veicolo_marca": 1,
@@ -7173,7 +7187,7 @@ async def auto_popola_veicoli(aid: str, user=Depends(current_user)):
         await db.analisi_cliente.update_one(
             {"anagrafica_id": aid},
             {"$set": {"veicoli": veicoli, "updated_at": _now_iso()}})
-    return {"aggiunti": len(aggiunti), "veicoli": veicoli}
+    return {"aggiunti": len(aggiunti), "veicoli": veicoli, "polizze_trovate": len(polizze)}
 
 
 @api.get("/anagrafiche/{aid}/analisi/patrimonio")

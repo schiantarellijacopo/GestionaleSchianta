@@ -64,7 +64,7 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
     return (
         <div className="space-y-4 mt-4" data-testid="analisi-cliente-tab">
             {/* Toolbar */}
-            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center justify-between flex-wrap gap-2">
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center justify-between flex-wrap gap-2 sticky top-0 z-30 shadow-sm">
                 <div className="text-xs text-sky-900">
                     <strong>Analisi Cliente completa</strong> — situazione finanziaria, patrimonio, obiettivi,
                     pensioni e successione. Premi <em>Salva</em> per persistere le modifiche.
@@ -143,7 +143,7 @@ export default function AnalisiClienteTab({ anagrafica_id, ana, canEdit, onReloa
                     <SituazioneFinanziaria ac={ac} set={set} canEdit={canEdit} />
                 </TabsContent>
                 <TabsContent value="patrimonio">
-                    <PatrimonioTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} />
+                    <PatrimonioTab ac={ac} set={set} canEdit={canEdit} anagrafica_id={anagrafica_id} save={save} dirty={dirty} saving={saving} />
                 </TabsContent>
                 <TabsContent value="contesto">
                     <ContestoObiettivi ac={ac} set={set} canEdit={canEdit} />
@@ -249,7 +249,7 @@ function SituazioneFinanziaria({ ac, set, canEdit }) {
 }
 
 // ============== SEZIONE 2: PATRIMONIO ==============
-function PatrimonioTab({ ac, set, canEdit, anagrafica_id }) {
+function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving }) {
     const [riepilogo, setRiepilogo] = useState(null);
 
     useEffect(() => {
@@ -301,9 +301,13 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id }) {
                                     try {
                                         const r = await api.post(`/anagrafiche/${anagrafica_id}/analisi/veicoli/auto-popola`);
                                         set("veicoli", r.data.veicoli);
-                                        toast.success(r.data.aggiunti > 0
-                                            ? `${r.data.aggiunti} veicoli aggiunti dalle polizze auto (targa + valore)`
-                                            : "Nessun nuovo veicolo trovato nelle polizze attive");
+                                        if (r.data.aggiunti > 0) {
+                                            toast.success(`${r.data.aggiunti} veicoli aggiunti dalle polizze auto (targa + valore). Ricordati di premere Salva.`);
+                                        } else if ((r.data.polizze_trovate || 0) > 0) {
+                                            toast.info(`Veicoli già aggiornati: ${r.data.polizze_trovate} polizza/e auto già presenti in elenco.`);
+                                        } else {
+                                            toast.warning("Nessuna polizza auto attiva trovata per questo cliente. Verifica che la polizza sia intestata a questa anagrafica (attenzione ai clienti duplicati).");
+                                        }
                                     } catch (e) { toast.error("Errore: " + (e.response?.data?.detail || e.message)); }
                                 }}>
                             <TrendingUp size={12} className="mr-1" /> Auto-popola da polizze auto
@@ -355,6 +359,15 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id }) {
                         onRemove={() => removeItem("aziende", i)} />
                 ))}
             </Card>
+            {canEdit && save && (
+                <div className="sticky bottom-0 bg-white/90 backdrop-blur border-t border-slate-200 py-3 flex justify-end">
+                    <Button onClick={save} disabled={!dirty || saving}
+                        className="bg-emerald-600 hover:bg-emerald-700" data-testid="patrimonio-salva-btn">
+                        <Save size={14} className="mr-1" />
+                        {saving ? "Salvataggio…" : (dirty ? "Salva situazione patrimoniale" : "Salvato")}
+                    </Button>
+                </div>
+            )}
         </div>
     );
 }
