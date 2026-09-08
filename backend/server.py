@@ -7694,6 +7694,31 @@ async def prepopola_piramide_v2(aid: str, user=Depends(current_user)):
         raise HTTPException(403, "Permesso negato")
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
     ac = await _ensure_analisi(aid)
+
+    # === AZIENDE (persona giuridica): precompila dai dati di bilancio, non INPS ===
+    if (ana.get("tipo") == "persona_giuridica") or ana.get("partita_iva"):
+        sf = (ana.get("salute_fiscale_dati") or {}).get("bilancio_estratto") or {}
+        base = sf.get("valore_produzione") or sf.get("ricavi")
+        if not base:
+            comp = (ana.get("openapi_data") or {}).get("company") or {}
+            bb = next((x for x in (comp.get("bilanci") or []) if x.get("fatturato")), None)
+            base = (bb or {}).get("fatturato")
+        if not base:
+            raise HTTPException(400, "Nessun dato di bilancio azienda disponibile. "
+                                     "Compila prima la Salute Fiscale da OpenAPI.")
+        r = int(round(float(base)))
+        return {
+            "reddito_attuale": r,                          # valore della produzione / fatturato
+            "estratto_conto": False,
+            "reddito_invalidita_66_99": int(round(r * 0.50)),
+            "reddito_inabilita_100": int(round(r * 0.80)),
+            "reddito_superstiti": int(round(r * 0.60)),
+            "reddito_responsabilita": r,
+            "reddito_perdita_beni": r,
+            "fonte": "bilancio_azienda",
+            "anni_storici_usati": 0,
+        }
+
     reddito_base = float(ana.get("reddito_annuo_lordo")
                          or ac.get("reddito_lordo_annuo") or 0)
     # Media ultimi 3 anni storici, se disponibile

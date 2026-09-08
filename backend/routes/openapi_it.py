@@ -64,7 +64,62 @@ async def fetch_company_for_anagrafica(aid: str, user=Depends(current_user)) -> 
     if not data.get("ragione_sociale"):
         data["ragione_sociale"] = ana.get("ragione_sociale")
     await _update_openapi_field(aid, "company", data)
+    # Auto-compila l'amministratore (legale rappresentante) se non ancora impostato
+    amm = _amministratore_da_company(data)
+    if amm and not (ana.get("amministratore") or "").strip():
+        await raw_db.anagrafiche.update_one(
+            {"id": aid}, {"$set": {"amministratore": amm, "updated_at": _now_iso()}})
+        data["_amministratore_auto"] = amm
     return data
+
+
+def _amministratore_da_company(data: dict) -> Optional[str]:
+    """Estrae il nome dell'amministratore/legale rappresentante dai dati governance."""
+    if not isinstance(data, dict):
+        return None
+    amms = data.get("amministratori") or []
+    if isinstance(amms, list) and amms:
+        # priorità: chi è flaggato legale rappresentante, poi ruolo 'amministratore'
+        lr = next((a for a in amms if isinstance(a, dict) and a.get("legale_rappresentante")), None)
+        if not lr:
+            lr = next((a for a in amms if isinstance(a, dict) and "amministrat" in (a.get("ruoli") or "").lower()), None)
+        cand = lr or (amms[0] if isinstance(amms[0], dict) else None)
+        if cand and (cand.get("nome") or "").strip():
+            return cand["nome"].strip()
+    lr_str = data.get("legale_rappresentante")
+    if isinstance(lr_str, str) and lr_str.strip():
+        return lr_str.strip()
+    return None
+
+
+@router.post("/governance/{aid}")
+async def governance_da_openapi(aid: str, user=Depends(current_user)) -> dict:
+    """Compila l'Amministratore (legale rappresentante) dell'azienda dalla governance
+    di company.openapi.com. Ritorna anche l'elenco completo degli amministratori/soci
+    per aiutare a scegliere un Referente. Email/telefono non sono forniti dalla
+    governance pubblica: restano da inserire a mano."""
+    ana = await _get_anagrafica(aid, user)
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
+    if not key:
+        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    data = await svc.company_full_completo(key)
+    if not data:
+        raise HTTPException(status_code=404, detail="Dati governance non disponibili da OpenAPI")
+    amm = _amministratore_da_company(data)
+    if not amm:
+        raise HTTPException(status_code=404, detail="Amministratore/legale rappresentante non trovato")
+    patch = {"amministratore": amm, "updated_at": _now_iso()}
+    # se il referente è vuoto, proponi lo stesso amministratore come default
+    if not (ana.get("referente_azienda") or "").strip():
+        patch["referente_azienda"] = amm
+    await raw_db.anagrafiche.update_one({"id": aid}, {"$set": patch})
+    return {
+        "amministratore": amm,
+        "referente_azienda": patch.get("referente_azienda"),
+        "pec": data.get("pec"),
+        "amministratori": data.get("amministratori") or [],
+        "soci": data.get("soci") or [],
+    }
 
 
 async def _save_allegato(aid: str, user, filename: str, content: bytes,

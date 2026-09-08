@@ -179,7 +179,7 @@ export default function AnagraficaDetail() {
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     <TabsTrigger value="dati" data-testid="tab-dati">Anagrafica</TabsTrigger>
                     <TabsTrigger value="albero" data-testid="tab-albero">Relazione</TabsTrigger>
-                    <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.length})</TabsTrigger>
+                    <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.filter(isPolizzaAttiva).length})</TabsTrigger>
                     <TabsTrigger value="conti-correnti" data-testid="tab-conti-correnti">🏦 Conti Correnti</TabsTrigger>
                     <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Profilazione & GDPR</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
@@ -188,9 +188,6 @@ export default function AnagraficaDetail() {
                     )}
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
-                    )}
-                    {ana.tipo === "persona_giuridica" && (
-                        <TabsTrigger value="analisi-azienda" data-testid="tab-analisi-azienda">🏢 Analisi Azienda</TabsTrigger>
                     )}
                     {ana.tipo === "persona_giuridica" && (
                         <TabsTrigger value="salute-fiscale" data-testid="tab-salute-fiscale">💼 Salute Fiscale</TabsTrigger>
@@ -217,9 +214,6 @@ export default function AnagraficaDetail() {
                 <TabsContent value="polizze"><PolizzeTab polizze={polizze} filter={polizzeFilter} onClearFilter={() => setPolizzeFilter(null)} /></TabsContent>
                 <TabsContent value="conti-correnti"><ContiCorrentiTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="profilazione-gdpr"><ProfilazioneGdprTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
-                {ana.tipo === "persona_giuridica" && (
-                    <TabsContent value="analisi-azienda"><AnalisiAziendaTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
-                )}
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
                     <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
@@ -228,7 +222,7 @@ export default function AnagraficaDetail() {
                     <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 )}
                 {ana.tipo === "persona_giuridica" && (
-                    <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
+                    <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
@@ -390,10 +384,10 @@ function DatiTab({ ana, canEdit, onReload }) {
                             <div className="text-sm text-slate-800 num">{v || "—"}</div>
                         </div>
                     ))}
-                    {/* IBAN — editabile inline */}
+                    {/* IBAN — editabile inline (fallback: IBAN principale dai Conti Correnti) */}
                     <InlineEditField
                         label="IBAN"
-                        value={ana.iban}
+                        value={ana.iban || (ana.conti_correnti?.find((c) => c.principale) || ana.conti_correnti?.[0])?.iban || ""}
                         canEdit={canEdit}
                         placeholder="IT60 X054 2811 1010 0000 0123 456"
                         onSave={async (val) => {
@@ -416,6 +410,27 @@ function DatiTab({ ana, canEdit, onReload }) {
                         }}
                     />
                 </div>
+                {ana.tipo === "persona_giuridica" && (
+                    <div className="mt-5 pt-4 border-t border-slate-100" data-testid="governance-view">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Governance azienda</div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-4">
+                            {[
+                                ["Amministratore", ana.amministratore],
+                                ["Amm. email", ana.amministratore_email],
+                                ["Amm. telefono", formatPhone(ana.amministratore_telefono)],
+                                ["Referente azienda", ana.referente_azienda],
+                                ["Ref. email", ana.referente_email],
+                                ["Ref. telefono", formatPhone(ana.referente_telefono)],
+                                ["PEC", ana.pec],
+                            ].map(([k, v]) => (
+                                <div key={k}>
+                                    <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{k}</div>
+                                    <div className="text-sm text-slate-800 num">{v || "—"}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {ana.note && (
                     <div className="mt-5 pt-4 border-t border-slate-100">
                         <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Note</div>
@@ -491,6 +506,41 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
                 <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
                 <div><Label>PEC</Label><Input value={f.pec || ""} onChange={(e) => set("pec", e.target.value)} placeholder="pec@esempio.it" /></div>
+                {f.tipo === "persona_giuridica" && (
+                    <div className="col-span-2 md:col-span-3 rounded-lg border border-sky-200 bg-sky-50/40 p-3">
+                        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                            <Label className="text-xs uppercase tracking-wide text-sky-800 font-semibold">Governance azienda — Amministratore & Referente</Label>
+                            <button
+                                type="button"
+                                data-testid="governance-openapi-btn"
+                                onClick={async () => {
+                                    try {
+                                        const r = await api.post(`/openapi-it/governance/${f.id}`);
+                                        setF((p) => ({
+                                            ...p,
+                                            amministratore: r.data.amministratore || p.amministratore,
+                                            referente_azienda: p.referente_azienda || r.data.referente_azienda || p.referente_azienda,
+                                            pec: p.pec || r.data.pec || p.pec,
+                                        }));
+                                        toast.success(`Amministratore: ${r.data.amministratore}`);
+                                    } catch (e) { toast.error(e.response?.data?.detail || "Governance OpenAPI non disponibile"); }
+                                }}
+                                className="text-xs px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800 font-medium"
+                            >
+                                ⚡ Compila da OpenAPI
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            <div><Label>Amministratore</Label><Input data-testid="anag-amministratore" value={f.amministratore || ""} onChange={(e) => set("amministratore", e.target.value)} placeholder="Legale rappresentante" /></div>
+                            <div><Label>Amm. email</Label><Input value={f.amministratore_email || ""} onChange={(e) => set("amministratore_email", e.target.value)} /></div>
+                            <div><Label>Amm. telefono</Label><Input value={f.amministratore_telefono || ""} onChange={(e) => set("amministratore_telefono", e.target.value)} /></div>
+                            <div><Label>Referente azienda</Label><Input data-testid="anag-referente" value={f.referente_azienda || ""} onChange={(e) => set("referente_azienda", e.target.value)} placeholder="Persona di contatto" /></div>
+                            <div><Label>Ref. email</Label><Input value={f.referente_email || ""} onChange={(e) => set("referente_email", e.target.value)} /></div>
+                            <div><Label>Ref. telefono</Label><Input value={f.referente_telefono || ""} onChange={(e) => set("referente_telefono", e.target.value)} /></div>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1.5">Email e telefono non sono forniti dalla governance pubblica OpenAPI: inseriscili manualmente.</div>
+                    </div>
+                )}
                 {f.tipo !== "persona_giuridica" && (<>
                 <div><Label>Data nascita</Label><Input type="date" value={f.data_nascita || ""} onChange={(e) => set("data_nascita", e.target.value)} /></div>
                 <div>
@@ -697,18 +747,33 @@ function DatiTab({ ana, canEdit, onReload }) {
     );
 }
 
+const _STATI_ATTIVI = new Set(["attiva", "in_corso", "in corso", "vigente", "in_emissione"]);
+const isPolizzaAttiva = (p) => _STATI_ATTIVI.has((p.stato || "").toLowerCase());
+
 function PolizzeTab({ polizze, filter, onClearFilter }) {
-    const filtered = !filter ? polizze : polizze.filter((p) => (p.stato || "").toLowerCase() === filter);
+    const [soloAttive, setSoloAttive] = useState(true);
+    // Se arriva un filtro esplicito (click da KPI) ha priorità; altrimenti applica "solo attive"
+    const filtered = filter
+        ? polizze.filter((p) => (p.stato || "").toLowerCase() === filter)
+        : (soloAttive ? polizze.filter(isPolizzaAttiva) : polizze);
+    const nAttive = polizze.filter(isPolizzaAttiva).length;
     return (
         <Card className="border-slate-200 mt-4 overflow-hidden">
-            {filter && (
+            {filter ? (
                 <div className="px-4 py-2 bg-sky-50 border-b border-sky-200 text-xs text-sky-900 flex items-center justify-between">
                     <span>Filtro attivo: <b>stato = {filter}</b> · {filtered.length}/{polizze.length}</span>
                     <button onClick={onClearFilter} className="text-sky-700 hover:underline" data-testid="polizze-clear-filter">Rimuovi filtro</button>
                 </div>
+            ) : (
+                <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs text-slate-700 flex items-center justify-between">
+                    <span>{soloAttive ? <>Mostrate solo le polizze <b>attive</b> · {nAttive}/{polizze.length}</> : <>Tutte le polizze · {polizze.length}</>}</span>
+                    <button onClick={() => setSoloAttive((v) => !v)} className="text-sky-700 hover:underline font-medium" data-testid="polizze-toggle-attive">
+                        {soloAttive ? "Mostra tutte" : "Mostra solo attive"}
+                    </button>
+                </div>
             )}
             {filtered.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-sm">{filter ? `Nessuna polizza con stato "${filter}".` : "Nessuna polizza intestata."}</div>
+                <div className="p-8 text-center text-slate-500 text-sm">{filter ? `Nessuna polizza con stato "${filter}".` : soloAttive ? "Nessuna polizza attiva." : "Nessuna polizza intestata."}</div>
             ) : (
                 <table className="tbl w-full">
                     <thead><tr><th>Numero</th><th>Compagnia</th><th>Ramo</th><th>Stato</th><th>Effetto</th><th>Scadenza</th><th className="text-right">Premio</th></tr></thead>
@@ -1475,6 +1540,22 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
         catch { toast.error("Errore"); }
     };
 
+    // Mappa categoria → cartella (etichetta, icona, ordine)
+    const CARTELLE = [
+        { key: "visura_camerale", label: "Visura Camerale", icon: "🏛️" },
+        { key: "visura_catastale", label: "Visura Catastale", icon: "🏠" },
+        { key: "bilancio", label: "Bilancio", icon: "📊", match: (c) => (c || "").includes("bilancio") },
+        { key: "visura", label: "Visura", icon: "📄", match: (c) => c === "visura" },
+        { key: "report_azienda", label: "Report Azienda", icon: "📈" },
+        { key: "quietanza", label: "Quietanze", icon: "🧾" },
+        { key: "identita", label: "Documenti identità", icon: "🪪", match: (c) => ["carta_identita", "documento_identita", "patente", "passaporto"].includes(c) },
+        { key: "richiesta_cliente", label: "Richieste cliente", icon: "📥" },
+        { key: "altri", label: "Altri documenti", icon: "📎", match: () => true },
+    ];
+    const cartellaDi = (cat) => (CARTELLE.find((f) => (f.match ? f.match(cat) : f.key === cat)) || CARTELLE[CARTELLE.length - 1]).key;
+    const gruppi = {};
+    (list || []).forEach((a) => { const k = cartellaDi(a.categoria); (gruppi[k] = gruppi[k] || []).push(a); });
+
     return (
         <Card className="p-6 border-slate-200 mt-4">
             <div className="flex items-center justify-between mb-4">
@@ -1494,8 +1575,33 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
                     Nessun documento caricato. Trascina un file o clicca &quot;Carica file&quot;.
                 </div>
             ) : (
-                <ul className="divide-y divide-slate-100">
-                    {list.map((a) => (
+                <div className="space-y-3" data-testid="allegati-cartelle">
+                    {CARTELLE.filter((f) => (gruppi[f.key] || []).length > 0).map((f) => (
+                        <AllegatiCartella key={f.key} folder={f} files={gruppi[f.key]} onDelete={elimina} />
+                    ))}
+                </div>
+            )}
+        </Card>
+    );
+}
+
+function AllegatiCartella({ folder, files, onDelete }) {
+    const [open, setOpen] = useState(true);
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`cartella-${folder.key}`}>
+            <button
+                onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                data-testid={`cartella-toggle-${folder.key}`}
+            >
+                <span className="text-lg">{folder.icon}</span>
+                <span className="font-medium text-sm text-slate-800 flex-1">{folder.label}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">{files.length}</span>
+                <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+            </button>
+            {open && (
+                <ul className="divide-y divide-slate-100 px-3">
+                    {files.map((a) => (
                         <li key={a.id} className="py-3 flex items-center gap-3" data-testid={`allegato-${a.id}`}>
                             <Paperclip size={16} className="text-slate-400" />
                             <div className="flex-1 min-w-0">
@@ -1510,12 +1616,12 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
                                     {fmtDate(a.created_at)} · {(a.size / 1024).toFixed(0)} KB · {a.content_type}
                                 </div>
                             </div>
-                            <RowActions onDelete={() => elimina(a.id)} canEdit={false} label="allegato" />
+                            <RowActions onDelete={() => onDelete(a.id)} canEdit={false} label="allegato" />
                         </li>
                     ))}
                 </ul>
             )}
-        </Card>
+        </div>
     );
 }
 

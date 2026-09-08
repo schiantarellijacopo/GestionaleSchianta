@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend testing per fusione Salute Fiscale + Analisi Azienda, governance amministratore/referente, IBAN sync, polizze solo attive, traduzione IT ruoli. Tutti i test principali PASSATI.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "detailed_results": {
+    "salute_fiscale_fusa": "PASS - tab-analisi-azienda assente (count=0), info-azienda-tab presente dentro tab-salute-fiscale",
+    "sf_openapi_blocchi": "PASS - sf-mdc-card, sf-impatto-card, sf-studio-card tutti presenti; mdc-totale='3.344.396 €'; scen-giorni-0..3 tutti presenti",
+    "sf_mdc_ricalcolo": "PASS - modificando mdc-imp-servizi a 50000 il totale passa da 3.344.396 € a 4.462.046 € (ricalcolo live OK)",
+    "governance_amministratore": "PASS - governance-openapi-btn cliccato -> anag-amministratore='ALESSANDRO VIVIANI', anag-referente='ALESSANDRO VIVIANI'; dopo save governance-view visibile",
+    "polizze_solo_attive": "PASS - conteggio 163/662, header 'Mostrate solo le polizze attive' presente, polizze-toggle-attive='Mostra tutte'",
+    "iban_sync": "PASS - IBAN IT60X0542811101000000123456 salvato in Conti Correnti e visibile nel tab Anagrafica di Marco Rossi (toast 'IBAN aggiunto')",
+    "traduzione_it": "PASS - dopo info-azienda-load i ruoli governance italiani presenti ('Amministratore delegato'/'Sindaco'/simili), nessun leftover EN"
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (skipped per richiesta)", "frontend": "100%" },
+  "seed_data_creation": "IBAN test aggiunto a Marco Rossi CC: IT60X0542811101000000123456",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Nota: il testid della tab Anagrafica in AnagraficaDetail.jsx e' 'tab-dati' (non 'tab-anagrafica'). Tutti gli altri testid corrispondono alla review request."
+}

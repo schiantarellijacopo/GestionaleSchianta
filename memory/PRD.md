@@ -1,5 +1,30 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 08/09/2026 (fork) — Cruscotto Salute Fiscale azienda + rifiniture
+
+### ✅ Salute Fiscale unificata (fusa con Analisi Azienda) — tab-salute-fiscale
+- Rimosso il tab separato "Analisi Azienda"; ora `SaluteFiscaleTab` renderizza in cima la Panoramica azienda + Soci/Governance/Forza lavoro (AnalisiAziendaTab) e sotto i blocchi finanziari.
+- Conto economico dettagliato + Stato patrimoniale + Storico bilanci + Indicatori (già in sessione precedente).
+- **Margine di Contribuzione** (`sf-mdc-card`): auto-import dal bilancio OpenAPI. Formula verificata sul PDF ufficiale VIVIANI: MDC 2025 = 3.830.606,90 € (Ricavi di vendita = Valore produzione IIC130 6.889.188; Rimanenze finali = rimanenze totali IIC045 42.000; % non assicurata default Servizi 70% / Amministrativi 30%). Voci e % editabili, ricalcolo live.
+- **Metriche di impatto** (`sf-impatto-card`): MDC giornaliero × giorni scenario; scenari Trascurabile/Gestibile/Grave/Critico con giorni configurabili (default 20/58/115/189); Risk Tolerance/Appetite configurabili; grafico a barre Recharts.
+- **Studio di bilancio** (`sf-studio-card`): Ciclo circolante, MOL/OF, Val.agg/immobilizzi, Ricavi/crediti — barra colorata con marker STATICO (l'utente ha chiesto NON modificabile). + "Altri indici utili": Margine di tesoreria e Indice di disponibilità.
+- **🔺 Piramide Azienda** (`sf-piramide-btn`): apre la Piramide delle Coperture (modello "aziende") e la precompila con i dati di bilancio (endpoint `POST /anagrafiche/{id}/analisi/piramide-v2/prepopola` reso azienda-aware: base = valore produzione/fatturato). `PiramideCopertureNuova` ora esportata da AnalisiClienteTab.
+- Backend `company_financials()` in openapi_it_service arricchito (rimanenze, crediti clienti, debiti fornitori/breve, immobilizzazioni, attivo circolante). Endpoint `salute-fiscale/da-openapi` corregge PN vs perdita e ritorna ~30 voci.
+
+### ✅ Governance & rifiniture
+- Campi Amministratore/Referente azienda (+ email/telefono) con "Compila da OpenAPI" (`POST /openapi-it/governance/{aid}`) — auto-fill legale rappresentante.
+- Traduzioni IT (`_trad_it`): ruoli governance, dimensione impresa; descrizione ATECO ora in italiano (usa campo RAE); forma giuridica IT.
+- IBAN salvato nei Conti Correnti riportato nel campo IBAN Anagrafica (sync in save + fallback in visualizzazione).
+- Tab Polizze mostra solo le ATTIVE con toggle "Mostra tutte"; conteggio tab = attive.
+- Documenti allegati raggruppati in CARTELLE per categoria (Visura Camerale/Catastale/Bilancio/…) — `AllegatiCartella` collassabili.
+- Conferma AlertDialog prima di ogni download OpenAPI (tutti i pulsanti). Rimosso il pulsante "Visura" singolo da OpenApiActions.
+- Testato: iter 71/72/73/74 tutti PASS 100%.
+
+### ⏳ In sospeso (richiesta utente in pausa)
+- "Anteprima chat" nel Diario/anagrafica: da chiarire l'opzione desiderata (a/b/c) prima di implementare.
+
+
+
 ## Sessione 08/09/2026 (fork) — Salute Fiscale ricca da OpenAPI + Conferma download OpenAPI
 
 ### ✅ Salute Fiscale (P0) — dati "più corposi" e KPI corretti da company.openapi.com

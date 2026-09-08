@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only regression on the 6 additive changes requested (iter 73). All 6 features verified as WORKING on the live preview URL. Login OK. VIVIANI (PG) allegati are grouped in collapsible folders (Visura Camerale x2, Visura Catastale x1) with working download anchors; folders default open. Studio di bilancio scores rendered as HTML input[type=range] sliders; keyboard drag on studio-score-ciclo went from 47->57 and label updated to 'score 57/100'. Altri indici utili section shows Margine di tesoreria = -309.992 € and Indice di disponibilita = 0.90 (both non-empty). MDC totale = 3.830.607 € (matches expected 3.830.606,90). Marco Rossi (PF) Anagrafica tab shows IBAN IT60X0542811101000000123456 (non-empty, sourced from Conti Correnti).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Folders default open (aria state controlled via internal state); this is fine but might surprise users with many folders/files - consider default-collapsed for >N folders.",
+    "InlineEditField for IBAN correctly falls back to conti_correnti IBAN when anagrafica.iban is empty; verified visually."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (from request)",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 6 additive features (cartelle allegati con toggle, slider studio bilancio, altri indici margine tesoreria/disponibilita, MDC 3.830.607, IBAN fallback conti_correnti) verified OK on VIVIANI abe0cbf1 e Marco Rossi 93b73085. Note: cartelle-* toggles start EXPANDED; clicking collapses. Sliders under data-testid studio-score-{ciclo,molOf,valImm,ricCred} are input[type=range]. sf-openapi-btn works (credits used).",
+  "rca of the issue": "N/A - no issues found"
+}

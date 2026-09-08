@@ -1561,7 +1561,7 @@ function ScenarioGrid({ scen, scenKey, canEdit, setTratt, color }) {
 }
 
 // ============== PIRAMIDE COPERTURE (v2 — schema Schiantarelli) ==============
-function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
+export function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
     const [data, setData] = useState(null);
     const [agenzia, setAgenzia] = useState({});
     const [busy, setBusy] = useState(false);

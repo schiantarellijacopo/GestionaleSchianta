@@ -332,6 +332,15 @@ class Anagrafica(BaseDoc):
     salute_fiscale_dati: dict = Field(default_factory=dict)
     salute_fiscale_aggiornata_il: Optional[str] = None
 
+    # === GOVERNANCE AZIENDA (persona giuridica) ===
+    pec: Optional[str] = None
+    amministratore: Optional[str] = None            # nome legale rappresentante (auto da OpenAPI governance)
+    amministratore_email: Optional[str] = None
+    amministratore_telefono: Optional[str] = None
+    referente_azienda: Optional[str] = None         # referente operativo lato agenzia
+    referente_email: Optional[str] = None
+    referente_telefono: Optional[str] = None
+
     # === AVATAR / LOGO ===
     avatar_url: Optional[str] = None  # foto persona / logo azienda / immagine edificio
     sotto_tipo: Optional[Literal["azienda", "asd", "condominio", "parrocchia", "onlus", "altro"]] = None

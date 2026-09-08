@@ -17,10 +17,13 @@ export default function ContiCorrentiTab({ ana, canEdit, onReload }) {
     const conti = ana.conti_correnti || [];
     const [adding, setAdding] = useState(false);
 
+    // L'IBAN principale (o il primo) viene riportato anche nel campo IBAN dell'anagrafica (tab Anagrafica)
+    const primaryIban = (arr) => (arr.find((c) => c.principale) || arr[0])?.iban || "";
+
     const setPrincipale = async (idx) => {
         const updated = conti.map((c, i) => ({ ...c, principale: i === idx }));
         try {
-            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated });
+            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated, iban: primaryIban(updated) });
             toast.success("Conto principale aggiornato");
             onReload?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
@@ -30,7 +33,7 @@ export default function ContiCorrentiTab({ ana, canEdit, onReload }) {
         if (!window.confirm("Rimuovere questo IBAN?")) return;
         const updated = conti.filter((_, i) => i !== idx);
         try {
-            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated });
+            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated, iban: primaryIban(updated) });
             toast.success("IBAN rimosso");
             onReload?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
@@ -44,7 +47,7 @@ export default function ContiCorrentiTab({ ana, canEdit, onReload }) {
         if (updated.length === 0) nuovo.principale = true;
         updated.push(nuovo);
         try {
-            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated });
+            await api.put(`/anagrafiche/${ana.id}`, { conti_correnti: updated, iban: primaryIban(updated) });
             toast.success("IBAN aggiunto");
             setAdding(false);
             onReload?.();

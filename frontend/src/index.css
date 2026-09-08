@@ -324,3 +324,27 @@ h1, h2, h3, h4, h5 {
     .btn-toolbar > * { flex-shrink: 0; }
 }
 
+
+/* Cursore trascinabile per gli score dello Studio di bilancio */
+.sf-score-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 2px solid #334155;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  cursor: pointer;
+}
+.sf-score-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 2px solid #334155;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  cursor: pointer;
+}
+.sf-score-range::-webkit-slider-runnable-track { background: transparent; }
+.sf-score-range::-moz-range-track { background: transparent; }

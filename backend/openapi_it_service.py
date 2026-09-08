@@ -1266,6 +1266,40 @@ def _co_num(v):
         return None
 
 
+# Traduzioni IT per valori che company.openapi.com restituisce in inglese
+_TRAD_IT = {
+    "managing director": "Amministratore delegato",
+    "director": "Amministratore",
+    "sole director": "Amministratore unico",
+    "chairman": "Presidente",
+    "chairman of the board of directors": "Presidente CdA",
+    "auditor": "Sindaco",
+    "statutory auditor": "Sindaco effettivo",
+    "sole auditor": "Sindaco unico",
+    "board member": "Consigliere",
+    "legal representative": "Legale rappresentante",
+    "partner": "Socio",
+    "shareholder": "Socio",
+    "liquidator": "Liquidatore",
+    "manager": "Procuratore",
+    "small enterprise": "Piccola impresa",
+    "medium enterprise": "Media impresa",
+    "large enterprise": "Grande impresa",
+    "micro enterprise": "Microimpresa",
+    "active": "Attiva",
+    "ceased": "Cessata",
+    "inactive": "Inattiva",
+}
+
+
+def _trad_it(s):
+    if not isinstance(s, str) or not s.strip():
+        return s
+    parts = [p.strip() for p in s.split(",")]
+    out = [_TRAD_IT.get(p.lower(), p) for p in parts]
+    return ", ".join(out)
+
+
 def _normalize_company_co(d: dict, full: bool) -> dict:
     bs = d.get("balanceSheets") or {}
     bilanci = []
@@ -1288,6 +1322,13 @@ def _normalize_company_co(d: dict, full: bool) -> dict:
     if not isinstance(ateco_obj, dict):
         ateco_obj = {}
     lf = d.get("detailedLegalForm") or {}
+    # descrizione attività in ITALIANO: preferisci RAE (Ramo Attività Economica), poi SAE
+    rae = d.get("rae") if isinstance(d.get("rae"), dict) else {}
+    sae = d.get("sae") if isinstance(d.get("sae"), dict) else {}
+    ateco_desc_it = (rae.get("description") or "").strip()
+    if ateco_desc_it:
+        ateco_desc_it = ateco_desc_it.capitalize()
+    ateco_descrizione = ateco_desc_it or _trad_it(ateco_obj.get("description")) or sae.get("description")
     addr = d.get("address")
     if isinstance(addr, dict):
         ro = addr.get("registeredOffice") or addr
@@ -1321,7 +1362,7 @@ def _normalize_company_co(d: dict, full: bool) -> dict:
         "pec": d.get("pec"),
         "forma_giuridica": lf.get("description") if isinstance(lf, dict) else lf,
         "ateco": ateco_obj.get("code"),
-        "ateco_descrizione": ateco_obj.get("description"),
+        "ateco_descrizione": ateco_descrizione,
         "data_inizio": d.get("startDate"),
         "bilanci": bilanci,
     }
@@ -1341,7 +1382,7 @@ def _normalize_company_co(d: dict, full: bool) -> dict:
             roles = ", ".join(r.get("role", {}).get("description", "") for r in (m.get("roles") or []) if isinstance(r, dict))
             managers.append({
                 "nome": (m.get("name") or m.get("companyName") or "").strip() + (f" {m.get('surname')}" if m.get("surname") else ""),
-                "ruoli": roles,
+                "ruoli": _trad_it(roles),
                 "legale_rappresentante": bool(m.get("isLegalRepresentative")),
             })
         out["amministratori"] = managers
@@ -1459,7 +1500,8 @@ async def company_financials(cf_piva: str) -> Optional[dict]:
     m = {}
     for sub in ("incomeStatementAggregateValues", "productionValue", "productionCosts",
                 "revenuesFinancialCharges", "annualResult", "assetsAggregateValues",
-                "liabilitiesAggregateValues", "netWorth", "debts"):
+                "liabilitiesAggregateValues", "netWorth", "debts",
+                "inventory", "credits", "financialAssets", "cashEquivalents"):
         m.update(_codes_map(d.get(sub)))
 
     def g(num: str):
@@ -1501,9 +1543,16 @@ async def company_financials(cf_piva: str) -> Optional[dict]:
         "ebitda": _co_num(op.get("ebitda")),
         "ebit": _co_num(op.get("ebit")),
         "cash_flow": _co_num(op.get("cashFlow")),
+        "rimanenze_variazione": g("125"),          # A.2 Variazione rimanenze prodotti
+        "rimanenze_totali": g("045"),              # C.I Totale rimanenze
+        "crediti_clienti": g("046") or g("058"),   # C.II.1 crediti v/clienti (o tot crediti)
+        "debiti_fornitori": g("100") or g("335"),  # D.7 debiti v/fornitori
+        "debiti_breve": g("116"),                  # D.>> debiti a breve termine
+        "immobilizzazioni": g("039"),              # B. Totale immobilizzazioni
+        "attivo_circolante": g("071"),             # C. Attivo circolante
         "dipendenti": emp.get("employee") or eco.get("employees"),
         "trend_fatturato_pct": _co_num(eco.get("turnoverTrend")),
-        "dimensione_impresa": (eco.get("enterpriseSize") or {}).get("description") if isinstance(eco.get("enterpriseSize"), dict) else None,
+        "dimensione_impresa": _trad_it((eco.get("enterpriseSize") or {}).get("description")) if isinstance(eco.get("enterpriseSize"), dict) else None,
     }
 
     indici = {

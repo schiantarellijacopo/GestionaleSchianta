@@ -125,14 +125,6 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.visengine_richieste) && openapi.visengine_richieste.length > 0}
                 />
-                <ActionBtn
-                    icon={FileSearch} label="Visura" testid="oapi-btn-visura"
-                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "visura"}
-                    loading={loading === "visura"}
-                    onClick={guard("Visura", () => call("visura", "visura", "Visura"))}
-                    hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
-                    hasData={!!openapi.visura}
-                />
             </div>
 
             <AlertDialog open={!!confirm} onOpenChange={(o) => { if (!o) setConfirm(null); }}>

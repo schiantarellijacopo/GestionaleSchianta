@@ -7,13 +7,41 @@ import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Upload, Activity, TrendingUp, AlertTriangle, Sparkles } from "lucide-react";
+import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 import { toast } from "sonner";
+import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
+import { PiramideCopertureNuova } from "@/components/AnalisiClienteTab";
 
-export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
+export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [dati, setDati] = useState(null);
     const [aggIl, setAggIl] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [showPir, setShowPir] = useState(false);
+    const [pirBusy, setPirBusy] = useState(false);
+
+    const apriPiramide = async () => {
+        setPirBusy(true);
+        try {
+            // precompila i dati_reddito con i dati di bilancio azienda, preservando eventuali personalizzazioni
+            const cur = (await api.get(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`)).data || {};
+            const pre = (await api.post(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2/prepopola`)).data || {};
+            await api.put(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`, {
+                dati_reddito: { ...(cur.dati_reddito || {}), ...pre },
+                testamento: cur.testamento || false,
+                eredi_legittimi: cur.eredi_legittimi || [],
+                override_voci: cur.override_voci || {},
+                stato_voci: cur.stato_voci || {},
+                voci_custom: cur.voci_custom || {},
+            });
+            toast.success("Piramide azienda precompilata dai dati di bilancio");
+            setShowPir(true);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Impossibile precompilare la piramide");
+            setShowPir(true); // mostra comunque la piramide (auto-popolata dalle polizze)
+        } finally { setPirBusy(false); }
+    };
 
     const load = () => api.get(`/anagrafiche/${anagrafica_id}/salute-fiscale`).then((r) => {
         setDati(r.data.dati || {});
@@ -46,6 +74,9 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
 
     return (
         <div className="space-y-4 mt-4" data-testid="salute-fiscale-tab">
+            {/* Panoramica azienda + Soci/Governance/Forza lavoro (fusa da Analisi Azienda) */}
+            {tipoCliente && <AnalisiAziendaTab ana={ana} canEdit={canEdit} onReload={onReload} />}
+
             <Card className="p-4 bg-gradient-to-r from-emerald-50 to-sky-50 border-emerald-200">
                 <div className="flex items-start justify-between flex-wrap gap-3">
                     <div>
@@ -78,10 +109,27 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
                             {busy ? "Elaborazione OCR…" : "Carica bilancio (PDF/JPG)"}
                             <input type="file" hidden accept="application/pdf,image/*" onChange={upload} />
                         </label>
+                        {tipoCliente && (
+                            <button onClick={apriPiramide} disabled={pirBusy}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
+                                data-testid="sf-piramide-btn">
+                                🔺 {pirBusy ? "Precompilo…" : "Piramide Azienda"}
+                            </button>
+                        )}
                         </div>
                     )}
                 </div>
             </Card>
+
+            {showPir && tipoCliente && (
+                <Card className="p-4" data-testid="sf-piramide-card">
+                    <div className="flex items-center justify-between mb-1">
+                        <h4 className="font-semibold text-slate-800 text-sm flex items-center gap-2">🔺 Piramide delle Coperture — Azienda</h4>
+                        <button onClick={() => setShowPir(false)} className="text-xs text-slate-500 hover:text-slate-700" data-testid="sf-piramide-close">Chiudi</button>
+                    </div>
+                    <PiramideCopertureNuova anagrafica_id={anagrafica_id} canEdit={canEdit} />
+                </Card>
+            )}
 
             {!dati || !Object.keys(bil).length ? (
                 <Card className="p-8 text-center text-slate-500 text-sm">
@@ -194,6 +242,9 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
                             <IndItem label="Inc. personale" value={ind.incidenza_personale_pct} unit="%" good={(v) => v < 25} bad={(v) => v > 45} />
                         </div>
                     </Card>
+
+                    <MargineContribuzione bil={bil} />
+                    <StudioBilancio bil={bil} />
                 </>
             )}
         </div>
@@ -223,3 +274,176 @@ const IndItem = ({ label, value, unit, good, bad }) => {
         </div>
     );
 };
+
+const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
+const eur0 = (v) => (v == null ? "—" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0 }) + " €");
+
+// ── Margine di Contribuzione + Metriche di impatto (fermo attività) ──
+function MargineContribuzione({ bil }) {
+    // righe: [chiave, label, segno(+/-), %nonAssicurataDefault, importoDaBilancio]
+    const initRows = () => [
+        { k: "ricavi", l: "Ricavi di vendita", seg: "+", pct: 100, imp: n(bil.valore_produzione) || n(bil.ricavi) },
+        { k: "rimf", l: "Rimanenze finali", seg: "+", pct: 100, imp: n(bil.rimanenze_totali) },
+        { k: "rimi", l: "Rimanenze iniziali", seg: "-", pct: 100, imp: 0 },
+        { k: "materie", l: "Materie prime e sussidiarie", seg: "-", pct: 100, imp: n(bil.costi_materie) },
+        { k: "godimento", l: "Godimento beni di terzi", seg: "-", pct: 0, imp: n(bil.costi_godimento_beni) },
+        { k: "personale", l: "Personale", seg: "-", pct: 0, imp: n(bil.costi_personale) },
+        { k: "servizi", l: "Costi tecnici (servizi)", seg: "-", pct: 70, imp: n(bil.costi_servizi) },
+        { k: "amm", l: "Costi amministrativi (oneri diversi)", seg: "-", pct: 30, imp: n(bil.oneri_diversi_gestione) },
+    ];
+    const [rows, setRows] = useState(initRows);
+    const [giorni, setGiorni] = useState(220);
+    const [gScen, setGScen] = useState([20, 58, 115, 189]);
+    const [riskTol, setRiskTol] = useState(8000000);
+    const [riskApp, setRiskApp] = useState(12000000);
+    useEffect(() => { setRows(initRows()); /* eslint-disable-next-line */ }, [bil.valore_produzione, bil.rimanenze_totali, bil.costi_servizi]);
+
+    const upd = (i, patch) => setRows((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+    const pesato = (r) => r.imp * (r.pct / 100);
+    const totPiu = rows.filter((r) => r.seg === "+").reduce((s, r) => s + pesato(r), 0);
+    const totMeno = rows.filter((r) => r.seg === "-").reduce((s, r) => s + pesato(r), 0);
+    const mdc = totPiu - totMeno;
+    const baseRicavi = pesato(rows[0]); // % su ricavi (A1+A5) = MDC / valore produzione
+    const pctRicavi = baseRicavi > 0 ? (mdc / baseRicavi) * 100 : 0;
+    const mdcGiorno = giorni > 0 ? mdc / giorni : 0;
+    const SCEN = ["Trascurabile", "Gestibile", "Grave", "Critico"];
+    const SCEN_COL = ["#10b981", "#eab308", "#f59e0b", "#ef4444"];
+    const chartData = SCEN.map((s, i) => ({ name: s, impatto: Math.round(mdcGiorno * gScen[i]), giorni: gScen[i], fill: SCEN_COL[i] }));
+
+    return (
+        <>
+        <Card className="p-4" data-testid="sf-mdc-card">
+            <h4 className="font-semibold text-slate-800 mb-3 text-sm">🧮 Margine di Contribuzione (perdita in caso di fermo)</h4>
+            <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+                <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">
+                    <tr><th className="text-left py-1">Voci di bilancio</th><th className="text-right">Importo</th><th className="text-right">% non assicurata</th><th className="text-right">Importo +</th><th className="text-right">Importo −</th></tr>
+                </thead>
+                <tbody>
+                    {rows.map((r, i) => (
+                        <tr key={r.k} className="border-b border-slate-100">
+                            <td className="py-1.5">{r.l}</td>
+                            <td className="text-right"><Input type="number" value={r.imp} onChange={(e) => upd(i, { imp: n(e.target.value) })} className="h-7 text-xs text-right w-32 inline-block" data-testid={`mdc-imp-${r.k}`} /></td>
+                            <td className="text-right"><Input type="number" value={r.pct} onChange={(e) => upd(i, { pct: n(e.target.value) })} className="h-7 text-xs text-right w-20 inline-block" data-testid={`mdc-pct-${r.k}`} /> %</td>
+                            <td className="text-right font-mono text-emerald-700">{r.seg === "+" ? eur0(pesato(r)) : "-"}</td>
+                            <td className="text-right font-mono text-rose-600">{r.seg === "-" ? eur0(pesato(r)) : "-"}</td>
+                        </tr>
+                    ))}
+                    <tr className="border-t-2 border-slate-300 font-semibold"><td className="py-1.5">Totale importi</td><td></td><td></td><td className="text-right font-mono">{eur0(totPiu)}</td><td className="text-right font-mono">{eur0(totMeno)}</td></tr>
+                </tbody>
+            </table>
+            </div>
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-sky-50 border border-sky-200 rounded p-3"><div className="text-[10px] uppercase text-slate-500">Margine di contribuzione</div><div className="text-lg font-bold text-sky-800 font-mono" data-testid="mdc-totale">{eur0(mdc)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-3"><div className="text-[10px] uppercase text-slate-500">% su ricavi (A1+A5)</div><div className="text-lg font-bold text-slate-800 font-mono">{pctRicavi.toFixed(1)} %</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-3"><div className="text-[10px] uppercase text-slate-500">MDC giornaliero</div><div className="text-lg font-bold text-slate-800 font-mono">{eur0(mdcGiorno)}</div></div>
+                <div><div className="text-[10px] uppercase text-slate-500 mb-1">Giorni lavorativi/anno</div><Input type="number" value={giorni} onChange={(e) => setGiorni(n(e.target.value))} className="h-9" data-testid="mdc-giorni" /></div>
+            </div>
+        </Card>
+
+        <Card className="p-4" data-testid="sf-impatto-card">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h4 className="font-semibold text-slate-800 text-sm">📉 Metriche di impatto (fermo attività)</h4>
+                <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-500">Risk Tolerance</span><Input type="number" value={riskTol} onChange={(e) => setRiskTol(n(e.target.value))} className="h-7 w-28 text-xs" data-testid="risk-tol" />
+                    <span className="text-slate-500">Risk Appetite</span><Input type="number" value={riskApp} onChange={(e) => setRiskApp(n(e.target.value))} className="h-7 w-28 text-xs" data-testid="risk-app" />
+                </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v) => eur0(v)} />
+                        <ReferenceLine y={riskTol} stroke="#334155" strokeDasharray="4 4" label={{ value: "Risk Tolerance", fontSize: 10, position: "right" }} />
+                        <ReferenceLine y={riskApp} stroke="#334155" strokeDasharray="4 4" label={{ value: "Risk Appetite", fontSize: 10, position: "right" }} />
+                        <Bar dataKey="impatto" radius={[4, 4, 0, 0]}>
+                            {chartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+                <table className="w-full text-xs self-center">
+                    <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">
+                        <tr><th className="text-left py-1">Scenario</th><th className="text-right">Impatto diretto</th><th className="text-right">Fermo attività</th></tr>
+                    </thead>
+                    <tbody>
+                        {chartData.map((d, i) => (
+                            <tr key={i} className="border-b border-slate-100">
+                                <td className="py-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style={{ background: d.fill }} />{d.name}</td>
+                                <td className="text-right font-mono">{eur0(d.impatto)}</td>
+                                <td className="text-right"><Input type="number" value={gScen[i]} onChange={(e) => setGScen((p) => p.map((g, j) => (j === i ? n(e.target.value) : g)))} className="h-7 w-20 text-xs text-right inline-block" data-testid={`scen-giorni-${i}`} /> gg</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Card>
+        </>
+    );
+}
+
+// ── Studio di bilancio per fermo attività (indici + score) ──
+function StudioBilancio({ bil }) {
+    const ricavi = n(bil.ricavi) || n(bil.valore_produzione);
+    const valAgg = n(bil.valore_produzione) - (n(bil.costi_materie) + n(bil.costi_servizi) + n(bil.costi_godimento_beni) + n(bil.oneri_diversi_gestione));
+    const ciclo = ricavi > 0 ? ((n(bil.crediti_clienti) + n(bil.rimanenze_totali) - n(bil.debiti_fornitori)) / ricavi) * 365 : null;
+    const molOf = n(bil.oneri_finanziari) > 0 ? n(bil.ebitda) / n(bil.oneri_finanziari) : null;
+    const valImm = n(bil.immobilizzazioni) > 0 ? valAgg / n(bil.immobilizzazioni) : null;
+    const ricCred = n(bil.crediti_clienti) > 0 ? ricavi / n(bil.crediti_clienti) : null;
+    // Altri indici utili
+    const attCirc = n(bil.attivo_circolante);
+    const debBreve = n(bil.debiti_breve);
+    const margTesoreria = attCirc && debBreve ? (attCirc - n(bil.rimanenze_totali)) - debBreve : null;
+    const indiceDisp = debBreve > 0 ? attCirc / debBreve : null;
+
+    const scores = {
+        ciclo: ciclo == null ? null : Math.min(1, Math.max(0, ciclo / 180)),
+        molOf: molOf == null ? null : Math.min(1, Math.max(0, 1 - molOf / 15)),
+        valImm: valImm == null ? null : Math.min(1, Math.max(0, 1 - valImm / 3)),
+        ricCred: ricCred == null ? null : Math.min(1, Math.max(0, 1 - ricCred / 6)),
+    };
+
+    const params = [
+        { key: "ciclo", l: "Ciclo del circolante", sintesi: "Giorni medi tra pagamento fornitori e incasso clienti.", val: ciclo, unit: " gg" },
+        { key: "molOf", l: "MOL / OF", sintesi: "Capacità del margine operativo di coprire gli oneri finanziari.", val: molOf, unit: "x" },
+        { key: "valImm", l: "Val. agg / immobilizzi", sintesi: "Dipendenza del valore aggiunto dagli investimenti fissi.", val: valImm, unit: "x" },
+        { key: "ricCred", l: "Ricavi / crediti vs Clienti", sintesi: "Facilità di incasso / potere contrattuale verso i clienti.", val: ricCred, unit: "x" },
+    ];
+    return (
+        <Card className="p-4" data-testid="sf-studio-card">
+            <h4 className="font-semibold text-slate-800 mb-3 text-sm">🔬 Studio di bilancio per fermo attività</h4>
+            <div className="space-y-4">
+                {params.map((p) => (
+                    <div key={p.key} className="grid grid-cols-12 items-center gap-3 border-b border-slate-100 pb-3">
+                        <div className="col-span-4">
+                            <div className="text-sm font-medium text-slate-800">{p.l}</div>
+                            <div className="text-[11px] text-slate-500">{p.sintesi}</div>
+                        </div>
+                        <div className="col-span-3 text-sm font-mono font-semibold">{p.val == null ? "Non calcolato" : `${p.val.toFixed(2)}${p.unit}`}</div>
+                        <div className="col-span-5">
+                            {scores[p.key] == null ? <span className="text-xs text-slate-400">dati insufficienti</span> : (
+                                <div className="relative h-3 rounded-full" style={{ background: "linear-gradient(90deg,#10b981,#eab308,#f59e0b,#ef4444)" }} data-testid={`studio-score-${p.key}`}>
+                                    <div className="absolute -top-1 w-4 h-4 rounded-full bg-white border-2 border-slate-700" style={{ left: `calc(${scores[p.key] * 100}% - 8px)` }} />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <div className="mt-4 pt-3 border-t border-slate-200">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Altri indici utili</div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 border border-slate-200 rounded p-3">
+                        <div className="text-[10px] uppercase text-slate-500">Margine di tesoreria</div>
+                        <div className={`text-lg font-mono font-bold ${margTesoreria == null ? "text-slate-400" : margTesoreria < 0 ? "text-rose-600" : "text-emerald-700"}`} data-testid="idx-margine-tesoreria">{margTesoreria == null ? "—" : eur0(margTesoreria)}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded p-3">
+                        <div className="text-[10px] uppercase text-slate-500">Indice di disponibilità</div>
+                        <div className={`text-lg font-mono font-bold ${indiceDisp == null ? "text-slate-400" : indiceDisp < 1 ? "text-amber-600" : "text-emerald-700"}`} data-testid="idx-disponibilita">{indiceDisp == null ? "—" : indiceDisp.toFixed(2)}</div>
+                    </div>
+                </div>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-2">Score calcolati con soglie standard di bilancio.</div>
+        </Card>
+    );
+}

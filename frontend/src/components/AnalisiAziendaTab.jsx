@@ -43,7 +43,9 @@ export default function AnalisiAziendaTab({ ana, canEdit, onReload }) {
     const [loading, setLoading] = useState(false);
     const c = ana.openapi_data?.company || {};
     const hasData = !!c.ragione_sociale;
-    const ultimoBilancio = (c.bilanci || [])[0] || {};
+    const bilanciAll = c.bilanci || [];
+    // ultimo bilancio con dati REALI (l'anno più recente ha spesso fatturato null)
+    const ultimoBilancio = bilanciAll.find((b) => b.fatturato != null) || bilanciAll[0] || {};
 
     const caricaDati = async () => {
         if (hasData && !window.confirm("Aggiornare i dati azienda? (chiamata a pagamento company.openapi.com)")) return;
