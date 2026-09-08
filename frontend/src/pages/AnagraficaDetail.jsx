@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import AnalisiClienteTab from "@/components/AnalisiClienteTab";
+import AnalisiClienteTab, { PiramideCopertureNuova } from "@/components/AnalisiClienteTab";
 import PrivacyConsensiDialog from "@/components/PrivacyConsensiDialog";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
 import TagsEditor from "@/components/TagsEditor";
@@ -192,9 +192,11 @@ export default function AnagraficaDetail() {
                     {ana.tipo === "persona_giuridica" && (
                         <TabsTrigger value="salute-fiscale" data-testid="tab-salute-fiscale">💼 Salute Fiscale</TabsTrigger>
                     )}
+                    {ana.tipo === "persona_giuridica" && (
+                        <TabsTrigger value="piramide-azienda" data-testid="tab-piramide-azienda">🔺 Piramide Azienda</TabsTrigger>
+                    )}
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
-                    <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Altri allegati</TabsTrigger>
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
                     )}
@@ -224,9 +226,11 @@ export default function AnagraficaDetail() {
                 {ana.tipo === "persona_giuridica" && (
                     <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 )}
+                {ana.tipo === "persona_giuridica" && (
+                    <TabsContent value="piramide-azienda"><PiramideAziendaTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
+                )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
-                <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
                     <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 )}
@@ -1542,19 +1546,22 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
 
     // Mappa categoria → cartella (etichetta, icona, ordine)
     const CARTELLE = [
-        { key: "visura_camerale", label: "Visura Camerale", icon: "🏛️" },
-        { key: "visura_catastale", label: "Visura Catastale", icon: "🏠" },
-        { key: "bilancio", label: "Bilancio", icon: "📊", match: (c) => (c || "").includes("bilancio") },
-        { key: "visura", label: "Visura", icon: "📄", match: (c) => c === "visura" },
-        { key: "report_azienda", label: "Report Azienda", icon: "📈" },
-        { key: "quietanza", label: "Quietanze", icon: "🧾" },
+        { key: "visura_camerale", label: "Visura Camerale", icon: "🏛️", match: (c, nome) => c === "visura_camerale" && !nome.includes("bilancio") },
+        { key: "visura_catastale", label: "Visura Catastale", icon: "🏠", match: (c) => c === "visura_catastale" },
+        { key: "bilancio", label: "Bilancio", icon: "📊", match: (c, nome) => (c || "").includes("bilancio") || nome.includes("bilancio") },
+        { key: "report_azienda", label: "Report Azienda", icon: "📈", match: (c) => c === "report_azienda" },
+        { key: "quietanza", label: "Quietanze", icon: "🧾", match: (c) => c === "quietanza" },
         { key: "identita", label: "Documenti identità", icon: "🪪", match: (c) => ["carta_identita", "documento_identita", "patente", "passaporto"].includes(c) },
-        { key: "richiesta_cliente", label: "Richieste cliente", icon: "📥" },
+        { key: "richiesta_cliente", label: "Richieste cliente", icon: "📥", match: (c) => c === "richiesta_cliente" },
         { key: "altri", label: "Altri documenti", icon: "📎", match: () => true },
     ];
-    const cartellaDi = (cat) => (CARTELLE.find((f) => (f.match ? f.match(cat) : f.key === cat)) || CARTELLE[CARTELLE.length - 1]).key;
+    const cartellaDi = (a) => {
+        const c = a.categoria;
+        const nome = (a.nome_file || "").toLowerCase();
+        return (CARTELLE.find((f) => f.match(c, nome)) || CARTELLE[CARTELLE.length - 1]).key;
+    };
     const gruppi = {};
-    (list || []).forEach((a) => { const k = cartellaDi(a.categoria); (gruppi[k] = gruppi[k] || []).push(a); });
+    (list || []).forEach((a) => { const k = cartellaDi(a); (gruppi[k] = gruppi[k] || []).push(a); });
 
     return (
         <Card className="p-6 border-slate-200 mt-4">
@@ -1793,6 +1800,44 @@ const DOC_TIPI_ANAG = [
     { key: "privacy_firmata", label: "Privacy firmata", icon: "✍️" },
 ];
 
+function PiramideAziendaTab({ anagrafica_id, ana, canEdit }) {
+    const [busy, setBusy] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
+    const precompila = async () => {
+        setBusy(true);
+        try {
+            const cur = (await api.get(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`)).data || {};
+            const pre = (await api.post(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2/prepopola`)).data || {};
+            await api.put(`/anagrafiche/${anagrafica_id}/analisi/piramide-v2`, {
+                dati_reddito: { ...(cur.dati_reddito || {}), ...pre },
+                testamento: cur.testamento || false,
+                eredi_legittimi: cur.eredi_legittimi || [],
+                override_voci: cur.override_voci || {},
+                stato_voci: cur.stato_voci || {},
+                voci_custom: cur.voci_custom || {},
+            });
+            toast.success("Piramide precompilata dai dati di bilancio azienda");
+            setReloadKey((k) => k + 1);
+        } catch (e) { toast.error(e.response?.data?.detail || "Impossibile precompilare la piramide"); }
+        finally { setBusy(false); }
+    };
+    return (
+        <div className="space-y-3 mt-4" data-testid="piramide-azienda-tab">
+            {canEdit && (
+                <div className="flex items-center justify-between flex-wrap gap-2 bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                    <div className="text-xs text-indigo-900">
+                        <strong>Piramide delle Coperture — Azienda</strong>: precompila i valori dal bilancio (valore della produzione) e dalle polizze attive.
+                    </div>
+                    <Button onClick={precompila} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 shrink-0" data-testid="piramide-azienda-precompila">
+                        {busy ? "Precompilo…" : "🔺 Precompila da bilancio"}
+                    </Button>
+                </div>
+            )}
+            <PiramideCopertureNuova key={reloadKey} anagrafica_id={anagrafica_id} canEdit={canEdit} />
+        </div>
+    );
+}
+
 function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [docs, setDocs] = useState(ana?.documenti || {});
     const [busyTipo, setBusyTipo] = useState(null);
@@ -1921,6 +1966,11 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <img src={ana.firma_cliente_url} alt="firma" className="bg-white rounded-md border max-h-24" />
                 </Card>
             )}
+
+            <div className="pt-2">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1 px-1">Documenti raccolti (Visure, Bilanci, altri file)</div>
+                <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} />
+            </div>
 
             <PrivacyConsensiDialog
                 open={privacyOpen}

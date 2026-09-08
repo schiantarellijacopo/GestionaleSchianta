@@ -1091,9 +1091,18 @@ async def upload_avatar(
     if not (ct or "").startswith("image/"):
         raise HTTPException(400, "Il file deve essere un'immagine")
     ext = (file.filename or "avatar.png").rsplit(".", 1)[-1].lower() or "png"
-    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/avatar_{_uid()}.{ext}"
+    # Se l'immagine contiene un volto riconoscibile (foto/documento), ritaglialo automaticamente
+    up_data, up_ct, up_ext = data, ct, ext
     try:
-        result = obj_storage.put_object(path, data, ct)
+        import face_crop
+        face = face_crop.crop_volto_bytes(data)
+        if face:
+            up_data, up_ct, up_ext = face, "image/jpeg", "jpg"
+    except Exception as e:
+        logging.warning("Face crop avatar manuale fallito per %s: %s", aid, e)
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/avatar_{_uid()}.{up_ext}"
+    try:
+        result = obj_storage.put_object(path, up_data, up_ct)
     except Exception as e:
         raise HTTPException(503, f"Errore upload: {e}")
     url = f"/api/storage/{result['path']}"

@@ -1,0 +1,20 @@
+{
+  "summary": "Test frontend delle 6 nuove funzionalita' su AUTOTRASPORTI VIVIANI (PG abe0cbf1). Tutte le voci passano: (1) tab Piramide Azienda visibile, contenuto con badge 'Modello Aziende (P.IVA)' e pulsante Precompila che mostra toast 'Piramide precompilata dai dati di bilancio azienda'; (2) tab 'Altri allegati' correttamente rimosso (data-testid=tab-allegati assente); (3) tab Documenti unificato: card documenti fissi (Carta d'identita', Patente, Visura camerale...) in alto e sezione 'Documenti raccolti' con cartelle Visura Camerale/Catastale/Bilancio; (4) smistamento corretto: '6aa013bbee74764daf02de8b_0_bilancio.pdf' finisce nella cartella Bilancio (non in Visura Camerale) e 'visura_catastale_...pdf' nella cartella Visura Catastale; (5) grafico BarChart (recharts-wrapper + svg) presente nella sf-storico-card dopo Compila da OpenAPI; (6) 'Salva scenari' mostra toast di conferma e mdc-giorni=250 persiste dopo reload.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100% (6/6)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 75: tutte le 6 nuove feature (Piramide Azienda tab, unificazione Documenti, rimozione Altri allegati, smistamento bilancio per nome_file, grafico storico fatturato in Salute Fiscale, Salva scenari con persistenza per cliente) verificate su cliente PG abe0cbf1-52a7-4d4b-b703-9a49ca89d924. Nessun errore lato UI o console (a parte 404 non bloccanti su risorse laterali).",
+  "console_errors_note": "Alcuni 404 non bloccanti in console (risorse laterali), nessuno impatta le funzionalita' testate."
+}

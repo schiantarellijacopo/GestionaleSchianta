@@ -208,8 +208,16 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                     {/* Storico fatturato */}
                     {storico.length > 0 && (
                         <Card className="p-4" data-testid="sf-storico-card">
-                            <h4 className="font-semibold text-slate-800 mb-3 text-sm">📈 Storico bilanci</h4>
-                            <table className="w-full text-xs">
+                            <h4 className="font-semibold text-slate-800 mb-3 text-sm">📈 Andamento fatturato</h4>
+                            <ResponsiveContainer width="100%" height={200}>
+                                <BarChart data={[...storico].filter((s) => s.fatturato != null).sort((a, b) => (a.anno || 0) - (b.anno || 0))} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
+                                    <XAxis dataKey="anno" tick={{ fontSize: 11 }} />
+                                    <YAxis tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`} tick={{ fontSize: 11 }} width={40} />
+                                    <Tooltip formatter={(v) => fmtEur(v)} labelFormatter={(l) => `Anno ${l}`} />
+                                    <Bar dataKey="fatturato" fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Fatturato" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                            <table className="w-full text-xs mt-3">
                                 <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">
                                     <tr><th className="text-left py-1">Anno</th><th className="text-right">Fatturato</th><th className="text-right">Patrimonio netto</th><th className="text-right">Dipendenti</th></tr>
                                 </thead>
@@ -243,7 +251,7 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                         </div>
                     </Card>
 
-                    <MargineContribuzione bil={bil} />
+                    <MargineContribuzione bil={bil} anagrafica_id={anagrafica_id} saved={ana?.salute_fiscale_scenari} onReload={onReload} />
                     <StudioBilancio bil={bil} />
                 </>
             )}
@@ -279,7 +287,7 @@ const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
 const eur0 = (v) => (v == null ? "—" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0 }) + " €");
 
 // ── Margine di Contribuzione + Metriche di impatto (fermo attività) ──
-function MargineContribuzione({ bil }) {
+function MargineContribuzione({ bil, anagrafica_id, saved, onReload }) {
     // righe: [chiave, label, segno(+/-), %nonAssicurataDefault, importoDaBilancio]
     const initRows = () => [
         { k: "ricavi", l: "Ricavi di vendita", seg: "+", pct: 100, imp: n(bil.valore_produzione) || n(bil.ricavi) },
@@ -291,12 +299,29 @@ function MargineContribuzione({ bil }) {
         { k: "servizi", l: "Costi tecnici (servizi)", seg: "-", pct: 70, imp: n(bil.costi_servizi) },
         { k: "amm", l: "Costi amministrativi (oneri diversi)", seg: "-", pct: 30, imp: n(bil.oneri_diversi_gestione) },
     ];
-    const [rows, setRows] = useState(initRows);
-    const [giorni, setGiorni] = useState(220);
-    const [gScen, setGScen] = useState([20, 58, 115, 189]);
-    const [riskTol, setRiskTol] = useState(8000000);
-    const [riskApp, setRiskApp] = useState(12000000);
-    useEffect(() => { setRows(initRows()); /* eslint-disable-next-line */ }, [bil.valore_produzione, bil.rimanenze_totali, bil.costi_servizi]);
+    const [rows, setRows] = useState(() => (saved?.rows?.length ? saved.rows : initRows()));
+    const [giorni, setGiorni] = useState(saved?.giorni ?? 220);
+    const [gScen, setGScen] = useState(saved?.gScen?.length === 4 ? saved.gScen : [20, 58, 115, 189]);
+    const [riskTol, setRiskTol] = useState(saved?.riskTol ?? 8000000);
+    const [riskApp, setRiskApp] = useState(saved?.riskApp ?? 12000000);
+    const [saving, setSaving] = useState(false);
+    // se non ci sono scenari salvati, ri-inizializza le righe quando cambiano i dati di bilancio
+    useEffect(() => {
+        if (!saved?.rows?.length) setRows(initRows());
+        /* eslint-disable-next-line */
+    }, [bil.valore_produzione, bil.rimanenze_totali, bil.costi_servizi]);
+
+    const salvaScenari = async () => {
+        setSaving(true);
+        try {
+            await api.put(`/anagrafiche/${anagrafica_id}`, {
+                salute_fiscale_scenari: { rows, giorni, gScen, riskTol, riskApp },
+            });
+            toast.success("Scenari salvati per questo cliente");
+            onReload?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio scenari"); }
+        finally { setSaving(false); }
+    };
 
     const upd = (i, patch) => setRows((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
     const pesato = (r) => r.imp * (r.pct / 100);
@@ -313,7 +338,12 @@ function MargineContribuzione({ bil }) {
     return (
         <>
         <Card className="p-4" data-testid="sf-mdc-card">
-            <h4 className="font-semibold text-slate-800 mb-3 text-sm">🧮 Margine di Contribuzione (perdita in caso di fermo)</h4>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <h4 className="font-semibold text-slate-800 text-sm">🧮 Margine di Contribuzione (perdita in caso di fermo)</h4>
+                <button onClick={salvaScenari} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50" data-testid="sf-salva-scenari">
+                    {saving ? "Salvo…" : "💾 Salva scenari"}
+                </button>
+            </div>
             <div className="overflow-x-auto">
             <table className="w-full text-xs">
                 <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">

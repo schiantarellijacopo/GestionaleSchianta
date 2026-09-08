@@ -1,5 +1,19 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 08/09/2026 (fork) — Batch 2: Piramide tab, Documenti unificati, scenari, avatar
+
+- **Tab "🔺 Piramide Azienda"** (persone giuridiche): nuovo tab dedicato (`tab-piramide-azienda`) con pulsante "Precompila da bilancio" che riempie la piramide coperture (modello aziende) dai dati di bilancio (valore produzione) + polizze attive. Backend `prepopola_piramide_v2` reso azienda-aware. `PiramideCopertureNuova` esportata. (Il pulsante resta anche dentro Salute Fiscale.)
+- **Documenti unificati**: un solo tab "Documenti" con i documenti fissi del cliente in alto + sezione "Documenti raccolti" con cartelle per categoria (Visura Camerale/Catastale/Bilancio/…). Rimosso il tab "Altri allegati". Smistamento migliorato: file con "bilancio" nel nome finiscono nella cartella Bilancio anche se categoria=visura_camerale.
+- **Andamento fatturato**: grafico a barre multi-anno (Recharts) nella card storico della Salute Fiscale.
+- **Salva scenari per cliente**: pulsante "💾 Salva scenari" nel Margine di Contribuzione → salva rows/%/giorni/scenari/risk in `anagrafica.salute_fiscale_scenari` (via PUT /anagrafiche) e li ricarica all'apertura. Persistenza verificata.
+- **Avatar auto-crop volto**: migliorato `face_crop._detect_face_opencv` con validazione tono-pelle (YCrCb) + minNeighbors=7 per eliminare i falsi positivi ("ritagliava zone non pertinenti"); se incerto NON ritaglia (fallback icona). Il crop volto ora si applica anche all'upload manuale dell'avatar (se trova un volto sicuro). NON testato via UI (euristica backend).
+- Testato: iter 75 PASS 100% (Piramide tab, unificazione Documenti, grafico fatturato, salva scenari, smistamento Bilancio).
+
+### ⏳ In sospeso
+- "Anteprima chat": scelta modalità (riga/bolle/pulsante dedicato) ancora da definire.
+
+
+
 ## Sessione 08/09/2026 (fork) — Cruscotto Salute Fiscale azienda + rifiniture
 
 ### ✅ Salute Fiscale unificata (fusa con Analisi Azienda) — tab-salute-fiscale

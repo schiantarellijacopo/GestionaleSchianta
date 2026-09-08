@@ -17,18 +17,35 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
-def _detect_face_opencv(img_pil) -> Optional[tuple[int, int, int, int]]:
-    """Ritorna (left, top, right, bottom) del volto più plausibile, o None."""
+def _skin_ratio(rgb_region) -> float:
+    """Frazione di pixel con tono pelle nella regione (YCrCb). 0..1."""
     import cv2
     import numpy as np
-    gray = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2GRAY)
+    if rgb_region.size == 0:
+        return 0.0
+    ycrcb = cv2.cvtColor(rgb_region, cv2.COLOR_RGB2YCrCb)
+    lo = np.array([0, 133, 77], dtype=np.uint8)
+    hi = np.array([255, 173, 127], dtype=np.uint8)
+    mask = cv2.inRange(ycrcb, lo, hi)
+    return float(np.count_nonzero(mask)) / float(mask.size)
+
+
+def _detect_face_opencv(img_pil) -> Optional[tuple[int, int, int, int]]:
+    """Ritorna (left, top, right, bottom) del volto più plausibile, o None.
+
+    Validazione anti-falsi-positivi: scarta box con proporzioni/area implausibili
+    e con troppo pochi pixel di tono pelle (evita di ritagliare loghi/testo)."""
+    import cv2
+    import numpy as np
+    rgb = np.array(img_pil)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     gray = cv2.equalizeHist(gray)
     H, W = gray.shape[:2]
     min_side = max(40, min(W, H) // 12)
     candidates = []
     for cascade_name in ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml"):
         cascade = cv2.CascadeClassifier(cv2.data.haarcascades + cascade_name)
-        faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=6,
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=7,
                                          minSize=(min_side, min_side))
         for (x, y, w, h) in faces:
             # scarta box implausibili: troppo grandi (documento intero) o proporzioni strane
@@ -36,12 +53,16 @@ def _detect_face_opencv(img_pil) -> Optional[tuple[int, int, int, int]]:
                 continue
             if not (0.7 <= w / h <= 1.4):
                 continue
-            candidates.append((int(x), int(y), int(w), int(h)))
+            skin = _skin_ratio(rgb[y:y + h, x:x + w])
+            if skin < 0.25:  # verosimilmente non è un volto (logo/testo/sfondo)
+                continue
+            candidates.append((int(x), int(y), int(w), int(h), skin))
         if candidates:
             break
     if not candidates:
         return None
-    x, y, w, h = max(candidates, key=lambda f: f[2] * f[3])
+    # miglior candidato: bilancia area e tono pelle
+    x, y, w, h, _ = max(candidates, key=lambda f: f[2] * f[3] * (0.5 + f[4]))
     return x, y, x + w, y + h
 
 
