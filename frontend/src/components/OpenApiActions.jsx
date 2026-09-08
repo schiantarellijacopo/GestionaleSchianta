@@ -12,6 +12,10 @@ import { toast } from "sonner";
 import CatastoImportDialog from "@/components/CatastoImportDialog";
 import VisengineDialog from "@/components/VisengineDialog";
 import CameraleDialog from "@/components/CameraleDialog";
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [mode, setMode] = useState(null); // "mock" | "live"
@@ -21,7 +25,11 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [catastoData, setCatastoData] = useState(null); // {immobili, soggetto}
     const [showVisengine, setShowVisengine] = useState(false);
     const [showCamerale, setShowCamerale] = useState(false);
+    const [confirm, setConfirm] = useState(null); // {label, run}
     const openapi = ana.openapi_data || {};
+
+    // Chiede SEMPRE conferma prima di scaricare/aprire un servizio OpenAPI (consuma credito)
+    const guard = (label, fn) => () => setConfirm({ label, run: fn });
 
     const estraiCatasto = async () => {
         setLoading("cadastre");
@@ -89,7 +97,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Building2} label="Camerale" testid="oapi-btn-company"
                     disabled={!canEdit || (!hasPiva && !hasCf)}
                     loading={false}
-                    onClick={() => setShowCamerale(true)}
+                    onClick={guard("Camerale", () => setShowCamerale(true))}
                     hint={!hasPiva && !hasCf ? "P.IVA/CF mancante" : null}
                     hasData={!!openapi.camerale || Array.isArray(openapi.camerale_richieste)}
                 />
@@ -97,7 +105,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Home} label="Catasto" testid="oapi-btn-cadastre"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre"}
                     loading={loading === "cadastre"}
-                    onClick={estraiCatasto}
+                    onClick={guard("Catasto", estraiCatasto)}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.cadastre) && openapi.cadastre.length > 0}
                 />
@@ -105,7 +113,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Car} label="Veicoli" testid="oapi-btn-vehicles"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "vehicles"}
                     loading={loading === "vehicles"}
-                    onClick={() => call("vehicles", "automotive", "Veicoli")}
+                    onClick={guard("Veicoli", () => call("vehicles", "automotive", "Veicoli"))}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.automotive) && openapi.automotive.length > 0}
                 />
@@ -113,7 +121,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={FileStack} label="Visure & Doc." testid="oapi-btn-visengine"
                     disabled={!canEdit || (!hasPiva && !hasCf)}
                     loading={false}
-                    onClick={() => setShowVisengine(true)}
+                    onClick={guard("Visure & Documenti", () => setShowVisengine(true))}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.visengine_richieste) && openapi.visengine_richieste.length > 0}
                 />
@@ -121,11 +129,36 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={FileSearch} label="Visura" testid="oapi-btn-visura"
                     disabled={!canEdit || (!hasPiva && !hasCf) || loading === "visura"}
                     loading={loading === "visura"}
-                    onClick={() => call("visura", "visura", "Visura")}
+                    onClick={guard("Visura", () => call("visura", "visura", "Visura"))}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={!!openapi.visura}
                 />
             </div>
+
+            <AlertDialog open={!!confirm} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
+                <AlertDialogContent data-testid="openapi-confirm-dialog">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Scaricare i dati da OpenAPI.it?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Stai per avviare il servizio <strong>{confirm?.label}</strong>.
+                            {mode === "live"
+                                ? " L'operazione interroga OpenAPI.it e può consumare credito del tuo account."
+                                : " (Modalità MOCK: nessun credito consumato.)"}
+                            {" "}Vuoi procedere?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel data-testid="openapi-confirm-cancel">Annulla</AlertDialogCancel>
+                        <AlertDialogAction
+                            data-testid="openapi-confirm-ok"
+                            className="bg-sky-700 hover:bg-sky-800"
+                            onClick={() => { const fn = confirm?.run; setConfirm(null); fn?.(); }}
+                        >
+                            Scarica
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {catastoData && (
                 <CatastoImportDialog

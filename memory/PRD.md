@@ -1,5 +1,18 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 08/09/2026 (fork) — Salute Fiscale ricca da OpenAPI + Conferma download OpenAPI
+
+### ✅ Salute Fiscale (P0) — dati "più corposi" e KPI corretti da company.openapi.com
+- Nuova funzione `openapi_it_service.company_financials(cf_piva)`: legge company.openapi.com **IT-full** e ricostruisce il conto economico dettagliato dalle voci codificate IIC/IPL (subset productionValue/productionCosts/revenuesFinancialCharges/annualResult/incomeStatementAggregateValues + assetsAggregateValues/liabilitiesAggregateValues/netWorth/debts). Aggiunge `operatingResults` (EBITDA/EBIT/cash flow), `ecofin` (netWorth reale, turnover, trend), `employees`, tutti gli indici ufficiali (redditività, liquidità, leva, kpi, struttura, indebitamento, copertura) e lo **storico fatturato** (IT-advanced balanceSheets.all, ultimi 6 anni).
+- `POST /anagrafiche/{aid}/salute-fiscale/da-openapi` (routes/extras_p1p2.py) riscritto: bilancio_estratto ora contiene ~24 voci (Ricavi, Valore produzione, Costi produzione/materie/servizi/godimento beni/personale, Ammortamenti, Oneri diversi, EBITDA/EBIT, Proventi/Oneri finanziari, Utile lordo, Imposte, Utile netto, Cash flow, Totale attivo/debiti, PN, Capitale sociale, dipendenti, trend). **BUG CORRETTO**: prima metteva come patrimonio_netto la perdita d'esercizio (-8.052) e ricostruiva l'utile da ROE; ora PN=451.553 (IIC084/ecofin) e utile netto=IIC179 reale. Indicatori estesi: ROE/ROI/ROS, EBITDA margin, Leva (Att/PN), PFN/EBITDA, Oneri fin./Ricavi, Pressione fiscale, Incidenza personale. Verificato via curl su AUTOTRASPORTI VIVIANI (00920050143, LIVE).
+- Frontend `SaluteFiscaleTab.jsx`: al click di "⚡ Compila da OpenAPI" ora fa `setDati(r.data)` immediato (UI si aggiorna all'istante, niente più "non aggiorna"); rendering arricchito con sezioni Conto economico + Stato patrimoniale + Storico bilanci (`sf-storico-card`) + Indicatori. Testato e2e (iter 71): score 7, nessun campo vuoto.
+
+### ✅ Conferma download OpenAPI (richiesta agentic-edit) — `OpenApiActions.jsx`
+- Prima di scaricare/aprire QUALSIASI servizio OpenAPI (tutti e 5 i pulsanti: Camerale, Catasto, Veicoli, Visure & Doc., Visura) compare un **AlertDialog** (`openapi-confirm-dialog`) "Scaricare i dati da OpenAPI.it?" con avviso consumo credito + bottoni Annulla (`openapi-confirm-cancel`) / Scarica (`openapi-confirm-ok`). Helper `guard(label, fn)`. Testato e2e (iter 71) su persona fisica: dialog compare su tutti i 5, Annulla chiude senza chiamata.
+- NB: `OpenApiActions` è renderizzato nel tab "Dati" per le persone fisiche e nel tab "Analisi Azienda" (AnalisiAziendaTab.jsx) per le persone giuridiche — il gate a riga 211 di AnagraficaDetail.jsx è INTENZIONALE (evita duplicati), NON un bug.
+
+
+
 ## Sessione 02/09/2026 (fork) — parte 6: Biblioteca Centralizzata (globale) + note Veicolo
 
 ### ✅ Biblioteca Centralizzata (opzione A — libreria unica globale)

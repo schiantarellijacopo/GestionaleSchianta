@@ -1428,6 +1428,124 @@ async def company_full_completo(cf_piva: str) -> Optional[dict]:
     return merged
 
 
+def _codes_map(lst) -> dict:
+    """Converte una lista [{code, value}] di company.openapi.com in {code: value}."""
+    out = {}
+    for x in (lst or []):
+        if isinstance(x, dict) and x.get("code") is not None:
+            out[str(x["code"])] = x.get("value")
+    return out
+
+
+async def company_financials(cf_piva: str) -> Optional[dict]:
+    """Estrae il conto economico + stato patrimoniale DETTAGLIATO dell'ultimo
+    bilancio depositato da company.openapi.com (IT-full, voci codificate IIC/IPL)
+    + gli indici ufficiali + lo storico fatturato (IT-advanced).
+
+    Ritorna un dizionario ricco pronto per la Salute Fiscale (niente OCR)."""
+    key = (cf_piva or "").strip()
+    if not key or not has_credentials():
+        return None
+    r = await _call_api([f"GET:{_CO_HOST}/IT-full"], "GET", f"https://{_CO_HOST}/IT-full/{key}")
+    if not r:
+        return None
+    d = r.get("data")
+    if isinstance(d, list):
+        d = d[0] if d else {}
+    if not isinstance(d, dict) or not d:
+        return None
+
+    # merge di tutte le voci codificate del conto economico / stato patrimoniale
+    m = {}
+    for sub in ("incomeStatementAggregateValues", "productionValue", "productionCosts",
+                "revenuesFinancialCharges", "annualResult", "assetsAggregateValues",
+                "liabilitiesAggregateValues", "netWorth", "debts"):
+        m.update(_codes_map(d.get(sub)))
+
+    def g(num: str):
+        """Legge una voce provando sia la divisione IC sia PL."""
+        v = m.get(f"IIC{num}")
+        if v is None:
+            v = m.get(f"IPL{num}")
+        return _co_num(v)
+
+    op = d.get("operatingResults") or {}
+    eco = d.get("ecofin") or {}
+    emp = d.get("employees") or {}
+    anno = None
+    try:
+        anno = int(str(eco.get("turnoverYear") or (eco.get("balanceSheetDate") or "")[:4]) or 0) or None
+    except (TypeError, ValueError):
+        anno = None
+
+    dett = {
+        "anno": anno,
+        "ricavi": g("124"),                     # A.1 Ricavi vendite e prestazioni
+        "valore_produzione": g("130"),          # A. Totale valore produzione
+        "costi_produzione": g("149"),           # B. Totale costi produzione
+        "costi_materie": g("131"),              # B.6 Materie prime
+        "costi_servizi": g("132"),              # B.7 Servizi
+        "costi_godimento_beni": g("133"),       # B.8 Godimento beni di terzi
+        "costi_personale": g("139"),            # B.9 Totale costo del personale
+        "ammortamenti": g("144"),               # B.10 Ammortamenti e svalutazioni
+        "oneri_diversi_gestione": g("148"),     # B.14 Oneri diversi di gestione
+        "proventi_finanziari": g("158"),        # C.16 Totale altri proventi finanziari
+        "oneri_finanziari": g("159"),           # C.17 Totale oneri finanziari
+        "utile_lordo": g("177"),                # Risultato prima delle imposte
+        "imposte": g("178"),                    # 20. Totale imposte
+        "utile_netto": g("179"),                # 21. Utile/perdita d'esercizio
+        "totale_attivo": g("074"),              # Totale attivo
+        "patrimonio_netto": g("084") or _co_num(eco.get("netWorth")),   # A. Totale patrimonio netto
+        "totale_debiti": g("118"),              # D. Totale debiti
+        "capitale_sociale": g("075") or _co_num(eco.get("shareCapital")),
+        "ebitda": _co_num(op.get("ebitda")),
+        "ebit": _co_num(op.get("ebit")),
+        "cash_flow": _co_num(op.get("cashFlow")),
+        "dipendenti": emp.get("employee") or eco.get("employees"),
+        "trend_fatturato_pct": _co_num(eco.get("turnoverTrend")),
+        "dimensione_impresa": (eco.get("enterpriseSize") or {}).get("description") if isinstance(eco.get("enterpriseSize"), dict) else None,
+    }
+
+    indici = {
+        "redditivita": d.get("profitability"),
+        "liquidita": d.get("liquidityRatios"),
+        "leva": d.get("leverageRatios"),
+        "kpi_bilancio": d.get("financialStatementKpi"),
+        "struttura": d.get("structureRatios"),
+        "indebitamento": d.get("indebtedness"),
+        "copertura": d.get("coverageRatios"),
+    }
+
+    # storico fatturato/utile (IT-advanced balanceSheets.all)
+    storico = []
+    adv_name = None
+    adv = await _call_api([f"GET:{_CO_HOST}/IT-advanced"], "GET", f"https://{_CO_HOST}/IT-advanced/{key}")
+    if adv:
+        da = adv.get("data")
+        if isinstance(da, list):
+            da = da[0] if da else {}
+        da = da or {}
+        adv_name = da.get("companyName")
+        for b in (da.get("balanceSheets") or {}).get("all", []):
+            t = _co_num(b.get("turnover"))
+            if t:
+                storico.append({
+                    "anno": b.get("year"),
+                    "fatturato": t,
+                    "patrimonio_netto": _co_num(b.get("netWorth")),
+                    "dipendenti": b.get("employees"),
+                })
+        storico.sort(key=lambda x: x.get("anno") or 0, reverse=True)
+
+    return {
+        "dettaglio": dett,
+        "indici": indici,
+        "storico": storico[:6],
+        "ragione_sociale": d.get("companyName") or adv_name,
+        "provider": "company.openapi.com IT-full (LIVE)",
+    }
+
+
 # ===================================================================
 # SERVIZIO 11 · REPORT AZIENDE (api.reportaziende.it — API Dettaglio Azienda)
 # Richiede attivazione prodotto su OpenAPI.it (scope OAuth dedicato).

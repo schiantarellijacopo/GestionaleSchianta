@@ -1472,58 +1472,112 @@ async def salute_fiscale_da_openapi(aid: str, user=Depends(current_user)) -> dic
     key = ana.get("partita_iva") or ana.get("codice_fiscale")
     if not key:
         raise HTTPException(400, "Anagrafica senza P.IVA/CF")
-    comp = await _svc.company_full_completo(key)
-    if not comp or not (comp.get("bilanci") or []):
+    fin = await _svc.company_financials(key)
+    if not fin or not fin.get("dettaglio"):
         raise HTTPException(404, "Dati di bilancio non disponibili da OpenAPI")
-    b = next((x for x in comp["bilanci"] if (x.get("fatturato") or 0) > 0), comp["bilanci"][0])
-    ricavi = b.get("fatturato") or 0
-    patrimonio_netto = b.get("patrimonio_netto") or 0
-    totale_attivo = b.get("totale_attivo") or 0
-    costi_personale = b.get("costo_personale") or 0
-    ind = comp.get("indici") or {}
-    red = ind.get("redditivita") or {}
-    utile_netto = None
-    # ROE = utile_netto / patrimonio_netto → ricostruisco utile_netto se ho ROE
-    roe = red.get("roe") if isinstance(red, dict) else None
-    try:
-        if roe is not None and patrimonio_netto:
-            utile_netto = round(float(roe) / 100 * patrimonio_netto, 2)
-    except (TypeError, ValueError):
-        utile_netto = None
-    dati = {
-        "ricavi": ricavi, "patrimonio_netto": patrimonio_netto,
-        "totale_attivo": totale_attivo, "costi_personale": costi_personale,
-        "utile_netto": utile_netto, "anno": b.get("anno"), "dipendenti": b.get("dipendenti"),
-    }
+    dt = fin["dettaglio"]
+    indici_raw = fin.get("indici") or {}
+
     def _n(v):
         try:
             return float(v) if v not in (None, "") else 0
         except (TypeError, ValueError):
             return 0
-    r, pn, ta = _n(ricavi), _n(patrimonio_netto), _n(totale_attivo)
-    un = _n(utile_netto)
-    indicatori = {
-        "roe_pct": round((un / pn * 100), 2) if pn > 0 else (red.get("roe") if isinstance(red, dict) else None),
-        "ros_pct": red.get("ros") if isinstance(red, dict) else None,
-        "leva_finanziaria": round((ta / pn), 2) if pn > 0 else None,
-        "incidenza_oneri_fin_pct": None,
-        "pressione_fiscale_pct": None,
+
+    ricavi = _n(dt.get("ricavi")) or _n(dt.get("valore_produzione"))
+    valore_prod = _n(dt.get("valore_produzione")) or ricavi
+    pn = _n(dt.get("patrimonio_netto"))
+    ta = _n(dt.get("totale_attivo"))
+    debiti = _n(dt.get("totale_debiti"))
+    un = _n(dt.get("utile_netto"))
+    ul = _n(dt.get("utile_lordo"))
+    imposte = _n(dt.get("imposte"))
+    oneri_fin = _n(dt.get("oneri_finanziari"))
+    ebitda = _n(dt.get("ebitda"))
+    ebit = _n(dt.get("ebit"))
+
+    # bilancio estratto RICCO (voci reali del conto economico + stato patrimoniale)
+    bilancio = {
+        "anno": dt.get("anno"),
+        "ricavi": dt.get("ricavi"),
+        "valore_produzione": dt.get("valore_produzione"),
+        "costi_produzione": dt.get("costi_produzione"),
+        "costi_materie": dt.get("costi_materie"),
+        "costi_servizi": dt.get("costi_servizi"),
+        "costi_godimento_beni": dt.get("costi_godimento_beni"),
+        "costi_personale": dt.get("costi_personale"),
+        "ammortamenti": dt.get("ammortamenti"),
+        "oneri_diversi_gestione": dt.get("oneri_diversi_gestione"),
+        "ebitda": dt.get("ebitda"),
+        "ebit": dt.get("ebit"),
+        "proventi_finanziari": dt.get("proventi_finanziari"),
+        "oneri_finanziari": dt.get("oneri_finanziari"),
+        "utile_lordo": dt.get("utile_lordo"),
+        "imposte": dt.get("imposte"),
+        "utile_netto": dt.get("utile_netto"),
+        "cash_flow": dt.get("cash_flow"),
+        "totale_attivo": dt.get("totale_attivo"),
+        "totale_debiti": dt.get("totale_debiti"),
+        "patrimonio_netto": dt.get("patrimonio_netto"),
+        "capitale_sociale": dt.get("capitale_sociale"),
+        "dipendenti": dt.get("dipendenti"),
+        "trend_fatturato_pct": dt.get("trend_fatturato_pct"),
+        "dimensione_impresa": dt.get("dimensione_impresa"),
+        "confidenza": "alta",
     }
+
+    red = indici_raw.get("redditivita") or {}
+    indeb = indici_raw.get("indebitamento") or {}
+    leva_o = indici_raw.get("leva") or {}
+    indicatori = {
+        "roe_pct": round(red.get("roe"), 2) if isinstance(red.get("roe"), (int, float)) else (round(un / pn * 100, 2) if pn > 0 else None),
+        "ros_pct": round(red.get("ros"), 2) if isinstance(red.get("ros"), (int, float)) else (round(ebit / ricavi * 100, 2) if ricavi > 0 else None),
+        "roi_pct": round(red.get("roi"), 2) if isinstance(red.get("roi"), (int, float)) else None,
+        "ebitda_margin_pct": round(ebitda / valore_prod * 100, 2) if valore_prod > 0 else None,
+        "leva_finanziaria": round(ta / pn, 2) if pn > 0 else None,
+        "pfn_ebitda": round(leva_o.get("pfnEbitda"), 2) if isinstance(leva_o.get("pfnEbitda"), (int, float)) else None,
+        "incidenza_oneri_fin_pct": round(oneri_fin / ricavi * 100, 2) if ricavi > 0 else None,
+        "pressione_fiscale_pct": round(imposte / ul * 100, 2) if ul > 0 else None,
+        "incidenza_personale_pct": round(_n(dt.get("costi_personale")) / valore_prod * 100, 2) if valore_prod > 0 else None,
+    }
+
+    # score rischio 0-10 (10 = max)
     rischio = 0
-    if un < 0: rischio += 4
-    if indicatori["leva_finanziaria"] and indicatori["leva_finanziaria"] > 3: rischio += 2
-    if pn <= 0: rischio += 3
+    if un < 0:
+        rischio += 4
+    elif ricavi > 0 and un < ricavi * 0.02:
+        rischio += 2
+    if indicatori["leva_finanziaria"] and indicatori["leva_finanziaria"] > 3:
+        rischio += 2
+    if indicatori["pfn_ebitda"] and indicatori["pfn_ebitda"] > 4:
+        rischio += 1
+    if indicatori["incidenza_oneri_fin_pct"] and indicatori["incidenza_oneri_fin_pct"] > 5:
+        rischio += 2
+    if pn <= 0:
+        rischio += 3
+    if ebitda < 0:
+        rischio += 2
     rischio = min(10, rischio)
+
     cross_sell = []
-    if r > 500000: cross_sell += ["Cyber Risk", "RC Prodotti"]
-    if un > 50000 and pn > 100000: cross_sell += ["RC Professionale / D&O", "Key Man"]
+    if ricavi > 500000:
+        cross_sell += ["Cyber Risk", "RC Prodotti"]
+    if un > 50000 and pn > 100000:
+        cross_sell += ["RC Professionale / D&O", "Key Man"]
+    if oneri_fin > 10000 or debiti > pn * 3:
+        cross_sell.append("Tutela Legale aziendale")
+    if _n(dt.get("dipendenti")) >= 10:
+        cross_sell.append("Polizza Infortuni Dipendenti / Sanitaria collettiva")
+
     payload = {
         "salute_fiscale_dati": {
-            "bilancio_estratto": dati,
+            "bilancio_estratto": bilancio,
             "indicatori": indicatori,
+            "indici_ufficiali": indici_raw,
+            "storico": fin.get("storico") or [],
             "score_rischio_default": rischio,
-            "cross_sell_suggerito": cross_sell,
-            "fonte": comp.get("provider"),
+            "cross_sell_suggerito": list(dict.fromkeys(cross_sell)),
+            "fonte": fin.get("provider"),
             "ocr_data": _now_iso()[:10],
         },
         "salute_fiscale_aggiornata_il": _now_iso(),

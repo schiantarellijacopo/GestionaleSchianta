@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend testing per (1) conferma AlertDialog sui 5 pulsanti OpenApiActions e (2) auto-compilazione Salute Fiscale da OpenAPI su PG AUTOTRASPORTI VIVIANI. La Salute Fiscale funziona perfettamente: al click di sf-openapi-btn la UI si aggiorna immediatamente con score rischio 7 (ALTO), cross-sell (4 voci), conto economico completo (EBITDA 286.999, EBIT 69.236, Imposte 28.113, utile netto -8.052, ecc.), stato patrimoniale con PN 451.553, storico 6 anni e indicatori. Nessun campo vuoto ('—' = 0 occorrenze, '€' = 33 occorrenze). Il meccanismo di conferma AlertDialog di OpenApiActions è stato verificato su una PF (Marco Rossi): tutti e 5 i pulsanti aprono correttamente openapi-confirm-dialog con titolo 'Scaricare i dati da OpenAPI.it?' e i bottoni Annulla/Scarica; il pulsante Annulla chiude il dialog senza effettuare la chiamata a pagamento. TUTTAVIA: sulla persona giuridica di test (target del review request) il componente OpenApiActions NON viene renderizzato per un gate errato in AnagraficaDetail.jsx.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AnagraficaDetail.jsx (line 211)", "issue": "OpenApiActions è renderizzato solo per NON persona_giuridica: `{ana.tipo !== 'persona_giuridica' && (<OpenApiActions .../>)}`. Sulla PG AUTOTRASPORTI VIVIANI il riquadro 'Autocompilazione dati da OpenAPI.it' NON compare, e i 5 pulsanti (oapi-btn-company/cadastre/vehicles/visengine/visura) non sono raggiungibili dalla tab 'Anagrafica'. La review request richiede esplicitamente il pannello su questa PG (tutti i 5 pulsanti + conferma). Fix: rimuovere il gate `ana.tipo !== 'persona_giuridica'` alla riga 211 (renderizzare OpenApiActions per entrambi i tipi, come già faceva nelle iterazioni precedenti).", "selector": "[data-testid='openapi-actions']", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "AnagraficaDetail.jsx riga 211: rimuovere il gate `ana.tipo !== 'persona_giuridica' &&` così che OpenApiActions sia renderizzato anche per persona giuridica (bloccante per il review request corrente)."
+  ],
+  "critical_code_review_comments": [
+    "OpenApiActions.jsx: la logica 'guard' + AlertDialog è pulita e coerente su tutti e 5 i pulsanti (verificato su PF).",
+    "SaluteFiscaleTab.jsx: `setDati(r.data)` immediato dopo POST /salute-fiscale/da-openapi rende la UI reattiva senza necessità di reload; storico, indicatori e stato patrimoniale sono renderizzati correttamente.",
+    "AnagraficaDetail.jsx è > 1980 righe: candidato a splitting in moduli per tab per manutenibilità."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "80% (Salute Fiscale ok, conferma dialog ok su PF; OpenApiActions non visibile su PG per bug di gating)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna. Usati: AUTOTRASPORTI VIVIANI (abe0cbf1-52a7-4d4b-b703-9a49ca89d924, PG) per Salute Fiscale + Marco Rossi (93b73085-100f-4c78-883a-e6cefea49c72, PF) per confermare AlertDialog. Nessun click su 'Scarica' per Catasto/Veicoli/Visura → nessun credito OpenAPI consumato.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Salute Fiscale su PG confermato funzionante end-to-end. Meccanismo di conferma su OpenApiActions confermato su PF. Manca solo il gating di riga 211 in AnagraficaDetail.jsx da rimuovere per rendere OpenApiActions visibile su PG (dove i pulsanti Camerale/Visura sono più utili). Dopo il fix, ripetere il flow sulla PG AUTOTRASPORTI VIVIANI: click sui 5 bottoni, verifica dialog + Annulla per Catasto/Veicoli/Visura, click Scarica per Camerale/Visure (aprono solo dialog di selezione, nessun costo).",
+  "rca_of_the_issue": "In AnagraficaDetail.jsx la riga 211 gata il componente OpenApiActions con `ana.tipo !== 'persona_giuridica'`. Probabilmente E1 ha introdotto questa condizione pensando di spostare la funzionalità nella tab 'Analisi Azienda' ma non l'ha completato: per la PG il componente non è più raggiungibile, contraddicendo il requisito del review. Fix di 1 riga: rimuovere il condizionale mantenendo `<OpenApiActions ana={ana} canEdit={canEdit} onReload={load} />` sempre presente nella TabsContent value='dati'."
+}

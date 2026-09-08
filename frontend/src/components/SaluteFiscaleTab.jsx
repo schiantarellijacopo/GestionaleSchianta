@@ -37,6 +37,7 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
 
     const ind = dati?.indicatori || {};
     const bil = dati?.bilancio_estratto || {};
+    const storico = dati?.storico || [];
     const rischio = dati?.score_rischio_default ?? null;
     const crossSell = dati?.cross_sell_suggerito || [];
     const ramoColor = (s) => s == null ? "slate" : s <= 3 ? "emerald" : s <= 6 ? "amber" : "rose";
@@ -63,9 +64,10 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
                         <button onClick={async () => {
                             try {
                                 setBusy(true);
-                                await api.post(`/anagrafiche/${anagrafica_id}/salute-fiscale/da-openapi`);
+                                const r = await api.post(`/anagrafiche/${anagrafica_id}/salute-fiscale/da-openapi`);
+                                setDati(r.data);
+                                setAggIl(new Date().toISOString());
                                 toast.success("Dati compilati da OpenAPI (company.openapi.com)");
-                                load();
                             } catch (e) { toast.error(e.response?.data?.detail || "Dati OpenAPI non disponibili"); }
                             finally { setBusy(false); }
                         }} disabled={busy} className="inline-flex items-center gap-2 px-3 py-2 bg-sky-700 text-white rounded text-sm hover:bg-sky-800 disabled:opacity-50" data-testid="sf-openapi-btn">
@@ -115,32 +117,81 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
 
                     {/* Bilancio estratto */}
                     <Card className="p-4">
-                        <h4 className="font-semibold text-slate-800 mb-3 text-sm">📄 Bilancio estratto · Anno {bil.anno || "—"}</h4>
+                        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                            <h4 className="font-semibold text-slate-800 text-sm">📄 Conto economico · Anno {bil.anno || "—"}</h4>
+                            <div className="flex items-center gap-2 text-[11px]">
+                                {bil.dimensione_impresa && <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">{bil.dimensione_impresa}</span>}
+                                {bil.dipendenti != null && <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{bil.dipendenti} dipendenti</span>}
+                                {bil.trend_fatturato_pct != null && (
+                                    <span className={`px-2 py-0.5 rounded-full ${bil.trend_fatturato_pct >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                                        Trend fatturato {bil.trend_fatturato_pct >= 0 ? "+" : ""}{bil.trend_fatturato_pct}%
+                                    </span>
+                                )}
+                            </div>
+                        </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            <BilItem label="Ricavi" value={bil.ricavi} />
-                            <BilItem label="Costi personale" value={bil.costi_personale} />
+                            <BilItem label="Ricavi vendite" value={bil.ricavi} />
+                            <BilItem label="Valore produzione" value={bil.valore_produzione} />
+                            <BilItem label="Costi produzione" value={bil.costi_produzione} />
+                            <BilItem label="Costi materie prime" value={bil.costi_materie} />
                             <BilItem label="Costi servizi" value={bil.costi_servizi} />
-                            <BilItem label="Costi god. beni" value={bil.costi_godimento_beni} />
-                            <BilItem label="Ammortamenti" value={bil.ammortamenti} />
+                            <BilItem label="Godimento beni terzi" value={bil.costi_godimento_beni} />
+                            <BilItem label="Costo del personale" value={bil.costi_personale} />
+                            <BilItem label="Ammortamenti/svalut." value={bil.ammortamenti} />
+                            <BilItem label="Oneri diversi gest." value={bil.oneri_diversi_gestione} />
+                            <BilItem label="EBITDA" value={bil.ebitda} positivo />
+                            <BilItem label="EBIT (risult. operativo)" value={bil.ebit} positivo />
+                            <BilItem label="Cash flow" value={bil.cash_flow} positivo />
+                            <BilItem label="Proventi finanziari" value={bil.proventi_finanziari} />
                             <BilItem label="Oneri finanziari" value={bil.oneri_finanziari} />
-                            <BilItem label="Utile lordo" value={bil.utile_lordo} positivo />
+                            <BilItem label="Utile lordo (ante imposte)" value={bil.utile_lordo} positivo />
                             <BilItem label="Imposte" value={bil.imposte} />
-                            <BilItem label="Utile netto" value={bil.utile_netto} positivo />
+                            <BilItem label="Utile/perdita d'esercizio" value={bil.utile_netto} positivo />
+                        </div>
+                        <h4 className="font-semibold text-slate-800 mt-4 mb-2 text-sm">🏛️ Stato patrimoniale</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             <BilItem label="Totale attivo" value={bil.totale_attivo} />
+                            <BilItem label="Totale debiti" value={bil.totale_debiti} />
                             <BilItem label="Patrimonio netto" value={bil.patrimonio_netto} positivo />
-                            <BilItem label="OCR confidenza" value={bil.confidenza} text />
+                            <BilItem label="Capitale sociale" value={bil.capitale_sociale} />
                         </div>
                     </Card>
+
+                    {/* Storico fatturato */}
+                    {storico.length > 0 && (
+                        <Card className="p-4" data-testid="sf-storico-card">
+                            <h4 className="font-semibold text-slate-800 mb-3 text-sm">📈 Storico bilanci</h4>
+                            <table className="w-full text-xs">
+                                <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">
+                                    <tr><th className="text-left py-1">Anno</th><th className="text-right">Fatturato</th><th className="text-right">Patrimonio netto</th><th className="text-right">Dipendenti</th></tr>
+                                </thead>
+                                <tbody>
+                                    {storico.map((s, i) => (
+                                        <tr key={i} className="border-b border-slate-100">
+                                            <td className="py-1 font-medium">{s.anno || "—"}</td>
+                                            <td className="text-right font-mono">{s.fatturato == null ? "—" : fmtEur(s.fatturato)}</td>
+                                            <td className="text-right font-mono">{s.patrimonio_netto == null ? "—" : fmtEur(s.patrimonio_netto)}</td>
+                                            <td className="text-right font-mono">{s.dipendenti ?? "—"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </Card>
+                    )}
 
                     {/* Indicatori */}
                     <Card className="p-4">
                         <h4 className="font-semibold text-slate-800 mb-3 text-sm">📊 Indicatori economico-finanziari</h4>
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                             <IndItem label="ROE" value={ind.roe_pct} unit="%" good={(v) => v >= 8} bad={(v) => v < 3} />
+                            <IndItem label="ROI" value={ind.roi_pct} unit="%" good={(v) => v >= 6} bad={(v) => v < 2} />
                             <IndItem label="ROS" value={ind.ros_pct} unit="%" good={(v) => v >= 10} bad={(v) => v < 2} />
-                            <IndItem label="Leva fin." value={ind.leva_finanziaria} unit="x" good={(v) => v <= 2} bad={(v) => v > 3} />
-                            <IndItem label="Oneri/Ricavi" value={ind.incidenza_oneri_fin_pct} unit="%" good={(v) => v < 2} bad={(v) => v > 5} />
+                            <IndItem label="EBITDA margin" value={ind.ebitda_margin_pct} unit="%" good={(v) => v >= 10} bad={(v) => v < 4} />
+                            <IndItem label="Leva fin. (Att/PN)" value={ind.leva_finanziaria} unit="x" good={(v) => v <= 2} bad={(v) => v > 3} />
+                            <IndItem label="PFN/EBITDA" value={ind.pfn_ebitda} unit="x" good={(v) => v <= 3} bad={(v) => v > 4} />
+                            <IndItem label="Oneri fin./Ricavi" value={ind.incidenza_oneri_fin_pct} unit="%" good={(v) => v < 2} bad={(v) => v > 5} />
                             <IndItem label="Press. fiscale" value={ind.pressione_fiscale_pct} unit="%" good={(v) => v < 30} bad={(v) => v > 50} />
+                            <IndItem label="Inc. personale" value={ind.incidenza_personale_pct} unit="%" good={(v) => v < 25} bad={(v) => v > 45} />
                         </div>
                     </Card>
                 </>
