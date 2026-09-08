@@ -183,8 +183,12 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="conti-correnti" data-testid="tab-conti-correnti">🏦 Conti Correnti</TabsTrigger>
                     <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Profilazione & GDPR</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
-                    <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
-                    <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
+                    {ana.tipo !== "persona_giuridica" && (
+                        <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
+                    )}
+                    {ana.tipo !== "persona_giuridica" && (
+                        <TabsTrigger value="potenti-domande" data-testid="tab-potenti-domande">💬 Potenti Domande</TabsTrigger>
+                    )}
                     {ana.tipo === "persona_giuridica" && (
                         <TabsTrigger value="analisi-azienda" data-testid="tab-analisi-azienda">🏢 Analisi Azienda</TabsTrigger>
                     )}
@@ -194,8 +198,12 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
                     <TabsTrigger value="allegati" data-testid="tab-allegati"><Paperclip size={13} className="mr-1" />Altri allegati</TabsTrigger>
-                    <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
-                    <TabsTrigger value="pensione" data-testid="tab-pensione"><Calculator size={13} className="mr-1" />Pensione INPS</TabsTrigger>
+                    {ana.tipo !== "persona_giuridica" && (
+                        <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
+                    )}
+                    {ana.tipo !== "persona_giuridica" && (
+                        <TabsTrigger value="pensione" data-testid="tab-pensione"><Calculator size={13} className="mr-1" />Pensione INPS</TabsTrigger>
+                    )}
                 </TabsList>
 
                 <TabsContent value="dati">
@@ -211,16 +219,24 @@ export default function AnagraficaDetail() {
                     <TabsContent value="analisi-azienda"><AnalisiAziendaTab ana={ana} onReload={load} /></TabsContent>
                 )}
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
-                <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
-                <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                {ana.tipo !== "persona_giuridica" && (
+                    <TabsContent value="raccolta-dati"><RaccoltaDatiTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                )}
+                {ana.tipo !== "persona_giuridica" && (
+                    <TabsContent value="potenti-domande"><PotentiDomandeTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                )}
                 {ana.tipo === "persona_giuridica" && (
                     <TabsContent value="salute-fiscale"><SaluteFiscaleTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
                 )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="allegati"><AllegatiTab entita_tipo="anagrafica" entita_id={id} canEdit={canEdit} /></TabsContent>
-                <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
-                <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                {ana.tipo !== "persona_giuridica" && (
+                    <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                )}
+                {ana.tipo !== "persona_giuridica" && (
+                    <TabsContent value="pensione"><PensioneTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                )}
             </Tabs>
 
             <PrivacyConsensiDialog

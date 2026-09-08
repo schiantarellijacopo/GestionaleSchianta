@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only testing eseguito per: (A) scheda 'Info Azienda' su persona giuridica, (B) visibilita tab per tipo anagrafica, (C) autocomplete P.IVA nel form Nuova anagrafica. Tutti i requisiti verificati con successo, nessun crash JS su recharts, i data-testid richiesti sono presenti e coerenti col contratto.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AnalisiAziendaTab: 'Governance' non usa una torta significativa: value=1 per ogni amministratore produce spicchi identici, poco informativi. Considerare pie basata su ruolo o quota consiglio.",
+    "AnalisiAziendaTab: il warning A11y 'Missing Description or aria-describedby' e presente sui DialogContent shadcn (non bloccante ma consigliato aggiungere DialogDescription)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "test@sandbox.it / Test1234! (nota: la sessione ha loggato come admin gia loggato in localStorage, ma flusso login testato in seconda run senza errori)",
+  "seed_data_creation": "Nessuna, usata anagrafica di test esistente 931835cd-9de5-41fb-a352-9996e03be47e (openapi_data.company gia salvato)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Verificati: PG /anagrafiche/931835cd-...-47e mostra tab 🏢 Analisi Azienda + 💼 Salute Fiscale; NON mostra Raccolta Dati/Potenti Domande/Analisi/Pensione. Su PF (f21723db-b961-4890-8072-a18bda8f733b) mostra i 4 tab persona fisica e NON i 2 azienda. info-azienda-tab render corretto: pannello con OPENAPI S.P.A. + ATECO 6201, 4 sotto-tab presenti; Soci: torta recharts + tabella con OPEN HOLDING SRL 100%; Governance: torta + tabella 10 amministratori; Estero: messaggio 'non disponibili / Report Aziende'; Forza lavoro cliccabile senza crash. Nel dialog Nuova anagrafica selezionando 'Azienda / Persona giuridica' e digitando 11 cifre nella P.IVA appare il pulsante 'Importa Dati Azienda' (data-testid=anag-importa-azienda-btn), cliccabile e abilitato. Nessuna chiamata a pagamento e nessuna chiamata a OpenAPI/company POST effettuata (vincolo utente rispettato).",
+  "rca_of_the_issue": "n/a"
+}

@@ -1294,17 +1294,27 @@ def _normalize_company_co(d: dict, full: bool) -> dict:
         prov = ro.get("province")
         if isinstance(prov, dict):
             prov = prov.get("code") or prov.get("description")
-        indirizzo = ro.get("streetName") or ro.get("street")
-        if indirizzo and ro.get("town"):
-            indirizzo = f"{indirizzo}, {ro.get('zipCode') or ''} {ro.get('town')} ({prov or ''})".strip()
+        comune = ro.get("town")
+        cap = ro.get("zipCode")
+        via = ro.get("streetName") or ro.get("street")
+        civ = ro.get("streetNumber")
+        indirizzo = via
+        if via and civ and str(civ) not in via:
+            indirizzo = f"{via} {civ}"
+        if indirizzo and comune:
+            indirizzo = f"{indirizzo}, {cap or ''} {comune} ({prov or ''})".strip()
     else:
         indirizzo = addr if isinstance(addr, str) else None
+        comune = prov = cap = None
     out = {
         "provider": "company.openapi.com (LIVE)",
         "ragione_sociale": d.get("companyName"),
         "piva": d.get("vatCode"),
         "cf": d.get("taxCode"),
         "indirizzo": indirizzo,
+        "comune": comune,
+        "provincia": prov,
+        "cap": cap,
         "stato_attivita": d.get("activityStatus"),
         "rea": d.get("reaCode"),
         "cciaa": d.get("cciaa"),
@@ -1349,7 +1359,6 @@ def _normalize_company_co(d: dict, full: bool) -> dict:
 
 
 async def company_dati(cf_piva: str, full: bool = False) -> Optional[dict]:
-    """Dati camerali + bilancio strutturato da company.openapi.com (a pagamento)."""
     key = (cf_piva or "").strip()
     if not key or not has_credentials():
         return None
@@ -1364,6 +1373,59 @@ async def company_dati(cf_piva: str, full: bool = False) -> Optional[dict]:
         return None
     return _normalize_company_co(d, full)
 
+
+async def company_lookup(piva: str) -> Optional[dict]:
+    """Ricerca azienda per P.IVA per l'AUTOCOMPILAZIONE del nuovo cliente.
+    Usa company.openapi.com IT-advanced (dati camerali). Ritorna la forma attesa dal form."""
+    d = await company_dati(piva, full=False)
+    if not d:
+        # fallback ricerca gratuita visurecamerali (solo denominazione/comune)
+        vc = await vc_search(piva)
+        if not vc:
+            return None
+        return {"ragione_sociale": vc.get("denominazione"), "comune": vc.get("comune"),
+                "piva": piva, "provider": "visurecamerali (LIVE, base)"}
+    return {
+        "ragione_sociale": d.get("ragione_sociale"),
+        "cf": d.get("cf"),
+        "piva": d.get("piva") or piva,
+        "indirizzo_completo": d.get("indirizzo"),
+        "comune": d.get("comune"),
+        "provincia": d.get("provincia"),
+        "cap": d.get("cap"),
+        "pec": d.get("pec"),
+        "forma_giuridica": d.get("forma_giuridica"),
+        "rea": d.get("rea"),
+        "cciaa": d.get("cciaa"),
+        "ateco": d.get("ateco"),
+        "ateco_descrizione": d.get("ateco_descrizione"),
+        "attiva": (d.get("stato_attivita") or "").upper() in ("ATTIVA", "ACTIVE", "ATTIVO"),
+        "provider": d.get("provider"),
+    }
+
+
+async def company_full_completo(cf_piva: str) -> Optional[dict]:
+    """Info Azienda completa: unisce IT-full (soci, governance, indici) con
+    IT-advanced (ragione sociale, indirizzo, bilanci) — al click manuale dell'utente."""
+    full = await company_dati(cf_piva, full=True)
+    adv = await company_dati(cf_piva, full=False)
+    if not full and not adv:
+        return None
+    base = dict(adv or {})
+    merged = dict(base)
+    if full:
+        for k, v in full.items():
+            # i campi ricchi di IT-full hanno priorità se valorizzati
+            if v not in (None, [], {}, ""):
+                merged[k] = v
+    # ragione sociale / bilanci: preferisci adv se full è vuoto
+    if adv:
+        for k in ("ragione_sociale", "indirizzo", "comune", "provincia", "cap", "ateco", "ateco_descrizione", "pec", "rea", "cciaa", "forma_giuridica", "stato_attivita"):
+            if not merged.get(k) and adv.get(k):
+                merged[k] = adv[k]
+        if not merged.get("bilanci") and adv.get("bilanci"):
+            merged["bilanci"] = adv["bilanci"]
+    return merged
 
 
 # ===================================================================

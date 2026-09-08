@@ -42,19 +42,27 @@ async def _update_openapi_field(aid: str, key: str, data) -> None:
 
 @router.get("/company")
 async def lookup_company(piva: str, user=Depends(current_user)) -> dict:
-    """Lookup diretto per autocomplete P.IVA/CF (non salva su anagrafica)."""
-    if not piva or len(piva) < 8:
+    """Lookup diretto per autocomplete P.IVA (company.openapi.com). Non salva."""
+    if not piva or len(piva.strip()) < 8:
         raise HTTPException(status_code=400, detail="P.IVA/CF non valido")
-    return await svc.fetch_company(piva.strip())
+    res = await svc.company_lookup(piva.strip())
+    if not res:
+        raise HTTPException(status_code=404, detail="Azienda non trovata")
+    return res
 
 
 @router.post("/company/{aid}")
 async def fetch_company_for_anagrafica(aid: str, user=Depends(current_user)) -> dict:
+    """Carica/aggiorna i dati azienda completi (company.openapi.com IT-full) per la scheda Info Azienda."""
     ana = await _get_anagrafica(aid, user)
     key = ana.get("partita_iva") or ana.get("codice_fiscale")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
-    data = await svc.fetch_company(key)
+    data = await svc.company_full_completo(key)
+    if not data:
+        raise HTTPException(status_code=404, detail="Dati azienda non disponibili")
+    if not data.get("ragione_sociale"):
+        data["ragione_sociale"] = ana.get("ragione_sociale")
     await _update_openapi_field(aid, "company", data)
     return data
 
