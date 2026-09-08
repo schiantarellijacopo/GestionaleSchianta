@@ -47,9 +47,34 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
         consenso_profilazione: false,
     });
     const [saving, setSaving] = useState(false);
+    const [firmando, setFirmando] = useState(false);
     const canvasRef = useRef(null);
     const [drawing, setDrawing] = useState(false);
     const [hasSign, setHasSign] = useState(false);
+
+    const firmaEsign = async () => {
+        const modalita = ana?.email ? "otp_email" : (ana?.cellulare ? "otp_sms" : "link");
+        setFirmando(true);
+        try {
+            const pdfRes = await api.get(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`, { responseType: "blob" });
+            const fd = new FormData();
+            fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "privacy.pdf");
+            fd.append("modalita", modalita);
+            fd.append("firmatario_id", anagrafica_id);
+            fd.append("display_name", "Informativa Privacy & Consensi");
+            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            if (r.data.signing_url) {
+                toast.success("Richiesta firma inviata. Link inviato al cliente.");
+                window.open(r.data.signing_url, "_blank");
+            } else {
+                toast.success("Richiesta firma inviata al cliente via " + modalita.replace("_", " "));
+            }
+        } catch (e) {
+            const msg = e.response?.data?.detail || "Errore invio firma";
+            if (String(msg).includes("non configurato")) toast.error("eSignAnyWhere non configurato — vai in Librerie → Firme");
+            else toast.error(msg);
+        } finally { setFirmando(false); }
+    };
 
     useEffect(() => {
         if (!ana || !open) return;
@@ -238,6 +263,9 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                     )}
                     <Button onClick={stampaPdf} className="bg-emerald-600 hover:bg-emerald-700" data-testid="cons-pdf">
                         <Download size={13} className="mr-1" /> Scarica PDF firmato
+                    </Button>
+                    <Button onClick={firmaEsign} disabled={firmando} className="bg-violet-700 hover:bg-violet-800" data-testid="cons-firma-esign">
+                        ✍️ {firmando ? "Invio…" : "Firma con eSignAnyWhere"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

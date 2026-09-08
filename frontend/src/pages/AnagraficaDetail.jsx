@@ -1576,13 +1576,12 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
     (list || []).forEach((a) => { const k = cartellaDi(a); (gruppi[k] = gruppi[k] || []).push(a); });
 
     return (
-        <Card className="p-6 border-slate-200 mt-4">
-            <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium">Documenti allegati</h3>
+        <div className="mt-2" data-testid="allegati-section">
+            <div className="flex items-center justify-end mb-3">
                 {canEdit && (
                     <label className="inline-flex items-center gap-2 cursor-pointer">
                         <input type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} data-testid="allegato-upload-input" />
-                        <Button asChild className="bg-sky-700 hover:bg-sky-800" disabled={uploading}>
+                        <Button asChild size="sm" className="bg-sky-700 hover:bg-sky-800" disabled={uploading}>
                             <span><Upload size={14} className="mr-1" /> {uploading ? "Caricamento..." : "Carica file"}</span>
                         </Button>
                     </label>
@@ -1600,7 +1599,7 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
                     ))}
                 </div>
             )}
-        </Card>
+        </div>
     );
 }
 
@@ -1907,6 +1906,9 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     };
 
     const scaricaPrivacy = () => setPrivacyOpen(true);
+    const [docsOpen, setDocsOpen] = useState(true);
+    const [cardOpen, setCardOpen] = useState({});
+    const nCaricati = DOC_TIPI_ANAG.filter((dt) => docs?.[dt.key]).length;
 
     return (
         <div className="space-y-4 mt-4" data-testid="documenti-tab">
@@ -1920,18 +1922,34 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {DOC_TIPI_ANAG.map((dt) => {
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <button onClick={() => setDocsOpen((o) => !o)}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                    data-testid="doc-cards-toggle">
+                    <span className="text-lg">🗂️</span>
+                    <span className="font-medium text-sm text-slate-800 flex-1">Documenti per categoria</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">{nCaricati}/{DOC_TIPI_ANAG.length}</span>
+                    <span className={`text-slate-400 transition-transform ${docsOpen ? "rotate-180" : ""}`}>▾</span>
+                </button>
+                {docsOpen && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
+                        {DOC_TIPI_ANAG.map((dt) => {
                     const doc = docs?.[dt.key];
+                    const cOpen = cardOpen[dt.key] !== false;
                     return (
                         <Card key={dt.key} className="p-3 border-slate-200">
-                            <div className="flex items-center justify-between mb-2">
+                            <button type="button" onClick={() => setCardOpen((s) => ({ ...s, [dt.key]: !cOpen }))}
+                                className="w-full flex items-center justify-between mb-2 text-left"
+                                data-testid={`doc-card-toggle-${dt.key}`}>
                                 <div className="font-medium text-sm flex items-center gap-2">
                                     <span className="text-lg">{dt.icon}</span> {dt.label}
                                 </div>
-                                {doc && <span className="badge badge-success text-[10px]">caricato</span>}
-                            </div>
-                            {doc ? (
+                                <div className="flex items-center gap-2">
+                                    {doc && <span className="badge badge-success text-[10px]">caricato</span>}
+                                    <span className={`text-slate-400 transition-transform ${cOpen ? "rotate-180" : ""}`}>▾</span>
+                                </div>
+                            </button>
+                            {cOpen && (doc ? (
                                 <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
                                     <div>
                                         📎 <a href={doc.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{doc.nome_file}</a>
@@ -1964,10 +1982,12 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                 </label>
                             ) : (
                                 <div className="text-xs text-slate-400 italic py-3 text-center">Nessun documento</div>
-                            )}
+                            ))}
                         </Card>
                     );
-                })}
+                        })}
+                    </div>
+                )}
             </div>
 
             {ana?.firma_cliente_url && (

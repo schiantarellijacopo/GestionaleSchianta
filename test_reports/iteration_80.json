@@ -1,0 +1,26 @@
+{
+  "summary": "Iter 80 — verificate feature aggiunte: Report Analisi Azienda (PDF/Word), salva Estratto Conto in anagrafica, campo 'mezzo' nei pagamenti, DELETE /diario/{id} con fallback db.diario, sezione Immobili aziendali con mappa Leaflet, cartelle documenti comprimibili con contatore, rinomina tab Privacy/GDPR (senza sezione 'Profilo aziendale'), firma eSignAnyWhere, tasto Stampa Piramide. Backend: 7/7 pytest superati (test_iter80.py). Frontend: tutti i data-testid richiesti presenti e funzionanti; il click 'Firma con eSignAnyWhere' non manda in crash la pagina (backend risponde 502 non essendo eSign configurato — atteso). Piramide 'Stampa' invoca window.print correttamente. Immobili aziendali (15 immobili per AUTOTRASPORTI VIVIANI): card + leaflet-container renderizzati.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "eSignAnyWhere firma consensi", "issue": "Backend /api/firma/richieste risponde 502 (eSign non configurato in preview). Il frontend gestisce senza crash. Nessuna azione richiesta salvo verificare che il toast di errore sia effettivamente visibile all'utente (nel test la pagina non ha crashato ma il testo del toast non è stato rilevato tramite selettore standard).", "affected_selectors": ["[data-testid=cons-firma-esign]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter80.py", "/app/test_reports/pytest/iter80.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/report_azienda.py: buono. Discriminazione persona giuridica basata su 'tipo == persona_giuridica' OR 'partita_iva' presente — il 400 su persona fisica è verificato.",
+    "server.py DELETE /diario/{nid}: fallback su db.diario correttamente ristretto ad admin/collaboratore. OK.",
+    "routes/estratto_conto_contraente.py: campo 'mezzo' correttamente popolato da t.get('mezzo_pagamento') OR conti_map[t.get('conto_cassa_id')]. Buona logica.",
+    "AnagraficaDetail.jsx supera 2000 righe: file molto grande, consigliata la scomposizione in sotto-componenti (DocumentiTab, PrivacyTab ecc.) — nota per il main agent."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter80.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Inserita 1 voce fittizia in db.diario (titolo 'TEST_iter80 seed', anagrafica_id=abe0cbf1...) per validare il fallback DELETE /diario/{id}. La voce viene cancellata dal test stesso. Nessuna anagrafica/polizza toccata.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test file: /app/backend/tests/test_iter80.py (7 test, tutti verdi). Le API testate: GET /anagrafiche/{id}/report-azienda/{pdf|docx}, POST /estratto-conto-contraente/salva, GET /estratto-conto-contraente (includi_pagamenti=true → campo mezzo), DELETE /diario/{id} (nota personale + voce db.diario). Frontend verificato su anagrafica AUTOTRASPORTI VIVIANI: SaluteFiscaleTab (sf-report-pdf-btn, sf-report-word-btn, sf-immobili-card con 15 immobili, sf-immobili-map-btn con leaflet-container), DocumentiTab (doc-cards-toggle con contatore n/N, genera-privacy-btn), PrivacyConsensiDialog (cons-firma-esign), PiramidePrivati (piramide-stampa-btn). Tab rinominato 'Privacy / GDPR' (data-testid tab-profilazione-gdpr) senza sezione 'Profilo aziendale'."
+}

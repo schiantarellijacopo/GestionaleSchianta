@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 // -----------------------------------------------------------------------------
@@ -305,9 +305,22 @@ export default function PiramidePrivati({
     };
 
     const logoSrc = resolveLogo(agenziaLogo);
+    const rootRef = useRef(null);
+
+    const stampaPiramide = () => {
+        const node = rootRef.current;
+        if (!node) { window.print(); return; }
+        const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+            .map((s) => s.outerHTML).join("");
+        const w = window.open("", "_blank", "width=1000,height=1300");
+        if (!w) { window.print(); return; }
+        w.document.write(`<!doctype html><html><head><title>Piramide della protezione${clienteNome ? " - " + clienteNome : ""}</title>${styles}</head><body style="padding:20px;background:#fff">${node.outerHTML}</body></html>`);
+        w.document.close();
+        setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 600);
+    };
 
     return (
-        <div className="bg-white rounded-lg border-2 border-slate-800 p-4 md:p-6" data-testid="piramide-privati">
+        <div ref={rootRef} className="bg-white rounded-lg border-2 border-slate-800 p-4 md:p-6" data-testid="piramide-privati">
             {/* HEADER: logo in alto a SINISTRA + titolo a destra */}
             <div className="flex items-start justify-between gap-4 mb-2 pb-3 border-b border-slate-300 flex-wrap">
                 <div className="flex items-center gap-3">
@@ -319,6 +332,11 @@ export default function PiramidePrivati({
                     )}
                 </div>
                 <div className="text-right">
+                    <button onClick={stampaPiramide} data-no-print
+                        className="mb-2 inline-flex items-center gap-1.5 px-3 py-1 text-xs bg-slate-800 text-white rounded hover:bg-slate-900 print:hidden"
+                        data-testid="piramide-stampa-btn">
+                        🖨️ Stampa
+                    </button>
                     <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
                         Piramide della protezione di:
                     </div>

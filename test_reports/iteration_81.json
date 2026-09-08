@@ -1,0 +1,20 @@
+{
+  "summary": "Verifica mirata frontend del tab Documenti dell'anagrafica azienda (id=abe0cbf1-...) dopo ristrutturazione JSX di DocumentiTab/AllegatiTab. Login admin OK, apertura anagrafica OK, tab Documenti renderizza correttamente senza crash. Collapse gruppo 'Documenti per categoria' (badge 0/8) funziona: comprime tutte le 8 card. Ogni card doc-card-toggle-* si comprime singolarmente. Sezione allegati con upload input e 10 cartelle presenti. Nessun errore JS di runtime (pageerror=0). Nessuna regressione su altri tab (salute-fiscale, anagrafica).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (funzionanti)",
+  "seed_data_creation": "Nessuna",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Ristrutturazione JSX di DocumentiTab e AllegatiTab in AnagraficaDetail.jsx confermata funzionante. Testid verificati: tab-documenti, doc-cards-toggle (badge 0/8), doc-card-toggle-{carta_identita, patente, passaporto, tessera_codice_fiscale, tessera_sanitaria, visura_camerale, mandato_sdd, privacy_firmata}, allegati-section, allegato-upload-input, cartella-* (10 cartelle). Sono presenti 3 errori 401 in console per risorse chiamate prima del login: non correlate alla ristrutturazione, ma potrebbero essere migliorate evitando chiamate API pre-auth.",
+  "rca of the issue": "N/A - nessun bug trovato"
+}
