@@ -376,7 +376,7 @@ export default function PiramidePrivati({
                             <SidebarField label="N. soci" value={reddito.reddito_responsabilita}
                                           editable={editable}
                                           onChange={(v) => setReddito((s) => ({ ...s, reddito_responsabilita: v }))} />
-                            <SidebarField label="Perdita beni" value={reddito.reddito_perdita_beni}
+                            <SidebarField label="Patrimonio netto" value={reddito.reddito_perdita_beni}
                                           editable={editable}
                                           onChange={(v) => setReddito((s) => ({ ...s, reddito_perdita_beni: v }))} />
                         </>

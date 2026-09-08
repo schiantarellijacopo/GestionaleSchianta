@@ -7695,27 +7695,43 @@ async def prepopola_piramide_v2(aid: str, user=Depends(current_user)):
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0}) or {}
     ac = await _ensure_analisi(aid)
 
-    # === AZIENDE (persona giuridica): precompila dai dati di bilancio, non INPS ===
+    # === AZIENDE (persona giuridica): precompila dai dati REALI di Salute Fiscale ===
     if (ana.get("tipo") == "persona_giuridica") or ana.get("partita_iva"):
         sf = (ana.get("salute_fiscale_dati") or {}).get("bilancio_estratto") or {}
-        base = sf.get("valore_produzione") or sf.get("ricavi")
-        if not base:
-            comp = (ana.get("openapi_data") or {}).get("company") or {}
-            bb = next((x for x in (comp.get("bilanci") or []) if x.get("fatturato")), None)
-            base = (bb or {}).get("fatturato")
-        if not base:
+        comp = (ana.get("openapi_data") or {}).get("company") or {}
+        # ultimo bilancio con dati reali (per fatturato/dipendenti di fallback)
+        ub = next((x for x in (comp.get("bilanci") or []) if x.get("fatturato") is not None),
+                  (comp.get("bilanci") or [{}])[0] if comp.get("bilanci") else {})
+
+        def _num(*vals):
+            for v in vals:
+                if isinstance(v, (int, float)) and v:
+                    return float(v)
+            return None
+
+        fatturato = _num(sf.get("valore_produzione"), sf.get("ricavi"), ub.get("fatturato"))
+        utile = _num(sf.get("utile_netto"))
+        ebitda = _num(sf.get("ebitda"))
+        patrimonio = _num(sf.get("patrimonio_netto"), sf.get("totale_attivo"))
+        # N. dipendenti: bilancio_estratto oppure ultimo bilancio OpenAPI
+        n_dip = sf.get("dipendenti")
+        if not isinstance(n_dip, (int, float)):
+            n_dip = ub.get("dipendenti")
+        # N. soci: conteggio soci dalla governance OpenAPI
+        n_soci = len(comp.get("soci") or []) or None
+
+        if not (fatturato or utile or ebitda or n_dip or n_soci):
             raise HTTPException(400, "Nessun dato di bilancio azienda disponibile. "
                                      "Compila prima la Salute Fiscale da OpenAPI.")
-        r = int(round(float(base)))
         return {
-            "reddito_attuale": r,                          # valore della produzione / fatturato
+            "reddito_attuale": int(round(fatturato)) if fatturato else None,        # Fatturato
             "estratto_conto": False,
-            "reddito_invalidita_66_99": int(round(r * 0.50)),
-            "reddito_inabilita_100": int(round(r * 0.80)),
-            "reddito_superstiti": int(round(r * 0.60)),
-            "reddito_responsabilita": r,
-            "reddito_perdita_beni": r,
-            "fonte": "bilancio_azienda",
+            "reddito_invalidita_66_99": int(round(utile)) if utile is not None else None,  # Utile
+            "reddito_inabilita_100": int(round(ebitda)) if ebitda is not None else None,    # EBITDA
+            "reddito_superstiti": int(n_dip) if isinstance(n_dip, (int, float)) else None,  # N. dipendenti
+            "reddito_responsabilita": int(n_soci) if n_soci else None,                      # N. soci
+            "reddito_perdita_beni": int(round(patrimonio)) if patrimonio else None,         # Patrimonio netto
+            "fonte": "salute_fiscale_azienda",
             "anni_storici_usati": 0,
         }
 
@@ -10159,6 +10175,14 @@ async def imap_poller_run_now(user=Depends(require_user("admin"))):
     """Esegue un singolo ciclo di polling on-demand (utile per test)."""
     res = await imap_poller.poll_once(db)
     return res
+
+
+@api.post("/email/poller/retry-allegati")
+async def imap_poller_retry_allegati(limit: int = 500, user=Depends(require_user("admin"))):
+    """Ri-processa gli allegati delle email GIÀ ricevute che non hanno prodotto
+    un collegamento a polizza/sinistro/anagrafica (es. la polizza è stata importata
+    dopo l'arrivo dell'email). Idempotente."""
+    return await imap_poller.retry_auto_allega(db, limit=limit)
 
 
 @api.post("/email/poller/backfill-diario")

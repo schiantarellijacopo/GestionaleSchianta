@@ -42,8 +42,7 @@ const SINISTRI_COLS = [
     {
         key: "contratto", label: "Contratto", sort: "numero_polizza", thClass: "w-[110px]",
         render: (s) => (
-            <Link to={`/polizze/${s.polizza_id}`} onClick={(e) => e.stopPropagation()}
-                  className="text-sky-700 hover:underline">{s.numero_polizza || "—"}</Link>
+            <span className="text-slate-800">{s.numero_polizza || "—"}</span>
         ),
     },
     { key: "data", label: "Data", sort: "data_avvenimento", thClass: "w-[90px]", tdClass: "num", render: (s) => fmtDate(s.data_avvenimento) },

@@ -4,12 +4,33 @@ import hashlib, random, re
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from database import db
 from auth import current_user
 from db_models import _now_iso, Allegato
 from storage_service import StorageService
+import contratto_render
 
 router = APIRouter()
+
+
+async def _logo_bytes() -> bytes | None:
+    az = await db.azienda_config.find_one({}, {"_id": 0, "logo_storage_path": 1}) or {}
+    if az.get("logo_storage_path"):
+        try:
+            import storage as _storage
+            data, _ct = _storage.get_object(az["logo_storage_path"])
+            return data
+        except Exception:
+            return None
+    return None
+
+
+def _cliente_nome(ana: dict) -> str:
+    if ana.get("tipo") == "persona_giuridica":
+        return ana.get("ragione_sociale", "")
+    return (f"{ana.get('nome','')} {ana.get('cognome','')}".strip() or ana.get("ragione_sociale", ""))
+
 
 
 def _intero_lettere(n: int) -> str:
@@ -190,8 +211,13 @@ async def firma_otp(aid: str, body: dict, user=Depends(current_user)):
         raise HTTPException(400, "Codice OTP scaduto. Richiedine uno nuovo.")
     if hashlib.sha256(otp.encode()).hexdigest() != cc["otp_hash"]:
         raise HTTPException(400, "Codice OTP errato.")
-    # genera PDF
-    pdf = _pdf_da_testo(cc.get("testo") or "")
+    # genera PDF impaginato professionale
+    cons = await _consulente_info(user)
+    logo = await _logo_bytes()
+    pdf = contratto_render.build_pdf(
+        cc.get("testo") or "", consulente=cons, cliente_nome=_cliente_nome(ana),
+        logo_bytes=logo, firmato=True, firmato_il=_now_iso(),
+        firmato_via=cc.get("otp_canale") or "otp")
     stored = await StorageService.put(
         user=user, entita_tipo="anagrafica", entita_id=aid,
         filename=f"Contratto_consulenza_{aid[:8]}.pdf", data=pdf, content_type="application/pdf")
@@ -207,6 +233,42 @@ async def firma_otp(aid: str, body: dict, user=Depends(current_user)):
                "otp_hash": None, "otp_scade": None})
     await db.anagrafiche.update_one({"id": aid}, {"$set": {"contratto_consulenza": cc}})
     return {"ok": True, "stato": "firmato", "allegato_id": alleg.id, "firmato_il": cc["firmato_il"]}
+
+
+async def _render_data(aid: str, user):
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    cc = ana.get("contratto_consulenza") or {}
+    testo = cc.get("testo")
+    cons = await _consulente_info(user)
+    if not testo:
+        testo = _costruisci_testo(ana, cons, float(cc.get("importo") or 0))
+    return ana, cc, testo, cons
+
+
+@router.get("/anagrafiche/{aid}/contratto-consulenza/pdf")
+async def download_pdf(aid: str, user=Depends(current_user)):
+    ana, cc, testo, cons = await _render_data(aid, user)
+    logo = await _logo_bytes()
+    pdf = contratto_render.build_pdf(
+        testo, consulente=cons, cliente_nome=_cliente_nome(ana), logo_bytes=logo,
+        firmato=cc.get("stato") == "firmato", firmato_il=cc.get("firmato_il") or "",
+        firmato_via=cc.get("firmato_via") or "")
+    return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="Contratto_consulenza_{aid[:8]}.pdf"'})
+
+
+@router.get("/anagrafiche/{aid}/contratto-consulenza/docx")
+async def download_docx(aid: str, user=Depends(current_user)):
+    ana, cc, testo, cons = await _render_data(aid, user)
+    logo = await _logo_bytes()
+    docx = contratto_render.build_docx(
+        testo, consulente=cons, cliente_nome=_cliente_nome(ana), logo_bytes=logo)
+    return StreamingResponse(
+        BytesIO(docx),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="Contratto_consulenza_{aid[:8]}.docx"'})
 
 
 def _pdf_da_testo(testo: str) -> bytes:

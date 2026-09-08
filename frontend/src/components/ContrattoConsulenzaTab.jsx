@@ -60,6 +60,29 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
 
     const firmato = stato === "firmato";
 
+    const scarica = async (fmt) => {
+        setBusy(true);
+        try {
+            if (!firmato) {
+                await api.put(`/anagrafiche/${anagrafica_id}/contratto-consulenza`, { testo, importo: Number(importo) || 0 });
+            }
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/contratto-consulenza/${fmt}`, { responseType: "blob" });
+            const blob = new Blob([r.data], { type: fmt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+            const url = URL.createObjectURL(blob);
+            if (fmt === "pdf") {
+                const win = window.open(url, "_blank");
+                if (!win) {
+                    const a = document.createElement("a");
+                    a.href = url; a.download = `Contratto_consulenza.pdf`; a.click();
+                }
+            } else {
+                const a = document.createElement("a");
+                a.href = url; a.download = `Contratto_consulenza.docx`; a.click();
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch { toast.error("Errore generazione documento"); } finally { setBusy(false); }
+    };
+
     return (
         <div className="space-y-4 mt-4" data-testid="contratto-consulenza-tab">
             <Card className="p-4">
@@ -89,6 +112,10 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                         <Input type="number" min="0" value={importo} onChange={(e) => setImporto(e.target.value)} data-testid="contratto-importo" />
                     </div>
                     <Button onClick={salva} disabled={busy} variant="outline" data-testid="contratto-salva">💾 Salva bozza</Button>
+                    <div className="flex gap-2">
+                        <Button onClick={() => scarica("pdf")} disabled={busy} variant="outline" className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 flex-1" data-testid="contratto-anteprima-pdf">📄 Anteprima PDF</Button>
+                        <Button onClick={() => scarica("docx")} disabled={busy} variant="outline" className="border-sky-300 text-sky-700 hover:bg-sky-50 flex-1" data-testid="contratto-scarica-word">📝 Scarica Word</Button>
+                    </div>
                 </div>
             </Card>
 

@@ -245,11 +245,12 @@ async def _copia_allegato_su_entita(
     alleg = Allegato(
         entita_tipo=entita_tipo, entita_id=entita_id,
         nome_file=att["filename"],
-        url=f"/api/storage/{new_path}", storage_path=new_path,
-        mime=ctype or att.get("content_type") or "application/octet-stream",
-        size_kb=round(len(data) / 1024, 1),
-        caricato_da=None,
+        storage_path=new_path,
+        content_type=ctype or att.get("content_type") or "application/octet-stream",
+        size=len(data),
+        autore_id=None,
     ).model_dump()
+    alleg["url"] = f"/api/storage/{new_path}"
     alleg["fonte"] = "email_imap"
     alleg["visibile_cliente"] = False
     alleg["categoria"] = categoria
@@ -389,11 +390,12 @@ async def _auto_allega_polizza(
             alleg = Allegato(
                 entita_tipo="polizza", entita_id=pol["id"],
                 nome_file=att["filename"],
-                url=f"/api/storage/{new_path}", storage_path=new_path,
-                mime=ctype or att.get("content_type") or "application/pdf",
-                size_kb=round(len(data) / 1024, 1),
-                caricato_da=None,   # System via IMAP
+                storage_path=new_path,
+                content_type=ctype or att.get("content_type") or "application/pdf",
+                size=len(data),
+                autore_id=None,   # System via IMAP
             ).model_dump()
+            alleg["url"] = f"/api/storage/{new_path}"
             alleg["fonte"] = "email_imap"
             alleg["visibile_cliente"] = False
             alleg["categoria"] = "polizza_firmata"
@@ -666,6 +668,104 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
         "saltati": saltati,
         "errori": errori,
         "last_uid": max_uid_seen,
+    }
+
+
+# ============================================================
+# Backfill: ri-processa allegati di email GIÀ ingerite
+# ============================================================
+async def retry_auto_allega(db: AsyncIOMotorDatabase, *, limit: int = 500) -> dict:
+    """Ri-esegue l'auto-collegamento allegati (polizza/sinistro/anagrafica) sulle
+    email già presenti in ``email_inbox`` che hanno allegati ma nessun match salvato.
+
+    Serve quando l'email è arrivata PRIMA che la polizza/sinistro esistesse nel CRM
+    (il re-polling IMAP salta le email già ingerite, quindi non ri-tenta il match).
+    Idempotente: ``_copia_allegato_su_entita`` salta i file già copiati.
+    """
+    q = {
+        "has_attachments": True,
+        "$or": [
+            {"polizze_matched": {"$in": [None, []]}},
+            {"polizze_matched": {"$exists": False}},
+        ],
+    }
+    cursor = db.email_inbox.find(
+        q, {"_id": 0, "id": 1, "uid": 1, "folder": 1, "subject": 1, "body_text": 1,
+            "attachments": 1, "anagrafica_id": 1, "from_name": 1, "from_address": 1},
+    ).limit(limit)
+    esaminate = 0
+    con_match = 0
+    tot_polizze = 0
+    tot_sinistri = 0
+    tot_anagrafica = 0
+    async for em in cursor:
+        esaminate += 1
+        attachments = em.get("attachments") or []
+        if not attachments:
+            continue
+        subject = em.get("subject") or ""
+        body_text = em.get("body_text") or ""
+        anagrafica_id = em.get("anagrafica_id")
+        polizze_matched: list[dict] = []
+        sinistri_matched: list[dict] = []
+        anagrafica_matched: list[dict] = []
+        try:
+            polizze_matched = await _auto_allega_polizza(
+                db, subject=subject, body_text=body_text,
+                attachments=attachments, anagrafica_id=anagrafica_id)
+        except Exception:
+            logger.exception("retry: errore auto-allega polizza email %s", em.get("uid"))
+        try:
+            sinistri_matched = await _auto_allega_sinistro(
+                db, subject=subject, body_text=body_text,
+                attachments=attachments, anagrafica_id=anagrafica_id)
+        except Exception:
+            logger.exception("retry: errore auto-allega sinistro email %s", em.get("uid"))
+        if anagrafica_id:
+            try:
+                origine_usate = {m.get("filename") for m in polizze_matched + sinistri_matched}
+                esclusi = {a.get("storage_path") for a in attachments
+                           if a.get("filename") in origine_usate}
+                anagrafica_matched = await _auto_allega_anagrafica(
+                    db, subject=subject, attachments=attachments,
+                    anagrafica_id=anagrafica_id, esclusi_paths=esclusi)
+            except Exception:
+                logger.exception("retry: errore auto-allega anagrafica email %s", em.get("uid"))
+        if polizze_matched or sinistri_matched or anagrafica_matched:
+            con_match += 1
+            tot_polizze += len(polizze_matched)
+            tot_sinistri += len(sinistri_matched)
+            tot_anagrafica += len(anagrafica_matched)
+            await db.email_inbox.update_one(
+                {"id": em["id"]},
+                {"$set": {"polizze_matched": polizze_matched,
+                          "sinistri_matched": sinistri_matched,
+                          "allegati_anagrafica": anagrafica_matched}},
+            )
+            if anagrafica_id:
+                try:
+                    from shared import log_diario_cliente
+                    dettagli = []
+                    if polizze_matched:
+                        nums = ", ".join(sorted({str(m.get('numero_polizza') or '') for m in polizze_matched}))
+                        dettagli.append(f"📎 allegati collegati a polizza {nums}")
+                    if sinistri_matched:
+                        nums = ", ".join(sorted({str(m.get('numero_sinistro') or '') for m in sinistri_matched}))
+                        dettagli.append(f"📎 allegati collegati a sinistro {nums}")
+                    if anagrafica_matched:
+                        dettagli.append(f"📎 {len(anagrafica_matched)} documenti salvati in anagrafica")
+                    if dettagli:
+                        desc = f"Allegati email da {em.get('from_name') or em.get('from_address')}: " + " · ".join(dettagli)
+                        await log_diario_cliente(anagrafica_id, "email", desc[:250], "", autore=None)
+                except Exception:
+                    logger.exception("retry: errore log diario email %s", em.get("uid"))
+    return {
+        "ok": True,
+        "esaminate": esaminate,
+        "con_match": con_match,
+        "allegati_polizza": tot_polizze,
+        "allegati_sinistro": tot_sinistri,
+        "allegati_anagrafica": tot_anagrafica,
     }
 
 

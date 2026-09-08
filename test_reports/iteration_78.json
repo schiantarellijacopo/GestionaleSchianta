@@ -1,0 +1,24 @@
+{
+  "summary": "Testato con successo: (1) POST /email/poller/retry-allegati risponde ok=true (esaminate=198, con_match=0 perché già eseguito in precedenza — idempotenza confermata: nessuna duplicazione dopo re-run); polizza 184643415 (bacebe55) ha 1 allegato 'Contratto Active Veicoli AUTOCARRI  184643415.pdf' con fonte=email_imap e categoria=polizza_firmata; (2) prepopola piramide-v2 azienda AUTOTRASPORTI VIVIANI restituisce fonte=salute_fiscale_azienda con valori reali (reddito_attuale=6889188, invalidita_66_99=-8052, inabilita_100=286999, superstiti=49, responsabilita=2, perdita_beni=451553); (3) contratto-consulenza pdf/docx validi (signature %PDF e PK, content-type corretti, >2KB). Frontend: login admin OK, tab Contratto Consulenza mostra 'Anteprima PDF' e 'Scarica Word', tab Piramide Azienda dopo 'Precompila da bilancio' mostra FATTURATO/UTILE/EBITDA/N. DIPENDENTI/N. SOCI/PATRIMONIO NETTO tutti con valori numerici popolati e toast di conferma; PolizzaDetail 184643415 header blu mostra 'ULTIMO PREMIO PAGATO 0,00 €' in alto a destra e 'N. 184643415 · Mandato --' sotto il nome prodotto, la griglia bianca sottostante NON contiene più 'Ultimo premio pagato'; Sinistri lista: colonna Contratto è solo testo (nessun <a>); SinistroDetail: riga Contratto è link <a> con data-testid='sinistro-polizza-link' e href='/polizze/{id}'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter78_imap_backfill_piramide_contratto.py",
+    "/app/test_reports/pytest/iter78.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "imap_poller retry-allegati: il conteggio 'con_match' riflette solo i nuovi match della corsa corrente; utile aggiungere anche 'gia_collegati' per trasparenza in UI/monitoring.",
+    "L'anteprima PDF via popup potrebbe essere bloccata dai popup blocker: valutare fallback con download diretto o iframe modale se window.open ritorna null."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter78_imap_backfill_piramide_contratto.py (nuovo)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessuna. Test in read-only + retry idempotente.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backfill IMAP è già stato eseguito con successo (con_match=49 storici, allegati_polizza=37); ora la retry è idempotente e restituisce con_match=0 su nuove chiamate. Polizza 184643415 tenant schiantarelli (bacebe55) ha 1 allegato collegato. La polizza omonima nell'altro tenant (31b4950e) non è stata toccata. Test file riutilizzabile per regressioni future in /app/backend/tests/test_iter78_imap_backfill_piramide_contratto.py.",
+  "rca of the issue": "Nessun bug residuo. Nota: il testo del review request diceva 'con_match>0' ma dato che il backfill era già stato eseguito è naturale che ora sia 0 — comportamento corretto e coerente con idempotenza dichiarata; il vero KPI è la presenza dell'allegato sulla polizza, verificato."
+}

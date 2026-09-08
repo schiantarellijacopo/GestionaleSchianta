@@ -8,7 +8,7 @@
  * azioni Salva/Elimina/Documenti/Stampa, tabs in basso.
  */
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { api, API_BASE, fmtEur } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,7 +148,7 @@ export default function SinistroDetail() {
                         </div>
                     </div>
                     <div className="col-span-6 text-sm space-y-1">
-                        <Riga label="Contratto" value={s.numero_polizza || "—"} />
+                        <Riga label="Contratto" value={s.numero_polizza || "—"} to={s.polizza_id ? `/polizze/${s.polizza_id}` : undefined} />
                         <Riga label="Contraente" value={s.contraente_nome} />
                         <Riga label="Ramo" value={s.polizza?.ramo || s.ramo} />
                         <Riga label="Compagnia" value={s.compagnia_nome} />
@@ -278,10 +278,14 @@ export default function SinistroDetail() {
     );
 }
 
-const Riga = ({ label, value }) => (
+const Riga = ({ label, value, to }) => (
     <div className="flex gap-2">
         <span className="text-slate-500 w-24">{label}</span>
-        <span className="font-medium text-slate-800">{value || "—"}</span>
+        {to ? (
+            <Link to={to} className="font-medium text-sky-700 hover:underline" data-testid="sinistro-polizza-link">{value || "—"}</Link>
+        ) : (
+            <span className="font-medium text-slate-800">{value || "—"}</span>
+        )}
     </div>
 );
 const CampoLabel = ({ label, value }) => (
