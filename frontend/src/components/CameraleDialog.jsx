@@ -5,14 +5,13 @@
  */
 import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
+import { downloadFile } from "@/lib/pdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Building2, Loader2, FileText, TrendingUp, CheckCircle2, Clock, RefreshCw, Download } from "lucide-react";
 import { toast } from "sonner";
-
-const API = process.env.REACT_APP_BACKEND_URL;
 
 export default function CameraleDialog({ ana, aid, onClose, onReload }) {
     const [search, setSearch] = useState(null);
@@ -301,9 +300,10 @@ export default function CameraleDialog({ ana, aid, onClose, onReload }) {
                                             <span className="font-medium truncate flex-1">{r.nome}</span>
                                             <span className="text-slate-500">{r.allegato_id ? (r.riusato ? "PDF (riuso gratis)" : "PDF salvato") : r.stato}</span>
                                             {r.allegato_id ? (
-                                                <a href={`${API}/api/allegati/${r.allegato_id}/download`} target="_blank" rel="noreferrer" className="text-sky-600" title="Scarica">
+                                                <button onClick={() => downloadFile(`/allegati/${r.allegato_id}/download`, {}, { filename: `${(r.nome || "documento").replace(/\s+/g, "_")}.pdf` })}
+                                                    className="text-sky-600 hover:text-sky-800" title="Scarica" data-testid={`camerale-download-${r.id}`}>
                                                     <Download size={12} />
-                                                </a>
+                                                </button>
                                             ) : (
                                                 <Button size="sm" variant="ghost" className="h-6 px-1.5" onClick={() => refresh(r.id)} data-testid={`camerale-refresh-${r.id}`}>
                                                     <RefreshCw size={11} />
