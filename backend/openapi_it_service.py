@@ -1364,3 +1364,68 @@ async def company_dati(cf_piva: str, full: bool = False) -> Optional[dict]:
         return None
     return _normalize_company_co(d, full)
 
+
+
+# ===================================================================
+# SERVIZIO 11 · REPORT AZIENDE (api.reportaziende.it — API Dettaglio Azienda)
+# Richiede attivazione prodotto su OpenAPI.it (scope OAuth dedicato).
+# ===================================================================
+_RA_HOST = "api.reportaziende.it"
+
+REPORT_SCHEDE = [
+    {"code": "ANA", "label": "Anagrafica azienda"},
+    {"code": "05", "label": "Quadro aziendale"},
+    {"code": "10", "label": "Bilancio (Conto economico)"},
+    {"code": "20", "label": "Stato patrimoniale attivo"},
+    {"code": "30", "label": "Stato patrimoniale passivo"},
+    {"code": "40", "label": "Indici"},
+    {"code": "50", "label": "Analisi della redditività"},
+    {"code": "60", "label": "Analisi della produttività"},
+    {"code": "70", "label": "Analisi della crescita"},
+    {"code": "85", "label": "Contatti, soci, esponenti, CEO"},
+    {"code": "95", "label": "Gruppo e Holding"},
+    {"code": "PROT", "label": "Protesti e pregiudizievoli"},
+    {"code": "CR", "label": "Credit score & rating"},
+]
+
+_RA_SCOPE = f"GET:{_RA_HOST}/dettaglioazienda/visualizza"
+
+
+def report_schede_catalog() -> list[dict]:
+    return REPORT_SCHEDE
+
+
+async def report_azienda(cf_piva: str, schede: list[str]) -> dict:
+    """GET sincrono /dettaglioazienda/visualizza/{CF}/{SCHEDE}.
+    Ritorna {ok, status, crediti_utilizzati, schede, error}. 1 credito per scheda."""
+    key = (cf_piva or "").strip()
+    if not key:
+        return {"ok": False, "error": "P.IVA/CF mancante"}
+    if not has_credentials():
+        return {"ok": False, "error": "Credenziali OpenAPI.it non configurate"}
+    sch = ",".join(schede) if schede else "all"
+    token = await _get_token([_RA_SCOPE])
+    if not token:
+        return {"ok": False, "error": "Prodotto 'Report Aziende' non attivo su OpenAPI.it (scope mancante). Attivalo su console.openapi.com."}
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            r = await client.get(f"https://{_RA_HOST}/dettaglioazienda/visualizza/{key}/{sch}",
+                                 headers={"Authorization": f"Bearer {token}"})
+        try:
+            j = r.json()
+        except Exception:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        if r.status_code >= 400:
+            return {"ok": False, "error": j.get("message") or j.get("error") or f"HTTP {r.status_code}"}
+        # normalizza: alcuni payload usano data.schede, altri schede top-level
+        data = j.get("data") if isinstance(j.get("data"), dict) else j
+        return {
+            "ok": True,
+            "status": data.get("status") or j.get("status") or "ok",
+            "cf": data.get("cf") or key,
+            "crediti_utilizzati": data.get("crediti_utilizzati"),
+            "schede": data.get("schede") or {},
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+

@@ -663,3 +663,33 @@ async def camerale_refresh(aid: str, record_id: str, user=Depends(current_user))
     )
     return {"id": record_id, "stato": stato, "allegato_id": allegato_id}
 
+
+
+# ============================================================
+# REPORT AZIENDE · api.reportaziende.it (API Dettaglio Azienda)
+# ============================================================
+@router.get("/report-azienda/catalog")
+async def report_azienda_catalog(user=Depends(current_user)) -> dict:
+    return {"schede": svc.report_schede_catalog()}
+
+
+@router.post("/report-azienda/{aid}")
+async def report_azienda_fetch(aid: str, body: dict, user=Depends(current_user)) -> dict:
+    """Report azienda (a pagamento, 1 credito per scheda).
+    Body: {schede: ["ANA","CR",...]} — vuoto o omesso = tutte le schede del piano."""
+    ana = await _get_anagrafica(aid, user)
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
+    if not key:
+        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    schede = body.get("schede") or []
+    res = await svc.report_azienda(key, schede)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error") or "Errore report azienda")
+    await _update_openapi_field(aid, "report_azienda", {
+        "cf": res.get("cf"),
+        "crediti_utilizzati": res.get("crediti_utilizzati"),
+        "schede": res.get("schede"),
+        "aggiornato": _now_iso(),
+    })
+    return res
+

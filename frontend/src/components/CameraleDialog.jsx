@@ -8,6 +8,7 @@ import { api, fmtEur } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Building2, Loader2, FileText, TrendingUp, CheckCircle2, Clock, RefreshCw, Download } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,6 +22,10 @@ export default function CameraleDialog({ ana, aid, onClose, onReload }) {
     const [full, setFull] = useState(false);
     const [genBusy, setGenBusy] = useState(null); // doc_type in corso
     const [anno, setAnno] = useState("");
+    const [reportCatalog, setReportCatalog] = useState([]);
+    const [reportSel, setReportSel] = useState(["ANA", "40", "CR", "PROT"]);
+    const [reportData, setReportData] = useState(ana.openapi_data?.report_azienda?.schede || null);
+    const [reportBusy, setReportBusy] = useState(false);
 
     const richieste = (ana.openapi_data?.camerale_richieste || []).slice().reverse();
 
@@ -29,7 +34,25 @@ export default function CameraleDialog({ ana, aid, onClose, onReload }) {
             .then((r) => setSearch(r.data))
             .catch((e) => toast.error(e.response?.data?.detail || "Azienda non trovata"))
             .finally(() => setLoadingSearch(false));
+        api.get(`/openapi-it/report-azienda/catalog`).then((r) => setReportCatalog(r.data.schede || [])).catch(() => {});
     }, [aid]);
+
+    const toggleScheda = (code) =>
+        setReportSel((p) => (p.includes(code) ? p.filter((c) => c !== code) : [...p, code]));
+
+    const generaReport = async () => {
+        if (reportSel.length === 0) { toast.error("Seleziona almeno una scheda"); return; }
+        if (!window.confirm(`Generare il report con ${reportSel.length} schede? Costo: 1 credito per scheda (chiamata reale).`)) return;
+        setReportBusy(true);
+        try {
+            const r = await api.post(`/openapi-it/report-azienda/${aid}`, { schede: reportSel });
+            setReportData(r.data.schede || {});
+            toast.success(`Report generato (${r.data.crediti_utilizzati ?? reportSel.length} crediti usati)`);
+            onReload?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore report azienda");
+        } finally { setReportBusy(false); }
+    };
 
     const caricaBilancio = async (isFull) => {
         setLoadingBil(true);
@@ -212,6 +235,59 @@ export default function CameraleDialog({ ana, aid, onClose, onReload }) {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+
+                        {/* Report Azienda (Reportaziende.it) */}
+                        <div className="border border-slate-200 rounded p-3">
+                            <div className="font-medium text-sm flex items-center gap-1 mb-1"><FileText size={14} className="text-indigo-600" /> Report Azienda (schede avanzate)</div>
+                            <div className="text-[11px] text-slate-500 mb-2">Anagrafica, bilancio, indici, redditività, protesti/pregiudizievoli, credit score & rating. 1 credito per scheda.</div>
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                {reportCatalog.map((s) => (
+                                    <label key={s.code}
+                                        className={`flex items-center gap-1.5 border rounded px-2 py-1 text-xs cursor-pointer ${reportSel.includes(s.code) ? "border-indigo-400 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}
+                                        data-testid={`report-scheda-${s.code}`}>
+                                        <Checkbox checked={reportSel.includes(s.code)} onCheckedChange={() => toggleScheda(s.code)} />
+                                        {s.label}
+                                    </label>
+                                ))}
+                            </div>
+                            <Button size="sm" onClick={generaReport} disabled={reportBusy || reportSel.length === 0}
+                                className="bg-indigo-600 hover:bg-indigo-700 h-7 text-xs" data-testid="report-genera-btn">
+                                {reportBusy ? <Loader2 size={12} className="animate-spin mr-1" /> : null}
+                                Genera report ({reportSel.length} schede)
+                            </Button>
+                            {reportData && Object.keys(reportData).length > 0 && (
+                                <div className="mt-3 space-y-3">
+                                    {Object.entries(reportData).map(([code, sc]) => (
+                                        <div key={code} className="border-t border-slate-100 pt-2">
+                                            <div className="font-medium text-xs text-slate-700 mb-1">{sc.nome || code}</div>
+                                            {sc.tipo === "per_anno" ? (
+                                                <div className="overflow-x-auto">
+                                                    <table className="text-[11px] w-full">
+                                                        <tbody>
+                                                            {Object.entries(sc.dati || {}).map(([anno, vals]) => (
+                                                                <tr key={anno} className="border-b border-slate-100">
+                                                                    <td className="font-medium pr-2 py-0.5">{anno}</td>
+                                                                    <td className="py-0.5">{Object.entries(vals || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 gap-x-4">
+                                                    {Object.entries(sc.dati || {}).map(([k, v]) => (
+                                                        <div key={k} className="flex justify-between gap-2 text-[11px] border-b border-slate-100 py-0.5">
+                                                            <span className="text-slate-500">{k}</span>
+                                                            <span className="font-medium text-right">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* Storico documenti richiesti */}
