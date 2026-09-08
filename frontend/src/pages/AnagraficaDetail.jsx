@@ -208,7 +208,9 @@ export default function AnagraficaDetail() {
 
                 <TabsContent value="dati">
                     <CustomerInsightsWidget anagrafica_id={id} onTabChange={handleTabChange} />
-                    <OpenApiActions ana={ana} canEdit={canEdit} onReload={load} />
+                    {ana.tipo !== "persona_giuridica" && (
+                        <OpenApiActions ana={ana} canEdit={canEdit} onReload={load} />
+                    )}
                     <DatiTab ana={ana} canEdit={canEdit} onReload={load} />
                 </TabsContent>
                 <TabsContent value="albero"><AlberoGenealogico ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
@@ -216,7 +218,7 @@ export default function AnagraficaDetail() {
                 <TabsContent value="conti-correnti"><ContiCorrentiTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 <TabsContent value="profilazione-gdpr"><ProfilazioneGdprTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 {ana.tipo === "persona_giuridica" && (
-                    <TabsContent value="analisi-azienda"><AnalisiAziendaTab ana={ana} onReload={load} /></TabsContent>
+                    <TabsContent value="analisi-azienda"><AnalisiAziendaTab ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 )}
                 <TabsContent value="intervista"><InterviewTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
@@ -476,9 +478,19 @@ function DatiTab({ ana, canEdit, onReload }) {
                 </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div><Label>Tipo anagrafica</Label>
+                    <Select value={f.tipo || "persona_fisica"} onValueChange={(v) => set("tipo", v)}>
+                        <SelectTrigger data-testid="anag-tipo-select"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="persona_fisica">Persona fisica</SelectItem>
+                            <SelectItem value="persona_giuridica">Azienda / Persona giuridica</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
                 <div><Label>Ragione sociale</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
                 <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
                 <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                <div><Label>PEC</Label><Input value={f.pec || ""} onChange={(e) => set("pec", e.target.value)} placeholder="pec@esempio.it" /></div>
                 {f.tipo !== "persona_giuridica" && (<>
                 <div><Label>Data nascita</Label><Input type="date" value={f.data_nascita || ""} onChange={(e) => set("data_nascita", e.target.value)} /></div>
                 <div>

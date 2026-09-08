@@ -731,3 +731,10 @@ Usare integration_expert prima di implementare.
 - REGOLA: ogni anagrafica con Partita IVA è persona_giuridica. Forzata in create_anagrafica e update_anagrafica (routes/anagrafiche.py). Migrazione one-time (tutti i tenant): 681 record con P.IVA convertiti a persona_giuridica (su 1934 totali con P.IVA); backfill ragione_sociale dove mancante (0 necessari). VIVIANI ora persona_giuridica.
 - CAMPI PERSONALI NASCOSTI per persona_giuridica (AnagraficaDetail.jsx): vista dettaglio (Data nascita, Sesso, Comune nascita, Professione, Tipo lavoratore, Stato civile, N.figli, Figli a carico, Reddito annuo lordo, Inizio contribuzione, Settimane contributive) filtrati; form modifica: stessi campi + Tipologia lavoratore/Professione/Datore lavoro avvolti in {f.tipo!=="persona_giuridica"}.
 - Pulsante "⚡ Estrai dati" ora sempre visibile per aziende accanto al campo P.IVA (disabilitato finché non 11 cifre) con testo di aiuto.
+
+## Sessione 2026-06 (parte 19) — Salute Fiscale da OpenAPI + card OpenAPI in Analisi Azienda + Tipo/PEC
+- SALUTE FISCALE da dati strutturati: nuovo POST /anagrafiche/{aid}/salute-fiscale/da-openapi (extras_p1p2.py) → usa company_full_completo (ultimo bilancio con fatturato>0) per compilare ricavi/PN/attivo/costi personale + indicatori (roe/ros da indici, leva=attivo/PN) + score rischio + cross-sell. Pulsante "⚡ Compila da OpenAPI" in SaluteFiscaleTab accanto a "Carica bilancio (OCR)". Testato: OPENAPI SPA 2025 ricavi 5.696.858, PN 1.037.925, leva 2.31.
+- Card OpenApiActions SPOSTATA in Analisi Azienda (AnalisiAziendaTab, in cima) per le aziende; nascosta nel tab dati per persona_giuridica.
+- Form modifica anagrafica: aggiunto selettore "Tipo anagrafica" (fisica/giuridica) + campo PEC.
+- I PDF scaricati (bilancio ottico, visure) restano salvati in allegati con categoria (visura_camerale/bilancio/visura_catastale), visibili in "Altri allegati" con data e multipli file per categoria.
+- PENDING (agentic edits da fare): campi Amministratore + Referente azienda (con email/cellulare, autocompilati da import); mostrare solo tab attive; categoria "bilancio" per bilancio-ottico.

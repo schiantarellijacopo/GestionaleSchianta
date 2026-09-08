@@ -59,11 +59,24 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit }) {
                         {aggIl && <div className="text-[10px] text-slate-500 mt-1">Ultimo bilancio elaborato: {new Date(aggIl).toLocaleDateString("it-IT")}</div>}
                     </div>
                     {canEdit && (
+                        <div className="flex flex-col gap-2 items-end">
+                        <button onClick={async () => {
+                            try {
+                                setBusy(true);
+                                await api.post(`/anagrafiche/${anagrafica_id}/salute-fiscale/da-openapi`);
+                                toast.success("Dati compilati da OpenAPI (company.openapi.com)");
+                                load();
+                            } catch (e) { toast.error(e.response?.data?.detail || "Dati OpenAPI non disponibili"); }
+                            finally { setBusy(false); }
+                        }} disabled={busy} className="inline-flex items-center gap-2 px-3 py-2 bg-sky-700 text-white rounded text-sm hover:bg-sky-800 disabled:opacity-50" data-testid="sf-openapi-btn">
+                            ⚡ Compila da OpenAPI
+                        </button>
                         <label className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-700 text-white rounded text-sm cursor-pointer hover:bg-emerald-800" data-testid="sf-upload-btn">
                             <Upload size={14} />
                             {busy ? "Elaborazione OCR…" : "Carica bilancio (PDF/JPG)"}
                             <input type="file" hidden accept="application/pdf,image/*" onChange={upload} />
                         </label>
+                        </div>
                     )}
                 </div>
             </Card>

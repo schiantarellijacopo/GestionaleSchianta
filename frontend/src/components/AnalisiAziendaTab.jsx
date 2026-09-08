@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Building2, Users, Briefcase, Globe2, RefreshCw, Loader2, Info } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
+import OpenApiActions from "@/components/OpenApiActions";
 import { toast } from "sonner";
 
 const COLORS = ["#6366f1", "#0ea5e9", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6", "#eab308"];
@@ -38,7 +39,7 @@ function TortaSemplice({ data }) {
     );
 }
 
-export default function AnalisiAziendaTab({ ana, onReload }) {
+export default function AnalisiAziendaTab({ ana, canEdit, onReload }) {
     const [loading, setLoading] = useState(false);
     const c = ana.openapi_data?.company || {};
     const hasData = !!c.ragione_sociale;
@@ -61,6 +62,7 @@ export default function AnalisiAziendaTab({ ana, onReload }) {
 
     return (
         <div className="space-y-4" data-testid="info-azienda-tab">
+            <OpenApiActions ana={ana} canEdit={canEdit} onReload={onReload} />
             <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold flex items-center gap-2"><Building2 size={18} className="text-sky-700" /> Info Azienda</h3>
                 <Button size="sm" onClick={caricaDati} disabled={loading} className="bg-sky-700 hover:bg-sky-800" data-testid="info-azienda-load">

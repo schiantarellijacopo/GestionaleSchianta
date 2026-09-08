@@ -1461,6 +1461,78 @@ async def get_salute_fiscale(aid: str, user=Depends(current_user)) -> dict:
     }
 
 
+@router.post("/anagrafiche/{aid}/salute-fiscale/da-openapi")
+async def salute_fiscale_da_openapi(aid: str, user=Depends(current_user)) -> dict:
+    """Compila la Salute Fiscale dai dati strutturati di company.openapi.com
+    (senza OCR), usando l'ultimo bilancio disponibile + indici."""
+    import openapi_it_service as _svc
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "partita_iva": 1, "codice_fiscale": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
+    if not key:
+        raise HTTPException(400, "Anagrafica senza P.IVA/CF")
+    comp = await _svc.company_full_completo(key)
+    if not comp or not (comp.get("bilanci") or []):
+        raise HTTPException(404, "Dati di bilancio non disponibili da OpenAPI")
+    b = next((x for x in comp["bilanci"] if (x.get("fatturato") or 0) > 0), comp["bilanci"][0])
+    ricavi = b.get("fatturato") or 0
+    patrimonio_netto = b.get("patrimonio_netto") or 0
+    totale_attivo = b.get("totale_attivo") or 0
+    costi_personale = b.get("costo_personale") or 0
+    ind = comp.get("indici") or {}
+    red = ind.get("redditivita") or {}
+    utile_netto = None
+    # ROE = utile_netto / patrimonio_netto → ricostruisco utile_netto se ho ROE
+    roe = red.get("roe") if isinstance(red, dict) else None
+    try:
+        if roe is not None and patrimonio_netto:
+            utile_netto = round(float(roe) / 100 * patrimonio_netto, 2)
+    except (TypeError, ValueError):
+        utile_netto = None
+    dati = {
+        "ricavi": ricavi, "patrimonio_netto": patrimonio_netto,
+        "totale_attivo": totale_attivo, "costi_personale": costi_personale,
+        "utile_netto": utile_netto, "anno": b.get("anno"), "dipendenti": b.get("dipendenti"),
+    }
+    def _n(v):
+        try:
+            return float(v) if v not in (None, "") else 0
+        except (TypeError, ValueError):
+            return 0
+    r, pn, ta = _n(ricavi), _n(patrimonio_netto), _n(totale_attivo)
+    un = _n(utile_netto)
+    indicatori = {
+        "roe_pct": round((un / pn * 100), 2) if pn > 0 else (red.get("roe") if isinstance(red, dict) else None),
+        "ros_pct": red.get("ros") if isinstance(red, dict) else None,
+        "leva_finanziaria": round((ta / pn), 2) if pn > 0 else None,
+        "incidenza_oneri_fin_pct": None,
+        "pressione_fiscale_pct": None,
+    }
+    rischio = 0
+    if un < 0: rischio += 4
+    if indicatori["leva_finanziaria"] and indicatori["leva_finanziaria"] > 3: rischio += 2
+    if pn <= 0: rischio += 3
+    rischio = min(10, rischio)
+    cross_sell = []
+    if r > 500000: cross_sell += ["Cyber Risk", "RC Prodotti"]
+    if un > 50000 and pn > 100000: cross_sell += ["RC Professionale / D&O", "Key Man"]
+    payload = {
+        "salute_fiscale_dati": {
+            "bilancio_estratto": dati,
+            "indicatori": indicatori,
+            "score_rischio_default": rischio,
+            "cross_sell_suggerito": cross_sell,
+            "fonte": comp.get("provider"),
+            "ocr_data": _now_iso()[:10],
+        },
+        "salute_fiscale_aggiornata_il": _now_iso(),
+    }
+    await db.anagrafiche.update_one({"id": aid}, {"$set": payload})
+    return payload["salute_fiscale_dati"]
+
+
+
 # ===========================================================
 # 9) RACCOLTA DATI + POTENTI DOMANDE (onboarding cliente)
 # ===========================================================
