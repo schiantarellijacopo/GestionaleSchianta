@@ -1052,3 +1052,153 @@ async def list_archivio(
         "abbinati": abbinati,
         "da_smistare": tot - abbinati,
     }
+
+
+# ============================================================================
+#  RICERCA DOCUMENTI DI POLIZZA SU GOOGLE DRIVE (match per numero polizza)
+# ============================================================================
+import re as _re
+import uuid as _uuid
+from datetime import datetime as _dt, timezone as _tz
+from storage_service import StorageService
+from db_models import Allegato
+
+
+def _now_iso_cs() -> str:
+    return _dt.now(_tz.utc).isoformat()
+
+
+async def _drive_token(user) -> tuple[str, dict]:
+    conn = await db.cloud_connections.find_one(
+        {"tenant_id": _tenant_id(user), "provider": "google_drive"})
+    if not conn:
+        raise HTTPException(409, "Google Drive non collegato per questa agenzia")
+    token = await _fresh_access_token("google_drive", conn)
+    return token, conn
+
+
+async def _drive_list_pdf(token: str, folder_id: str | None,
+                          fulltext: str | None = None, page_size: int = 500) -> list[dict]:
+    q = "trashed=false and mimeType='application/pdf'"
+    if fulltext:
+        safe = fulltext.replace("'", "\\'")
+        q += f" and fullText contains '{safe}'"
+    if folder_id:
+        q += f" and '{folder_id}' in parents"
+    out, page_token = [], None
+    async with httpx.AsyncClient(timeout=40) as x:
+        for _ in range(6):  # max ~3000 file
+            params = {"q": q, "fields": "nextPageToken,files(id,name,size)",
+                      "pageSize": min(page_size, 1000)}
+            if page_token:
+                params["pageToken"] = page_token
+            r = await x.get("https://www.googleapis.com/drive/v3/files",
+                            headers={"Authorization": f"Bearer {token}"}, params=params)
+            r.raise_for_status()
+            j = r.json()
+            out.extend(j.get("files", []))
+            page_token = j.get("nextPageToken")
+            if not page_token:
+                break
+    return out
+
+
+async def _drive_download(token: str, file_id: str) -> bytes | None:
+    async with httpx.AsyncClient(timeout=90, follow_redirects=True) as x:
+        r = await x.get(f"https://www.googleapis.com/drive/v3/files/{file_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={"alt": "media"})
+    if r.status_code == 200 and r.content:
+        return r.content
+    return None
+
+
+async def _allega_a_polizza(user, polizza_id: str, filename: str, content: bytes) -> str:
+    stored = await StorageService.put(
+        user=user, entita_tipo="polizza", entita_id=polizza_id,
+        filename=filename, data=content, content_type="application/pdf")
+    alleg = Allegato(
+        entita_tipo="polizza", entita_id=polizza_id, nome_file=filename,
+        storage_path=stored["storage_path"], storage_provider=stored["storage_provider"],
+        content_type="application/pdf", size=stored.get("size", len(content)),
+        categoria="polizza", visibile_cliente=True, descrizione="Importato da Google Drive",
+    )
+    await db.allegati.insert_one(alleg.model_dump())
+    return alleg.id
+
+
+@router.post("/cerca-documenti-polizza/{polizza_id}")
+async def cerca_documenti_polizza(polizza_id: str, user=Depends(current_user)):
+    """Cerca su Google Drive i PDF che contengono il numero di polizza (nel nome
+    o nel testo) e li salva negli allegati della polizza (categoria 'polizza')."""
+    pol = await db.polizze.find_one({"id": polizza_id},
+                                    {"_id": 0, "id": 1, "numero_polizza": 1})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    numero = (pol.get("numero_polizza") or "").strip()
+    if not numero:
+        raise HTTPException(400, "Polizza senza numero")
+    token, conn = await _drive_token(user)
+    files = await _drive_list_pdf(token, conn.get("folder_id"), fulltext=numero)
+    # filtro extra: il numero deve comparire nel nome file O il match fulltext basta
+    esistenti = set()
+    async for a in db.allegati.find({"entita_tipo": "polizza", "entita_id": polizza_id},
+                                    {"nome_file": 1}):
+        esistenti.add(a.get("nome_file"))
+    salvati = []
+    for f in files:
+        name = f.get("name") or f"{numero}.pdf"
+        if name in esistenti:
+            continue
+        content = await _drive_download(token, f["id"])
+        if not content:
+            continue
+        await _allega_a_polizza(user, polizza_id, name, content)
+        salvati.append(name)
+    return {"numero_polizza": numero, "trovati": len(files),
+            "salvati": salvati, "gia_presenti": len(files) - len(salvati)}
+
+
+@router.post("/cerca-documenti-tutte-polizze")
+async def cerca_documenti_tutte_polizze(limite_download: int = 150, user=Depends(current_user)):
+    """Scansione batch: elenca i PDF del Drive e li abbina alle polizze il cui
+    numero compare nel nome del file. Salva negli allegati della polizza."""
+    token, conn = await _drive_token(user)
+    files = await _drive_list_pdf(token, conn.get("folder_id"))
+    # mappa numero_polizza -> polizza_id (solo numeri >= 5 cifre)
+    num_map: dict[str, str] = {}
+    async for p in db.polizze.find({"is_deleted": {"$ne": True}},
+                                   {"_id": 0, "id": 1, "numero_polizza": 1}):
+        num = _re.sub(r"\s", "", (p.get("numero_polizza") or ""))
+        if len(_re.sub(r"\D", "", num)) >= 5:
+            num_map[num] = p["id"]
+    numeri = sorted(num_map.keys(), key=len, reverse=True)
+    scaricati, abbinamenti, polizze_tocc = 0, 0, set()
+    for f in files:
+        if scaricati >= limite_download:
+            break
+        name = f.get("name") or ""
+        low = name.replace(" ", "")
+        match_num = next((n for n in numeri if n and n in low), None)
+        if not match_num:
+            continue
+        pid = num_map[match_num]
+        # evita duplicati
+        exists = await db.allegati.find_one(
+            {"entita_tipo": "polizza", "entita_id": pid, "nome_file": name}, {"_id": 1})
+        if exists:
+            continue
+        content = await _drive_download(token, f["id"])
+        if not content:
+            continue
+        await _allega_a_polizza(user, pid, name, content)
+        scaricati += 1
+        abbinamenti += 1
+        polizze_tocc.add(pid)
+    return {
+        "file_su_drive": len(files),
+        "polizze_totali": len(num_map),
+        "documenti_salvati": scaricati,
+        "polizze_aggiornate": len(polizze_tocc),
+        "completato": scaricati < limite_download,
+    }

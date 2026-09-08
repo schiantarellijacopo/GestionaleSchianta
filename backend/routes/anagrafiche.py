@@ -1111,6 +1111,25 @@ async def upload_avatar(
     return {"ok": True, "avatar_url": url}
 
 
+@router.get("/anagrafiche/{aid}/whatsapp-chat")
+async def whatsapp_chat_anagrafica(aid: str, limit: int = 300, user: dict = Depends(current_user)):
+    """Ritorna la conversazione WhatsApp del cliente (match sul numero di telefono),
+    ordinata cronologicamente, per l'anteprima stile chat."""
+    ana = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, "cellulare": 1, "telefono": 1, "ragione_sociale": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    raw = (ana.get("cellulare") or ana.get("telefono") or "")
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) < 6:
+        return {"number": None, "messages": [], "nome": ana.get("ragione_sociale")}
+    suffix = digits[-9:]  # confronta le ultime 9 cifre (prefisso paese variabile)
+    msgs = await db.whatsapp_messages.find(
+        {"number": {"$regex": re.escape(suffix) + "$"}}, {"_id": 0},
+    ).sort("created_at", 1).limit(limit).to_list(limit)
+    return {"number": digits, "messages": msgs, "nome": ana.get("ragione_sociale")}
+
+
 @router.delete("/anagrafiche/{aid}/avatar")
 async def delete_avatar(
     aid: str,

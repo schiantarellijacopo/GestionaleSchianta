@@ -1,5 +1,18 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 08/09/2026 (fork) — Batch 3: Chat WhatsApp, Avatar, Documenti polizza da Drive
+
+- **💬 Tab "Chat WhatsApp"** (scheda cliente): anteprima conversazione stile WhatsApp (bolle verdi in uscita a destra, bianche in entrata a sinistra), orari, nome mittente e foto/media caricati on-demand (`/whatsapp-evo/messages/{id}/media` come blob). Backend `GET /anagrafiche/{aid}/whatsapp-chat` (match sulle ultime 9 cifre del cellulare su `whatsapp_messages`). Testato: BALZAROLO ALESSIA 51 messaggi (28 out/23 in, 3 media). `WhatsAppChatPreview.jsx`.
+- **Avatar auto-crop volto**: `face_crop.crop_volto_bytes` ora prova le rotazioni 0/90/180/270 (i documenti scansionati sono spesso ruotati) + validazione tono-pelle per evitare ritagli errati. Verificato sulla C.I. reale caricata dall'utente (volto ritagliato correttamente). Applicato anche all'upload manuale dell'avatar.
+- **Documenti polizza da Google Drive**: pulsante "🔍 Cerca su Google Drive" nel tab Documenti della polizza → `POST /librerie/cloud-storage/cerca-documenti-polizza/{id}` cerca i PDF (fullText + nome) contenenti il numero polizza nella cartella collegata e li allega alla polizza (categoria "polizza", visibile_cliente). Batch `POST /cerca-documenti-tutte-polizze` abbina per numero-nel-nome su tutte le polizze del tenant (cap download). Riusa l'integrazione Drive OAuth esistente (`_fresh_access_token`, StorageService). Testato: auth Drive OK, ricerca eseguita. NB: la cartella collegata "Assicura CRM" è al momento SENZA PDF → 0 risultati finché non ci si caricano i file. La polizza 184643409 è in un tenant SENZA Drive collegato.
+- **Import**: toast di fine importazione in ImportMassivo ora con conteggi (creati/aggiornati/saltati/errori).
+- Testato: iter 76 PASS 100%.
+
+### ⏳ In sospeso — serve input utente
+- **Fonte IMAP** per i documenti polizza: da configurare (serve host IMAP + utente + password/app-password). Integrazione da fare via integration_expert una volta ricevute le credenziali.
+
+
+
 ## Sessione 08/09/2026 (fork) — Batch 2: Piramide tab, Documenti unificati, scenari, avatar
 
 - **Tab "🔺 Piramide Azienda"** (persone giuridiche): nuovo tab dedicato (`tab-piramide-azienda`) con pulsante "Precompila da bilancio" che riempie la piramide coperture (modello aziende) dai dati di bilancio (valore produzione) + polizze attive. Backend `prepopola_piramide_v2` reso azienda-aware. `PiramideCopertureNuova` esportata. (Il pulsante resta anche dentro Salute Fiscale.)

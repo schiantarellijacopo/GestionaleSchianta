@@ -21,7 +21,7 @@ import RowActions, { PrintButton } from "@/components/RowActions";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
-    Pencil, Trash2, Briefcase, Link2, Copy, Send,
+    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -37,6 +37,7 @@ import ContiCorrentiTab from "@/components/ContiCorrentiTab";
 import ProfilazioneGdprTab from "@/components/ProfilazioneGdprTab";
 import OpenApiActions from "@/components/OpenApiActions";
 import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
+import WhatsAppChatPreview from "@/components/WhatsAppChatPreview";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -196,6 +197,7 @@ export default function AnagraficaDetail() {
                         <TabsTrigger value="piramide-azienda" data-testid="tab-piramide-azienda">🔺 Piramide Azienda</TabsTrigger>
                     )}
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
+                    <TabsTrigger value="chat-whatsapp" data-testid="tab-chat-whatsapp"><MessageCircle size={13} className="mr-1" />Chat WhatsApp</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
@@ -230,6 +232,7 @@ export default function AnagraficaDetail() {
                     <TabsContent value="piramide-azienda"><PiramideAziendaTab anagrafica_id={id} ana={ana} canEdit={canEdit} /></TabsContent>
                 )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
+                <TabsContent value="chat-whatsapp"><WhatsAppChatPreview anagrafica_id={id} /></TabsContent>
                 <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
                     <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>

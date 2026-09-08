@@ -939,6 +939,35 @@ export default function PolizzaDetail() {
                 )}
 
                 <TabsContent value="documenti">
+                    {canEdit && (
+                        <div className="mb-3 flex items-center justify-between flex-wrap gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div className="text-xs text-blue-900">
+                                <strong>Documenti da Google Drive</strong>: cerca i PDF che contengono il numero di questa polizza e allegali automaticamente.
+                            </div>
+                            <Button
+                                size="sm"
+                                className="bg-blue-600 hover:bg-blue-700 shrink-0"
+                                data-testid="cerca-drive-polizza-btn"
+                                onClick={async () => {
+                                    const t = toast.loading("Cerco i documenti su Google Drive…");
+                                    try {
+                                        const r = await api.post(`/librerie/cloud-storage/cerca-documenti-polizza/${pol.id}`);
+                                        const n = r.data.salvati?.length || 0;
+                                        toast.success(
+                                            n > 0
+                                                ? `Trovati ${r.data.trovati} file · ${n} nuovi documenti allegati`
+                                                : `Nessun nuovo documento (${r.data.gia_presenti} già presenti)`,
+                                            { id: t });
+                                        load();
+                                    } catch (e) {
+                                        toast.error(e.response?.data?.detail || "Errore ricerca su Drive", { id: t });
+                                    }
+                                }}
+                            >
+                                🔍 Cerca su Google Drive
+                            </Button>
+                        </div>
+                    )}
                     <DocumentiPolizzaTab polizzaId={pol.id} canEdit={canEdit} onAfterOCR={load} />
                     <div className="mt-4">
                         <DocumentiSezioneSplit

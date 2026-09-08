@@ -103,7 +103,12 @@ export default function ImportMassivo() {
                         clearInterval(pollRef.current);
                         setResult(st.data.result);
                         setCommitting(false);
-                        toast.success("Importazione completata");
+                        {
+                            const rr = st.data.result || {};
+                            toast.success(
+                                `Importazione completata · ${rr.creati || 0} creati, ${rr.aggiornati || 0} aggiornati, ${rr.saltati || 0} saltati, ${rr.errori || 0} errori`,
+                                { duration: 8000 });
+                        }
                     } else if (st.data.status === "errore") {
                         clearInterval(pollRef.current);
                         setResult(st.data.result || { errore: "Errore sconosciuto" });

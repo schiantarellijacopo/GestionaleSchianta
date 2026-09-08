@@ -67,35 +67,43 @@ def _detect_face_opencv(img_pil) -> Optional[tuple[int, int, int, int]]:
 
 
 def crop_volto_bytes(image_bytes: bytes, ai_bbox: Optional[dict] = None) -> Optional[bytes]:
-    """Ritaglia la fototessera dal documento. Ritorna JPEG quadrato max 512px o None."""
+    """Ritaglia la fototessera dal documento. Ritorna JPEG quadrato max 512px o None.
+
+    Prova anche le rotazioni (0/90/180/270): i documenti scansionati sono spesso ruotati."""
     from PIL import Image
     try:
-        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        img0 = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception:
         return None
-    W, H = img.size
-    box = None
-    try:
-        det = _detect_face_opencv(img)
+    best = None  # (img_ruotata, box)
+    for angle in (0, 90, 270, 180):
+        img = img0.rotate(-angle, expand=True) if angle else img0
+        W, H = img.size
+        try:
+            det = _detect_face_opencv(img)
+        except Exception as e:
+            logger.warning("OpenCV face detect (rot %s) fallito: %s", angle, e)
+            det = None
         if det:
             l, t, r, b = det
-            # margine 45% attorno al volto per includere spalle/capelli
             mw, mh = int((r - l) * 0.45), int((b - t) * 0.55)
             box = (max(0, l - mw), max(0, t - mh), min(W, r + mw), min(H, b + mh))
-    except Exception as e:
-        logger.warning("OpenCV face detect fallito: %s", e)
-    if box is None and ai_bbox and isinstance(ai_bbox, dict):
+            best = (img, box)
+            break
+    if best is None and ai_bbox and isinstance(ai_bbox, dict):
+        W, H = img0.size
         x = float(ai_bbox.get("x") or 0)
         y = float(ai_bbox.get("y") or 0)
         w = float(ai_bbox.get("w") or 0)
         h = float(ai_bbox.get("h") or 0)
-        # accetta solo box plausibili per una fototessera (non il documento intero)
         if 0.05 < w <= 0.5 and 0.05 < h <= 0.8:
             pad = 0.05
             box = (max(0, int((x - pad) * W)), max(0, int((y - pad) * H)),
                    min(W, int((x + w + pad) * W)), min(H, int((y + h + pad) * H)))
-    if box is None:
+            best = (img0, box)
+    if best is None:
         return None
+    img, box = best
     face = img.crop(box)
     fw, fh = face.size
     side = min(fw, fh)
