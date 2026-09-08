@@ -32,6 +32,31 @@ def _cliente_nome(ana: dict) -> str:
     return (f"{ana.get('nome','')} {ana.get('cognome','')}".strip() or ana.get("ragione_sociale", ""))
 
 
+def _sostituisci_placeholder(testo: str, ana: dict, cons: dict, importo: float,
+                             luogo: str = "", data: str = "") -> str:
+    """Risolve i placeholder {campo} nel testo con i dati reali di cliente/consulente."""
+    imp = int(round(importo or 0))
+    corr = "a titolo gratuito" if imp == 0 else (f"€ {imp:,.0f}".replace(",", ".") + f" ({_intero_lettere(imp)})")
+    indirizzo = ", ".join([x for x in [ana.get("indirizzo"), ana.get("comune"), ana.get("cap")] if x])
+    mapping = {
+        "{cliente}": _cliente_nome(ana),
+        "{codice_fiscale}": ana.get("codice_fiscale") or "",
+        "{partita_iva}": ana.get("partita_iva") or "",
+        "{indirizzo}": indirizzo,
+        "{email}": ana.get("email") or "",
+        "{cellulare}": ana.get("cellulare") or ana.get("telefono") or "",
+        "{consulente}": cons.get("ragione_sociale") or "",
+        "{rui}": cons.get("rui") or "",
+        "{importo}": corr,
+        "{luogo}": luogo or ana.get("comune") or "",
+        "{data}": data or "",
+    }
+    out = testo or ""
+    for k, v in mapping.items():
+        out = out.replace(k, v)
+    return out
+
+
 
 def _intero_lettere(n: int) -> str:
     if n == 0:
@@ -214,8 +239,9 @@ async def firma_otp(aid: str, body: dict, user=Depends(current_user)):
     # genera PDF impaginato professionale
     cons = await _consulente_info(user)
     logo = await _logo_bytes()
+    testo_finale = _sostituisci_placeholder(cc.get("testo") or "", ana, cons, float(cc.get("importo") or 0))
     pdf = contratto_render.build_pdf(
-        cc.get("testo") or "", consulente=cons, cliente_nome=_cliente_nome(ana),
+        testo_finale, consulente=cons, cliente_nome=_cliente_nome(ana),
         logo_bytes=logo, firmato=True, firmato_il=_now_iso(),
         firmato_via=cc.get("otp_canale") or "otp")
     stored = await StorageService.put(
@@ -244,6 +270,7 @@ async def _render_data(aid: str, user):
     cons = await _consulente_info(user)
     if not testo:
         testo = _costruisci_testo(ana, cons, float(cc.get("importo") or 0))
+    testo = _sostituisci_placeholder(testo, ana, cons, float(cc.get("importo") or 0))
     return ana, cc, testo, cons
 
 

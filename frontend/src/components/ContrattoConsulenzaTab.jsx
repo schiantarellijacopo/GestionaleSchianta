@@ -1,10 +1,68 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { FileSignature, ShieldCheck } from "lucide-react";
+
+// Numero intero → lettere (italiano) — replica del backend per coerenza PDF/UI.
+function numLettere(n) {
+    n = Math.round(Number(n) || 0);
+    if (n === 0) return "zero euro (a titolo gratuito)";
+    const u = ["", "uno", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci",
+        "undici", "dodici", "tredici", "quattordici", "quindici", "sedici", "diciassette",
+        "diciotto", "diciannove"];
+    const d = ["", "", "venti", "trenta", "quaranta", "cinquanta", "sessanta", "settanta", "ottanta", "novanta"];
+    const sotto100 = (x) => {
+        if (x < 20) return u[x];
+        const dec = Math.floor(x / 10), un = x % 10;
+        let base = d[dec];
+        if (un === 1 || un === 8) base = base.slice(0, -1);
+        return base + u[un];
+    };
+    const sotto1000 = (x) => {
+        const cent = Math.floor(x / 100), r = x % 100;
+        const pre = cent === 0 ? "" : (cent === 1 ? "cento" : u[cent] + "cento");
+        return pre + sotto100(r);
+    };
+    if (n < 1000) return sotto1000(n) + " euro";
+    const migl = Math.floor(n / 1000), r = n % 1000;
+    const pre = migl === 1 ? "mille" : sotto1000(migl) + "mila";
+    return (pre + sotto1000(r)).trim() + " euro";
+}
+
+function formatCorr(imp) {
+    const n = Math.round(Number(imp) || 0);
+    if (n === 0) return "a titolo gratuito";
+    return "€ " + n.toLocaleString("it-IT") + " (" + numLettere(n) + ")";
+}
+
+// Aggiorna nel testo l'Art. 4 (Corrispettivo) e la riga "Corrispettivo pattuito:".
+function applicaImporto(testo, imp) {
+    const corr = formatCorr(imp);
+    let t = testo || "";
+    t = t.replace(/(corrisponderà al Consulente )([\s\S]*?)(\.\s*Tale corrispettivo)/,
+        (_m, a, _b, c) => a + corr + c);
+    t = t.replace(/(Corrispettivo pattuito:\s*)(.*)/,
+        (_m, a) => a + corr);
+    return t;
+}
+
+// Placeholder inseribili nel testo (risolti dal backend in fase di PDF/Word/firma).
+const PLACEHOLDERS = [
+    { token: "{cliente}", label: "Cliente" },
+    { token: "{codice_fiscale}", label: "Cod. fiscale" },
+    { token: "{partita_iva}", label: "P. IVA" },
+    { token: "{indirizzo}", label: "Indirizzo" },
+    { token: "{email}", label: "Email" },
+    { token: "{cellulare}", label: "Cellulare" },
+    { token: "{consulente}", label: "Consulente" },
+    { token: "{rui}", label: "RUI" },
+    { token: "{importo}", label: "Importo" },
+    { token: "{luogo}", label: "Luogo" },
+    { token: "{data}", label: "Data" },
+];
 
 export default function ContrattoConsulenzaTab({ anagrafica_id }) {
     const [testo, setTesto] = useState("");
@@ -17,6 +75,20 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
     const [otpInviato, setOtpInviato] = useState(false);
     const [otpDebug, setOtpDebug] = useState(null);
     const [busy, setBusy] = useState(false);
+    const testoRef = useRef(null);
+
+    const insertPlaceholder = (token) => {
+        const el = testoRef.current;
+        if (!el) { setTesto((t) => t + token); return; }
+        const start = el.selectionStart ?? testo.length;
+        const end = el.selectionEnd ?? testo.length;
+        const next = testo.slice(0, start) + token + testo.slice(end);
+        setTesto(next);
+        setTimeout(() => {
+            el.focus();
+            el.selectionStart = el.selectionEnd = start + token.length;
+        }, 0);
+    };
 
     const load = () => {
         api.get(`/anagrafiche/${anagrafica_id}/contratto-consulenza`).then((r) => {
@@ -100,7 +172,20 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                 </div>
 
                 <label className="text-xs text-slate-500">Testo del contratto (modificabile)</label>
+                {!firmato && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 mb-1.5" data-testid="contratto-placeholder-bar">
+                        <span className="text-[11px] text-slate-500 mr-1">Inserisci campo:</span>
+                        {PLACEHOLDERS.map((p) => (
+                            <button key={p.token} type="button" onClick={() => insertPlaceholder(p.token)}
+                                className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                                data-testid={`contratto-ph-${p.token.replace(/[{}]/g, "")}`}>
+                                {p.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <textarea
+                    ref={testoRef}
                     value={testo} onChange={(e) => setTesto(e.target.value)}
                     className="w-full h-[420px] text-[12px] font-mono border border-slate-300 rounded-md p-3 mt-1 leading-relaxed"
                     data-testid="contratto-testo"
@@ -109,7 +194,13 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3 items-end">
                     <div>
                         <label className="text-xs text-slate-500">Importo consulenza (€) — 0 = gratuito</label>
-                        <Input type="number" min="0" value={importo} onChange={(e) => setImporto(e.target.value)} data-testid="contratto-importo" />
+                        <Input type="number" min="0" value={importo}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setImporto(v);
+                                if (stato !== "firmato") setTesto((t) => applicaImporto(t, v));
+                            }}
+                            data-testid="contratto-importo" />
                     </div>
                     <Button onClick={salva} disabled={busy} variant="outline" data-testid="contratto-salva">💾 Salva bozza</Button>
                     <div className="flex gap-2">
