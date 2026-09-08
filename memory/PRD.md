@@ -722,3 +722,7 @@ Usare integration_expert prima di implementare.
 - Backend: svc.company_lookup(), svc.company_full_completo() (merge IT-full soci/governance/indici + IT-advanced ragione_sociale/indirizzo/bilanci). _normalize_company_co ora espone comune/provincia/cap. POST /company/{aid} salva dati merged in openapi_data.company; backfill ragione_sociale dall'anagrafica.
 - "Analisi Azienda approfondita" = da sviluppare in seguito (contenitore esistente).
 - Test: testing_agent frontend iteration_70 = 100% (Info Azienda render, visibilità tab PG/PF, autocomplete presente). Backend via curl OK.
+
+## Sessione 2026-06 (parte 17) — Fix pulsante Estrai dati P.IVA + nota tipo azienda
+- FIX (Anagrafiche.jsx form nuovo cliente): il pulsante di autocompilazione P.IVA prima era una piccola pill in alto visibile solo dopo 11 cifre → non evidente. Ora: campo P.IVA + pulsante verde "⚡ Estrai dati" sempre visibile per aziende (tipo persona_giuridica), disabilitato finché la P.IVA non ha 11 cifre, con testo di aiuto. Chiama importaAzienda() → GET /openapi-it/company (company.openapi.com).
+- NOTA: AUTOTRASPORTI VIVIANI risulta "Persona fisica" perché il record è stato salvato con tipo=persona_fisica (probabile ditta individuale o import). Va corretto manualmente (modifica anagrafica → Tipo → Azienda) oppure valutare estrazione dati anche per persone fisiche con P.IVA (ditte individuali) in futuro.

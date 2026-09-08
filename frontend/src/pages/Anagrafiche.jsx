@@ -1501,22 +1501,24 @@ function NuovaAnagraficaDialog({ onClose }) {
 
                 {!isPF && (
                     <div className="col-span-2">
-                        <div className="flex items-center justify-between mb-1">
-                            <Label>Partita IVA</Label>
-                            {form.partita_iva && form.partita_iva.length === 11 && (
-                                <button
-                                    type="button"
-                                    onClick={importaAzienda}
-                                    disabled={importAziendaLoading}
-                                    className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 transition-colors disabled:opacity-50"
-                                    data-testid="anag-importa-azienda-btn"
-                                    title="Autocompila dati azienda da OpenAPI.it (Camerale)"
-                                >
-                                    {importAziendaLoading ? "⏳ Importo..." : "⚡ Importa Dati Azienda"}
-                                </button>
-                            )}
+                        <Label>Partita IVA</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                            <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)}
+                                placeholder="Inserisci la P.IVA (11 cifre)" className="flex-1" data-testid="anag-piva-input" />
+                            <button
+                                type="button"
+                                onClick={importaAzienda}
+                                disabled={importAziendaLoading || (form.partita_iva || "").trim().length !== 11}
+                                className="whitespace-nowrap bg-emerald-600 text-white hover:bg-emerald-700 px-3 py-2 rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                data-testid="anag-importa-azienda-btn"
+                                title="Autocompila i dati dell'azienda da OpenAPI.it (Camerale)"
+                            >
+                                {importAziendaLoading ? "⏳ Estraggo…" : "⚡ Estrai dati"}
+                            </button>
                         </div>
-                        <Input value={form.partita_iva} onChange={(e) => set("partita_iva", e.target.value)} data-testid="anag-piva-input" />
+                        <div className="text-[11px] text-slate-500 mt-1">
+                            Inserisci la Partita IVA e clicca <b>Estrai dati</b> per compilare automaticamente ragione sociale, indirizzo, PEC e ATECO.
+                        </div>
                     </div>
                 )}
 
