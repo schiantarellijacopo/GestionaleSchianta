@@ -11,6 +11,7 @@ import { Building2, Home, Car, FileSearch, Loader2, ChevronDown, ChevronUp, Info
 import { toast } from "sonner";
 import CatastoImportDialog from "@/components/CatastoImportDialog";
 import VisengineDialog from "@/components/VisengineDialog";
+import CameraleDialog from "@/components/CameraleDialog";
 
 export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [mode, setMode] = useState(null); // "mock" | "live"
@@ -19,6 +20,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [expanded, setExpanded] = useState(null);
     const [catastoData, setCatastoData] = useState(null); // {immobili, soggetto}
     const [showVisengine, setShowVisengine] = useState(false);
+    const [showCamerale, setShowCamerale] = useState(false);
     const openapi = ana.openapi_data || {};
 
     const estraiCatasto = async () => {
@@ -85,11 +87,11 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                 <ActionBtn
                     icon={Building2} label="Camerale" testid="oapi-btn-company"
-                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "company"}
-                    loading={loading === "company"}
-                    onClick={() => call("company", "company", "Camerale")}
+                    disabled={!canEdit || (!hasPiva && !hasCf)}
+                    loading={false}
+                    onClick={() => setShowCamerale(true)}
                     hint={!hasPiva && !hasCf ? "P.IVA/CF mancante" : null}
-                    hasData={!!openapi.company}
+                    hasData={!!openapi.camerale || Array.isArray(openapi.camerale_richieste)}
                 />
                 <ActionBtn
                     icon={Home} label="Catasto" testid="oapi-btn-cadastre"
@@ -139,6 +141,14 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     ana={ana}
                     aid={ana.id}
                     onClose={() => setShowVisengine(false)}
+                    onReload={onReload}
+                />
+            )}
+            {showCamerale && (
+                <CameraleDialog
+                    ana={ana}
+                    aid={ana.id}
+                    onClose={() => setShowCamerale(false)}
                     onReload={onReload}
                 />
             )}

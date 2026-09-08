@@ -22,7 +22,7 @@ import {
 import {
     Wallet, Home, Target, Calculator, Briefcase, Shield, Scale,
     FileText, Save, Plus, Trash2, TrendingDown, TrendingUp, Upload,
-    Sparkles, Loader2,
+    Sparkles, Loader2, MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Loading } from "@/components/Shared";
@@ -249,6 +249,71 @@ function SituazioneFinanziaria({ ac, set, canEdit }) {
 }
 
 // ============== SEZIONE 2: PATRIMONIO ==============
+function useLeafletCDN() {
+    const [ready, setReady] = useState(!!window.L);
+    useEffect(() => {
+        if (window.L) { setReady(true); return; }
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+            const l = document.createElement("link");
+            l.rel = "stylesheet"; l.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+            document.head.appendChild(l);
+        }
+        const existing = document.querySelector('script[src*="leaflet.js"]');
+        if (existing) { existing.addEventListener("load", () => setReady(true)); if (existing.dataset.loaded) setReady(true); return; }
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; s.async = false;
+        s.onload = () => { s.dataset.loaded = "1"; setReady(true); };
+        document.body.appendChild(s);
+    }, []);
+    return ready;
+}
+
+const IMMOBILE_COLORS = {
+    abitativo: "#0ea5e9", commerciale: "#f59e0b", ufficio: "#8b5cf6",
+    garage: "#64748b", terreno: "#10b981", altro: "#94a3b8",
+};
+
+function ImmobiliMap({ immobili }) {
+    const ready = useLeafletCDN();
+    const mapRef = useRef(null);
+    const divRef = useRef(null);
+    const geo = (immobili || []).filter((i) => i.latitude && i.longitude);
+
+    useEffect(() => {
+        if (!ready || !divRef.current) return;
+        const L = window.L;
+        if (!mapRef.current) {
+            mapRef.current = L.map(divRef.current, { scrollWheelZoom: false })
+                .setView([41.9028, 12.4964], 6);
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                attribution: "© OpenStreetMap", maxZoom: 19,
+            }).addTo(mapRef.current);
+        }
+        const map = mapRef.current;
+        (map._imm_markers || []).forEach((m) => map.removeLayer(m));
+        map._imm_markers = [];
+        geo.forEach((im) => {
+            const color = IMMOBILE_COLORS[im.tipo] || "#0ea5e9";
+            const icon = L.divIcon({
+                className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+                html: `<div style="background:${color};width:20px;height:20px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+            });
+            const m = L.marker([im.latitude, im.longitude], { icon }).addTo(map);
+            m.bindPopup(`<b>${im.tipo || "Immobile"}</b><br>${im.indirizzo || ""}<br>${im.comune || ""} ${im.categoria_catastale ? "· " + im.categoria_catastale : ""}`);
+            map._imm_markers.push(m);
+        });
+        if (geo.length > 0) {
+            const bounds = window.L.latLngBounds(geo.map((i) => [i.latitude, i.longitude]));
+            map.fitBounds(bounds.pad(0.3), { maxZoom: 15 });
+        }
+        setTimeout(() => map.invalidateSize(), 200);
+    }, [ready, JSON.stringify(geo.map((i) => [i.latitude, i.longitude, i.tipo]))]);
+
+    if (geo.length === 0) return null;
+    return <div ref={divRef} data-testid="immobili-map" className="w-full h-64 rounded-lg overflow-hidden border border-slate-200 mb-3" />;
+}
+
+
 function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving }) {
     const [riepilogo, setRiepilogo] = useState(null);
 
@@ -279,9 +344,30 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving })
             <Card className="p-5 border-slate-200">
                 <SectionHeader title="Immobili" icon={<Home size={16} />} count={ac.immobili?.length || 0}
                     onAdd={canEdit ? () => addItem("immobili", { tipo: "abitativo", titolo: "proprieta", percentuale_proprieta: 100, valore_commerciale: 0, rendita_catastale: 0 }) : null} />
-                <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
-                    ⚠ Banca dati catastale: nessuna API pubblica gratuita; per ora inserimento manuale. Importazione XML/ZIP da Agenzia Entrate prevista in roadmap.
+                <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="text-xs text-sky-900 bg-sky-50 border border-sky-200 rounded p-2 flex-1">
+                        💡 Usa il pulsante <b>Catasto</b> (nel tab Anagrafica) per importare automaticamente gli immobili reali dal Catasto. Gli immobili con indirizzo/comune vengono mostrati sulla mappa.
+                    </div>
+                    {canEdit && (ac.immobili || []).some((i) => !i.latitude && (i.indirizzo || i.comune)) && (
+                        <Button size="sm" variant="outline" className="text-xs h-8 whitespace-nowrap"
+                                data-testid="immobili-geocode-btn"
+                                onClick={async () => {
+                                    try {
+                                        const r = await api.post(`/openapi-it/analisi/${anagrafica_id}/geocode-immobili`);
+                                        if (r.data.geocodificati > 0) {
+                                            toast.success(`${r.data.geocodificati} immobili geolocalizzati. Ricarico…`);
+                                            const a = await api.get(`/anagrafiche/${anagrafica_id}/analisi`);
+                                            set("immobili", a.data.immobili || []);
+                                        } else {
+                                            toast.info("Nessun immobile da geolocalizzare (indirizzo/comune mancante).");
+                                        }
+                                    } catch (e) { toast.error("Errore geocoding: " + (e.response?.data?.detail || e.message)); }
+                                }}>
+                            <MapPin size={12} className="mr-1" /> Geolocalizza immobili
+                        </Button>
+                    )}
                 </div>
+                <ImmobiliMap immobili={ac.immobili || []} />
                 {(ac.immobili || []).map((im, i) => (
                     <ImmobileRow key={i} item={im} canEdit={canEdit}
                         onChange={(patch) => updateItem("immobili", i, patch)}

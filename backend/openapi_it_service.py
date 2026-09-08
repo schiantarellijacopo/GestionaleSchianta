@@ -1095,3 +1095,235 @@ async def visengine_download(rid: str) -> tuple[int, bytes, str]:
 
 def visengine_is_ready(stato: str) -> bool:
     return (stato or "").lower() in ("evasa", "evaso", "completato", "completata", "success", "done", "pronto", "pronta")
+
+
+# ===================================================================
+# SERVIZIO 9 · VISURE CAMERALI (visurecamerali.openapi.it) — ricerca
+# gratuita + generazione documenti ufficiali (PDF) a pagamento
+# ===================================================================
+_VC_HOST = "visurecamerali.openapi.it"
+_CO_HOST = "company.openapi.com"
+
+VC_DOC_META = {
+    "ordinaria-societa-capitale": {"label": "Visura Ordinaria (Società di Capitali)", "prezzo": 4.90},
+    "storica-societa-capitale": {"label": "Visura Storica (Società di Capitali)", "prezzo": 5.90},
+    "ordinaria-societa-persone": {"label": "Visura Ordinaria (Società di Persone)", "prezzo": 3.40},
+    "storica-societa-persone": {"label": "Visura Storica (Società di Persone)", "prezzo": 4.40},
+    "ordinaria-impresa-individuale": {"label": "Visura Ordinaria (Impresa Individuale)", "prezzo": 2.90},
+    "storica-impresa-individuale": {"label": "Visura Storica (Impresa Individuale)", "prezzo": 3.90},
+    "bilancio-ottico": {"label": "Bilancio Ottico", "prezzo": 4.50},
+    "certificato-iscrizione": {"label": "Certificato di Iscrizione", "prezzo": 13.70},
+    "certificato-iscrizione-vigenza": {"label": "Certificato con Vigenza", "prezzo": 13.70},
+    "soci-attivi": {"label": "Elenco Soci Attivi", "prezzo": 2.30},
+}
+
+
+async def vc_search(cf_piva: str) -> Optional[dict]:
+    """Ricerca commerciale GRATUITA (GET /impresa/{cf_piva})."""
+    key = (cf_piva or "").strip()
+    if not key or not has_credentials():
+        return None
+    r = await _call_api([f"GET:{_VC_HOST}/impresa"], "GET", f"https://{_VC_HOST}/impresa/{key}")
+    if not r:
+        return None
+    data = r.get("data")
+    if isinstance(data, list):
+        item = data[0] if data else None
+    elif isinstance(data, dict):
+        item = data
+    else:
+        item = None
+    if not item:
+        return None
+    docs = []
+    for scope in item.get("chiamate_disponibili") or []:
+        dt = scope.split("/")[-1]
+        meta = VC_DOC_META.get(dt)
+        if meta:
+            docs.append({"doc_type": dt, **meta})
+    return {
+        "id": item.get("id"),
+        "cf_piva": key,
+        "denominazione": item.get("denominazione"),
+        "comune": item.get("comune"),
+        "natura_giuridica": item.get("codice_natura_giuridica"),
+        "documenti_disponibili": docs,
+        "provider": "visurecamerali.openapi.it (LIVE)",
+    }
+
+
+async def vc_generate(doc_type: str, cf_piva_id: str, anno: Optional[str] = None) -> dict:
+    """POST /{doc_type} → genera la richiesta del documento (a pagamento)."""
+    body = {"cf_piva_id": cf_piva_id}
+    if anno and doc_type == "bilancio-ottico":
+        body["anno_chiusura"] = str(anno)
+    token = await _get_token([f"POST:{_VC_HOST}/{doc_type}"])
+    if not token:
+        return {"ok": False, "error": "Token non disponibile"}
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            r = await client.post(f"https://{_VC_HOST}/{doc_type}", json=body,
+                                  headers={"Authorization": f"Bearer {token}",
+                                           "Content-Type": "application/json"})
+        try:
+            j = r.json()
+        except Exception:
+            j = {"raw": r.text}
+        if r.status_code >= 400 or not j.get("success", True):
+            return {"ok": False, "error": j.get("message") or f"HTTP {r.status_code}"}
+        d = j.get("data") or {}
+        return {"ok": True, "id": d.get("id"), "stato": d.get("stato_richiesta") or "In ricerca"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+async def vc_status(doc_type: str, rid: str) -> dict:
+    r = await _call_api([f"GET:{_VC_HOST}/{doc_type}"], "GET", f"https://{_VC_HOST}/{doc_type}/{rid}")
+    return (r or {}).get("data") or {}
+
+
+async def vc_find_existing(doc_type: str, cf_piva_id: str) -> Optional[str]:
+    """GET GRATUITA /{doc_type}: cerca una richiesta GIÀ pronta per la stessa azienda,
+    così la riscarichiamo senza pagare di nuovo. Ritorna l'id o None."""
+    r = await _call_api([f"GET:{_VC_HOST}/{doc_type}"], "GET", f"https://{_VC_HOST}/{doc_type}")
+    data = (r or {}).get("data")
+    if not isinstance(data, list):
+        return None
+    key = (cf_piva_id or "").strip().lower()
+    candidates = []
+    for it in data:
+        cf = str(it.get("cf_piva_id") or "").strip().lower()
+        if cf == key and vc_is_ready(it.get("stato_richiesta")):
+            candidates.append(it)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x.get("timestamp_creation") or 0, reverse=True)
+    return candidates[0].get("id")
+
+
+async def vc_download(doc_type: str, rid: str) -> tuple[int, bytes, str]:
+    token = await _get_token([f"GET:{_VC_HOST}/{doc_type}"])
+    if not token:
+        return 0, b"", ""
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            r = await client.get(f"https://{_VC_HOST}/{doc_type}/{rid}/allegati",
+                                 headers={"Authorization": f"Bearer {token}"})
+        return r.status_code, r.content, r.headers.get("content-type", "")
+    except Exception as e:
+        logger.warning("VC download error: %s", e)
+        return 0, b"", ""
+
+
+def vc_is_ready(stato: str) -> bool:
+    return (stato or "").strip().lower() in ("visura evasa", "dati disponbili", "dati disponibili", "evasa")
+
+
+# ===================================================================
+# SERVIZIO 10 · COMPANY.OPENAPI.COM — dati camerali + BILANCIO strutturato
+# ===================================================================
+def _co_num(v):
+    try:
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _normalize_company_co(d: dict, full: bool) -> dict:
+    bs = d.get("balanceSheets") or {}
+    bilanci = []
+    for b in (bs.get("all") or []):
+        bilanci.append({
+            "anno": b.get("year"),
+            "fatturato": _co_num(b.get("turnover")),
+            "patrimonio_netto": _co_num(b.get("netWorth")),
+            "dipendenti": b.get("employees"),
+            "capitale_sociale": _co_num(b.get("shareCapital")),
+            "costo_personale": _co_num(b.get("totalStaffCost")),
+            "totale_attivo": _co_num(b.get("totalAssets")),
+            "stipendio_medio": _co_num(b.get("avgGrossSalary")),
+        })
+    bilanci.sort(key=lambda x: x.get("anno") or 0, reverse=True)
+    ateco_raw = d.get("atecoClassification") or {}
+    if isinstance(ateco_raw, list):
+        ateco_raw = ateco_raw[0] if ateco_raw else {}
+    ateco_obj = ateco_raw.get("ateco2022") or ateco_raw.get("ateco2007") or ateco_raw.get("ateco") or {}
+    if not isinstance(ateco_obj, dict):
+        ateco_obj = {}
+    lf = d.get("detailedLegalForm") or {}
+    addr = d.get("address")
+    if isinstance(addr, dict):
+        ro = addr.get("registeredOffice") or addr
+        prov = ro.get("province")
+        if isinstance(prov, dict):
+            prov = prov.get("code") or prov.get("description")
+        indirizzo = ro.get("streetName") or ro.get("street")
+        if indirizzo and ro.get("town"):
+            indirizzo = f"{indirizzo}, {ro.get('zipCode') or ''} {ro.get('town')} ({prov or ''})".strip()
+    else:
+        indirizzo = addr if isinstance(addr, str) else None
+    out = {
+        "provider": "company.openapi.com (LIVE)",
+        "ragione_sociale": d.get("companyName"),
+        "piva": d.get("vatCode"),
+        "cf": d.get("taxCode"),
+        "indirizzo": indirizzo,
+        "stato_attivita": d.get("activityStatus"),
+        "rea": d.get("reaCode"),
+        "cciaa": d.get("cciaa"),
+        "pec": d.get("pec"),
+        "forma_giuridica": lf.get("description") if isinstance(lf, dict) else lf,
+        "ateco": ateco_obj.get("code"),
+        "ateco_descrizione": ateco_obj.get("description"),
+        "data_inizio": d.get("startDate"),
+        "bilanci": bilanci,
+    }
+    if full:
+        out["indici"] = {
+            "redditivita": d.get("profitability"),
+            "liquidita": d.get("liquidityRatios"),
+            "leva": d.get("leverageRatios"),
+            "kpi_bilancio": d.get("financialStatementKpi"),
+            "struttura": d.get("structureRatios"),
+            "indebitamento": d.get("indebtedness"),
+        }
+        out["dipendenti_statistiche"] = d.get("employeesStatistic")
+        # amministratori
+        managers = []
+        for m in (d.get("managers") or [])[:15]:
+            roles = ", ".join(r.get("role", {}).get("description", "") for r in (m.get("roles") or []) if isinstance(r, dict))
+            managers.append({
+                "nome": (m.get("name") or m.get("companyName") or "").strip() + (f" {m.get('surname')}" if m.get("surname") else ""),
+                "ruoli": roles,
+                "legale_rappresentante": bool(m.get("isLegalRepresentative")),
+            })
+        out["amministratori"] = managers
+        # soci
+        soci = []
+        for s in (d.get("shareholders") or [])[:15]:
+            info = (s.get("shareholdersInformation") or [{}])[0]
+            soci.append({
+                "nome": info.get("companyName") or (f"{info.get('name','')} {info.get('surname','')}".strip()) or info.get("taxCode"),
+                "quota": s.get("percentShare"),
+                "tipo": (s.get("shareType") or {}).get("description"),
+            })
+        out["soci"] = soci
+    return out
+
+
+async def company_dati(cf_piva: str, full: bool = False) -> Optional[dict]:
+    """Dati camerali + bilancio strutturato da company.openapi.com (a pagamento)."""
+    key = (cf_piva or "").strip()
+    if not key or not has_credentials():
+        return None
+    level = "IT-full" if full else "IT-advanced"
+    r = await _call_api([f"GET:{_CO_HOST}/{level}"], "GET", f"https://{_CO_HOST}/{level}/{key}")
+    if not r:
+        return None
+    d = r.get("data")
+    if isinstance(d, list):
+        d = d[0] if d else {}
+    if not isinstance(d, dict) or not d:
+        return None
+    return _normalize_company_co(d, full)
+

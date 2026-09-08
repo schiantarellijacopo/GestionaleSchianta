@@ -687,3 +687,18 @@ Usare integration_expert prima di implementare.
   Allegati salvati via obj_storage + modello Allegato standard (is_deleted=False) così compaiono nel tab "Altri allegati" e sono scaricabili.
 - Test: testing_agent frontend 100% (iteration_68.json). Credito OpenAPI.it residuo ~€76.
 - Dati di test creati nel tenant sandbox: anagrafica 931835cd-... "ALTRAVIA TEST CATASTO" (P.IVA 12485671007) con 1 immobile importato + PDF visura.
+
+## Sessione 2026-06 (parte 13) — Camerale/Bilancio + Mappa Immobili + Riuso gratuito (COMPLETATO)
+- KPI Anagrafiche (routes/anagrafiche.py /anagrafiche/stats): 'n' ora conta SOLO i contraenti distinti con almeno una polizza attiva/in_emissione (via $addToSet contraente_id); premi già solo da polizze attive. Etichetta card "tot." → "con pol." (Anagrafiche.jsx). Vale anche per KPI custom.
+- CAMERALE / VISURE CAMERALI (visurecamerali.openapi.it — ATTIVO): pulsante "Camerale" apre CameraleDialog.jsx ("Dati Azienda & Bilancio").
+  - Ricerca GRATUITA: GET /impresa/{cf_piva} → denominazione, comune, natura giuridica, elenco documenti richiedibili con prezzi. Endpoint: GET /openapi-it/camerale/{aid}/search.
+  - Documenti ufficiali PDF (a pagamento): POST /{doc_type} → poll stato_richiesta (In ricerca→In erogazione→Dati disponibili→Visura evasa) → download /{id}/allegati → salva Allegato. Endpoint: POST /openapi-it/camerale/{aid}/documento {doc_type, anno?}. Tipi: ordinaria/storica società capitali/persone/impresa individuale, bilancio-ottico, certificato-iscrizione(-vigenza), soci-attivi.
+  - RIUSO GRATUITO: prima di pagare, vc_find_existing() usa la GET gratuita /{doc_type} per trovare una richiesta già pronta della stessa azienda e la riscarica GRATIS (prezzo=0, riusato=true). Testato: 1ª soci-attivi a pagamento, 2ª riusata gratis.
+- BILANCIO strutturato (company.openapi.com — ATTIVO, imprese.openapi.it invece è 406/non attivo):
+  - IT-advanced: dati camerali + bilanci sintetici (anno, fatturato/turnover, patrimonio_netto, dipendenti, capitale, ecc.). Endpoint: GET /openapi-it/camerale/{aid}/bilancio.
+  - IT-full: + indici (redditività roe/roi/ros/roa, liquidità, leva, kpi), amministratori (con LR), soci. Endpoint: GET /openapi-it/camerale/{aid}/bilancio?full=true.
+  - Servizio: openapi_it_service.company_dati(), _normalize_company_co().
+- MAPPA IMMOBILI (AnalisiClienteTab.jsx → PatrimonioTab): componente ImmobiliMap (Leaflet via CDN) mostra i pin degli immobili geolocalizzati. Pulsante "Geolocalizza immobili" → POST /openapi-it/analisi/{aid}/geocode-immobili (Nominatim, gratuito). Geocoding automatico anche all'import Catasto (con pulizia indirizzo catastale + fallback su comune). Helper: routes/openapi_it.py _clean_catasto_address(), _geocode_immobile().
+- SPIEGAZIONE ENDPOINT GRATUITI (per l'utente): i GET gratuiti (0.001€, 1440/gg) o elencano/riscaricano richieste GIÀ generate (riuso senza ripagare) o fanno ricerca commerciale gratuita (visurecamerali /impresa). Non esiste modo gratuito per generare NUOVE visure catastali/camerali.
+- Test: testing_agent frontend iteration_69 (Camerale dialog + mappa) 100%. Backend validato via curl (search/bilancio/documento/riuso/geocode).
+- Anagrafica test società capitali: 931835cd-... (OPENAPI/ALTRAVIA P.IVA 12485671007) con 1 immobile geolocalizzato + soci-attivi PDF salvato.

@@ -117,6 +117,41 @@ async def fetch_cadastre_for_anagrafica(aid: str, user=Depends(current_user)) ->
     }
 
 
+import re as _re
+
+
+def _clean_catasto_address(ind: str) -> str:
+    if not ind:
+        return ""
+    ind = _re.split(r"\b(Scala|Interno|Piano|Palazzo|Edificio|Lotto)\b", ind, flags=_re.I)[0]
+    ind = ind.replace(" n. ", " ").replace(" n.", " ")
+    return _re.sub(r"\s+", " ", ind).strip()
+
+
+async def _geocode_immobile(im: dict) -> bool:
+    """Geolocalizza un immobile (indirizzo pulito → fallback comune). True se trovato."""
+    import geocoder as _geo
+    if im.get("latitude") or not (im.get("indirizzo") or im.get("comune")):
+        return False
+    prov = im.get("provincia")
+    ind = _clean_catasto_address(im.get("indirizzo") or "")
+    tentativi = []
+    if ind:
+        tentativi.append((ind, im.get("comune"), prov))
+    if im.get("comune"):
+        tentativi.append(("", im.get("comune"), prov))
+    for indirizzo, comune, provincia in tentativi:
+        try:
+            g = await _geo.geocoda_indirizzo(indirizzo, comune=comune, provincia=provincia)
+            if g:
+                im["latitude"] = g.get("lat")
+                im["longitude"] = g.get("lng")
+                return True
+        except Exception:
+            pass
+    return False
+
+
 @router.post("/cadastre/{aid}/importa-immobili")
 async def importa_immobili_catasto(aid: str, body: dict, user=Depends(current_user)) -> dict:
     """Aggiunge gli immobili selezionati all'Analisi Cliente (analisi_cliente.immobili).
@@ -143,6 +178,8 @@ async def importa_immobili_catasto(aid: str, body: dict, user=Depends(current_us
         chiave = (str(im.get("foglio")), str(im.get("particella")), (im.get("comune") or "").upper())
         if chiave in seen and chiave != ("", "", ""):
             continue
+        # geocoding (indirizzo pulito + fallback comune)
+        await _geocode_immobile(im)
         seen.add(chiave)
         esistenti.append(im)
         aggiunti.append(im)
@@ -151,6 +188,26 @@ async def importa_immobili_catasto(aid: str, body: dict, user=Depends(current_us
         {"$set": {"immobili": esistenti, "updated_at": _now_iso()}},
     )
     return {"aggiunti": len(aggiunti), "totale": len(esistenti)}
+
+
+@router.post("/analisi/{aid}/geocode-immobili")
+async def geocode_immobili_analisi(aid: str, user=Depends(current_user)) -> dict:
+    """Geolocalizza (Nominatim) gli immobili dell'Analisi Cliente senza coordinate."""
+    await _get_anagrafica(aid, user)
+    ac = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
+    if not ac:
+        return {"geocodificati": 0, "totale": 0}
+    immobili = list(ac.get("immobili") or [])
+    geocoded = 0
+    for im in immobili:
+        if await _geocode_immobile(im):
+            geocoded += 1
+    if geocoded:
+        await db.analisi_cliente.update_one(
+            {"anagrafica_id": aid},
+            {"$set": {"immobili": immobili, "updated_at": _now_iso()}},
+        )
+    return {"geocodificati": geocoded, "totale": len(immobili)}
 
 
 @router.post("/vehicles/{aid}")
@@ -489,3 +546,122 @@ async def visengine_refresh(aid: str, record_id: str, user=Depends(current_user)
         }},
     )
     return {"id": record_id, "stato": stato, "allegato_id": allegato_id}
+
+
+# ============================================================
+# CAMERALE · Visure Camerali (gratis ricerca) + Bilancio (company)
+# ============================================================
+@router.get("/camerale/{aid}/search")
+async def camerale_search(aid: str, user=Depends(current_user)) -> dict:
+    """Ricerca commerciale GRATUITA: dati azienda + elenco documenti richiedibili."""
+    ana = await _get_anagrafica(aid, user)
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
+    if not key:
+        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    res = await svc.vc_search(key)
+    if not res:
+        raise HTTPException(status_code=404, detail="Azienda non trovata nel registro imprese")
+    await _update_openapi_field(aid, "camerale", res)
+    return res
+
+
+@router.get("/camerale/{aid}/bilancio")
+async def camerale_bilancio(aid: str, full: bool = False, user=Depends(current_user)) -> dict:
+    """Dati camerali + bilancio strutturato (A PAGAMENTO — company.openapi.com)."""
+    ana = await _get_anagrafica(aid, user)
+    key = ana.get("partita_iva") or ana.get("codice_fiscale")
+    if not key:
+        raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    res = await svc.company_dati(key, full=full)
+    if not res:
+        raise HTTPException(status_code=404, detail="Dati di bilancio non disponibili per questa azienda")
+    field = "bilancio_full" if full else "bilancio"
+    await _update_openapi_field(aid, field, res)
+    return res
+
+
+@router.post("/camerale/{aid}/documento")
+async def camerale_documento(aid: str, body: dict, user=Depends(current_user)) -> dict:
+    """Genera un documento camerale ufficiale (PDF) — A PAGAMENTO.
+    Body: {doc_type, cf_piva_id?, anno?}"""
+    import uuid as _uuid
+    ana = await _get_anagrafica(aid, user)
+    doc_type = body.get("doc_type")
+    if doc_type not in svc.VC_DOC_META:
+        raise HTTPException(status_code=400, detail="Tipo documento non valido")
+    cf_piva_id = body.get("cf_piva_id") or ana.get("partita_iva") or ana.get("codice_fiscale")
+    meta = svc.VC_DOC_META[doc_type]
+    # RIUSO GRATUITO: se esiste già una richiesta pronta per questa azienda, la riscarichiamo senza pagare
+    existing_rid = await svc.vc_find_existing(doc_type, cf_piva_id)
+    riusato = False
+    if existing_rid:
+        rid = existing_rid
+        stato = "Visura evasa"
+        riusato = True
+    else:
+        created = await svc.vc_generate(doc_type, cf_piva_id, body.get("anno"))
+        if not created.get("ok"):
+            raise HTTPException(status_code=400, detail=created.get("error") or "Errore generazione documento")
+        rid = created.get("id")
+        stato = created.get("stato") or "In ricerca"
+    record = {
+        "id": str(_uuid.uuid4()),
+        "richiesta_id": rid,
+        "doc_type": doc_type,
+        "nome": meta["label"],
+        "prezzo": 0 if riusato else meta["prezzo"],
+        "riusato": riusato,
+        "stato": stato,
+        "allegato_id": None,
+        "created_at": _now_iso(),
+        "created_by": user.get("id"),
+    }
+    # tentativo download immediato (documenti sincroni o riusati)
+    if rid:
+        import asyncio
+        for _ in range(4):
+            d = await svc.vc_status(doc_type, rid)
+            if svc.vc_is_ready(d.get("stato_richiesta")) or riusato:
+                status, content, ctype = await svc.vc_download(doc_type, rid)
+                if status == 200 and content:
+                    fn = f"{doc_type}_{cf_piva_id}_{_now_iso()[:10]}.pdf"
+                    record["allegato_id"] = await _save_allegato(
+                        aid, user, fn, content, "visura_camerale",
+                        ctype or "application/pdf", "openapi.it/visurecamerali")
+                    record["stato"] = "Visura evasa"
+                break
+            await asyncio.sleep(2.0)
+    await raw_db.anagrafiche.update_one(
+        {"id": aid},
+        {"$push": {"openapi_data.camerale_richieste": record},
+         "$set": {"updated_at": _now_iso()}},
+    )
+    return record
+
+
+@router.post("/camerale/{aid}/refresh/{record_id}")
+async def camerale_refresh(aid: str, record_id: str, user=Depends(current_user)) -> dict:
+    """Ricontrolla lo stato di un documento camerale e scarica il PDF se pronto."""
+    ana = await _get_anagrafica(aid, user)
+    richieste = (ana.get("openapi_data") or {}).get("camerale_richieste") or []
+    rec = next((r for r in richieste if r.get("id") == record_id), None)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Richiesta non trovata")
+    doc_type, rid = rec.get("doc_type"), rec.get("richiesta_id")
+    d = await svc.vc_status(doc_type, rid)
+    stato = d.get("stato_richiesta") or rec.get("stato")
+    allegato_id = rec.get("allegato_id")
+    if svc.vc_is_ready(stato) and not allegato_id:
+        status, content, ctype = await svc.vc_download(doc_type, rid)
+        if status == 200 and content:
+            fn = f"{doc_type}_{rid}.pdf"
+            allegato_id = await _save_allegato(aid, user, fn, content, "visura_camerale",
+                                               ctype or "application/pdf", "openapi.it/visurecamerali")
+    await raw_db.anagrafiche.update_one(
+        {"id": aid, "openapi_data.camerale_richieste.id": record_id},
+        {"$set": {"openapi_data.camerale_richieste.$.stato": stato,
+                  "openapi_data.camerale_richieste.$.allegato_id": allegato_id,
+                  "updated_at": _now_iso()}},
+    )
+    return {"id": record_id, "stato": stato, "allegato_id": allegato_id}
+
