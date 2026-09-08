@@ -378,7 +378,11 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Inizio contribuzione", fmtDate(ana.data_inizio_contribuzione)],
                         ["Settimane contributive", ana.settimane_contributive],
                         ["Coordinate", ana.lat && ana.lng ? `${ana.lat.toFixed(4)}, ${ana.lng.toFixed(4)}` : "-"],
-                    ].map(([k, v]) => (
+                    ].filter(([k]) => ana.tipo !== "persona_giuridica" || ![
+                        "Data nascita", "Sesso", "Comune nascita", "Professione", "Tipo lavoratore",
+                        "Stato civile", "N. figli", "Figli a carico", "Reddito annuo lordo",
+                        "Inizio contribuzione", "Settimane contributive",
+                    ].includes(k)).map(([k, v]) => (
                         <div key={k}>
                             <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{k}</div>
                             <div className="text-sm text-slate-800 num">{v || "—"}</div>
@@ -475,6 +479,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Ragione sociale</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
                 <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
                 <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                {f.tipo !== "persona_giuridica" && (<>
                 <div><Label>Data nascita</Label><Input type="date" value={f.data_nascita || ""} onChange={(e) => set("data_nascita", e.target.value)} /></div>
                 <div>
                     <Label>Stato civile</Label>
@@ -505,6 +510,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
                 <div><Label>Inizio contribuzione</Label><Input type="date" value={f.data_inizio_contribuzione || ""} onChange={(e) => set("data_inizio_contribuzione", e.target.value)} /></div>
                 <div><Label>Settimane contributive</Label><Input type="number" value={f.settimane_contributive || ""} onChange={(e) => set("settimane_contributive", parseInt(e.target.value) || null)} /></div>
+                </>)}
                 <div><Label>Email</Label>
                     <Input
                         value={f.email || ""}
@@ -630,6 +636,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ℹ&#65039; Quando inserisci cellulare/email i flag corrispondenti vengono attivati automaticamente. Puoi disattivarli manualmente su richiesta del cliente.
                     </div>
                 </div>
+                {f.tipo !== "persona_giuridica" && (<>
                 <div>
                     <Label>Tipologia lavoratore</Label>
                     <Select value={f.tipologia_lavoratore || "__none__"} onValueChange={(v) => set("tipologia_lavoratore", v === "__none__" ? null : v)}>
@@ -657,6 +664,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                     <Label>Datore di lavoro</Label>
                     <Input value={f.datore_lavoro || ""} onChange={(e) => set("datore_lavoro", e.target.value)} />
                 </div>
+                </>)}
             </div>
             <div className="mt-4">
                 <Label>Note</Label>

@@ -591,6 +591,9 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
 @router.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
+    # Regola: ogni anagrafica con Partita IVA è una persona giuridica (azienda)
+    if (body.get("partita_iva") or "").strip():
+        body["tipo"] = "persona_giuridica"
     body = await _auto_geocode(body)
     # Default collaboratore_id = utente loggato se non specificato (visibilità)
     if not body.get("collaboratore_id"):
@@ -639,6 +642,14 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
 @router.put("/anagrafiche/{aid}")
 async def update_anagrafica(aid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
+    # Regola: ogni anagrafica con Partita IVA è una persona giuridica (azienda)
+    piva_body = (body.get("partita_iva") or "").strip()
+    if piva_body:
+        body["tipo"] = "persona_giuridica"
+    elif "partita_iva" not in body:
+        _cur = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "partita_iva": 1})
+        if _cur and (_cur.get("partita_iva") or "").strip():
+            body["tipo"] = "persona_giuridica"
     # Re-geocodifica se l'indirizzo è cambiato
     existing = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "indirizzo": 1, "comune": 1, "cap": 1, "lat": 1, "lng": 1})
     if existing and any(body.get(k) != existing.get(k) for k in ("indirizzo", "comune", "cap") if k in body):
