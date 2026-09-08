@@ -12321,6 +12321,8 @@ from routes import copilot as _copilot_router  # noqa: E402
 api.include_router(_dash_router.router)
 api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
+from routes import contratto_extra as _contratto_router  # noqa: E402
+api.include_router(_contratto_router.router)
 api.include_router(_alert_router.router)
 api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)

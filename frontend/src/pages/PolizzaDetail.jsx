@@ -281,7 +281,7 @@ export default function PolizzaDetail() {
                         <div>
                             <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
                             <div className="text-xl font-semibold mt-0.5">{pol.ramo || "—"}{pol.prodotto ? ` · ${pol.prodotto}` : ""}</div>
-                            <div className="text-xs text-slate-300 mt-1">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
+                            <div className="text-lg font-semibold text-slate-100 mt-1 text-center tracking-wide">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
                             <div className="mt-2 inline-flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1" data-testid="pol-header-operatore">
                                 <CollaboratoreInlineSelect
                                     entita="polizze"
@@ -296,6 +296,7 @@ export default function PolizzaDetail() {
                         </div>
                     </div>
                     <div className="flex gap-6 text-xs">
+                        <Hd label="Ultimo premio pagato" value={<span className="text-base font-semibold text-emerald-300 num">{fmtEur(pol.ultimo_premio_pagato ?? pol.ultimo_titolo_importo)}</span>} />
                         <Hd label="Ultimo titolo" value={fmtDate(pol.ultimo_titolo_scadenza || pol.titoli?.[0]?.data_incasso || pol.effetto)} />
                         <Hd label="Stato" value={<StatusBadge stato={pol.stato} />} />
                         <Hd label="Copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />
@@ -362,7 +363,6 @@ export default function PolizzaDetail() {
                     <F label="Termini mora" value={pol.termini_mora_giorni ? `${pol.termini_mora_giorni} gg` : "—"} />
                     <F label="Termini disdetta" value={pol.termini_disdetta_giorni ? `${pol.termini_disdetta_giorni} gg` : "—"} />
                     <F label="Oggetto assicurato" value={pol.oggetto_assicurato || pol.targa} />
-                    <F label="Ultimo premio pagato" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.ultimo_premio_pagato ?? pol.ultimo_titolo_importo)}</span>} />
                 </div>
             </Card>
 

@@ -75,10 +75,12 @@ export default function Posta() {
     const sync = async () => {
         setSyncing(true);
         try {
-            // endpoint poller (in attesa di attivazione)
-            await api.post("/email/sync");
+            // esegue un ciclo completo: scarica email, allega i PDF alle polizze e
+            // registra le email dei clienti nel loro Diario
+            const r = await api.post("/email/poller/run-now");
+            const nuove = r.data?.nuovi ?? 0;
             await loadStats(); await loadList();
-            toast.success("Sincronizzazione completata");
+            toast.success(`Sincronizzazione completata${nuove ? ` · ${nuove} nuove email` : ""}`);
         } catch (e) {
             toast.warning("IMAP non ancora attivo: configura Librerie → Comunicazioni → Posta in arrivo");
         }

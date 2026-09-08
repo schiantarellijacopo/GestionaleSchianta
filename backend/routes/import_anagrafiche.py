@@ -258,6 +258,9 @@ def _row_to_anagrafica(row_values: dict, mapping: dict) -> dict:
             ana["tipo"] = "persona_giuridica"
         else:
             ana["tipo"] = "persona_fisica"
+    # REGOLA FERREA: qualsiasi anagrafica con Partita IVA è persona giuridica
+    if (ana.get("partita_iva") or "").strip():
+        ana["tipo"] = "persona_giuridica"
 
     # Ragione sociale: se manca ed è PF, componi da nome+cognome
     if not ana.get("ragione_sociale"):

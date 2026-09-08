@@ -1,0 +1,25 @@
+{
+  "summary": "Testato con successo il nuovo tab 'Contratto Consulenza' su AZIENDA (AUTOTRASPORTI VIVIANI) e PRIVATO (Rossi Marco). Prefill, modifica importo, salvataggio bozza, invio OTP WhatsApp con codice di debug in UI, firma OTP, cambio stato a 'Firmato il ...' e comparsa link PDF: tutto funzionante. Il testo del contratto risulta correttamente differenziato per persona giuridica (ragione sociale + P.IVA) vs persona fisica (Sig./Sig.ra + codice fiscale).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ContrattoConsulenzaTab - persona fisica", "issues": ["Nel testo precompilato per persona fisica compare 'con sede in <indirizzo>' invece di 'residente in <indirizzo>' — dettaglio cosmetico non bloccante"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "contratto_extra.py _costruisci_testo usa 'con sede in' anche per persone fisiche: sostituire con 'residente in' per PF per correttezza formale del documento.",
+    "otp_debug esposto in risposta API quando la consegna non è confermata è un rischio in produzione: valutare feature flag o rimuoverlo lasciando solo l'invio server-side."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skip)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Reset dei campi contratto_consulenza su 2 anagrafiche di test (abe0cbf1..., 93b73085...) via mongo unset per permettere il test del prefill.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "AZIENDA abe0cbf1 è nuovamente in stato 'firmato' (con allegato PDF 8baee54e...). Per ritestare il flusso completo di firma, resettare campo contratto_consulenza in mongo con: db.anagrafiche.update_one({id:aid},{$unset:{contratto_consulenza:''}}). Il codice OTP appare nel tab dopo 'comunica al cliente il codice XXXXXX'. Test 'Sincronizza ora' della Posta NON eseguito (fuori scope corrente).",
+  "rca of the issue": "Nessun bug bloccante rilevato."
+}

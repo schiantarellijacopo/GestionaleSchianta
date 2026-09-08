@@ -807,6 +807,9 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
             ana["conti_correnti"] = [{"iban": ana.pop("iban"), "principale": True, "note": "Import massivo"}]
         if "tipo" not in ana:
             ana["tipo"] = "persona_giuridica" if (piva and len(cf or "") != 16) else "persona_fisica"
+        # REGOLA FERREA: qualsiasi anagrafica con Partita IVA è persona giuridica
+        if (ana.get("partita_iva") or "").strip():
+            ana["tipo"] = "persona_giuridica"
         ana.setdefault("collaboratore_id", user.get("id"))
         obj = Anagrafica(**{k: v for k, v in ana.items() if k in Anagrafica.model_fields})
         buffers["anagrafiche"].append(obj.model_dump())

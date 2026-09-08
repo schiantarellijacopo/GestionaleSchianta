@@ -164,11 +164,13 @@ export default function PiramidePrivati({
     onPrepopolate,          // () => Promise<datiRedditoSuggeriti> — bottone "Prepopola"
     onRichiediPreventivo,   // (voce_id, label) => void (portale)
     template = null,        // modello globale (privati/aziende) dal backend
+    tipoPiramide = "privati",
     agenziaLogo,
     agenziaName = "Assicurazioni",
     clienteNome = "",
 }) {
     const editable = typeof onSave === "function";
+    const isAziende = tipoPiramide === "aziende";
     const [reddito, setReddito] = useState(dati_reddito || {});
     const [test, setTest] = useState(!!testamento);
     const [eredi, setEredi] = useState(() => normEredi(eredi_legittimi));
@@ -357,6 +359,29 @@ export default function PiramidePrivati({
                     </div>
                 )}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-1 text-[10px]">
+                    {isAziende ? (
+                        <>
+                            <SidebarField label="Fatturato" value={reddito.reddito_attuale}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_attuale: v }))} />
+                            <SidebarField label="Utile" value={reddito.reddito_invalidita_66_99}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_invalidita_66_99: v }))} />
+                            <SidebarField label="EBITDA" value={reddito.reddito_inabilita_100}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_inabilita_100: v }))} />
+                            <SidebarField label="N. dipendenti" value={reddito.reddito_superstiti}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_superstiti: v }))} />
+                            <SidebarField label="N. soci" value={reddito.reddito_responsabilita}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_responsabilita: v }))} />
+                            <SidebarField label="Perdita beni" value={reddito.reddito_perdita_beni}
+                                          editable={editable}
+                                          onChange={(v) => setReddito((s) => ({ ...s, reddito_perdita_beni: v }))} />
+                        </>
+                    ) : (
+                    <>
                     <SidebarField label="Reddito attuale" value={reddito.reddito_attuale}
                                   editable={editable}
                                   onChange={(v) => setReddito((s) => ({ ...s, reddito_attuale: v }))} />
@@ -388,6 +413,8 @@ export default function PiramidePrivati({
                     <SidebarField label="Perdita beni" value={reddito.reddito_perdita_beni}
                                   editable={editable}
                                   onChange={(v) => setReddito((s) => ({ ...s, reddito_perdita_beni: v }))} />
+                    </>
+                    )}
                 </div>
             </div>
 

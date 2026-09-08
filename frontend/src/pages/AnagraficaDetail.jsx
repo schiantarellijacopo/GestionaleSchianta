@@ -38,6 +38,7 @@ import ProfilazioneGdprTab from "@/components/ProfilazioneGdprTab";
 import OpenApiActions from "@/components/OpenApiActions";
 import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
 import WhatsAppChatPreview from "@/components/WhatsAppChatPreview";
+import ContrattoConsulenzaTab from "@/components/ContrattoConsulenzaTab";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -198,6 +199,7 @@ export default function AnagraficaDetail() {
                     )}
                     <TabsTrigger value="diario" data-testid="tab-diario"><BookText size={13} className="mr-1" />Diario</TabsTrigger>
                     <TabsTrigger value="chat-whatsapp" data-testid="tab-chat-whatsapp"><MessageCircle size={13} className="mr-1" />Chat WhatsApp</TabsTrigger>
+                    <TabsTrigger value="contratto" data-testid="tab-contratto"><FileText size={13} className="mr-1" />Contratto Consulenza</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti"><Paperclip size={13} className="mr-1" />Documenti</TabsTrigger>
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="analisi" data-testid="tab-analisi"><Calculator size={13} className="mr-1" />Analisi Cliente</TabsTrigger>
@@ -233,6 +235,7 @@ export default function AnagraficaDetail() {
                 )}
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="chat-whatsapp"><WhatsAppChatPreview anagrafica_id={id} /></TabsContent>
+                <TabsContent value="contratto"><ContrattoConsulenzaTab anagrafica_id={id} /></TabsContent>
                 <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
                     <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
@@ -403,6 +406,12 @@ function DatiTab({ ana, canEdit, onReload }) {
                             onReload && onReload();
                         }}
                     />
+                    {ana.tipo === "persona_giuridica" && (
+                        <div data-testid="anag-pec-view">
+                            <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">PEC</div>
+                            <div className="text-sm text-slate-800 num">{ana.pec || "—"}</div>
+                        </div>
+                    )}
                     {/* Preferenze canale comunicazione — editabile inline (checkbox multi) */}
                     <InlineChannelsField
                         label="Canale preferito avvisi"
@@ -428,7 +437,6 @@ function DatiTab({ ana, canEdit, onReload }) {
                                 ["Referente azienda", ana.referente_azienda],
                                 ["Ref. email", ana.referente_email],
                                 ["Ref. telefono", formatPhone(ana.referente_telefono)],
-                                ["PEC", ana.pec],
                             ].map(([k, v]) => (
                                 <div key={k}>
                                     <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{k}</div>

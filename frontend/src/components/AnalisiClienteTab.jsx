@@ -1622,6 +1622,7 @@ export function PiramideCopertureNuova({ anagrafica_id, canEdit }) {
                 stato_voci={data.stato_voci}
                 voci_custom={data.voci_custom}
                 template={data.template}
+                tipoPiramide={data.tipo_piramide}
                 clienteNome={data.cliente_nome}
                 onSave={canEdit ? salva : null}
                 onPrepopolate={canEdit ? prepopola : null}
