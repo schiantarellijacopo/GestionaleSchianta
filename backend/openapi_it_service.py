@@ -1201,18 +1201,55 @@ async def vc_find_existing(doc_type: str, cf_piva_id: str) -> Optional[str]:
     return candidates[0].get("id")
 
 
-async def vc_download(doc_type: str, rid: str) -> tuple[int, bytes, str]:
+async def vc_download(doc_type: str, rid: str) -> tuple[int, bytes, str, str]:
+    """Scarica il documento camerale. L'endpoint /allegati può restituire il PDF
+    diretto oppure un JSON {data:{nome, file(base64 ZIP)}}: in tal caso decodifica
+    il base64 ed estrae il PDF dallo ZIP. Ritorna (status, bytes, content_type, filename)."""
     token = await _get_token([f"GET:{_VC_HOST}/{doc_type}"])
     if not token:
-        return 0, b"", ""
+        return 0, b"", "", ""
     try:
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
             r = await client.get(f"https://{_VC_HOST}/{doc_type}/{rid}/allegati",
                                  headers={"Authorization": f"Bearer {token}"})
-        return r.status_code, r.content, r.headers.get("content-type", "")
+        content = r.content
+        ctype = r.headers.get("content-type", "")
+        fname = f"{doc_type}_{rid}.pdf"
+        if r.status_code != 200 or not content:
+            return r.status_code, b"", ctype, fname
+        # PDF diretto
+        if content[:4] == b"%PDF":
+            return 200, content, "application/pdf", fname
+        # JSON con base64
+        if content[:1] in (b"{", b"[") or "json" in ctype.lower():
+            import json as _json, base64 as _b64
+            try:
+                j = _json.loads(content.decode("utf-8", "ignore"))
+                d = j.get("data") or {}
+                nome = d.get("nome") or fname
+                b64 = d.get("file")
+                if not b64:
+                    return 200, content, "application/json", fname
+                raw = _b64.b64decode(b64)
+                # ZIP → estrai primo PDF
+                if raw[:2] == b"PK" or str(nome).lower().endswith(".zip"):
+                    import io as _io, zipfile as _zip
+                    with _zip.ZipFile(_io.BytesIO(raw)) as zf:
+                        pdfs = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
+                        if pdfs:
+                            return 200, zf.read(pdfs[0]), "application/pdf", pdfs[0].split("/")[-1]
+                        # nessun pdf: ritorna lo zip
+                    return 200, raw, "application/zip", str(nome)
+                # non zip: bytes decodificati
+                ct = "application/pdf" if raw[:4] == b"%PDF" else "application/octet-stream"
+                return 200, raw, ct, str(nome)
+            except Exception as e:
+                logger.warning("VC download parse error: %s", e)
+                return 200, content, "application/json", fname
+        return 200, content, ctype or "application/octet-stream", fname
     except Exception as e:
-        logger.warning("VC download error: %s", e)
-        return 0, b"", ""
+        logger.warning("Visengine/VC download error: %s", e)
+        return 0, b"", "", ""
 
 
 def vc_is_ready(stato: str) -> bool:

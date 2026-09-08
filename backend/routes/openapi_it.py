@@ -622,11 +622,10 @@ async def camerale_documento(aid: str, body: dict, user=Depends(current_user)) -
         for _ in range(4):
             d = await svc.vc_status(doc_type, rid)
             if svc.vc_is_ready(d.get("stato_richiesta")) or riusato:
-                status, content, ctype = await svc.vc_download(doc_type, rid)
+                status, content, ctype, fname = await svc.vc_download(doc_type, rid)
                 if status == 200 and content:
-                    fn = f"{doc_type}_{cf_piva_id}_{_now_iso()[:10]}.pdf"
                     record["allegato_id"] = await _save_allegato(
-                        aid, user, fn, content, "visura_camerale",
+                        aid, user, fname, content, "visura_camerale",
                         ctype or "application/pdf", "openapi.it/visurecamerali")
                     record["stato"] = "Visura evasa"
                 break
@@ -652,10 +651,9 @@ async def camerale_refresh(aid: str, record_id: str, user=Depends(current_user))
     stato = d.get("stato_richiesta") or rec.get("stato")
     allegato_id = rec.get("allegato_id")
     if svc.vc_is_ready(stato) and not allegato_id:
-        status, content, ctype = await svc.vc_download(doc_type, rid)
+        status, content, ctype, fname = await svc.vc_download(doc_type, rid)
         if status == 200 and content:
-            fn = f"{doc_type}_{rid}.pdf"
-            allegato_id = await _save_allegato(aid, user, fn, content, "visura_camerale",
+            allegato_id = await _save_allegato(aid, user, fname, content, "visura_camerale",
                                                ctype or "application/pdf", "openapi.it/visurecamerali")
     await raw_db.anagrafiche.update_one(
         {"id": aid, "openapi_data.camerale_richieste.id": record_id},

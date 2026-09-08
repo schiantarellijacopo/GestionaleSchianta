@@ -702,3 +702,8 @@ Usare integration_expert prima di implementare.
 - SPIEGAZIONE ENDPOINT GRATUITI (per l'utente): i GET gratuiti (0.001€, 1440/gg) o elencano/riscaricano richieste GIÀ generate (riuso senza ripagare) o fanno ricerca commerciale gratuita (visurecamerali /impresa). Non esiste modo gratuito per generare NUOVE visure catastali/camerali.
 - Test: testing_agent frontend iteration_69 (Camerale dialog + mappa) 100%. Backend validato via curl (search/bilancio/documento/riuso/geocode).
 - Anagrafica test società capitali: 931835cd-... (OPENAPI/ALTRAVIA P.IVA 12485671007) con 1 immobile geolocalizzato + soci-attivi PDF salvato.
+
+## Sessione 2026-06 (parte 14) — Fix download documenti camerali + test Bilancio Ottico
+- BUG FIX (openapi_it_service.vc_download): l'endpoint visurecamerali /{doc_type}/{id}/allegati NON restituisce il PDF diretto ma JSON {data:{nome:"*.zip", file:"<base64 ZIP>"}}. Ora vc_download: rileva JSON → base64-decode → estrae il primo .pdf dallo ZIP → salva il PDF corretto (con nome/content_type reali). Gestisce anche PDF diretto e ZIP senza pdf. Firma cambiata: ritorna (status, bytes, content_type, filename). Aggiornati camerale_documento e camerale_refresh.
+- TEST REALE Bilancio Ottico su AUTOTRASPORTI VIVIANI SRL (P.IVA 00920050143, BIANZONE SO, SRL): PDF ufficiale 27 pagine, chiusura 31/12/2025 (Ricavi 6.444.977, perdita -8.052), salvato in Allegati e scaricabile. Riuso 2ª volta a €0 confermato.
+- Nota: allegati salvati PRIMA del fix (es. soci-attivi ALTRAVIA, 1° bilancio VIVIANI) contengono il JSON grezzo (artefatti di test, non critici).
