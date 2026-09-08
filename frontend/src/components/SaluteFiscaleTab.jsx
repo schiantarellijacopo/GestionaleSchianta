@@ -13,6 +13,7 @@ import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, Refere
 import { toast } from "sonner";
 import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
 import { PiramideCopertureNuova } from "@/components/AnalisiClienteTab";
+import ImmobiliSection from "@/components/ImmobiliSection";
 
 export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [dati, setDati] = useState(null);
@@ -48,6 +49,21 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
         setAggIl(r.data.aggiornato_il);
     });
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
+
+    const scaricaReport = async (fmt) => {
+        try {
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/report-azienda/${fmt}`, { responseType: "blob" });
+            const type = fmt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            const url = URL.createObjectURL(new Blob([r.data], { type }));
+            if (fmt === "pdf") {
+                const w = window.open(url, "_blank");
+                if (!w) { const a = document.createElement("a"); a.href = url; a.download = "report_azienda.pdf"; a.click(); }
+            } else {
+                const a = document.createElement("a"); a.href = url; a.download = "report_azienda.docx"; a.click();
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore generazione report"); }
+    };
 
     const upload = async (e) => {
         const f = e.target.files?.[0]; if (!f) return;
@@ -116,6 +132,14 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                                 🔺 {pirBusy ? "Precompilo…" : "Piramide Azienda"}
                             </button>
                         )}
+                        <div className="flex gap-2">
+                            <button onClick={() => scaricaReport("pdf")} disabled={busy}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 text-white rounded text-sm hover:bg-slate-800 disabled:opacity-50"
+                                data-testid="sf-report-pdf-btn">📄 Report PDF</button>
+                            <button onClick={() => scaricaReport("docx")} disabled={busy}
+                                className="inline-flex items-center gap-2 px-3 py-2 bg-sky-800 text-white rounded text-sm hover:bg-sky-900 disabled:opacity-50"
+                                data-testid="sf-report-word-btn">📝 Report Word</button>
+                        </div>
                         </div>
                     )}
                 </div>
@@ -255,6 +279,8 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                     <StudioBilancio bil={bil} />
                 </>
             )}
+
+            <ImmobiliSection anagrafica_id={anagrafica_id} canEdit={canEdit} />
         </div>
     );
 }

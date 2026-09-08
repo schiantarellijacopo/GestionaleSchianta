@@ -75,6 +75,7 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
     const [otpInviato, setOtpInviato] = useState(false);
     const [otpDebug, setOtpDebug] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [modelli, setModelli] = useState([]);
     const testoRef = useRef(null);
 
     const insertPlaceholder = (token) => {
@@ -100,6 +101,34 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
         });
     };
     useEffect(load, [anagrafica_id]);
+
+    const loadModelli = () => { api.get(`/contratti-modelli`).then((r) => setModelli(r.data || [])).catch(() => {}); };
+    useEffect(loadModelli, []);
+
+    const salvaModello = async () => {
+        const nome = window.prompt("Nome del modello (es. \"Consulenza standard aziende\"):");
+        if (!nome || !nome.trim()) return;
+        setBusy(true);
+        try {
+            await api.post(`/contratti-modelli`, { nome: nome.trim(), testo, importo: Number(importo) || 0 });
+            toast.success("Modello salvato nella libreria");
+            loadModelli();
+        } catch { toast.error("Errore salvataggio modello"); } finally { setBusy(false); }
+    };
+
+    const applicaModello = (mid) => {
+        const m = modelli.find((x) => x.id === mid);
+        if (!m) return;
+        setTesto(m.testo || "");
+        setImporto(m.importo || 0);
+        toast.success(`Modello "${m.nome}" applicato — verifica e salva`);
+    };
+
+    const eliminaModello = async (mid) => {
+        if (!window.confirm("Eliminare questo modello dalla libreria?")) return;
+        try { await api.delete(`/contratti-modelli/${mid}`); toast.success("Modello eliminato"); loadModelli(); }
+        catch { toast.error("Errore eliminazione"); }
+    };
 
     const salva = async () => {
         setBusy(true);
@@ -172,6 +201,32 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                 </div>
 
                 <label className="text-xs text-slate-500">Testo del contratto (modificabile)</label>
+                {!firmato && (
+                    <div className="flex flex-wrap items-center gap-2 mt-1 mb-1.5 p-2 bg-slate-50 border border-slate-200 rounded-md" data-testid="contratto-modelli-bar">
+                        <span className="text-[11px] font-semibold text-slate-600">Libreria modelli:</span>
+                        <select onChange={(e) => { if (e.target.value) { applicaModello(e.target.value); e.target.value = ""; } }}
+                            defaultValue="" className="text-[12px] border border-slate-300 rounded-md h-8 px-2 bg-white max-w-[240px]"
+                            data-testid="contratto-modello-select">
+                            <option value="">— Applica un modello —</option>
+                            {modelli.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
+                        </select>
+                        <Button onClick={salvaModello} disabled={busy} size="sm" variant="outline"
+                            className="h-8 text-[12px] border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                            data-testid="contratto-salva-modello">⭐ Salva come modello</Button>
+                        {modelli.length > 0 && (
+                            <span className="text-[10px] text-slate-400">
+                                {modelli.length} modell{modelli.length === 1 ? "o" : "i"} ·
+                                <span className="ml-1">gestisci:</span>
+                                {modelli.map((m) => (
+                                    <button key={m.id} type="button" onClick={() => eliminaModello(m.id)}
+                                        title={`Elimina ${m.nome}`}
+                                        className="ml-1 text-rose-400 hover:text-rose-600 underline"
+                                        data-testid={`contratto-modello-del-${m.id}`}>✕{m.nome.slice(0, 12)}</button>
+                                ))}
+                            </span>
+                        )}
+                    </div>
+                )}
                 {!firmato && (
                     <div className="flex flex-wrap items-center gap-1.5 mt-1 mb-1.5" data-testid="contratto-placeholder-bar">
                         <span className="text-[11px] text-slate-500 mr-1">Inserisci campo:</span>

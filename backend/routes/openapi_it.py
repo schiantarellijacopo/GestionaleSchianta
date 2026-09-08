@@ -191,6 +191,18 @@ def _clean_catasto_address(ind: str) -> str:
     return _re.sub(r"\s+", " ", ind).strip()
 
 
+def _extract_piano(ind: str) -> tuple[str, str]:
+    """Separa la parte 'Piano ...' dall'indirizzo. Ritorna (indirizzo_senza_piano, piano)."""
+    if not ind:
+        return "", ""
+    m = _re.search(r"\bPiano\s+([^,;]+)$", ind, flags=_re.I)
+    if not m:
+        return ind.strip(), ""
+    piano = m.group(1).strip()
+    resto = ind[:m.start()].strip().rstrip(",;").strip()
+    return resto, piano
+
+
 async def _geocode_immobile(im: dict) -> bool:
     """Geolocalizza un immobile (indirizzo pulito → fallback comune). True se trovato."""
     import geocoder as _geo
@@ -238,6 +250,12 @@ async def importa_immobili_catasto(aid: str, body: dict, user=Depends(current_us
             im = ImmobileItem(**raw).model_dump()
         except Exception:
             im = {k: raw.get(k) for k in raw}
+        # separa "Piano ..." dall'indirizzo (per display pulito e geocoding)
+        if im.get("indirizzo") and not im.get("piano"):
+            resto, piano = _extract_piano(im["indirizzo"])
+            if piano:
+                im["indirizzo"] = resto
+                im["piano"] = piano
         chiave = (str(im.get("foglio")), str(im.get("particella")), (im.get("comune") or "").upper())
         if chiave in seen and chiave != ("", "", ""):
             continue

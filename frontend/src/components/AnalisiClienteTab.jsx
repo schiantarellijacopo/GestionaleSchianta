@@ -270,10 +270,10 @@ function useLeafletCDN() {
 
 const IMMOBILE_COLORS = {
     abitativo: "#0ea5e9", commerciale: "#f59e0b", ufficio: "#8b5cf6",
-    garage: "#64748b", terreno: "#10b981", altro: "#94a3b8",
+    garage: "#ec4899", terreno: "#10b981", altro: "#dc2626",
 };
 
-function ImmobiliMap({ immobili }) {
+export function ImmobiliMap({ immobili }) {
     const ready = useLeafletCDN();
     const mapRef = useRef(null);
     const divRef = useRef(null);
@@ -285,9 +285,24 @@ function ImmobiliMap({ immobili }) {
         if (!mapRef.current) {
             mapRef.current = L.map(divRef.current, { scrollWheelZoom: false })
                 .setView([41.9028, 12.4964], 6);
-            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
                 attribution: "© OpenStreetMap", maxZoom: 19,
-            }).addTo(mapRef.current);
+            });
+            const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+                attribution: "© Esri World Imagery", maxZoom: 19,
+            });
+            const labels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+                maxZoom: 19,
+            });
+            const ibrida = L.layerGroup([sat, labels]);
+            const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+                attribution: "© OpenTopoMap", maxZoom: 17,
+            });
+            osm.addTo(mapRef.current);
+            L.control.layers(
+                { "Stradale": osm, "Satellite": sat, "Ibrida (satellite + nomi)": ibrida, "Topografica": topo },
+                {}, { collapsed: false },
+            ).addTo(mapRef.current);
         }
         const map = mapRef.current;
         (map._imm_markers || []).forEach((m) => map.removeLayer(m));
@@ -316,6 +331,7 @@ function ImmobiliMap({ immobili }) {
 
 function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving }) {
     const [riepilogo, setRiepilogo] = useState(null);
+    const [showMapImm, setShowMapImm] = useState(true);
 
     useEffect(() => {
         api.get(`/anagrafiche/${anagrafica_id}/analisi/patrimonio`).then((r) => setRiepilogo(r.data));
@@ -348,6 +364,10 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving })
                     <div className="text-xs text-sky-900 bg-sky-50 border border-sky-200 rounded p-2 flex-1">
                         💡 Usa il pulsante <b>Catasto</b> (nel tab Anagrafica) per importare automaticamente gli immobili reali dal Catasto. Gli immobili con indirizzo/comune vengono mostrati sulla mappa.
                     </div>
+                    <Button size="sm" variant={showMapImm ? "default" : "outline"} className="text-xs h-8 whitespace-nowrap"
+                            data-testid="immobili-map-btn" onClick={() => setShowMapImm((v) => !v)}>
+                        <MapPin size={12} className="mr-1" /> Mappa
+                    </Button>
                     {canEdit && (ac.immobili || []).some((i) => !i.latitude && (i.indirizzo || i.comune)) && (
                         <Button size="sm" variant="outline" className="text-xs h-8 whitespace-nowrap"
                                 data-testid="immobili-geocode-btn"
@@ -367,7 +387,7 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving })
                         </Button>
                     )}
                 </div>
-                <ImmobiliMap immobili={ac.immobili || []} />
+                <ImmobiliMap immobili={showMapImm ? (ac.immobili || []) : []} />
                 {(ac.immobili || []).map((im, i) => (
                     <ImmobileRow key={i} item={im} canEdit={canEdit}
                         onChange={(patch) => updateItem("immobili", i, patch)}
@@ -458,7 +478,7 @@ function PatrimonioTab({ ac, set, canEdit, anagrafica_id, save, dirty, saving })
     );
 }
 
-function ImmobileRow({ item, canEdit, onChange, onRemove }) {
+export function ImmobileRow({ item, canEdit, onChange, onRemove }) {
     return (
         <div className="border border-slate-200 rounded-md p-3 mb-3 bg-slate-50/30">
             <div className="grid grid-cols-12 gap-2">
@@ -485,7 +505,9 @@ function ImmobileRow({ item, canEdit, onChange, onRemove }) {
                             <SelectItem value="comproprieta">Comproprietà</SelectItem>
                             <SelectItem value="usufrutto">Usufrutto</SelectItem>
                             <SelectItem value="nuda_proprieta">Nuda proprietà</SelectItem>
-                            <SelectItem value="locazione">Locazione</SelectItem>
+                            <SelectItem value="locazione">Locazione (dato in affitto)</SelectItem>
+                            <SelectItem value="affitto_passivo">In affitto (preso in locazione)</SelectItem>
+                            <SelectItem value="comodato">Comodato</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -504,10 +526,15 @@ function ImmobileRow({ item, canEdit, onChange, onRemove }) {
                         <Trash2 size={14} className="text-rose-600" />
                     </Button>
                 )}
-                <div className="col-span-5">
+                <div className="col-span-4">
                     <Label className="text-xs">Indirizzo</Label>
                     <Input value={item.indirizzo || ""} disabled={!canEdit}
                         onChange={(e) => onChange({ indirizzo: e.target.value })} />
+                </div>
+                <div className="col-span-1">
+                    <Label className="text-xs">Piano</Label>
+                    <Input value={item.piano || ""} disabled={!canEdit} placeholder="T"
+                        onChange={(e) => onChange({ piano: e.target.value })} />
                 </div>
                 <div className="col-span-3">
                     <Label className="text-xs">Comune</Label>

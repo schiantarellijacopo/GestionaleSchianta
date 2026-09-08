@@ -39,6 +39,7 @@ const ALL_MENU_ITEMS = [
     { id: "sospesi", path: "/sospesi", icon: "TimerReset", label: "Sospesi (anticipati)", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "ec_contraente", path: "/contraente-estratto", icon: "FileText", label: "E/C contraente", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "contabilita", roles: ["admin", "collaboratore"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },

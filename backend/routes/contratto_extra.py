@@ -298,6 +298,42 @@ async def download_docx(aid: str, user=Depends(current_user)):
         headers={"Content-Disposition": f'attachment; filename="Contratto_consulenza_{aid[:8]}.docx"'})
 
 
+# ============================================================
+# Libreria modelli di contratto (riutilizzabili per tutti i clienti dell'agenzia)
+# ============================================================
+@router.get("/contratti-modelli")
+async def list_modelli(user=Depends(current_user)):
+    docs = await db.contratti_modelli.find({}, {"_id": 0}).sort("nome", 1).to_list(200)
+    return docs
+
+
+@router.post("/contratti-modelli")
+async def save_modello(body: dict, user=Depends(current_user)):
+    nome = (body.get("nome") or "").strip()
+    if not nome:
+        raise HTTPException(400, "Nome del modello obbligatorio")
+    import uuid
+    doc = {
+        "id": str(uuid.uuid4()),
+        "nome": nome,
+        "testo": body.get("testo") or "",
+        "importo": float(body.get("importo") or 0),
+        "creato_da": user.get("id"),
+        "creato_il": _now_iso(),
+    }
+    await db.contratti_modelli.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.delete("/contratti-modelli/{mid}")
+async def delete_modello(mid: str, user=Depends(current_user)):
+    r = await db.contratti_modelli.delete_one({"id": mid})
+    if not r.deleted_count:
+        raise HTTPException(404, "Modello non trovato")
+    return {"ok": True}
+
+
 def _pdf_da_testo(testo: str) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm

@@ -45,7 +45,7 @@ export default function ProfilazioneGdprTab({ ana, canEdit, onReload }) {
     return (
         <div className="space-y-4 mt-4" data-testid="profilazione-gdpr-tab">
             {!isPG && <StileVitaSection sv={sv} setSv={setSv} canEdit={canEdit} />}
-            {isPG && <CorporateProfileSection cp={cp} setCp={setCp} canEdit={canEdit} />}
+            {false && isPG && <CorporateProfileSection cp={cp} setCp={setCp} canEdit={canEdit} />}
             <GdprConsensiSection c={consensi} setC={setConsensi} canEdit={canEdit} />
 
             {canEdit && (

@@ -1,0 +1,19 @@
+{
+  "summary": "Testata la nuova funzionalità 'Estratti conto contraente' (backend + frontend). Backend: 7/7 pytest superati (preview con filtra_per rata/emissione/copertura, includi_pagamenti=false → pagamento null, includi_collegati=true → collegati_inclusi=true, PDF valido >2KB con header %PDF, 404 su contraente inesistente, ordinamento date decrescente, totale = premi + addizionali). Frontend: login admin OK, pagina /contraente-estratto carica, IntestatarioAutocomplete seleziona AUTOTRASPORTI VIVIANI, filtri Data 2026-05-01/2026-09-08 con filtra_per=rata restituiscono 8 righe con totali (Totale premi/addizionali/già pagato/DA PAGARE). Radio ecc-fp-emissione/copertura/rata e checkbox ecc-pagamenti/ecc-collegati funzionanti. Pulsante 'Salva estratto conto (PDF)' scarica PDF (200, application/pdf).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter79_estratto_conto_contraente.py", "/app/test_reports/pytest/iter79.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/estratto_conto_contraente.py: chiaro, ben strutturato, esclude correttamente _id, gestisce filtra_per (rata/emissione/copertura), include collegati via parente_di, ordina per data effetto decrescente. Nessuna criticità.",
+    "Endpoint /pdf riusa _build ed evita duplicazione (buono).",
+    "Frontend usa data-testid coerenti (ecc-*, ec-contraente-page). Layout responsivo grid e Card standard."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter79_estratto_conto_contraente.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (già presenti in /app/memory/test_credentials.md)",
+  "seed_data_creation": "Nessuna. Dati esistenti (contraente abe0cbf1... AUTOTRASPORTI VIVIANI).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Feature estratto conto contraente completamente validata (iter79). File di test: /app/backend/tests/test_iter79_estratto_conto_contraente.py."
+}

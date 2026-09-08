@@ -10529,13 +10529,19 @@ async def crea_nota_diario(body: dict, user=Depends(current_user)):
 
 @api.delete("/diario/{nid}")
 async def elimina_nota_diario(nid: str, user=Depends(current_user)):
+    # 1) prova come nota personale del diario (diario_note): un utente elimina solo le proprie
     flt: dict = {"id": nid}
     if user.get("role") != "admin":
-        flt["user_id"] = user["id"]  # un utente può eliminare solo le proprie
+        flt["user_id"] = user["id"]
     res = await db.diario_note.delete_one(flt)
-    if res.deleted_count == 0:
-        raise HTTPException(404, "Nota non trovata")
-    return {"ok": True}
+    if res.deleted_count:
+        return {"ok": True}
+    # 2) fallback: voce del diario cliente (db.diario) — solo admin/collaboratore
+    if user.get("role") in ("admin", "collaboratore"):
+        res2 = await db.diario.delete_one({"id": nid})
+        if res2.deleted_count:
+            return {"ok": True}
+    raise HTTPException(404, "Voce non trovata")
 
 
 # ============================================================
@@ -10749,7 +10755,7 @@ async def update_diario(did: str, body: dict, user=Depends(require_user("admin",
     return strip_mongo_id(await db.diario.find_one({"id": did}, {"_id": 0}))
 
 
-@api.delete("/diario/{did}")
+@api.delete("/diario-cliente/{did}")
 async def delete_diario(did: str, user=Depends(require_user("admin", "collaboratore"))):
     await db.diario.delete_one({"id": did})
     return {"ok": True}
@@ -12347,6 +12353,10 @@ api.include_router(_ocr_router.router)
 api.include_router(_anag_router.router)
 from routes import contratto_extra as _contratto_router  # noqa: E402
 api.include_router(_contratto_router.router)
+from routes import estratto_conto_contraente as _ecc_router  # noqa: E402
+api.include_router(_ecc_router.router)
+from routes import report_azienda as _report_az_router  # noqa: E402
+api.include_router(_report_az_router.router)
 api.include_router(_alert_router.router)
 api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)

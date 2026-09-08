@@ -1374,6 +1374,7 @@ class ImmobileItem(BaseModel):
     particella: Optional[str] = None
     sub: Optional[str] = None
     categoria_catastale: Optional[str] = None
+    piano: Optional[str] = None
     rendita_catastale: float = 0.0
     valore_commerciale: float = 0.0
     # Nuovi: valore ricostruzione + degrado (per polizze casa/abitazione)
@@ -1384,7 +1385,7 @@ class ImmobileItem(BaseModel):
     # Geolocalizzazione (Leaflet)
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    titolo: Literal["proprieta", "comproprieta", "usufrutto", "nuda_proprieta", "locazione"] = "proprieta"
+    titolo: Literal["proprieta", "comproprieta", "usufrutto", "nuda_proprieta", "locazione", "affitto_passivo", "comodato"] = "proprieta"
     percentuale_proprieta: float = 100.0
     targa_immobile: Optional[str] = None
     note: Optional[str] = None

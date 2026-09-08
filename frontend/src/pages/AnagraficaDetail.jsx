@@ -183,7 +183,7 @@ export default function AnagraficaDetail() {
                     <TabsTrigger value="albero" data-testid="tab-albero">Relazione</TabsTrigger>
                     <TabsTrigger value="polizze" data-testid="tab-polizze">Polizze ({polizze.filter(isPolizzaAttiva).length})</TabsTrigger>
                     <TabsTrigger value="conti-correnti" data-testid="tab-conti-correnti">🏦 Conti Correnti</TabsTrigger>
-                    <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Profilazione & GDPR</TabsTrigger>
+                    <TabsTrigger value="profilazione-gdpr" data-testid="tab-profilazione-gdpr">📋 Privacy / GDPR</TabsTrigger>
                     <TabsTrigger value="intervista" data-testid="tab-intervista">Intervista</TabsTrigger>
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="raccolta-dati" data-testid="tab-raccolta-dati">📋 Raccolta Dati</TabsTrigger>
@@ -1561,6 +1561,7 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
         { key: "visura_catastale", label: "Visura Catastale", icon: "🏠", match: (c) => c === "visura_catastale" },
         { key: "bilancio", label: "Bilancio", icon: "📊", match: (c, nome) => (c || "").includes("bilancio") || nome.includes("bilancio") },
         { key: "report_azienda", label: "Report Azienda", icon: "📈", match: (c) => c === "report_azienda" },
+        { key: "estratto_conto", label: "Estratti conto", icon: "📄", match: (c) => c === "estratto_conto" },
         { key: "quietanza", label: "Quietanze", icon: "🧾", match: (c) => c === "quietanza" },
         { key: "identita", label: "Documenti identità", icon: "🪪", match: (c) => ["carta_identita", "documento_identita", "patente", "passaporto"].includes(c) },
         { key: "richiesta_cliente", label: "Richieste cliente", icon: "📥", match: (c) => c === "richiesta_cliente" },
