@@ -898,12 +898,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     comp = await db.compagnie.find_one({"id": compagnia_id}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
+    # Il flag "trattiene_provvigioni" della compagnia è l'unica fonte di verità
+    # (coerente con Brogliaccio e Saldo cassa). Se trattiene → il dovuto è al netto
+    # delle provvigioni; altrimenti è il premio pieno.
     trattiene = bool(comp.get("trattiene_provvigioni", True))
     tipo_mandato = comp.get("tipo_mandato", "diretto")
-    # Mandato collaborazione: saldo = premi puri (non scaliamo le provv,
-    # verranno fatturate dalla agenzia partner). Forziamo trattiene=False.
-    if tipo_mandato == "collaborazione":
-        trattiene = False
 
     pol_flt: dict = {"compagnia_id": compagnia_id}
     if collaboratore_id:

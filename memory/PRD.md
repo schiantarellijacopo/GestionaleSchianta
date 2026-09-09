@@ -1,4 +1,14 @@
-# Programma Assicurativo — PRD (aggiornato 12/02/2026)
+# Programma Assicurativo — PRD (aggiornato 09/09/2026)
+
+## Sessione 09/09/2026 (fork) — Batch 9: Fix Estratto Conto Compagnie + header polizza
+
+- **🔴 FIX P0 — Compagnia mancante dall'Estratto Conto Compagnie**: `_compagnia_estratto_data` (server.py ~riga 936) faceva `contr_map[c["id"]] = c["ragione_sociale"]` con accesso diretto alla chiave → per un contraente **persona fisica** (senza `ragione_sociale`) lanciava `KeyError`, l'intera funzione andava in eccezione e `saldi_cassa_compagnie` la scartava in silenzio (`try/except: continue`) → la compagnia (GROUPAMA GPM) spariva dall'estratto. Corretto con `c.get("ragione_sociale") or "{cognome} {nome}"`.
+- **🔴 FIX P0 — Coerenza "trattiene provvigioni"**: l'estratto conto **forzava** `trattiene=False` per i mandati `collaborazione`, mostrando il DARE al lordo (es. 489€) mentre Brogliaccio/Saldo cassa usavano il flag della compagnia. Rimossa la forzatura: ora l'unica fonte di verità è `compagnia.trattiene_provvigioni`. GROUPAMA (trattiene=sì) → DARE al netto provvigioni = 443,41€ (489 − 35,59 − 10). La polizza 1212 dà 90€ come nel Brogliaccio.
+- **Data cleanup**: eliminato il doppione compagnia vuoto "groupama" (cod. 005, 0 polizze/titoli/movimenti) nel tenant `tenant-principale-schiantarelli`. Resta la sola "GROUPAMA" (cod. GPM, 22 polizze).
+- **PolizzaDetail header**: ripristinato il **nome dell'agenzia partner** sotto il numero polizza (`pol-header-agenzia-partner`), mostrato solo se presente (`pol.mandato`). Nella modifica precedente era stato rimosso del tutto per errore.
+- Verificato via API autenticata + screenshot UI (E/C compagnie: GROUPAMA 443,41€, 11 compagnie, doppione sparito).
+
+
 
 ## Sessione 09/09/2026 (fork) — Batch 8: Modelli PDF per sezione, generazione documenti, unione Documenti, Task collegabili
 
