@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 from auth import current_user, require_user
@@ -107,6 +107,95 @@ async def create_modello(
     doc.pop("_id", None)
     await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
     return doc
+
+
+_PLACEHOLDER_DISPONIBILI = [
+    "azienda_nome", "azienda_indirizzo", "azienda_telefono", "azienda_email", "data_oggi",
+    "numero_polizza", "ramo", "prodotto", "stato_polizza", "scadenza", "data_scadenza",
+    "effetto", "data_effetto", "premio", "premio_lordo", "importo", "compagnia", "compagnia_nome",
+    "cliente", "cliente_nome", "cliente_cognome", "cliente_indirizzo", "cliente_comune",
+    "cliente_cap", "cliente_provincia", "cliente_cf", "cliente_codice_fiscale",
+    "cliente_partita_iva", "cliente_email", "cliente_telefono", "cliente_cellulare",
+    "cliente_data_nascita", "cliente_luogo_nascita", "cliente_professione", "cliente_iban",
+]
+
+
+@router.post("/librerie/modelli/da-pdf", status_code=201)
+async def crea_modello_da_pdf(
+    file: UploadFile = File(...),
+    tipo: str = Form("pdf_altro"),
+    nome: Optional[str] = Form(None),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Carica un PDF, ne estrae il testo con l'AI e lo trasforma in un modello
+    editabile con i {segnaposto} del CRM, poi lo salva come TemplateModello."""
+    if file is None:
+        raise HTTPException(400, "Nessun file caricato")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "File vuoto")
+
+    # 1) Estrazione testo dal PDF
+    testo = ""
+    try:
+        import io
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            pagine = [(pg.extract_text() or "") for pg in pdf.pages]
+        testo = "\n\n".join(pagine).strip()
+    except Exception as e:  # noqa
+        raise HTTPException(400, f"Impossibile leggere il PDF: {str(e)[:150]}")
+    if not testo:
+        raise HTTPException(422, "Il PDF non contiene testo estraibile (potrebbe essere una scansione immagine)")
+
+    # 2) Trasformazione AI in template con segnaposto
+    import os
+    ph_list = ", ".join("{" + p + "}" for p in _PLACEHOLDER_DISPONIBILI)
+    prompt = (
+        "Trasforma il seguente documento in un MODELLO riutilizzabile per un CRM assicurativo italiano.\n"
+        "Sostituisci i dati specifici (nome cliente, indirizzo, codice fiscale/P.IVA, numero polizza, "
+        "compagnia, importi, date, contatti dell'agenzia, ecc.) con i SEGNAPOSTO tra parentesi graffe "
+        "SOLO da questo elenco disponibile:\n"
+        f"{ph_list}\n\n"
+        "Regole:\n"
+        "- Usa esclusivamente i segnaposto elencati; se un dato non ha un segnaposto adatto, lascia il testo generico.\n"
+        "- Mantieni la struttura e i paragrafi del documento (intestazioni, articoli, elenchi).\n"
+        "- NON aggiungere commenti, spiegazioni o markdown: restituisci solo il testo del modello.\n"
+        "- Conserva la lingua originale (italiano).\n\n"
+        "DOCUMENTO:\n" + testo[:20000]
+    )
+    corpo = ""
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY"),
+            session_id=f"modello_pdf_{user.get('id')}",
+            system_message="Sei un assistente che converte documenti assicurativi in modelli con segnaposto. Rispondi solo con il testo del modello.",
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        corpo = str(resp).strip() if resp else ""
+    except Exception as e:  # noqa
+        raise HTTPException(502, f"Errore AI durante la trasformazione: {str(e)[:200]}")
+    if not corpo:
+        corpo = testo  # fallback: testo grezzo
+
+    # 3) Salva come modello
+    nome_finale = (nome or "").strip() or (file.filename or "Modello da PDF").rsplit(".", 1)[0]
+    body = ModelloBody(tipo=tipo, nome=nome_finale, corpo=corpo)
+    placeholders = _autodetect_placeholders(body)
+    doc = TemplateModello(
+        tipo=body.tipo,                 # type: ignore[arg-type]
+        nome=body.nome.strip(),
+        corpo=body.corpo,
+        categoria="da_pdf",
+        note=f"Generato da PDF: {file.filename}",
+        placeholders=placeholders,
+    ).model_dump()
+    await db.template_modelli.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
+    return doc
+
 
 
 @router.put("/librerie/modelli/{mid}")

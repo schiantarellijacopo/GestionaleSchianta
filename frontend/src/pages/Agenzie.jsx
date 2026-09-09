@@ -141,18 +141,34 @@ function AgenziaCard({ a, onEdit, onDelete, testid }) {
                     </Button>
                 </div>
             )}
+            {a.tipo === "principale" && (
+                <div className="mt-2 pt-2 border-t border-slate-100 text-xs flex items-center justify-between">
+                    <div>
+                        <span className="text-slate-500">Compagnie con mandato diretto: </span>
+                        <span className="font-bold text-amber-700">{a.n_compagnie_collegate || 0}</span>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => setCollegaOpen(true)}
+                        data-testid={`age-collega-${a.id}`}>
+                        <Link2 size={11} className="mr-1" /> Collega compagnie
+                    </Button>
+                </div>
+            )}
             {collegaOpen && <CollegaCompagnieDialog agenzia={a} onClose={() => setCollegaOpen(false)} />}
         </Card>
     );
 }
 
 function CollegaCompagnieDialog({ agenzia, onClose }) {
+    const isPrincipale = agenzia.tipo === "principale";
     const [comps, setComps] = useState(null);
     const [collegate, setCollegate] = useState(new Set());
     useEffect(() => {
         api.get("/compagnie").then((r) => {
             setComps(r.data);
-            setCollegate(new Set((r.data || []).filter((c) => c.agenzia_partner_id === agenzia.id).map((c) => c.id)));
+            const iniz = (r.data || []).filter((c) =>
+                isPrincipale ? !c.agenzia_partner_id : c.agenzia_partner_id === agenzia.id,
+            ).map((c) => c.id);
+            setCollegate(new Set(iniz));
         });
     }, [agenzia.id]);
 
@@ -169,11 +185,19 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
         try {
             for (const c of comps) {
                 const wantLinked = collegate.has(c.id);
-                const isLinked = c.agenzia_partner_id === agenzia.id;
-                if (wantLinked && !isLinked) {
-                    await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "collaborazione", agenzia_partner_id: agenzia.id });
-                } else if (!wantLinked && isLinked) {
-                    await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                if (isPrincipale) {
+                    const isDirect = !c.agenzia_partner_id;
+                    // collegare al principale = mandato diretto (stacca da eventuale partner)
+                    if (wantLinked && !isDirect) {
+                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                    }
+                } else {
+                    const isLinked = c.agenzia_partner_id === agenzia.id;
+                    if (wantLinked && !isLinked) {
+                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "collaborazione", agenzia_partner_id: agenzia.id });
+                    } else if (!wantLinked && isLinked) {
+                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                    }
                 }
             }
             toast.success("Collegamenti aggiornati"); onClose();
@@ -183,11 +207,21 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
-                <DialogHeader><DialogTitle>Collega compagnie a {agenzia.ragione_sociale}</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>
+                    {isPrincipale
+                        ? `Compagnie con mandato diretto — ${agenzia.ragione_sociale}`
+                        : `Collega compagnie a ${agenzia.ragione_sociale}`}
+                </DialogTitle></DialogHeader>
                 <div className="space-y-2 py-2">
                     <div className="text-xs text-slate-600 bg-amber-50 border border-amber-200 p-2 rounded">
-                        Le compagnie selezionate diventano <strong>mandato di collaborazione</strong> via questa agenzia.
-                        Le compagnie deselezionate tornano a mandato diretto.
+                        {isPrincipale ? (
+                            <>Le compagnie selezionate diventano <strong>mandato diretto</strong> con l&apos;agenzia principale.
+                            Selezionandone una collegata a un&apos;agenzia partner, la si riporta a mandato diretto.
+                            Per spostare una compagnia su un&apos;agenzia partner usa il pulsante &quot;Collega compagnie&quot; della partner.</>
+                        ) : (
+                            <>Le compagnie selezionate diventano <strong>mandato di collaborazione</strong> via questa agenzia.
+                            Le compagnie deselezionate tornano a mandato diretto.</>
+                        )}
                     </div>
                     {comps === null ? <Loading /> : (
                         <div className="grid grid-cols-1 gap-1 max-h-96 overflow-y-auto">
@@ -199,9 +233,13 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
                                         <div className="font-medium">{c.ragione_sociale}</div>
                                         <div className="text-[10px] text-slate-400 font-mono">{c.codice}</div>
                                     </div>
-                                    {c.agenzia_partner_id && c.agenzia_partner_id !== agenzia.id && (
-                                        <span className="text-[10px] text-amber-700">⚠ già collegata ad altra agenzia</span>
-                                    )}
+                                    {isPrincipale
+                                        ? (c.agenzia_partner_id && (
+                                            <span className="text-[10px] text-amber-700">⚠ collegata a un&apos;agenzia partner</span>
+                                        ))
+                                        : (c.agenzia_partner_id && c.agenzia_partner_id !== agenzia.id && (
+                                            <span className="text-[10px] text-amber-700">⚠ già collegata ad altra agenzia</span>
+                                        ))}
                                 </label>
                             ))}
                         </div>

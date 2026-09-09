@@ -3514,6 +3514,27 @@ function ModelliSezione() {
         setOpen(true);
     };
 
+    const [uploadingPdf, setUploadingPdf] = useState(false);
+    const caricaPdf = async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (!f) return;
+        setUploadingPdf(true);
+        toast.info("Analisi del PDF in corso… l'AI sta creando il modello");
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("tipo", "pdf_altro");
+            const r = await api.post("/librerie/modelli/da-pdf", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Modello creato dal PDF — rivedilo e salva");
+            await load();
+            setEditing(r.data);
+            setOpen(true);
+        } catch (err) {
+            toast.error(errMsg(err, "Errore durante l'analisi del PDF"));
+        } finally { setUploadingPdf(false); }
+    };
+
     return (
         <Card className="p-0 border-slate-200 overflow-hidden" data-testid="lib-modelli">
             {/* Header */}
@@ -3570,6 +3591,14 @@ function ModelliSezione() {
                             className="bg-violet-700 hover:bg-violet-800 h-8" data-testid="modelli-new">
                             <Plus size={14} className="mr-1" />Nuovo {gruppoCorrente?.label}
                         </Button>
+                        {activeTab === "pdf" && (
+                            <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-violet-300 text-violet-700 text-sm font-medium cursor-pointer hover:bg-violet-50 ${uploadingPdf ? "opacity-60 pointer-events-none" : ""}`}
+                                data-testid="modelli-carica-pdf">
+                                <Upload size={14} /> {uploadingPdf ? "Analisi…" : "Carica PDF"}
+                                <input type="file" hidden accept="application/pdf" onChange={caricaPdf}
+                                    data-testid="modelli-carica-pdf-input" />
+                            </label>
+                        )}
                     </div>
                 </div>
 

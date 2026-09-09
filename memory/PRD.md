@@ -1,5 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
+## Sessione 09/09/2026 (fork) — Batch 6: Utenti solo staff, Agenzia partner label, Principale mandato diretto, Modelli da PDF (AI)
+
+- **Librerie → Utenti / Collaboratori: solo personale di agenzia**. La lista `/auth/users` ora filtra i `role === "cliente"` (i clienti si gestiscono in Anagrafiche). Rimossa l'opzione ruolo "Cliente" dal form utente e il relativo blocco "Anagrafica cliente collegata". Verificato a schermo (15 elementi: admin/collaboratori/dipendenti, nessun cliente). `Librerie.jsx` (`load`, `UtenteForm`).
+- **PolizzaDetail: "Mandato" → "Agenzia partner"** (header blu + form modifica). Il valore `pol.mandato` rappresenta l'agenzia partner (terminologia utente). Solo label.
+- **Agenzie → l'agenzia PRINCIPALE può collegare le compagnie a mandato diretto**. Prima il pulsante "Collega compagnie" era solo per le partner. Ora la card principale mostra "Compagnie con mandato diretto: N" + pulsante. `CollegaCompagnieDialog` è tenant/tipo-aware: per la principale pre-seleziona le compagnie senza `agenzia_partner_id` (=diretto), selezionandone una collegata a partner la riporta a `tipo_mandato=diretto, agenzia_partner_id=null`. Backend `routes/agenzie.py`: `n_compagnie_collegate` per la principale = `count(agenzia_partner_id=None)`. Verificato UI + curl (principale=7).
+- **Librerie → Gestioni Modelli: "Carica PDF" (tab PDF)**. Nuovo endpoint `POST /api/librerie/modelli/da-pdf` (`routes/modelli.py`): estrae il testo con pdfplumber, lo trasforma via **Claude (claude-sonnet-4-6, Emergent LLM Key)** in un modello con i `{segnaposto}` del CRM (whitelist `_PLACEHOLDER_DISPONIBILI`), lo salva come `TemplateModello` (categoria `da_pdf`) e lo apre nel form per la revisione. UI: pulsante `modelli-carica-pdf` visibile solo nella tab PDF. Verificato e2e via curl (lettera → template con cliente_nome/numero_polizza/compagnia_nome/data_scadenza/premio_lordo/azienda_*).
+- **MUP**: backend (`routes/mup.py`) + modale editabile in `PolizzaDetail.jsx` (checkbox garanzie per ramo, genera/anteprima/archivia tra gli allegati polizza categoria `mup`, firma eSAW) già completi. In attesa di test lato utente.
+
+
 ## Sessione 08/09/2026 (fork) — Batch 5: Estratto conto, Report Azienda, Immobili, Documenti, eSign
 
 - **Report di gruppo** (`?gruppo=true` su report-azienda pdf/docx): sezione "Società del gruppo — quadro consolidato" con capogruppo + collegate (da `parente_di`) e riga TOTALE GRUPPO. Il frontend chiede conferma se ci sono collegate. Estratto conto già supporta il gruppo via `includi_collegati`. Verificato via curl.

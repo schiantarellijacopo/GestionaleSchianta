@@ -54,9 +54,15 @@ async def list_agenzie(
     items = await db.agenzie.find(flt, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
     # per ogni agenzia partner: conteggio compagnie collegate
     for a in items:
-        a["n_compagnie_collegate"] = await db.compagnie.count_documents(
-            {"agenzia_partner_id": a["id"]},
-        )
+        if a.get("tipo") == "principale":
+            # mandato diretto = compagnie non collegate a un'agenzia partner
+            a["n_compagnie_collegate"] = await db.compagnie.count_documents(
+                {"agenzia_partner_id": None},
+            )
+        else:
+            a["n_compagnie_collegate"] = await db.compagnie.count_documents(
+                {"agenzia_partner_id": a["id"]},
+            )
     return items
 
 
