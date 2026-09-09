@@ -52,7 +52,12 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
 
     const scaricaReport = async (fmt) => {
         try {
-            const r = await api.get(`/anagrafiche/${anagrafica_id}/report-azienda/${fmt}`, { responseType: "blob" });
+            const collegate = (ana?.parente_di || []).length;
+            let gruppo = false;
+            if (collegate > 0) {
+                gruppo = window.confirm(`Questa azienda ha ${collegate} società collegate. Vuoi generare il REPORT DI GRUPPO (capogruppo + collegate con totali consolidati)?\n\nOK = report di gruppo · Annulla = solo questa azienda`);
+            }
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/report-azienda/${fmt}`, { params: { gruppo }, responseType: "blob" });
             const type = fmt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             const url = URL.createObjectURL(new Blob([r.data], { type }));
             if (fmt === "pdf") {

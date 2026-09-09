@@ -89,26 +89,51 @@ async def _gather(aid: str):
     return ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto
 
 
+async def _gather_gruppo(ana: dict) -> list:
+    """Riepilogo economico delle società collegate (persona giuridica) del gruppo."""
+    rel_ids = [r.get("anagrafica_id") for r in (ana.get("parente_di") or []) if r.get("anagrafica_id")]
+    if not rel_ids:
+        return []
+    out = []
+    async for c in db.anagrafiche.find(
+            {"id": {"$in": rel_ids}, "$or": [{"tipo": "persona_giuridica"}, {"partita_iva": {"$nin": [None, ""]}}]},
+            {"_id": 0, "ragione_sociale": 1, "salute_fiscale_dati": 1, "openapi_data": 1}):
+        b = (c.get("salute_fiscale_dati") or {}).get("bilancio_estratto") or {}
+        cm = (c.get("openapi_data") or {}).get("company") or {}
+        out.append({
+            "ragione_sociale": c.get("ragione_sociale", ""),
+            "fatturato": b.get("valore_produzione") or b.get("ricavi") or 0,
+            "ebitda": b.get("ebitda") or 0,
+            "utile": b.get("utile_netto") or 0,
+            "patrimonio": b.get("patrimonio_netto") or 0,
+            "dipendenti": b.get("dipendenti") or 0,
+            "soci": len(cm.get("soci") or []),
+        })
+    return out
+
+
 @router.get("/anagrafiche/{aid}/report-azienda/pdf")
-async def report_pdf(aid: str, user=Depends(current_user)):
+async def report_pdf(aid: str, gruppo: bool = False, user=Depends(current_user)):
     ctx = await _gather(aid)
+    grp = await _gather_gruppo(ctx[0]) if gruppo else None
     logo = await _logo_bytes()
-    return StreamingResponse(BytesIO(_build_pdf(*ctx, logo=logo)), media_type="application/pdf",
+    return StreamingResponse(BytesIO(_build_pdf(*ctx, gruppo=grp, logo=logo)), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="report_azienda_{aid[:8]}.pdf"'})
 
 
 @router.get("/anagrafiche/{aid}/report-azienda/docx")
-async def report_docx(aid: str, user=Depends(current_user)):
+async def report_docx(aid: str, gruppo: bool = False, user=Depends(current_user)):
     ctx = await _gather(aid)
+    grp = await _gather_gruppo(ctx[0]) if gruppo else None
     logo = await _logo_bytes()
     return StreamingResponse(
-        BytesIO(_build_docx(*ctx, logo=logo)),
+        BytesIO(_build_docx(*ctx, gruppo=grp, logo=logo)),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="report_azienda_{aid[:8]}.docx"'})
 
 
 # ============================================================ PDF
-def _build_pdf(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, logo=None) -> bytes:
+def _build_pdf(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, gruppo=None, logo=None) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
@@ -213,6 +238,24 @@ def _build_pdf(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, lo
     story.append(Paragraph(NOTE_LEGALI, small))
     story.append(Paragraph(NOTE_IA, small))
 
+    if gruppo:
+        story.append(Paragraph("Società del gruppo — quadro consolidato", H2))
+        story.append(Paragraph("Riepilogo economico della società capogruppo e delle società collegate.", body))
+        rows = [[rag, _eur(piramide["Fatturato"]), _eur(piramide["EBITDA"]), _eur(piramide["Utile netto"]),
+                 _eur(piramide["Patrimonio netto"]), str(piramide["N. dipendenti"] or "—")]]
+        tot = {"f": float(piramide["Fatturato"] or 0), "e": float(piramide["EBITDA"] or 0),
+               "u": float(piramide["Utile netto"] or 0), "p": float(piramide["Patrimonio netto"] or 0),
+               "d": int(piramide["N. dipendenti"] or 0)}
+        for g in gruppo:
+            rows.append([g["ragione_sociale"], _eur(g["fatturato"]), _eur(g["ebitda"]), _eur(g["utile"]),
+                         _eur(g["patrimonio"]), str(g["dipendenti"] or "—")])
+            tot["f"] += float(g["fatturato"] or 0); tot["e"] += float(g["ebitda"] or 0)
+            tot["u"] += float(g["utile"] or 0); tot["p"] += float(g["patrimonio"] or 0)
+            tot["d"] += int(g["dipendenti"] or 0)
+        rows.append(["TOTALE GRUPPO", _eur(tot["f"]), _eur(tot["e"]), _eur(tot["u"]), _eur(tot["p"]), str(tot["d"])])
+        data_table(["Società", "Fatturato", "EBITDA", "Utile", "Patrim. netto", "Dip."],
+                   rows, [4.2, 2.6, 2.4, 2.4, 2.6, 1.3])
+
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2.4 * cm, bottomMargin=1.8 * cm,
                             leftMargin=2 * cm, rightMargin=2 * cm, title="Report Analisi Azienda")
@@ -238,7 +281,7 @@ def _build_pdf(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, lo
 
 
 # ============================================================ DOCX
-def _build_docx(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, logo=None) -> bytes:
+def _build_docx(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, gruppo=None, logo=None) -> bytes:
     from docx import Document
     from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -323,5 +366,18 @@ def _build_docx(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, l
     sec("Note legali")
     r1 = d.add_paragraph().add_run(NOTE_LEGALI); r1.font.size = Pt(7.5); r1.font.color.rgb = RGBColor(0x64, 0x74, 0x8b)
     r2 = d.add_paragraph().add_run(NOTE_IA); r2.font.size = Pt(7.5); r2.font.color.rgb = RGBColor(0x64, 0x74, 0x8b)
+
+    if gruppo:
+        sec("Società del gruppo — quadro consolidato")
+        para("Riepilogo economico della società capogruppo e delle società collegate.")
+        rws = [[rag, _eur(piramide["Fatturato"]), _eur(piramide["EBITDA"]), _eur(piramide["Utile netto"]),
+                _eur(piramide["Patrimonio netto"]), piramide["N. dipendenti"] or "—"]]
+        tf = float(piramide["Fatturato"] or 0); te = float(piramide["EBITDA"] or 0)
+        tu = float(piramide["Utile netto"] or 0); tp = float(piramide["Patrimonio netto"] or 0); td = int(piramide["N. dipendenti"] or 0)
+        for g in gruppo:
+            rws.append([g["ragione_sociale"], _eur(g["fatturato"]), _eur(g["ebitda"]), _eur(g["utile"]), _eur(g["patrimonio"]), g["dipendenti"] or "—"])
+            tf += float(g["fatturato"] or 0); te += float(g["ebitda"] or 0); tu += float(g["utile"] or 0); tp += float(g["patrimonio"] or 0); td += int(g["dipendenti"] or 0)
+        rws.append(["TOTALE GRUPPO", _eur(tf), _eur(te), _eur(tu), _eur(tp), td])
+        table(["Società", "Fatturato", "EBITDA", "Utile", "Patrim. netto", "Dip."], rws)
 
     buf = BytesIO(); d.save(buf); return buf.getvalue()
