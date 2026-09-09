@@ -1,0 +1,8 @@
+{
+  "nome": "Scheda anagrafica cliente",
+  "tipo": "pdf_altro",
+  "categoria": "default_sezione",
+  "default": true,
+  "sezioni_visibili": ["contraente"],
+  "corpo": "SCHEDA ANAGRAFICA\n\nContraente: {cliente_nome} {cliente_cognome}\nCodice Fiscale: {cliente_codice_fiscale}   Partita IVA: {cliente_partita_iva}\nProfessione: {cliente_professione}\n\nIndirizzo: {cliente_indirizzo}\nCittà: {cliente_comune}   CAP: {cliente_cap}   Provincia: {cliente_provincia}\n\nRecapiti\nTelefono/Mobile: {cliente_cellulare}\nE-mail: {cliente_email}\n\nData: {data_oggi}"
+}

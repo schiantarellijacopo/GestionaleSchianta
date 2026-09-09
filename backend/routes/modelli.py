@@ -55,6 +55,42 @@ def _autodetect_placeholders(body: ModelloBody) -> list[str]:
     return out
 
 
+import os as _os_seed
+import json as _json_seed
+
+_MODELLI_DEFAULT_DIR = _os_seed.path.join(_os_seed.path.dirname(_os_seed.path.dirname(__file__)), "assets", "modelli_default")
+
+
+async def _seed_modelli_default() -> None:
+    """Importa i modelli PDF predefiniti per sezione (idempotente per nome+categoria)."""
+    if not _os_seed.path.isdir(_MODELLI_DEFAULT_DIR):
+        return
+    for fn in sorted(_os_seed.listdir(_MODELLI_DEFAULT_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(_os_seed.path.join(_MODELLI_DEFAULT_DIR, fn), encoding="utf-8") as fh:
+                spec = _json_seed.load(fh)
+        except Exception:
+            continue
+        exists = await db.template_modelli.find_one(
+            {"nome": spec["nome"], "categoria": spec.get("categoria", "default_sezione")}, {"_id": 1},
+        )
+        if exists:
+            continue
+        body = ModelloBody(
+            tipo=spec.get("tipo", "pdf_altro"), nome=spec["nome"], corpo=spec.get("corpo", ""),
+            sezioni_visibili=spec.get("sezioni_visibili", []), categoria=spec.get("categoria", "default_sezione"),
+            default=spec.get("default", False),
+        )
+        doc = TemplateModello(
+            tipo=body.tipo, nome=body.nome, corpo=body.corpo, sezioni=body.sezioni,
+            sezioni_visibili=body.sezioni_visibili, categoria=body.categoria, default=body.default,
+            placeholders=_autodetect_placeholders(body),
+        ).model_dump()
+        await db.template_modelli.insert_one(doc)
+
+
 @router.get("/librerie/modelli")
 async def list_modelli(
     tipo: Optional[str] = None,
@@ -62,6 +98,7 @@ async def list_modelli(
     sezione: Optional[str] = None,
     user: dict = Depends(current_user),
 ) -> list[dict]:
+    await _seed_modelli_default()
     flt: dict = {}
     if tipo:
         flt["tipo"] = tipo
@@ -122,6 +159,7 @@ _PLACEHOLDER_DISPONIBILI = [
     "cliente_cap", "cliente_provincia", "cliente_cf", "cliente_codice_fiscale",
     "cliente_partita_iva", "cliente_email", "cliente_telefono", "cliente_cellulare",
     "cliente_data_nascita", "cliente_luogo_nascita", "cliente_professione", "cliente_iban",
+    "numero_sinistro", "data_sinistro", "descrizione_sinistro", "stato_sinistro", "data_denuncia",
 ]
 
 

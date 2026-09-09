@@ -28,6 +28,8 @@ import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import TitoloDialog from "@/components/TitoloDialog";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
+import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
+import { TaskCollegati } from "@/components/TaskCollegati";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
 import AllegatiCell from "@/components/AllegatiCell";
@@ -326,6 +328,7 @@ export default function PolizzaDetail() {
                             className="border-indigo-300 text-indigo-700 hover:bg-indigo-50" data-testid="pol-mup-button">
                         📋 {mupBusy ? "…" : "MUP precontrattuale"}
                     </Button>
+                    <GeneraDocumentoButton sezione="polizza" entitaId={id} firmatarioId={pol.contraente_id} onSaved={load} />
                     {canDelete && (
                         <Button variant="outline" size="sm" onClick={handleDelete}
                                 className="text-rose-700 hover:bg-rose-50 hover:text-rose-800" data-testid="pol-delete-button">
@@ -435,6 +438,8 @@ export default function PolizzaDetail() {
             {pol.targa && (
                 <TargaConflictWidget targa={pol.targa} excludeId={pol.id} compact />
             )}
+
+            <TaskCollegati entitaTipo="polizza" entitaId={id} />
 
             <Tabs defaultValue={isVeicoloPol ? "veicolo" : "garanzie"}>
                 <TabsList className="bg-slate-100 flex-wrap h-auto">

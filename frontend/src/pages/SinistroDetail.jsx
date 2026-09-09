@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
+import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { Card } from "@/components/ui/card";
 import { Loading } from "@/components/Shared";
 import {
@@ -248,6 +249,9 @@ export default function SinistroDetail() {
                 </TabsContent>
 
                 <TabsContent value="documenti">
+                    <div className="flex justify-end mb-2">
+                        <GeneraDocumentoButton sezione="sinistro" entitaId={id} firmatarioId={s.contraente_id} onSaved={load} />
+                    </div>
                     <DocumentiTab sinistroId={id} docs={s.documenti || []} onReload={load} />
                     <div className="mt-4">
                         <DocumentiSezioneSplit

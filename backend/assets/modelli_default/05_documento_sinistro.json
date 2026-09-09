@@ -1,0 +1,8 @@
+{
+  "nome": "Documento di sinistro",
+  "tipo": "pdf_altro",
+  "categoria": "default_sezione",
+  "default": true,
+  "sezioni_visibili": ["sinistro"],
+  "corpo": "DOCUMENTO DI SINISTRO\n\nNum. Interno Sinistro: {numero_sinistro}\n\nDATI CONTRAENTE\nCognome e Nome / Rag. Sociale: {cliente_nome} {cliente_cognome}\nIndirizzo: {cliente_indirizzo} - {cliente_comune} ({cliente_provincia})\nP.IVA/C.F.: {cliente_partita_iva} {cliente_codice_fiscale}\n\nDATI CONTRATTO\nRamo: {ramo}   Num. Contratto: {numero_polizza}   Compagnia: {compagnia_nome}\n\nDATI SINISTRO\nData sinistro: {data_sinistro}   Aperto il: {data_denuncia}\nLuogo: {cliente_comune}\nStato: {stato_sinistro}\n\nDESCRIZIONE\n{descrizione_sinistro}\n\nData: {data_oggi}\nFirma: _______________________________"
+}

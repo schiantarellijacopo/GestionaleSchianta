@@ -1,0 +1,8 @@
+{
+  "nome": "Modulo RID / Mandato SEPA",
+  "tipo": "pdf_altro",
+  "categoria": "default_sezione",
+  "default": true,
+  "sezioni_visibili": ["contraente"],
+  "corpo": "MANDATO PER ADDEBITO DIRETTO SEPA CORE\n\nRiferimento del mandato (a cura del Creditore): ____________________\n\nCon la sottoscrizione del presente mandato il Debitore autorizza il Creditore a disporre l'addebito del conto indicato di seguito e autorizza la Banca del Debitore ad eseguire l'addebito conformemente alle disposizioni impartite dal Creditore. I campi contrassegnati con asterisco (*) sono obbligatori.\n\nDATI RELATIVI AL DEBITORE\nNome e Cognome / Rag. Sociale*: {cliente_nome} {cliente_cognome}\nIndirizzo: {cliente_indirizzo}\nCAP e Località: {cliente_cap} {cliente_comune} ({cliente_provincia})\nCod. Fiscale / Part. IVA: {cliente_codice_fiscale} {cliente_partita_iva}\nIBAN*: {cliente_iban}\n\nDATI RELATIVI AL CREDITORE\nRag. Sociale del Creditore*: {azienda_nome}\nSede Legale*: {azienda_indirizzo}\n\nTipologia di pagamento*:  [ ] Ricorrente   [ ] Singolo addebito\n\nIl rapporto con la Banca è regolato dal contratto stipulato dal Debitore con la Banca stessa. Il Debitore ha diritto di ottenere il rimborso dalla propria Banca secondo quanto previsto nel suddetto contratto; eventuali richieste di rimborso devono essere presentate entro e non oltre 8 settimane a decorrere dalla data di addebito in conto.\n\nLuogo: {cliente_comune}   Data di sottoscrizione*: {data_oggi}\n\nFirma*: _______________________________"
+}

@@ -478,7 +478,7 @@ const CELL_RENDERERS = {
         )
     ),
     note_carico: (r) => (
-        <span className="text-[11px] text-slate-600 max-w-[220px] truncate inline-block align-middle"
+        <span className="text-[11px] text-slate-600 max-w-[220px] whitespace-normal break-words inline-block align-top leading-tight"
               title={r.note_carico || r.motivo_mancanza || ""}>
             {r.motivo_mancanza && <span className="text-rose-700 font-semibold">{r.motivo_mancanza}: </span>}
             {r.note_carico || "-"}
@@ -494,7 +494,7 @@ const CELL_RENDERERS = {
         )
     ),
     note_storiche: (r) => (
-        <span className="text-[11px] text-slate-600 max-w-[220px] truncate inline-block align-middle"
+        <span className="text-[11px] text-slate-600 max-w-[220px] whitespace-normal break-words inline-block align-top leading-tight"
               title={r.note_storiche || ""}>
             {r.note_storiche || "-"}
         </span>

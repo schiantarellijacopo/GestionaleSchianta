@@ -18,6 +18,8 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import RowActions, { PrintButton } from "@/components/RowActions";
+import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
+import { TaskCollegati } from "@/components/TaskCollegati";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
@@ -177,6 +179,8 @@ export default function AnagraficaDetail() {
                 }
             />
 
+            <TaskCollegati entitaTipo="anagrafica" entitaId={id} />
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     <TabsTrigger value="dati" data-testid="tab-dati">Anagrafica</TabsTrigger>
@@ -236,7 +240,12 @@ export default function AnagraficaDetail() {
                 <TabsContent value="diario"><DiarioTab anagrafica_id={id} canEdit={canEdit} /></TabsContent>
                 <TabsContent value="chat-whatsapp"><WhatsAppChatPreview anagrafica_id={id} /></TabsContent>
                 <TabsContent value="contratto"><ContrattoConsulenzaTab anagrafica_id={id} /></TabsContent>
-                <TabsContent value="documenti"><RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
+                <TabsContent value="documenti">
+                    <div className="flex justify-end mb-2">
+                        <GeneraDocumentoButton sezione="contraente" entitaId={id} firmatarioId={id} onSaved={load} />
+                    </div>
+                    <RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} />
+                </TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
                     <TabsContent value="analisi"><AnalisiClienteTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} /></TabsContent>
                 )}
@@ -1529,7 +1538,7 @@ function DiarioForm({ anagrafica_id, editing, onClose }) {
     );
 }
 
-function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
+function AllegatiTab({ entita_tipo, entita_id, canEdit, embedded = false }) {
     const [list, setList] = useState(null);
     const [uploading, setUploading] = useState(false);
 
@@ -1555,15 +1564,15 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
         catch { toast.error("Errore"); }
     };
 
-    // Mappa categoria → cartella (etichetta, icona, ordine)
+    // Mappa categoria → cartella (etichetta, icona, ordine).
+    // NB: le categorie con casella dedicata nel blocco fisso sopra (Visura camerale, Documenti
+    // identità) NON compaiono qui per evitare doppioni: i relativi file confluiscono in "Altri".
     const CARTELLE = [
-        { key: "visura_camerale", label: "Visura Camerale", icon: "🏛️", match: (c, nome) => c === "visura_camerale" && !nome.includes("bilancio") },
         { key: "visura_catastale", label: "Visura Catastale", icon: "🏠", match: (c) => c === "visura_catastale" },
         { key: "bilancio", label: "Bilancio", icon: "📊", match: (c, nome) => (c || "").includes("bilancio") || nome.includes("bilancio") },
         { key: "report_azienda", label: "Report Azienda", icon: "📈", match: (c) => c === "report_azienda" },
         { key: "estratto_conto", label: "Estratti conto", icon: "📄", match: (c) => c === "estratto_conto" },
         { key: "quietanza", label: "Quietanze", icon: "🧾", match: (c) => c === "quietanza" },
-        { key: "identita", label: "Documenti identità", icon: "🪪", match: (c) => ["carta_identita", "documento_identita", "patente", "passaporto"].includes(c) },
         { key: "richiesta_cliente", label: "Richieste cliente", icon: "📥", match: (c) => c === "richiesta_cliente" },
         { key: "altri", label: "Altri documenti", icon: "📎", match: () => true },
     ];
@@ -1576,7 +1585,7 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
     (list || []).forEach((a) => { const k = cartellaDi(a); (gruppi[k] = gruppi[k] || []).push(a); });
 
     return (
-        <div className="mt-2" data-testid="allegati-section">
+        <div className={embedded ? "" : "mt-2"} data-testid="allegati-section">
             <div className="flex items-center justify-end mb-3">
                 {canEdit && (
                     <label className="inline-flex items-center gap-2 cursor-pointer">
@@ -1588,12 +1597,12 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit }) {
                 )}
             </div>
             {list === null ? <Loading /> : list.length === 0 ? (
-                <div className="text-center py-10 text-sm text-slate-500">
-                    <Paperclip size={28} className="mx-auto text-slate-300 mb-2" />
-                    Nessun documento caricato. Trascina un file o clicca &quot;Carica file&quot;.
+                <div className="text-center py-6 text-sm text-slate-500">
+                    <Paperclip size={24} className="mx-auto text-slate-300 mb-2" />
+                    Nessun altro documento caricato.
                 </div>
             ) : (
-                <div className="space-y-3" data-testid="allegati-cartelle">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="allegati-cartelle">
                     {CARTELLE.filter((f) => (gruppi[f.key] || []).length > 0).map((f) => (
                         <AllegatiCartella key={f.key} folder={f} files={gruppi[f.key]} onDelete={elimina} />
                     ))}
@@ -1927,12 +1936,13 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
                     data-testid="doc-cards-toggle">
                     <span className="text-lg">🗂️</span>
-                    <span className="font-medium text-sm text-slate-800 flex-1">Documenti per categoria</span>
+                    <span className="font-medium text-sm text-slate-800 flex-1">Documenti</span>
                     <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">{nCaricati}/{DOC_TIPI_ANAG.length}</span>
                     <span className={`text-slate-400 transition-transform ${docsOpen ? "rotate-180" : ""}`}>▾</span>
                 </button>
                 {docsOpen && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
+                    <div className="p-3 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {DOC_TIPI_ANAG.map((dt) => {
                     const doc = docs?.[dt.key];
                     const cOpen = cardOpen[dt.key] !== false;
@@ -1987,6 +1997,11 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     );
                         })}
                     </div>
+                    <div className="border-t border-slate-100 pt-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1 px-1">Altri documenti caricati (Visure, Bilanci, file vari)</div>
+                        <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} embedded />
+                    </div>
+                    </div>
                 )}
             </div>
 
@@ -1998,11 +2013,6 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <img src={ana.firma_cliente_url} alt="firma" className="bg-white rounded-md border max-h-24" />
                 </Card>
             )}
-
-            <div className="pt-2">
-                <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1 px-1">Documenti raccolti (Visure, Bilanci, altri file)</div>
-                <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} />
-            </div>
 
             <PrivacyConsensiDialog
                 open={privacyOpen}

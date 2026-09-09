@@ -1,6 +1,16 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
-## Sessione 09/09/2026 (fork) — Batch 7: MUP libreria + testo + flag sezione, bug PDF, campo agenzia partner, provv. collaboratore, unisci doppioni
+## Sessione 09/09/2026 (fork) — Batch 8: Modelli PDF per sezione, generazione documenti, unione Documenti, Task collegabili
+
+- **5 modelli PDF predefiniti per sezione** (auto-seed da `/app/backend/assets/modelli_default/*.json`, idempotente): Scheda anagrafica cliente, Modulo RID/SEPA, Autocertificazione stato di famiglia (contraente); Documento di polizza (polizza); Documento di sinistro (sinistro). Corpi generati via AI (Claude) con segnaposto.
+- **Motore generazione documenti** (`routes/documenti_genera.py`): `GET /api/documenti/modelli-sezione?sezione=`, `POST /api/documenti/genera` (compila i segnaposto coi dati reali di contraente/polizza/sinistro, PDF reportlab, salva=true → allegato categoria `documento_generato`, opzione firma eSAW). Segnaposto speciale `{stato_famiglia}` espande i familiari del cliente (campo `parente_di`).
+- **Pulsante "Genera documento"** (`components/GeneraDocumentoButton.jsx`) in AnagraficaDetail (Documenti), PolizzaDetail (accanto a MUP), SinistroDetail (Documenti): seleziona modello → testo editabile → Anteprima/Firma/Genera e archivia. Verificato e2e (12/12 backend iter 83, frontend OK).
+- **Unione blocchi Documenti (AnagraficaDetail)**: caselle fisse (CI/patente/CF/…) + allegati caricati ora in UN unico blocco "Documenti" con griglia uniforme. Rimossi i doppioni "Visura camerale" e "Documenti identità" dalle cartelle allegati (i file confluiscono in "Altri documenti").
+- **CarichiMensili**: colonna Note non più troncata (va a capo).
+- **Task collegabili** (`routes/tasks.py`): campi `collegamento_tipo` (anagrafica|polizza|titolo) + `collegamento_id` + `collegamento_label`; `GET /api/tasks/collegati?entita_tipo=&entita_id=` (default solo attivi). Dialog Task con selettore "Collega a" + ricerca (cliente/polizza). Pannello "Attività aperte collegate" (`components/TaskCollegati.jsx`) in scheda cliente e polizza, con completamento rapido. Verificato via curl + screenshot.
+
+## Sessione 09/09/2026 (fork) — Batch 7
+: MUP libreria + testo + flag sezione, bug PDF, campo agenzia partner, provv. collaboratore, unisci doppioni
 
 - **MUP → libreria (Librerie → "Modelli MUP")**: nuova collezione `mup_modelli` tenant-scoped (backend `routes/mup.py`): CRUD `/librerie/mup-modelli`, seed 5 modelli predefiniti per ramo (Auto/RC Auto, Beni, Infortuni, Vita, Generica). Il MUP di polizza usa il modello con l'area corrispondente (o quello scelto nel selettore). Componente `ModelliMupSezione`/`ModelloMupDialog` in `Librerie.jsx`.
 - **MUP → modale editabile in polizza (era MANCANTE dal fork)**: `PolizzaDetail.jsx` ora renderizza `mup-dialog` con selettore modello, tabella garanzie con checkbox richiesta/proposta/confermata, Anteprima PDF, Genera+archivia (allegato categoria `mup`), Firma eSAW. Quadrato "MUP" aggiunto nella sezione Documenti.

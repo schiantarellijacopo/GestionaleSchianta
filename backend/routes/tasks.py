@@ -52,6 +52,9 @@ class TaskCreate(BaseModel):
     assegnatari: List[str] = []             # condivisa con altri operatori
     data_scadenza: Optional[str] = None     # YYYY-MM-DD
     priorita: Optional[str] = "normale"     # bassa | normale | alta
+    collegamento_tipo: Optional[str] = None   # anagrafica | polizza | titolo
+    collegamento_id: Optional[str] = None
+    collegamento_label: Optional[str] = None  # descrizione leggibile (nome cliente, n. polizza...)
 
 
 class TaskUpdate(BaseModel):
@@ -62,6 +65,9 @@ class TaskUpdate(BaseModel):
     data_scadenza: Optional[str] = None
     priorita: Optional[str] = None
     stato: Optional[str] = None             # todo | done
+    collegamento_tipo: Optional[str] = None
+    collegamento_id: Optional[str] = None
+    collegamento_label: Optional[str] = None
 
 
 @router.get("/operatori")
@@ -69,6 +75,21 @@ async def list_operatori(user: dict = Depends(require_user(*_ROLES))) -> list[di
     """Operatori dell'agenzia (per colonne bacheca + condivisione)."""
     flt = {"role": {"$in": list(_ROLES)}, **(tenant_filter(user) or {})}
     items = await db.users.find(flt, {"_id": 0, "id": 1, "name": 1, "role": 1, "email": 1}).sort("name", 1).to_list(500)
+    return items
+
+
+@router.get("/collegati")
+async def tasks_collegati(
+    entita_tipo: str,
+    entita_id: str,
+    include_done: bool = False,
+    user: dict = Depends(require_user(*_ROLES)),
+) -> list[dict]:
+    """Task collegati a un'entità (anagrafica/polizza/titolo). Di default solo attivi (non completati)."""
+    flt: dict = {"collegamento_tipo": entita_tipo, "collegamento_id": entita_id}
+    if not include_done:
+        flt["stato"] = {"$ne": "done"}
+    items = await db.tasks.find(flt, {"_id": 0}).sort([("data_scadenza", 1), ("created_at", -1)]).to_list(500)
     return items
 
 
@@ -109,6 +130,9 @@ async def create_task(body: TaskCreate, user: dict = Depends(require_user(*_ROLE
         "data_scadenza": body.data_scadenza,
         "priorita": body.priorita or "normale",
         "stato": "todo",
+        "collegamento_tipo": body.collegamento_tipo,
+        "collegamento_id": body.collegamento_id,
+        "collegamento_label": body.collegamento_label,
         "allegati": [],
         "creato_da": user["id"],
         "created_at": _now_iso(),

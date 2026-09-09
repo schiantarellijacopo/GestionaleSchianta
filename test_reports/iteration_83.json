@@ -1,0 +1,20 @@
+{
+  "summary": "Iter 83 — modelli PDF predefiniti per sezione + motore generazione documenti. Backend suite 12/12 passing (/app/backend/tests/test_iter83_documenti_genera.py): seed 5 modelli default (Scheda anagrafica cliente/Modulo RID/Autocertificazione stato di famiglia/Documento di polizza/Documento di sinistro) è idempotente; GET /api/documenti/modelli-sezione?sezione=X filtra correttamente per sezioni_visibili e ritorna 400 per sezioni non valide; POST /api/documenti/genera restituisce PDF binario per contraente/polizza/sinistro; salva=true archivia allegato (categoria documento_generato) → verificato create+delete round-trip; autocertificazione sul cliente 93b73085-100f-4c78-883a-e6cefea49c72 genera PDF non vuoto (>1500 byte). Frontend Playwright: (1) Anagrafica /anagrafiche/{id} tab Documenti mostra UN SOLO blocco 'doc-cards-toggle' + 'allegati-section' (union OK, prima erano due). (2) 'genera-doc-btn-contraente' apre 'genera-doc-dialog' con select 'genera-doc-modello' popolata con esattamente 3 modelli contraente: Autocertificazione stato di famiglia, Modulo RID / Mandato SEPA, Scheda anagrafica cliente. Selezionando l'autocertificazione il textarea 'genera-doc-corpo' viene popolato (1139 char) e contiene il placeholder {stato_famiglia}. (3) Polizza detail: 'genera-doc-btn-polizza' presente accanto a 'pol-mup-button' (regressione MUP OK); dropdown modelli mostra SOLO 'Documento di polizza'. (4) Sinistro detail: 'genera-doc-btn-sinistro' presente, dialog apre correttamente, dropdown mostra SOLO 'Documento di sinistro'. Filtro sezione lato UI coerente con backend.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter83_documenti_genera.py", "/app/test_reports/pytest/iter83.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_context() in routes/documenti_genera.py ritorna una tupla ma è annotato -> dict (annotation misleading, non funzionale).",
+    "Il salvataggio dell'allegato usa filename generico 'doc_{entita_id[:8]}.pdf' come storage filename ma nome_file mostrato usa il titolo — attualmente OK ma se il titolo contiene caratteri non ASCII conviene sanificarlo prima di metterlo nel Content-Disposition (attualmente reportlab-only, quindi impatto basso).",
+    "Ancora 2 console error 401 in fase di pre-auth (già segnalato iter 81/82)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter83_documenti_genera.py", "/app/test_reports/iteration_83.json"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (tutti i flussi richiesti)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "1 allegato di test TEST_iter83_doc creato via POST /api/documenti/genera (salva=true) e cancellato via DELETE /api/allegati/{id}. I 5 modelli default sono seed idempotenti e restano in DB (richiesto).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Endpoint chiave: GET /api/librerie/modelli?categoria=default_sezione (seed 5 idempotente), GET /api/documenti/modelli-sezione?sezione={contraente|polizza|sinistro}, POST /api/documenti/genera {entita_tipo, entita_id, template_id, salva, titolo}. Cliente con familiari collegati per test autocertificazione: 93b73085-100f-4c78-883a-e6cefea49c72. Data-testids frontend: genera-doc-btn-{contraente|polizza|sinistro}, genera-doc-dialog, genera-doc-modello, genera-doc-titolo, genera-doc-corpo, genera-doc-anteprima, genera-doc-firma (Namirial mocked, non testare), genera-doc-salva, doc-cards-toggle (blocco unico Documenti), allegati-section. Namirial eSignAnyWhere non configurato — atteso 'eSignAnyWhere non configurato' sul pulsante Firma.",
+  "rca of the issue": "N/A — nessun bug rilevato"
+}

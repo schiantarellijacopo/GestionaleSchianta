@@ -1,0 +1,8 @@
+{
+  "nome": "Autocertificazione stato di famiglia",
+  "tipo": "pdf_altro",
+  "categoria": "default_sezione",
+  "default": true,
+  "sezioni_visibili": ["contraente"],
+  "corpo": "AUTOCERTIFICAZIONE DI STATO DI FAMIGLIA\n(ai sensi dell'art. 46 del D.P.R. 445 del 28/12/2000)\n\nIl/La sottoscritto/a {cliente_nome} {cliente_cognome}\nnato/a a {cliente_luogo_nascita} il {cliente_data_nascita}\nresidente in {cliente_indirizzo} - {cliente_cap} {cliente_comune} ({cliente_provincia})\ncodice fiscale {cliente_codice_fiscale}\n\nconsapevole che in caso di dichiarazione mendace sarà punito ai sensi del Codice Penale secondo quanto prescritto dall'art. 76 del D.P.R. 445/2000 e che, qualora dal controllo effettuato emerga la non veridicità del contenuto di taluna delle dichiarazioni rese, decadrà dai benefici conseguenti al provvedimento eventualmente emanato sulla base della dichiarazione non veritiera (art. 75 D.P.R. 445/2000)\n\nDICHIARA\n\nche la propria famiglia, residente in {cliente_indirizzo} - {cliente_cap} {cliente_comune} ({cliente_provincia}), è così composta:\n\n{stato_famiglia}\n\nLuogo e data: {cliente_comune}, {data_oggi}\n\nFirma: _______________________________\n\nLa firma non deve essere autenticata. Alla presente dichiarazione va allegata fotocopia non autenticata di un documento di identità del sottoscrittore."
+}
