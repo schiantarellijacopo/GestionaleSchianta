@@ -9,7 +9,13 @@
 - **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
 - **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
 
+### 🗑️ Eliminazione definitiva tenant (09/09/2026)
+- Nuovo endpoint `POST /super-admin/agenzie/{tid}/elimina-definitiva` (body: `password_custode` + `conferma_ragione_sociale`): rimuove IRREVERSIBILMENTE dati + config tenant-scoped + TUTTI gli utenti (admin inclusi) + il record `tenants`. Crea un **backup gzip** in /app/backups prima di cancellare. Protezioni: solo super admin, password custode, match ragione sociale, blocco tenant di sistema (principale/demo/clean).
+- Frontend SuperAdminPanel: pulsante 🗑️ (Trash2) per riga (`sa-elimina-{id}`) → `EliminaDefinitivaDialog` a 3 step (digita ELIMINA + ragione sociale + password custode; testid `elimina-*`). Distinto dalla cancellazione soft (`DELETE /agenzie/{tid}` = solo marca "cancellata") e dal reset dati (🔥 svuota dati ma tiene tenant+admin).
+- Verificato via curl (403 pass errata / 400 nome errato / 200 + tenant sparito 404) e screenshot dialog.
+
 ### 🧩 Edit UI (09/09/2026) — AzioniPolizzaTab
+
 - **Motivo annullamento** → da input libero a **Select** con opzioni predefinite (Disdetta, Mancato pagamento, Sinistro, Vendita veicolo, Demolizione, Furto, Esportazione, Sostituzione, Passaggio ad altra compagnia, Recesso, Altro).
 - **Sospensione — limite di legge**: sotto "Riattivazione prevista" mostra nota "Massimo di legge: 10 mesi per annualità"; con le due date calcola durata (mesi) + residuo su 10 e avvisa se si superano i 10 mesi (`sosp-durata-info`). Calcolo client-side sulle date correnti (non traccia ancora lo storico cumulativo di annualità).
 

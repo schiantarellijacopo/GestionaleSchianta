@@ -791,6 +791,118 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
     }
 
 
+class EliminaDefinitivaBody(BaseModel):
+    password_custode: str
+    conferma_ragione_sociale: str
+
+
+@router.post("/agenzie/{tid}/elimina-definitiva")
+async def elimina_definitiva_tenant(tid: str, body: EliminaDefinitivaBody, request: Request,
+                                    user=Depends(require_user("admin"))) -> dict:
+    """🗑️ ELIMINAZIONE DEFINITIVA e IRREVERSIBILE di un tenant.
+
+    Rimuove: tutti i dati operativi, la configurazione tenant-scoped, TUTTI gli
+    utenti (admin inclusi) e il record del tenant stesso (sparisce dalla lista).
+    Prima crea un backup JSON gzip in /app/backups. Richiede password custode +
+    conferma della ragione sociale (doppia protezione, come il reset).
+    """
+    _ensure_super_admin(user)
+
+    if not _RESET_CUSTODE_PASSWORD or body.password_custode != _RESET_CUSTODE_PASSWORD:
+        raise HTTPException(status_code=403, detail="Password custode errata")
+
+    if tid in (TENANT_PRINCIPALE_ID, TENANT_DEMO_ID, TENANT_CLEAN_ID):
+        raise HTTPException(status_code=400, detail="Tenant di sistema non eliminabile")
+
+    tenant = await raw_db.tenants.find_one({"id": tid}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant non trovato")
+
+    if body.conferma_ragione_sociale.strip().lower() != (tenant.get("ragione_sociale") or "").strip().lower():
+        raise HTTPException(status_code=400, detail="Ragione sociale di conferma non corrisponde")
+
+    # ---- Backup completo (dati + tutti gli utenti + record tenant) ----
+    import gzip
+    import json as _json
+    import os as _os
+    from datetime import datetime as _dt
+    from bson import ObjectId
+
+    def _json_default(o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, _dt):
+            return o.isoformat()
+        return str(o)
+
+    backup_dir = "/app/backups"
+    _os.makedirs(backup_dir, exist_ok=True)
+    timestamp = _dt.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_name = "".join(c if c.isalnum() else "_" for c in (tenant.get("ragione_sociale") or "tenant"))[:40]
+    backup_filename = f"elimina_{safe_name}_{tid[:8]}_{timestamp}.json.gz"
+    backup_path = _os.path.join(backup_dir, backup_filename)
+    backup_data: dict = {
+        "meta": {"tenant_id": tid, "ragione_sociale": tenant.get("ragione_sociale"),
+                 "timestamp": _now_iso(), "eseguito_da": user.get("email") or user.get("id"),
+                 "tipo": "elimina_definitiva"},
+        "tenant": tenant,
+        "collections": {},
+    }
+    for coll_name in _RESET_COLLECTIONS:
+        try:
+            docs = await raw_db[coll_name].find({"agenzia_tenant_id": tid}, {"_id": 0}).to_list(100000)
+            if docs:
+                backup_data["collections"][coll_name] = docs
+        except Exception:
+            pass
+    users_bak = await raw_db.users.find({"agenzia_tenant_id": tid, "role": {"$ne": "super_admin"}}, {"_id": 0}).to_list(10000)
+    if users_bak:
+        backup_data["collections"]["users_deleted"] = users_bak
+    try:
+        with gzip.open(backup_path, "wt", encoding="utf-8") as gz:
+            _json.dump(backup_data, gz, ensure_ascii=False, default=_json_default)
+        backup_size_kb = round(_os.path.getsize(backup_path) / 1024, 1)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup fallito, eliminazione annullata: {e}")
+
+    # ---- DELETE definitivo ----
+    dettaglio: dict[str, int] = {}
+    for coll_name in _RESET_COLLECTIONS:
+        try:
+            res = await raw_db[coll_name].delete_many({"agenzia_tenant_id": tid})
+            if res.deleted_count > 0:
+                dettaglio[coll_name] = res.deleted_count
+        except Exception as e:
+            dettaglio[f"{coll_name}_err"] = str(e)[:100]
+    # Config tenant-scoped extra + utenti (TUTTI, admin inclusi) + record tenant
+    for extra_coll in ("azienda_config", "conti", "compagnie", "agenzie", "tipi_pagamento", "modelli", "mup_modelli"):
+        try:
+            res = await raw_db[extra_coll].delete_many({"agenzia_tenant_id": tid})
+            if res.deleted_count > 0:
+                dettaglio[extra_coll] = res.deleted_count
+        except Exception:
+            pass
+    res_u = await raw_db.users.delete_many({"agenzia_tenant_id": tid, "role": {"$ne": "super_admin"}})
+    if res_u.deleted_count > 0:
+        dettaglio["users"] = res_u.deleted_count
+    await raw_db.tenants.delete_one({"id": tid})
+    dettaglio["tenant"] = 1
+
+    await log_action(user=user, action_type="TENANT_DELETED_PERMANENTLY",
+                     target_agency_id=tid, target_agency_name=tenant.get("ragione_sociale"),
+                     details=f"Eliminazione definitiva: {sum(v for v in dettaglio.values() if isinstance(v, int))} record. Backup: {backup_filename} ({backup_size_kb} KB)",
+                     request=request)
+
+    return {
+        "ok": True,
+        "tenant": tenant.get("ragione_sociale"),
+        "totale_record_eliminati": sum(v for v in dettaglio.values() if isinstance(v, int)),
+        "dettaglio": dettaglio,
+        "backup": {"filename": backup_filename, "size_kb": backup_size_kb,
+                   "download_url": f"/api/super-admin/backups/{backup_filename}"},
+    }
+
+
 @router.get("/backups")
 async def list_backups(user=Depends(require_user("admin"))) -> list[dict]:
     """Lista tutti i backup di reset disponibili sul server."""

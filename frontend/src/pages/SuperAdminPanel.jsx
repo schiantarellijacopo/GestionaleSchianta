@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked, Coins, ListChecks } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked, Coins, ListChecks, Trash2 } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -108,6 +108,7 @@ function AgenzieTab() {
     const [showNew, setShowNew] = useState(false);
     const [editAgenzia, setEditAgenzia] = useState(null);
     const [resetAgenzia, setResetAgenzia] = useState(null);
+    const [eliminaAgenzia, setEliminaAgenzia] = useState(null);
     const [dominiAgenzia, setDominiAgenzia] = useState(null);
     const [creditoAgenzia, setCreditoAgenzia] = useState(null);
     const [showListino, setShowListino] = useState(false);
@@ -266,6 +267,12 @@ function AgenzieTab() {
                                         data-testid={`sa-estendi-${a.id}`}>
                                         <RotateCcw size={14} />
                                     </button>
+                                    <button onClick={() => setEliminaAgenzia(a)}
+                                        title="🗑️ Elimina definitivamente"
+                                        className="p-1 text-rose-700 hover:bg-rose-100 rounded"
+                                        data-testid={`sa-elimina-${a.id}`}>
+                                        <Trash2 size={14} />
+                                    </button>
                                 </td>
                             </tr>
                         ))}
@@ -275,6 +282,7 @@ function AgenzieTab() {
             {showNew && <NuovaAgenziaDialog onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); load(); }} />}
             {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
             {resetAgenzia && <ResetDatiDialog agenzia={resetAgenzia} onClose={() => setResetAgenzia(null)} onDone={() => { setResetAgenzia(null); load(); }} />}
+            {eliminaAgenzia && <EliminaDefinitivaDialog agenzia={eliminaAgenzia} onClose={() => setEliminaAgenzia(null)} onDone={() => { setEliminaAgenzia(null); load(); }} />}
             {dominiAgenzia && <DominiCredenzialiDialog agenzia={dominiAgenzia} onClose={() => { setDominiAgenzia(null); load(); }} />}
             {creditoAgenzia && <CreditoOpenApiDialog agenzia={creditoAgenzia} onSaved={load} onClose={() => { setCreditoAgenzia(null); load(); }} />}
             {showListino && <ListinoOpenApiDialog onClose={() => setShowListino(false)} />}
@@ -801,6 +809,142 @@ function ResetDatiDialog({ agenzia, onClose, onDone }) {
         </div>
     );
 }
+
+
+function EliminaDefinitivaDialog({ agenzia, onClose, onDone }) {
+    const [step, setStep] = useState(1);
+    const [confirmText, setConfirmText] = useState("");
+    const [conferma, setConferma] = useState("");
+    const [password, setPassword] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [result, setResult] = useState(null);
+
+    const canProceed = confirmText === "ELIMINA" && password.length > 0 && conferma === agenzia.ragione_sociale;
+
+    const doElimina = async () => {
+        if (!canProceed) return;
+        setSaving(true);
+        try {
+            const r = await api.post(`/super-admin/agenzie/${agenzia.id}/elimina-definitiva`, {
+                password_custode: password,
+                conferma_ragione_sociale: conferma,
+            });
+            setResult(r.data);
+            setStep(3);
+            toast.success(`Agenzia eliminata: ${r.data.totale_record_eliminati} record rimossi`);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Eliminazione fallita");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={step !== 3 ? undefined : onClose}>
+            <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+                {step === 1 && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center">
+                                <Trash2 size={24} className="text-rose-700" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-rose-900">Elimina definitivamente</h3>
+                                <p className="text-xs text-slate-500">Operazione IRREVERSIBILE</p>
+                            </div>
+                        </div>
+                        <div className="bg-rose-50 border border-rose-200 rounded-md p-3 mb-4">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                                <div className="text-xs text-rose-800 space-y-2">
+                                    <p>Stai per <b>ELIMINARE PER SEMPRE</b> l'agenzia:</p>
+                                    <p className="font-semibold text-sm">🏢 {agenzia.ragione_sociale}</p>
+                                    <p>Verranno rimossi in modo permanente:</p>
+                                    <ul className="list-disc pl-4 space-y-0.5">
+                                        <li>Tutti i dati (anagrafiche, polizze, titoli, sinistri, movimenti…)</li>
+                                        <li>La configurazione (conti, compagnie, agenzie, modelli)</li>
+                                        <li><b>TUTTI gli utenti</b> del tenant (admin inclusi)</li>
+                                        <li>Il record dell'agenzia (sparisce dalla lista)</li>
+                                    </ul>
+                                    <p className="mt-2">Viene creato automaticamente un <b>backup</b> scaricabile prima dell'eliminazione.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button onClick={onClose} className="px-4 py-2 text-sm border border-slate-300 rounded-md hover:bg-slate-50" data-testid="elimina-cancel-1">Annulla</button>
+                            <button onClick={() => setStep(2)} className="px-4 py-2 text-sm bg-rose-700 hover:bg-rose-800 text-white rounded-md font-semibold" data-testid="elimina-continue">
+                                Ho capito, continua →
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {step === 2 && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                            <Trash2 size={20} className="text-rose-700" />
+                            <h3 className="text-lg font-bold">Conferma eliminazione — {agenzia.ragione_sociale}</h3>
+                        </div>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                                    1️⃣ Digita <span className="font-mono bg-slate-100 px-1.5">ELIMINA</span> per confermare
+                                </label>
+                                <input type="text" value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+                                    placeholder="ELIMINA" autoComplete="off"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md font-mono"
+                                    data-testid="elimina-confirm-text" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">
+                                    2️⃣ Digita la ragione sociale <span className="font-mono bg-slate-100 px-1.5">{agenzia.ragione_sociale}</span>
+                                </label>
+                                <input type="text" value={conferma} onChange={(e) => setConferma(e.target.value)}
+                                    autoComplete="off"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md"
+                                    data-testid="elimina-confirm-name" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 block mb-1">3️⃣ Password custode</label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                                    autoComplete="new-password"
+                                    className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md"
+                                    data-testid="elimina-password" />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 mt-6">
+                            <button onClick={() => setStep(1)} className="px-4 py-2 text-sm border border-slate-300 rounded-md" data-testid="elimina-back">← Indietro</button>
+                            <button onClick={doElimina} disabled={!canProceed || saving}
+                                className="px-4 py-2 text-sm bg-rose-700 hover:bg-rose-800 text-white rounded-md font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                                data-testid="elimina-execute">
+                                {saving ? <><Loader2 size={14} className="animate-spin inline mr-1" /> Eliminazione…</> : "🗑️ ELIMINA DEFINITIVAMENTE"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {step === 3 && result && (
+                    <div className="p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                                <Check size={24} className="text-emerald-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-emerald-900">Agenzia eliminata</h3>
+                                <p className="text-xs text-slate-500">{result.totale_record_eliminati} record rimossi</p>
+                            </div>
+                        </div>
+                        {result.backup?.download_url && (
+                            <a href={result.backup.download_url} className="text-xs text-sky-600 underline block mb-3" data-testid="elimina-backup-link">
+                                ⬇ Scarica backup ({result.backup.size_kb} KB)
+                            </a>
+                        )}
+                        <div className="flex justify-end">
+                            <button onClick={onDone} className="px-4 py-2 text-sm bg-slate-800 hover:bg-slate-900 text-white rounded-md" data-testid="elimina-close">Chiudi</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 
 
 function AbbonamentiTab() {
