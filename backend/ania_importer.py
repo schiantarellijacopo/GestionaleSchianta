@@ -317,7 +317,9 @@ async def _build_anagrafica_payload(db, row: dict,
                                     tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                                     import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> dict:
     cf = row.get("codice_fiscale") or None
-    tipo = "persona_giuridica" if row.get("partita_iva") and not cf else "persona_fisica"
+    # Regola: ogni anagrafica con Partita IVA è una persona giuridica (azienda),
+    # a prescindere dalla presenza del codice fiscale.
+    tipo = "persona_giuridica" if (row.get("partita_iva") or "").strip() else "persona_fisica"
     sesso_raw = (row.get("sesso_share") or "").upper()
     return {
         "tipo": tipo,
