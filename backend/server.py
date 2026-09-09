@@ -933,8 +933,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     collab_ids = list({pol_index[t["polizza_id"]].get("collaboratore_id") for t in titoli if t["polizza_id"] in pol_index and pol_index[t["polizza_id"]].get("collaboratore_id")})
     contr_map = {}
     if contr_ids:
-        async for c in db.anagrafiche.find({"id": {"$in": contr_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
-            contr_map[c["id"]] = c["ragione_sociale"]
+        async for c in db.anagrafiche.find({"id": {"$in": contr_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1}):
+            contr_map[c["id"]] = c.get("ragione_sociale") or f"{c.get('cognome', '')} {c.get('nome', '')}".strip() or None
     collab_map = {}
     if collab_ids:
         async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
