@@ -9,7 +9,13 @@
 - **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
 - **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
 
-### 📥 Import Omnia — Passo 1/2 + collaboratori + titoli storici (09/09/2026)
+### ⏳ Import in background (09/09/2026) — fix timeout 520 su ZIP grandi
+- Causa: l'import ZIP Omnia girava in un'unica richiesta sincrona → su file grandi superava il timeout del gateway (errore Cloudflare 520). Ottimizzata anche la regola stato (da N+1 a 4 query aggregate).
+- **Soluzione job asincrono** (server.py): nuovo `POST /api/import/omnia-async` → crea un job in `import_jobs`, lancia `asyncio.create_task(_run_ania_job)` (il contextvar tenant viene copiato nel task → isolamento ok) e ritorna subito `{job_id}`. `GET /api/import/job/{job_id}` per lo stato (running/done/error + result/error). Il vecchio `/import/omnia` sincrono resta per compatibilità.
+- Frontend (Importazione.jsx, ImportOmnia): l'upload usa l'endpoint async e fa **polling** ogni 2,5s fino a done/error, mostrando il risultato. Verificato ciclo job end-to-end (running→done).
+- **TODO (richiesto dall'utente)**: estendere lo stesso pattern job async agli ALTRI import (Metodo Pagamento, Libro Matricola, Anagrafiche Excel) — pattern riutilizzabile già pronto.
+
+
 - **Passo 1 — regola stato polizza** (`ania_importer._applica_regola_stato_da_titoli`, chiamata dopo i titoli): per ogni polizza importata, se l'ultimo titolo pagato ha `data_incasso ≥ 2025-01-01` → **attiva**; altrimenti → **annullata SOLO se la compagnia è CATTOLICA** (le altre restano come da tracciato Omnia).
 - **Titoli con data pagamento → incassato**: in `_processa_titoli`, se il titolo ha `dt_pag_cliente` viene forzato `stato="incassato"` così finisce nei **Titoli storici** (idem nel Passo 2 se c'è DataPagam).
 - **Collaboratori — unificazione fuzzy** (`_processa_collaboratori`): i collaboratori del flusso con nome simile a un collaboratore/utente già esistente (match su token del nome, ordine indifferente + subset ≥2 token) vengono **agganciati allo stesso utente** invece di creare doppioni/stub. Helper `_collab_tokens`.

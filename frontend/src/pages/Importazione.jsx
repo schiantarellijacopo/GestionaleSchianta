@@ -182,11 +182,27 @@ function ImportOmnia({ onOpenWizard }) {
         const fd = new FormData();
         fd.append("file", file);
         try {
-            const res = await api.post("/import/omnia", fd, {
+            const start = await api.post("/import/omnia-async", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
-            setLastLog(res.data);
-            toast.success(`Import completato in ${(res.data.durata_ms / 1000).toFixed(1)}s`);
+            const jobId = start.data.job_id;
+            toast.info("Import avviato in background… attendere.");
+            // Polling stato job (fino a done/error)
+            let done = false;
+            while (!done) {
+                await new Promise((r) => setTimeout(r, 2500));
+                const st = await api.get(`/import/job/${jobId}`);
+                const s = st.data.status;
+                if (s === "done") {
+                    setLastLog(st.data.result);
+                    const ms = st.data.result?.durata_ms || 0;
+                    toast.success(`Import completato${ms ? ` in ${(ms / 1000).toFixed(1)}s` : ""}`);
+                    done = true;
+                } else if (s === "error") {
+                    toast.error("Errore import: " + (st.data.error || "sconosciuto"));
+                    done = true;
+                }
+            }
             setFile(null);
             if (inputRef.current) inputRef.current.value = "";
         } catch (e) {

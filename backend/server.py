@@ -6103,6 +6103,51 @@ async def import_omnia(file: UploadFile = File(...),
     return await import_ania(file, user)
 
 
+async def _run_ania_job(job_id: str, contents: bytes, filename: str, user: dict):
+    """Esegue l'import ZIP in background aggiornando lo stato in import_jobs."""
+    try:
+        log = await ania_importer.importa_zip(db, contents, filename, user)
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "done", "result": log.model_dump(), "finished_at": _now_iso()}})
+        await log_attivita(user, "import", "ania", log.id, f"Import file {filename}",
+                           payload=log.record_types_processati)
+        if log.sinistri_creati > 0:
+            from alert_dispatcher import safe_dispatch
+            await safe_dispatch("sinistro.importato_ania", {
+                "entita_tipo": "import", "entita_id": log.id, "nome_file": filename,
+                "n_sinistri": log.sinistri_creati,
+                "n_polizze": log.polizze_create + log.polizze_aggiornate, "link": "/importazioni"})
+    except Exception as e:
+        import traceback
+        logging.error("Import ANIA job %s fallito: %s", job_id, traceback.format_exc())
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "error", "error": str(e)[:800], "finished_at": _now_iso()}})
+
+
+@api.post("/import/omnia-async")
+async def import_omnia_async(file: UploadFile = File(...),
+                             user=Depends(require_user("admin", "collaboratore"))):
+    """Avvia l'import ZIP in BACKGROUND (per file grandi, evita timeout gateway).
+    Ritorna subito un job_id; lo stato si controlla con GET /import/job/{job_id}."""
+    contents = await file.read()
+    import asyncio as _asyncio
+    job_id = str(uuid.uuid4())
+    await db.import_jobs.insert_one({
+        "id": job_id, "tipo": "omnia", "filename": file.filename,
+        "status": "running", "created_at": _now_iso()})
+    _asyncio.create_task(_run_ania_job(job_id, contents, file.filename, user))
+    return {"job_id": job_id, "status": "running"}
+
+
+@api.get("/import/job/{job_id}")
+async def import_job_status(job_id: str,
+                            user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    j = await db.import_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job non trovato")
+    return j
+
+
 # Mapping per flussi (compagnia/ramo/collaboratore/prodotto)
 @api.get("/import/mappings")
 async def list_mappings(
