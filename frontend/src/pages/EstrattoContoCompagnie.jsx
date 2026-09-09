@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye } from "lucide-react";
+import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye, Handshake } from "lucide-react";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
@@ -67,6 +67,7 @@ export default function EstrattoContoCompagnie() {
                             <tr>
                                 <th>Codice</th>
                                 <th>Compagnia</th>
+                                <th>Agenzia partner</th>
                                 <th>Trattiene provv.</th>
                                 <th className="text-right">Incassato dai clienti €</th>
                                 <th className="text-right">Versato alla compagnia €</th>
@@ -79,6 +80,16 @@ export default function EstrattoContoCompagnie() {
                                 <tr key={r.compagnia_id} data-testid={`ec-row-${r.compagnia_id}`}>
                                     <td className="num text-xs">{r.codice}</td>
                                     <td className="font-medium">{r.ragione_sociale}</td>
+                                    <td className="text-xs" data-testid={`ec-partner-${r.compagnia_id}`}>
+                                        {r.tipo_mandato === "collaborazione" ? (
+                                            <span className="inline-flex items-center gap-1 text-violet-700">
+                                                <Handshake size={12} className="shrink-0" />
+                                                {r.agenzia_partner_nome || <span className="text-amber-600">partner non impostato</span>}
+                                            </span>
+                                        ) : (
+                                            <span className="text-slate-400">Diretto (compagnia)</span>
+                                        )}
+                                    </td>
                                     <td>{r.trattiene_provvigioni ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
                                     <td className="num text-right">{fmtEur(r.totale_incassato)}</td>
                                     <td className="num text-right text-slate-600">{fmtEur(r.totale_versato)}</td>

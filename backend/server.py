@@ -1276,15 +1276,24 @@ async def saldi_cassa_compagnie(
 ):
     """Saldo da versare/da incassare per ciascuna compagnia (tutti i periodi)."""
     compagnie = await db.compagnie.find({}, {"_id": 0}).to_list(500)
+    # mappa agenzie partner (id -> ragione sociale) per sapere "a chi versare"
+    age_map: dict[str, str] = {}
+    async for a in db.agenzie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+        age_map[a["id"]] = a.get("ragione_sociale")
     risultati = []
     for c in compagnie:
         try:
             data = await _compagnia_estratto_data(c["id"], None, None)
+            tipo_mandato = c.get("tipo_mandato", "diretto")
+            age_pid = c.get("agenzia_partner_id")
             risultati.append({
                 "compagnia_id": c["id"],
                 "codice": c.get("codice"),
                 "ragione_sociale": c.get("ragione_sociale"),
                 "trattiene_provvigioni": c.get("trattiene_provvigioni", True),
+                "tipo_mandato": tipo_mandato,
+                "agenzia_partner_id": age_pid if tipo_mandato == "collaborazione" else None,
+                "agenzia_partner_nome": age_map.get(age_pid) if tipo_mandato == "collaborazione" else None,
                 "totale_incassato": data["totale_dare"],
                 "totale_versato": data["totale_avere"],
                 "saldo_da_versare": data["saldo"],
@@ -5411,6 +5420,10 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
     """
     out = []
     compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).to_list(500)
+    # mappa agenzie partner (id -> ragione sociale) per sapere "a chi versare"
+    age_map: dict[str, str] = {}
+    async for a in db.agenzie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+        age_map[a["id"]] = a.get("ragione_sociale")
     for c in compagnie:
         cid = c["id"]
         trattiene = c.get("trattiene_provvigioni", True)
@@ -5471,6 +5484,9 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             "compagnia_id": cid,
             "compagnia": c["ragione_sociale"],
             "trattiene_provvigioni": trattiene,
+            "tipo_mandato": c.get("tipo_mandato", "diretto"),
+            "agenzia_partner_id": c.get("agenzia_partner_id") if c.get("tipo_mandato") == "collaborazione" else None,
+            "agenzia_partner_nome": age_map.get(c.get("agenzia_partner_id")) if c.get("tipo_mandato") == "collaborazione" else None,
             "incassi_lordi": round(incassi, 2),
             "provvigioni": round(provv, 2),
             "saldo_dovuto": round(saldo_dovuto, 2),

@@ -486,6 +486,7 @@ export default function BrogliaccioTab({ refreshKey }) {
                         <thead>
                             <tr className="bg-slate-900 text-white">
                                 <th className="text-left px-3 py-2">Compagnia</th>
+                                <th className="text-left px-3 py-2">Agenzia partner</th>
                                 <th className="text-center px-3 py-2">Regime</th>
                                 <th className="text-right px-3 py-2">Saldo cassa attuale</th>
                             </tr>
@@ -494,6 +495,11 @@ export default function BrogliaccioTab({ refreshKey }) {
                             {b.saldi_compagnie.map((s) => (
                                 <tr key={s.compagnia_id} data-testid={`saldo-comp-${s.compagnia_id}`}>
                                     <td className="px-3 py-1.5 font-medium">{s.compagnia}</td>
+                                    <td className="px-3 py-1.5">
+                                        {s.tipo_mandato === "collaborazione"
+                                            ? <span className="text-violet-700 font-medium">{s.agenzia_partner_nome || <span className="text-amber-600">partner non impostato</span>}</span>
+                                            : <span className="text-slate-400">Diretto (compagnia)</span>}
+                                    </td>
                                     <td className="text-center text-[10px]">
                                         {s.trattiene_provvigioni
                                             ? <span className="badge badge-success">Tratteniamo provv.</span>
