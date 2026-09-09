@@ -501,13 +501,21 @@ async def _auto_create_stub_user(db, operatore_codice: str, label: str) -> Optio
     if not operatore_codice:
         return None
     codice = operatore_codice.strip()
-    # slug email placeholder
-    slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
-    email = f"operatore.{slug}@import-auto.local"
-    # dedup difensivo: se esiste già uno stub con quell'email, riusalo
-    existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+    from database import get_current_user
+    from tenant import user_tenant_id
+    tid = user_tenant_id(get_current_user())
+    # dedup PER TENANT: gli stub sono per-agenzia, non globali.
+    existing = await db.users.find_one(
+        {"auto_created_from_codice": codice, "agenzia_tenant_id": tid},
+        {"_id": 0, "id": 1},
+    )
     if existing:
         return existing["id"]
+    # slug email placeholder — include il tenant per non collidere con l'indice
+    # unique su email quando lo stesso codice esiste in più agenzie.
+    slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
+    tid_slug = (tid or "notenant").replace("-", "")[:12]
+    email = f"operatore.{slug}.{tid_slug}@import-auto.local"
     # Nome leggibile: label dal flusso o "Operatore <codice>"
     nome_display = (label or "").strip() or f"Operatore {codice}"
     # password_hash con valore fittizio non usabile (l'utente non può loggare
@@ -525,11 +533,7 @@ async def _auto_create_stub_user(db, operatore_codice: str, label: str) -> Optio
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
     }
-    # users NON è tenant-scoped dal wrapper: assegna esplicitamente il tenant
-    # corrente così il collaboratore compare nella lista della sua agenzia.
-    from database import get_current_user
-    from tenant import user_tenant_id
-    tid = user_tenant_id(get_current_user())
+    # users NON è tenant-scoped dal wrapper: assegna esplicitamente il tenant.
     if tid:
         doc["agenzia_tenant_id"] = tid
     await db.users.insert_one(doc)

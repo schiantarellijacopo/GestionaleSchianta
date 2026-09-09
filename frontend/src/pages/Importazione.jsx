@@ -200,41 +200,65 @@ function ImportOmnia({ onOpenWizard }) {
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [lastLog, setLastLog] = useState(null);
+    const [jobError, setJobError] = useState(null);
     const inputRef = useRef(null);
+
+    const pollJob = async (jobId) => {
+        setUploading(true);
+        setJobError(null);
+        localStorage.setItem("omnia_job_id", jobId);
+        try {
+            let done = false;
+            while (!done) {
+                await new Promise((r) => setTimeout(r, 2500));
+                let st;
+                try {
+                    st = await api.get(`/import/job/${jobId}`);
+                } catch (e) {
+                    setJobError("Impossibile leggere lo stato del job (riprova a ricaricare la pagina).");
+                    break;
+                }
+                const s = st.data.status;
+                if (s === "done") {
+                    setLastLog(st.data.result);
+                    const ms = st.data.result?.durata_ms || 0;
+                    toast.success(`Import OMNIA completato${ms ? ` in ${(ms / 1000).toFixed(1)}s` : ""}`);
+                    done = true;
+                } else if (s === "error") {
+                    setJobError(st.data.error || "sconosciuto");
+                    toast.error("Errore import: " + (st.data.error || "sconosciuto"));
+                    done = true;
+                }
+            }
+        } finally {
+            localStorage.removeItem("omnia_job_id");
+            setUploading(false);
+        }
+    };
+
+    // Riprende il polling se la pagina viene ricaricata durante un import lungo
+    useEffect(() => {
+        const jid = localStorage.getItem("omnia_job_id");
+        if (jid) pollJob(jid);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const startImport = async () => {
         if (!file) { toast.error("Seleziona prima un file ZIP"); return; }
-        setUploading(true);
+        setLastLog(null);
+        setJobError(null);
         const fd = new FormData();
         fd.append("file", file);
         try {
             const start = await api.post("/import/omnia-async", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
-            const jobId = start.data.job_id;
             toast.info("Import avviato in background… attendere.");
-            // Polling stato job (fino a done/error)
-            let done = false;
-            while (!done) {
-                await new Promise((r) => setTimeout(r, 2500));
-                const st = await api.get(`/import/job/${jobId}`);
-                const s = st.data.status;
-                if (s === "done") {
-                    setLastLog(st.data.result);
-                    const ms = st.data.result?.durata_ms || 0;
-                    toast.success(`Import completato${ms ? ` in ${(ms / 1000).toFixed(1)}s` : ""}`);
-                    done = true;
-                } else if (s === "error") {
-                    toast.error("Errore import: " + (st.data.error || "sconosciuto"));
-                    done = true;
-                }
-            }
             setFile(null);
             if (inputRef.current) inputRef.current.value = "";
+            pollJob(start.data.job_id);
         } catch (e) {
             toast.error("Errore import: " + (e.response?.data?.detail || e.message));
-        } finally {
-            setUploading(false);
         }
     };
 
@@ -277,6 +301,33 @@ function ImportOmnia({ onOpenWizard }) {
                     </Button>
                 </div>
             </Card>
+
+            {uploading && (
+                <Card className="p-4 mb-4 border-l-4 border-l-sky-500 bg-sky-50/60 flex items-center gap-3" data-testid="omnia-running-banner">
+                    <div className="h-4 w-4 rounded-full border-2 border-sky-600 border-t-transparent animate-spin" />
+                    <div className="text-sm text-sky-900">
+                        <b>Importazione OMNIA in corso…</b> Non chiudere questa pagina. Il messaggio di completamento comparirà qui automaticamente al termine.
+                    </div>
+                </Card>
+            )}
+
+            {!uploading && jobError && (
+                <Card className="p-4 mb-4 border-l-4 border-l-red-500 bg-red-50/60" data-testid="omnia-error-banner">
+                    <div className="text-sm text-red-800">
+                        <b>Import non riuscito.</b> {jobError}
+                    </div>
+                </Card>
+            )}
+
+            {!uploading && lastLog && (
+                <Card className="p-4 mb-4 border-l-4 border-l-emerald-500 bg-emerald-50/60 flex items-center gap-2" data-testid="omnia-done-banner">
+                    <CheckCircle2 size={18} className="text-emerald-600" />
+                    <div className="text-sm text-emerald-900 font-medium">
+                        ✅ Importazione OMNIA completata — vedi il report dettagliato qui sotto.
+                    </div>
+                </Card>
+            )}
+
             {lastLog && <ImportReport log={lastLog} onOpenWizard={onOpenWizard} />}
         </div>
     );
