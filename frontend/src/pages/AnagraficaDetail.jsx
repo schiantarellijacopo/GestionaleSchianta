@@ -930,12 +930,44 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                             <div className="space-y-3 py-2">
                                 <div>
                                     <Label>Anagrafica collegata</Label>
-                                    <Select value={target} onValueChange={setTarget}>
-                                        <SelectTrigger data-testid="rel-target"><SelectValue placeholder="Seleziona..." /></SelectTrigger>
-                                        <SelectContent>
-                                            {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.ragione_sociale}</SelectItem>)}
-                                        </SelectContent>
-                                    </Select>
+                                    {target ? (
+                                        <div className="flex items-center justify-between border border-slate-300 rounded-md px-3 py-2 text-sm" data-testid="rel-target-selected">
+                                            <span className="font-medium truncate">{options.find((o) => o.id === target)?.ragione_sociale || "Anagrafica selezionata"}</span>
+                                            <button type="button" onClick={() => { setTarget(""); setQ(""); }} className="text-slate-400 hover:text-rose-600 ml-2" data-testid="rel-target-clear">✕</button>
+                                        </div>
+                                    ) : (
+                                        <div className="relative">
+                                            <input
+                                                value={q}
+                                                onChange={(e) => { setQ(e.target.value); setShowList(true); }}
+                                                onFocus={() => setShowList(true)}
+                                                placeholder="Digita nome, CF o P.IVA…"
+                                                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                                                data-testid="rel-target-search"
+                                            />
+                                            {showList && q.trim().length >= 1 && (
+                                                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-auto bg-white border border-slate-200 rounded-md shadow-lg" data-testid="rel-target-list">
+                                                    {(() => {
+                                                        const term = q.trim().toLowerCase();
+                                                        const filtered = options.filter((o) => (`${o.ragione_sociale || ""} ${o.codice_fiscale || ""} ${o.partita_iva || ""}`).toLowerCase().includes(term));
+                                                        if (filtered.length === 0) return <div className="px-3 py-2 text-xs text-slate-400">Nessun risultato</div>;
+                                                        return filtered.slice(0, 50).map((o) => (
+                                                            <button
+                                                                key={o.id}
+                                                                type="button"
+                                                                onClick={() => { setTarget(o.id); setShowList(false); setQ(""); }}
+                                                                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-sky-50"
+                                                                data-testid={`rel-opt-${o.id}`}
+                                                            >
+                                                                <span className="font-medium">{o.ragione_sociale}</span>
+                                                                {(o.codice_fiscale || o.partita_iva) && <span className="text-[10px] text-slate-400 ml-2">{o.codice_fiscale || o.partita_iva}</span>}
+                                                            </button>
+                                                        ));
+                                                    })()}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
