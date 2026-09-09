@@ -1206,3 +1206,128 @@ async def _geocode_anagrafiche(ids: List[str]):
         except Exception:
             pass
         await asyncio.sleep(1.1)
+
+
+
+# ==========================================================================
+# IMPORT "METODO DI PAGAMENTO" (secondo file) — rettifica tipo pagamento +
+# data copertura sui TITOLI già importati (match per numero polizza + data)
+# e imposta il metodo pagamento della POLIZZA dall'ultima rata.
+# ==========================================================================
+def _mp_norm_num(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\D", "", s or "")
+
+
+def _mp_parse_date(v: str):
+    v = (v or "").strip()
+    if not v:
+        return None
+    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            d = datetime.strptime(v, fmt)
+            if d.year < 100:
+                d = d.replace(year=2000 + d.year)
+            return d.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _mp_categoria(t: str) -> str:
+    t = (t or "").upper()
+    if any(k in t for k in ("RID", "SDD", "SEPA", "ADDEB")):
+        return "sepa"
+    if "BONIF" in t:
+        return "bonifico"
+    if "CONTAN" in t:
+        return "contanti"
+    if "ASSEG" in t:
+        return "assegno"
+    if "CARTA" in t or "POS" in t:
+        return "carta"
+    return "altro"
+
+
+@router.post("/metodo-pagamento")
+async def import_metodo_pagamento(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+):
+    """Secondo file (CSV ';'): rettifica su ogni titolo `mezzo_pagamento` (testo
+    originale) + `data_copertura` (colonna Copertura) e imposta su ogni polizza
+    `metodo_pagamento` (categoria) e `metodo_pagamento_desc` (testo) dell'ultima rata."""
+    content = await file.read()
+    import csv as _csv
+    text = content.decode("utf-8-sig", errors="replace")
+    reader = _csv.DictReader(io.StringIO(text), delimiter=";")
+    per_pol: dict[str, list[dict]] = {}
+    righe = 0
+    for r in reader:
+        num = _mp_norm_num(r.get("NumPolizza") or r.get("NumeroPolizza") or "")
+        if not num:
+            continue
+        righe += 1
+        per_pol.setdefault(num, []).append(r)
+
+    titoli_aggiornati = 0
+    polizze_aggiornate = 0
+    non_trovate: list[str] = []
+    for num, rr in per_pol.items():
+        pol = await db.polizze.find_one({"numero_polizza": rr[0].get("NumPolizza")}) \
+            or await db.polizze.find_one({"numero_polizza": num})
+        if not pol:
+            non_trovate.append(rr[0].get("NumPolizza"))
+            continue
+        titoli = await db.titoli.find({"polizza_id": pol["id"]}).to_list(1000)
+        tit_by_eff = {t.get("effetto"): t for t in titoli if t.get("effetto")}
+        tit_by_scad = {t.get("scadenza"): t for t in titoli if t.get("scadenza")}
+        tit_by_incasso = {t.get("data_incasso"): t for t in titoli if t.get("data_incasso")}
+        usati: set[str] = set()
+        for row in rr:
+            cop = _mp_parse_date(row.get("Copertura"))
+            pag = _mp_parse_date(row.get("DataPagam"))
+            tipo_pag = (row.get("TipoPag") or "").strip()
+            t = tit_by_eff.get(cop) or tit_by_scad.get(cop) or tit_by_incasso.get(pag)
+            if not t or t["id"] in usati:
+                continue
+            usati.add(t["id"])
+            _set = {
+                "data_copertura": cop or t.get("data_copertura"), "titolo_coperto": True,
+                "mezzo_pagamento": tipo_pag or None, "updated_at": _now_iso_mp(),
+            }
+            # Se c'è la data di pagamento → titolo incassato (finisce nei titoli storici)
+            if pag:
+                _set["stato"] = "incassato"
+                if not t.get("data_incasso"):
+                    _set["data_incasso"] = pag
+            if not dry_run:
+                await db.titoli.update_one({"id": t["id"]}, {"$set": _set})
+            titoli_aggiornati += 1
+        # ultima rata (max DataPagam) → metodo pagamento polizza
+        def _key(row):
+            return _mp_parse_date(row.get("DataPagam")) or _mp_parse_date(row.get("RataDel")) or ""
+        ultima = max(rr, key=_key)
+        cat = _mp_categoria(ultima.get("TipoPag"))
+        if not dry_run:
+            await db.polizze.update_one({"id": pol["id"]}, {"$set": {
+                "metodo_pagamento": cat,
+                "metodo_pagamento_desc": (ultima.get("TipoPag") or "").strip() or None,
+                "updated_at": _now_iso_mp(),
+            }})
+        polizze_aggiornate += 1
+
+    return {
+        "dry_run": dry_run,
+        "righe_lette": righe,
+        "polizze_nel_file": len(per_pol),
+        "polizze_aggiornate": polizze_aggiornate,
+        "titoli_aggiornati": titoli_aggiornati,
+        "polizze_non_trovate": non_trovate[:100],
+        "tot_non_trovate": len(non_trovate),
+    }
+
+
+def _now_iso_mp() -> str:
+    return datetime.now(timezone.utc).isoformat()

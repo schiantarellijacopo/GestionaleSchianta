@@ -897,6 +897,11 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
             stato = _MAP_STATO_TITOLO.get((row.get("stato_share") or "").lower(), "da_incassare")
+            # Regola: se il titolo ha una data di pagamento cliente deve risultare
+            # INCASSATO, così finisce nei titoli storici (a prescindere dallo stato SHARE).
+            _dt_pag = _parse_date(row.get("dt_pag_cliente", ""))
+            if _dt_pag:
+                stato = "incassato"
             existing = await db.titoli.find_one({"id_titolo_exp": id_t})
             # 🔧 FIX titoli import ANIA:
             # Il flusso fornisce netto_totale (netto tecnico) + tasse_totale + accessori.
@@ -1055,13 +1060,43 @@ async def _processa_prodotti(db, files_data: Dict[str, str],
             )
 
 
+def _collab_tokens(name) -> set:
+    """Token normalizzati di un nome collaboratore per confronto fuzzy.
+    Uppercase, senza punteggiatura, ignora token corti (iniziali/titoli)."""
+    import re as _re
+    if not name:
+        return set()
+    toks = _re.sub(r"[^A-Za-zÀ-ÿ]+", " ", str(name)).upper().split()
+    return {t for t in toks if len(t) >= 3}
+
+
 async def _processa_collaboratori(db, files_data: Dict[str, str],
                                   counts: Dict[str, int],
                                   tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                                   import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     """Legge il dizionario collaboratori (rec101) e li traccia come "da
-    associare" alla libreria Collaboratori (utenti). NON crea utenti.
+    associare" alla libreria Collaboratori (utenti). Se il nome è simile a un
+    collaboratore GIÀ esistente (anche scritto in modo diverso), lo UNIFICA
+    agganciandolo a quell'utente invece di creare un doppione.
     """
+    # Indice collaboratori esistenti: nome normalizzato (set di token) -> user id
+    user_index: list[tuple[set, str]] = []
+    async for u in db.users.find({"role": {"$in": ["admin", "collaboratore", "dipendente"]}},
+                                 {"_id": 0, "id": 1, "name": 1}):
+        toks = _collab_tokens(u.get("name"))
+        if toks:
+            user_index.append((toks, u["id"]))
+
+    async def _match_collaboratore(descr: str) -> Optional[str]:
+        toks = _collab_tokens(descr)
+        if len(toks) < 2:
+            return None
+        for utoks, uid in user_index:
+            # uguali, oppure uno è sottoinsieme dell'altro (>=2 token in comune)
+            if toks == utoks or (len(toks & utoks) >= 2 and (toks <= utoks or utoks <= toks)):
+                return uid
+        return None
+
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec101":
             continue
@@ -1079,6 +1114,21 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
             descr = (row.get("descrizione_collaboratore") or "").strip()
             rui = (row.get("cod_rui") or "").strip()
             cf = (row.get("codice_fiscale") or "").strip()
+            # UNIFICAZIONE: se il nome combacia con un collaboratore esistente,
+            # aggancia il codice a quell'utente (niente doppione, niente stub unmapped).
+            uid = await _match_collaboratore(descr)
+            if uid:
+                if import_mappings is not None:
+                    import_mappings.setdefault("collaboratore", {})[codice] = uid
+                await db.import_mappings.update_one(
+                    {"tipo": "collaboratore", "flusso": "omnia", "valore_flusso": codice},
+                    {"$setOnInsert": {"id": _uid(), "tipo": "collaboratore", "flusso": "omnia",
+                                      "valore_flusso": codice, "created_at": _now_iso()},
+                     "$set": {"entita_id": uid, "label_flusso": descr or codice, "updated_at": _now_iso()},
+                     "$inc": {"occorrenze": 1}},
+                    upsert=True,
+                )
+                continue
             label_parts = [descr or codice]
             if rui:
                 label_parts.append(f"RUI: {rui}")
@@ -1094,6 +1144,37 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
 # ---------------------------------------------------------------------------
 # Entrypoint pubblico
 # ---------------------------------------------------------------------------
+async def _applica_regola_stato_da_titoli(db, polizza_id_map: Dict[str, str], log: "ImportLog") -> None:
+    """Passo 1 (post-import Omnia): per ogni polizza importata, se l'ultimo titolo
+    pagato è >= 01/01/2025 la polizza resta ATTIVA; altrimenti viene ANNULLATA
+    SOLO se la compagnia è CATTOLICA (le altre restano come da tracciato Omnia)."""
+    SOGLIA = "2025-01-01"
+    aggiornate = 0
+    for pid in set(polizza_id_map.values()):
+        pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "id": 1, "compagnia_id": 1, "stato": 1})
+        if not pol:
+            continue
+        ultimo = None
+        async for t in db.titoli.find({"polizza_id": pid, "stato": "incassato"}, {"_id": 0, "data_incasso": 1}):
+            di = t.get("data_incasso")
+            if di and (ultimo is None or di > ultimo):
+                ultimo = di
+        if ultimo and ultimo >= SOGLIA:
+            nuovo = "attiva"
+        else:
+            comp = None
+            if pol.get("compagnia_id"):
+                comp = await db.compagnie.find_one({"id": pol["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
+            if comp and "cattolica" in (comp.get("ragione_sociale") or "").lower():
+                nuovo = "annullata"
+            else:
+                continue  # non-Cattolica senza pagamenti recenti: lascia stato Omnia
+        if nuovo != pol.get("stato"):
+            await db.polizze.update_one({"id": pid}, {"$set": {"stato": nuovo, "updated_at": _now_iso()}})
+            aggiornate += 1
+
+
+
 async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> ImportLog:
     """Importa un file ZIP contenente i record ANIA (rec10/20/21/30/40/50)."""
     log = ImportLog(
@@ -1136,6 +1217,8 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_titoli(db, files_data, log, polizza_id_map, counts,
                            mapping_operatori=mapping_operatori,
                            tracker=tracker, import_mappings=import_mappings)
+    # Passo 1: regola stato polizza in base all'ultimo titolo pagato
+    await _applica_regola_stato_da_titoli(db, polizza_id_map, log)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)

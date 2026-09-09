@@ -64,6 +64,7 @@ export default function Importazioni() {
                 {[
                     { v: "massivo", label: "Import Massivo AI", Icon: Wand2 },
                     { v: "omnia", label: "Importazione OMNIA", Icon: FileArchive },
+                    { v: "metodopag", label: "Metodo Pagamento", Icon: Upload },
                     { v: "excel", label: "Anagrafiche Excel/CSV", Icon: FileSpreadsheet },
                     { v: "targhe", label: "Targhe / Libri Matricola", Icon: Car },
                     { v: "storico", label: "Storico", Icon: Clock },
@@ -80,6 +81,7 @@ export default function Importazioni() {
             </div>
             {tab === "massivo" && <ImportMassivo />}
             {tab === "omnia" && <ImportOmnia onOpenWizard={() => setShowWizard(true)} />}
+            {tab === "metodopag" && <ImportMetodoPagamento />}
             {tab === "excel" && <ImportAnagraficheExcel />}
             {tab === "targhe" && <ImportTargheStub />}
             {tab === "storico" && <Storico onOpenWizard={() => setShowWizard(true)} />}
@@ -88,6 +90,78 @@ export default function Importazioni() {
                 open={showWizard}
                 onClose={() => setShowWizard(false)}
             />
+        </div>
+    );
+}
+
+
+// ============================================================
+// METODO PAGAMENTO — secondo file (CSV ';') rettifica titoli/polizze
+// ============================================================
+function ImportMetodoPagamento() {
+    const [file, setFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [res, setRes] = useState(null);
+    const inputRef = useRef(null);
+
+    const run = async (dryRun) => {
+        if (!file) { toast.error("Seleziona prima il file CSV"); return; }
+        setUploading(true);
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+            const r = await api.post(`/import-massivo/metodo-pagamento?dry_run=${dryRun}`, fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            setRes(r.data);
+            toast.success(dryRun ? "Anteprima calcolata" : `Aggiornate ${r.data.polizze_aggiornate} polizze, ${r.data.titoli_aggiornati} titoli`);
+        } catch (e) {
+            toast.error("Errore: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    return (
+        <div>
+            <Card className="p-6 mb-4" data-testid="metodopag-dropzone">
+                <Upload size={36} className="mx-auto text-sky-700 mb-3" />
+                <div className="text-center text-slate-800 font-medium mb-1">File "Metodo di pagamento" (CSV ;)</div>
+                <div className="text-center text-xs text-slate-500 mb-4">
+                    Rettifica tipo pagamento + data copertura sui titoli e imposta il metodo pagamento della polizza (match per numero polizza)
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                    <input ref={inputRef} type="file" accept=".csv" className="hidden"
+                        onChange={(e) => { setFile(e.target.files?.[0] || null); setRes(null); }}
+                        data-testid="metodopag-file-input" />
+                    <Button type="button" variant="outline" onClick={() => inputRef.current?.click()} data-testid="metodopag-select-button">
+                        <Upload size={14} className="mr-1" />{file ? file.name : "Seleziona CSV"}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => run(true)} disabled={!file || uploading} data-testid="metodopag-preview-btn">
+                        Anteprima
+                    </Button>
+                    <Button type="button" onClick={() => run(false)} disabled={!file || uploading}
+                        className="bg-sky-700 hover:bg-sky-800" data-testid="metodopag-importa-btn">
+                        {uploading ? "Elaborazione..." : "Applica"}
+                    </Button>
+                </div>
+            </Card>
+            {res && (
+                <Card className="p-5 border-l-4 border-l-sky-500" data-testid="metodopag-report">
+                    <div className="text-sm font-semibold mb-2">{res.dry_run ? "Anteprima (nessuna modifica salvata)" : "Import applicato"}</div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <Stat label="Righe lette" value={res.righe_lette} />
+                        <Stat label="Polizze nel file" value={res.polizze_nel_file} />
+                        <Stat label="Polizze aggiornate" value={res.polizze_aggiornate} />
+                        <Stat label="Titoli aggiornati" value={res.titoli_aggiornati} />
+                    </div>
+                    {res.tot_non_trovate > 0 && (
+                        <div className="mt-3 text-xs text-amber-700">
+                            {res.tot_non_trovate} polizze non trovate: {res.polizze_non_trovate.join(", ")}
+                        </div>
+                    )}
+                </Card>
+            )}
         </div>
     );
 }
