@@ -1145,33 +1145,38 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
 # Entrypoint pubblico
 # ---------------------------------------------------------------------------
 async def _applica_regola_stato_da_titoli(db, polizza_id_map: Dict[str, str], log: "ImportLog") -> None:
-    """Passo 1 (post-import Omnia): per ogni polizza importata, se l'ultimo titolo
-    pagato è >= 01/01/2025 la polizza resta ATTIVA; altrimenti viene ANNULLATA
-    SOLO se la compagnia è CATTOLICA (le altre restano come da tracciato Omnia)."""
+    """Passo 1 (post-import Omnia): ultimo titolo pagato >= 01/01/2025 -> ATTIVA;
+    altrimenti ANNULLATA solo se compagnia CATTOLICA. Versione efficiente:
+    poche query aggregate invece di N+1."""
     SOGLIA = "2025-01-01"
-    aggiornate = 0
-    for pid in set(polizza_id_map.values()):
-        pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "id": 1, "compagnia_id": 1, "stato": 1})
-        if not pol:
-            continue
-        ultimo = None
-        async for t in db.titoli.find({"polizza_id": pid, "stato": "incassato"}, {"_id": 0, "data_incasso": 1}):
-            di = t.get("data_incasso")
-            if di and (ultimo is None or di > ultimo):
-                ultimo = di
+    pids = list(set(polizza_id_map.values()))
+    if not pids:
+        return
+    # 1) max data_incasso per polizza (titoli incassati) in un'unica aggregazione
+    ultimo_map: Dict[str, str] = {}
+    async for r in db.titoli.aggregate([
+        {"$match": {"polizza_id": {"$in": pids}, "stato": "incassato"}},
+        {"$group": {"_id": "$polizza_id", "ultimo": {"$max": "$data_incasso"}}},
+    ]):
+        if r.get("ultimo"):
+            ultimo_map[r["_id"]] = r["ultimo"]
+    # 2) id compagnie CATTOLICA (una sola query)
+    cattolica_ids = set()
+    async for c in db.compagnie.find({"ragione_sociale": {"$regex": "cattolica", "$options": "i"}}, {"_id": 0, "id": 1}):
+        cattolica_ids.add(c["id"])
+    # 3) polizze da valutare (una query, solo campi utili)
+    to_attiva, to_annulla = [], []
+    async for p in db.polizze.find({"id": {"$in": pids}}, {"_id": 0, "id": 1, "compagnia_id": 1, "stato": 1}):
+        ultimo = ultimo_map.get(p["id"])
         if ultimo and ultimo >= SOGLIA:
-            nuovo = "attiva"
-        else:
-            comp = None
-            if pol.get("compagnia_id"):
-                comp = await db.compagnie.find_one({"id": pol["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
-            if comp and "cattolica" in (comp.get("ragione_sociale") or "").lower():
-                nuovo = "annullata"
-            else:
-                continue  # non-Cattolica senza pagamenti recenti: lascia stato Omnia
-        if nuovo != pol.get("stato"):
-            await db.polizze.update_one({"id": pid}, {"$set": {"stato": nuovo, "updated_at": _now_iso()}})
-            aggiornate += 1
+            if p.get("stato") != "attiva":
+                to_attiva.append(p["id"])
+        elif p.get("compagnia_id") in cattolica_ids and p.get("stato") != "annullata":
+            to_annulla.append(p["id"])
+    if to_attiva:
+        await db.polizze.update_many({"id": {"$in": to_attiva}}, {"$set": {"stato": "attiva", "updated_at": _now_iso()}})
+    if to_annulla:
+        await db.polizze.update_many({"id": {"$in": to_annulla}}, {"$set": {"stato": "annullata", "updated_at": _now_iso()}})
 
 
 
