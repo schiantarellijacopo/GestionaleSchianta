@@ -244,7 +244,9 @@ function ImportOmnia({ onOpenWizard }) {
     }, []);
 
     const startImport = async () => {
+        if (uploading) return; // evita doppio invio (doppio click)
         if (!file) { toast.error("Seleziona prima un file ZIP"); return; }
+        setUploading(true);
         setLastLog(null);
         setJobError(null);
         const fd = new FormData();
@@ -256,9 +258,10 @@ function ImportOmnia({ onOpenWizard }) {
             toast.info("Import avviato in background… attendere.");
             setFile(null);
             if (inputRef.current) inputRef.current.value = "";
-            pollJob(start.data.job_id);
+            await pollJob(start.data.job_id);
         } catch (e) {
             toast.error("Errore import: " + (e.response?.data?.detail || e.message));
+            setUploading(false);
         }
     };
 
