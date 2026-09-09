@@ -6103,6 +6103,12 @@ async def import_omnia(file: UploadFile = File(...),
     return await import_ania(file, user)
 
 
+# Riferimenti forti ai task in background: senza questo il loop mantiene solo
+# weak-ref e il GC può cancellare il task a metà (import parziale). Vedi
+# https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
+_BG_TASKS: set = set()
+
+
 async def _run_ania_job(job_id: str, contents: bytes, filename: str, user: dict):
     """Esegue l'import ZIP in background aggiornando lo stato in import_jobs."""
     try:
@@ -6135,7 +6141,11 @@ async def import_omnia_async(file: UploadFile = File(...),
     await db.import_jobs.insert_one({
         "id": job_id, "tipo": "omnia", "filename": file.filename,
         "status": "running", "created_at": _now_iso()})
-    _asyncio.create_task(_run_ania_job(job_id, contents, file.filename, user))
+    task = _asyncio.create_task(_run_ania_job(job_id, contents, file.filename, user))
+    # Mantieni un riferimento forte al task finché non termina, così il GC
+    # non lo cancella a metà lasciando un import parziale.
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
     return {"job_id": job_id, "status": "running"}
 
 

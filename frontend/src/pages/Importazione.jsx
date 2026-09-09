@@ -102,23 +102,44 @@ function ImportMetodoPagamento() {
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
     const [res, setRes] = useState(null);
+    const [progress, setProgress] = useState(null);
     const inputRef = useRef(null);
 
     const run = async (dryRun) => {
         if (!file) { toast.error("Seleziona prima il file CSV"); return; }
         setUploading(true);
+        setRes(null);
         const fd = new FormData();
         fd.append("file", file);
         try {
-            const r = await api.post(`/import-massivo/metodo-pagamento?dry_run=${dryRun}`, fd, {
+            const start = await api.post(`/import-massivo/metodo-pagamento?dry_run=${dryRun}`, fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
-            setRes(r.data);
-            toast.success(dryRun ? "Anteprima calcolata" : `Aggiornate ${r.data.polizze_aggiornate} polizze, ${r.data.titoli_aggiornati} titoli`);
+            const jobId = start.data.job_id;
+            toast.info(dryRun ? "Anteprima avviata in background… attendere." : "Elaborazione avviata in background… attendere.");
+            let done = false;
+            while (!done) {
+                await new Promise((r) => setTimeout(r, 2500));
+                const st = await api.get(`/import/job/${jobId}`);
+                const s = st.data.status;
+                if (st.data.processate) {
+                    setProgress({ done: st.data.processate, tot: st.data.totali });
+                }
+                if (s === "done") {
+                    const data = st.data.result;
+                    setRes(data);
+                    toast.success(dryRun ? "Anteprima calcolata" : `Aggiornate ${data.polizze_aggiornate} polizze, ${data.titoli_aggiornati} titoli`);
+                    done = true;
+                } else if (s === "error") {
+                    toast.error("Errore: " + (st.data.error || "sconosciuto"));
+                    done = true;
+                }
+            }
         } catch (e) {
             toast.error("Errore: " + (e.response?.data?.detail || e.message));
         } finally {
             setUploading(false);
+            setProgress(null);
         }
     };
 
@@ -145,6 +166,11 @@ function ImportMetodoPagamento() {
                         {uploading ? "Elaborazione..." : "Applica"}
                     </Button>
                 </div>
+                {uploading && progress && (
+                    <div className="text-center text-xs text-slate-500 mt-3" data-testid="metodopag-progress">
+                        Elaborate {progress.done} / {progress.tot} polizze…
+                    </div>
+                )}
             </Card>
             {res && (
                 <Card className="p-5 border-l-4 border-l-sky-500" data-testid="metodopag-report">

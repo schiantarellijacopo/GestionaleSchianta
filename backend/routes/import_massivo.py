@@ -1249,16 +1249,8 @@ def _mp_categoria(t: str) -> str:
     return "altro"
 
 
-@router.post("/metodo-pagamento")
-async def import_metodo_pagamento(
-    file: UploadFile = File(...),
-    dry_run: bool = False,
-    user: dict = Depends(require_user("admin", "collaboratore")),
-):
-    """Secondo file (CSV ';'): rettifica su ogni titolo `mezzo_pagamento` (testo
-    originale) + `data_copertura` (colonna Copertura) e imposta su ogni polizza
-    `metodo_pagamento` (categoria) e `metodo_pagamento_desc` (testo) dell'ultima rata."""
-    content = await file.read()
+async def _process_metodo_pagamento(content: bytes, dry_run: bool, job_id: Optional[str] = None) -> dict:
+    """Logica di rettifica metodo pagamento (usata dal job in background)."""
     import csv as _csv
     text = content.decode("utf-8-sig", errors="replace")
     reader = _csv.DictReader(io.StringIO(text), delimiter=";")
@@ -1274,11 +1266,14 @@ async def import_metodo_pagamento(
     titoli_aggiornati = 0
     polizze_aggiornate = 0
     non_trovate: list[str] = []
+    tot_pol = len(per_pol)
+    processate = 0
     for num, rr in per_pol.items():
-        pol = await db.polizze.find_one({"numero_polizza": rr[0].get("NumPolizza")}) \
-            or await db.polizze.find_one({"numero_polizza": num})
+        pol = await db.polizze.find_one(
+            {"numero_polizza": {"$in": [rr[0].get("NumPolizza"), num]}})
         if not pol:
             non_trovate.append(rr[0].get("NumPolizza"))
+            processate += 1
             continue
         titoli = await db.titoli.find({"polizza_id": pol["id"]}).to_list(1000)
         tit_by_eff = {t.get("effetto"): t for t in titoli if t.get("effetto")}
@@ -1317,16 +1312,61 @@ async def import_metodo_pagamento(
                 "updated_at": _now_iso_mp(),
             }})
         polizze_aggiornate += 1
+        processate += 1
+        # progresso ogni 300 polizze
+        if job_id and processate % 300 == 0:
+            await db.import_jobs.update_one({"id": job_id}, {"$set": {
+                "processate": processate, "totali": tot_pol}})
 
     return {
         "dry_run": dry_run,
         "righe_lette": righe,
-        "polizze_nel_file": len(per_pol),
+        "polizze_nel_file": tot_pol,
         "polizze_aggiornate": polizze_aggiornate,
         "titoli_aggiornati": titoli_aggiornati,
         "polizze_non_trovate": non_trovate[:100],
         "tot_non_trovate": len(non_trovate),
     }
+
+
+# Riferimenti forti ai task background: evita che il GC cancelli il task a metà.
+_MP_BG_TASKS: set = set()
+
+
+async def _run_metodo_pagamento_job(job_id: str, content: bytes, dry_run: bool):
+    try:
+        result = await _process_metodo_pagamento(content, dry_run, job_id)
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "done", "result": result, "finished_at": _now_iso_mp()}})
+    except Exception as e:
+        import traceback, logging
+        logging.error("Import metodo pagamento job %s fallito: %s", job_id, traceback.format_exc())
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "error", "error": str(e)[:800], "finished_at": _now_iso_mp()}})
+
+
+@router.post("/metodo-pagamento")
+async def import_metodo_pagamento(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+):
+    """File CSV ';' del metodo pagamento. Gira in BACKGROUND (per file grandi,
+    evita il timeout gateway Cloudflare 520). Ritorna subito un `job_id`; lo
+    stato si controlla con GET /api/import/job/{job_id}.
+
+    Rettifica su ogni titolo `mezzo_pagamento` + `data_copertura` (colonna
+    Copertura) e imposta su ogni polizza `metodo_pagamento` (categoria) e
+    `metodo_pagamento_desc` (testo) dell'ultima rata."""
+    content = await file.read()
+    job_id = str(uuid.uuid4())
+    await db.import_jobs.insert_one({
+        "id": job_id, "tipo": "metodo_pagamento", "dry_run": dry_run,
+        "filename": file.filename, "status": "running", "created_at": _now_iso_mp()})
+    task = asyncio.create_task(_run_metodo_pagamento_job(job_id, content, dry_run))
+    _MP_BG_TASKS.add(task)
+    task.add_done_callback(_MP_BG_TASKS.discard)
+    return {"job_id": job_id, "status": "running"}
 
 
 def _now_iso_mp() -> str:

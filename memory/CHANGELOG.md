@@ -319,3 +319,9 @@ Adapter provider-neutrale con supporto 4 modalità: **OTP SMS · OTP Email · Gr
 
 ### Test credentials
 Admin: `admin@assicura.it / Admin123!`
+
+## 2026-06 — Fix import background (task GC) + metodo pagamento async
+- **Bug import parziale OMNIA**: `import_omnia_async` lanciava `asyncio.create_task` senza tenere il riferimento → il GC cancellava il task a metà (CancelledError, non catturata da `except Exception`), lasciando anagrafiche/polizze ma NON garanzie/titoli/provvigioni/sinistri e job bloccato su "running". Fix: set modulo `_BG_TASKS` con riferimento forte + `add_done_callback(discard)` (server.py).
+- **Bug import metodo pagamento (Cloudflare 520)**: endpoint sincrono su ~17k polizze → timeout gateway. Convertito a job in background (`import_massivo.py`): ritorna `job_id`, stato via `GET /api/import/job/{job_id}`, con campo `processate/totali` per la progress bar. Frontend `Importazione.jsx` ora fa polling. Verificato dry-run: 16.973 polizze in ~12s.
+- Nota: molte `polizze_non_trovate` nel metodo pagamento derivano dall'import OMNIA incompleto → reimportare prima lo ZIP OMNIA (ora completo).
+- **TargaConflictWidget**: `/polizze/by-targa` ora considera solo polizze `attiva`/`sospesa` (escluse annullate/scadute/sostituite) — extras_p1p2.py.
