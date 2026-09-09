@@ -48,12 +48,36 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
     });
     const [saving, setSaving] = useState(false);
     const [firmando, setFirmando] = useState(false);
+    const [firmaMenu, setFirmaMenu] = useState(false);
+    const [uploadModello, setUploadModello] = useState(false);
+
+    const caricaModello = async (f) => {
+        if (!f) return;
+        setUploadModello(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            await api.post("/librerie/azienda/privacy-modello", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success(`Modello privacy caricato: ${f.name}`);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore caricamento modello"); }
+        finally { setUploadModello(false); }
+    };
+
+    const scaricaModello = async () => {
+        try {
+            const r = await api.get("/librerie/azienda/privacy-modello", { responseType: "blob" });
+            const url = URL.createObjectURL(new Blob([r.data]));
+            window.open(url, "_blank");
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) {
+            toast.error(e.response?.status === 404 ? "Nessun modello caricato" : "Errore download");
+        }
+    };
     const canvasRef = useRef(null);
     const [drawing, setDrawing] = useState(false);
     const [hasSign, setHasSign] = useState(false);
 
-    const firmaEsign = async () => {
-        const modalita = ana?.email ? "otp_email" : (ana?.cellulare ? "otp_sms" : "link");
+    const firmaEsign = async (modalita) => {
         setFirmando(true);
         try {
             const pdfRes = await api.get(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`, { responseType: "blob" });
@@ -63,17 +87,25 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
             fd.append("firmatario_id", anagrafica_id);
             fd.append("display_name", "Informativa Privacy & Consensi");
             const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            if (r.data.signing_url) {
-                toast.success("Richiesta firma inviata. Link inviato al cliente.");
-                window.open(r.data.signing_url, "_blank");
+            const link = r.data.signing_url || r.data.viewer_link;
+            if (link) {
+                if (modalita === "link_whatsapp") {
+                    const tel = (ana?.cellulare || "").replace(/[^0-9]/g, "");
+                    const txt = encodeURIComponent(`Gentile cliente, firmi qui l'informativa privacy: ${link}`);
+                    window.open(`https://wa.me/${tel}?text=${txt}`, "_blank");
+                    toast.success("Apro WhatsApp con il link di firma");
+                } else {
+                    window.open(link, "_blank");
+                    toast.success("Richiesta firma creata");
+                }
             } else {
-                toast.success("Richiesta firma inviata al cliente via " + modalita.replace("_", " "));
+                toast.success("Richiesta firma inviata al cliente");
             }
         } catch (e) {
             const msg = e.response?.data?.detail || "Errore invio firma";
-            if (String(msg).includes("non configurato")) toast.error("eSignAnyWhere non configurato — vai in Librerie → Firme");
+            if (String(msg).toLowerCase().includes("configur")) toast.error("eSignAnyWhere non configurato — vai in Librerie → Firme");
             else toast.error(msg);
-        } finally { setFirmando(false); }
+        } finally { setFirmando(false); setFirmaMenu(false); }
     };
 
     useEffect(() => {
@@ -180,6 +212,18 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                 </DialogHeader>
 
                 <div className="space-y-4">
+                    {/* Modello privacy agenzia */}
+                    <div className="flex items-center justify-between gap-2 bg-violet-50 border border-violet-200 rounded-md p-2.5" data-testid="privacy-modello-box">
+                        <span className="text-xs text-violet-900">📎 Modello Privacy agenzia (PDF/Word) — usato come base per tutti i clienti</span>
+                        <div className="flex items-center gap-2">
+                            <button onClick={scaricaModello} className="text-xs text-violet-700 underline" data-testid="privacy-modello-download">Scarica modello</button>
+                            <label className="text-xs px-2 py-1 rounded bg-violet-700 text-white cursor-pointer hover:bg-violet-800" data-testid="privacy-modello-upload">
+                                {uploadModello ? "Carico…" : "Importa modello"}
+                                <input type="file" accept=".pdf,.doc,.docx" className="hidden"
+                                    onChange={(e) => caricaModello(e.target.files?.[0])} />
+                            </label>
+                        </div>
+                    </div>
                     {/* Info */}
                     <div className="bg-sky-50 border border-sky-200 text-sky-900 text-xs rounded-md p-3">
                         Spunta i consensi prestati dal cliente, raccogli la firma digitale, poi
@@ -264,9 +308,19 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                     <Button onClick={stampaPdf} className="bg-emerald-600 hover:bg-emerald-700" data-testid="cons-pdf">
                         <Download size={13} className="mr-1" /> Scarica PDF firmato
                     </Button>
-                    <Button onClick={firmaEsign} disabled={firmando} className="bg-violet-700 hover:bg-violet-800" data-testid="cons-firma-esign">
-                        ✍️ {firmando ? "Invio…" : "Firma con eSignAnyWhere"}
-                    </Button>
+                    <div className="relative">
+                        <Button onClick={() => setFirmaMenu((v) => !v)} disabled={firmando} className="bg-violet-700 hover:bg-violet-800" data-testid="cons-firma-esign">
+                            ✍️ {firmando ? "Invio…" : "Firma con eSignAnyWhere"} ▾
+                        </Button>
+                        {firmaMenu && (
+                            <div className="absolute bottom-full right-0 mb-1 w-64 bg-white border border-slate-200 rounded-md shadow-lg z-50 overflow-hidden" data-testid="cons-firma-menu">
+                                <button onClick={() => firmaEsign("biometric")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-biometric">✒️ Grafometrica (su tablet)</button>
+                                <button onClick={() => firmaEsign("otp_sms")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-otp-sms">📱 OTP via SMS</button>
+                                <button onClick={() => firmaEsign("link_whatsapp")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-whatsapp">🟢 Link via WhatsApp</button>
+                                <button onClick={() => firmaEsign("link")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-email">✉️ Link via Email</button>
+                            </div>
+                        )}
+                    </div>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

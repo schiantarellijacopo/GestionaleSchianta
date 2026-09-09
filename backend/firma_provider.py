@@ -78,23 +78,14 @@ def _build_signature_config(mode: str) -> dict:
     - biometric     → Firma grafometrica FEA (app SIGNificant su tablet)
     - simple / link → ClickToSign (link remoto WhatsApp/SMS/Email)
     """
-    if mode == "simple" or mode == "link":
+    if mode in ("simple", "link", "link_whatsapp", "otp_email"):
+        # ClickToSign: link remoto (inviabile via email/WhatsApp dal nostro sistema).
+        # NB: eSAW v6 NON espone un "Email OTP" nativo come firma → si usa il link.
         return {"ClickToSign": {}}
     if mode == "otp_sms":
-        return {"TransactionCode": {
-            "TrModType": "TransactionCodeSenderPlugin",
-            "TrValidityInSeconds": 300,
-            "TrConfId": "otpSignatureSmsText",
-            "IsPhoneNumberRequired": True,
-            "Ly": "simpleTransactionCodeSms",
-        }}
-    if mode == "otp_email":
-        return {"TransactionCode": {
-            "TrModType": "TransactionCodeSenderPlugin",
-            "TrValidityInSeconds": 300,
-            "TrConfId": "otpSignatureEmailText",
-            "IsPhoneNumberRequired": False,
-        }}
+        # v6: il tipo firma è OtpSignature; l'OTP via SMS è un metodo di autenticazione
+        # del destinatario (vedi _build_envelope → AuthenticationMethods).
+        return {"OtpSignature": {}}
     if mode == "biometric":
         return {"Biometric": {
             "BiometricVerification": False,
@@ -128,11 +119,14 @@ def _build_envelope(
         "ContactInformation": contact,
         # In presenza (biometric) o link custom (via nostri canali) disabilita l'email
         # automatica di Namirial: l'utente riceve il link solo dal nostro sistema.
-        "DisableEmail": mode in ("biometric", "simple", "link"),
+        "DisableEmail": mode in ("biometric", "simple", "link", "link_whatsapp", "otp_email"),
         "AuthenticationMethods": [],
     }
     if mode == "otp_sms":
-        recipient["OtpData"] = {"PhoneMobile": signer.get("cellulare") or signer.get("phone")}
+        # v6: autenticazione del destinatario via SMS-OTP (E.164)
+        phone = signer.get("cellulare") or signer.get("phone")
+        contact["PhoneNumber"] = phone
+        recipient["AuthenticationMethods"] = [{"Method": "Sms", "Parameter": phone}]
 
     signature = {
         "ElementId": f"sig-{file_id[:8]}",

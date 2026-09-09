@@ -279,7 +279,7 @@ export default function Sinistri() {
                         <tbody>
                             {sorted.map((s) => (
                                 <tr key={s.id} data-testid={`sinistro-row-${s.id}`}
-                                    className="hover:bg-sky-50/60 cursor-pointer"
+                                    className="bg-sky-50/50 hover:bg-sky-100 cursor-pointer transition-colors"
                                     onClick={() => navigate(`/sinistri/${s.id}`)}>
                                     {cols.map((c) => (
                                         <td key={c.key} className={c.tdClass}>{c.render(s)}</td>

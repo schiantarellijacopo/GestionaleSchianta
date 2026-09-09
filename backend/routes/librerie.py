@@ -1125,6 +1125,52 @@ async def upload_logo_azienda(file: UploadFile = File(...),
     return {"logo_url": url}
 
 
+@router.post("/librerie/azienda/privacy-modello")
+async def upload_privacy_modello(file: UploadFile = File(...),
+                                 user: dict = Depends(require_user("admin"))) -> dict:
+    """Carica il MODELLO privacy dell'agenzia (PDF o Word) usato come base."""
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 15 MB)")
+    fname = file.filename or "privacy.pdf"
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "pdf"
+    if ext not in ("pdf", "doc", "docx"):
+        raise HTTPException(400, "Formato non valido: usa PDF o Word (.doc/.docx)")
+    ct = file.content_type or obj_storage.mime_for(fname)
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/azienda/privacy_modello_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, data, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    existing = await db.azienda_config.find_one({})
+    set_fields = {"privacy_modello": {"storage_path": result["path"], "nome_file": fname,
+                                      "content_type": ct, "ext": ext, "caricato_il": _now_iso()},
+                  "updated_at": _now_iso()}
+    if not existing:
+        await db.azienda_config.insert_one(AziendaConfig(**set_fields).model_dump())
+    else:
+        await db.azienda_config.update_one({"id": existing["id"]}, {"$set": set_fields})
+    return {"ok": True, "nome_file": fname, "ext": ext}
+
+
+@router.get("/librerie/azienda/privacy-modello")
+async def download_privacy_modello(user: dict = Depends(current_user)):
+    """Scarica il modello privacy dell'agenzia, se caricato."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "privacy_modello": 1}) or {}
+    pm = az.get("privacy_modello")
+    if not pm or not pm.get("storage_path"):
+        raise HTTPException(404, "Nessun modello privacy caricato")
+    try:
+        data, ct = obj_storage.get_object(pm["storage_path"])
+    except Exception:
+        raise HTTPException(404, "File modello non trovato")
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+    disp = "inline" if pm.get("ext") == "pdf" else "attachment"
+    return StreamingResponse(BytesIO(data), media_type=pm.get("content_type") or ct,
+                             headers={"Content-Disposition": f'{disp}; filename="{pm.get("nome_file", "privacy")}"'})
+
+
 @router.post("/librerie/azienda/video-analisi")
 async def upload_video_analisi(file: UploadFile = File(...),
                                 user: dict = Depends(require_user("admin"))) -> dict:

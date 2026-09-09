@@ -1141,6 +1141,7 @@ class AziendaConfig(BaseDoc):
     codice_fiscale: Optional[str] = None
     rui: Optional[str] = None              # numero iscrizione RUI/IVASS
     rui_sezione: Optional[str] = None
+    privacy_modello: Optional[dict] = None  # modello privacy agenzia (PDF/Word) caricato
     data_iscrizione_rui: Optional[str] = None
     indirizzo: Optional[str] = None
     comune: Optional[str] = None

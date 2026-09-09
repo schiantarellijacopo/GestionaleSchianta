@@ -161,6 +161,31 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
 
     const firmato = stato === "firmato";
 
+    const firmaEsignContratto = async (modalita) => {
+        setBusy(true);
+        try {
+            if (stato !== "firmato") await api.put(`/anagrafiche/${anagrafica_id}/contratto-consulenza`, { testo, importo: Number(importo) || 0 });
+            const pdfRes = await api.get(`/anagrafiche/${anagrafica_id}/contratto-consulenza/pdf`, { responseType: "blob" });
+            const fd = new FormData();
+            fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "contratto_consulenza.pdf");
+            fd.append("modalita", modalita);
+            fd.append("firmatario_id", anagrafica_id);
+            fd.append("display_name", "Contratto di Consulenza");
+            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            const link = r.data.signing_url || r.data.viewer_link;
+            if (link && modalita === "link_whatsapp") {
+                const txt = encodeURIComponent(`Gentile cliente, firmi qui il contratto di consulenza: ${link}`);
+                window.open(`https://wa.me/?text=${txt}`, "_blank");
+            } else if (link) {
+                window.open(link, "_blank");
+            }
+            toast.success("Richiesta firma eSignAnyWhere creata");
+        } catch (e) {
+            const msg = e.response?.data?.detail || "Errore firma";
+            toast.error(String(msg).toLowerCase().includes("configur") ? "eSignAnyWhere non configurato — vai in Librerie → Firme" : msg);
+        } finally { setBusy(false); }
+    };
+
     const scarica = async (fmt) => {
         setBusy(true);
         try {
@@ -287,6 +312,15 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                                 <Button onClick={firma} disabled={busy || otp.length < 4} className="bg-emerald-600 hover:bg-emerald-700" data-testid="contratto-firma">✍️ Firma contratto</Button>
                             </>
                         )}
+                    </div>
+                    <div className="border-t border-indigo-200 mt-3 pt-3">
+                        <div className="text-xs font-semibold text-indigo-900 mb-2">Oppure firma con eSignAnyWhere</div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button onClick={() => firmaEsignContratto("biometric")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-grafometrica">✒️ Firma grafometrica</Button>
+                            <Button onClick={() => firmaEsignContratto("otp_sms")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-otp-sms">📱 OTP SMS</Button>
+                            <Button onClick={() => firmaEsignContratto("link_whatsapp")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-whatsapp">🟢 Link WhatsApp</Button>
+                            <Button onClick={() => firmaEsignContratto("link")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-email">✉️ Link Email</Button>
+                        </div>
                     </div>
                     {otpDebug && (
                         <div className="text-[11px] text-slate-500 mt-2">
