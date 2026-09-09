@@ -12357,6 +12357,8 @@ from routes import estratto_conto_contraente as _ecc_router  # noqa: E402
 api.include_router(_ecc_router.router)
 from routes import report_azienda as _report_az_router  # noqa: E402
 api.include_router(_report_az_router.router)
+from routes import mup as _mup_router  # noqa: E402
+api.include_router(_mup_router.router)
 api.include_router(_alert_router.router)
 api.include_router(_modelli_router.router)
 api.include_router(_kpi_router.router)

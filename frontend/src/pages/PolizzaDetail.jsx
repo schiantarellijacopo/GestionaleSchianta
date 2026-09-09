@@ -48,6 +48,37 @@ export default function PolizzaDetail() {
     const [provvEdit, setProvvEdit] = useState(false);
     const [provvVal, setProvvVal] = useState("");
     const [provvSaving, setProvvSaving] = useState(false);
+    const [mupBusy, setMupBusy] = useState(false);
+
+    const apriMup = async () => {
+        setMupBusy(true);
+        try {
+            const r = await api.get(`/polizze/${id}/mup/pdf`, { responseType: "blob" });
+            const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+            const w = window.open(url, "_blank");
+            if (!w) { const a = document.createElement("a"); a.href = url; a.download = "MUP.pdf"; a.click(); }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch { toast.error("Errore generazione MUP"); } finally { setMupBusy(false); }
+    };
+
+    const firmaMup = async () => {
+        setMupBusy(true);
+        try {
+            const pdfRes = await api.get(`/polizze/${id}/mup/pdf`, { responseType: "blob" });
+            const fd = new FormData();
+            fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "MUP.pdf");
+            fd.append("modalita", "biometric");
+            fd.append("firmatario_id", pol?.contraente_id || "");
+            fd.append("display_name", "Modulo Unico Precontrattuale");
+            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            const link = r.data.signing_url || r.data.viewer_link;
+            if (link) window.open(link, "_blank");
+            toast.success("Richiesta firma MUP creata");
+        } catch (e) {
+            const msg = e.response?.data?.detail || "Errore firma MUP";
+            toast.error(String(msg).toLowerCase().includes("configur") ? "eSignAnyWhere non configurato — Librerie → Firme" : msg);
+        } finally { setMupBusy(false); }
+    };
     const [searchParams, setSearchParams] = useSearchParams();
     const [conti, setConti] = useState([]);
     const [paying, setPaying] = useState(null);
@@ -260,6 +291,14 @@ export default function PolizzaDetail() {
                             <Pencil size={14} className="mr-1" /> Modifica polizza
                         </Button>
                     )}
+                    <Button variant="outline" size="sm" onClick={apriMup} disabled={mupBusy}
+                            className="border-indigo-300 text-indigo-700 hover:bg-indigo-50" data-testid="pol-mup-button">
+                        📋 {mupBusy ? "Genero…" : "Genera MUP"}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={firmaMup} disabled={mupBusy}
+                            className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="pol-mup-firma-button">
+                        ✒️ Firma MUP (grafometrica)
+                    </Button>
                     {canDelete && (
                         <Button variant="outline" size="sm" onClick={handleDelete}
                                 className="text-rose-700 hover:bg-rose-50 hover:text-rose-800" data-testid="pol-delete-button">
