@@ -839,8 +839,11 @@ async def cerca_polizze_per_targa(
     targa_clean = (targa or "").strip().upper().replace(" ", "")
     if not targa_clean:
         return {"polizze": [], "applicazioni": []}
-    # polizze dirette
-    pol_filter = {"targa": {"$regex": f"^{re.escape(targa_clean)}$", "$options": "i"}}
+    # polizze dirette — solo attive o sospese (le annullate/scadute/sostituite non si calcolano)
+    pol_filter = {
+        "targa": {"$regex": f"^{re.escape(targa_clean)}$", "$options": "i"},
+        "stato": {"$in": ["attiva", "sospesa"]},
+    }
     if exclude_id:
         pol_filter["id"] = {"$ne": exclude_id}
     is_client = user["role"] == "cliente"
