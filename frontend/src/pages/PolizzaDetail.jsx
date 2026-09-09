@@ -351,6 +351,11 @@ export default function PolizzaDetail() {
                             <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
                             <div className="text-xl font-semibold mt-0.5">{pol.ramo || "—"}{pol.prodotto ? ` · ${pol.prodotto}` : ""}</div>
                             <div className="text-lg font-semibold text-slate-100 mt-1 tracking-wide">N. {pol.numero_polizza}</div>
+                            {pol.mandato && (
+                                <div className="text-xs text-sky-200 mt-0.5" data-testid="pol-header-agenzia-partner">
+                                    Agenzia partner: <span className="font-medium text-slate-100">{pol.mandato}</span>
+                                </div>
+                            )}
                             <div className="mt-2 inline-flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1" data-testid="pol-header-operatore">
                                 <CollaboratoreInlineSelect
                                     entita="polizze"
