@@ -19,7 +19,9 @@ import {
 
 export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [mode, setMode] = useState(null); // "mock" | "live"
-    const [credit, setCredit] = useState(null);
+    const [credit, setCredit] = useState(null); // credito agenzia (tenant) o fallback account
+    const [walletActive, setWalletActive] = useState(false); // true se il tenant ha un credito configurato
+    const [listino, setListino] = useState({}); // costi per operazione
     const [loading, setLoading] = useState(null); // key attualmente in caricamento
     const [expanded, setExpanded] = useState(null);
     const [catastoData, setCatastoData] = useState(null); // {immobili, soggetto}
@@ -30,6 +32,16 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
 
     // Chiede SEMPRE conferma prima di scaricare/aprire un servizio OpenAPI (consuma credito)
     const guard = (label, fn) => () => setConfirm({ label, run: fn });
+
+    const refreshStatus = () => {
+        api.get("/openapi-it/status").then((r) => {
+            setMode(r.data.mode);
+            setListino(r.data.listino || {});
+            const tc = r.data.tenant_credito_eur;
+            setWalletActive(tc !== null && tc !== undefined);
+            setCredit(tc !== null && tc !== undefined ? tc : r.data.account_credit_eur);
+        }).catch(() => setMode(null));
+    };
 
     const estraiCatasto = async () => {
         setLoading("cadastre");
@@ -43,15 +55,10 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
             onReload?.();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore Catasto");
-        } finally { setLoading(null); }
+        } finally { setLoading(null); refreshStatus(); }
     };
 
-    useEffect(() => {
-        api.get("/openapi-it/status").then((r) => {
-            setMode(r.data.mode);
-            setCredit(r.data.credit_eur);
-        }).catch(() => setMode(null));
-    }, []);
+    useEffect(() => { refreshStatus(); }, []);
 
     const call = async (endpoint, key, label) => {
         setLoading(key);
@@ -65,8 +72,12 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
             toast.error(e.response?.data?.detail || "Errore chiamata OpenAPI.it");
         } finally {
             setLoading(null);
+            refreshStatus();
         }
     };
+
+    // Verifica se il credito basta per una data operazione (solo se wallet attivo)
+    const puoEstrarre = (op) => !walletActive || (credit ?? 0) >= (listino[op] ?? 0);
 
     const hasPiva = !!ana.partita_iva;
     const hasCf = !!ana.codice_fiscale;
@@ -84,8 +95,8 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                             {mode === "mock" ? "⚠ MOCK" : "🟢 LIVE"}
                         </span>
                         {credit !== null && credit !== undefined && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${credit > 5 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`} data-testid="openapi-credit-badge">
-                                Credito: €{credit.toFixed(2)}
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${credit > 5 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`} data-testid="openapi-credit-badge" title={walletActive ? "Credito residuo dell'agenzia" : "Credito account OpenAPI.it"}>
+                                {walletActive ? "Credito agenzia" : "Credito"}: €{Number(credit).toFixed(2)}
                             </span>
                         )}
                     </div>
@@ -97,22 +108,25 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Building2} label="Camerale" testid="oapi-btn-company"
                     disabled={!canEdit || (!hasPiva && !hasCf)}
                     loading={false}
+                    cost={listino.camerale} bloccato={!puoEstrarre("camerale")}
                     onClick={guard("Camerale", () => setShowCamerale(true))}
                     hint={!hasPiva && !hasCf ? "P.IVA/CF mancante" : null}
                     hasData={!!openapi.camerale || Array.isArray(openapi.camerale_richieste)}
                 />
                 <ActionBtn
                     icon={Home} label="Catasto" testid="oapi-btn-cadastre"
-                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre"}
+                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre" || !puoEstrarre("catasto")}
                     loading={loading === "cadastre"}
+                    cost={listino.catasto} bloccato={!puoEstrarre("catasto")}
                     onClick={guard("Catasto", estraiCatasto)}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.cadastre) && openapi.cadastre.length > 0}
                 />
                 <ActionBtn
                     icon={Car} label="Veicoli" testid="oapi-btn-vehicles"
-                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "vehicles"}
+                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "vehicles" || !puoEstrarre("veicoli")}
                     loading={loading === "vehicles"}
+                    cost={listino.veicoli} bloccato={!puoEstrarre("veicoli")}
                     onClick={guard("Veicoli", () => call("vehicles", "automotive", "Veicoli"))}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.automotive) && openapi.automotive.length > 0}
@@ -121,6 +135,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={FileStack} label="Visure & Doc." testid="oapi-btn-visengine"
                     disabled={!canEdit || (!hasPiva && !hasCf)}
                     loading={false}
+                    cost={listino.visure} bloccato={!puoEstrarre("visure")}
                     onClick={guard("Visure & Documenti", () => setShowVisengine(true))}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.visengine_richieste) && openapi.visengine_richieste.length > 0}
@@ -199,7 +214,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     );
 }
 
-function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasData, testid }) {
+function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasData, testid, cost, bloccato }) {
     return (
         <div>
             <Button
@@ -214,6 +229,11 @@ function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasDat
                 {label}
                 {hasData && <span className="ml-1 text-[9px]">✓</span>}
             </Button>
+            {cost !== null && cost !== undefined && cost > 0 && (
+                <div className={`text-[10px] mt-1 text-center font-medium ${bloccato ? "text-rose-600" : "text-slate-500"}`} data-testid={`${testid}-cost`}>
+                    Costo: €{Number(cost).toFixed(2)}{bloccato ? " · credito insufficiente" : ""}
+                </div>
+            )}
             {hint && <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1"><Info size={9} /> {hint}</div>}
         </div>
     );

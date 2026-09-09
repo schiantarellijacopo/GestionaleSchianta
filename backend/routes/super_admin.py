@@ -398,6 +398,41 @@ async def get_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
     return t
 
 
+# ---------------------------------------------------------------------------
+# CREDITO OpenAPI per agenzia (prepagato) + listino costi estrazioni
+# ---------------------------------------------------------------------------
+class CreditoOpenApiBody(BaseModel):
+    importo: float
+    modo: Literal["set", "add"] = "add"
+
+
+@router.post("/agenzie/{tid}/openapi-credito")
+async def imposta_credito_openapi(tid: str, body: CreditoOpenApiBody,
+                                  user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    import openapi_credito as credito
+    t = await raw_db.tenants.find_one({"id": tid}, {"_id": 0, "id": 1})
+    if not t:
+        raise HTTPException(status_code=404, detail="Tenant non trovato")
+    res = await credito.imposta_credito(tid, body.importo, body.modo, user)
+    return res
+
+
+@router.get("/openapi-listino")
+async def get_openapi_listino(user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    import openapi_credito as credito
+    return {"costi": await credito.get_listino(), "labels": credito.LISTINO_LABELS}
+
+
+@router.put("/openapi-listino")
+async def set_openapi_listino(body: dict, user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    import openapi_credito as credito
+    costi = await credito.set_listino(body.get("costi") or {})
+    return {"costi": costi, "labels": credito.LISTINO_LABELS}
+
+
 @router.post("/agenzie", status_code=201)
 async def create_agenzia(body: AgenziaNuovaBody, request: Request,
                          user=Depends(require_user("admin"))) -> dict:

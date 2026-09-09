@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 09/09/2026 (fork) — Batch 10: Credito OpenAPI per agenzia + costo estrazioni + form polizza agenzia→compagnia
+
+- **Portafoglio credito OpenAPI per agenzia** (nuovo `openapi_credito.py`): credito prepagato salvato sul documento `tenants` (`openapi_credito_eur`), gestito dal Super Admin. Ogni estrazione OpenAPI (Camerale/Catasto/Veicoli/Visure/Visura/Report) ha un costo (listino) e viene addebitata prima dell'esecuzione; se il credito è insufficiente → **HTTP 402 bloccato** con messaggio chiaro. **Nessuna regressione**: se il tenant non ha credito configurato (`None`) il wallet è "non attivo" → nessun blocco/addebito (le agenzie esistenti continuano come prima).
+- **Listino costi configurabile dal Super Admin** (`raw_db.openapi_config`): default = prezzi base singola richiesta OpenAPI.it (camerale 0,30 / catasto 1,90 / veicoli 0,30 / visura 4,90 / visure 4,90 / report 5,00). Endpoint `GET/PUT /super-admin/openapi-listino`.
+- **Super Admin UI** (SuperAdminPanel.jsx): colonna "Credito API" per agenzia, pulsante 🪙 per **impostare/ricaricare** (`CreditoOpenApiDialog`, modo add/set → `POST /super-admin/agenzie/{tid}/openapi-credito`), pulsante "Listino OpenAPI" (`ListinoOpenApiDialog`).
+- **OpenApiActions.jsx**: badge mostra ora il **credito dell'agenzia** (non più il credito account OpenAPI.it), ogni pulsante mostra il **costo** dell'estrazione, e viene **disabilitato** se il credito è insufficiente. `/openapi-it/status` arricchito con `tenant_credito_eur` + `account_credit_eur` + `listino`.
+- Endpoint strumentati con addebito: `POST /openapi-it/{company,cadastre,vehicles,visura,visengine/request,report-azienda}`.
+- Verificato e2e: set credito 100€ → catasto scala a 98,10€; credito 1€ → catasto bloccato 402; ricarica OK; UI card mostra "Credito agenzia €100" + costi per pulsante; pannello Super Admin con colonna + dialog.
 - **Form Nuova polizza — ordine invertito Agenzia → Compagnia** (Polizze.jsx): il campo "Agenzia (mandato)" è ora la **prima scelta** (elenca principale=diretto + tutte le partner). La tendina "Compagnia" è disabilitata finché non si sceglie l'agenzia e mostra **solo le compagnie collegate a quell'agenzia** (principale → compagnie a mandato diretto; partner → compagnie con quel `agenzia_partner_id`). Cambiando agenzia si azzera la compagnia. Risolve l'ambiguità delle compagnie omonime con partner diversi. Verificato e2e (Bottoni → UnipolSai/TEST/GROUPAMA).
 
 ## Sessione 09/09/2026 (fork) — Batch 9: Fix Estratto Conto Compagnie + header polizza

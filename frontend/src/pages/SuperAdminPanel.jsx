@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked, Coins, ListChecks } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -109,6 +109,8 @@ function AgenzieTab() {
     const [editAgenzia, setEditAgenzia] = useState(null);
     const [resetAgenzia, setResetAgenzia] = useState(null);
     const [dominiAgenzia, setDominiAgenzia] = useState(null);
+    const [creditoAgenzia, setCreditoAgenzia] = useState(null);
+    const [showListino, setShowListino] = useState(false);
 
     const load = () => {
         setLoading(true);
@@ -164,11 +166,18 @@ function AgenzieTab() {
 
             <div className="flex justify-between items-center mb-3">
                 <h2 className="text-sm font-semibold text-slate-700">{items.length} agenzie registrate</h2>
-                <button onClick={() => setShowNew(true)}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-1"
-                    data-testid="sa-new-agenzia-btn">
-                    <Plus size={14} /> Nuova Agenzia
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowListino(true)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-1"
+                        data-testid="sa-listino-openapi-btn">
+                        <ListChecks size={14} /> Listino OpenAPI
+                    </button>
+                    <button onClick={() => setShowNew(true)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-1"
+                        data-testid="sa-new-agenzia-btn">
+                        <Plus size={14} /> Nuova Agenzia
+                    </button>
+                </div>
             </div>
             {loading && <Loader2 className="animate-spin text-slate-400 mx-auto my-8" />}
             <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -183,6 +192,7 @@ function AgenzieTab() {
                             <th className="text-right px-3 py-2">Clienti</th>
                             <th className="text-right px-3 py-2">Polizze</th>
                             <th className="text-right px-3 py-2">€/mese</th>
+                            <th className="text-right px-3 py-2">Credito API</th>
                             <th className="text-right px-3 py-2">Azioni</th>
                         </tr>
                     </thead>
@@ -204,7 +214,18 @@ function AgenzieTab() {
                                 <td className="px-3 py-2 text-right num">{a.stats?.anagrafiche ?? 0}</td>
                                 <td className="px-3 py-2 text-right num">{a.stats?.polizze ?? 0}</td>
                                 <td className="px-3 py-2 text-right num">€ {a.prezzo_mensile_eur?.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right num" data-testid={`sa-credito-${a.id}`}>
+                                    {a.openapi_credito_eur === null || a.openapi_credito_eur === undefined
+                                        ? <span className="text-[11px] text-slate-400">non attivo</span>
+                                        : <span className={`font-semibold ${a.openapi_credito_eur > 5 ? "text-emerald-700" : "text-rose-600"}`}>€ {Number(a.openapi_credito_eur).toFixed(2)}</span>}
+                                </td>
                                 <td className="px-3 py-2 text-right space-x-1">
+                                    <button onClick={() => setCreditoAgenzia(a)}
+                                        title="Credito OpenAPI (imposta/ricarica)"
+                                        className="p-1 text-amber-600 hover:bg-amber-50 rounded"
+                                        data-testid={`sa-credito-btn-${a.id}`}>
+                                        <Coins size={14} />
+                                    </button>
                                     {a.stato_abbonamento === "sospesa" && (
                                         <button onClick={() => azione(a.id, "attiva", "Agenzia attivata")}
                                             title="Riattiva"
@@ -255,6 +276,122 @@ function AgenzieTab() {
             {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
             {resetAgenzia && <ResetDatiDialog agenzia={resetAgenzia} onClose={() => setResetAgenzia(null)} onDone={() => { setResetAgenzia(null); load(); }} />}
             {dominiAgenzia && <DominiCredenzialiDialog agenzia={dominiAgenzia} onClose={() => { setDominiAgenzia(null); load(); }} />}
+            {creditoAgenzia && <CreditoOpenApiDialog agenzia={creditoAgenzia} onClose={() => { setCreditoAgenzia(null); load(); }} />}
+            {showListino && <ListinoOpenApiDialog onClose={() => setShowListino(false)} />}
+        </div>
+    );
+}
+
+function CreditoOpenApiDialog({ agenzia, onClose }) {
+    const [importo, setImporto] = useState("");
+    const [modo, setModo] = useState("add");
+    const [saving, setSaving] = useState(false);
+    const attuale = agenzia.openapi_credito_eur;
+
+    const salva = async () => {
+        const val = parseFloat(String(importo).replace(",", "."));
+        if (isNaN(val) || val < 0) { toast.error("Importo non valido"); return; }
+        setSaving(true);
+        try {
+            const r = await api.post(`/super-admin/agenzie/${agenzia.id}/openapi-credito`, { importo: val, modo });
+            toast.success(`Credito aggiornato: € ${Number(r.data.credito_eur).toFixed(2)}`);
+            onClose();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Errore");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" data-testid="sa-credito-dialog">
+            <div className="bg-white rounded-xl p-6 max-w-md w-full">
+                <h3 className="font-semibold text-lg mb-1 flex items-center gap-2"><Coins size={18} className="text-amber-600" /> Credito OpenAPI</h3>
+                <p className="text-sm text-slate-600 mb-4">{agenzia.ragione_sociale}</p>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4 text-sm">
+                    Credito attuale:{" "}
+                    <span className="font-semibold">
+                        {attuale === null || attuale === undefined ? "non attivo" : `€ ${Number(attuale).toFixed(2)}`}
+                    </span>
+                </div>
+                <div className="space-y-3">
+                    <div className="flex gap-2">
+                        <button onClick={() => setModo("add")} data-testid="sa-credito-modo-add"
+                            className={`flex-1 text-sm px-3 py-2 rounded-md border ${modo === "add" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-300"}`}>
+                            Aggiungi (ricarica)
+                        </button>
+                        <button onClick={() => setModo("set")} data-testid="sa-credito-modo-set"
+                            className={`flex-1 text-sm px-3 py-2 rounded-md border ${modo === "set" ? "bg-sky-600 text-white border-sky-600" : "bg-white text-slate-600 border-slate-300"}`}>
+                            Imposta (saldo esatto)
+                        </button>
+                    </div>
+                    <div>
+                        <label className="text-xs text-slate-500">Importo €</label>
+                        <input type="number" step="0.01" min="0" value={importo} onChange={(e) => setImporto(e.target.value)}
+                            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" placeholder="es. 100.00"
+                            data-testid="sa-credito-importo" autoFocus />
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-5">
+                    <button onClick={onClose} className="text-sm px-4 py-2 rounded-md border border-slate-300 text-slate-600">Annulla</button>
+                    <button onClick={salva} disabled={saving} className="text-sm px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700" data-testid="sa-credito-salva">
+                        {saving ? "Salvataggio…" : "Salva credito"}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ListinoOpenApiDialog({ onClose }) {
+    const [costi, setCosti] = useState(null);
+    const [labels, setLabels] = useState({});
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        api.get("/super-admin/openapi-listino").then((r) => { setCosti(r.data.costi || {}); setLabels(r.data.labels || {}); });
+    }, []);
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            const clean = {};
+            Object.entries(costi).forEach(([k, v]) => { clean[k] = parseFloat(String(v).replace(",", ".")) || 0; });
+            const r = await api.put("/super-admin/openapi-listino", { costi: clean });
+            setCosti(r.data.costi);
+            toast.success("Listino aggiornato");
+            onClose();
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Errore");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" data-testid="sa-listino-dialog">
+            <div className="bg-white rounded-xl p-6 max-w-md w-full">
+                <h3 className="font-semibold text-lg mb-1 flex items-center gap-2"><ListChecks size={18} className="text-slate-600" /> Listino costi OpenAPI</h3>
+                <p className="text-sm text-slate-600 mb-4">Costo per singola estrazione (scalato dal credito dell'agenzia).</p>
+                {!costi ? <Loader2 className="animate-spin text-slate-400 mx-auto my-6" /> : (
+                    <div className="space-y-2">
+                        {Object.keys(costi).map((k) => (
+                            <div key={k} className="flex items-center justify-between gap-3">
+                                <label className="text-sm text-slate-700">{labels[k] || k}</label>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-slate-400 text-sm">€</span>
+                                    <input type="number" step="0.01" min="0" value={costi[k]}
+                                        onChange={(e) => setCosti((p) => ({ ...p, [k]: e.target.value }))}
+                                        className="w-24 border border-slate-300 rounded-md px-2 py-1 text-sm text-right"
+                                        data-testid={`sa-listino-${k}`} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <div className="flex justify-end gap-2 mt-5">
+                    <button onClick={onClose} className="text-sm px-4 py-2 rounded-md border border-slate-300 text-slate-600">Annulla</button>
+                    <button onClick={salva} disabled={saving || !costi} className="text-sm px-4 py-2 rounded-md bg-slate-800 text-white hover:bg-slate-900" data-testid="sa-listino-salva">
+                        {saving ? "Salvataggio…" : "Salva listino"}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

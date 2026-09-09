@@ -16,6 +16,7 @@ from auth import current_user
 from database import db, raw_db
 from db_models import _now_iso
 import openapi_it_service as svc
+import openapi_credito as credito
 
 
 router = APIRouter(prefix="/openapi-it", tags=["openapi-it"])
@@ -58,6 +59,7 @@ async def fetch_company_for_anagrafica(aid: str, user=Depends(current_user)) -> 
     key = ana.get("partita_iva") or ana.get("codice_fiscale")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    await credito.addebita(user.get("agenzia_tenant_id"), "camerale", user)
     data = await svc.company_full_completo(key)
     if not data:
         raise HTTPException(status_code=404, detail="Dati azienda non disponibili")
@@ -160,6 +162,7 @@ async def fetch_cadastre_for_anagrafica(aid: str, user=Depends(current_user)) ->
     key = ana.get("codice_fiscale") or ana.get("partita_iva")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
+    await credito.addebita(user.get("agenzia_tenant_id"), "catasto", user)
     res = await svc.fetch_cadastre_detailed(key, want_pdf=True)
     allegato_id = None
     if res.get("pdf_bytes"):
@@ -297,6 +300,7 @@ async def fetch_vehicles_for_anagrafica(aid: str, user=Depends(current_user)) ->
     key = ana.get("codice_fiscale") or ana.get("partita_iva")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
+    await credito.addebita(user.get("agenzia_tenant_id"), "veicoli", user)
     data = await svc.fetch_vehicles(key)
     await _update_openapi_field(aid, "automotive", data)
     return {"count": len(data), "veicoli": data}
@@ -317,6 +321,7 @@ async def fetch_visura_for_anagrafica(aid: str, user=Depends(current_user)) -> d
     key = ana.get("partita_iva") or ana.get("codice_fiscale")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
+    await credito.addebita(user.get("agenzia_tenant_id"), "visura", user)
     data = await svc.fetch_visura(key)
 
     # Se OpenAPI ha restituito un download_url PDF → scarica e salva come Allegato.
@@ -375,14 +380,20 @@ async def status(user=Depends(current_user)) -> dict:
     """
     from os import environ
     has_creds = svc.has_credentials()
-    credit = None
+    account_credit = None
     if has_creds:
-        credit = await svc.get_credit()
+        account_credit = await svc.get_credit()
+    tenant_id = user.get("agenzia_tenant_id")
+    tenant_credito = await credito.get_credito(tenant_id)
+    listino = await credito.get_listino()
     return {
         "mode": "live" if has_creds else "mock",
         "has_credentials": has_creds,
         "env": (environ.get("OPENAPI_IT_ENV") or "prod").lower(),
-        "credit_eur": credit,
+        "credit_eur": tenant_credito if tenant_credito is not None else account_credit,
+        "tenant_credito_eur": tenant_credito,   # None = wallet non attivo (nessun blocco)
+        "account_credit_eur": account_credit,   # credito account OpenAPI.it (solo info)
+        "listino": listino,
     }
 
 
@@ -562,6 +573,7 @@ async def visengine_request(aid: str, body: dict, user=Depends(current_user)) ->
     json_visura = body.get("json_visura") or {}
     if not hash_visura or not json_visura:
         raise HTTPException(status_code=400, detail="hash_visura e json_visura obbligatori")
+    await credito.addebita(user.get("agenzia_tenant_id"), "visure", user)
     created = await svc.visengine_create_request(hash_visura, json_visura, body.get("opzioni"))
     if not created.get("ok"):
         raise HTTPException(status_code=400, detail=created.get("error") or "Errore Visengine")
@@ -763,6 +775,7 @@ async def report_azienda_fetch(aid: str, body: dict, user=Depends(current_user))
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza P.IVA/CF")
     schede = body.get("schede") or []
+    await credito.addebita(user.get("agenzia_tenant_id"), "report", user)
     res = await svc.report_azienda(key, schede)
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("error") or "Errore report azienda")
