@@ -884,7 +884,10 @@ function NuovaPolizzaDialog({ onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div><Label>Effetto *</Label><Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)} /></div>
+                <div><Label>Effetto *</Label><Input type="date" value={f.effetto} onChange={(e) => {
+                    const v = e.target.value; set("effetto", v);
+                    if (v) { const d = new Date(v); d.setFullYear(d.getFullYear() + 1); set("scadenza", d.toISOString().slice(0, 10)); }
+                }} /></div>
                 <div><Label>Scadenza *</Label><Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)} /></div>
                 <div>
                     <Label>Frazionamento</Label>
