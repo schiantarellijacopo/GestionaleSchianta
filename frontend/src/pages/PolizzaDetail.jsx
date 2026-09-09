@@ -1250,7 +1250,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori(r.data || []))
             .catch(() => setCollaboratori([]));
-        api.get("/librerie/rami").then((r) => setRami(r.data || []));
+        api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data || []));
     }, []);
     const [f, setF] = useState({
         numero_polizza: pol.numero_polizza || "",

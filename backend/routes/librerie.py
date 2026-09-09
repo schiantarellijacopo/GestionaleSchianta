@@ -1035,8 +1035,23 @@ async def seed_default_tipologie_sinistri() -> None:
 
 # --- RAMI ---
 @router.get("/librerie/rami")
-async def list_rami(user: dict = Depends(current_user)) -> list[dict]:
-    return await db.rami.find({}, {"_id": 0}).sort("nome", 1).to_list(200)
+async def list_rami(dedup: bool = False, user: dict = Depends(current_user)) -> list[dict]:
+    """`dedup=1` (per le tendine): esclude archiviati e doppioni con stesso codice."""
+    docs = await db.rami.find({}, {"_id": 0}).sort("nome", 1).to_list(300)
+    docs = [d for d in docs if not d.get("unito_in_ramo_id")]
+    if not dedup:
+        return docs
+    visti: set[str] = set()
+    out = []
+    for d in docs:
+        if d.get("attivo") is False:
+            continue
+        k = (d.get("codice") or "").strip().upper()
+        if k in visti:
+            continue
+        visti.add(k)
+        out.append(d)
+    return out
 
 
 @router.post("/librerie/rami", status_code=201)

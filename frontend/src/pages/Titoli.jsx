@@ -135,7 +135,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     useEffect(() => { load(); }, [filters]);
     useEffect(() => {
         Promise.all([
-            api.get("/compagnie"), api.get("/librerie/rami"),
+            api.get("/compagnie"), api.get("/librerie/rami?dedup=1"),
             api.get("/librerie/conti-cassa"),
             api.get("/auth/users").catch(() => ({ data: [] })),
             api.get("/librerie/prodotti").catch(() => ({ data: [] })),

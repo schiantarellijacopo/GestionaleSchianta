@@ -1172,7 +1172,7 @@ function ProdottoForm({ section, editing, onClose }) {
     const [rami, setRami] = useState([]);
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data));
-        api.get("/librerie/rami").then((r) => setRami(r.data));
+        api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data));
     }, []);
     // Default mora: 30gg per Vita, 15gg per gli altri
     const defaultMoraFor = (ramo) => {
@@ -1947,7 +1947,7 @@ function SchemaProvvForm({ section, editing, onClose }) {
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollab(r.data));
         api.get("/compagnie").then((r) => setCompagnie(r.data));
-        api.get("/librerie/rami").then((r) => setRami(r.data));
+        api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data));
     }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
         defaults={{ nome: "", collaboratore_id: null, compagnia_id: null, ramo: null,

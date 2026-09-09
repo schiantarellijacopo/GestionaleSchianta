@@ -25,7 +25,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     const [prodotti, setProdotti] = useState([]);
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data || []));
-        api.get("/librerie/rami").then((r) => setRami(r.data || []));
+        api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data || []));
     }, []);
 
     const oggi = new Date().toISOString().slice(0, 10);

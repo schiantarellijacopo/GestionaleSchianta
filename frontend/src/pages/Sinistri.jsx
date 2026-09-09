@@ -124,7 +124,7 @@ export default function Sinistri() {
     useEffect(() => {
         Promise.all([
             api.get("/compagnie").catch(() => ({ data: [] })),
-            api.get("/librerie/rami").catch(() => ({ data: [] })),
+            api.get("/librerie/rami?dedup=1").catch(() => ({ data: [] })),
             api.get("/auth/users").catch(() => ({ data: [] })),
         ]).then(([c, r, u]) => {
             setCompagnie(c.data); setRami(r.data);

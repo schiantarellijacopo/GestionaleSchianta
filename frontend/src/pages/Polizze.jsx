@@ -163,7 +163,7 @@ export default function Polizze() {
 
     useEffect(() => {
         Promise.all([
-            api.get("/compagnie"), api.get("/librerie/rami"),
+            api.get("/compagnie"), api.get("/librerie/rami?dedup=1"),
             api.get("/auth/users").catch(() => ({ data: [] })),
         ]).then(([c, r, u]) => {
             setCompagnie(c.data); setRami(r.data);
@@ -485,7 +485,7 @@ function NuovaPolizzaDialog({ onClose }) {
     useEffect(() => {
         api.get("/compagnie").then((r) => setComp(r.data));
         api.get("/agenzie").then((r) => setAgenzie(r.data || [])).catch(() => setAgenzie([]));
-        api.get("/librerie/rami").then((r) => setRami(r.data || []));
+        api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data || []));
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori(r.data || []))
             .catch(() => setCollaboratori([]));
