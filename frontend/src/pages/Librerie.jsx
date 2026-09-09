@@ -91,6 +91,8 @@ function Sezione({ section }) {
     const load = () => api.get(section.endpoint).then((r) => {
         let data = r.data;
         if (section.key === "utenti") data = (data || []).filter((u) => u.role !== "cliente");
+        // rami uniti in un master: restano in DB per lo storico, non si mostrano in libreria
+        if (section.key === "rami") data = (data || []).filter((r) => !r.unito_in_ramo_id);
         setList(data);
     });
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [section.key]);
