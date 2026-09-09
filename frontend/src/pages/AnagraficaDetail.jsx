@@ -1942,7 +1942,6 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 </button>
                 {docsOpen && (
                     <div className="p-3 space-y-4">
-                    <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} embedded />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {DOC_TIPI_ANAG.map((dt) => {
                     const doc = docs?.[dt.key];
@@ -1998,6 +1997,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     );
                         })}
                     </div>
+                    <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} embedded />
                     </div>
                 )}
             </div>
