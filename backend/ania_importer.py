@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from db_models import (
     Anagrafica, Polizza, Titolo, Sinistro, Compagnia, ImportLog, _uid, _now_iso,
+    ProdottoLibreria, RamoLibreria,
 )
 
 
@@ -120,6 +121,88 @@ async def _ensure_stub_mapping(db, collection: str, codice: str, descrizione: st
             "id": _uid(), "codice_ania": codice, "descrizione_ania": descrizione,
             "created_at": _now_iso(), "updated_at": _now_iso(), "is_deleted": False,
         })
+
+
+async def _register_import_mapping(db, import_mappings, tipo: str, codice: str,
+                                   entita_id: str, label: str = "",
+                                   flusso: str = "omnia") -> None:
+    """Segna un valore di flusso come MAPPATO a un'entità creata dall'import
+    (aggiorna la cache in-memory + persiste in import_mappings)."""
+    codice = (codice or "").strip()
+    if not codice or not entita_id:
+        return
+    if import_mappings is not None:
+        import_mappings.setdefault(tipo, {})[codice] = entita_id
+    await db.import_mappings.update_one(
+        {"tipo": tipo, "flusso": flusso, "valore_flusso": codice},
+        {"$setOnInsert": {"id": _uid(), "tipo": tipo, "flusso": flusso,
+                          "valore_flusso": codice, "created_at": _now_iso()},
+         "$set": {"entita_id": entita_id, "label_flusso": label or codice,
+                  "updated_at": _now_iso()},
+         "$inc": {"occorrenze": 1}},
+        upsert=True,
+    )
+
+
+async def _get_or_create_prodotto(db, codice: str, descr: str,
+                                  comp_id: Optional[str], ramo: Optional[str],
+                                  cache: Dict[str, str]) -> Optional[str]:
+    """Crea (o riusa) un Prodotto nella libreria Prodotti dal dizionario rec100."""
+    nome = (descr or codice or "").strip()
+    if not nome:
+        return None
+    key = nome.upper()
+    if key in cache:
+        return cache[key]
+    existing = await db.prodotti.find_one({"nome": nome}, {"_id": 0, "id": 1})
+    if existing:
+        cache[key] = existing["id"]
+        return existing["id"]
+    obj = ProdottoLibreria(nome=nome, compagnia_id=comp_id or None, ramo=(ramo or None))
+    await db.prodotti.insert_one(obj.model_dump())
+    cache[key] = obj.id
+    return obj.id
+
+
+async def _get_or_create_ramo(db, ramo_raw: str, cache: Dict[str, str]) -> Optional[str]:
+    """Crea (o riusa) un Ramo nella libreria globale Rami e ritorna il suo codice."""
+    code = (ramo_raw or "").strip().upper()
+    if not code or code == "VARIE":
+        return None
+    if code in cache:
+        return cache[code]
+    existing = await db.rami.find_one({"codice": code}, {"_id": 0, "codice": 1})
+    if existing and existing.get("codice"):
+        cache[code] = existing["codice"]
+        return existing["codice"]
+    obj = RamoLibreria(codice=code, nome=(ramo_raw or code).strip())
+    await db.rami.insert_one(obj.model_dump())
+    cache[code] = obj.codice
+    return obj.codice
+
+
+async def _get_or_create_tipologia_sinistro(db, ramo: Optional[str],
+                                            cache: Dict[str, str]) -> Optional[str]:
+    """Crea (o riusa) una Tipologia Sinistro dal ramo del sinistro importato."""
+    nome = (ramo or "").strip()
+    if not nome:
+        return None
+    key = nome.upper()
+    if key in cache:
+        return cache[key]
+    existing = await db.tipologie_sinistri.find_one({"nome": nome}, {"_id": 0, "id": 1})
+    if existing:
+        cache[key] = existing["id"]
+        return existing["id"]
+    doc = {
+        "id": _uid(), "nome": nome, "categoria": "Import ANIA",
+        "richiede_cai": False, "richiede_denuncia": True,
+        "attivo": True, "ordine": 100, "fonte": "import_ania",
+        "created_at": _now_iso(), "updated_at": _now_iso(),
+    }
+    await db.tipologie_sinistri.insert_one(doc)
+    cache[key] = doc["id"]
+    return doc["id"]
 
 
 def _parse_date(value: str) -> str | None:
@@ -442,6 +525,13 @@ async def _auto_create_stub_user(db, operatore_codice: str, label: str) -> Optio
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
     }
+    # users NON è tenant-scoped dal wrapper: assegna esplicitamente il tenant
+    # corrente così il collaboratore compare nella lista della sua agenzia.
+    from database import get_current_user
+    from tenant import user_tenant_id
+    tid = user_tenant_id(get_current_user())
+    if tid:
+        doc["agenzia_tenant_id"] = tid
     await db.users.insert_one(doc)
     return user_id
 
@@ -566,6 +656,7 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                             counts: Dict[str, int],
                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                             import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    rami_cache: Dict[str, str] = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec20":
             continue
@@ -601,11 +692,9 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                     )
                     if ramo_doc and ramo_doc.get("codice"):
                         ramo_mapped = ramo_doc["codice"]
-                elif tracker is not None:
-                    await _track_unmapped(
-                        db, tracker, "ramo", ramo_raw,
-                        label=ramo_raw, import_mappings=import_mappings,
-                    )
+                else:
+                    # Ramo non mappato → crea il ramo nella libreria e assegnalo
+                    ramo_mapped = await _get_or_create_ramo(db, ramo_raw, rami_cache)
             # Traccia prodotto come non mappato (verrà associato manualmente dalla libreria Prodotti)
             prodotto_raw = (row.get("prodotto_cmp") or "").strip()
             prodotto_mapped = None
@@ -974,6 +1063,7 @@ async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
                              counts: Dict[str, int],
                              tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                              import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    tip_cache: Dict[str, str] = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec50":
             continue
@@ -984,6 +1074,9 @@ async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
+            # Crea/riusa la tipologia sinistro dal ramo del sinistro
+            await _get_or_create_tipologia_sinistro(
+                db, row.get("ramo_sinistro_share"), tip_cache)
             id_s = row.get("id_sinistro_exp") or _uid()
             contraente_exp = row.get("id_contraente_exp")
             contraente_id = ana_id_map.get(contraente_exp) if contraente_exp else None
@@ -1030,18 +1123,20 @@ def _conta_record_residui(files_data: Dict[str, str], counts: Dict[str, int]) ->
 # ---------------------------------------------------------------------------
 async def _processa_prodotti(db, files_data: Dict[str, str],
                              counts: Dict[str, int],
+                             compagnie_cache: Optional[Dict[str, str]] = None,
                              tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                              import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
-    """Legge il dizionario prodotti (rec100) e traccia ciascun prodotto come "da
-    associare" alla libreria Prodotti del programma. NON crea entità Prodotto.
-    """
+    """Legge il dizionario prodotti (rec100) e CREA l'entità Prodotto nella
+    libreria Prodotti (dedup per nome), mappando il codice di flusso al prodotto
+    creato così le polizze vi si agganciano automaticamente."""
+    prod_cache: Dict[str, str] = {}
+    if compagnie_cache is None:
+        compagnie_cache = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec100":
             continue
         rows = _read_csv_text(content)
         counts["rec100"] = counts.get("rec100", 0) + len(rows)
-        if tracker is None:
-            continue
         for row in rows:
             # Traccia compagnia anche da rec100 (colonna B compagnia_exp)
             if import_mappings is not None:
@@ -1050,16 +1145,15 @@ async def _processa_prodotti(db, files_data: Dict[str, str],
             descr = (row.get("descrizione_prodotto") or "").strip()
             if not (codice or descr):
                 continue
-            valore = codice or descr
-            # Label con compagnia se disponibile (es. "Guidamica - Veicoli Autovettura (GPM)")
-            comp = (row.get("compagnia_exp") or "").strip()
-            label = descr or codice
-            if comp and label:
-                label = f"{label} ({comp})"
-            await _track_unmapped(
-                db, tracker, "prodotto", valore,
-                label=label, import_mappings=import_mappings,
+            comp_id = await _get_or_create_compagnia(
+                db, row.get("compagnia_exp", ""), row.get("compagnia_ania", ""),
+                compagnie_cache, tracker=tracker, import_mappings=import_mappings,
             )
+            prod_id = await _get_or_create_prodotto(db, codice, descr, comp_id, None, prod_cache)
+            if prod_id:
+                await _register_import_mapping(
+                    db, import_mappings, "prodotto", codice or descr, prod_id,
+                    label=(descr or codice))
 
 
 def _collab_tokens(name) -> set:
@@ -1082,9 +1176,15 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
     agganciandolo a quell'utente invece di creare un doppione.
     """
     # Indice collaboratori esistenti: nome normalizzato (set di token) -> user id
+    # Ristretto al tenant corrente (users NON è auto-filtrato dal wrapper).
+    from database import get_current_user
+    from tenant import user_tenant_id
+    _tid = user_tenant_id(get_current_user())
+    _uflt: dict = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}}
+    if _tid:
+        _uflt["agenzia_tenant_id"] = _tid
     user_index: list[tuple[set, str]] = []
-    async for u in db.users.find({"role": {"$in": ["admin", "collaboratore", "dipendente"]}},
-                                 {"_id": 0, "id": 1, "name": 1}):
+    async for u in db.users.find(_uflt, {"_id": 0, "id": 1, "name": 1}):
         toks = _collab_tokens(u.get("name"))
         if toks:
             user_index.append((toks, u["id"]))
@@ -1137,10 +1237,20 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
             if cf:
                 label_parts.append(f"CF: {cf}")
             label = " · ".join(label_parts)
-            await _track_unmapped(
-                db, tracker, "collaboratore", codice,
-                label=label, import_mappings=import_mappings,
-            )
+            # Nessun match con utenti esistenti → CREA il collaboratore (utente
+            # stub, ruolo collaboratore, non attivo) e mappalo al codice flusso.
+            new_uid = await _auto_create_stub_user(db, codice, descr or codice)
+            if new_uid:
+                toks = _collab_tokens(descr)
+                if toks:
+                    user_index.append((toks, new_uid))
+                await _register_import_mapping(
+                    db, import_mappings, "collaboratore", codice, new_uid, label=label)
+            else:
+                await _track_unmapped(
+                    db, tracker, "collaboratore", codice,
+                    label=label, import_mappings=import_mappings,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1209,7 +1319,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     # rec100/101 (dizionari) vengono processati PRIMA delle polizze in modo che,
     # quando le polizze tracciano un codice prodotto/collaboratore, la descrizione
     # completa sia già disponibile (rec100 colonna J descrizione_prodotto).
-    await _processa_prodotti(db, files_data, counts,
+    await _processa_prodotti(db, files_data, counts, compagnie_cache=compagnie_cache,
                              tracker=tracker, import_mappings=import_mappings)
     await _processa_collaboratori(db, files_data, counts,
                                   tracker=tracker, import_mappings=import_mappings)

@@ -325,3 +325,13 @@ Admin: `admin@assicura.it / Admin123!`
 - **Bug import metodo pagamento (Cloudflare 520)**: endpoint sincrono su ~17k polizze → timeout gateway. Convertito a job in background (`import_massivo.py`): ritorna `job_id`, stato via `GET /api/import/job/{job_id}`, con campo `processate/totali` per la progress bar. Frontend `Importazione.jsx` ora fa polling. Verificato dry-run: 16.973 polizze in ~12s.
 - Nota: molte `polizze_non_trovate` nel metodo pagamento derivano dall'import OMNIA incompleto → reimportare prima lo ZIP OMNIA (ora completo).
 - **TargaConflictWidget**: `/polizze/by-targa` ora considera solo polizze `attiva`/`sospesa` (escluse annullate/scadute/sostituite) — extras_p1p2.py.
+
+## 2026-06 — Import OMNIA: auto-creazione entità + fix Partita IVA
+- **Fix Partita IVA (ania_importer)**: la classificazione azienda avveniva solo se P.IVA presente E codice fiscale assente. Ora QUALSIASI anagrafica con P.IVA = `persona_giuridica`. Migrazione DB: 637 anagrafiche corrette su tutti i tenant. (API anagrafiche, import massivo, import OCR già corretti.)
+- **Auto-creazione entità nell'import OMNIA** (prima solo "tracciate da mappare"):
+  - **Prodotti** (rec100) → creati in libreria `prodotti` (dedup per nome), mappati al codice flusso così le polizze si agganciano.
+  - **Collaboratori** (rec101) → se nessun match con utenti esistenti, creato stub collaboratore in `users` (ruolo collaboratore, attivo=false) con `agenzia_tenant_id` corretto; match ristretto al tenant.
+  - **Rami** non mappati (rec20) → creati in libreria globale `rami` e assegnati alla polizza.
+  - **Tipologie sinistri** (rec50) → create in `tipologie_sinistri` dal ramo del sinistro (dedup per nome).
+- Compagnie, garanzie, titoli, sinistri: già creati/aggiornati dall'import.
+- Test end-to-end sintetico (tenant sandbox) PASS su tutte le entità con isolamento tenant corretto: `backend/tests/test_omnia_autocreate.py`.
