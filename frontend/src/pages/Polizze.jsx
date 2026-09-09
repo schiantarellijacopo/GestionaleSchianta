@@ -736,32 +736,32 @@ function NuovaPolizzaDialog({ onClose }) {
                     </Select>
                 </div>
                 <div>
+                    <Label>Agenzia (mandato) *</Label>
+                    <Select value={f.mandato || ""} onValueChange={(v) => { set("mandato", v); set("compagnia_id", ""); }}>
+                        <SelectTrigger data-testid="pol-agenzia-partner-select"><SelectValue placeholder="Scegli prima l'agenzia" /></SelectTrigger>
+                        <SelectContent>
+                            {agenzie.map((a) => (
+                                <SelectItem key={a.id} value={a.ragione_sociale}>
+                                    {a.ragione_sociale}{a.tipo === "principale" ? " (diretto)" : " (partner)"}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <div className="text-[11px] text-slate-400 mt-1">Scegli l'agenzia principale (mandato diretto) o l'agenzia partner: sotto vedrai solo le sue compagnie.</div>
+                </div>
+                <div>
                     <Label>Compagnia *</Label>
-                    <Select value={f.compagnia_id} onValueChange={(v) => set("compagnia_id", v)}>
-                        <SelectTrigger data-testid="pol-comp-select"><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                    <Select value={f.compagnia_id} onValueChange={(v) => set("compagnia_id", v)} disabled={!f.mandato}>
+                        <SelectTrigger data-testid="pol-comp-select"><SelectValue placeholder={f.mandato ? "Seleziona compagnia" : "Scegli prima l'agenzia"} /></SelectTrigger>
                         <SelectContent>
                             {comp.filter((c) => {
-                                if (!f.mandato) return true;
+                                if (!f.mandato) return false;
                                 const ag = agenzie.find((a) => a.ragione_sociale === f.mandato);
                                 if (!ag) return true;
                                 return ag.tipo === "principale" ? !c.agenzia_partner_id : c.agenzia_partner_id === ag.id;
                             }).map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                         </SelectContent>
                     </Select>
-                </div>
-                <div>
-                    <Label>Agenzia partner</Label>
-                    <Select value={f.mandato || ""} onValueChange={(v) => set("mandato", v)}>
-                        <SelectTrigger data-testid="pol-agenzia-partner-select"><SelectValue placeholder="Seleziona agenzia" /></SelectTrigger>
-                        <SelectContent>
-                            {agenzie.map((a) => (
-                                <SelectItem key={a.id} value={a.ragione_sociale}>
-                                    {a.ragione_sociale}{a.tipo === "principale" ? " (diretto)" : ""}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <div className="text-[11px] text-slate-400 mt-1">Precompilata in base alla compagnia (mandato diretto o via agenzia collegata).</div>
                 </div>
                 <div className="col-span-2">
                     <Label>Collaboratore (Operatore)</Label>

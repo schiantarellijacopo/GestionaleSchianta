@@ -1,5 +1,7 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+- **Form Nuova polizza — ordine invertito Agenzia → Compagnia** (Polizze.jsx): il campo "Agenzia (mandato)" è ora la **prima scelta** (elenca principale=diretto + tutte le partner). La tendina "Compagnia" è disabilitata finché non si sceglie l'agenzia e mostra **solo le compagnie collegate a quell'agenzia** (principale → compagnie a mandato diretto; partner → compagnie con quel `agenzia_partner_id`). Cambiando agenzia si azzera la compagnia. Risolve l'ambiguità delle compagnie omonime con partner diversi. Verificato e2e (Bottoni → UnipolSai/TEST/GROUPAMA).
+
 ## Sessione 09/09/2026 (fork) — Batch 9: Fix Estratto Conto Compagnie + header polizza
 
 - **Colonna "Agenzia partner" in Estratto conto compagnie** (EstrattoContoCompagnie.jsx): l'endpoint `/compagnie/saldi-cassa` ora restituisce `tipo_mandato` + `agenzia_partner_id` + `agenzia_partner_nome`. La tabella mostra, per i mandati in collaborazione, l'agenzia partner a cui versare (icona Handshake, viola); per i diretti "Diretto (compagnia)". Se collaborazione senza partner impostato → "partner non impostato" (ambra). Verificato via API + screenshot.
