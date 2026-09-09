@@ -418,6 +418,26 @@ async def imposta_credito_openapi(tid: str, body: CreditoOpenApiBody,
     return res
 
 
+@router.get("/agenzie/{tid}/openapi-storico")
+async def storico_credito_openapi(tid: str, user=Depends(require_user("admin"))) -> dict:
+    _ensure_super_admin(user)
+    t = await raw_db.tenants.find_one(
+        {"id": tid},
+        {"_id": 0, "openapi_credito_eur": 1, "openapi_credito_ricariche": 1, "openapi_credito_movimenti": 1},
+    )
+    if not t:
+        raise HTTPException(status_code=404, detail="Tenant non trovato")
+    ricariche = list(reversed(t.get("openapi_credito_ricariche") or []))
+    movimenti = list(reversed(t.get("openapi_credito_movimenti") or []))
+    return {
+        "credito_eur": t.get("openapi_credito_eur"),
+        "ricariche": ricariche,
+        "movimenti": movimenti,
+        "totale_ricaricato": round(sum(r.get("importo", 0) for r in ricariche if r.get("importo", 0) > 0), 2),
+        "totale_consumato": round(sum(-m.get("importo", 0) for m in movimenti if m.get("importo", 0) < 0), 2),
+    }
+
+
 @router.get("/openapi-listino")
 async def get_openapi_listino(user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)

@@ -286,7 +286,13 @@ function CreditoOpenApiDialog({ agenzia, onClose }) {
     const [importo, setImporto] = useState("");
     const [modo, setModo] = useState("add");
     const [saving, setSaving] = useState(false);
+    const [storico, setStorico] = useState(null);
     const attuale = agenzia.openapi_credito_eur;
+
+    const loadStorico = () => {
+        api.get(`/super-admin/agenzie/${agenzia.id}/openapi-storico`).then((r) => setStorico(r.data)).catch(() => setStorico(null));
+    };
+    useEffect(() => { loadStorico(); }, []);
 
     const salva = async () => {
         const val = parseFloat(String(importo).replace(",", "."));
@@ -295,22 +301,32 @@ function CreditoOpenApiDialog({ agenzia, onClose }) {
         try {
             const r = await api.post(`/super-admin/agenzie/${agenzia.id}/openapi-credito`, { importo: val, modo });
             toast.success(`Credito aggiornato: € ${Number(r.data.credito_eur).toFixed(2)}`);
-            onClose();
+            setImporto("");
+            loadStorico();
         } catch (e) {
             toast.error(e?.response?.data?.detail || "Errore");
         } finally { setSaving(false); }
     };
 
+    const fmtDt = (s) => s ? String(s).slice(0, 16).replace("T", " ") : "";
+
     return (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" data-testid="sa-credito-dialog">
-            <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <div className="bg-white rounded-xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
                 <h3 className="font-semibold text-lg mb-1 flex items-center gap-2"><Coins size={18} className="text-amber-600" /> Credito OpenAPI</h3>
                 <p className="text-sm text-slate-600 mb-4">{agenzia.ragione_sociale}</p>
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4 text-sm">
-                    Credito attuale:{" "}
-                    <span className="font-semibold">
-                        {attuale === null || attuale === undefined ? "non attivo" : `€ ${Number(attuale).toFixed(2)}`}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4 text-sm flex items-center justify-between">
+                    <span>Credito attuale:{" "}
+                        <span className="font-semibold">
+                            {(storico?.credito_eur ?? attuale) === null || (storico?.credito_eur ?? attuale) === undefined ? "non attivo" : `€ ${Number(storico?.credito_eur ?? attuale).toFixed(2)}`}
+                        </span>
                     </span>
+                    {storico && (
+                        <span className="text-[11px] text-slate-500">
+                            Ricaricato: <b className="text-emerald-700">€{Number(storico.totale_ricaricato || 0).toFixed(2)}</b>
+                            {" · "}Consumato: <b className="text-rose-600">€{Number(storico.totale_consumato || 0).toFixed(2)}</b>
+                        </span>
+                    )}
                 </div>
                 <div className="space-y-3">
                     <div className="flex gap-2">
@@ -323,18 +339,57 @@ function CreditoOpenApiDialog({ agenzia, onClose }) {
                             Imposta (saldo esatto)
                         </button>
                     </div>
-                    <div>
-                        <label className="text-xs text-slate-500">Importo €</label>
-                        <input type="number" step="0.01" min="0" value={importo} onChange={(e) => setImporto(e.target.value)}
-                            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" placeholder="es. 100.00"
-                            data-testid="sa-credito-importo" autoFocus />
+                    <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                            <label className="text-xs text-slate-500">Importo €</label>
+                            <input type="number" step="0.01" min="0" value={importo} onChange={(e) => setImporto(e.target.value)}
+                                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" placeholder="es. 100.00"
+                                data-testid="sa-credito-importo" />
+                        </div>
+                        <button onClick={salva} disabled={saving} className="text-sm px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap" data-testid="sa-credito-salva">
+                            {saving ? "…" : "Salva"}
+                        </button>
                     </div>
                 </div>
+
+                {/* STORICO */}
+                <div className="mt-5 border-t border-slate-200 pt-4" data-testid="sa-credito-storico">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <div className="text-[10px] uppercase font-semibold text-emerald-700 mb-1">Ricariche</div>
+                            {!storico?.ricariche?.length ? (
+                                <div className="text-xs text-slate-400">Nessuna ricarica.</div>
+                            ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto">
+                                    {storico.ricariche.map((r, i) => (
+                                        <div key={i} className="text-xs flex justify-between border-b border-slate-100 pb-1">
+                                            <span className="text-slate-500">{fmtDt(r.data)}<div className="text-[10px] text-slate-400">{r.modo === "set" ? "imposta" : "ricarica"} · {r.by || "—"}</div></span>
+                                            <span className={`font-semibold ${r.importo >= 0 ? "text-emerald-700" : "text-rose-600"}`}>{r.importo >= 0 ? "+" : ""}{Number(r.importo).toFixed(2)}€</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div>
+                            <div className="text-[10px] uppercase font-semibold text-rose-600 mb-1">Consumi (estrazioni)</div>
+                            {!storico?.movimenti?.length ? (
+                                <div className="text-xs text-slate-400">Nessun consumo.</div>
+                            ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto">
+                                    {storico.movimenti.map((m, i) => (
+                                        <div key={i} className="text-xs flex justify-between border-b border-slate-100 pb-1">
+                                            <span className="text-slate-500">{fmtDt(m.data)}<div className="text-[10px] text-slate-400">{m.operazione}</div></span>
+                                            <span className="font-semibold text-rose-600">{Number(m.importo).toFixed(2)}€</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
                 <div className="flex justify-end gap-2 mt-5">
-                    <button onClick={onClose} className="text-sm px-4 py-2 rounded-md border border-slate-300 text-slate-600">Annulla</button>
-                    <button onClick={salva} disabled={saving} className="text-sm px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700" data-testid="sa-credito-salva">
-                        {saving ? "Salvataggio…" : "Salva credito"}
-                    </button>
+                    <button onClick={onClose} className="text-sm px-4 py-2 rounded-md border border-slate-300 text-slate-600">Chiudi</button>
                 </div>
             </div>
         </div>
