@@ -928,3 +928,13 @@ Usare integration_expert prima di implementare.
 - Form modifica anagrafica: aggiunto selettore "Tipo anagrafica" (fisica/giuridica) + campo PEC.
 - I PDF scaricati (bilancio ottico, visure) restano salvati in allegati con categoria (visura_camerale/bilancio/visura_catastale), visibili in "Altri allegati" con data e multipli file per categoria.
 - PENDING (agentic edits da fare): campi Amministratore + Referente azienda (con email/cellulare, autocompilati da import); mostrare solo tab attive; categoria "bilancio" per bilancio-ottico.
+
+## Sessione 2026-09 (parte 20) — Import OMNIA completato + Unisci doppioni Rami
+- IMPORT OMNIA (tenant 31b4950e, job b78fb2e5) COMPLETATO 09/09 21:10, 0 errori: 9.895 anagrafiche (+34 agg.), 49.039 polizze (6.802 attive), 187.953 titoli (176.145 incassati / 11.808 da incassare), 7.718 sinistri, 5 compagnie, 342 prodotti, 10 collaboratori (19.659 polizze collegate).
+- PENDING: import CSV "Metodo di Pagamento" per popolare mezzo_pagamento / data_copertura sui titoli (endpoint async già pronto: POST /api/import-massivo/metodo-pagamento).
+- NUOVA FEATURE "Unisci doppioni" (solo libreria Rami, richiesta utente):
+  - Backend routes/librerie.py: POST /api/librerie/rami/merge-preview (anteprima conteggi riferimenti: polizze, sinistri, prodotti — totale su unione valori per evitare doppi conteggi) e POST /api/librerie/rami/merge (admin): riassegna ramo dei doc al codice master e ARCHIVIA i doppioni (attivo=false + unito_in_ramo_id / unito_in_codice / unito_at), log_attivita "merge".
+  - Match riferimenti su {codice, nome} del doppione; le collezioni polizze/sinistri/prodotti sono tenant-scoped (wrapper DB) → riassegnazione limitata all'agenzia corrente. NB: la collezione `rami` è globale/condivisa, l'archiviazione ha effetto su tutti i tenant.
+  - Frontend Librerie.jsx: pulsante "Unisci doppioni" nel tab Rami → MergeRamiDialog con rilevamento automatico gruppi (nome/codice normalizzati), scelta master (radio) + doppioni (checkbox), anteprima conteggi, conferma. Tabella Rami ora mostra colonna Stato (attivo / archiviato / "unito → CODICE").
+  - Testato: curl (create/preview/merge/archiviazione/errori + cleanup) e screenshot UI con gruppo RC AUTO (38 polizze).
+

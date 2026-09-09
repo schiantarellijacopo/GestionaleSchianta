@@ -1062,6 +1062,84 @@ async def delete_ramo(rid: str, user: dict = Depends(require_user("admin"))) -> 
     return {"ok": True}
 
 
+# --- RAMI: unione doppioni -------------------------------------------------
+def _ramo_valori(r: dict) -> list[str]:
+    """Valori testuali con cui un ramo può essere referenziato in polizze/sinistri."""
+    vals = {(r.get("codice") or "").strip(), (r.get("nome") or "").strip()}
+    return [v for v in vals if v]
+
+
+async def _conta_riferimenti_ramo(valori: list[str]) -> dict:
+    flt = {"$in": valori}
+    return {
+        "polizze": await db.polizze.count_documents({"ramo": flt}),
+        "sinistri": await db.sinistri.count_documents({"ramo": flt}),
+        "prodotti": await db.prodotti.count_documents({"ramo": flt}),
+    }
+
+
+async def _carica_master_e_doppioni(body: dict) -> tuple[dict, list[dict]]:
+    master_id = body.get("master_id")
+    dup_ids = [d for d in (body.get("duplicati_ids") or []) if d and d != master_id]
+    if not master_id or not dup_ids:
+        raise HTTPException(400, "Seleziona un ramo master e almeno un doppione")
+    master = await db.rami.find_one({"id": master_id}, {"_id": 0})
+    if not master:
+        raise HTTPException(404, "Ramo master non trovato")
+    dups = await db.rami.find({"id": {"$in": dup_ids}}, {"_id": 0}).to_list(100)
+    if len(dups) != len(dup_ids):
+        raise HTTPException(404, "Uno o più doppioni non trovati")
+    return master, dups
+
+
+@router.post("/librerie/rami/merge-preview")
+async def merge_rami_preview(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    """Anteprima: quanti riferimenti verranno spostati sul ramo master."""
+    master, dups = await _carica_master_e_doppioni(body)
+    dettaglio = []
+    valori_tutti: set[str] = set()
+    for d in dups:
+        valori = _ramo_valori(d)
+        valori_tutti.update(valori)
+        cnt = await _conta_riferimenti_ramo(valori)
+        dettaglio.append({"id": d["id"], "codice": d.get("codice"), "nome": d.get("nome"), **cnt})
+    # totale su unione dei valori: evita doppi conteggi tra doppioni con stesso codice
+    tot = await _conta_riferimenti_ramo(sorted(valori_tutti))
+    return {
+        "master": {"id": master["id"], "codice": master.get("codice"), "nome": master.get("nome")},
+        "doppioni": dettaglio,
+        "totali": tot,
+    }
+
+
+@router.post("/librerie/rami/merge")
+async def merge_rami(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
+    """Riassegna i riferimenti dei doppioni al ramo master e li archivia."""
+    master, dups = await _carica_master_e_doppioni(body)
+    master_codice = (master.get("codice") or "").strip()
+    if not master_codice:
+        raise HTTPException(400, "Il ramo master non ha un codice valido")
+
+    tot = {"polizze": 0, "sinistri": 0, "prodotti": 0}
+    for d in dups:
+        valori = _ramo_valori(d)
+        flt = {"ramo": {"$in": valori}}
+        upd = {"$set": {"ramo": master_codice, "updated_at": _now_iso()}}
+        tot["polizze"] += (await db.polizze.update_many(flt, upd)).modified_count
+        tot["sinistri"] += (await db.sinistri.update_many(flt, upd)).modified_count
+        tot["prodotti"] += (await db.prodotti.update_many(flt, upd)).modified_count
+        await db.rami.update_one({"id": d["id"]}, {"$set": {
+            "attivo": False,
+            "unito_in_ramo_id": master["id"],
+            "unito_in_codice": master_codice,
+            "unito_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }})
+        await log_attivita(user, "merge", "ramo", d["id"], f"{d.get('nome')} → {master.get('nome')}")
+
+    return {"ok": True, "master": master_codice, "archiviati": len(dups), "riferimenti_spostati": tot}
+
+
 # ============================================================
 # LIBRERIE — AZIENDA (DATI INTESTAZIONE / STAMPE)
 # ============================================================

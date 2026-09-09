@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
@@ -86,6 +86,7 @@ function Sezione({ section }) {
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
+    const [mergeOpen, setMergeOpen] = useState(false);
 
     const load = () => api.get(section.endpoint).then((r) => {
         let data = r.data;
@@ -126,6 +127,7 @@ function Sezione({ section }) {
 
     const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
     const showBulkRename = section.key === "prodotti";
+    const showMerge = section.key === "rami";
 
     return (
         <div>
@@ -140,6 +142,11 @@ function Sezione({ section }) {
                     {showBulkRename && list && list.length > 0 && (
                         <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} data-testid="lib-bulk-rename-prodotti">
                             <Pencil size={13} className="mr-1" /> Rinomina in massa
+                        </Button>
+                    )}
+                    {showMerge && list && list.length > 1 && (
+                        <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)} data-testid="lib-merge-rami">
+                            <GitMerge size={13} className="mr-1" /> Unisci doppioni
                         </Button>
                     )}
                     <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
@@ -173,7 +180,160 @@ function Sezione({ section }) {
                     onClose={() => { setBulkOpen(false); load(); }}
                 />
             )}
+
+            {showMerge && mergeOpen && (
+                <MergeRamiDialog
+                    open={mergeOpen}
+                    rami={list || []}
+                    onClose={() => { setMergeOpen(false); load(); }}
+                />
+            )}
         </div>
+    );
+}
+
+function MergeRamiDialog({ open, rami, onClose }) {
+    const [masterId, setMasterId] = useState("");
+    const [dupIds, setDupIds] = useState([]);
+    const [preview, setPreview] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    const attivi = (rami || []).filter((r) => r.attivo !== false);
+
+    const norm = (s) => (s || "").toUpperCase().replace(/[\s_.-]/g, "");
+    const gruppi = Object.values(
+        attivi.reduce((acc, r) => {
+            const k = norm(r.nome) || norm(r.codice);
+            (acc[k] = acc[k] || []).push(r);
+            return acc;
+        }, {})
+    ).filter((g) => g.length > 1);
+
+    const toggleDup = (id) => {
+        setPreview(null);
+        setDupIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    };
+
+    const selezionaGruppo = (g) => {
+        setPreview(null);
+        setMasterId(g[0].id);
+        setDupIds(g.slice(1).map((r) => r.id));
+    };
+
+    const caricaPreview = async () => {
+        setLoading(true);
+        try {
+            const r = await api.post("/librerie/rami/merge-preview", { master_id: masterId, duplicati_ids: dupIds });
+            setPreview(r.data);
+        } catch (e) { toast.error(errMsg(e, "Errore anteprima")); }
+        finally { setLoading(false); }
+    };
+
+    const conferma = async () => {
+        setLoading(true);
+        try {
+            const r = await api.post("/librerie/rami/merge", { master_id: masterId, duplicati_ids: dupIds });
+            const t = r.data.riferimenti_spostati || {};
+            toast.success(`Unione completata: ${r.data.archiviati} rami archiviati · ${t.polizze || 0} polizze, ${t.sinistri || 0} sinistri, ${t.prodotti || 0} prodotti riassegnati`);
+            onClose();
+        } catch (e) { toast.error(errMsg(e, "Errore unione")); }
+        finally { setLoading(false); }
+    };
+
+    const canPreview = masterId && dupIds.length > 0 && !dupIds.includes(masterId);
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+            <DialogContent className="max-w-3xl" data-testid="merge-rami-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2"><GitMerge size={16} /> Unisci rami doppioni</DialogTitle>
+                </DialogHeader>
+
+                <p className="text-sm text-slate-500">
+                    Scegli il ramo <b>master</b> da mantenere e spunta i doppioni: polizze, sinistri e prodotti
+                    verranno riassegnati al master, i doppioni restano archiviati nello storico.
+                </p>
+
+                {gruppi.length > 0 && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5" data-testid="merge-rami-suggeriti">
+                        <div className="text-xs font-semibold text-amber-800 mb-1.5">Doppioni rilevati automaticamente</div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {gruppi.map((g, i) => (
+                                <Button key={i} variant="outline" size="sm" className="h-7 text-xs bg-white"
+                                    onClick={() => selezionaGruppo(g)} data-testid={`merge-rami-gruppo-${i}`}>
+                                    {g[0].nome} <span className="ml-1 text-slate-400">×{g.length}</span>
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="max-h-72 overflow-auto border border-slate-200 rounded-md">
+                    <table className="tbl w-full text-sm">
+                        <thead><tr><th className="w-16">Master</th><th className="w-16">Doppione</th><th>Codice</th><th>Nome</th></tr></thead>
+                        <tbody>
+                            {attivi.map((r) => (
+                                <tr key={r.id} className={masterId === r.id ? "bg-sky-50" : dupIds.includes(r.id) ? "bg-rose-50" : ""}>
+                                    <td className="text-center">
+                                        <input type="radio" name="ramo-master" checked={masterId === r.id}
+                                            onChange={() => { setMasterId(r.id); setDupIds((p) => p.filter((x) => x !== r.id)); setPreview(null); }}
+                                            data-testid={`merge-master-${r.id}`} />
+                                    </td>
+                                    <td className="text-center">
+                                        <input type="checkbox" checked={dupIds.includes(r.id)} disabled={masterId === r.id}
+                                            onChange={() => toggleDup(r.id)} data-testid={`merge-dup-${r.id}`} />
+                                    </td>
+                                    <td className="num font-medium">{r.codice}</td>
+                                    <td>{r.nome}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {preview && (
+                    <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm" data-testid="merge-rami-preview">
+                        <div className="font-semibold text-sky-900 mb-1.5">
+                            Master: {preview.master.nome} ({preview.master.codice})
+                        </div>
+                        <table className="tbl w-full text-xs bg-white rounded">
+                            <thead><tr><th>Doppione</th><th className="text-right">Polizze</th><th className="text-right">Sinistri</th><th className="text-right">Prodotti</th></tr></thead>
+                            <tbody>
+                                {preview.doppioni.map((d) => (
+                                    <tr key={d.id}>
+                                        <td>{d.nome} <span className="text-slate-400">({d.codice})</span></td>
+                                        <td className="num text-right">{d.polizze}</td>
+                                        <td className="num text-right">{d.sinistri}</td>
+                                        <td className="num text-right">{d.prodotti}</td>
+                                    </tr>
+                                ))}
+                                <tr className="font-semibold">
+                                    <td>Totale da spostare</td>
+                                    <td className="num text-right">{preview.totali.polizze}</td>
+                                    <td className="num text-right">{preview.totali.sinistri}</td>
+                                    <td className="num text-right">{preview.totali.prodotti}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose} data-testid="merge-rami-annulla">Annulla</Button>
+                    {!preview ? (
+                        <Button disabled={!canPreview || loading} onClick={caricaPreview}
+                            className="bg-sky-700 hover:bg-sky-800" data-testid="merge-rami-preview-btn">
+                            {loading ? "Calcolo…" : "Anteprima"}
+                        </Button>
+                    ) : (
+                        <Button disabled={loading} onClick={conferma}
+                            className="bg-emerald-700 hover:bg-emerald-800" data-testid="merge-rami-conferma">
+                            {loading ? "Unione…" : `Unisci ${preview.doppioni.length} doppioni`}
+                        </Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -471,13 +631,20 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
     if (section.key === "rami") {
         return (
             <table className="tbl w-full">
-                <thead><tr><th>Codice</th><th>Nome</th><th>Descrizione</th><th></th></tr></thead>
+                <thead><tr><th>Codice</th><th>Nome</th><th>Descrizione</th><th>Stato</th><th></th></tr></thead>
                 <tbody>
                     {list.map((r) => (
-                        <tr key={r.id}>
+                        <tr key={r.id} className={r.attivo === false ? "opacity-60" : ""}>
                             <td className="num font-medium">{r.codice}</td>
                             <td>{r.nome}</td>
                             <td className="text-xs text-slate-500">{r.descrizione || ""}</td>
+                            <td>
+                                {r.attivo === false
+                                    ? <span className="badge badge-neutral" title={r.unito_in_codice ? `Unito in ${r.unito_in_codice}` : "Archiviato"}>
+                                        {r.unito_in_codice ? `unito → ${r.unito_in_codice}` : "archiviato"}
+                                      </span>
+                                    : <span className="badge badge-success">attivo</span>}
+                            </td>
                             <td className="text-right">
                                 <RowActions onEdit={() => onEdit(r)} onDelete={() => onDelete(r.id)} label="ramo" />
                             </td>
