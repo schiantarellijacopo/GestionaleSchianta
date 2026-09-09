@@ -1,6 +1,6 @@
 """Contratto di consulenza assicurativa — precompilazione, modifica, firma OTP, PDF."""
 from __future__ import annotations
-import hashlib, random, re
+import hashlib, secrets, re
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
@@ -196,7 +196,7 @@ async def invia_otp(aid: str, body: dict, user=Depends(current_user)):
         {"id": aid}, {"_id": 0, "cellulare": 1, "telefono": 1, "email": 1, "contratto_consulenza": 1})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
-    otp = f"{random.randint(0, 999999):06d}"
+    otp = f"{secrets.randbelow(1000000):06d}"
     scade = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
     cc = ana.get("contratto_consulenza") or {}
     cc["otp_hash"] = hashlib.sha256(otp.encode()).hexdigest()

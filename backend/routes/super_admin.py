@@ -622,8 +622,8 @@ async def cancella_agenzia(tid: str, request: Request,
 # ---------------------------------------------------------------------------
 # 🔥 RESET DATI TENANT (super-destructive, richiede password custode)
 # ---------------------------------------------------------------------------
-# Password custode: fissata lato server. NON esposta al frontend.
-_RESET_CUSTODE_PASSWORD = "Cazzimiei91!"
+# Password custode: letta da env (non hardcoded, non esposta al frontend).
+_RESET_CUSTODE_PASSWORD = os.environ.get("RESET_CUSTODE_PASSWORD", "")
 
 # Collezioni azzerate dal reset. Manteniamo tenant, users admin, e config di sistema.
 _RESET_COLLECTIONS = [
@@ -667,7 +667,7 @@ async def reset_dati_tenant(tid: str, body: ResetDatiBody, request: Request,
     """
     _ensure_super_admin(user)
 
-    if body.password_custode != _RESET_CUSTODE_PASSWORD:
+    if not _RESET_CUSTODE_PASSWORD or body.password_custode != _RESET_CUSTODE_PASSWORD:
         raise HTTPException(status_code=403, detail="Password custode errata")
 
     if tid == TENANT_PRINCIPALE_ID:

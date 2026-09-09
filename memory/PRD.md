@@ -9,6 +9,13 @@
 - **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
 - **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
 
+### 🔒 Code review (09/09/2026) — fix applicati + falsi positivi
+- **FIX** `routes/contratto_extra.py`: OTP firma contratto ora usa `secrets.randbelow(1000000)` invece di `random.randint` (crittograficamente sicuro).
+- **FIX** `routes/super_admin.py`: password custode reset tenant spostata da hardcoded a env `RESET_CUSTODE_PASSWORD` (+ guardia: rifiuta se env vuota). Valore in backend/.env.
+- **FALSO POSITIVO** marketing_studio.py:376/387 "exec() injection" → è `asyncio.create_subprocess_exec` (chiamata ffmpeg sicura con lista argomenti, nessuno shell). Nessun `exec()`. Nessuna azione.
+- **NON applicati (di proposito, alto rischio / nessun beneficio su app in produzione)**: split server.py (229 import), refactor complessità dispatch_query/send_whatsapp, "circular import" database↔tenant (app funzionante, refactor rischioso), "65 undefined variables" (vaghi, probabili falsi positivi del linter), dynamic imports (lazy import intenzionali), `random` in demo_seed/openapi_it_service/seed (dati mock/demo, non security-sensitive).
+
+
 ### ❌ Decisioni dell'utente — NON FARE (09/09/2026)
 - **Paga Agenzia Partner** (versamento premi collaborazione su IBAN partner) → l'utente ha deciso di NON farlo. Rimosso dal backlog.
 - **Attiva CAP + Geocoding** → NON fare (l'utente non lo vuole).
