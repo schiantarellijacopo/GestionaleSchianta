@@ -22,8 +22,9 @@ from db_models import _now_iso
 # Listino di default (Prezzo base 1 richiesta, pay-as-you-go OpenAPI.it).
 # Modificabile dal Super Admin. Valori in euro per singola estrazione.
 DEFAULT_LISTINO: dict[str, float] = {
-    "camerale": 0.30,     # visura/lookup camerale (company)
-    "catasto": 1.90,      # visura catastale
+    "camerale": 0.00,     # ricerca/dati azienda = GRATIS (i PDF si pagano a parte)
+    "catasto": 0.30,      # dati catastali (richiesta) - riempimento campi
+    "catasto_pdf": 1.90,  # visura catastale PDF ufficiale
     "veicoli": 0.30,      # PRA / automotive
     "visura": 4.90,       # visura camerale ordinaria (visengine/legacy)
     "visure": 4.90,       # Visure & Documenti (visengine)
@@ -32,8 +33,9 @@ DEFAULT_LISTINO: dict[str, float] = {
 
 # Etichette per la UI del listino
 LISTINO_LABELS: dict[str, str] = {
-    "camerale": "Camerale (dati azienda)",
-    "catasto": "Catasto (visura catastale)",
+    "camerale": "Camerale (dati azienda) — ricerca gratis",
+    "catasto": "Catasto (dati / riempimento campi)",
+    "catasto_pdf": "Catasto — visura PDF ufficiale",
     "veicoli": "Veicoli (PRA)",
     "visura": "Visura camerale",
     "visure": "Visure & Documenti",
@@ -97,6 +99,33 @@ async def imposta_credito(tenant_id: str, importo: float, modo: str = "set", use
          }}},
     )
     return {"tenant_id": tenant_id, "credito_eur": nuovo}
+
+
+async def addebita_importo(tenant_id: Optional[str], importo: float, descrizione: str, user: dict | None = None) -> dict:
+    """Addebita un importo variabile (es. prezzo reale di un documento PDF)."""
+    credito = await get_credito(tenant_id)
+    if credito is None:
+        return {"addebitato": 0.0, "saldo": None}
+    importo = round(float(importo or 0), 2)
+    if importo <= 0:
+        return {"addebitato": 0.0, "saldo": credito}
+    if credito < importo:
+        raise HTTPException(
+            status_code=402,
+            detail=(f"Credito OpenAPI insufficiente: {credito:.2f}€ disponibili, "
+                    f"«{descrizione}» costa {importo:.2f}€. Contatta l'amministratore per ricaricare."),
+        )
+    nuovo = round(credito - importo, 2)
+    await raw_db.tenants.update_one(
+        {"id": tenant_id},
+        {"$set": {"openapi_credito_eur": nuovo, "updated_at": _now_iso()},
+         "$push": {"openapi_credito_movimenti": {
+             "$each": [{"data": _now_iso(), "operazione": descrizione, "importo": -importo,
+                        "saldo": nuovo, "by": (user or {}).get("email") or (user or {}).get("id")}],
+             "$slice": -200,
+         }}},
+    )
+    return {"addebitato": importo, "saldo": nuovo}
 
 
 async def addebita(tenant_id: Optional[str], operazione: str, user: dict | None = None) -> dict:

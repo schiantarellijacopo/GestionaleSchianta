@@ -153,19 +153,17 @@ async def _save_allegato(aid: str, user, filename: str, content: bytes,
 
 
 @router.post("/cadastre/{aid}")
-async def fetch_cadastre_for_anagrafica(aid: str, user=Depends(current_user)) -> dict:
-    """Genera la visura catastale LIVE per il soggetto: estrae gli immobili
-    strutturati (per il selettore di import) e salva il PDF ufficiale negli Allegati.
-    NON inietta gli immobili: la scelta 'tutti o alcuni' avviene lato UI e poi
-    viene chiamato /cadastre/{aid}/importa-immobili."""
+async def fetch_cadastre_for_anagrafica(aid: str, pdf: bool = False, user=Depends(current_user)) -> dict:
+    """Estrae i dati catastali del soggetto (immobili strutturati) per riempire i campi.
+    Se pdf=True genera e salva anche la visura catastale PDF ufficiale (costo maggiore)."""
     ana = await _get_anagrafica(aid, user)
     key = ana.get("codice_fiscale") or ana.get("partita_iva")
     if not key:
         raise HTTPException(status_code=400, detail="Anagrafica senza CF/P.IVA")
-    await credito.addebita(user.get("agenzia_tenant_id"), "catasto", user)
-    res = await svc.fetch_cadastre_detailed(key, want_pdf=True)
+    await credito.addebita(user.get("agenzia_tenant_id"), "catasto_pdf" if pdf else "catasto", user)
+    res = await svc.fetch_cadastre_detailed(key, want_pdf=pdf)
     allegato_id = None
-    if res.get("pdf_bytes"):
+    if pdf and res.get("pdf_bytes"):
         allegato_id = await _save_allegato(
             aid, user, res.get("pdf_filename") or f"visura_catastale_{key}.pdf",
             res["pdf_bytes"], "visura_catastale", "application/pdf", "openapi.it/catasto")
@@ -692,6 +690,7 @@ async def camerale_documento(aid: str, body: dict, user=Depends(current_user)) -
         stato = "Visura evasa"
         riusato = True
     else:
+        await credito.addebita_importo(user.get("agenzia_tenant_id"), meta.get("prezzo"), f"Camerale: {meta['label']}", user)
         created = await svc.vc_generate(doc_type, cf_piva_id, body.get("anno"))
         if not created.get("ok"):
             raise HTTPException(status_code=400, detail=created.get("error") or "Errore generazione documento")

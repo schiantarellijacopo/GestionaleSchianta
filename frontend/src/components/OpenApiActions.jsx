@@ -25,6 +25,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     const [loading, setLoading] = useState(null); // key attualmente in caricamento
     const [expanded, setExpanded] = useState(null);
     const [catastoData, setCatastoData] = useState(null); // {immobili, soggetto}
+    const [catastoPdf, setCatastoPdf] = useState(false); // scarica anche la visura PDF ufficiale
     const [showVisengine, setShowVisengine] = useState(false);
     const [showCamerale, setShowCamerale] = useState(false);
     const [confirm, setConfirm] = useState(null); // {label, run}
@@ -46,7 +47,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     const estraiCatasto = async () => {
         setLoading("cadastre");
         try {
-            const r = await api.post(`/openapi-it/cadastre/${ana.id}`);
+            const r = await api.post(`/openapi-it/cadastre/${ana.id}?pdf=${catastoPdf ? "true" : "false"}`);
             if (r.data.pdf_salvato) toast.success("Visura catastale PDF salvata negli Allegati");
             if ((r.data.count || 0) === 0 && !r.data.pdf_salvato) {
                 toast.info(r.data.message || "Nessun immobile trovato al Catasto");
@@ -108,19 +109,25 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
                     icon={Building2} label="Camerale" testid="oapi-btn-company"
                     disabled={!canEdit || (!hasPiva && !hasCf)}
                     loading={false}
-                    cost={listino.camerale} bloccato={!puoEstrarre("camerale")}
                     onClick={guard("Camerale", () => setShowCamerale(true))}
                     hint={!hasPiva && !hasCf ? "P.IVA/CF mancante" : null}
                     hasData={!!openapi.camerale || Array.isArray(openapi.camerale_richieste)}
+                    extra={<div className="text-[10px] mt-1 text-center text-emerald-600 font-medium" data-testid="oapi-camerale-nota">Dati gratis · PDF a pagamento</div>}
                 />
                 <ActionBtn
                     icon={Home} label="Catasto" testid="oapi-btn-cadastre"
-                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre" || !puoEstrarre("catasto")}
+                    disabled={!canEdit || (!hasPiva && !hasCf) || loading === "cadastre" || !puoEstrarre(catastoPdf ? "catasto_pdf" : "catasto")}
                     loading={loading === "cadastre"}
-                    cost={listino.catasto} bloccato={!puoEstrarre("catasto")}
-                    onClick={guard("Catasto", estraiCatasto)}
+                    cost={catastoPdf ? listino.catasto_pdf : listino.catasto} bloccato={!puoEstrarre(catastoPdf ? "catasto_pdf" : "catasto")}
+                    onClick={guard(catastoPdf ? "Catasto + Visura PDF ufficiale" : "Catasto (dati)", estraiCatasto)}
                     hint={!hasPiva && !hasCf ? "CF/P.IVA mancante" : null}
                     hasData={Array.isArray(openapi.cadastre) && openapi.cadastre.length > 0}
+                    extra={canEdit && (hasPiva || hasCf) ? (
+                        <label className="flex items-center gap-1.5 mt-1 cursor-pointer text-[10px] text-slate-600 justify-center" data-testid="oapi-catasto-pdf-flag">
+                            <input type="checkbox" checked={catastoPdf} onChange={(e) => setCatastoPdf(e.target.checked)} className="accent-sky-600" />
+                            PDF ufficiale (€{Number(listino.catasto_pdf ?? 1.9).toFixed(2)})
+                        </label>
+                    ) : null}
                 />
                 <ActionBtn
                     icon={Car} label="Veicoli" testid="oapi-btn-vehicles"
@@ -214,7 +221,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
     );
 }
 
-function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasData, testid, cost, bloccato }) {
+function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasData, testid, cost, bloccato, extra }) {
     return (
         <div>
             <Button
@@ -235,6 +242,7 @@ function ActionBtn({ icon: Icon, label, onClick, loading, disabled, hint, hasDat
                 </div>
             )}
             {hint && <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1"><Info size={9} /> {hint}</div>}
+            {extra}
         </div>
     );
 }

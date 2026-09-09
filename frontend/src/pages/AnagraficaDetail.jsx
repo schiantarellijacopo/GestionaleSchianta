@@ -831,6 +831,8 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
     const [aCarico, setACarico] = useState(true);
     const [handicap, setHandicap] = useState(false);
     const [options, setOptions] = useState([]);
+    const [q, setQ] = useState(""); // testo di ricerca per l'anagrafica collegata
+    const [showList, setShowList] = useState(false);
     const [editing, setEditing] = useState(null);
     const [network, setNetwork] = useState(null);
     useEffect(() => { api.get("/anagrafiche").then((r) => setOptions(r.data.filter((a) => a.id !== ana.id))); }, [ana.id]);
