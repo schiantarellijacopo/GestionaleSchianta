@@ -140,6 +140,23 @@ async def _context(entita_tipo: str, entita_id: str) -> dict:
     }
     if entita_tipo == "contraente":
         ctx["stato_famiglia"] = await _stato_famiglia(ana)
+
+    # Garanzie + dati veicolo (per il Documento di polizza)
+    gar = pol.get("garanzie") or []
+    gar_lines = []
+    for g in gar:
+        if isinstance(g, dict):
+            nome = g.get("nome") or g.get("descrizione") or ""
+            extra = g.get("massimale") or g.get("somma_assicurata") or g.get("premio") or ""
+            gar_lines.append(f"{nome}: {extra}" if extra else nome)
+        elif g:
+            gar_lines.append(str(g))
+    ctx["garanzie"] = "\n".join(gar_lines) if gar_lines else "(nessuna garanzia specificata)"
+    ramo_l = f"{pol.get('ramo') or ''} {pol.get('prodotto') or ''}".lower()
+    is_auto = ("auto" in ramo_l or "rca" in ramo_l or "veicol" in ramo_l or bool(pol.get("targa")))
+    ctx["targa"] = pol.get("targa") or ""
+    ctx["modello"] = pol.get("modello") or pol.get("marca_modello") or pol.get("veicolo") or ""
+    ctx["sezione_veicolo"] = (f"DATI VEICOLO\nTarga: {ctx['targa']}\nModello: {ctx['modello']}" if is_auto else "")
     return ctx, ana, pol, comp, sin
 
 
@@ -150,41 +167,131 @@ def _sub(text: str, ctx: dict) -> str:
 def _build_pdf(titolo: str, corpo: str, ctx: dict, logo: bytes | None) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
-    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.enums import TA_LEFT
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, HRFlowable
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, HRFlowable,
+    )
 
     navy = colors.HexColor("#0f2f4a")
+    grey_line = colors.HexColor("#d7dee6")
+    label_col = colors.HexColor("#334155")
     ss = getSampleStyleSheet()
-    H1 = ParagraphStyle("H1", parent=ss["Title"], fontSize=15, leading=19, textColor=navy, alignment=TA_CENTER, spaceAfter=6)
-    body = ParagraphStyle("b", parent=ss["BodyText"], fontSize=10, leading=15)
+    title_st = ParagraphStyle("t", parent=ss["Title"], fontSize=16, leading=20, textColor=navy, alignment=TA_LEFT, spaceAfter=2)
+    body_st = ParagraphStyle("b", parent=ss["BodyText"], fontSize=9.5, leading=13, textColor=colors.HexColor("#1f2937"))
+    lbl_st = ParagraphStyle("l", parent=body_st, fontName="Helvetica-Bold", textColor=label_col)
+    val_st = ParagraphStyle("v", parent=body_st)
+    sec_st = ParagraphStyle("s", parent=body_st, fontName="Helvetica-Bold", fontSize=10, textColor=colors.white)
+    agency_st = ParagraphStyle("ag", parent=body_st, fontName="Helvetica-Bold", fontSize=11, textColor=navy)
 
     def esc(t):
         return str(t or "").replace("&", "&amp;").replace("<", "&lt;")
 
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.6 * cm, bottomMargin=1.6 * cm,
-                            leftMargin=2 * cm, rightMargin=2 * cm)
+    def is_section(line):
+        s = line.strip()
+        if not s or ":" in s or len(s) > 48:
+            return False
+        letters = [c for c in s if c.isalpha()]
+        return bool(letters) and s.upper() == s
+
+    testo = _sub(corpo, ctx).replace("\r", "")
+    lines = testo.split("\n")
+
     story = []
+    # Intestazione: logo + nome agenzia
+    header_left = []
     if logo:
         try:
             img = Image(BytesIO(logo))
             ratio = img.imageWidth / max(img.imageHeight, 1)
-            img.drawHeight = 1.4 * cm
-            img.drawWidth = 1.4 * cm * ratio
-            img.hAlign = "CENTER"
-            story.append(img)
-            story.append(Spacer(1, 6))
+            img.drawHeight = 1.3 * cm
+            img.drawWidth = 1.3 * cm * ratio
+            header_left.append(img)
         except Exception:
             pass
-    story.append(Paragraph(esc(titolo), H1))
-    story.append(HRFlowable(width="100%", thickness=1, color=navy, spaceAfter=10))
-    testo = _sub(corpo, ctx)
-    for para in testo.split("\n"):
-        story.append(Paragraph(esc(para) if para.strip() else "&nbsp;", body))
+    agency = ctx.get("azienda_nome") or ctx.get("agenzia_nome") or ""
+    name_cell = Paragraph(esc(agency), agency_st)
+    if header_left:
+        htab = Table([[header_left[0], name_cell]], colWidths=[1.6 * cm, None])
+        htab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+        story.append(htab)
+    elif agency:
+        story.append(name_cell)
+    story.append(HRFlowable(width="100%", thickness=1.2, color=navy, spaceBefore=6, spaceAfter=8))
+
+    # Titolo (prima riga in maiuscolo)
+    idx = 0
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    if idx < len(lines) and is_section(lines[idx]):
+        story.append(Paragraph(esc(lines[idx].strip()), title_st))
+        story.append(Spacer(1, 8))
+        idx += 1
+
+    tw = A4[0] - 4 * cm  # larghezza utile
+    pending = []  # buffer coppie label/value
+
+    def flush_fields():
+        nonlocal pending
+        if not pending:
+            return
+        data = [[Paragraph(esc(l), lbl_st), Paragraph(esc(v), val_st)] for l, v in pending]
+        t = Table(data, colWidths=[tw * 0.34, tw * 0.66])
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, grey_line),
+            ("BOX", (0, 0), (-1, -1), 0.6, grey_line),
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f4f7fa")),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 8))
+        pending = []
+
+    def section_bar(text):
+        cell = Paragraph(esc(text), sec_st)
+        t = Table([[cell]], colWidths=[tw])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), navy),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 5))
+
+    for line in lines[idx:]:
+        s = line.strip()
+        if not s:
+            flush_fields()
+            story.append(Spacer(1, 4))
+            continue
+        if is_section(s):
+            flush_fields()
+            section_bar(s)
+            continue
+        # riga campo "Etichetta: valore" (anche più coppie separate da 2+ spazi)
+        segs = re.split(r"\s{2,}", s)
+        if len(segs) > 1 and all((":" in seg and len(seg.split(":", 1)[0]) <= 42) for seg in segs):
+            for seg in segs:
+                label, value = seg.split(":", 1)
+                pending.append((label.strip(), value.strip()))
+            continue
+        if ":" in s and len(s.split(":", 1)[0]) <= 42 and not s.startswith("("):
+            label, value = s.split(":", 1)
+            pending.append((label.strip(), value.strip()))
+            continue
+        flush_fields()
+        story.append(Paragraph(esc(s), body_st))
+        story.append(Spacer(1, 2))
+    flush_fields()
+
+    out = BytesIO()
+    doc = SimpleDocTemplate(out, pagesize=A4, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+                            leftMargin=2 * cm, rightMargin=2 * cm)
     doc.build(story)
-    return buf.getvalue()
+    return out.getvalue()
 
 
 @router.get("/documenti/modelli-sezione")

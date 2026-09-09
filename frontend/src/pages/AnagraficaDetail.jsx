@@ -241,9 +241,6 @@ export default function AnagraficaDetail() {
                 <TabsContent value="chat-whatsapp"><WhatsAppChatPreview anagrafica_id={id} /></TabsContent>
                 <TabsContent value="contratto"><ContrattoConsulenzaTab anagrafica_id={id} /></TabsContent>
                 <TabsContent value="documenti">
-                    <div className="flex justify-end mb-2">
-                        <GeneraDocumentoButton sezione="contraente" entitaId={id} firmatarioId={id} onSaved={load} />
-                    </div>
                     <RichiediDocumentoBox anagrafica_id={id} ana={ana} /><DocumentiTab anagrafica_id={id} ana={ana} canEdit={canEdit} onReload={load} />
                 </TabsContent>
                 {ana.tipo !== "persona_giuridica" && (
@@ -1926,9 +1923,12 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <strong>Documenti del cliente</strong>: CI, patente, passaporto, codice fiscale, tessera sanitaria, visura camerale, mandato SDD, privacy firmata.
                     Tutti questi documenti sono <strong>sempre visibili al cliente</strong> nel suo portale.
                 </div>
-                <Button size="sm" variant="outline" onClick={scaricaPrivacy} data-testid="genera-privacy-btn">
-                    <FileText size={13} className="mr-1" /> Privacy & Consensi
-                </Button>
+                <div className="flex items-center gap-2">
+                    <GeneraDocumentoButton sezione="contraente" entitaId={anagrafica_id} firmatarioId={anagrafica_id} onSaved={onReload} />
+                    <Button size="sm" variant="outline" onClick={scaricaPrivacy} data-testid="genera-privacy-btn">
+                        <FileText size={13} className="mr-1" /> Privacy & Consensi
+                    </Button>
+                </div>
             </div>
 
             <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -1942,6 +1942,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 </button>
                 {docsOpen && (
                     <div className="p-3 space-y-4">
+                    <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} embedded />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {DOC_TIPI_ANAG.map((dt) => {
                     const doc = docs?.[dt.key];
@@ -1996,10 +1997,6 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                         </Card>
                     );
                         })}
-                    </div>
-                    <div className="border-t border-slate-100 pt-3">
-                        <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1 px-1">Altri documenti caricati (Visure, Bilanci, file vari)</div>
-                        <AllegatiTab entita_tipo="anagrafica" entita_id={anagrafica_id} canEdit={canEdit} embedded />
                     </div>
                     </div>
                 )}
@@ -2136,6 +2133,11 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
         finally { setCreating(false); }
     };
     const copia = (url) => { navigator.clipboard.writeText(url); toast.success("Link copiato"); };
+    const elimina = async (lid) => {
+        if (!window.confirm("Eliminare questa richiesta?")) return;
+        try { await api.delete(`/upload-links/${lid}`); toast.success("Richiesta eliminata"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
     const waLink = (url) => {
         const num = (ana?.cellulare || ana?.telefono || "").replace(/\D/g, "");
         const msg = encodeURIComponent(`Salve, per completare la pratica carichi qui il documento richiesto: ${url}`);
@@ -2152,7 +2154,20 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
             </div>
             <div className="flex gap-2">
                 <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)}
+                    list="doc-suggerimenti"
                     placeholder="Es. Libretto veicolo, Carta d'identità…" data-testid="richiedi-doc-descr" />
+                <datalist id="doc-suggerimenti">
+                    <option value="Carta d'identità" />
+                    <option value="Patente di guida" />
+                    <option value="Codice fiscale / Tessera sanitaria" />
+                    <option value="Libretto veicolo" />
+                    <option value="Visura camerale" />
+                    <option value="Bilancio" />
+                    <option value="Coordinate bancarie / IBAN" />
+                    <option value="Attestato di rischio" />
+                    <option value="Denuncia sinistro" />
+                    <option value="Fattura / Preventivo" />
+                </datalist>
                 <Button onClick={crea} disabled={creating} className="bg-sky-700 hover:bg-sky-800 shrink-0" data-testid="richiedi-doc-crea">
                     {creating ? "…" : "Genera link"}
                 </Button>
@@ -2169,6 +2184,7 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
                                 </span>
                                 <button onClick={() => copia(l.url)} className="text-sky-600 hover:text-sky-800" title="Copia link" data-testid={`richiedi-doc-copy-${l.id}`}><Copy size={13} /></button>
                                 {wa && <a href={wa} target="_blank" rel="noreferrer" className="text-emerald-600 hover:text-emerald-800" title="Invia su WhatsApp"><Send size={13} /></a>}
+                                <button onClick={() => elimina(l.id)} className="text-rose-500 hover:text-rose-700" title="Elimina richiesta" data-testid={`richiedi-doc-del-${l.id}`}><Trash2 size={13} /></button>
                             </div>
                         );
                     })}

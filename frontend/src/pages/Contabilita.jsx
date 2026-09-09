@@ -83,7 +83,6 @@ export default function Contabilita() {
                     <TabsTrigger value="storico" data-testid="tab-storico-pn">Storico Prima Nota</TabsTrigger>
                     <TabsTrigger value="prima-nota" data-testid="tab-prima-nota">Movimenti (elenco)</TabsTrigger>
                     <TabsTrigger value="dati-compagnie" data-testid="tab-dati-compagnie">Dati Compagnie</TabsTrigger>
-                    <TabsTrigger value="estratti" data-testid="tab-estratti">Estratto conto cliente</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="brogliaccio">

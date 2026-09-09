@@ -504,6 +504,18 @@ function NuovaPolizzaDialog({ onClose }) {
         /* eslint-disable-next-line */
     }, [f.compagnia_id, agenzie]);
 
+    // Se cambio l'agenzia partner, azzero la compagnia se non è collegata a quell'agenzia.
+    useEffect(() => {
+        if (!f.mandato || !f.compagnia_id) return;
+        const ag = agenzie.find((a) => a.ragione_sociale === f.mandato);
+        if (!ag) return;
+        const sel = comp.find((c) => c.id === f.compagnia_id);
+        if (!sel) return;
+        const ok = ag.tipo === "principale" ? !sel.agenzia_partner_id : sel.agenzia_partner_id === ag.id;
+        if (!ok) setF((p) => ({ ...p, compagnia_id: "" }));
+        /* eslint-disable-next-line */
+    }, [f.mandato]);
+
     // Ricerca anagrafiche SERVER-SIDE con debounce 250ms.
     // Funziona anche con DB di milioni di record perche' il filtraggio e' su Mongo (regex AND multi-token).
     useEffect(() => {
@@ -728,7 +740,12 @@ function NuovaPolizzaDialog({ onClose }) {
                     <Select value={f.compagnia_id} onValueChange={(v) => set("compagnia_id", v)}>
                         <SelectTrigger data-testid="pol-comp-select"><SelectValue placeholder="Seleziona" /></SelectTrigger>
                         <SelectContent>
-                            {comp.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
+                            {comp.filter((c) => {
+                                if (!f.mandato) return true;
+                                const ag = agenzie.find((a) => a.ragione_sociale === f.mandato);
+                                if (!ag) return true;
+                                return ag.tipo === "principale" ? !c.agenzia_partner_id : c.agenzia_partner_id === ag.id;
+                            }).map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
