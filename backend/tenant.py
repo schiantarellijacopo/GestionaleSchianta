@@ -191,6 +191,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "biblioteca_jobs",
     "biblioteca_previdenza_cartelle",
     "template_modelli",
+    "mup_modelli",
     "scambi_richieste",
     "import_massivo_sessioni",
     "import_massivo_files",

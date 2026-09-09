@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
@@ -26,6 +26,7 @@ const SECTIONS = [
     { key: "voci-bilancio", label: "Voci di bilancio", icon: <Wallet size={14} />, endpoint: "/librerie/voci-bilancio" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
+    { key: "mup-modelli", label: "Modelli MUP (precontrattuale)", icon: <ClipboardList size={14} />, endpoint: "/librerie/mup-modelli", custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
@@ -70,6 +71,7 @@ export default function Librerie() {
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
+                            : s.key === "mup-modelli" ? <ModelliMupSezione />
                             : s.key === "permessi" ? <PermessiSezione />
                             : <Sezione section={s} />}
                     </TabsContent>
@@ -3450,6 +3452,173 @@ const PLACEHOLDERS_DOC = [
 ];
 
 // Categorie raggruppate per chiarezza UI (tabs)
+const MUP_AREE = ["Auto / RC Auto", "Beni", "Infortuni e malattie", "Vita / Previdenza", "Generica"];
+const MODELLO_SEZIONI = [
+    { key: "contraente", label: "Contraente / Cliente" },
+    { key: "polizza", label: "Polizza" },
+    { key: "sinistro", label: "Sinistro" },
+    { key: "preventivo", label: "Preventivo / Trattativa" },
+];
+
+function SezioniVisibiliPicker({ value, onChange, testidPrefix }) {
+    const toggle = (k) => {
+        const s = new Set(value || []);
+        if (s.has(k)) s.delete(k); else s.add(k);
+        onChange([...s]);
+    };
+    return (
+        <div>
+            <Label>Visibile nelle sezioni</Label>
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
+                {MODELLO_SEZIONI.map((s) => (
+                    <label key={s.key} className={`flex items-center gap-2 text-xs p-1.5 rounded border cursor-pointer ${(value || []).includes(s.key) ? "border-indigo-400 bg-indigo-50" : "border-slate-200"}`}>
+                        <input type="checkbox" checked={(value || []).includes(s.key)} onChange={() => toggle(s.key)}
+                            data-testid={`${testidPrefix}-${s.key}`} className="accent-indigo-600" />
+                        {s.label}
+                    </label>
+                ))}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1">Il modello appare solo nelle sezioni selezionate. Se nessuna è selezionata, non è disponibile in nessuna sezione.</div>
+        </div>
+    );
+}
+
+function ModelliMupSezione() {
+    const [items, setItems] = useState(null);
+    const [editing, setEditing] = useState(null);
+
+    const load = () => api.get("/librerie/mup-modelli").then((r) => setItems(r.data || []));
+    useEffect(() => { load(); }, []);
+
+    const elimina = async (id) => {
+        if (!window.confirm("Eliminare questo modello MUP?")) return;
+        try { await api.delete(`/librerie/mup-modelli/${id}`); toast.success("Eliminato"); load(); }
+        catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+
+    return (
+        <div className="space-y-3" data-testid="mup-modelli-sezione">
+            <div className="flex items-center justify-between">
+                <div className="text-sm text-slate-600">
+                    Definisci, per ogni <strong>ramo/prodotto</strong>, le garanzie da spuntare nel MUP.
+                    In fase di polizza il modulo si compila scegliendo il modello e spuntando le garanzie.
+                </div>
+                <Button onClick={() => setEditing({ nome: "", area: "Generica", garanzie: [], attivo: true })}
+                    className="bg-indigo-700 hover:bg-indigo-800 h-8 shrink-0" data-testid="mup-modello-new">
+                    <Plus size={14} className="mr-1" />Nuovo modello MUP
+                </Button>
+            </div>
+            {items === null ? <Loading /> : items.length === 0 ? (
+                <div className="text-sm text-slate-500 py-8 text-center">Nessun modello MUP. Creane uno.</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {items.map((m) => (
+                        <Card key={m.id} className="p-3 border-slate-200" data-testid={`mup-modello-${m.id}`}>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <div className="font-semibold text-slate-800 flex items-center gap-2">
+                                        <ClipboardList size={15} className="text-indigo-600" />{m.nome}
+                                        {!m.attivo && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">archiviato</span>}
+                                    </div>
+                                    <div className="text-xs text-indigo-700 mt-0.5">Area: {m.area}</div>
+                                    <div className="text-[11px] text-slate-500 mt-1">{(m.garanzie || []).length} garanzie</div>
+                                </div>
+                                <div className="flex gap-1">
+                                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(m)}
+                                        data-testid={`mup-modello-edit-${m.id}`}><Pencil size={13} /></Button>
+                                    <Button size="icon" variant="ghost" className="h-7 w-7 text-rose-600" onClick={() => elimina(m.id)}
+                                        data-testid={`mup-modello-del-${m.id}`}><Trash2 size={13} /></Button>
+                                </div>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                                {(m.garanzie || []).slice(0, 8).map((g, i) => (
+                                    <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{g}</span>
+                                ))}
+                                {(m.garanzie || []).length > 8 && <span className="text-[10px] text-slate-400">+{m.garanzie.length - 8}</span>}
+                            </div>
+                        </Card>
+                    ))}
+                </div>
+            )}
+            {editing && <ModelloMupDialog editing={editing} onClose={() => { setEditing(null); load(); }} />}
+        </div>
+    );
+}
+
+function ModelloMupDialog({ editing, onClose }) {
+    const isNew = !editing.id;
+    const [f, setF] = useState({
+        nome: editing.nome || "", area: editing.area || "Generica",
+        garanzieText: (editing.garanzie || []).join("\n"), corpo: editing.corpo || "",
+        sezioni_visibili: editing.id ? (editing.sezioni_visibili || []) : MODELLO_SEZIONI.map((s) => s.key),
+        attivo: editing.attivo !== false,
+    });
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        const garanzie = f.garanzieText.split("\n").map((s) => s.trim()).filter(Boolean);
+        if (!f.nome.trim()) { toast.error("Inserisci un nome"); return; }
+        if (garanzie.length === 0) { toast.error("Inserisci almeno una garanzia"); return; }
+        const payload = { nome: f.nome.trim(), area: f.area, garanzie, corpo: f.corpo, sezioni_visibili: f.sezioni_visibili, attivo: f.attivo };
+        try {
+            if (isNew) await api.post("/librerie/mup-modelli", payload);
+            else await api.put(`/librerie/mup-modelli/${editing.id}`, payload);
+            toast.success("Modello MUP salvato"); onClose();
+        } catch (e) { toast.error(errMsg(e, "Errore salvataggio")); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="mup-modello-dialog">
+                <DialogHeader><DialogTitle>{isNew ? "Nuovo modello MUP" : "Modifica modello MUP"}</DialogTitle></DialogHeader>
+                <div className="space-y-3 py-2">
+                    <div>
+                        <Label>Nome modello *</Label>
+                        <Input value={f.nome} onChange={(e) => set("nome", e.target.value)}
+                            placeholder="Es. MUP RC Auto" data-testid="mup-modello-nome" />
+                    </div>
+                    <div>
+                        <Label>Area / ramo *</Label>
+                        <Select value={f.area} onValueChange={(v) => set("area", v)}>
+                            <SelectTrigger data-testid="mup-modello-area"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                {MUP_AREE.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <div className="text-[11px] text-slate-400 mt-1">Il MUP di polizza usa il modello con l'area corrispondente al ramo/prodotto.</div>
+                    </div>
+                    <div>
+                        <Label>Garanzie (una per riga) *</Label>
+                        <Textarea rows={8} value={f.garanzieText} onChange={(e) => set("garanzieText", e.target.value)}
+                            placeholder={"Ricorso Terzi\nCristalli\nFurto\n..."} data-testid="mup-modello-garanzie"
+                            className="font-mono text-xs" />
+                    </div>
+                    <div>
+                        <Label>Testo precontrattuale (con segnaposto)</Label>
+                        <Textarea rows={8} value={f.corpo} onChange={(e) => set("corpo", e.target.value)}
+                            placeholder={"Incolla qui il testo completo del MUP.\nUsa i segnaposto: {contraente}, {cliente_cf}, {compagnia}, {collaboratore}, {agenzia_nome}, {numero_polizza}, {ramo}, {prodotto}, {premio_lordo}, {data_oggi}"}
+                            data-testid="mup-modello-corpo" className="text-xs" />
+                        <div className="text-[11px] text-slate-400 mt-1">
+                            Segnaposto disponibili: {"{contraente} {cliente_cf} {cliente_indirizzo} {compagnia} {collaboratore} {agenzia_nome} {agenzia_rui} {numero_polizza} {ramo} {prodotto} {premio_lordo} {data_oggi}"}
+                        </div>
+                    </div>
+                    <SezioniVisibiliPicker value={f.sezioni_visibili} onChange={(v) => set("sezioni_visibili", v)} testidPrefix="mup-modello-sez" />
+                    <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={f.attivo} onChange={(e) => set("attivo", e.target.checked)}
+                            data-testid="mup-modello-attivo" />
+                        Attivo
+                    </label>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={save} className="bg-indigo-700 hover:bg-indigo-800" data-testid="mup-modello-save">Salva</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
 const MODELLI_GRUPPI = [
     {
         key: "email", label: "Email", icon: "Mail", color: "sky",
@@ -3806,6 +3975,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
 function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     const [f, setF] = useState(editing || {
         tipo: suggestedTipo || "email", nome: "", oggetto: "", corpo: "", sezioni: [],
+        sezioni_visibili: MODELLO_SEZIONI.map((s) => s.key),
         categoria: "", default: false, attivo: true, note: "",
     });
     const [saving, setSaving] = useState(false);
@@ -3823,6 +3993,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 oggetto: editing.oggetto || "",
                 corpo: editing.corpo || "",
                 sezioni: editing.sezioni || [],
+                sezioni_visibili: editing.sezioni_visibili || [],
                 categoria: editing.categoria || "",
                 default: !!editing.default,
                 attivo: editing.attivo !== false,
@@ -3867,6 +4038,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 tipo: f.tipo, nome: f.nome.trim(),
                 oggetto: f.oggetto || null, corpo: f.corpo || "",
                 sezioni: f.sezioni || [],
+                sezioni_visibili: f.sezioni_visibili || [],
                 template_riga: f.template_riga || null,
                 categoria: f.categoria || null, default: !!f.default,
                 attivo: f.attivo !== false, note: f.note || null,
@@ -3948,6 +4120,10 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                                 Attivo
                             </label>
                         </div>
+                    </div>
+
+                    <div className="mt-3">
+                        <SezioniVisibiliPicker value={f.sezioni_visibili} onChange={(v) => set("sezioni_visibili", v)} testidPrefix="modello-sez" />
                     </div>
 
                     {(isEmail || isPdf) && (

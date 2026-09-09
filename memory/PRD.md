@@ -1,6 +1,21 @@
 # Programma Assicurativo — PRD (aggiornato 12/02/2026)
 
-## Sessione 09/09/2026 (fork) — Batch 6: Utenti solo staff, Agenzia partner label, Principale mandato diretto, Modelli da PDF (AI)
+## Sessione 09/09/2026 (fork) — Batch 7: MUP libreria + testo + flag sezione, bug PDF, campo agenzia partner, provv. collaboratore, unisci doppioni
+
+- **MUP → libreria (Librerie → "Modelli MUP")**: nuova collezione `mup_modelli` tenant-scoped (backend `routes/mup.py`): CRUD `/librerie/mup-modelli`, seed 5 modelli predefiniti per ramo (Auto/RC Auto, Beni, Infortuni, Vita, Generica). Il MUP di polizza usa il modello con l'area corrispondente (o quello scelto nel selettore). Componente `ModelliMupSezione`/`ModelloMupDialog` in `Librerie.jsx`.
+- **MUP → modale editabile in polizza (era MANCANTE dal fork)**: `PolizzaDetail.jsx` ora renderizza `mup-dialog` con selettore modello, tabella garanzie con checkbox richiesta/proposta/confermata, Anteprima PDF, Genera+archivia (allegato categoria `mup`), Firma eSAW. Quadrato "MUP" aggiunto nella sezione Documenti.
+- **MUP → testo precontrattuale con aggancio dati**: campo `corpo` sul modello MUP con segnaposto ({contraente},{cliente_cf},{compagnia},{collaboratore},{agenzia_nome},{agenzia_rui},{numero_polizza},{ramo},{prodotto},{premio_lordo},{data_oggi}), sostituiti coi dati reali nel PDF (`_ph_context`/`_sub`).
+- **BUG FIX MUP PDF**: le garanzie non spuntate apparivano tutte "piene" (glifi ☑/☐ non supportati da Helvetica). Ora: spuntata = "SÌ", non spuntata = "—". Verificato via pdfplumber.
+- **Flag visibilità per sezione (contraente/polizza/sinistro/preventivo)** su ENTRAMBI i tipi di modello (`TemplateModello.sezioni_visibili`, `MupModello.sezioni_visibili`). List endpoints accettano `?sezione=`; nessun flag = non visibile (backfill dei modelli esistenti a tutte le sezioni). UI: `SezioniVisibiliPicker` in entrambi i dialog. Consumatore LIVE: selettore MUP in polizza filtra a `sezione=polizza`. NOTA: per contraente/sinistro/preventivo i picker "genera documento da modello" non esistono ancora → follow-up per consumare i flag lì.
+- **Polizze (form nuova polizza)**: campo "Collaboratore (Operatore)" spostato SOPRA "Contraente"; nuovo select "Agenzia partner" accanto a Compagnia, precompilato in base alla compagnia (diretto→principale, collaborazione→agenzia partner).
+- **PolizzaDetail → Provvigioni**: accanto al nome collaboratore mostrato l'importo "Provv. collaboratore" (`pol-collab-provv-inline`).
+- **BUG FIX Anagrafiche**: pulsante "Unisci doppioni" non apriva nulla (dialog non montato) → montato `UnisciDoppioniDialog`.
+- **Utenti/Collaboratori**: solo personale di agenzia (no clienti, no super_admin, solo tenant proprio). `list_users` in server.py.
+- **Agenzie**: l'agenzia principale collega compagnie a mandato diretto (dialog dedicato + conteggio backend).
+- **Modelli → Carica PDF (tab PDF)**: `POST /librerie/modelli/da-pdf` estrae testo (pdfplumber) e crea modello con segnaposto via Claude (Emergent LLM Key).
+
+## Sessione 09/09/2026 (fork) — Batch 6
+: Utenti solo staff, Agenzia partner label, Principale mandato diretto, Modelli da PDF (AI)
 
 - **Librerie → Utenti / Collaboratori: solo personale di agenzia**. La lista `/auth/users` ora filtra i `role === "cliente"` (i clienti si gestiscono in Anagrafiche). Rimossa l'opzione ruolo "Cliente" dal form utente e il relativo blocco "Anagrafica cliente collegata". Verificato a schermo (15 elementi: admin/collaboratori/dipendenti, nessun cliente). `Librerie.jsx` (`load`, `UtenteForm`).
 - **PolizzaDetail: "Mandato" → "Agenzia partner"** (header blu + form modifica). Il valore `pol.mandato` rappresenta l'agenzia partner (terminologia utente). Solo label.

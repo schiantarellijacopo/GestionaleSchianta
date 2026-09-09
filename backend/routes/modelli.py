@@ -31,6 +31,7 @@ class ModelloBody(BaseModel):
     oggetto: Optional[str] = None
     corpo: str = ""
     sezioni: list[dict] = []
+    sezioni_visibili: list[str] = []
     template_riga: Optional[str] = None
     categoria: Optional[str] = None
     default: bool = False
@@ -58,6 +59,7 @@ def _autodetect_placeholders(body: ModelloBody) -> list[str]:
 async def list_modelli(
     tipo: Optional[str] = None,
     categoria: Optional[str] = None,
+    sezione: Optional[str] = None,
     user: dict = Depends(current_user),
 ) -> list[dict]:
     flt: dict = {}
@@ -65,6 +67,8 @@ async def list_modelli(
         flt["tipo"] = tipo
     if categoria:
         flt["categoria"] = categoria
+    if sezione:
+        flt["sezioni_visibili"] = sezione
     items = await db.template_modelli.find(flt, {"_id": 0}).sort([
         ("tipo", 1), ("nome", 1),
     ]).to_list(500)
@@ -91,6 +95,7 @@ async def create_modello(
         oggetto=body.oggetto,
         corpo=body.corpo,
         sezioni=body.sezioni,
+        sezioni_visibili=body.sezioni_visibili,
         categoria=body.categoria,
         default=body.default,
         attivo=body.attivo,

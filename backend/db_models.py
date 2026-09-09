@@ -1571,6 +1571,7 @@ class TemplateModello(BaseDoc):
     oggetto: Optional[str] = None                   # solo email
     corpo: str = ""                                 # text / html / markdown
     sezioni: List[dict] = Field(default_factory=list)  # per PDF multi-sezione (avvisi): [{titolo, contenuto, ordine, attiva}]
+    sezioni_visibili: List[str] = Field(default_factory=list)  # sezioni CRM dove il modello è disponibile (contraente/polizza/sinistro/preventivo)
     placeholders: List[str] = Field(default_factory=list)  # documentazione (auto-rilevati)
     # Template per singola riga dell'elenco titoli (placeholder {elenco_titoli}).
     # Se presente, ogni titolo del cliente viene formattato con questo template.

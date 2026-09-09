@@ -520,6 +520,11 @@ export default function Anagrafiche() {
                 open={credMassivoOpen}
                 onClose={() => setCredMassivoOpen(false)}
             />
+            <UnisciDoppioniDialog
+                open={dedupOpen}
+                onClose={() => setDedupOpen(false)}
+                onMerged={() => load()}
+            />
         </div>
     );
 }

@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 82 end-to-end validation of MUP precontrattuale feature + related changes. Backend suite 7/7 passing: MUP modelli seed(5), MUP CRUD, /polizze/{id}/mup/righe-default, /polizze/{id}/mup/genera (salva=true) archives allegato category 'mup', /auth/users excludes is_super_admin, agenzie principale returns n_compagnie_collegate, /anagrafiche-duplicati reachable. Frontend: (1) Anagrafiche → dialog-unisci-doppioni opens on button click. (2) Librerie → lib-tab-utenti loads without any 'cliente' role rows; Nuovo utente form ('lib-new-utenti') role select options are ONLY [Nessuno, Admin agente, Collaboratore, Sola lettura] — no Cliente option. (3) Librerie → lib-tab-mup-modelli shows 5 seeded models (Auto, Beni, Vita, Infortuni, Generico); mup-modello-new opens dialog; save/delete work (test row created + deleted round-trip successful). (4) Polizza detail → pol-mup-button opens mup-dialog containing mup-modello-select, 39 mup-chk-* checkboxes, mup-anteprima-btn, mup-archivia-btn. (5) Polizza detail → Documenti tab shows a 'MUP' category card (📋). (6) Polizza detail → Provvigioni tab renders pol-collab-provv-inline. (7) Polizze → Nuova polizza dialog has pol-agenzia-partner-select next to Compagnia. Source review of Polizze.jsx confirms Collaboratore Label (line 750) is above Contraente Label (line 796). (8) Agenzie → principale card shows 'Compagnie con mandato diretto: N' and 'Collega compagnie' button which opens dedicated dialog with 7 companies pre-selected as mandato diretto.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter82_mup_and_features.py", "/app/test_reports/pytest/iter82.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~13k lines; continue to extract routers into /app/backend/routes/* as already started with mup.py, modelli.py, agenzie.py.",
+    "3 pre-auth 401 console errors on first render (already noted iter 81) still present — consider gating startup API calls on auth token presence."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter82_mup_and_features.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all requested flows)"},
+  "test_credentials": "admin@assicura.it / Admin123! (working)",
+  "seed_data_creation": "Ephemeral TEST_MUP_Modello_82 created and deleted; no residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MUP precontrattuale flow fully wired: Librerie tab, dialogs, polizza detail MUP button, MUP category in Documenti, righe-default (area+modelli+righe), and genera+salva persisting an 'mup' allegato. Namirial eSignAnyWhere sign flow intentionally not tested (credentials mocked). Backend router file: /app/backend/routes/mup.py. Data-testids reference: pol-mup-button, mup-dialog, mup-modello-select, mup-chk-{i}-{richiesta|proposta|confermata}, mup-anteprima-btn, mup-archivia-btn, lib-tab-mup-modelli, mup-modello-new, mup-modello-dialog, mup-modello-nome, mup-modello-area, mup-modello-garanzie, mup-modello-save, mup-modello-edit-<id>, mup-modello-del-<id>, pol-agenzia-partner-select, pol-collab-provv-inline, dialog-unisci-doppioni.",
+  "rca of the issue": "N/A — no bugs found"
+}

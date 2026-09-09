@@ -438,6 +438,7 @@ function NuovaPolizzaDialog({ onClose }) {
     const navigate = useNavigate();
     const [ana, setAna] = useState([]);
     const [comp, setComp] = useState([]);
+    const [agenzie, setAgenzie] = useState([]);
     const [rami, setRami] = useState([]);
     const [prodotti, setProdotti] = useState([]);
     const [collaboratori, setCollaboratori] = useState([]);
@@ -461,7 +462,7 @@ function NuovaPolizzaDialog({ onClose }) {
         ramo: "", prodotto: "", effetto: "", scadenza: "",
         premio_lordo: 0, premio_netto: 0, premio_tasse: 0, premio_ssn: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
-        prossima_quietanza: "", collaboratore_id: "",
+        prossima_quietanza: "", collaboratore_id: "", mandato: "",
     });
     const [quietanzaTouched, setQuietanzaTouched] = useState(false);
     // Auto-calcolo Data prima quietanza = effetto + periodo del frazionamento
@@ -483,11 +484,25 @@ function NuovaPolizzaDialog({ onClose }) {
     });
     useEffect(() => {
         api.get("/compagnie").then((r) => setComp(r.data));
+        api.get("/agenzie").then((r) => setAgenzie(r.data || [])).catch(() => setAgenzie([]));
         api.get("/librerie/rami").then((r) => setRami(r.data || []));
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori(r.data || []))
             .catch(() => setCollaboratori([]));
     }, []);
+
+    // Auto-imposta l'agenzia partner (mandato) in base alla compagnia scelta:
+    // se la compagnia è "collaborazione" → agenzia partner collegata, altrimenti la principale.
+    useEffect(() => {
+        if (!f.compagnia_id || agenzie.length === 0) return;
+        const sel = comp.find((c) => c.id === f.compagnia_id);
+        if (!sel) return;
+        const linked = sel.tipo_mandato === "collaborazione" && sel.agenzia_partner_id
+            ? agenzie.find((a) => a.id === sel.agenzia_partner_id)
+            : agenzie.find((a) => a.tipo === "principale");
+        setF((p) => ({ ...p, mandato: linked ? linked.ragione_sociale : p.mandato }));
+        /* eslint-disable-next-line */
+    }, [f.compagnia_id, agenzie]);
 
     // Ricerca anagrafiche SERVER-SIDE con debounce 250ms.
     // Funziona anche con DB di milioni di record perche' il filtraggio e' su Mongo (regex AND multi-token).
@@ -717,6 +732,66 @@ function NuovaPolizzaDialog({ onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
+                <div>
+                    <Label>Agenzia partner</Label>
+                    <Select value={f.mandato || ""} onValueChange={(v) => set("mandato", v)}>
+                        <SelectTrigger data-testid="pol-agenzia-partner-select"><SelectValue placeholder="Seleziona agenzia" /></SelectTrigger>
+                        <SelectContent>
+                            {agenzie.map((a) => (
+                                <SelectItem key={a.id} value={a.ragione_sociale}>
+                                    {a.ragione_sociale}{a.tipo === "principale" ? " (diretto)" : ""}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <div className="text-[11px] text-slate-400 mt-1">Precompilata in base alla compagnia (mandato diretto o via agenzia collegata).</div>
+                </div>
+                <div className="col-span-2">
+                    <Label>Collaboratore (Operatore)</Label>
+                    <div className="relative">
+                        {(() => {
+                            const sel = collaboratori.find((c) => c.id === f.collaboratore_id);
+                            return (
+                                <Input
+                                    value={showCollabList ? collabQuery : (sel ? sel.name : "")}
+                                    placeholder="Digita per cercare un collaboratore..."
+                                    onChange={(e) => { setCollabQuery(e.target.value); setShowCollabList(true); }}
+                                    onFocus={() => { setCollabQuery(""); setShowCollabList(true); }}
+                                    onBlur={() => setTimeout(() => setShowCollabList(false), 200)}
+                                    data-testid="pol-collab-search"
+                                />
+                            );
+                        })()}
+                        {showCollabList && (
+                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto" data-testid="collab-suggestions">
+                                <button
+                                    type="button"
+                                    className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 text-sm text-slate-500"
+                                    onMouseDown={() => { set("collaboratore_id", ""); setShowCollabList(false); }}
+                                    data-testid="collab-opt-none"
+                                >
+                                    — Nessuno —
+                                </button>
+                                {collaboratori
+                                    .filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase()))
+                                    .map((c) => (
+                                        <button
+                                            type="button"
+                                            key={c.id}
+                                            className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-0 text-sm"
+                                            onMouseDown={() => { set("collaboratore_id", c.id); setShowCollabList(false); }}
+                                            data-testid={`collab-opt-${c.id}`}
+                                        >
+                                            {c.name}
+                                        </button>
+                                    ))}
+                                {collaboratori.filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase())).length === 0 && (
+                                    <div className="p-3 text-xs text-slate-500">Nessun collaboratore trovato</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
                 <div className="col-span-2">
                     <Label>Contraente *</Label>
                     <div className="relative">
@@ -811,52 +886,6 @@ function NuovaPolizzaDialog({ onClose }) {
                 <div><Label>Data prima quietanza</Label><Input type="date" value={f.prossima_quietanza || ""} onChange={(e) => { setQuietanzaTouched(true); set("prossima_quietanza", e.target.value); }} data-testid="pol-prima-quietanza" /></div>
                 <div className="col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
                     💡 Premi (netto/lordo/imposte/SSN), provvigioni e dati veicolo (targa) si inseriscono e si modificano nella scheda della polizza dopo la creazione.
-                </div>
-                <div className="col-span-2">
-                    <Label>Collaboratore (Operatore)</Label>
-                    <div className="relative">
-                        {(() => {
-                            const sel = collaboratori.find((c) => c.id === f.collaboratore_id);
-                            return (
-                                <Input
-                                    value={showCollabList ? collabQuery : (sel ? sel.name : "")}
-                                    placeholder="Digita per cercare un collaboratore..."
-                                    onChange={(e) => { setCollabQuery(e.target.value); setShowCollabList(true); }}
-                                    onFocus={() => { setCollabQuery(""); setShowCollabList(true); }}
-                                    onBlur={() => setTimeout(() => setShowCollabList(false), 200)}
-                                    data-testid="pol-collab-search"
-                                />
-                            );
-                        })()}
-                        {showCollabList && (
-                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-y-auto" data-testid="collab-suggestions">
-                                <button
-                                    type="button"
-                                    className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 text-sm text-slate-500"
-                                    onMouseDown={() => { set("collaboratore_id", ""); setShowCollabList(false); }}
-                                    data-testid="collab-opt-none"
-                                >
-                                    — Nessuno —
-                                </button>
-                                {collaboratori
-                                    .filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase()))
-                                    .map((c) => (
-                                        <button
-                                            type="button"
-                                            key={c.id}
-                                            className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-100 last:border-0 text-sm"
-                                            onMouseDown={() => { set("collaboratore_id", c.id); setShowCollabList(false); }}
-                                            data-testid={`collab-opt-${c.id}`}
-                                        >
-                                            {c.name}
-                                        </button>
-                                    ))}
-                                {collaboratori.filter((c) => !collabQuery.trim() || (c.name || "").toLowerCase().includes(collabQuery.trim().toLowerCase())).length === 0 && (
-                                    <div className="p-3 text-xs text-slate-500">Nessun collaboratore trovato</div>
-                                )}
-                            </div>
-                        )}
-                    </div>
                 </div>
             </div>
             <DialogFooter>

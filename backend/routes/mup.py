@@ -5,13 +5,15 @@ dati prodotto/intermediario e area firma. Firmabile via eSignAnyWhere dal fronte
 """
 from __future__ import annotations
 
+import uuid
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from database import db
-from auth import current_user
+from auth import current_user, require_user
 from db_models import Allegato, _now_iso
 from storage_service import StorageService
 
@@ -51,6 +53,82 @@ def _area_e_garanzie(pol: dict):
     return "Generica", GARANZIE_GENERICHE
 
 
+_MUP_SEED = [
+    ("MUP Auto / RC Auto", "Auto / RC Auto", GARANZIE_RCA),
+    ("MUP Beni / Property", "Beni", GARANZIE_BENI),
+    ("MUP Infortuni e Malattie", "Infortuni e malattie", GARANZIE_INFORTUNI),
+    ("MUP Vita / Previdenza", "Vita / Previdenza", GARANZIE_VITA),
+    ("MUP Generico", "Generica", GARANZIE_GENERICHE),
+]
+
+
+_MUP_SEZIONI = ["contraente", "polizza", "sinistro", "preventivo"]
+
+
+class MupModelloBody(BaseModel):
+    nome: str
+    area: str
+    garanzie: list[str] = []
+    corpo: str = ""
+    sezioni_visibili: list[str] = []
+    attivo: bool = True
+    note: str | None = None
+
+
+async def _seed_mup_defaults() -> None:
+    """Crea i modelli MUP predefiniti per il tenant corrente se assenti (idempotente).
+    Effettua anche il backfill di ``sezioni_visibili`` sui modelli già esistenti."""
+    await db.mup_modelli.update_many(
+        {"sezioni_visibili": {"$exists": False}},
+        {"$set": {"sezioni_visibili": list(_MUP_SEZIONI)}},
+    )
+    if await db.mup_modelli.count_documents({}) > 0:
+        return
+    for nome, area, garanzie in _MUP_SEED:
+        await db.mup_modelli.insert_one({
+            "id": str(uuid.uuid4()), "nome": nome, "area": area,
+            "garanzie": list(garanzie), "corpo": "", "sezioni_visibili": list(_MUP_SEZIONI),
+            "attivo": True, "note": None,
+            "created_at": _now_iso(), "updated_at": _now_iso(),
+        })
+
+
+@router.get("/librerie/mup-modelli")
+async def mup_modelli_list(sezione: str = None, user=Depends(current_user)):
+    await _seed_mup_defaults()
+    flt: dict = {}
+    if sezione:
+        flt["sezioni_visibili"] = sezione
+    return await db.mup_modelli.find(flt, {"_id": 0}).sort("nome", 1).to_list(500)
+
+
+@router.post("/librerie/mup-modelli", status_code=201)
+async def mup_modelli_create(body: MupModelloBody, user=Depends(require_user("admin", "collaboratore"))):
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(),
+           "created_at": _now_iso(), "updated_at": _now_iso()}
+    await db.mup_modelli.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/librerie/mup-modelli/{mid}")
+async def mup_modelli_update(mid: str, body: MupModelloBody, user=Depends(require_user("admin", "collaboratore"))):
+    existing = await db.mup_modelli.find_one({"id": mid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Modello MUP non trovato")
+    upd = {**body.model_dump(), "updated_at": _now_iso()}
+    await db.mup_modelli.update_one({"id": mid}, {"$set": upd})
+    return await db.mup_modelli.find_one({"id": mid}, {"_id": 0})
+
+
+@router.delete("/librerie/mup-modelli/{mid}")
+async def mup_modelli_delete(mid: str, user=Depends(require_user("admin"))):
+    res = await db.mup_modelli.delete_one({"id": mid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Modello MUP non trovato")
+    return {"ok": True}
+
+
 def _eur(v):
     try:
         return "€ " + f"{float(v or 0):,.0f}".replace(",", ".")
@@ -80,31 +158,85 @@ async def _ctx(pid: str):
     return pol, ana, comp, az
 
 
-def _righe_default(pol: dict):
+async def _ph_context(pol, ana, comp, az):
+    """Costruisce il dizionario di segnaposto per il testo del MUP."""
+    import re as _re  # noqa
+    from datetime import datetime
+    collab = pol.get("collaboratore_nome") or ""
+    cid = pol.get("collaboratore_id")
+    if cid and not collab:
+        u = await db.users.find_one({"id": cid}, {"_id": 0, "name": 1})
+        collab = (u or {}).get("name", "")
+    cliente = ana.get("ragione_sociale") or f"{ana.get('nome','')} {ana.get('cognome','')}".strip()
+    return {
+        "contraente": cliente, "cliente": cliente,
+        "cliente_cf": ana.get("codice_fiscale") or ana.get("partita_iva") or "",
+        "cliente_indirizzo": ", ".join([x for x in [ana.get("indirizzo"), ana.get("cap"), ana.get("comune")] if x]),
+        "cliente_email": ana.get("email") or "",
+        "cliente_telefono": ana.get("cellulare") or ana.get("telefono") or "",
+        "compagnia": comp.get("ragione_sociale") or "", "compagnia_nome": comp.get("ragione_sociale") or "",
+        "collaboratore": collab,
+        "agenzia_nome": az.get("ragione_sociale") or "",
+        "agenzia_indirizzo": ", ".join([x for x in [az.get("indirizzo"), az.get("cap"), az.get("comune")] if x]),
+        "agenzia_rui": az.get("rui") or "",
+        "numero_polizza": pol.get("numero_polizza") or "", "ramo": pol.get("ramo") or "",
+        "prodotto": pol.get("prodotto") or "", "mandato": pol.get("mandato") or "",
+        "premio_lordo": _eur(pol.get("premio_lordo") or pol.get("ultimo_premio_pagato")),
+        "data_oggi": datetime.now().strftime("%d/%m/%Y"),
+    }
+
+
+def _sub(text, ctx):
+    import re as _re
+    return _re.sub(r"\{([a-z_]+)\}", lambda m: str(ctx.get(m.group(1), m.group(0))), text or "")
+
+
+async def _garanzie_per_area(area: str, garanzie_hard, modello_id=None):
+    """Risolve il set di garanzie: se esiste un modello MUP di libreria per
+    l'area (o quello indicato), usa le sue garanzie; altrimenti il fallback."""
+    modello = None
+    if modello_id:
+        modello = await db.mup_modelli.find_one({"id": modello_id, "attivo": True}, {"_id": 0})
+    if not modello:
+        modello = await db.mup_modelli.find_one({"area": area, "attivo": True}, {"_id": 0})
+    if modello and modello.get("garanzie"):
+        return modello.get("area") or area, modello["garanzie"], modello
+    return area, garanzie_hard, None
+
+
+async def _righe_default(pol: dict, modello_id=None):
     attive = set()
     for g in (pol.get("garanzie") or []):
         nome = g.get("nome") if isinstance(g, dict) else str(g)
         if nome:
             attive.add(nome.strip().lower())
-    area, garanzie = _area_e_garanzie(pol)
+    area0, garanzie_hard = _area_e_garanzie(pol)
+    area, garanzie, modello = await _garanzie_per_area(area0, garanzie_hard, modello_id)
     righe = [{"nome": g, "richiesta": g.lower() in attive, "proposta": g.lower() in attive,
               "confermata": g.lower() in attive} for g in garanzie]
-    return area, righe
+    return area, righe, modello
 
 
 @router.get("/polizze/{pid}/mup/righe-default")
-async def mup_righe_default(pid: str, user=Depends(current_user)):
+async def mup_righe_default(pid: str, modello_id: str = None, user=Depends(current_user)):
     pol, _, _, _ = await _ctx(pid)
-    area, righe = _righe_default(pol)
-    return {"area": area, "righe": righe}
+    await _seed_mup_defaults()
+    area, righe, modello = await _righe_default(pol, modello_id)
+    modelli = await db.mup_modelli.find(
+        {"attivo": True, "sezioni_visibili": "polizza"}, {"_id": 0},
+    ).sort("nome", 1).to_list(200)
+    return {"area": area, "righe": righe,
+            "modello_id": (modello or {}).get("id"),
+            "modelli": modelli}
 
 
 @router.get("/polizze/{pid}/mup/pdf")
-async def mup_pdf(pid: str, user=Depends(current_user)):
+async def mup_pdf(pid: str, modello_id: str = None, user=Depends(current_user)):
     pol, ana, comp, az = await _ctx(pid)
     logo = await _logo_bytes()
-    area, righe = _righe_default(pol)
-    pdf = _build(pol, ana, comp, az, area, righe, logo)
+    area, righe, modello = await _righe_default(pol, modello_id)
+    ctx = await _ph_context(pol, ana, comp, az)
+    pdf = _build(pol, ana, comp, az, area, righe, logo, (modello or {}).get("corpo", ""), ctx)
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="MUP_{pol.get("numero_polizza", pid[:8])}.pdf"'})
 
@@ -115,9 +247,12 @@ async def mup_genera(pid: str, body: dict, user=Depends(current_user)):
     tra gli allegati della polizza (categoria 'mup')."""
     pol, ana, comp, az = await _ctx(pid)
     logo = await _logo_bytes()
-    area = body.get("area") or _area_e_garanzie(pol)[0]
-    righe = body.get("righe") or _righe_default(pol)[1]
-    pdf = _build(pol, ana, comp, az, area, righe, logo)
+    fallback_area, fallback_righe, modello = await _righe_default(pol, body.get("modello_id"))
+    area = body.get("area") or fallback_area
+    righe = body.get("righe") or fallback_righe
+    corpo = body.get("corpo") if body.get("corpo") is not None else (modello or {}).get("corpo", "")
+    ctx = await _ph_context(pol, ana, comp, az)
+    pdf = _build(pol, ana, comp, az, area, righe, logo, corpo, ctx)
     if not body.get("salva"):
         return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                                  headers={"Content-Disposition": f'inline; filename="MUP_{pol.get("numero_polizza", pid[:8])}.pdf"'})
@@ -132,7 +267,7 @@ async def mup_genera(pid: str, body: dict, user=Depends(current_user)):
     return {"ok": True, "allegato_id": alleg.id, "nome_file": fname}
 
 
-def _build(pol, ana, comp, az, area, righe, logo) -> bytes:
+def _build(pol, ana, comp, az, area, righe, logo, corpo="", ctx=None) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.enums import TA_CENTER
@@ -177,7 +312,7 @@ def _build(pol, ana, comp, az, area, righe, logo) -> bytes:
     rows = [[Paragraph(h, th) for h in header]]
     for r in righe:
         def ck(v):
-            return "☑" if v else "☐"
+            return '<b>SÌ</b>' if v else '<font color="#94a3b8">—</font>'
         rows.append([Paragraph(esc(r.get("nome")), body), Paragraph(ck(r.get("richiesta")), body),
                      Paragraph(ck(r.get("proposta")), body), Paragraph(ck(r.get("confermata")), body)])
     t = Table(rows, colWidths=[6.5 * cm, 3.3 * cm, 3.3 * cm, 3.4 * cm], repeatRows=1)
@@ -187,6 +322,13 @@ def _build(pol, ana, comp, az, area, righe, logo) -> bytes:
                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
                            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
     story.append(t)
+
+    if corpo:
+        story.append(Paragraph("Informazioni precontrattuali", H2))
+        testo = _sub(corpo, ctx or {})
+        for para in testo.split("\n"):
+            para = para.strip()
+            story.append(Paragraph(esc(para) if para else "&nbsp;", body))
 
     story.append(Paragraph("Dati prodotto e intermediario", H2))
     kv([("Compagnia", comp.get("ragione_sociale") or "—"),

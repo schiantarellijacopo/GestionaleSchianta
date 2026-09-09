@@ -52,13 +52,25 @@ export default function PolizzaDetail() {
     const [mupOpen, setMupOpen] = useState(false);
     const [mupArea, setMupArea] = useState("");
     const [mupRighe, setMupRighe] = useState([]);
+    const [mupModelli, setMupModelli] = useState([]);
+    const [mupModelloId, setMupModelloId] = useState("");
 
     const apriMup = async () => {
         setMupBusy(true);
         try {
             const r = await api.get(`/polizze/${id}/mup/righe-default`);
-            setMupArea(r.data.area); setMupRighe(r.data.righe || []); setMupOpen(true);
+            setMupArea(r.data.area); setMupRighe(r.data.righe || []);
+            setMupModelli(r.data.modelli || []); setMupModelloId(r.data.modello_id || "");
+            setMupOpen(true);
         } catch { toast.error("Errore caricamento MUP"); } finally { setMupBusy(false); }
+    };
+
+    const cambiaModelloMup = async (mid) => {
+        setMupBusy(true);
+        try {
+            const r = await api.get(`/polizze/${id}/mup/righe-default`, { params: { modello_id: mid } });
+            setMupArea(r.data.area); setMupRighe(r.data.righe || []); setMupModelloId(mid);
+        } catch { toast.error("Errore caricamento modello"); } finally { setMupBusy(false); }
     };
 
     const toggleMup = (i, col) => setMupRighe((p) => p.map((r, idx) => idx === i ? { ...r, [col]: !r[col] } : r));
@@ -67,11 +79,11 @@ export default function PolizzaDetail() {
         setMupBusy(true);
         try {
             if (salva) {
-                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: true });
+                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: true });
                 toast.success(`MUP archiviato nei documenti della polizza (${r.data.nome_file})`);
                 setMupOpen(false);
             } else {
-                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: false }, { responseType: "blob" });
+                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: false }, { responseType: "blob" });
                 const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
                 const w = window.open(url, "_blank");
                 if (!w) { const a = document.createElement("a"); a.href = url; a.download = "MUP.pdf"; a.click(); }
@@ -83,7 +95,7 @@ export default function PolizzaDetail() {
     const firmaMup = async () => {
         setMupBusy(true);
         try {
-            const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: false }, { responseType: "blob" });
+            const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: false }, { responseType: "blob" });
             const fd = new FormData();
             fd.append("file", new Blob([r0.data], { type: "application/pdf" }), "MUP.pdf");
             fd.append("modalita", "biometric");
@@ -820,8 +832,14 @@ export default function PolizzaDetail() {
                         ]} />
                         )}
                         {pol.collaboratore_nome && (
-                            <div className="mt-2 text-xs text-slate-600">
-                                Collaboratore polizza: <strong>{pol.collaboratore_nome}</strong>
+                            <div className="mt-2 text-xs text-slate-600 flex items-center flex-wrap gap-2">
+                                <span>Collaboratore polizza: <strong>{pol.collaboratore_nome}</strong></span>
+                                <span className="inline-flex items-center gap-1 bg-sky-50 border border-sky-200 text-sky-700 rounded px-2 py-0.5 font-medium" data-testid="pol-collab-provv-inline">
+                                    <Banknote size={11} /> Provv. collaboratore: {fmtEur(pol.provvigione_collaboratore || 0)}
+                                    {pol.provvigione_pct_collab > 0 && (
+                                        <span className="text-[10px] text-sky-500">({pol.provvigione_pct_collab}%)</span>
+                                    )}
+                                </span>
                             </div>
                         )}
                         <ProvvigioniOperatoriEditor pol={pol} canEdit={canEdit} onSaved={load} />
@@ -1037,6 +1055,7 @@ export default function PolizzaDetail() {
                                 { key: "libretto_veicolo", label: "Libretto veicolo", icon: "📕", default_visibile: true, multiple: true, descrizione: "Libretto di circolazione del veicolo" },
                                 { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true, descrizione: "Atto di vendita / passaggio proprietà" },
                                 { key: "quietanza", label: "Quietanze", icon: "🧾", default_visibile: true, multiple: true, descrizione: "Documenti di pagamento rilasciati al cliente (più quietanze secondo frazionamento)" },
+                                { key: "mup", label: "MUP", icon: "📋", default_visibile: true, multiple: true, descrizione: "Modulo Unico Precontrattuale (IVASS) — generato dalla polizza e firmabile" },
                                 { key: "preventivo", label: "Preventivi", icon: "📋", default_visibile: false, multiple: true },
                                 { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false, multiple: true },
                                 { key: "altri", label: "Documenti altri (foto)", icon: "🖼️", default_visibile: false, multiple: true, descrizione: "Altri documenti / foto ad uso interno" },
@@ -1140,6 +1159,74 @@ export default function PolizzaDetail() {
                     onDelete={() => { setTitoloEditing(null); load(); }}
                 />
             )}
+            <Dialog open={mupOpen} onOpenChange={(o) => !o && setMupOpen(false)}>
+                <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto" data-testid="mup-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">📋 Modulo Unico Precontrattuale (MUP)</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 py-1">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="text-xs font-medium text-slate-600">Modello (libreria)</label>
+                                <Select value={mupModelloId || "auto"} onValueChange={(v) => cambiaModelloMup(v === "auto" ? "" : v)}>
+                                    <SelectTrigger data-testid="mup-modello-select"><SelectValue placeholder="Automatico da ramo" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="auto">Automatico (in base al ramo)</SelectItem>
+                                        {mupModelli.map((m) => <SelectItem key={m.id} value={m.id}>{m.nome} — {m.area}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-medium text-slate-600">Area di tutela</label>
+                                <div className="h-9 flex items-center px-3 rounded-md bg-slate-50 border border-slate-200 text-sm text-slate-700">{mupArea || "—"}</div>
+                            </div>
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                            Spunta le garanzie richieste dal cliente, proposte dall'intermediario e confermate in polizza.
+                            I modelli si gestiscono in <strong>Librerie → Modelli MUP</strong>.
+                        </div>
+                        <div className="border border-slate-200 rounded-md overflow-hidden">
+                            <table className="w-full text-xs">
+                                <thead className="bg-slate-800 text-white">
+                                    <tr>
+                                        <th className="text-left px-2 py-1.5">Garanzia</th>
+                                        <th className="text-center px-2 py-1.5 w-24">Richiesta</th>
+                                        <th className="text-center px-2 py-1.5 w-24">Proposta</th>
+                                        <th className="text-center px-2 py-1.5 w-24">Confermata</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-testid="mup-righe">
+                                    {mupRighe.length === 0 ? (
+                                        <tr><td colSpan={4} className="text-center text-slate-400 py-4">Nessuna garanzia per questo modello</td></tr>
+                                    ) : mupRighe.map((r, i) => (
+                                        <tr key={i} className={i % 2 ? "bg-slate-50" : "bg-white"} data-testid={`mup-riga-${i}`}>
+                                            <td className="px-2 py-1.5 text-slate-700">{r.nome}</td>
+                                            {["richiesta", "proposta", "confermata"].map((col) => (
+                                                <td key={col} className="text-center px-2 py-1.5">
+                                                    <input type="checkbox" checked={!!r[col]} onChange={() => toggleMup(i, col)}
+                                                        data-testid={`mup-chk-${i}-${col}`} className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <DialogFooter className="gap-2 flex-wrap">
+                        <Button variant="outline" onClick={() => setMupOpen(false)}>Chiudi</Button>
+                        <Button variant="outline" onClick={() => generaMup(false)} disabled={mupBusy}
+                            className="border-slate-300" data-testid="mup-anteprima-btn">Anteprima PDF</Button>
+                        <Button variant="outline" onClick={firmaMup} disabled={mupBusy}
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="mup-firma-btn">Firma (eSignAnyWhere)</Button>
+                        <Button onClick={() => generaMup(true)} disabled={mupBusy}
+                            className="bg-indigo-700 hover:bg-indigo-800" data-testid="mup-archivia-btn">
+                            {mupBusy ? "…" : "Genera e archivia"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
         </div>
     );
 }
