@@ -9,6 +9,10 @@
 - **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
 - **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
 
+### 🧩 Edit UI (09/09/2026) — AzioniPolizzaTab
+- **Motivo annullamento** → da input libero a **Select** con opzioni predefinite (Disdetta, Mancato pagamento, Sinistro, Vendita veicolo, Demolizione, Furto, Esportazione, Sostituzione, Passaggio ad altra compagnia, Recesso, Altro).
+- **Sospensione — limite di legge**: sotto "Riattivazione prevista" mostra nota "Massimo di legge: 10 mesi per annualità"; con le due date calcola durata (mesi) + residuo su 10 e avvisa se si superano i 10 mesi (`sosp-durata-info`). Calcolo client-side sulle date correnti (non traccia ancora lo storico cumulativo di annualità).
+
 ### 🔒 Code review (09/09/2026) — fix applicati + falsi positivi
 - **FIX** `routes/contratto_extra.py`: OTP firma contratto ora usa `secrets.randbelow(1000000)` invece di `random.randint` (crittograficamente sicuro).
 - **FIX** `routes/super_admin.py`: password custode reset tenant spostata da hardcoded a env `RESET_CUSTODE_PASSWORD` (+ guardia: rifiuta se env vuota). Valore in backend/.env.

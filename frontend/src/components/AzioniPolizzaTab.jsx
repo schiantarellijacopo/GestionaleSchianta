@@ -232,10 +232,24 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                         </div>
                         <div>
                             <Label>Motivo annullamento</Label>
-                            <Input value={annulla.motivo}
-                                onChange={(e) => setAnnulla((p) => ({ ...p, motivo: e.target.value }))}
-                                placeholder="es. Disdetta, Sinistro, Vendita veicolo"
-                                disabled={isLocked} data-testid="ann-motivo" />
+                            <Select value={annulla.motivo}
+                                onValueChange={(v) => setAnnulla((p) => ({ ...p, motivo: v }))}
+                                disabled={isLocked}>
+                                <SelectTrigger data-testid="ann-motivo"><SelectValue placeholder="Seleziona motivo…" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="Disdetta">Disdetta</SelectItem>
+                                    <SelectItem value="Mancato pagamento">Mancato pagamento</SelectItem>
+                                    <SelectItem value="Sinistro">Sinistro</SelectItem>
+                                    <SelectItem value="Vendita veicolo">Vendita veicolo</SelectItem>
+                                    <SelectItem value="Demolizione">Demolizione</SelectItem>
+                                    <SelectItem value="Furto">Furto</SelectItem>
+                                    <SelectItem value="Esportazione">Esportazione</SelectItem>
+                                    <SelectItem value="Sostituzione">Sostituzione</SelectItem>
+                                    <SelectItem value="Passaggio ad altra compagnia">Passaggio ad altra compagnia</SelectItem>
+                                    <SelectItem value="Recesso">Recesso</SelectItem>
+                                    <SelectItem value="Altro">Altro</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                         <Button
                             onClick={doAnnulla}
@@ -282,6 +296,26 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                 <Input type="date" value={sospendi.riatt}
                                     onChange={(e) => setSospendi((p) => ({ ...p, riatt: e.target.value }))}
                                     disabled={isLocked} data-testid="sosp-riatt" />
+                                {(() => {
+                                    if (!sospendi.data || !sospendi.riatt) {
+                                        return <div className="text-[11px] text-slate-400 mt-1">Massimo di legge: 10 mesi di sospensione per annualità.</div>;
+                                    }
+                                    const d1 = new Date(sospendi.data), d2 = new Date(sospendi.riatt);
+                                    if (isNaN(d1) || isNaN(d2) || d2 <= d1) {
+                                        return <div className="text-[11px] text-rose-600 mt-1">La riattivazione deve essere successiva alla sospensione.</div>;
+                                    }
+                                    const mesi = Math.round(((d2 - d1) / (1000 * 60 * 60 * 24 * 30.4375)) * 10) / 10;
+                                    const residuo = Math.round((10 - mesi) * 10) / 10;
+                                    const over = mesi > 10;
+                                    return (
+                                        <div className={`text-[11px] mt-1 ${over ? "text-rose-600 font-medium" : "text-slate-500"}`} data-testid="sosp-durata-info">
+                                            Durata sospensione: <strong>{mesi.toString().replace(".", ",")} mesi</strong>
+                                            {over
+                                                ? <> · supera il massimo di legge (10 mesi per annualità)</>
+                                                : <> · residuo su questa annualità: <strong>{residuo.toString().replace(".", ",")} mesi</strong></>}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                             <Button onClick={doSospendi}
                                 disabled={!canEdit || isLocked || sospLoading}
