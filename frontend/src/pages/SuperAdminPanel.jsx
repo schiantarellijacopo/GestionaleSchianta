@@ -276,13 +276,13 @@ function AgenzieTab() {
             {editAgenzia && <EditAgenziaDialog agenzia={editAgenzia} onClose={() => setEditAgenzia(null)} onSaved={() => { setEditAgenzia(null); load(); }} />}
             {resetAgenzia && <ResetDatiDialog agenzia={resetAgenzia} onClose={() => setResetAgenzia(null)} onDone={() => { setResetAgenzia(null); load(); }} />}
             {dominiAgenzia && <DominiCredenzialiDialog agenzia={dominiAgenzia} onClose={() => { setDominiAgenzia(null); load(); }} />}
-            {creditoAgenzia && <CreditoOpenApiDialog agenzia={creditoAgenzia} onClose={() => { setCreditoAgenzia(null); load(); }} />}
+            {creditoAgenzia && <CreditoOpenApiDialog agenzia={creditoAgenzia} onSaved={load} onClose={() => { setCreditoAgenzia(null); load(); }} />}
             {showListino && <ListinoOpenApiDialog onClose={() => setShowListino(false)} />}
         </div>
     );
 }
 
-function CreditoOpenApiDialog({ agenzia, onClose }) {
+function CreditoOpenApiDialog({ agenzia, onClose, onSaved }) {
     const [importo, setImporto] = useState("");
     const [modo, setModo] = useState("add");
     const [saving, setSaving] = useState(false);
@@ -303,6 +303,7 @@ function CreditoOpenApiDialog({ agenzia, onClose }) {
             toast.success(`Credito aggiornato: € ${Number(r.data.credito_eur).toFixed(2)}`);
             setImporto("");
             loadStorico();
+            onSaved?.();
         } catch (e) {
             toast.error(e?.response?.data?.detail || "Errore");
         } finally { setSaving(false); }

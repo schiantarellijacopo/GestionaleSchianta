@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 84 — Frontend-only UI tests for (a) Super Admin OpenAPI credito + storico, (b) Listino OpenAPI, (c) Anagrafica searchable 'Aggiungi relazione'. ALL FLOWS WORKING. (1) /admin-login with superadmin@assicura.it/superadmin123! authenticates and lands on /super-admin. sa-listino-openapi-btn opens sa-listino-dialog showing 7 editable price inputs (camerale, catasto, catasto_pdf, veicoli, visura, visure, report) with sa-listino-salva button present. (2) On Axicura Cattolica row (id 31b4950e-85c2-4232-a31f-ba226b7923fe), sa-credito-btn opens sa-credito-dialog. Initial cell shows 'non attivo', storico shows 'Nessuna ricarica / Nessun consumo'. Set 100 → toast 'Credito aggiornato: € 100.00', storico row '+100.00€ imposta · superadmin@assicura.it' appears. Add 50 → toast 'Credito aggiornato: € 150.00', storico shows both entries (+50 ricarica + +100 imposta) and header 'Ricaricato: €150.00 · Consumato: €0.00'. After page reload, table cell sa-credito-{id} correctly shows '€ 150.00' in emerald (persistence confirmed). (3) Agency login admin@assicura.it/Admin123! on /login OK. Anagrafica /anagrafiche/6df29f83-509a-4aa4-a176-5a033b49e4e9 → tab-albero 'Relazione' opens. add-relation-button opens dialog; rel-target-search is an INPUT (not <Select>), placeholder 'Digita nome, CF o P.IVA...'. Typing 'a' shows rel-target-list with 50 rel-opt-* results. Selecting first option replaces input with rel-target-selected chip ('+39 ITALIA S. R. L. ✕'); rel-target-clear button restores the search input. add-azienda-lr-button also present alongside add-relation-button. No blocking bugs. Backend endpoints observed: GET /api/super-admin/agenzie, POST openapi-credito, GET openapi-storico all return 200 after first save (initial 404 on openapi-storico before any record is expected — likely returns 404 when no doc yet; backend logic already validated by main agent).",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "GET /api/super-admin/agenzie/{tid}/openapi-storico", "issue": "Returns 404 when no credito record has been created yet (dialog then shows empty state correctly, but produces console error). Consider returning 200 with empty {ricariche:[],consumi:[]} for cleaner UX."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Super Admin — Credito dialog save", "issue": "Parent agenzie table cell 'sa-credito-{id}' does not refresh until page reload. Toast + storico update correctly, and value persists (verified on reload). Minor UX nit — consider calling fetchAgenzie() after successful POST openapi-credito.", "affected_selectors": ["sa-credito-{id}"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Minor) After sa-credito-salva, refresh agenzie list so the 'Credito API' cell updates without page reload.",
+    "(Minor) Backend: return 200 with empty arrays for openapi-storico when no record exists (avoid console 404)."
+  ],
+  "critical_code_review_comments": [
+    "SuperAdminPanel.jsx credito dialog: after POST openapi-credito success, only storico is re-fetched; parent agenzie list state is not refreshed. Add onSaved callback that triggers fetchAgenzie() to keep table in sync.",
+    "2 pre-auth 401 console errors on first render still present (already noted iter 81/82/83) — gate startup API calls on auth token presence."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skipped per request)", "frontend": "100% (3/3 flows)"},
+  "test_credentials": "Super Admin: superadmin@assicura.it / superadmin123! ; Agency: admin@assicura.it / Admin123!",
+  "seed_data_creation": "Axicura Cattolica (tenant id 31b4950e-85c2-4232-a31f-ba226b7923fe) openapi_credito_eur was set to 150.00 (100 imposta + 50 ricarica) during testing. Two entries persist in the openapi_credito_storico collection under super admin. If needed, main agent can reset via sa-credito dialog 'Imposta (saldo esatto)' with 0.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Data-testids working: sa-listino-openapi-btn, sa-listino-dialog, sa-listino-{camerale|catasto|catasto_pdf|veicoli|visura|visure|report}, sa-listino-salva, sa-credito-btn-{agenziaId}, sa-credito-dialog, sa-credito-modo-add, sa-credito-modo-set, sa-credito-importo, sa-credito-salva, sa-credito-storico, sa-credito-{agenziaId} (cell). Anagrafica: tab-albero, add-relation-button, add-azienda-lr-button, rel-target-search (input, not Select), rel-target-list, rel-opt-{id}, rel-target-selected, rel-target-clear. Axicura Cattolica now has €150.00 credito for future consumption tests.",
+  "rca of the issue": "N/A — no bugs. Only 1 minor UX suggestion (parent table cell not refreshed after credito save; persists after reload)."
+}
