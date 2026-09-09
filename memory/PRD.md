@@ -9,6 +9,11 @@
 - **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
 - **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
 
+### ❌ Decisioni dell'utente — NON FARE (09/09/2026)
+- **Paga Agenzia Partner** (versamento premi collaborazione su IBAN partner) → l'utente ha deciso di NON farlo. Rimosso dal backlog.
+- **Attiva CAP + Geocoding** → NON fare (l'utente non lo vuole).
+- **Pulsante Affidabilità (Risk)** in scheda cliente → NON fare (l'utente non lo vuole).
+
 
 
 - **Portafoglio credito OpenAPI per agenzia** (nuovo `openapi_credito.py`): credito prepagato salvato sul documento `tenants` (`openapi_credito_eur`), gestito dal Super Admin. Ogni estrazione OpenAPI (Camerale/Catasto/Veicoli/Visure/Visura/Report) ha un costo (listino) e viene addebitata prima dell'esecuzione; se il credito è insufficiente → **HTTP 402 bloccato** con messaggio chiaro. **Nessuna regressione**: se il tenant non ha credito configurato (`None`) il wallet è "non attivo" → nessun blocco/addebito (le agenzie esistenti continuano come prima).
