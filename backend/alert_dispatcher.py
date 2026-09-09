@@ -13,9 +13,12 @@ Canali:
 Tutti i tentativi vengono loggati in AlertEvent (storico).
 """
 from __future__ import annotations
+import asyncio
 import logging
 import os
+import random
 import smtplib
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, Awaitable, Callable
@@ -25,6 +28,36 @@ from alert_models import AlertEvent, Notification
 from db_models import _now_iso
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# THROTTLE ANTI-SPAM WHATSAPP
+# Ritardo casuale tra un messaggio WhatsApp e il successivo (per tenant),
+# per evitare il ban da spam negli invii massivi/automatici.
+# Tecnica "prenota lo slot": la finestra viene calcolata sotto lock (no sleep
+# sotto lock) così invii concorrenti si accodano correttamente e gli invii
+# singoli/sporadici non subiscono ritardi inutili.
+# ============================================================
+WA_ANTISPAM_MIN = float(os.environ.get("WA_ANTISPAM_MIN_SEC", "20"))
+WA_ANTISPAM_MAX = float(os.environ.get("WA_ANTISPAM_MAX_SEC", "35"))
+_wa_lock = asyncio.Lock()
+_wa_next_slot: dict[str, float] = {}
+
+
+async def throttle_whatsapp(tenant_key: str) -> None:
+    """Attende, se necessario, così che tra due WhatsApp consecutivi dello stesso
+    tenant passino 20-35 secondi (valore casuale)."""
+    key = tenant_key or "global"
+    async with _wa_lock:
+        now = time.monotonic()
+        gap = random.uniform(WA_ANTISPAM_MIN, WA_ANTISPAM_MAX)
+        prev = _wa_next_slot.get(key, 0.0)
+        slot = max(now, prev + gap)
+        _wa_next_slot[key] = slot
+    wait = slot - time.monotonic()
+    if wait > 0:
+        logger.info("Anti-spam WhatsApp: attendo %.1fs prima del prossimo invio (tenant=%s)", wait, key)
+        await asyncio.sleep(wait)
 
 
 # ============================================================
@@ -484,6 +517,8 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
                 ev.error_message = f"canale '{canale}' non riconosciuto"
             else:
                 try:
+                    if canale == "whatsapp" and indirizzo:
+                        await throttle_whatsapp(rule.get("agenzia_tenant_id") or dest.get("agenzia_tenant_id") or "global")
                     res = await adapter(rule, dest, ctx_dest)
                     ev.status = res.get("status") or "errore"
                     ev.error_message = res.get("error")

@@ -1,6 +1,15 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 09/09/2026 (fork) — Batch 10: Credito OpenAPI per agenzia + costo estrazioni + form polizza agenzia→compagnia
+## Sessione 09/09/2026 (fork) — Batch 11: Storico credito, Catasto flag PDF, Camerale gratis, Anagrafica ricercabile, Anti-spam WhatsApp
+
+- **Anti-spam WhatsApp** (alert_dispatcher.py): ritardo casuale **20–35s tra un messaggio WhatsApp e il successivo, per tenant**, su TUTTI gli invii automatici/massivi (schedule, soglia, evento, solleciti — tutti passano da `dispatch_rule`). Tecnica "prenota lo slot" (calcolo finestra sotto lock, sleep fuori dal lock) → invii concorrenti si accodano, il primo messaggio parte subito, gli invii singoli sporadici non subiscono ritardi. Guardia: throttle solo se c'è un numero WhatsApp. Config via env `WA_ANTISPAM_MIN_SEC`/`WA_ANTISPAM_MAX_SEC` (default 20/35). Verificato con unit test (spacing corretto, tenant indipendenti).
+- **Catasto: base dati 0,30€ + flag "PDF ufficiale (1,90€)"** — `POST /openapi-it/cadastre/{aid}?pdf=bool`: senza pdf usa la `richiesta` (dati per riempire i campi, addebito "catasto" 0,30€); con pdf genera la visura PDF ufficiale (addebito "catasto_pdf" 1,90€). Flag/checkbox in OpenApiActions. Verificato via curl (100→99,70→97,80).
+- **Camerale base GRATIS** — la ricerca/dati azienda (GET /impresa) è gratuita: listino `camerale`=0. I documenti PDF ufficiali (visure ordinaria/storica/bilancio ottico/certificati) ora **scalano dal credito il loro prezzo reale** (`meta["prezzo"]` da VC_DOC_META, es. ord. SdC 4,90 / storica 5,90 / bilancio ottico 4,50 / certificati 13,70) via `addebita_importo`. Nota UI "Dati gratis · PDF a pagamento".
+- **Storico ricariche/consumi credito** (Super Admin) — `GET /super-admin/agenzie/{tid}/openapi-storico` (ricariche + movimenti + totali). Sezione Storico nel `CreditoOpenApiDialog` (ricariche a sinistra, consumi/estrazioni a destra, totali ricaricato/consumato). Verificato via curl.
+- **Anagrafica ricercabile in "Aggiungi relazione"** (AnagraficaDetail.jsx, AlberoGenealogico) — sostituita la tendina lunga con un campo **ricercabile digitabile** (filtra per ragione sociale / CF / P.IVA, max 50 risultati, chip con ✕ per deselezionare). Frontend compila.
+- **NOTA**: la Risk API (`POST /openapi-it/risk/{aid}`) esiste a backend ma NON è esposta nella UI (nessun pulsante). L'affidabilità aziende usata oggi è il "Report Azienda" dentro Camerale.
+
+
 
 - **Portafoglio credito OpenAPI per agenzia** (nuovo `openapi_credito.py`): credito prepagato salvato sul documento `tenants` (`openapi_credito_eur`), gestito dal Super Admin. Ogni estrazione OpenAPI (Camerale/Catasto/Veicoli/Visure/Visura/Report) ha un costo (listino) e viene addebitata prima dell'esecuzione; se il credito è insufficiente → **HTTP 402 bloccato** con messaggio chiaro. **Nessuna regressione**: se il tenant non ha credito configurato (`None`) il wallet è "non attivo" → nessun blocco/addebito (le agenzie esistenti continuano come prima).
 - **Listino costi configurabile dal Super Admin** (`raw_db.openapi_config`): default = prezzi base singola richiesta OpenAPI.it (camerale 0,30 / catasto 1,90 / veicoli 0,30 / visura 4,90 / visure 4,90 / report 5,00). Endpoint `GET/PUT /super-admin/openapi-listino`.
