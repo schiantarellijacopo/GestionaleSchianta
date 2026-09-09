@@ -132,11 +132,24 @@ export default function Sidebar() {
         });
     };
 
-    // Costruisce la lista visibile: applica ordine custom + filtra per ruolo
-    const visibleItems = order
+    // Costruisce la lista visibile: applica ordine custom + filtra per ruolo.
+    // Le voci NUOVE (non presenti nell'ordine salvato) vengono inserite accanto
+    // all'ultima voce della stessa sezione, così non finiscono in fondo creando
+    // una sezione duplicata.
+    const effOrder = [...order];
+    for (const m of ALL_MENU_ITEMS) {
+        if (effOrder.includes(m.id)) continue;
+        let insertAt = -1;
+        for (let i = 0; i < effOrder.length; i++) {
+            const it = ALL_MENU_ITEMS.find((x) => x.id === effOrder[i]);
+            if (it && it.section === m.section) insertAt = i;
+        }
+        if (insertAt >= 0) effOrder.splice(insertAt + 1, 0, m.id);
+        else effOrder.push(m.id);
+    }
+    const visibleItems = effOrder
         .map((id) => ALL_MENU_ITEMS.find((m) => m.id === id))
-        .filter((m) => m && (!m.roles || m.roles.includes(role)))
-        .concat(ALL_MENU_ITEMS.filter((m) => !order.includes(m.id) && (!m.roles || m.roles.includes(role))));
+        .filter((m) => m && (!m.roles || m.roles.includes(role)));
 
     // In edit mode mostra tutto, altrimenti filtra le voci nascoste
     let itemsToRender = editMode ? visibleItems : visibleItems.filter((m) => !hidden.has(m.id));
