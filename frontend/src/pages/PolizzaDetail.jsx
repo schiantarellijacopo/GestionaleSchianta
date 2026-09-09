@@ -49,24 +49,43 @@ export default function PolizzaDetail() {
     const [provvVal, setProvvVal] = useState("");
     const [provvSaving, setProvvSaving] = useState(false);
     const [mupBusy, setMupBusy] = useState(false);
+    const [mupOpen, setMupOpen] = useState(false);
+    const [mupArea, setMupArea] = useState("");
+    const [mupRighe, setMupRighe] = useState([]);
 
     const apriMup = async () => {
         setMupBusy(true);
         try {
-            const r = await api.get(`/polizze/${id}/mup/pdf`, { responseType: "blob" });
-            const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
-            const w = window.open(url, "_blank");
-            if (!w) { const a = document.createElement("a"); a.href = url; a.download = "MUP.pdf"; a.click(); }
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            const r = await api.get(`/polizze/${id}/mup/righe-default`);
+            setMupArea(r.data.area); setMupRighe(r.data.righe || []); setMupOpen(true);
+        } catch { toast.error("Errore caricamento MUP"); } finally { setMupBusy(false); }
+    };
+
+    const toggleMup = (i, col) => setMupRighe((p) => p.map((r, idx) => idx === i ? { ...r, [col]: !r[col] } : r));
+
+    const generaMup = async (salva) => {
+        setMupBusy(true);
+        try {
+            if (salva) {
+                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: true });
+                toast.success(`MUP archiviato nei documenti della polizza (${r.data.nome_file})`);
+                setMupOpen(false);
+            } else {
+                const r = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: false }, { responseType: "blob" });
+                const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+                const w = window.open(url, "_blank");
+                if (!w) { const a = document.createElement("a"); a.href = url; a.download = "MUP.pdf"; a.click(); }
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            }
         } catch { toast.error("Errore generazione MUP"); } finally { setMupBusy(false); }
     };
 
     const firmaMup = async () => {
         setMupBusy(true);
         try {
-            const pdfRes = await api.get(`/polizze/${id}/mup/pdf`, { responseType: "blob" });
+            const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, salva: false }, { responseType: "blob" });
             const fd = new FormData();
-            fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "MUP.pdf");
+            fd.append("file", new Blob([r0.data], { type: "application/pdf" }), "MUP.pdf");
             fd.append("modalita", "biometric");
             fd.append("firmatario_id", pol?.contraente_id || "");
             fd.append("display_name", "Modulo Unico Precontrattuale");
@@ -293,11 +312,7 @@ export default function PolizzaDetail() {
                     )}
                     <Button variant="outline" size="sm" onClick={apriMup} disabled={mupBusy}
                             className="border-indigo-300 text-indigo-700 hover:bg-indigo-50" data-testid="pol-mup-button">
-                        📋 {mupBusy ? "Genero…" : "Genera MUP"}
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={firmaMup} disabled={mupBusy}
-                            className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="pol-mup-firma-button">
-                        ✒️ Firma MUP (grafometrica)
+                        📋 {mupBusy ? "…" : "MUP precontrattuale"}
                     </Button>
                     {canDelete && (
                         <Button variant="outline" size="sm" onClick={handleDelete}
@@ -320,7 +335,7 @@ export default function PolizzaDetail() {
                         <div>
                             <div className="text-[10px] uppercase tracking-widest text-sky-300">{pol.compagnia?.ragione_sociale || "—"}</div>
                             <div className="text-xl font-semibold mt-0.5">{pol.ramo || "—"}{pol.prodotto ? ` · ${pol.prodotto}` : ""}</div>
-                            <div className="text-lg font-semibold text-slate-100 mt-1 tracking-wide">N. {pol.numero_polizza} · Mandato {pol.mandato || "—"}</div>
+                            <div className="text-lg font-semibold text-slate-100 mt-1 tracking-wide">N. {pol.numero_polizza} · Agenzia partner {pol.mandato || "—"}</div>
                             <div className="mt-2 inline-flex items-center gap-2 bg-white/10 rounded-lg px-2.5 py-1" data-testid="pol-header-operatore">
                                 <CollaboratoreInlineSelect
                                     entita="polizze"
@@ -1347,7 +1362,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                 <input type="checkbox" id="tacito" checked={f.tacito_rinnovo} onChange={(e) => set("tacito_rinnovo", e.target.checked)} />
                                 <Label htmlFor="tacito" className="cursor-pointer">Tacito rinnovo</Label>
                             </div>
-                            <div><Label>Mandato</Label><Input value={f.mandato} onChange={(e) => set("mandato", e.target.value)} /></div>
+                            <div><Label>Agenzia partner</Label><Input value={f.mandato} onChange={(e) => set("mandato", e.target.value)} /></div>
                             <div><Label>Sostituisce polizza</Label><Input value={f.sostituisce_polizza} onChange={(e) => set("sostituisce_polizza", e.target.value)} /></div>
                             <div><Label>Stato iter</Label><Input value={f.iter_status} onChange={(e) => set("iter_status", e.target.value)} /></div>
                             <div><Label>Oggetto assicurato</Label><Input value={f.oggetto_assicurato} onChange={(e) => set("oggetto_assicurato", e.target.value)} /></div>

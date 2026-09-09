@@ -12,12 +12,43 @@ from fastapi.responses import StreamingResponse
 
 from database import db
 from auth import current_user
+from db_models import Allegato, _now_iso
+from storage_service import StorageService
 
 router = APIRouter()
 
 GARANZIE_RCA = ["Ricorso Terzi", "Rinuncia alla Rivalsa", "Cristalli", "Assistenza Stradale",
                 "Incendio", "Furto", "Atti Vandalici", "Eventi Atmosferici", "Kasko",
                 "Collisione", "Tutela Legale", "Infortunio del Conducente"]
+
+GARANZIE_BENI = ["Incendio ed eventi complementari", "Furto e rapina", "Eventi atmosferici",
+                 "Eventi sociopolitici e atti vandalici", "Danni da acqua condotta", "Fenomeno elettrico",
+                 "Cristalli e lastre", "Terremoto", "Alluvione e inondazione",
+                 "Responsabilità civile", "Tutela Legale", "Assistenza"]
+
+GARANZIE_INFORTUNI = ["Morte da infortunio", "Invalidità permanente", "Inabilità temporanea",
+                      "Diaria da ricovero", "Diaria da gessatura", "Rimborso spese mediche",
+                      "Malattia grave", "Assistenza"]
+
+GARANZIE_VITA = ["Caso morte", "Caso vita", "Invalidità totale permanente", "Malattie gravi",
+                 "Long Term Care", "Esonero pagamento premi"]
+
+GARANZIE_GENERICHE = ["Garanzia base", "Garanzie accessorie", "Massimali/Somme assicurate",
+                      "Franchigie e scoperti", "Assistenza", "Tutela Legale"]
+
+
+def _area_e_garanzie(pol: dict):
+    """Determina area di tutela e set di garanzie in base a ramo/prodotto della polizza."""
+    s = f"{pol.get('ramo','')} {pol.get('prodotto','')} {pol.get('tipo','')}".lower()
+    if any(k in s for k in ("rca", "auto", "veicol", "autocarr", "libro matricola", "flotta")):
+        return "Auto / RC Auto", GARANZIE_RCA
+    if any(k in s for k in ("infortun", "malatt", "salute")):
+        return "Infortuni e malattie", GARANZIE_INFORTUNI
+    if any(k in s for k in ("vita", "tcm", "previdenza", "risparmio", "ltc")):
+        return "Vita / Previdenza", GARANZIE_VITA
+    if any(k in s for k in ("incendio", "furto", "casa", "fabbricat", "multirisch", "ard", "globale", "property", "beni", "abitazione", "rc")):
+        return "Beni", GARANZIE_BENI
+    return "Generica", GARANZIE_GENERICHE
 
 
 def _eur(v):
@@ -39,27 +70,69 @@ async def _logo_bytes():
     return None
 
 
-@router.get("/polizze/{pid}/mup/pdf")
-async def mup_pdf(pid: str, user=Depends(current_user)):
+async def _ctx(pid: str):
     pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
     if not pol:
         raise HTTPException(404, "Polizza non trovata")
     ana = await db.anagrafiche.find_one({"id": pol.get("contraente_id")}, {"_id": 0}) or {}
     comp = await db.compagnie.find_one({"id": pol.get("compagnia_id")}, {"_id": 0}) or {}
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    logo = await _logo_bytes()
-    # garanzie presenti nella polizza
+    return pol, ana, comp, az
+
+
+def _righe_default(pol: dict):
     attive = set()
     for g in (pol.get("garanzie") or []):
         nome = g.get("nome") if isinstance(g, dict) else str(g)
         if nome:
             attive.add(nome.strip().lower())
-    pdf = _build(pol, ana, comp, az, attive, logo)
+    area, garanzie = _area_e_garanzie(pol)
+    righe = [{"nome": g, "richiesta": g.lower() in attive, "proposta": g.lower() in attive,
+              "confermata": g.lower() in attive} for g in garanzie]
+    return area, righe
+
+
+@router.get("/polizze/{pid}/mup/righe-default")
+async def mup_righe_default(pid: str, user=Depends(current_user)):
+    pol, _, _, _ = await _ctx(pid)
+    area, righe = _righe_default(pol)
+    return {"area": area, "righe": righe}
+
+
+@router.get("/polizze/{pid}/mup/pdf")
+async def mup_pdf(pid: str, user=Depends(current_user)):
+    pol, ana, comp, az = await _ctx(pid)
+    logo = await _logo_bytes()
+    area, righe = _righe_default(pol)
+    pdf = _build(pol, ana, comp, az, area, righe, logo)
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="MUP_{pol.get("numero_polizza", pid[:8])}.pdf"'})
 
 
-def _build(pol, ana, comp, az, attive, logo) -> bytes:
+@router.post("/polizze/{pid}/mup/genera")
+async def mup_genera(pid: str, body: dict, user=Depends(current_user)):
+    """Genera il MUP con le righe/spunte scelte a video. Se salva=true, lo archivia
+    tra gli allegati della polizza (categoria 'mup')."""
+    pol, ana, comp, az = await _ctx(pid)
+    logo = await _logo_bytes()
+    area = body.get("area") or _area_e_garanzie(pol)[0]
+    righe = body.get("righe") or _righe_default(pol)[1]
+    pdf = _build(pol, ana, comp, az, area, righe, logo)
+    if not body.get("salva"):
+        return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                                 headers={"Content-Disposition": f'inline; filename="MUP_{pol.get("numero_polizza", pid[:8])}.pdf"'})
+    fname = f"MUP {pol.get('numero_polizza', '')}.pdf".strip()
+    stored = await StorageService.put(user=user, entita_tipo="polizza", entita_id=pid,
+                                      filename=f"mup_{pid[:8]}.pdf", data=pdf, content_type="application/pdf")
+    alleg = Allegato(entita_tipo="polizza", entita_id=pid, nome_file=fname,
+                     storage_path=stored["storage_path"], storage_provider=stored["storage_provider"],
+                     content_type="application/pdf", size=stored.get("size", len(pdf)),
+                     categoria="mup", descrizione=f"MUP — {area}")
+    await db.allegati.insert_one(alleg.model_dump())
+    return {"ok": True, "allegato_id": alleg.id, "nome_file": fname}
+
+
+def _build(pol, ana, comp, az, area, righe, logo) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.enums import TA_CENTER
@@ -79,9 +152,9 @@ def _build(pol, ana, comp, az, attive, logo) -> bytes:
         return str(t or "").replace("&", "&amp;").replace("<", "&lt;")
 
     cliente = ana.get("ragione_sociale") or f"{ana.get('nome','')} {ana.get('cognome','')}".strip()
-    ramo = pol.get("ramo") or pol.get("prodotto") or "—"
+    ramo = pol.get("prodotto") or pol.get("ramo") or "—"
     story = [Paragraph("MODULO UNICO PRECONTRATTUALE (MUP)", H1),
-             Paragraph(f"Ramo/Prodotto: {esc(ramo)} — Polizza n. {esc(pol.get('numero_polizza',''))}",
+             Paragraph(f"{esc(ramo)} — Area di tutela: {esc(area)} — Polizza n. {esc(pol.get('numero_polizza',''))}",
                        ParagraphStyle("sub", parent=body, alignment=TA_CENTER, textColor=colors.HexColor("#64748b"))),
              HRFlowable(width="100%", thickness=1, color=navy, spaceAfter=8)]
 
@@ -102,9 +175,11 @@ def _build(pol, ana, comp, az, attive, logo) -> bytes:
     story.append(Paragraph("Richieste ed esigenze del cliente — Garanzie", H2))
     header = ["Garanzia", "Richiesta cliente", "Proposta interm.", "Confermata in polizza"]
     rows = [[Paragraph(h, th) for h in header]]
-    for g in GARANZIE_RCA:
-        segno = "☑" if g.lower() in attive else "☐"
-        rows.append([Paragraph(esc(g), body), Paragraph(segno, body), Paragraph(segno, body), Paragraph(segno, body)])
+    for r in righe:
+        def ck(v):
+            return "☑" if v else "☐"
+        rows.append([Paragraph(esc(r.get("nome")), body), Paragraph(ck(r.get("richiesta")), body),
+                     Paragraph(ck(r.get("proposta")), body), Paragraph(ck(r.get("confermata")), body)])
     t = Table(rows, colWidths=[6.5 * cm, 3.3 * cm, 3.3 * cm, 3.4 * cm], repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), navy),
                            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),

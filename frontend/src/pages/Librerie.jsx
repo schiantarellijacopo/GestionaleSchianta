@@ -85,7 +85,11 @@ function Sezione({ section }) {
     const [editing, setEditing] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
 
-    const load = () => api.get(section.endpoint).then((r) => setList(r.data));
+    const load = () => api.get(section.endpoint).then((r) => {
+        let data = r.data;
+        if (section.key === "utenti") data = (data || []).filter((u) => u.role !== "cliente");
+        setList(data);
+    });
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [section.key]);
 
     const elimina = async (id) => {
@@ -1264,9 +1268,7 @@ function CompagniaForm({ section, editing, onClose }) {
 }
 
 function UtenteForm({ section, editing, onClose }) {
-    const [anagrafiche, setAnagrafiche] = useState([]);
     const [staff, setStaff] = useState([]);
-    useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
     useEffect(() => {
         api.get("/auth/users").then((r) => setStaff(r.data.filter((u) => u.role !== "cliente"))).catch(() => {});
     }, []);
@@ -1313,22 +1315,9 @@ function UtenteForm({ section, editing, onClose }) {
                                 <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
                                 <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
                                 <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
-                                <SelectItem value="cliente">Cliente - vede solo i propri dati</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
-                    {f.role === "cliente" && (
-                        <div>
-                            <Label>Anagrafica cliente collegata *</Label>
-                            <Select value={f.anagrafica_id || ""} onValueChange={(v) => set("anagrafica_id", v)}>
-                                <SelectTrigger><SelectValue placeholder="Seleziona anagrafica..." /></SelectTrigger>
-                                <SelectContent>
-                                    {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
-                            <div className="text-xs text-slate-500 mt-1">Il cliente vedrà solo le polizze/sinistri legati a questa anagrafica.</div>
-                        </div>
-                    )}
                     {f.role !== "cliente" && (
                         <div className="grid grid-cols-2 gap-3">
                             <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
