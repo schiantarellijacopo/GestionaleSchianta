@@ -938,3 +938,10 @@ Usare integration_expert prima di implementare.
   - Frontend Librerie.jsx: pulsante "Unisci doppioni" nel tab Rami → MergeRamiDialog con rilevamento automatico gruppi (nome/codice normalizzati), scelta master (radio) + doppioni (checkbox), anteprima conteggi, conferma. Tabella Rami ora mostra colonna Stato (attivo / archiviato / "unito → CODICE").
   - Testato: curl (create/preview/merge/archiviazione/errori + cleanup) e screenshot UI con gruppo RC AUTO (38 polizze).
 
+
+## Sessione 2026-09-10 — Metodo pagamento: fix match numero polizza + dedup tendine Ramo
+- IMPORT metodo pagamento (job 2fa1c316) terminato: 16.973 polizze nel file, 7.405 aggiornate, 6.204 titoli, ma **9.568 polizze "non trovate"**.
+- ROOT CAUSE: `_process_metodo_pagamento` cercava `numero_polizza` esatto (`58531300240`) mentre le polizze OMNIA sono zero-padded a 14 cifre (`00058531300240`).
+- FIX (routes/import_massivo.py): costruito indice in memoria numero→id (chiavi = numero raw + solo-cifre senza zeri iniziali, 86.969 chiavi su 49.070 polizze) usato al posto della find_one per polizza (anche molto più veloce). Verificato che i numeri prima falliti ora risolvono. **Richiede ri-upload del CSV** (il file non viene conservato).
+- FIX tendine Ramo (bug "RC AutoRC AutoRC Auto" nel form Prodotti): rami globali con lo stesso `codice` → Radix concatenava le label. `GET /librerie/rami?dedup=1` esclude uniti/archiviati e deduplica per codice; usato in Prodotti/Collaboratori (Librerie), Polizze, PolizzaDetail, Titoli, Sinistri, AzioniPolizzaTab. La sezione Librerie→Rami continua a ricevere la lista completa (serve per l'unione doppioni) e nasconde i rami uniti.
+

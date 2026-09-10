@@ -1263,18 +1263,28 @@ async def _process_metodo_pagamento(content: bytes, dry_run: bool, job_id: Optio
         righe += 1
         per_pol.setdefault(num, []).append(r)
 
+    # Indice numero polizza → id: le polizze OMNIA hanno zeri iniziali di
+    # riempimento (00058531300240) mentre il CSV riporta il numero "nudo".
+    idx_pol: dict[str, str] = {}
+    async for p in db.polizze.find({}, {"_id": 0, "id": 1, "numero_polizza": 1}):
+        raw = (p.get("numero_polizza") or "").strip()
+        for k in {raw, _mp_norm_num(raw).lstrip("0")}:
+            if k:
+                idx_pol.setdefault(k, p["id"])
+
     titoli_aggiornati = 0
     polizze_aggiornate = 0
     non_trovate: list[str] = []
     tot_pol = len(per_pol)
     processate = 0
     for num, rr in per_pol.items():
-        pol = await db.polizze.find_one(
-            {"numero_polizza": {"$in": [rr[0].get("NumPolizza"), num]}})
-        if not pol:
+        pol_id = (idx_pol.get((rr[0].get("NumPolizza") or "").strip())
+                  or idx_pol.get(num) or idx_pol.get(num.lstrip("0")))
+        if not pol_id:
             non_trovate.append(rr[0].get("NumPolizza"))
             processate += 1
             continue
+        pol = {"id": pol_id}
         titoli = await db.titoli.find({"polizza_id": pol["id"]}).to_list(1000)
         tit_by_eff = {t.get("effetto"): t for t in titoli if t.get("effetto")}
         tit_by_scad = {t.get("scadenza"): t for t in titoli if t.get("scadenza")}
