@@ -1223,7 +1223,7 @@ def _mp_parse_date(v: str):
     v = (v or "").strip()
     if not v:
         return None
-    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d"):
+    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d-%m-%y"):
         try:
             d = datetime.strptime(v, fmt)
             if d.year < 100:
@@ -1291,9 +1291,9 @@ async def _process_metodo_pagamento(content: bytes, dry_run: bool, job_id: Optio
         tit_by_incasso = {t.get("data_incasso"): t for t in titoli if t.get("data_incasso")}
         usati: set[str] = set()
         for row in rr:
-            cop = _mp_parse_date(row.get("Copertura"))
-            pag = _mp_parse_date(row.get("DataPagam"))
-            tipo_pag = (row.get("TipoPag") or "").strip()
+            cop = _mp_parse_date(row.get("Copertura") or row.get("DataCopertura"))
+            pag = _mp_parse_date(row.get("DataPagam") or row.get("DataPagamento"))
+            tipo_pag = (row.get("TipoPag") or row.get("ModalitaPagamento") or "").strip()
             t = tit_by_eff.get(cop) or tit_by_scad.get(cop) or tit_by_incasso.get(pag)
             if not t or t["id"] in usati:
                 continue
@@ -1312,13 +1312,15 @@ async def _process_metodo_pagamento(content: bytes, dry_run: bool, job_id: Optio
             titoli_aggiornati += 1
         # ultima rata (max DataPagam) → metodo pagamento polizza
         def _key(row):
-            return _mp_parse_date(row.get("DataPagam")) or _mp_parse_date(row.get("RataDel")) or ""
+            return (_mp_parse_date(row.get("DataPagam") or row.get("DataPagamento"))
+                    or _mp_parse_date(row.get("RataDel")) or "")
         ultima = max(rr, key=_key)
-        cat = _mp_categoria(ultima.get("TipoPag"))
+        tipo_ultima = (ultima.get("TipoPag") or ultima.get("ModalitaPagamento") or "").strip()
+        cat = _mp_categoria(tipo_ultima)
         if not dry_run:
             await db.polizze.update_one({"id": pol["id"]}, {"$set": {
                 "metodo_pagamento": cat,
-                "metodo_pagamento_desc": (ultima.get("TipoPag") or "").strip() or None,
+                "metodo_pagamento_desc": tipo_ultima or None,
                 "updated_at": _now_iso_mp(),
             }})
         polizze_aggiornate += 1
