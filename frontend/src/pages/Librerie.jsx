@@ -20,6 +20,7 @@ import { useSearchParams } from "react-router-dom";
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
     { key: "cloud-storage", label: "Cloud Storage (Drive/OneDrive)", icon: <Cloud size={14} />, endpoint: "/librerie/cloud-storage", custom: true },
+    { key: "google-contatti", label: "Google Contatti", icon: <Users size={14} />, endpoint: "/google/status", custom: true },
     { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
@@ -68,6 +69,7 @@ export default function Librerie() {
                     <TabsContent key={s.key} value={s.key} className="mt-4">
                         {s.key === "azienda" ? <AziendaSezione />
                             : s.key === "cloud-storage" ? <CloudStorageSezione />
+                            : s.key === "google-contatti" ? <GoogleContattiSezione />
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
@@ -204,6 +206,108 @@ function Sezione({ section }) {
                     onClose={() => { setCodiciOpen(false); load(); }}
                 />
             )}
+        </div>
+    );
+}
+
+function GoogleContattiSezione() {
+    const [st, setSt] = useState(null);
+    const [job, setJob] = useState(null);
+    const pollRef = useRef(null);
+
+    const load = () => api.get("/google/status").then((r) => setSt(r.data)).catch(() => setSt({ configurato: false }));
+    useEffect(() => { load(); return () => clearInterval(pollRef.current); }, []);
+
+    const collega = async () => {
+        try {
+            const r = await api.get("/google/connect");
+            window.location.assign(r.data.authorization_url);
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const scollega = async () => {
+        if (!window.confirm("Scollegare l'account Google? I contatti già creati restano su Google.")) return;
+        try { await api.delete("/google/connection"); toast.success("Account scollegato"); load(); }
+        catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const syncTutti = async () => {
+        if (!window.confirm(`Sincronizzare tutte le ${st?.anagrafiche || 0} anagrafiche su Google Contatti?`)) return;
+        try {
+            const r = await api.post("/google/sync-tutti");
+            setJob(r.data);
+            clearInterval(pollRef.current);
+            pollRef.current = setInterval(async () => {
+                const j = await api.get(`/google/sync-job/${r.data.job_id}`);
+                setJob(j.data);
+                if (j.data.status === "done") { clearInterval(pollRef.current); toast.success(`Sincronizzati ${j.data.fatte} contatti`); load(); }
+            }, 3000);
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+
+    if (!st) return <Loading />;
+
+    return (
+        <Card className="border-slate-200 p-5 space-y-4" data-testid="google-contatti-sezione">
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <h3 className="font-semibold text-slate-800">Google Contatti</h3>
+                    <p className="text-sm text-slate-500 mt-1">
+                        Ogni anagrafica creata o modificata nel CRM viene scritta anche nei contatti
+                        del tuo account Google (nome, cognome, indirizzo, cellulare, email).
+                    </p>
+                </div>
+                {st.collegato
+                    ? <span className="badge badge-success inline-flex items-center gap-1"><CheckCircle2 size={12} /> collegato</span>
+                    : <span className="badge badge-neutral inline-flex items-center gap-1"><XCircle size={12} /> non collegato</span>}
+            </div>
+
+            {!st.configurato && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" data-testid="google-non-configurato">
+                    Manca la configurazione lato server (Client ID/Secret Google). Crea le credenziali in
+                    Google Cloud Console (People API + ID client OAuth "Applicazione web") e comunicale
+                    per completare l&apos;attivazione.
+                </div>
+            )}
+
+            {st.collegato && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <Stat label="Account" value={st.connessione?.account_email || "—"} />
+                    <Stat label="Anagrafiche" value={st.anagrafiche} />
+                    <Stat label="Sincronizzate" value={st.sincronizzate} />
+                    <Stat label="Errori" value={st.errori} />
+                </div>
+            )}
+
+            {job && job.status === "running" && (
+                <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" data-testid="google-sync-progress">
+                    Sincronizzazione in corso… {job.fatte || 0}/{job.totali || 0}
+                </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-1">
+                {!st.collegato ? (
+                    <Button onClick={collega} disabled={!st.configurato} className="bg-sky-700 hover:bg-sky-800" data-testid="google-collega">
+                        <ExternalLink size={14} className="mr-1" /> Collega account Google
+                    </Button>
+                ) : (
+                    <>
+                        <Button onClick={syncTutti} className="bg-emerald-700 hover:bg-emerald-800" data-testid="google-sync-tutti">
+                            <RotateCw size={14} className="mr-1" /> Sincronizza tutti i clienti
+                        </Button>
+                        <Button variant="outline" onClick={collega} data-testid="google-ricollega">Ricollega</Button>
+                        <Button variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                            onClick={scollega} data-testid="google-scollega">Scollega</Button>
+                    </>
+                )}
+            </div>
+        </Card>
+    );
+}
+
+function Stat({ label, value }) {
+    return (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-widest text-slate-500">{label}</div>
+            <div className="text-sm font-semibold text-slate-800 truncate">{value}</div>
         </div>
     );
 }

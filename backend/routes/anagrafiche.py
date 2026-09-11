@@ -29,6 +29,14 @@ from shared import log_attivita, log_diario_cliente, strip_mongo_id
 import storage as obj_storage
 import inps_calculator
 import geocoder as geocoder_svc
+from tenant import user_tenant_id
+
+
+def _google_sync(user: dict, ana_id: str) -> None:
+    """Sincronizza l'anagrafica su Google Contacts (se l'agenzia è collegata)."""
+    from routes.google_contacts import sync_in_background
+    sync_in_background(user_tenant_id(user), ana_id)
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -636,6 +644,7 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")
+    _google_sync(user, obj.id)
     return obj.model_dump()
 
 
@@ -661,6 +670,7 @@ async def update_anagrafica(aid: str, body: dict, user: dict = Depends(require_u
     if res.matched_count == 0:
         raise HTTPException(404, "Non trovata")
     await log_attivita(user, "update", "anagrafica", aid)
+    _google_sync(user, aid)
     return strip_mongo_id(await db.anagrafiche.find_one({"id": aid}, {"_id": 0}))
 
 

@@ -39,6 +39,7 @@ google-api-core==2.31.0
 google-api-python-client==2.197.0
 google-auth==2.55.0
 google-auth-httplib2==0.4.0
+google-auth-oauthlib==1.4.1
 google-genai==2.9.0
 google-generativeai==0.8.6
 googleapis-common-protos==1.75.0
@@ -80,6 +81,7 @@ packaging==26.2
 pandas==3.0.3
 passlib==1.7.4
 pathspec==1.1.1
+pdf2image==1.17.0
 pdfminer.six==20260107
 pdfplumber==0.11.10
 pillow==12.2.0
@@ -111,6 +113,7 @@ python-dotenv==1.2.2
 python-fsutil==0.16.1
 python-jose==3.5.0
 python-multipart==0.0.32
+python-pptx==1.0.2
 python-slugify==8.0.4
 pytokens==0.4.1
 PyYAML==6.0.3
@@ -148,5 +151,6 @@ urllib3==2.7.0
 uvicorn==0.25.0
 watchfiles==1.2.0
 websockets==16.0
+xlsxwriter==3.2.9
 yarl==1.24.2
 zipp==4.1.0
