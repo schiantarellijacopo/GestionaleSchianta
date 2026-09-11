@@ -77,7 +77,7 @@ FIELD_ALIASES: dict = {
         "comune", "citta", "città", "comune residenza", "comune di residenza",
         "city", "località", "localita",
     ],
-    "provincia": ["provincia", "prov", "prov.", "province"],
+    "provincia": ["provincia", "province", "provincia residenza"],
     "cap": ["cap", "codice postale", "postal code", "zip", "zip code"],
     "nazione": ["nazione", "stato", "country", "paese"],
     # documento

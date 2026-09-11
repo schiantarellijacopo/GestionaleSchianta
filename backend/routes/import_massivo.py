@@ -192,7 +192,7 @@ _POL_ALIASES = {
     "contraente_indirizzo": ["indirizzo", "via", "indirizzo contraente"],
     "contraente_comune": ["comune", "citta", "localita"],
     "contraente_cap": ["cap"],
-    "contraente_provincia": ["provincia", "prov"],
+    "contraente_provincia": ["provincia", "province", "provincia contraente"],
     "contraente_telefono": ["tel contr", "telefono", "tel"],
     "contraente_cellulare": ["cel contr", "cellulare", "cell"],
     "contraente_email": ["mail contr", "email", "mail", "e mail"],
@@ -405,14 +405,20 @@ def _count_rows(content: bytes, filename: str) -> int:
 def _detect_entity_heuristic(headers: List[str]) -> str:
     blob = " | ".join(_normalize_header(h) for h in headers)
     has = lambda *ks: any(k in blob for k in ks)
+    # movimento / prima nota / estratto conto: SOLO segnali forti (NON "mandato",
+    # che è presente anche nei portafogli polizze)
     if has("tipo operazione", "importo pagato", "descrizione pagamento", "data coge",
-           "prima nota", "tipo pagam", "num estratto", "numero estratto", "mandato"):
+           "prima nota", "num estratto", "numero estratto"):
         return "movimento"
     if has("numero sinistro", "numero interno", "avvenimento", "denuncia", "liquidato", "riserva"):
         return "sinistro"
-    if has("modalitapagamento", "importoincassato", "datapagamento", "numappendice", "quietanza", "rata"):
+    if has("modalitapagamento", "importoincassato", "datapagamento", "numappendice", "quietanza"):
         return "titolo"
-    if has("numpolizza", "numero polizza", "polizza", "contratto"):
+    # polizza / portafoglio: numero polizza esplicito OPPURE (ramo + contraente + data)
+    if has("numpolizza", "numero polizza", "polizza", "contratto") or (
+        has("ramo") and has("contraente", "codice fiscale", "partita iva")
+        and has("decor", "decorrenza", "scad", "scadenza", "effetto")
+    ):
         return "polizza"
     return "anagrafica"
 
@@ -422,6 +428,11 @@ def _detect_mapping_heuristic(entity: str, headers: List[str]) -> dict:
     mapping, used = {}, set()
     for h in headers:
         norm = _normalize_header(h)
+        # Ignora le colonne "alla firma" (premio/provv. iniziale): non sono i
+        # valori ricorrenti e rubavano il mapping a Lordo/Netto/Provvigioni.
+        if "firma" in norm.split():
+            mapping[str(h)] = None
+            continue
         best, best_score = None, 0.0
         for canonical, al in aliases.items():
             if canonical in used:
@@ -451,6 +462,13 @@ async def _ai_detect(headers: List[str], samples: List[dict]) -> Optional[dict]:
             f"COLONNE: {json.dumps(headers, ensure_ascii=False)}\n\n"
             f"ESEMPI (prime {len(samples)} righe): {json.dumps(samples, ensure_ascii=False, default=str)}\n\n"
             "REGOLE IMPORTANTI:\n"
+            "- Un file 'portafoglio' con Numero/Ramo/Compagnia/Decorrenza/Contraente è ENTITÀ 'polizza' "
+            "(NON 'movimento', anche se contiene la colonna 'Mandato').\n"
+            "- IGNORA (mappa a null) le colonne che finiscono con '_firma' o '(firma)' "
+            "(es. Lordo_firma, Netto_firma, Provv_firma): sono valori 'alla firma', NON i valori ricorrenti. "
+            "Per i premi usa le colonne senza suffisso: Lordo→premio_lordo, Netto→premio_netto, Imposte→premio_tasse, "
+            "Provvigioni→provvigioni.\n"
+            "- 'Provv_firma' NON è la provincia: non mapparla a contraente_provincia.\n"
             "- Se il file è un PORTAFOGLIO polizze, mappa ANCHE i dati anagrafici del CONTRAENTE "
             "presenti nella stessa riga (indirizzo, comune, cap, provincia, telefono, cellulare, email, "
             "codice fiscale, partita iva) ai campi contraente_*.\n"

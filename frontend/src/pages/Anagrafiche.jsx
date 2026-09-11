@@ -207,6 +207,17 @@ export default function Anagrafiche() {
     useEffect(() => { api.get("/anagrafiche/stats").then((r) => setStats(r.data)).catch(() => {}); }, []);
     useEffect(() => { api.get("/anagrafiche/tags").then((r) => setAllTags(r.data || [])).catch(() => {}); }, []);
 
+    // Se non ci sono clienti CON polizze ma esistono anagrafiche (es. subito dopo
+    // un import senza polizze), mostra automaticamente "Tutte" — una sola volta.
+    const autoSwitched = useRef(false);
+    useEffect(() => {
+        if (autoSwitched.current) return;
+        if (catFilter === "con_polizze" && catCounts.con_polizze === 0 && catCounts.tutte > 0) {
+            autoSwitched.current = true;
+            setCatFilter("all");
+        }
+    }, [catCounts, catFilter]);
+
     const toggleExpand = async (aid) => {
         const next = !expanded[aid];
         setExpanded((p) => ({ ...p, [aid]: next }));
