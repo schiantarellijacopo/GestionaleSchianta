@@ -40,7 +40,6 @@ const PRESETS_CORRENTI = [
 ];
 
 const PRESETS_STORICO = [
-    { key: "storico", label: "Tutti incassati" },
     { key: "storico_anno", label: "Anno corrente" },
     { key: "storico_mese", label: "Mese corrente" },
 ];
@@ -84,10 +83,10 @@ export default function Titoli({ storicoMode = false } = {}) {
 
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
-        ? ["storico", "storico_anno", "storico_mese"]
+        ? ["storico_anno", "storico_mese"]
         : ["sospesi", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
 
-    const defaultPreset = storicoMode ? "storico" : "tutti_aperti";
+    const defaultPreset = storicoMode ? "storico_anno" : "tutti_aperti";
 
     const [filters, setFilters] = useState({
         preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : defaultPreset,
