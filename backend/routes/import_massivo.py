@@ -117,6 +117,18 @@ ENTITY_FIELDS = {
         "compagnia_nome": "compagnia (per collegare/creare la polizza se mancante)",
         "ramo": "ramo (per collegare/creare la polizza se mancante)",
         "operatore_nome": "operatore/collaboratore assegnato al titolo",
+        "operatore_provv": "provvigione dell'operatore 1 (Operatore 1 Provv)",
+        "operatore_rit": "ritenuta dell'operatore 1 (Operatore 1 Rit)",
+        "operatore_2_nome": "secondo operatore/collaboratore",
+        "operatore_2_provv": "provvigione del secondo operatore",
+        "operatore_2_rit": "ritenuta del secondo operatore",
+        "operatore_3_nome": "terzo operatore/collaboratore",
+        "operatore_3_provv": "provvigione del terzo operatore",
+        "operatore_3_rit": "ritenuta del terzo operatore",
+        "operatore_4_nome": "quarto operatore/collaboratore",
+        "operatore_4_provv": "provvigione del quarto operatore",
+        "operatore_4_rit": "ritenuta del quarto operatore",
+        "pagamento_in_direzione": "premio pagato direttamente in compagnia/direzione (PagatoInCom)",
         "mandato": "mandato / agenzia partner",
         "contraente_cf": "CF/P.IVA del contraente (per creare la polizza se mancante)",
         "contraente_piva": "partita IVA del contraente",
@@ -200,7 +212,19 @@ _TIT_ALIASES = {
     "data_copertura": ["data copertura", "datacopertura", "copertura", "coperto il"],
     "compagnia_nome": ["compagnia", "impresa", "compagnia assicurativa"],
     "ramo": ["ramo", "rischio", "ramo assicurativo"],
-    "operatore_nome": ["operatori", "operatore", "collaboratore", "produttore", "sub agente", "subagente", "agente"],
+    "operatore_nome": ["operatori", "operatore", "operatore 1", "collaboratore", "produttore", "sub agente", "subagente", "agente"],
+    "operatore_provv": ["operatore 1 provv", "operatore provv"],
+    "operatore_rit": ["operatore 1 rit", "operatore rit"],
+    "operatore_2_nome": ["operatore 2"],
+    "operatore_2_provv": ["operatore 2 provv"],
+    "operatore_2_rit": ["operatore 2 rit"],
+    "operatore_3_nome": ["operatore 3"],
+    "operatore_3_provv": ["operatore 3 provv"],
+    "operatore_3_rit": ["operatore 3 rit"],
+    "operatore_4_nome": ["operatore 4"],
+    "operatore_4_provv": ["operatore 4 provv"],
+    "operatore_4_rit": ["operatore 4 rit"],
+    "pagamento_in_direzione": ["pagatoincom", "pagato in com", "pagato in compagnia", "pagamento in direzione"],
     "mandato": ["mandato", "agenzia partner", "partner"],
     "contraente_cf": ["cfcontraente", "cf contraente", "codice fiscale contraente", "cfclientipaganti"],
     "contraente_piva": ["piva contraente", "partita iva contraente"],
@@ -1034,6 +1058,29 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                             auto_creati["polizze_da_titolo"].append(num_pol)
                     doc = {k: v for k, v in rec.items() if k in Titolo.model_fields}
                     doc["polizza_id"] = pol_id
+                    # Ripartizione provvigioni sui 4 operatori del flusso (Operatore N + Provv + Rit)
+                    provv_ops = []
+                    for idx_op, nome_op in ((1, t_operatore), (2, rec.pop("operatore_2_nome", None)),
+                                            (3, rec.pop("operatore_3_nome", None)), (4, rec.pop("operatore_4_nome", None))):
+                        pref = "operatore_" if idx_op == 1 else f"operatore_{idx_op}_"
+                        p_val = rec.pop(f"{pref}provv", None)
+                        r_val = rec.pop(f"{pref}rit", None)
+                        if not nome_op and not p_val:
+                            continue
+                        op_ident = op_id if idx_op == 1 else await _operatore_id(nome_op)
+                        provv_ops.append({
+                            "operatore_id": op_ident,
+                            "operatore_nome": nome_op,
+                            "provvigione": _to_float(p_val) or 0.0,
+                            "ritenuta": _to_float(r_val) or 0.0,
+                        })
+                    if provv_ops:
+                        doc["provvigioni_operatori"] = provv_ops
+                    # PagatoInCom → premio pagato in direzione (no cassa)
+                    dir_raw = rec.get("pagamento_in_direzione")
+                    if dir_raw is not None:
+                        doc["pagamento_in_direzione"] = str(dir_raw).strip().lower() in (
+                            "1", "s", "si", "sì", "x", "true", "vero", "y", "yes")
                     # Operatore già risolto sopra → assegnato anche al titolo
                     doc["collaboratore_id"] = op_id or doc.get("collaboratore_id") or user.get("id")
                     # Metodo di pagamento → codice (auto-crea se manca)
