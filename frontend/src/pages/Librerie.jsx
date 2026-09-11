@@ -213,10 +213,27 @@ function Sezione({ section }) {
 function GoogleContattiSezione() {
     const [st, setSt] = useState(null);
     const [job, setJob] = useState(null);
+    const [cid, setCid] = useState("");
+    const [csec, setCsec] = useState("");
     const pollRef = useRef(null);
 
-    const load = () => api.get("/google/status").then((r) => setSt(r.data)).catch(() => setSt({ configurato: false }));
+    const load = () => api.get("/google/status").then((r) => { setSt(r.data); setCid(r.data.client_id || ""); })
+        .catch(() => setSt({ configurato: false }));
     useEffect(() => { load(); return () => clearInterval(pollRef.current); }, []);
+
+    const salvaCfg = async () => {
+        try {
+            await api.put("/google/config", { client_id: cid.trim(), client_secret: csec.trim() });
+            setCsec("");
+            toast.success("Credenziali salvate: ora collega l'account Google");
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const rimuoviCfg = async () => {
+        if (!window.confirm("Rimuovere le credenziali Google di questa agenzia?")) return;
+        try { await api.delete("/google/config"); setCid(""); setCsec(""); toast.success("Credenziali rimosse"); load(); }
+        catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
 
     const collega = async () => {
         try {
@@ -262,11 +279,37 @@ function GoogleContattiSezione() {
 
             {!st.configurato && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" data-testid="google-non-configurato">
-                    Manca la configurazione lato server (Client ID/Secret Google). Crea le credenziali in
-                    Google Cloud Console (People API + ID client OAuth "Applicazione web") e comunicale
-                    per completare l&apos;attivazione.
+                    Inserisci qui sotto le credenziali OAuth della <b>tua</b> agenzia (Google Cloud Console →
+                    People API abilitata → ID client OAuth di tipo <b>Applicazione web</b>).
                 </div>
             )}
+
+            <div className="rounded-md border border-slate-200 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                    <div className="text-xs uppercase tracking-widest text-slate-500">Credenziali OAuth dell&apos;agenzia</div>
+                    {st.client_id && <span className="badge badge-success">salvate</span>}
+                </div>
+                <div className="text-xs text-slate-500">
+                    URI di reindirizzamento da incollare in Google Cloud Console:
+                    <code className="ml-1 px-1.5 py-0.5 bg-slate-100 rounded text-[11px] break-all" data-testid="google-redirect-uri">{st.redirect_uri}</code>
+                </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                    <Input placeholder="Client ID (…apps.googleusercontent.com)" value={cid}
+                        onChange={(e) => setCid(e.target.value)} data-testid="google-client-id" />
+                    <Input placeholder="Client Secret (GOCSPX-…)" value={csec} type="password"
+                        onChange={(e) => setCsec(e.target.value)} data-testid="google-client-secret" />
+                </div>
+                <div className="flex gap-2">
+                    <Button size="sm" disabled={!cid.trim() || !csec.trim()} onClick={salvaCfg}
+                        className="bg-slate-800 hover:bg-slate-900" data-testid="google-salva-credenziali">
+                        Salva credenziali
+                    </Button>
+                    {st.client_id && (
+                        <Button size="sm" variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-50"
+                            onClick={rimuoviCfg} data-testid="google-rimuovi-credenziali">Rimuovi</Button>
+                    )}
+                </div>
+            </div>
 
             {st.collegato && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

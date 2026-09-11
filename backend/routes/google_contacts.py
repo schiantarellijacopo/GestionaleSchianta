@@ -18,6 +18,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from pydantic import BaseModel
 
 from database import db, raw_db
 from auth import current_user, require_user
@@ -37,11 +38,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _cfg() -> dict:
-    cid = os.environ.get("GOOGLE_CONTACTS_CLIENT_ID", "")
-    csec = os.environ.get("GOOGLE_CONTACTS_CLIENT_SECRET", "")
+def _cfg_from(cid: str, csec: str) -> dict:
     if not cid or not csec:
-        raise HTTPException(400, "Google Contacts non configurato: manca Client ID/Secret")
+        raise HTTPException(400, "Google Contacts non configurato: inserisci Client ID e Client Secret dell'agenzia")
     return {"web": {
         "client_id": cid,
         "client_secret": csec,
@@ -51,12 +50,21 @@ def _cfg() -> dict:
     }}
 
 
+async def _credenziali_app(tenant_id: str) -> tuple[str, str]:
+    """Client ID/Secret dell'agenzia (isolati per tenant); fallback su env."""
+    row = await raw_db.google_contacts_config.find_one({"agenzia_tenant_id": tenant_id})
+    if row and row.get("client_id") and row.get("client_secret_enc"):
+        return row["client_id"], _cipher().decrypt(row["client_secret_enc"].encode()).decode()
+    return (os.environ.get("GOOGLE_CONTACTS_CLIENT_ID", ""),
+            os.environ.get("GOOGLE_CONTACTS_CLIENT_SECRET", ""))
+
+
 def _cipher() -> Fernet:
     return Fernet(os.environ["GOOGLE_TOKEN_KEY"].encode())
 
 
-def _flow(state: Optional[str] = None) -> Flow:
-    f = Flow.from_client_config(_cfg(), scopes=SCOPES, state=state)
+def _flow(cid: str, csec: str, state: Optional[str] = None) -> Flow:
+    f = Flow.from_client_config(_cfg_from(cid, csec), scopes=SCOPES, state=state)
     f.redirect_uri = os.environ["GOOGLE_CONTACTS_REDIRECT_URI"]
     return f
 
@@ -92,12 +100,13 @@ async def _credenziali(tenant_id: str) -> Credentials:
     row = await raw_db.google_contacts_connessioni.find_one({"agenzia_tenant_id": tenant_id})
     if not row:
         raise RuntimeError("Google Contacts non collegato per questa agenzia")
+    cid, csec = await _credenziali_app(tenant_id)
     creds = Credentials(
         token=None,
         refresh_token=_cipher().decrypt(row["refresh_token_enc"].encode()).decode(),
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["GOOGLE_CONTACTS_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CONTACTS_CLIENT_SECRET"],
+        client_id=cid,
+        client_secret=csec,
         scopes=SCOPES,
     )
     creds.refresh(GoogleRequest())
@@ -163,15 +172,56 @@ async def google_status(user: dict = Depends(current_user)) -> dict:
     tid = user_tenant_id(user)
     conn = await raw_db.google_contacts_connessioni.find_one(
         {"agenzia_tenant_id": tid}, {"_id": 0, "refresh_token_enc": 0})
+    cfg = await raw_db.google_contacts_config.find_one(
+        {"agenzia_tenant_id": tid}, {"_id": 0, "client_secret_enc": 0})
+    cid, csec = await _credenziali_app(tid)
     tot = await db.anagrafiche.count_documents({})
     sincronizzate = await db.anagrafiche.count_documents({"google_sync_status": "synced"})
     errori = await db.anagrafiche.count_documents({"google_sync_status": "errore"})
     return {
-        "configurato": bool(os.environ.get("GOOGLE_CONTACTS_CLIENT_ID")),
+        "configurato": bool(cid and csec),
+        "client_id": cfg.get("client_id") if cfg else None,
+        "redirect_uri": os.environ["GOOGLE_CONTACTS_REDIRECT_URI"],
         "collegato": bool(conn),
         "connessione": conn,
         "anagrafiche": tot, "sincronizzate": sincronizzate, "errori": errori,
     }
+
+
+class GoogleConfigBody(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@router.put("/google/config")
+async def google_config(body: GoogleConfigBody,
+                        user: dict = Depends(require_user("admin"))) -> dict:
+    """Client ID/Secret Google isolati per agenzia."""
+    tid = user_tenant_id(user)
+    if not tid:
+        raise HTTPException(400, "Nessuna agenzia associata all'utente")
+    cid = body.client_id.strip()
+    csec = body.client_secret.strip()
+    if not cid or not csec:
+        raise HTTPException(400, "Client ID e Client Secret sono obbligatori")
+    await raw_db.google_contacts_config.update_one(
+        {"agenzia_tenant_id": tid},
+        {"$set": {"client_id": cid,
+                  "client_secret_enc": _cipher().encrypt(csec.encode()).decode(),
+                  "updated_at": _now()},
+         "$setOnInsert": {"agenzia_tenant_id": tid, "created_at": _now()}},
+        upsert=True)
+    # credenziali cambiate → la vecchia connessione non è più valida
+    await raw_db.google_contacts_connessioni.delete_one({"agenzia_tenant_id": tid})
+    return {"ok": True, "redirect_uri": os.environ["GOOGLE_CONTACTS_REDIRECT_URI"]}
+
+
+@router.delete("/google/config")
+async def google_config_delete(user: dict = Depends(require_user("admin"))) -> dict:
+    tid = user_tenant_id(user)
+    await raw_db.google_contacts_config.delete_one({"agenzia_tenant_id": tid})
+    await raw_db.google_contacts_connessioni.delete_one({"agenzia_tenant_id": tid})
+    return {"ok": True}
 
 
 @router.get("/google/connect")
@@ -184,7 +234,8 @@ async def google_connect(user: dict = Depends(require_user("admin"))) -> dict:
     await raw_db.google_contacts_states.update_one(
         {"state": state}, {"$set": {"state": state, "agenzia_tenant_id": tid, "created_at": _now()}},
         upsert=True)
-    url, _ = _flow(state).authorization_url(
+    cid, csec = await _credenziali_app(tid)
+    url, _ = _flow(cid, csec, state).authorization_url(
         access_type="offline", include_granted_scopes="true", prompt="consent")
     return {"authorization_url": url}
 
@@ -197,7 +248,8 @@ async def google_callback(code: str, state: str):
         tid = (row or {}).get("agenzia_tenant_id")
     if not tid:
         raise HTTPException(400, "Stato OAuth non valido o scaduto")
-    flow = _flow(state)
+    cid, csec = await _credenziali_app(tid)
+    flow = _flow(cid, csec, state)
     flow.fetch_token(code=code)
     creds = flow.credentials
     if not creds.refresh_token:
