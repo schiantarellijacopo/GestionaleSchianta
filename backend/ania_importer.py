@@ -641,9 +641,11 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     ramo_raw = row.get("ramo_share") or row.get("ramo_cmp") or "VARIE"
     prodotto_raw = row.get("prodotto_cmp") or None
     # rec20 col AG (33ª, index 32) = data annullo → polizza annullata
-    data_annullo = _parse_date(row.get("data_annullo") or _col_at(row, 32))
+    data_annullo = _parse_date(row.get("data_annullamento") or row.get("data_annullo")
+                               or _col_at(row, 32))
     # rec20 col BP (68ª, index 67) = numero polizza sostituita
-    sostituisce = (row.get("polizza_sostituita") or _col_at(row, 67) or "").strip() or None
+    sostituisce = (row.get("numero_polizza_sostituita_1") or row.get("polizza_sostituita")
+                   or _col_at(row, 67) or "").strip() or None
     if data_annullo:
         stato = "annullata"
     payload = {
