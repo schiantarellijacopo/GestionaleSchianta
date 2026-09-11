@@ -383,7 +383,7 @@ class Anagrafica(BaseDoc):
 
 
 # =============== POLIZZE ===============
-PolizzaStato = Literal["attiva", "sospesa", "annullata", "scaduta", "in_emissione"]
+PolizzaStato = Literal["attiva", "sospesa", "annullata", "sostituita", "scaduta", "in_emissione"]
 
 
 class Polizza(BaseDoc):

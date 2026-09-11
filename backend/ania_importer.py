@@ -1083,7 +1083,7 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 "scadenza": (_parse_date(row.get("data_scadenza_emesso", ""))
                              or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
                              or eff_titolo),
-                "stato": stato,
+                "stato": ("incassato" if lordo <= 0 else stato),  # titoli a premio 0: nulla da incassare
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,
                 "imposte": round(imposte_eff, 2),
@@ -1324,6 +1324,32 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
 # ---------------------------------------------------------------------------
 # Entrypoint pubblico
 # ---------------------------------------------------------------------------
+async def _marca_polizze_sostituite(db) -> int:
+    """Le polizze citate nel campo `sostituisce_polizza` passano a stato
+    'sostituita', con backlink alla polizza che le ha rimpiazzate."""
+    import re as _re
+    idx: Dict[str, str] = {}
+    async for p in db.polizze.find({}, {"_id": 0, "id": 1, "numero_polizza": 1}):
+        raw = (p.get("numero_polizza") or "").strip()
+        for k in {raw, _re.sub(r"\D", "", raw).lstrip("0")}:
+            if k:
+                idx.setdefault(k, p["id"])
+    n = 0
+    async for p in db.polizze.find({"sostituisce_polizza": {"$nin": [None, ""]}},
+                                   {"_id": 0, "id": 1, "sostituisce_polizza": 1}):
+        num = (p.get("sostituisce_polizza") or "").strip()
+        old_id = idx.get(num) or idx.get(_re.sub(r"\D", "", num).lstrip("0"))
+        if not old_id or old_id == p["id"]:
+            continue
+        res = await db.polizze.update_one(
+            {"id": old_id, "stato": {"$ne": "sostituita"}},
+            {"$set": {"stato": "sostituita", "sostituita_da_polizza_id": p["id"],
+                      "updated_at": _now_iso()}})
+        n += res.modified_count
+    return n
+
+
+
 async def _applica_regola_stato_da_titoli(db, polizza_id_map: Dict[str, str], log: "ImportLog") -> None:
     """Passo 1 (post-import Omnia): ultimo titolo pagato >= 01/01/2025 -> ATTIVA;
     altrimenti ANNULLATA solo se compagnia CATTOLICA. Versione efficiente:
@@ -1404,6 +1430,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                            tracker=tracker, import_mappings=import_mappings)
     # Passo 1: regola stato polizza in base all'ultimo titolo pagato
     await _applica_regola_stato_da_titoli(db, polizza_id_map, log)
+    counts["polizze_sostituite"] = await _marca_polizze_sostituite(db)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)

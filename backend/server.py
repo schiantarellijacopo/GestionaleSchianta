@@ -4617,12 +4617,31 @@ async def create_applicazione(pid: str, body: dict, user=Depends(require_user("a
     return obj.model_dump()
 
 
+@api.get("/polizze/{pid}/titoli-arretrati")
+async def titoli_arretrati_polizza(pid: str, user=Depends(current_user)):
+    """Titoli ancora aperti (arretrati) della polizza: serve per chiedere lo storno
+    prima di annullare/sostituire il contratto."""
+    titoli = await db.titoli.find(
+        {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+        {"_id": 0, "id": 1, "tipo": 1, "effetto": 1, "scadenza": 1, "stato": 1,
+         "importo_lordo": 1},
+    ).sort("scadenza", 1).to_list(200)
+    return {
+        "titoli": titoli,
+        "totale": len(titoli),
+        "importo": round(sum(t.get("importo_lordo") or 0 for t in titoli), 2),
+    }
+
+
 @api.post("/polizze/{pid}/annulla")
 async def annulla_polizza(
     pid: str, body: dict,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Annulla una polizza: setta stato=annullata, data e motivo."""
+    """Annulla una polizza: setta stato=annullata, data e motivo.
+
+    `storna_titoli=true` storna anche i titoli arretrati ancora aperti.
+    """
     pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
     if not pol:
         raise HTTPException(404, "Polizza non trovata")
@@ -4636,8 +4655,19 @@ async def annulla_polizza(
         "motivo_annullamento": motivo,
         "updated_at": _now_iso(),
     }})
-    await log_attivita(user, "annulla", "polizza", pid, f"Motivo: {motivo}")
-    return {"ok": True, "stato": "annullata", "data_annullamento": data_ann}
+    titoli_stornati = 0
+    if body.get("storna_titoli"):
+        res = await db.titoli.update_many(
+            {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+            {"$set": {"stato": "stornato",
+                      "nota": f"Stornato per annullamento polizza ({motivo})",
+                      "updated_at": _now_iso()}},
+        )
+        titoli_stornati = res.modified_count
+    await log_attivita(user, "annulla", "polizza", pid, f"Motivo: {motivo}"
+                       + (f" + {titoli_stornati} titoli stornati" if titoli_stornati else ""))
+    return {"ok": True, "stato": "annullata", "data_annullamento": data_ann,
+            "titoli_stornati": titoli_stornati}
 
 
 @api.post("/polizze/{pid}/sospendi")
@@ -4700,6 +4730,7 @@ async def sostituisci_polizza(
         raise HTTPException(400, "numero_polizza ed effetto obbligatori")
 
     crea_titolo = bool(body.pop("crea_titolo", True))  # default: sempre crea titolo di sostituzione
+    storna_arretrati = bool(body.pop("storna_titoli", True))
     today = _now_iso()[:10]
     nuovo: dict = {
         # campi ereditati salvo override
@@ -4740,14 +4771,16 @@ async def sostituisci_polizza(
         "updated_at": _now_iso(),
     }})
 
-    # STORNO titoli arretrati/aperti della polizza sostituita (non più esigibili)
-    storno = await db.titoli.update_many(
-        {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
-        {"$set": {"stato": "stornato",
-                  "nota": f"Stornato per sostituzione con polizza {obj.numero_polizza}",
-                  "updated_at": _now_iso()}},
-    )
-    titoli_stornati = storno.modified_count
+    # STORNO titoli arretrati/aperti della polizza sostituita (se richiesto)
+    titoli_stornati = 0
+    if storna_arretrati:
+        storno = await db.titoli.update_many(
+            {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+            {"$set": {"stato": "stornato",
+                      "nota": f"Stornato per sostituzione con polizza {obj.numero_polizza}",
+                      "updated_at": _now_iso()}},
+        )
+        titoli_stornati = storno.modified_count
 
     # Crea titolo iniziale (prima rata) se richiesto
     titolo_id = None

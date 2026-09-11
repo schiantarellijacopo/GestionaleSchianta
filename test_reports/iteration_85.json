@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 85 — Backend + Frontend tests per (1) storno condizionato titoli arretrati su annulla/sostituisci polizza, (2) preset/filtro stato 'Sostituite', (3) campo rendita_annua editabile inline. Backend 7/8 pytest OK. Frontend 3/3 flow OK. Un unico test backend fallito è un finding legittimo (dati legacy nel tenant admin@assicura.it non migrati per la regola 'titoli premio 0 = incassato'). Tutti gli endpoint nuovi (GET /polizze/{pid}/titoli-arretrati, POST /polizze/{pid}/annulla, POST /polizze/{pid}/sostituisci con storna_titoli) funzionano correttamente; PUT /polizze/{pid} salva rendita_annua; GET /polizze/conteggi-stato include 'sostituita'. UI: preset 'pol-preset-sostituite' mostra 4 polizze con badge 'sostituita'. Scheda polizza tab Garanzie sezione 'Vita / Previdenza' con RenditaCell: click su + Inserisci → input, salva 2500 → '2500,00 €' visualizzato e persistente dopo reload. Tab Azioni annullamento di polizza con arretrato mostra 2 window.confirm sequenziali (conferma annullamento, poi 'ha 1 titolo in arretrato per 300,00 € · vuoi stornarli?'); accettando entrambi, toast 'Polizza annullata · 1 titoli arretrati stornati' correttamente visualizzato (via page.on('dialog')).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/titoli?stato=da_incassare", "issue": "Nel tenant admin@assicura.it (tenant-principale-schiantarelli) sono presenti 29 titoli con importo_lordo<=0 in stato 'da_incassare' — la migrazione 'titoli premio 0 → incassato' menzionata nel requirement risulta NON eseguita su questo tenant. Se la migrazione è stata eseguita solo sul tenant OMNIA, va rilanciata anche qui."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter85_annulla_sostituisci.py",
+    "/app/test_reports/pytest/iter85.xml"
+  ],
+  "action_items": [
+    "Eseguire la migrazione 'titoli premio 0 = incassato' anche sul tenant admin@assicura.it (29 titoli aperti con importo_lordo<=0 individuati).",
+    "Opzionale: rimuovere i dati di test creati (contraente TEST_Iter85_Contraente_*, polizze TESTPOL*, TESTUI-*, TESTUIREND-* e relativi titoli) — 4 polizze compaiono ora nel preset 'Sostituite' come artefatti."
+  ],
+  "critical_code_review_comments": [
+    "annulla_polizza: bene il pop di storna_titoli e log_attivita esteso. Idempotenza: già gestita con 400 su polizza già annullata.",
+    "sostituisci_polizza: `storna_arretrati = bool(body.pop('storna_titoli', True))` — DEFAULT True. Il frontend passa esplicitamente il valore ricavato da chiediStornoArretrati, ok. Attenzione: chi chiama l'endpoint senza campo storna_titoli otterrà storno automatico. Documentare o rendere il default False per coerenza con annulla (annulla default False → no storno). Non bloccante.",
+    "titoli-arretrati: buon uso di projection e sort. OK.",
+    "RenditaCell (PolizzaDetail.jsx): parseFloat con replace virgola→punto; input type=number in un browser italiano potrebbe non accettare virgola — mitigato dal replace. OK."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter85_annulla_sostituisci.py"],
+  "success_rate": {"backend": "87.5% (7/8, il fallito è finding legittimo su dati legacy)", "frontend": "100% (3/3 flussi)"},
+  "test_credentials": "admin@assicura.it / Admin123! (tenant di test, come da /app/memory/test_credentials.md)",
+  "seed_data_creation": "Creati durante il test: 1 contraente TEST_Iter85_Contraente_{ts}, 5 polizze TESTPOL{ts}-* (2 sostituite, 2 annullate, 1 vita), 1 contraente TEST_UI_Contraente + 2 polizze TESTUI-{ts} / TESTUIREND-{ts} (una annullata da UI, l'altra con rendita_annua=2500). I titoli associati sono stati o stornati o lasciati in da_incassare a seconda del test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Data-testids OK: pol-preset-sostituite, pol-preset-count-sostituite, rendita-annua-value/input/salva, ann-motivo, ann-confirm. Filtro Stato in /polizze richiede aprire 'Filtri' (dietro pol-filter-stato). Endpoints coperti: /api/polizze/{id}/titoli-arretrati, /annulla, /sostituisci, /conteggi-stato, PUT /polizze/{id} (rendita_annua). Il tenant admin@assicura.it contiene 29 titoli legacy con importo<=0 e stato!=incassato — verificare se migrazione va rieseguita."
+}

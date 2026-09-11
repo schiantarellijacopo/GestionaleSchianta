@@ -708,7 +708,9 @@ export default function PolizzaDetail() {
                             </div>
                         )}
                     </Card>
+                </TabsContent>
 
+                <TabsContent value="garanzie">
                     <Card className="p-6 border-slate-200 mt-4">
                         <SezioneTitolo titolo="Vita / Previdenza" />
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -720,9 +722,7 @@ export default function PolizzaDetail() {
                             <F label="Capitale assicurato" value={fmtEur(pol.capitale_assicurato)} mono />
                         </div>
                     </Card>
-                </TabsContent>
 
-                <TabsContent value="garanzie">
                     <Card className="border-slate-200 mt-4 overflow-hidden">
                         {(!pol.garanzie || pol.garanzie.length === 0) ? (
                             <div className="p-8 text-center text-slate-500 text-sm">Nessuna garanzia di dettaglio importata.</div>
@@ -1407,7 +1407,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                 <Select value={f.stato} onValueChange={(v) => set("stato", v)}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        {["attiva", "sospesa", "in_emissione", "scaduta", "annullata"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                        {["attiva", "sospesa", "in_emissione", "scaduta", "annullata", "sostituita"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
                             </div>

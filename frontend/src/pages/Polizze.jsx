@@ -82,6 +82,7 @@ const PRESETS = [
     { key: "scadute", label: "Scadute" },
     { key: "sospese", label: "Sospese" },
     { key: "annullate", label: "Annullate" },
+    { key: "sostituite", label: "Sostituite" },
 ];
 
 const presetParams = (key) => {
@@ -90,6 +91,7 @@ const presetParams = (key) => {
         case "sospese": return { stato: "sospesa" };
         case "scadute": return { stato: "scaduta" };
         case "annullate": return { stato: "annullata" };
+        case "sostituite": return { stato: "sostituita" };
         case "scad15": return { in_scadenza_giorni: 15 };
         case "scad_oltre15": return { scadenza_oltre_giorni: 15 };
         case "scadute_oggi": return { scadute_oggi: true };
@@ -143,7 +145,7 @@ export default function Polizze() {
         api.get("/polizze/conteggi-stato").then((r) => setConteggi(r.data || {})).catch(() => {});
     };
     const contaPreset = (key) => {
-        const map = { tutti: "_tot", attive: "attiva", scadute: "scaduta", sospese: "sospesa", annullate: "annullata" };
+        const map = { tutti: "_tot", attive: "attiva", scadute: "scaduta", sospese: "sospesa", annullate: "annullata", sostituite: "sostituita" };
         const k = map[key];
         return k ? (conteggi[k] ?? 0) : null;
     };
@@ -310,6 +312,7 @@ export default function Polizze() {
                                 <SelectItem value="in_emissione">In emissione</SelectItem>
                                 <SelectItem value="scaduta">Scaduta</SelectItem>
                                 <SelectItem value="annullata">Annullata</SelectItem>
+                                <SelectItem value="sostituita">Sostituita</SelectItem>
                             </SelectContent>
                         </Select>
                         <Select value={filters.compagnia_id} onValueChange={(v) => setF("compagnia_id", v)}>
@@ -737,6 +740,7 @@ function NuovaPolizzaDialog({ onClose }) {
                             <SelectItem value="in_emissione">In emissione</SelectItem>
                             <SelectItem value="scaduta">Scaduta</SelectItem>
                             <SelectItem value="annullata">Annullata</SelectItem>
+                                <SelectItem value="sostituita">Sostituita</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

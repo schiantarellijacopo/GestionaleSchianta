@@ -36,15 +36,33 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
         motivo: polizza.motivo_annullamento || "",
     });
     const [annLoading, setAnnLoading] = useState(false);
+    // Chiede se stornare i titoli arretrati ancora aperti della polizza
+    const chiediStornoArretrati = async (contesto) => {
+        try {
+            const r = await api.get(`/polizze/${polizza.id}/titoli-arretrati`);
+            const n = r.data?.totale || 0;
+            if (!n) return false;
+            const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+            return window.confirm(
+                `Questa polizza ha ${n} titol${n === 1 ? "o" : "i"} in arretrato per ${imp}.\n\n`
+                + `Vuoi stornarli (annullarli) contestualmente ${contesto}?\n\n`
+                + "OK = storna i titoli · Annulla = lasciali aperti",
+            );
+        } catch { return false; }
+    };
+
     const doAnnulla = async () => {
         if (!annulla.motivo.trim()) { toast.error("Motivo obbligatorio"); return; }
         if (!window.confirm("Confermi l'annullamento della polizza?")) return;
+        const storna = await chiediStornoArretrati("all'annullamento");
         setAnnLoading(true);
         try {
-            await api.post(`/polizze/${polizza.id}/annulla`, {
+            const r = await api.post(`/polizze/${polizza.id}/annulla`, {
                 data_annullamento: annulla.data, motivo_annullamento: annulla.motivo,
+                storna_titoli: storna,
             });
-            toast.success("Polizza annullata");
+            const ns = r.data?.titoli_stornati || 0;
+            toast.success(`Polizza annullata${ns ? ` · ${ns} titoli arretrati stornati` : ""}`);
             onChanged?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setAnnLoading(false); }
@@ -157,10 +175,11 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             toast.error("Numero, effetto e scadenza obbligatori"); return;
         }
         if (!window.confirm(`Sostituire polizza ${polizza.numero_polizza} con la nuova?`)) return;
+        const stornaArretrati = await chiediStornoArretrati("alla sostituzione");
         setSostLoading(true);
         try {
             const numFields = ["premio_lordo", "premio_netto", "premio_ssn", "premio_imposte", "provvigioni"];
-            const payload = { ...sost };
+            const payload = { ...sost, storna_titoli: stornaArretrati };
             numFields.forEach((k) => {
                 payload[k] = parseFloat(payload[k]) || 0;
             });
