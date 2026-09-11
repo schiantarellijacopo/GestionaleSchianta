@@ -98,6 +98,7 @@ ENTITY_FIELDS = {
         "contraente_telefono": "telefono fisso del contraente",
         "contraente_cellulare": "cellulare del contraente",
         "contraente_email": "email del contraente",
+        "operatore_nome": "operatore/collaboratore della polizza (Operatore 1)",
     },
     "titolo": {
         "numero_polizza": "numero polizza a cui appartiene il titolo (CHIAVE collegamento)",
@@ -194,6 +195,7 @@ _POL_ALIASES = {
     "contraente_telefono": ["tel contr", "telefono", "tel"],
     "contraente_cellulare": ["cel contr", "cellulare", "cell"],
     "contraente_email": ["mail contr", "email", "mail", "e mail"],
+    "operatore_nome": ["operatore 1", "operatori", "operatore", "collaboratore", "produttore", "sub agente", "subagente", "agente"],
 }
 _TIT_ALIASES = {
     "numero_polizza": ["numero polizza", "numpolizza", "n polizza", "polizza"],
@@ -962,7 +964,11 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     ana = {ak: rec[ck] for ck, ak in _CONTR_TO_ANAG.items() if rec.get(ck)}
                     contr_id = await _upsert_anagrafica(ana) if ana else None
                     comp_id = await _compagnia_id(rec.get("compagnia_nome"))
+                    p_operatore = rec.pop("operatore_nome", None)
+                    p_op_id = await _operatore_id(p_operatore)
                     doc = {k: v for k, v in rec.items() if k in Polizza.model_fields}
+                    if p_op_id:
+                        doc["collaboratore_id"] = p_op_id
                     if rec.get("data_annullamento"):
                         doc["stato"] = "annullata"
                     elif rec.get("data_sospensione"):

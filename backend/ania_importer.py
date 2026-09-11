@@ -622,6 +622,16 @@ async def _resolve_operatore_codice(db, row: dict,
     return operatore_codice, collaboratore_id
 
 
+def _col_at(row: dict, index: int) -> str:
+    """Valore della colonna in posizione `index` (0-based) mantenendo l'ordine
+    del CSV: usato per le colonne rec20 individuate per lettera (AG, BP)."""
+    try:
+        keys = list(row.keys())
+        return (row.get(keys[index]) or "").strip()
+    except (IndexError, AttributeError):
+        return ""
+
+
 def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
                            contraente_id: Optional[str], stato: str,
                            operatore_codice: Optional[str], id_exp: str,
@@ -630,7 +640,13 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     """Costruisce il dict di payload polizza da una riga rec20."""
     ramo_raw = row.get("ramo_share") or row.get("ramo_cmp") or "VARIE"
     prodotto_raw = row.get("prodotto_cmp") or None
-    return {
+    # rec20 col AG (33ª, index 32) = data annullo → polizza annullata
+    data_annullo = _parse_date(row.get("data_annullo") or _col_at(row, 32))
+    # rec20 col BP (68ª, index 67) = numero polizza sostituita
+    sostituisce = (row.get("polizza_sostituita") or _col_at(row, 67) or "").strip() or None
+    if data_annullo:
+        stato = "annullata"
+    payload = {
         "numero_polizza": numero,
         "compagnia_id": comp_id or "",
         "compagnia_codice_exp": (row.get("compagnia_exp") or "").strip() or None,
@@ -659,6 +675,11 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "fonte": "import_ania",
         "updated_at": _now_iso(),
     }
+    if data_annullo:
+        payload["data_annullamento"] = data_annullo
+    if sostituisce:
+        payload["sostituisce_polizza"] = sostituisce
+    return payload
 
 
 async def _upsert_polizza(db, data: dict, log: ImportLog,
@@ -690,6 +711,10 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             continue
         rows = _read_csv_text(content)
         counts["rec20"] = counts.get("rec20", 0) + len(rows)
+        if rows:
+            _k = list(rows[0].keys())
+            print(f"[OMNIA rec20] col AG (33ª) = '{_k[32] if len(_k) > 32 else '?'}' · "
+                  f"col BP (68ª) = '{_k[67] if len(_k) > 67 else '?'}' · tot colonne {len(_k)}", flush=True)
         for row in rows:
             id_exp = row.get("id_polizza_exp") or _uid()
             numero = row.get("numero_polizza_cmp") or id_exp
@@ -1071,6 +1096,12 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             if coll_id_titolo:
                 data["collaboratore_id"] = coll_id_titolo
             if existing:
+                # Non sovrascrivere con valori calcolati/vuoti i dati già rettificati
+                # (scadenza reale e metodo di pagamento dal file pagamenti).
+                if not _parse_date(row.get("data_scadenza_emesso", "")) and existing.get("scadenza"):
+                    data.pop("scadenza", None)
+                if not data.get("mezzo_pagamento") and existing.get("mezzo_pagamento"):
+                    data.pop("mezzo_pagamento", None)
                 await db.titoli.update_one({"id": existing["id"]}, {"$set": data})
             else:
                 obj = Titolo(**data)
