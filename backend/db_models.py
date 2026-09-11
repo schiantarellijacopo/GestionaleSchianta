@@ -484,6 +484,7 @@ class Polizza(BaseDoc):
     valore_residuo_veicolo: float = 0.0
     valore_accessori: float = 0.0
     capitale_assicurato: float = 0.0  # capitale/valore assicurato aggregato (max delle garanzie rec30 col W)
+    rendita_annua: float = 0.0  # Vita/Previdenza: rendita annua (inserimento manuale)
     guida_esperta: bool = False
     guida_esclusiva: bool = False
     rinuncia_rivalsa: bool = False

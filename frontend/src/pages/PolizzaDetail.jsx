@@ -708,6 +708,18 @@ export default function PolizzaDetail() {
                             </div>
                         )}
                     </Card>
+
+                    <Card className="p-6 border-slate-200 mt-4">
+                        <SezioneTitolo titolo="Vita / Previdenza" />
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div>
+                                <div className="text-[10px] uppercase tracking-widest text-slate-500">Rendita annua</div>
+                                <RenditaCell polizzaId={pol.id} current={pol.rendita_annua}
+                                             canEdit={canEdit} onSaved={load} />
+                            </div>
+                            <F label="Capitale assicurato" value={fmtEur(pol.capitale_assicurato)} mono />
+                        </div>
+                    </Card>
                 </TabsContent>
 
                 <TabsContent value="garanzie">
@@ -1980,6 +1992,51 @@ function Grid({ items }) {
 // garanzia. Se manca il valore mostra "+ Inserisci" cliccabile che
 // diventa input numerico; salva via PATCH /api/polizze/{pid}/garanzie/{i}.
 // ─────────────────────────────────────────────────────────────────────
+function RenditaCell({ polizzaId, current, canEdit, onSaved }) {
+    const [editing, setEditing] = useState(false);
+    const [val, setVal] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    const salva = async () => {
+        const num = parseFloat(String(val).replace(",", "."));
+        if (isNaN(num)) { setEditing(false); return; }
+        setSaving(true);
+        try {
+            await api.put(`/polizze/${polizzaId}`, { rendita_annua: num });
+            toast.success("Rendita annua aggiornata");
+            setEditing(false);
+            onSaved?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio"); }
+        finally { setSaving(false); }
+    };
+
+    if (!editing) {
+        return (
+            <button
+                type="button"
+                disabled={!canEdit}
+                onClick={() => { setVal(current ? String(current) : ""); setEditing(true); }}
+                className={`text-sm mt-0.5 num font-medium ${canEdit ? "text-sky-700 hover:underline" : "text-slate-900"}`}
+                data-testid="rendita-annua-value"
+            >
+                {current ? fmtEur(current) : (canEdit ? "+ Inserisci" : "—")}
+            </button>
+        );
+    }
+    return (
+        <div className="flex items-center gap-1 mt-0.5">
+            <Input type="number" step="0.01" value={val} autoFocus
+                onChange={(e) => setVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") salva(); if (e.key === "Escape") setEditing(false); }}
+                className="h-7 w-28 text-sm" data-testid="rendita-annua-input" />
+            <Button size="sm" className="h-7 px-2 bg-sky-700 hover:bg-sky-800" disabled={saving}
+                onClick={salva} data-testid="rendita-annua-salva">OK</Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setEditing(false)}
+                data-testid="rendita-annua-annulla">✕</Button>
+        </div>
+    );
+}
+
 function MassimaleCell({ polizzaId, index, current, canEdit, onSaved }) {
     const [editing, setEditing] = useState(false);
     const [val, setVal] = useState("");
