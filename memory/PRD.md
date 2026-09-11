@@ -1025,3 +1025,6 @@ Usare integration_expert prima di implementare.
 - Sospesi/anticipi (`import_sospesi_axicura.py`, 76): 62 titoli da_incassare + titolo_coperto=True + data_copertura dalle date file. NB: Titolo NON ha stato 'sospeso' → anticipo = da_incassare+coperto.
 - Annullate su richiesta: 72 polizze sospese con numero prefisso 58533. Prefissi '0'/'2015' → 0 match (numeri in DB senza zeri iniziali).
 - APERTO (utente ha detto NON toccare ora): garanzie mappate 'FAMIGLIA' (codici D21/T04/E07) che dovrebbero essere 'I.P. Infortunio' su alcune polizze.
+
+### Correzione arretrati con valori esatti rec40 (2026-06 fork)
+- `fix_arretrati_da_rec40.py`: match arretrati (file stampa) ↔ rec40 OMNIA per (numero polizza normalizzato + effetto_titolo == 'Rata del'). Applica valori ESATTI: importo_netto=netto_totale, imposte=tasse_totale (netto+tasse=lordo), accessori, importo_lordo=lordo_totale, provvigioni=provvigioni_totale. 397/447 titoli aggiornati; 10 senza corrispondenza nel rec40 (mantengono il calcolo proporzionale). Nota: Titolo non ha campo SSN (ssn è componente delle tasse).
