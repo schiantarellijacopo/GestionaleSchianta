@@ -1010,11 +1010,14 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     existing_id = await _polizza_id(num)
                     if existing_id:
                         existing = await db.polizze.find_one({"id": existing_id}, {"_id": 0})
-                        upd = _fill_missing(existing, doc)
-                        if upd:
-                            upd["updated_at"] = now_iso
-                            await db.polizze.update_one({"id": existing_id}, {"$set": upd})
-                            stats["aggiornati"] += 1
+                        if existing:
+                            upd = _fill_missing(existing, doc)
+                            if upd:
+                                upd["updated_at"] = now_iso
+                                await db.polizze.update_one({"id": existing_id}, {"$set": upd})
+                                stats["aggiornati"] += 1
+                            else:
+                                stats["saltati"] += 1
                         else:
                             stats["saltati"] += 1
                     else:

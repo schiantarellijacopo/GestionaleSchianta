@@ -1001,3 +1001,8 @@ Usare integration_expert prima di implementare.
 - **Prompt AI** aggiornato con le stesse regole (portafoglio→polizza, ignora _firma, Provv_firma≠provincia).
 - **Import eseguito** (`/app/scripts/import_polizze_axicura.py`, riusa `_run_commit_inner` con `set_current_user`): da portafoglio_attivo.csv → 5.311 polizze nel tenant c5ae2d0e (5.058 attive, 222 sospese, 31 annullate), tutte collegate al contraente; +46 anagrafiche nuove, +12 collaboratori bozza. 0 errori.
 - **Anagrafiche.jsx**: auto-switch a "Tutte" quando `con_polizze==0` ma esistono anagrafiche (evita schermata vuota post-import senza polizze).
+
+### Import portafoglio ANNULLATE Axicura (2026-06 fork)
+- `portafoglio_annullato.csv` (21.169 righe, 60 colonne) importato nel tenant c5ae2d0e via `import_polizze_axicura.py`. Solo ~12k avevano Data_annul → post-step forza stato "annullata" (8.125 righe senza data, data_annullamento=scadenza) sui numeri esclusivi del file annullato (esclusi i 44 presenti anche nell'attivo, per non annullare polizze attive).
+- Stati finali tenant Axicura: 5.058 attiva, 1.047 sospesa, 20.179 annullata (tot 26.284 polizze, tutte con contraente). Anagrafiche: 5.579.
+- FIX bug import_massivo (polizza): guardia su `existing` None in `_fill_missing` (i duplicati intra-file causavano 149 errori "'NoneType' has no attribute 'get'").
