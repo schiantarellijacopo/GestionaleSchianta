@@ -648,6 +648,10 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
                    or _col_at(row, 67) or "").strip() or None
     if data_annullo:
         stato = "annullata"
+    # rec20 col DK (115ª, index 114) = data emissione
+    data_emissione = _parse_date(row.get("data_emissione") or _col_at(row, 114))
+    effetto = (_parse_date(row.get("effetto", "")) or data_emissione or _now_iso()[:10])
+    frazionamento = _parse_frazionamento(row.get("frazionamento_share", ""))
     payload = {
         "numero_polizza": numero,
         "compagnia_id": comp_id or "",
@@ -658,14 +662,16 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "prodotto": prodotto_mapped or prodotto_raw,
         "prodotto_originale": prodotto_raw,
         "stato": stato,
-        "effetto": _parse_date(row.get("effetto", "")) or _now_iso()[:10],
-        # Scadenza contratto: rec20 col AK = scadenza_effettiva (scadenza reale del contratto).
-        # Fallback: scadenza_originale (col AJ) se scadenza_effettiva assente.
-        "scadenza": (_parse_date(row.get("scadenza_effettiva", ""))
-                     or _parse_date(row.get("scadenza_originale", ""))
+        "effetto": effetto,
+        "data_emissione": data_emissione,
+        # Scadenza contratto: calcolata da effetto + frazionamento (le colonne
+        # AK/AL/AM del flusso NON vanno usate; AL/AM solo come ultima spiaggia).
+        "scadenza": (_scadenza_da_effetto(effetto, frazionamento)
+                     or _parse_date(row.get("scadenza_emesso", ""))
+                     or _parse_date(row.get("scadenza_incassato", ""))
                      or _now_iso()[:10]),
         # Frazionamento (rec20 col AN — frazionamento_share)
-        "frazionamento": _parse_frazionamento(row.get("frazionamento_share", "")),
+        "frazionamento": frazionamento,
         "premio_lordo": _parse_float(row.get("lordo_totale", "")),
         "premio_netto": _parse_float(row.get("netto_totale", "")),
         "premio_tasse": _parse_float(row.get("tasse_totale") or row.get("imposte_totali", "")),
@@ -1179,6 +1185,42 @@ async def _processa_sinistri(db, files_data: Dict[str, str], log: ImportLog,
                 log.sinistri_creati += 1
 
 
+async def _processa_liquidazioni(db, files_data: Dict[str, str],
+                                 counts: Dict[str, int]) -> int:
+    """rec52 → liquidazioni dei sinistri: col Y (index 24) = data liquidazione,
+    col Z (index 25) = importo liquidato. Somma per sinistro e valorizza
+    `liquidazione` + `data_liquidazione` (stato → liquidato)."""
+    agg: Dict[str, Dict[str, object]] = {}
+    for fname, content in files_data.items():
+        if _detect_record_type(fname) != "rec52":
+            continue
+        rows = _read_csv_text(content)
+        counts["rec52"] = counts.get("rec52", 0) + len(rows)
+        for row in rows:
+            id_s = (row.get("id_sinistro_exp") or "").strip()
+            if not id_s:
+                continue
+            data_liq = _parse_date(_col_at(row, 24))
+            importo = _parse_float(_col_at(row, 25))
+            cur = agg.setdefault(id_s, {"importo": 0.0, "data": None})
+            cur["importo"] = float(cur["importo"]) + (importo or 0.0)
+            if data_liq and (not cur["data"] or data_liq > str(cur["data"])):
+                cur["data"] = data_liq
+    aggiornati = 0
+    for id_s, v in agg.items():
+        importo = round(float(v["importo"]), 2)
+        if not importo and not v["data"]:
+            continue
+        _set = {"liquidazione": importo, "updated_at": _now_iso()}
+        if v["data"]:
+            _set["data_liquidazione"] = v["data"]
+            _set["stato"] = "liquidato"
+        res = await db.sinistri.update_one({"id_sinistro_exp": id_s}, {"$set": _set})
+        aggiornati += res.modified_count
+    counts["sinistri_liquidati"] = aggiornati
+    return aggiornati
+
+
 def _conta_record_residui(files_data: Dict[str, str], counts: Dict[str, int]) -> None:
     for fname, content in files_data.items():
         rec = _detect_record_type(fname)
@@ -1434,6 +1476,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)
+    await _processa_liquidazioni(db, files_data, counts)
     _conta_record_residui(files_data, counts)
 
     # Entità non mappate raccolte durante l'import (NB: rami NON sono tracciati per scelta utente)

@@ -51,6 +51,10 @@ async def main():
                                 counts, tracker=tracker, import_mappings=import_mappings)
     print("sinistri fatti:", counts, flush=True)
 
+    print("FASE liquidazioni (rec52)…", flush=True)
+    n_liq = await ai._processa_liquidazioni(db, files_data, counts)
+    print("sinistri con liquidazione aggiornata:", n_liq, flush=True)
+
     n = await ai._marca_polizze_sostituite(db)
     print("polizze marcate sostituite:", n, flush=True)
 
