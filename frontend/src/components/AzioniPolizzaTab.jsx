@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
-import { Ban, PauseCircle, PlayCircle, ArrowLeftRight, Loader2, Search } from "lucide-react";
+import { Ban, PauseCircle, PlayCircle, ArrowLeftRight, Loader2, Search, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -92,6 +92,33 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             toast.success("Polizza riattivata");
             onChanged?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    // ====== RIPRENDI (annulla l'annullamento) ======
+    const [ripLoading, setRipLoading] = useState(false);
+    const doRiprendi = async () => {
+        if (!window.confirm("Riprendere il contratto? La polizza tornerà attiva.")) return;
+        let ripristina_titoli = false;
+        try {
+            const r = await api.get(`/polizze/${polizza.id}/titoli-stornati-annullamento`);
+            const n = r.data?.totale || 0;
+            if (n) {
+                const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+                ripristina_titoli = window.confirm(
+                    `All'annullamento erano stati stornati ${n} titol${n === 1 ? "o" : "i"} per ${imp}.\n\n`
+                    + "Vuoi ripristinarli a 'da incassare'?\n\n"
+                    + "OK = ripristina i titoli · Annulla = lasciali stornati",
+                );
+            }
+        } catch { /* nessun titolo stornato o errore: procedi senza ripristino */ }
+        setRipLoading(true);
+        try {
+            const r = await api.post(`/polizze/${polizza.id}/riprendi`, { ripristina_titoli });
+            const nr = r.data?.titoli_ripristinati || 0;
+            toast.success(`Contratto ripreso${nr ? ` · ${nr} titoli ripristinati` : ""}`);
+            onChanged?.();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setRipLoading(false); }
     };
 
     // ====== SOSTITUISCI ======
@@ -227,6 +254,20 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                 → Apri polizza sostitutiva
                             </Link>
                         </div>
+                    )}
+                    {polizza.stato === "annullata" && (
+                        <Button
+                            onClick={doRiprendi}
+                            disabled={!canEdit || ripLoading}
+                            className="mt-3 bg-emerald-600 hover:bg-emerald-700"
+                            size="sm"
+                            data-testid="riprendi-confirm"
+                        >
+                            {ripLoading
+                                ? <Loader2 size={14} className="animate-spin mr-1" />
+                                : <RotateCcw size={14} className="mr-1" />}
+                            Riprendi Contratto
+                        </Button>
                     )}
                 </Card>
             )}

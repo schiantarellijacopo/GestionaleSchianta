@@ -4732,6 +4732,62 @@ async def riattiva_polizza(
     return {"ok": True, "stato": "attiva"}
 
 
+@api.get("/polizze/{pid}/titoli-stornati-annullamento")
+async def titoli_stornati_annullamento(
+    pid: str,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Conteggio dei titoli stornati durante l'annullamento della polizza,
+    ripristinabili con la ripresa del contratto."""
+    flt = {"polizza_id": pid, "stato": "stornato",
+           "nota": {"$regex": "^Stornato per annullamento polizza"}}
+    cur = db.titoli.find(flt, {"_id": 0, "premio_lordo": 1, "importo": 1})
+    tot = 0
+    imp = 0.0
+    async for t in cur:
+        tot += 1
+        imp += float(t.get("premio_lordo") or t.get("importo") or 0)
+    return {"totale": tot, "importo": imp}
+
+
+@api.post("/polizze/{pid}/riprendi")
+async def riprendi_polizza(
+    pid: str, body: dict = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Riprende (annulla l'annullamento) una polizza annullata: riporta lo
+    stato ad 'attiva' e pulisce data/motivo annullamento.
+
+    `ripristina_titoli=true` riporta a 'da_incassare' i titoli che erano
+    stati stornati durante l'annullamento.
+    """
+    body = body or {}
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata")
+    if pol.get("stato") != "annullata":
+        raise HTTPException(400, "Solo le polizze annullate possono essere riprese")
+    await db.polizze.update_one({"id": pid}, {"$set": {
+        "stato": "attiva",
+        "data_annullamento": None,
+        "motivo_annullamento": None,
+        "updated_at": _now_iso(),
+    }})
+    titoli_ripristinati = 0
+    if body.get("ripristina_titoli"):
+        res = await db.titoli.update_many(
+            {"polizza_id": pid, "stato": "stornato",
+             "nota": {"$regex": "^Stornato per annullamento polizza"}},
+            {"$set": {"stato": "da_incassare",
+                      "nota": "Ripristinato dalla ripresa del contratto",
+                      "updated_at": _now_iso()}},
+        )
+        titoli_ripristinati = res.modified_count
+    await log_attivita(user, "riprendi", "polizza", pid,
+                       (f"{titoli_ripristinati} titoli ripristinati" if titoli_ripristinati else "senza ripristino titoli"))
+    return {"ok": True, "stato": "attiva", "titoli_ripristinati": titoli_ripristinati}
+
+
 @api.post("/polizze/{pid}/sostituisci")
 async def sostituisci_polizza(
     pid: str, body: dict,
