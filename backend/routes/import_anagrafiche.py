@@ -53,18 +53,19 @@ FIELD_ALIASES: dict = {
     ],
     # data nascita
     "data_nascita": [
-        "data di nascita", "data nascita", "datadi nascita", "birth date",
+        "data di nascita", "data nascita", "datadi nascita", "datanascita", "birth date",
         "date of birth", "dob", "nato il", "nata il", "nato/a il",
     ],
     "sesso": ["sesso", "genere", "sex", "gender", "m/f"],
     # nascita
     "comune_nascita": [
         "comune di nascita", "comune nascita", "luogo di nascita", "luogo nascita",
-        "citta di nascita", "citta nascita", "nato a", "nata a",
+        "luogonascita", "citta di nascita", "citta nascita", "nato a", "nata a",
     ],
     "provincia_nascita": ["provincia di nascita", "provincia nascita", "prov nascita"],
     # contatti
     "email": ["email", "e-mail", "e mail", "posta elettronica", "mail"],
+    "pec": ["pec", "pec email", "posta certificata", "indirizzo pec", "email pec"],
     "cellulare": ["cellulare", "cell", "mobile", "cell.", "telefono cellulare", "numero cellulare"],
     "telefono": ["telefono", "tel", "tel.", "numero telefono", "phone", "fisso", "telefono fisso"],
     # residenza
@@ -204,6 +205,27 @@ def _sanitize_value(v) -> Optional[str]:
     return s
 
 
+def _norm_piva(v) -> Optional[str]:
+    """Normalizza la Partita IVA italiana a 11 cifre.
+
+    - tiene solo le cifre (rimuove '-', spazi, ecc.)
+    - se > 11: toglie gli zeri iniziali (fallback: ultime 11 cifre)
+    - se < 11: aggiunge zeri iniziali fino a 11
+    """
+    if v is None:
+        return None
+    d = re.sub(r"\D", "", str(v))
+    if not d:
+        return None
+    if len(d) > 11:
+        d = d.lstrip("0")
+        if len(d) > 11:
+            d = d[-11:]
+    if len(d) < 11:
+        d = d.zfill(11)
+    return d
+
+
 def _row_to_anagrafica(row_values: dict, mapping: dict) -> dict:
     """Data una riga (dict header→value) e mapping {header: canonical},
     ritorna un dict Anagrafica pulito.
@@ -217,9 +239,19 @@ def _row_to_anagrafica(row_values: dict, mapping: dict) -> dict:
         if val is None:
             continue
         # normalizzazioni per campo
-        if canonical in ("codice_fiscale", "partita_iva"):
+        if canonical == "partita_iva":
+            val = _norm_piva(val)
+            if val is None:
+                continue
+        elif canonical == "codice_fiscale":
             val = val.upper().replace(" ", "")
-        elif canonical in ("email",):
+        elif canonical == "tipo":
+            lv = val.strip().lower()
+            if lv in ("privato", "persona fisica", "pf", "fisica", "privata"):
+                val = "persona_fisica"
+            else:
+                val = "persona_giuridica"
+        elif canonical in ("email", "pec"):
             val = val.lower()
         elif canonical in ("nome", "cognome", "ragione_sociale", "indirizzo",
                             "comune", "provincia", "comune_nascita",

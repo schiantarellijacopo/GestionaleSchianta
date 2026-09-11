@@ -33,7 +33,7 @@ from auth import require_user
 from shared import log_attivita
 from routes.import_anagrafiche import (
     _normalize_header, _sanitize_value, _parse_date_flexible,
-    _similarity, FIELD_ALIASES as ANAG_ALIASES,
+    _similarity, _norm_piva, FIELD_ALIASES as ANAG_ALIASES,
 )
 
 router = APIRouter(prefix="/import-massivo", tags=["import-massivo"])
@@ -65,6 +65,7 @@ ENTITY_FIELDS = {
         "telefono": "telefono fisso",
         "cellulare": "cellulare",
         "email": "email",
+        "pec": "PEC (posta certificata)",
         "iban": "IBAN",
         "note": "note",
         "preferenza_pagamento": "metodo pagamento preferito",
@@ -533,8 +534,13 @@ def _row_to_record(row_values: dict, mapping: dict) -> dict:
             if val is None:
                 continue
         elif canonical in _CODE_FIELDS:
-            val = val.upper().replace(" ", "")
-        elif canonical in ("email", "contraente_email"):
+            if canonical in ("partita_iva", "contraente_piva"):
+                val = _norm_piva(val)
+                if val is None:
+                    continue
+            else:
+                val = val.upper().replace(" ", "")
+        elif canonical in ("email", "contraente_email", "pec"):
             val = val.lower()
         elif canonical in _UPPER_FIELDS:
             val = val.upper()
@@ -831,7 +837,12 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
             return existing["id"]
         if ana.get("iban"):
             ana["conti_correnti"] = [{"iban": ana.pop("iban"), "principale": True, "note": "Import massivo"}]
-        if "tipo" not in ana:
+        tp = str(ana.get("tipo") or "").strip().lower()
+        if tp in ("privato", "persona fisica", "pf", "fisica", "privata"):
+            ana["tipo"] = "persona_fisica"
+        elif tp and tp not in ("persona_fisica", "persona_giuridica"):
+            ana["tipo"] = "persona_giuridica"
+        if ana.get("tipo") not in ("persona_fisica", "persona_giuridica"):
             ana["tipo"] = "persona_giuridica" if (piva and len(cf or "") != 16) else "persona_fisica"
         # REGOLA FERREA: qualsiasi anagrafica con Partita IVA è persona giuridica
         if (ana.get("partita_iva") or "").strip():
