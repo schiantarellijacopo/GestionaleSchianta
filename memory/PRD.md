@@ -957,3 +957,17 @@ Usare integration_expert prima di implementare.
 - GOOGLE CONTATTI (nuovo, routes/google_contacts.py + sezione Librerie→Google Contatti): OAuth People API con **Client ID/Secret per agenzia** salvati da UI (secret cifrato Fernet, `GOOGLE_TOKEN_KEY` in .env), refresh token cifrato, sync automatico su create/update anagrafica (background), pulsante "Sincronizza tutti i clienti" (job con avanzamento, 1 contatto/sec, backoff su 429), login_hint + prompt=select_account. PKCE DISABILITATO (autogenerate_code_verifier=False) altrimenti "Missing code verifier" nel callback. Testato end-to-end: contatti creati realmente sull'account assicurazioni@schiantarelli.it.
 - UI: Titoli storici default "Anno corrente" (rimosso "Tutti incassati"); Polizze footer con premio totale lordo + netto; badge "Cliente da X anni · dal GG/MM/AAAA" in anagrafica (prima stipula incl. annullate, solo se ha polizze attive); Librerie→Rami "Mappa codici polizze" (riassegna codici OMNIA 3N/33/45 al ramo corretto).
 
+
+## Sessione 2026-09-11 (parte 2) — Import OMNIA completo + regole portafoglio
+- Import OMNIA (ZIP _P_S 02/09) eseguito lato server. La fase titoli è stata interrotta 2 volte (processo in /tmp cancellato dal pod + OOM): NON serviva, i titoli erano già importati. Sostituita da `/app/scripts/post_import_regole.py` (leggero: estrae solo rec52 + regole DB).
+- RISULTATO FINALE tenant 31b4950e: 49.070 polizze (5.634 attive · 25.436 annullate · **18.000 sostituite** · 19.532 con campo Sostituisce), 188.409 titoli (181.796 con metodo di pagamento, **118.768 "Pagamento in direzione"**), 7.744 sinistri (**5.377 liquidati** da rec52), 4.366 scadenze contratto allineate all'ultimo titolo pagato.
+- MAPPATURE rec20 confermate dall'header reale: col AG=`data_annullamento` (forza stato annullata), col BP=`numero_polizza_sostituita_1`, col AN=`frazionamento_share`, col DK=`data_emissione` (nuovo campo mostrato in testata; effetto resta col AI), col AK=`scadenza_effettiva` per la scadenza contratto + regola di allineamento all'ultimo titolo pagato (`_aggiorna_scadenza_da_titoli`).
+- rec52: nuova fase `_processa_liquidazioni` (col Y=data liquidazione, col Z=importo) → `liquidazione`, `data_liquidazione`, stato `liquidato`.
+- REGOLE TITOLI: premio 0 → incassato; incassato senza metodo → "Pagamento in direzione" (+flag), sia nell'importer sia via script.
+- POLIZZE SENZA COPERTURA: `/app/scripts/chiudi_polizze_scadute.py` — 51 polizze attive/sospese senza copertura da oltre 1 anno annullate (data annullamento = ultima scadenza copertura, motivo "Nessuna copertura/pagamento dal ...").
+- NUOVO stato polizza `sostituita` + preset/filtro "Sostituite" in Polizze; storno titoli arretrati su annulla/sostituisci ORA CHIESTO all'utente (endpoint GET /api/polizze/{pid}/titoli-arretrati + flag storna_titoli); DELETE polizza bloccato (409) se esistono titoli incassati/coperti.
+- POLIZZA UI: campo `ultimo_premio_pagato` calcolato dal titolo incassato più recente; sezione "Vita / Previdenza" con `Rendita annua` editabile inline (solo rami vita/previdenza); "Data emissione" in testata.
+- REGOLAZIONE PREMIO: imposta di polizza % (default **22,25**, modificabile e memorizzata in `regolazione_imposta_pct`) → premio netto + imposta = dovuto cliente.
+- SINISTRI: KPI e elenco limitati all'anno in corso (filtro `dal` precompilato, modificabile).
+- Test: iteration_85/86/87.json tutti PASS (backend+frontend).
+

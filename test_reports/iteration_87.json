@@ -1,0 +1,20 @@
+{
+  "summary": "Iter 87 — Regression fix bug 'haTitoliBloccanti is not defined' + delete polizza 409 con titoli incassati/coperti + KPI Sinistri anno corrente + filtro 'dal' Sinistri precompilato. Backend 3/3 pytest PASS. Frontend 5/5 checks PASS. Nessun errore runtime rilevato aprendo la scheda polizza (con e senza titoli).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_iter87_polizza_delete_kpi_sinistri.py",
+    "/app/test_reports/pytest/iter87.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PolizzaDetail.jsx è ~2152 righe: consigliata suddivisione in sotto-componenti (Tab*) per maintainability, ma non blocca."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter87_polizza_delete_kpi_sinistri.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Create/deleted TEST_ anagrafiche e polizze TESTP87*/TESTUI87*; sinistri TEST87-CUR/OLD (cleanup best-effort in test)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter 87 verifica: (a) niente ReferenceError 'haTitoliBloccanti' su /polizze/{id} (con e senza titoli); (b) bottone data-testid='pol-delete-button' disabled+tooltip quando esistono titoli incassati/coperti, abilitato altrimenti; (c) DELETE /api/polizze/{id} → 409 con titoli incassati/coperti, 200 su polizza pulita; (d) GET /api/kpi/sinistri/stats: chiave 'default' contiene lista KPI; label 'Totale <anno corrente>'; conteggia solo data_avvenimento anno in corso; (e) /sinistri filtro 'dal' precompilato all'anno-01-01 corrente. Struttura response KPI: {default:[...], custom:[]}. Polizza test bloccante fornita: ada937f1-10f0-421b-8160-a502c87e8ae4."
+}
