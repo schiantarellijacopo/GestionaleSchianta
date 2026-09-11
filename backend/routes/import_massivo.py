@@ -211,7 +211,7 @@ _TIT_ALIASES = {
     "importo_pagato": ["importoincassato", "importo incassato", "incassato", "pagato"],
     "provvigioni": ["provvigioni", "provvigione"],
     "data_incasso": ["data incasso", "datapagamento", "data pagamento", "datafatture", "pagato il"],
-    "mezzo_pagamento": ["modalitapagamento", "modalita pagamento", "mezzo pagamento", "metodo pagamento", "forma pagamento", "tipo pagamento"],
+    "mezzo_pagamento": ["modalitapagamento", "modalita pagamento", "mezzo pagamento", "metodo pagamento", "forma pagamento", "tipo pagamento", "tipopag", "tipo pag"],
     "data_copertura": ["data copertura", "datacopertura", "copertura", "coperto il"],
     "compagnia_nome": ["compagnia", "impresa", "compagnia assicurativa"],
     "ramo": ["ramo", "rischio", "ramo assicurativo"],
@@ -412,7 +412,8 @@ def _detect_entity_heuristic(headers: List[str]) -> str:
         return "movimento"
     if has("numero sinistro", "numero interno", "avvenimento", "denuncia", "liquidato", "riserva"):
         return "sinistro"
-    if has("modalitapagamento", "importoincassato", "datapagamento", "numappendice", "quietanza"):
+    if has("modalitapagamento", "importoincassato", "datapagamento", "numappendice",
+           "quietanza", "copertura", "tipopag", "datapagam"):
         return "titolo"
     # polizza / portafoglio: numero polizza esplicito OPPURE (ramo + contraente + data)
     if has("numpolizza", "numero polizza", "polizza", "contratto") or (
@@ -1130,6 +1131,9 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     if doc.get("data_incasso"):
                         doc["stato"] = "incassato"
                         doc.setdefault("importo_pagato", doc.get("importo_lordo"))
+                        # Incassato senza tipo pagamento → pagamento in direzione
+                        if not doc.get("mezzo_pagamento"):
+                            doc["pagamento_in_direzione"] = True
                     # Data copertura → titolo COPERTO
                     if doc.get("data_copertura"):
                         doc["titolo_coperto"] = True

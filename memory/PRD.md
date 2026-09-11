@@ -1006,3 +1006,9 @@ Usare integration_expert prima di implementare.
 - `portafoglio_annullato.csv` (21.169 righe, 60 colonne) importato nel tenant c5ae2d0e via `import_polizze_axicura.py`. Solo ~12k avevano Data_annul → post-step forza stato "annullata" (8.125 righe senza data, data_annullamento=scadenza) sui numeri esclusivi del file annullato (esclusi i 44 presenti anche nell'attivo, per non annullare polizze attive).
 - Stati finali tenant Axicura: 5.058 attiva, 1.047 sospesa, 20.179 annullata (tot 26.284 polizze, tutte con contraente). Anagrafiche: 5.579.
 - FIX bug import_massivo (polizza): guardia su `existing` None in `_fill_missing` (i duplicati intra-file causavano 149 errori "'NoneType' has no attribute 'get'").
+
+### Import TITOLI incassati Axicura (2026-06 fork)
+- `titoli_incassati_periodo.csv` (51.320 righe) importato nel tenant c5ae2d0e via `import_titoli_axicura.py` (mapping ESPLICITO, entità titolo forzata). Tutti incassati, con data_copertura, mezzo_pagamento, collegati alla polizza (17.435/17.436 numeri trovati, 1 polizza auto-creata). 13 metodi pagamento auto-creati. 0 errori.
+- Mapping chiave: NumPolizza→numero_polizza, Copertura→data_copertura, TipoPag→mezzo_pagamento, DataPagam→data_incasso, Totale→importo_lordo, Netto→importo_netto, Imposte→imposte, Provvigioni→provvigioni, RataDel→effetto, Operatore 1..4→ripartizione provvigioni.
+- **NUOVA REGOLA** (import_massivo titolo): titolo INCASSATO senza mezzo_pagamento → `pagamento_in_direzione=True`.
+- **Fix Import Massivo AI titoli**: rilevamento entità titolo aggiunto (copertura/tipopag/datapagam); alias mezzo_pagamento estesi con "tipopag"/"tipo pag".
