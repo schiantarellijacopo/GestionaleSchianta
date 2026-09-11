@@ -1032,3 +1032,6 @@ Usare integration_expert prima di implementare.
 ### Import titoli PS (pagamento in direzione) da rec40 (2026-06 fork)
 - `import_ps_direzione_axicura.py`: importati dal rec40 OMNIA 2.466 titoli con mezzo_pagamento_cmp='PS' non ancora presenti (dedup per polizza+effetto+lordo). mezzo_pagamento="Pagamento in direzione", pagamento_in_direzione=True, valori esatti (netto/tasse/accessori/lordo/provv), stato incassato se dt_pag_cliente presente (2.464), data_incasso/data_copertura=dt_pag_cliente. note_carico='OMNIA PS - pagamento in direzione'. 187 dup saltati, 2 senza polizza.
 - Codici pagamento OMNIA titoli: mezzo_pag_share SEC=SDD Compagnia, ID=direzione; mezzo_pagamento_cmp RD=RID/SDD, PS=pagamento sportello/diretto, BN=bonifico, AS=assegno, CO=contanti.
+
+### Import titoli SDD (SEC/RD) da rec40 come pagamento in direzione (2026-06 fork)
+- `import_sdd_direzione_axicura.py`: 1.845 titoli con mezzo_pag_share='SEC' o mezzo_pagamento_cmp='RD' importati (dedup polizza+effetto+lordo, 16 saltati), mezzo_pagamento="Pagamento in direzione", valori esatti. Titoli tenant Axicura tot: 56.091.
