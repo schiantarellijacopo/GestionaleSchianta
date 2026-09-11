@@ -121,6 +121,30 @@ def _service(creds: Credentials):
     return build("people", "v1", credentials=creds, cache_discovery=False)
 
 
+async def _sync_uno(svc, ana: dict) -> None:
+    body = _persona(ana)
+    res_name = ana.get("google_person_resource")
+    loop = asyncio.get_running_loop()
+    if res_name:
+        attuale = await loop.run_in_executor(None, lambda: svc.people().get(
+            resourceName=res_name, personFields=PERSON_FIELDS).execute())
+        body["resourceName"] = res_name
+        body["etag"] = attuale.get("etag")
+        person = await loop.run_in_executor(None, lambda: svc.people().updateContact(
+            resourceName=res_name, updatePersonFields=UPDATE_FIELDS,
+            personFields=PERSON_FIELDS, body=body).execute())
+    else:
+        person = await loop.run_in_executor(None, lambda: svc.people().createContact(
+            body=body, personFields=PERSON_FIELDS).execute())
+    await raw_db.anagrafiche.update_one({"id": ana["id"]}, {"$set": {
+        "google_person_resource": person["resourceName"],
+        "google_etag": person.get("etag"),
+        "google_sync_status": "synced",
+        "google_sync_at": _now(),
+        "google_sync_error": None,
+    }})
+
+
 async def sincronizza_anagrafica(tenant_id: str, ana_id: str) -> None:
     """Crea/aggiorna il contatto Google. Non solleva: registra lo stato sull'anagrafica."""
     try:
@@ -130,29 +154,7 @@ async def sincronizza_anagrafica(tenant_id: str, ana_id: str) -> None:
         conn = await raw_db.google_contacts_connessioni.find_one({"agenzia_tenant_id": tenant_id})
         if not conn:
             return  # agenzia non collegata → niente sync
-        creds = await _credenziali(tenant_id)
-        svc = _service(creds)
-        body = _persona(ana)
-        res_name = ana.get("google_person_resource")
-        loop = asyncio.get_running_loop()
-        if res_name:
-            attuale = await loop.run_in_executor(None, lambda: svc.people().get(
-                resourceName=res_name, personFields=PERSON_FIELDS).execute())
-            body["resourceName"] = res_name
-            body["etag"] = attuale.get("etag")
-            person = await loop.run_in_executor(None, lambda: svc.people().updateContact(
-                resourceName=res_name, updatePersonFields=UPDATE_FIELDS,
-                personFields=PERSON_FIELDS, body=body).execute())
-        else:
-            person = await loop.run_in_executor(None, lambda: svc.people().createContact(
-                body=body, personFields=PERSON_FIELDS).execute())
-        await raw_db.anagrafiche.update_one({"id": ana_id}, {"$set": {
-            "google_person_resource": person["resourceName"],
-            "google_etag": person.get("etag"),
-            "google_sync_status": "synced",
-            "google_sync_at": _now(),
-            "google_sync_error": None,
-        }})
+        await _sync_uno(_service(await _credenziali(tenant_id)), ana)
     except Exception as e:  # noqa: BLE001
         await raw_db.anagrafiche.update_one({"id": ana_id}, {"$set": {
             "google_sync_status": "errore", "google_sync_error": str(e)[:300],
@@ -304,18 +306,33 @@ async def google_sync_una(aid: str, user: dict = Depends(require_user("admin", "
 
 
 async def _sync_tutte_job(tenant_id: str, job_id: str) -> None:
+    """Sync massivo: un solo token/servizio, 1 contatto al secondo (quota People API)."""
+    svc = _service(await _credenziali(tenant_id))
     ids = await raw_db.anagrafiche.find(
         {"agenzia_tenant_id": tenant_id}, {"_id": 0, "id": 1}).to_list(100000)
     tot = len(ids)
-    fatte = 0
+    fatte = errori = 0
     for a in ids:
-        await sincronizza_anagrafica(tenant_id, a["id"])
+        ana = await raw_db.anagrafiche.find_one({"id": a["id"]}, {"_id": 0})
+        try:
+            await _sync_uno(svc, ana)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            errori += 1
+            await raw_db.anagrafiche.update_one({"id": a["id"]}, {"$set": {
+                "google_sync_status": "errore", "google_sync_error": msg[:300]}})
+            if "429" in msg or "Quota" in msg or "rateLimit" in msg:
+                await asyncio.sleep(30)
+            elif "401" in msg or "invalid_grant" in msg:
+                svc = _service(await _credenziali(tenant_id))
         fatte += 1
+        await asyncio.sleep(0.9)
         if fatte % 25 == 0:
             await raw_db.google_contacts_jobs.update_one(
-                {"id": job_id}, {"$set": {"fatte": fatte, "totali": tot}})
+                {"id": job_id}, {"$set": {"fatte": fatte, "totali": tot, "errori": errori}})
     await raw_db.google_contacts_jobs.update_one({"id": job_id}, {"$set": {
-        "status": "done", "fatte": fatte, "totali": tot, "finished_at": _now()}})
+        "status": "done", "fatte": fatte, "totali": tot, "errori": errori,
+        "finished_at": _now()}})
 
 
 @router.post("/google/sync-tutti")
