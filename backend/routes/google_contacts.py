@@ -181,6 +181,9 @@ async def google_connect(user: dict = Depends(require_user("admin"))) -> dict:
         raise HTTPException(400, "Nessuna agenzia associata all'utente")
     state = secrets.token_urlsafe(32)
     _STATES[state] = tid
+    await raw_db.google_contacts_states.update_one(
+        {"state": state}, {"$set": {"state": state, "agenzia_tenant_id": tid, "created_at": _now()}},
+        upsert=True)
     url, _ = _flow(state).authorization_url(
         access_type="offline", include_granted_scopes="true", prompt="consent")
     return {"authorization_url": url}
@@ -189,6 +192,9 @@ async def google_connect(user: dict = Depends(require_user("admin"))) -> dict:
 @router.get("/google/oauth/callback")
 async def google_callback(code: str, state: str):
     tid = _STATES.pop(state, None)
+    if not tid:
+        row = await raw_db.google_contacts_states.find_one_and_delete({"state": state})
+        tid = (row or {}).get("agenzia_tenant_id")
     if not tid:
         raise HTTPException(400, "Stato OAuth non valido o scaduto")
     flow = _flow(state)
