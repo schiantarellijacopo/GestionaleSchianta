@@ -1291,17 +1291,25 @@ async def _process_metodo_pagamento(content: bytes, dry_run: bool, job_id: Optio
         tit_by_incasso = {t.get("data_incasso"): t for t in titoli if t.get("data_incasso")}
         usati: set[str] = set()
         for row in rr:
+            rata = _mp_parse_date(row.get("RataDel"))
             cop = _mp_parse_date(row.get("Copertura") or row.get("DataCopertura"))
             pag = _mp_parse_date(row.get("DataPagam") or row.get("DataPagamento"))
+            prox = _mp_parse_date(row.get("ProssimaScadenza"))
             tipo_pag = (row.get("TipoPag") or row.get("ModalitaPagamento") or "").strip()
-            t = tit_by_eff.get(cop) or tit_by_scad.get(cop) or tit_by_incasso.get(pag)
+            # chiave primaria di incrocio: RataDel = effetto del titolo
+            t = (tit_by_eff.get(rata) or tit_by_eff.get(cop)
+                 or tit_by_scad.get(cop) or tit_by_incasso.get(pag))
             if not t or t["id"] in usati:
                 continue
             usati.add(t["id"])
             _set = {
-                "data_copertura": cop or t.get("data_copertura"), "titolo_coperto": True,
+                "data_copertura": cop or t.get("data_copertura"),
+                "titolo_coperto": bool(cop) or bool(t.get("titolo_coperto")),
                 "mezzo_pagamento": tipo_pag or None, "updated_at": _now_iso_mp(),
             }
+            # scadenza reale della rata dal file (il flusso OMNIA non la valorizza)
+            if prox:
+                _set["scadenza"] = prox
             # Se c'è la data di pagamento → titolo incassato (finisce nei titoli storici)
             if pag:
                 _set["stato"] = "incassato"

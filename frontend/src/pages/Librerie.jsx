@@ -87,6 +87,7 @@ function Sezione({ section }) {
     const [editing, setEditing] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
     const [mergeOpen, setMergeOpen] = useState(false);
+    const [codiciOpen, setCodiciOpen] = useState(false);
 
     const load = () => api.get(section.endpoint).then((r) => {
         let data = r.data;
@@ -151,6 +152,11 @@ function Sezione({ section }) {
                             <GitMerge size={13} className="mr-1" /> Unisci doppioni
                         </Button>
                     )}
+                    {showMerge && (
+                        <Button variant="outline" size="sm" onClick={() => setCodiciOpen(true)} data-testid="lib-mappa-codici-rami">
+                            <Tags size={13} className="mr-1" /> Mappa codici polizze
+                        </Button>
+                    )}
                     <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
                         <DialogTrigger asChild>
                             <Button data-testid={`lib-new-${section.key}`} onClick={() => setOpen(true)} className="bg-sky-700 hover:bg-sky-800">
@@ -190,7 +196,114 @@ function Sezione({ section }) {
                     onClose={() => { setMergeOpen(false); load(); }}
                 />
             )}
+
+            {showMerge && codiciOpen && (
+                <MappaCodiciRamoDialog
+                    open={codiciOpen}
+                    rami={list || []}
+                    onClose={() => { setCodiciOpen(false); load(); }}
+                />
+            )}
         </div>
+    );
+}
+
+function MappaCodiciRamoDialog({ open, rami, onClose }) {
+    const [codici, setCodici] = useState(null);
+    const [sel, setSel] = useState([]);
+    const [masterId, setMasterId] = useState("");
+    const [soloNonMappati, setSoloNonMappati] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        api.get("/librerie/rami/codici-usati")
+            .then((r) => setCodici(r.data || []))
+            .catch((e) => { toast.error(errMsg(e, "Errore")); setCodici([]); });
+    }, []);
+
+    const attivi = (rami || []).filter((r) => r.attivo !== false);
+    const lista = (codici || []).filter((c) => !soloNonMappati || !c.in_libreria);
+    const totPolizze = lista.filter((c) => sel.includes(c.codice))
+        .reduce((s, c) => s + c.polizze, 0);
+
+    const toggle = (cod) => setSel((p) => p.includes(cod) ? p.filter((x) => x !== cod) : [...p, cod]);
+
+    const conferma = async () => {
+        setSaving(true);
+        try {
+            const r = await api.post("/librerie/rami/riassegna-codici", { codici: sel, master_id: masterId });
+            const t = r.data.riferimenti_spostati || {};
+            toast.success(`Riassegnati: ${t.polizze || 0} polizze, ${t.sinistri || 0} sinistri, ${t.prodotti || 0} prodotti`);
+            onClose();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+        finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+            <DialogContent className="max-w-2xl" data-testid="mappa-codici-ramo-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2"><Tags size={16} /> Mappa codici ramo delle polizze</DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-slate-500">
+                    Questi sono i codici ramo realmente presenti nelle polizze (es. codici OMNIA <b>3N</b>, <b>45</b>, <b>60</b>).
+                    Selezionali e scegli il ramo di destinazione: polizze, sinistri e prodotti verranno riassegnati.
+                </p>
+
+                <div className="flex items-center justify-between gap-3">
+                    <label className="text-xs text-slate-600 flex items-center gap-1.5">
+                        <input type="checkbox" checked={soloNonMappati} onChange={(e) => setSoloNonMappati(e.target.checked)}
+                            data-testid="mappa-codici-filtro" />
+                        Mostra solo codici non presenti in libreria
+                    </label>
+                    <div className="w-64">
+                        <Select value={masterId} onValueChange={setMasterId}>
+                            <SelectTrigger data-testid="mappa-codici-master"><SelectValue placeholder="Ramo di destinazione…" /></SelectTrigger>
+                            <SelectContent>
+                                {attivi.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome} ({r.codice})</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+
+                <div className="max-h-72 overflow-auto border border-slate-200 rounded-md">
+                    {codici === null ? <Loading /> : lista.length === 0 ? <Empty /> : (
+                        <table className="tbl w-full text-sm">
+                            <thead><tr><th className="w-12"></th><th>Codice</th><th className="text-right">Polizze</th><th>In libreria</th></tr></thead>
+                            <tbody>
+                                {lista.map((c) => (
+                                    <tr key={c.codice} className={sel.includes(c.codice) ? "bg-sky-50" : ""}>
+                                        <td className="text-center">
+                                            <input type="checkbox" checked={sel.includes(c.codice)} onChange={() => toggle(c.codice)}
+                                                data-testid={`mappa-codice-${c.codice}`} />
+                                        </td>
+                                        <td className="num font-medium">{c.codice}</td>
+                                        <td className="num text-right">{c.polizze}</td>
+                                        <td>{c.in_libreria
+                                            ? <span className="badge badge-success">sì</span>
+                                            : <span className="badge badge-warning">no</span>}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                {sel.length > 0 && (
+                    <div className="text-sm text-sky-900 bg-sky-50 border border-sky-200 rounded-md px-3 py-2" data-testid="mappa-codici-riepilogo">
+                        {sel.length} codici selezionati · <b>{totPolizze}</b> polizze verranno riassegnate
+                    </div>
+                )}
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose} data-testid="mappa-codici-annulla">Annulla</Button>
+                    <Button disabled={!sel.length || !masterId || saving} onClick={conferma}
+                        className="bg-emerald-700 hover:bg-emerald-800" data-testid="mappa-codici-conferma">
+                        {saving ? "Riassegno…" : "Riassegna al ramo scelto"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

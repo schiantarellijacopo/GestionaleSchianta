@@ -24,6 +24,30 @@ from db_models import (
 )
 
 
+_MESI_FRAZIONAMENTO = {
+    "mensile": 1, "bimestrale": 2, "trimestrale": 3, "quadrimestrale": 4,
+    "semestrale": 6, "annuale": 12, "unica": 12,
+}
+
+
+def _scadenza_da_effetto(effetto: Optional[str], frazionamento: Optional[str]) -> Optional[str]:
+    """Scadenza rata = effetto + periodo del frazionamento (il flusso OMNIA non
+    valorizza sempre la scadenza del titolo: mai usare la data odierna)."""
+    if not effetto:
+        return None
+    import calendar
+    mesi = _MESI_FRAZIONAMENTO.get((frazionamento or "annuale").lower(), 12)
+    try:
+        d = datetime.strptime(effetto, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    tot = d.month - 1 + mesi
+    anno = d.year + tot // 12
+    mese = tot % 12 + 1
+    giorno = min(d.day, calendar.monthrange(anno, mese)[1])
+    return d.replace(year=anno, month=mese, day=giorno).isoformat()
+
+
 async def _load_mapping_garanzie(db) -> dict:
     """Carica mapping {codice_ania: nome_personalizzato} dalle librerie."""
     out = {}
@@ -980,6 +1004,7 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                            mapping_operatori: Optional[dict] = None,
                            tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                            import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+    fraz_cache: Dict[str, str] = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -1021,10 +1046,16 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                     {"id": pol_id}, {"_id": 0, "collaboratore_id": 1},
                 )
                 coll_id_titolo = (pol_ref or {}).get("collaboratore_id") or None
+            eff_titolo = _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10]
+            if pol_id not in fraz_cache:
+                _p = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "frazionamento": 1})
+                fraz_cache[pol_id] = (_p or {}).get("frazionamento") or "annuale"
             data = {
                 "polizza_id": pol_id,
-                "effetto": _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10],
-                "scadenza": _parse_date(row.get("data_scadenza_emesso", "")) or _now_iso()[:10],
+                "effetto": eff_titolo,
+                "scadenza": (_parse_date(row.get("data_scadenza_emesso", ""))
+                             or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
+                             or eff_titolo),
                 "stato": stato,
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,

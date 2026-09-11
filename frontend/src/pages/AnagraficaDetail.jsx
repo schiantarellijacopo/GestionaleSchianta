@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
@@ -98,8 +98,23 @@ export default function AnagraficaDetail() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
-    if (!ana) return <Loading />;
+    // Cliente dal (prima stipula, anche polizze annullate) → anzianità cliente.
+    // Mostrata solo se il cliente ha ancora almeno una polizza attiva.
+    const clienteDa = useMemo(() => {
+        const tutte = polizze || [];
+        if (!tutte.some(isPolizzaAttiva)) return null;
+        const date = tutte.map((p) => p.effetto).filter(Boolean).sort();
+        if (!date.length) return null;
+        const prima = date[0].slice(0, 10);
+        const d = new Date(prima);
+        const oggi = new Date();
+        let anni = oggi.getFullYear() - d.getFullYear();
+        const dm = oggi.getMonth() - d.getMonth();
+        if (dm < 0 || (dm === 0 && oggi.getDate() < d.getDate())) anni -= 1;
+        return { prima, anni: Math.max(anni, 0) };
+    }, [polizze]);
 
+    if (!ana) return <Loading />;
     // Stato compliance: privacy & documento riconoscimento
     const computePrivacyStato = () => {
         if (!ana) return "rosso";
@@ -143,6 +158,19 @@ export default function AnagraficaDetail() {
                             <span className={`w-2.5 h-2.5 rounded-full ${dotColor(statoDocId)}`} data-testid="dot-docid" />
                             <span className="text-slate-600">Doc. Riconoscimento</span>
                         </span>
+                        {clienteDa && (
+                            <span
+                                className="inline-flex items-center gap-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded-full"
+                                title={`Prima stipula: ${fmtDate(clienteDa.prima)} (incluse polizze annullate)`}
+                                data-testid="badge-cliente-da"
+                            >
+                                <Calendar size={11} />
+                                {clienteDa.anni === 0
+                                    ? <>Cliente da quest&apos;anno</>
+                                    : <>Cliente da <b>{clienteDa.anni}</b> ann{clienteDa.anni === 1 ? "o" : "i"}</>}
+                                <span className="text-emerald-600/80">· dal {fmtDate(clienteDa.prima)}</span>
+                            </span>
+                        )}
                     </span>
                 }
                 subtitle={`${ana.tipo === "persona_giuridica" ? "Persona giuridica" : "Persona fisica"} · ${ana.codice_fiscale || ana.partita_iva || "—"}`}

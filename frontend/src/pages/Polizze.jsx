@@ -179,8 +179,9 @@ export default function Polizze() {
     const totali = useMemo(() => {
         const src = list || [];
         const t_lordo = src.reduce((s, p) => s + (p.premio_lordo || 0), 0);
+        const t_netto = src.reduce((s, p) => s + (p.premio_netto || 0), 0);
         const t_provv = src.reduce((s, p) => s + (p.provvigioni || 0), 0);
-        return { t_lordo, t_provv };
+        return { t_lordo, t_netto, t_provv };
     }, [list]);
 
     const qs = (params) => {
@@ -397,8 +398,12 @@ export default function Polizze() {
                 </span>
                 <div className="ml-auto flex gap-6">
                     <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Premio totale</div>
-                        <div className="text-base font-semibold num">{fmtEur(totali.t_lordo)}</div>
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Premio totale lordo</div>
+                        <div className="text-base font-semibold num" data-testid="pol-tot-lordo">{fmtEur(totali.t_lordo)}</div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Premio totale netto</div>
+                        <div className="text-base font-semibold num" data-testid="pol-tot-netto">{fmtEur(totali.t_netto)}</div>
                     </div>
                     <div className="text-right">
                         <div className="text-[10px] uppercase tracking-widest text-slate-400">Provvigioni</div>

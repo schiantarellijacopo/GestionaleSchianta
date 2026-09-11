@@ -1077,6 +1077,59 @@ async def delete_ramo(rid: str, user: dict = Depends(require_user("admin"))) -> 
     return {"ok": True}
 
 
+@router.get("/librerie/rami/codici-usati")
+async def rami_codici_usati(user: dict = Depends(current_user)) -> list[dict]:
+    """Codici ramo realmente presenti nelle polizze (es. codici OMNIA 3N, 45, 60)
+    con conteggi e flag `in_libreria`: servono per mapparli al ramo corretto."""
+    rami = await db.rami.find({}, {"_id": 0, "codice": 1, "nome": 1, "attivo": 1, "unito_in_ramo_id": 1}).to_list(500)
+    noti = {(r.get("codice") or "").strip().upper() for r in rami
+            if r.get("attivo") is not False and not r.get("unito_in_ramo_id")}
+    out: list[dict] = []
+    async for g in db.polizze.aggregate([
+        {"$group": {"_id": "$ramo", "polizze": {"$sum": 1}}},
+        {"$sort": {"polizze": -1}},
+    ]):
+        cod = (g["_id"] or "").strip()
+        if not cod:
+            continue
+        out.append({
+            "codice": cod,
+            "polizze": g["polizze"],
+            "in_libreria": cod.upper() in noti,
+        })
+    return out
+
+
+class RiassegnaCodiciBody(BaseModel):
+    codici: list[str]
+    master_id: str
+
+
+@router.post("/librerie/rami/riassegna-codici")
+async def rami_riassegna_codici(body: RiassegnaCodiciBody,
+                                user: dict = Depends(require_user("admin"))) -> dict:
+    """Riassegna al ramo master i codici ramo grezzi usati in polizze/sinistri/prodotti."""
+    codici = [c.strip() for c in body.codici if c and c.strip()]
+    if not codici:
+        raise HTTPException(400, "Nessun codice selezionato")
+    master = await db.rami.find_one({"id": body.master_id}, {"_id": 0})
+    if not master:
+        raise HTTPException(404, "Ramo master non trovato")
+    master_codice = (master.get("codice") or "").strip()
+    if not master_codice:
+        raise HTTPException(400, "Il ramo master non ha un codice valido")
+    flt = {"ramo": {"$in": codici}}
+    upd = {"$set": {"ramo": master_codice, "updated_at": _now_iso()}}
+    tot = {
+        "polizze": (await db.polizze.update_many(flt, upd)).modified_count,
+        "sinistri": (await db.sinistri.update_many(flt, upd)).modified_count,
+        "prodotti": (await db.prodotti.update_many(flt, upd)).modified_count,
+    }
+    await log_attivita(user, "merge", "ramo", master["id"],
+                       f"{', '.join(codici)} → {master.get('nome')}")
+    return {"ok": True, "master": master_codice, "codici": codici, "riferimenti_spostati": tot}
+
+
 # --- RAMI: unione doppioni -------------------------------------------------
 def _ramo_valori(r: dict) -> list[str]:
     """Valori testuali con cui un ramo può essere referenziato in polizze/sinistri."""
