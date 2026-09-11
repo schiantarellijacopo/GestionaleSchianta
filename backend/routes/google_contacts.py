@@ -64,7 +64,10 @@ def _cipher() -> Fernet:
 
 
 def _flow(cid: str, csec: str, state: Optional[str] = None) -> Flow:
-    f = Flow.from_client_config(_cfg_from(cid, csec), scopes=SCOPES, state=state)
+    # PKCE disabilitato: il code_verifier non sopravvive tra connect e callback
+    # (flusso server-side con client secret: PKCE non necessario).
+    f = Flow.from_client_config(_cfg_from(cid, csec), scopes=SCOPES, state=state,
+                                autogenerate_code_verifier=False)
     f.redirect_uri = os.environ["GOOGLE_CONTACTS_REDIRECT_URI"]
     return f
 
@@ -253,7 +256,10 @@ async def google_callback(code: str, state: str):
         raise HTTPException(400, "Stato OAuth non valido o scaduto")
     cid, csec = await _credenziali_app(tid)
     flow = _flow(cid, csec, state)
-    flow.fetch_token(code=code)
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Google ha rifiutato l'autorizzazione: {e}") from e
     creds = flow.credentials
     if not creds.refresh_token:
         raise HTTPException(400, "Google non ha restituito il refresh token: ricollega dando il consenso")
