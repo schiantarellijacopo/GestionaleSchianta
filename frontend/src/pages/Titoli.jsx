@@ -93,7 +93,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         q: "",
         stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
-        dal: "", al: "",
+        dal: "", al: "", data_campo: "scadenza",
     });
 
     // Allineamento preset dall'URL (es. /titoli?preset=sospesi)
@@ -123,6 +123,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         if (filters.mezzo_pagamento) p.mezzo_pagamento = filters.mezzo_pagamento;
         if (filters.dal) p.dal = filters.dal;
         if (filters.al) p.al = filters.al;
+        if (filters.data_campo) p.data_campo = filters.data_campo;
         return p;
     };
 
@@ -198,9 +199,13 @@ export default function Titoli({ storicoMode = false } = {}) {
             key: "contratto", label: "Contratto", sort: "numero_polizza", thClass: "w-[140px]",
             render: (t) => (
                 <>
-                    <Link to={`/polizze/${t.polizza_id}`} className="text-amber-600 hover:underline font-medium block">
+                    <button type="button"
+                        onClick={() => (canEdit ? setEditing(t) : null)}
+                        className="text-amber-600 hover:underline font-medium block text-left"
+                        title="Apri dettaglio titolo"
+                        data-testid={`titolo-link-${t.id}`}>
                         {t.numero_polizza || "—"}
-                    </Link>
+                    </button>
                     <div className="text-[11px] text-slate-500">{t.prodotto || t.ramo}</div>
                 </>
             ),
@@ -309,7 +314,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                 }
             />
 
-            <KpiBarSection sezione="titoli" />
+            <KpiBarSection sezione="titoli" params={storicoMode ? { storico: true } : undefined} />
 
             {/* Preset rapidi */}
             <div className="flex flex-wrap gap-2 mb-3">
@@ -403,17 +408,28 @@ export default function Titoli({ storicoMode = false } = {}) {
                             </SelectContent>
                         </Select>
                         <div>
-                            <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
+                            <Label className="text-[10px] text-slate-500">Filtra periodo su</Label>
+                            <Select value={filters.data_campo} onValueChange={(v) => setF("data_campo", v)}>
+                                <SelectTrigger data-testid="f-data-campo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="scadenza">Data scadenza</SelectItem>
+                                    <SelectItem value="data_copertura">Data copertura</SelectItem>
+                                    <SelectItem value="data_incasso">Data incasso</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label className="text-[10px] text-slate-500">Dal</Label>
                             <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="f-dal" />
                         </div>
                         <div>
-                            <Label className="text-[10px] text-slate-500">Scadenza al</Label>
+                            <Label className="text-[10px] text-slate-500">Al</Label>
                             <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="f-al" />
                         </div>
                         <button onClick={() => setFilters({
                             preset: "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
                             prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
-                            conto_cassa_id: "all", dal: "", al: "",
+                            conto_cassa_id: "all", dal: "", al: "", data_campo: "scadenza",
                         })} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
                             <X size={12} /> Azzera filtri
                         </button>
@@ -442,12 +458,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                                 <tr
                                     key={t.id}
                                     data-testid={`titolo-row-${t.id}`}
-                                    className={`${selected.has(t.id) ? "bg-sky-50" : ""} hover:bg-sky-50/60 cursor-pointer`}
-                                    onClick={(e) => {
-                                        // ignora click su elementi interattivi (checkbox, link, button, menu)
-                                        if (e.target.closest("button, a, input, [role='menuitem'], [data-row-noclick]")) return;
-                                        if (canEdit) setEditing(t);
-                                    }}
+                                    className={`${selected.has(t.id) ? "bg-sky-50" : ""} hover:bg-sky-50/60`}
                                 >
                                     {titoliCols.map((c) => (
                                         <td key={c.key} className={c.tdClass}>{c.render(t)}</td>
@@ -491,7 +502,9 @@ export default function Titoli({ storicoMode = false } = {}) {
                     <KpiBar label="Provv. totali" value={totali.t_provv} accent="sky" testid="kpi-provv" />
                     <KpiBar label="Provv. collab." value={totali.t_provv_collab} accent="indigo" testid="kpi-provv-collab" />
                     <KpiBar label="Margine" value={totali.t_provv_margine} accent="amber" testid="kpi-provv-margine" />
-                    <KpiBar label="Da pagare" value={totali.da_pagare} accent="amber" testid="kpi-dapagare" highlight />
+                    {storicoMode
+                        ? <KpiBar label="Premio netto" value={totali.t_netto} accent="indigo" testid="kpi-netto" />
+                        : <KpiBar label="Da pagare" value={totali.da_pagare} accent="amber" testid="kpi-dapagare" highlight />}
                     <KpiBar label="Incassato" value={totali.incassato} accent="emerald" testid="kpi-incassato" />
                 </div>
             </div>

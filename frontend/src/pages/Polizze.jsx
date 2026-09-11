@@ -77,12 +77,10 @@ const POLIZZE_COLS = [
 ];
 
 const PRESETS = [
-    { key: "tutti", label: "Tutte" },
     { key: "attive", label: "Attive" },
     { key: "scadute", label: "Scadute" },
     { key: "sospese", label: "Sospese" },
     { key: "annullate", label: "Annullate" },
-    { key: "sostituite", label: "Sostituite" },
 ];
 
 const presetParams = (key) => {
@@ -125,7 +123,7 @@ export default function Polizze() {
     const buildParams = () => {
         const p = { ...presetParams(filters.preset) };
         if (filters.q) p.q = filters.q;
-        if (filters.stato !== "all" && filters.preset === "tutti") p.stato = filters.stato;
+        if (filters.stato !== "all") p.stato = filters.stato;
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;

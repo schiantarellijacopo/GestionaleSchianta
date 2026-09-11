@@ -130,7 +130,12 @@ async def _stats_polizze(scope_filter: dict) -> list[dict]:
                  "scaduta": {"n": 0, "p": 0.0}}
 
     active_states = {"attiva", "in_emissione"}
+    anno = str(datetime.now(timezone.utc).year)
     async for p in db.polizze.find(scope_filter, {"_id": 0}):
+        # KPI dell'anno in corso: numero e importi solo delle polizze con
+        # decorrenza (effetto) nell'anno corrente
+        if not (p.get("effetto") or "").startswith(anno):
+            continue
         stato = (p.get("stato") or "").lower()
         premio = float(p.get("premio_lordo") or 0)
         # totali per stato (su tutte le polizze nello scope)
@@ -195,10 +200,69 @@ async def _stats_polizze(scope_filter: dict) -> list[dict]:
     ]
 
 
-async def _stats_titoli(scope_filter: dict) -> list[dict]:
-    """KPI Titoli: Da incassare · Incassati · Scaduti · Sospesi · Totale importo."""
+async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]:
+    """KPI Titoli — limitate all'ANNO IN CORSO.
+
+    - Titoli storici (storico=True): solo INCASSATI. Filtro anno/mese su
+      `data_copertura` (fallback `data_incasso`). Card: Incassati anno,
+      Incassati mese, Premio netto, Provvigioni.
+    - Titoli correnti (storico=False): Da incassare · Incassati · Scaduti ·
+      Sospesi · Totale, limitati all'anno corrente sulla `scadenza`.
+    """
+    now = datetime.now(timezone.utc)
+    anno = now.year
+    y_start, y_end = f"{anno}-01-01", f"{anno}-12-31"
+    m_start = f"{anno}-{now.month:02d}-01"
+    m_end = f"{anno}-{now.month:02d}-31"
+
+    def _fmt(v):
+        return f"€ {_eur(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    if storico:
+        eff_date = {"$ifNull": ["$data_copertura", "$data_incasso"]}
+        pipeline = [
+            {"$match": {**scope_filter, "stato": "incassato"}},
+            {"$addFields": {"_dt": eff_date}},
+            {"$facet": {
+                "anno": [
+                    {"$match": {"_dt": {"$gte": y_start, "$lte": y_end}}},
+                    {"$group": {"_id": None, "n": {"$sum": 1},
+                                "lordo": {"$sum": "$importo_lordo"},
+                                "netto": {"$sum": "$importo_netto"},
+                                "provv": {"$sum": "$provvigioni"}}},
+                ],
+                "mese": [
+                    {"$match": {"_dt": {"$gte": m_start, "$lte": m_end}}},
+                    {"$group": {"_id": None, "n": {"$sum": 1},
+                                "lordo": {"$sum": "$importo_lordo"}}},
+                ],
+            }},
+        ]
+        res = await db.titoli.aggregate(pipeline).to_list(1)
+        res = res[0] if res else {"anno": [], "mese": []}
+        a = res["anno"][0] if res.get("anno") else {}
+        m = res["mese"][0] if res.get("mese") else {}
+        return [
+            {"key": "incassati_anno", "label": f"Incassati {anno}",
+             "value": a.get("n", 0), "sub": _fmt(a.get("lordo", 0)),
+             "color": "emerald", "icon": "CheckCircle",
+             "link": "/titoli-storici?preset=storico_anno"},
+            {"key": "incassati_mese", "label": "Incassati mese",
+             "value": m.get("n", 0), "sub": _fmt(m.get("lordo", 0)),
+             "color": "sky", "icon": "CheckCircle",
+             "link": "/titoli-storici?preset=storico_mese"},
+            {"key": "premio_netto", "label": f"Premio netto {anno}",
+             "value": _fmt(a.get("netto", 0)),
+             "color": "indigo", "icon": "Receipt"},
+            {"key": "provvigioni", "label": f"Provvigioni {anno}",
+             "value": _fmt(a.get("provv", 0)),
+             "color": "violet", "icon": "TrendingUp"},
+        ]
+
+    # Titoli correnti: limitati all'anno in corso sulla scadenza
+    flt = {**scope_filter, "scadenza": {"$gte": y_start, "$lte": y_end}}
     pipeline = [
-        {"$match": scope_filter},
+        {"$match": flt},
         {"$group": {"_id": "$stato", "n": {"$sum": 1},
                     "tot": {"$sum": "$importo_lordo"}}},
     ]
@@ -208,25 +272,25 @@ async def _stats_titoli(scope_filter: dict) -> list[dict]:
     return [
         {"key": "da_incassare", "label": "Da incassare",
          "value": res.get("da_incassare", {}).get("n", 0),
-         "sub": f"€ {_eur(res.get('da_incassare', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+         "sub": _fmt(res.get("da_incassare", {}).get("tot", 0)),
          "color": "amber", "icon": "Clock",
          "link": "/titoli?preset=tutti_aperti"},
         {"key": "incassati", "label": "Incassati",
          "value": res.get("incassato", {}).get("n", 0),
-         "sub": f"€ {_eur(res.get('incassato', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+         "sub": _fmt(res.get("incassato", {}).get("tot", 0)),
          "color": "emerald", "icon": "CheckCircle",
          "link": "/titoli-storici?preset=storico_anno"},
         {"key": "scaduti", "label": "Scaduti",
          "value": res.get("scaduto", {}).get("n", 0),
-         "sub": f"€ {_eur(res.get('scaduto', {}).get('tot', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+         "sub": _fmt(res.get("scaduto", {}).get("tot", 0)),
          "color": "rose", "icon": "AlertTriangle",
          "link": "/titoli?preset=scad_oltre15"},
         {"key": "sospesi", "label": "Sospesi",
          "value": res.get("sospeso", {}).get("n", 0),
          "color": "indigo", "icon": "Pause",
          "link": "/titoli?preset=sospesi"},
-        {"key": "totale", "label": "Totale", "value": total_n,
-         "sub": f"€ {_eur(total_eur):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        {"key": "totale", "label": f"Totale {anno}", "value": total_n,
+         "sub": _fmt(total_eur),
          "color": "violet", "icon": "Receipt",
          "link": "/titoli?preset=tutti_aperti"},
     ]
@@ -439,7 +503,8 @@ async def kpi_filter_options(
 
 
 @router.get("/kpi/{sezione}/stats")
-async def kpi_stats(sezione: str, user: dict = Depends(current_user)) -> dict:
+async def kpi_stats(sezione: str, storico: bool = False,
+                    user: dict = Depends(current_user)) -> dict:
     if sezione not in _STATS_DISPATCH:
         raise HTTPException(404, f"Sezione '{sezione}' non supportata")
     fn = _STATS_DISPATCH[sezione]
@@ -447,7 +512,10 @@ async def kpi_stats(sezione: str, user: dict = Depends(current_user)) -> dict:
     scope: dict = {}
     if user["role"] not in ("admin",):
         scope["collaboratore_id"] = user["id"]
-    base = await fn(scope)
+    if sezione == "titoli":
+        base = await _stats_titoli(scope, storico=storico)
+    else:
+        base = await fn(scope)
     # Aggiungi custom dell'utente
     customs = await db.kpi_custom.find(
         {"user_id": user["id"], "sezione": sezione}, {"_id": 0},

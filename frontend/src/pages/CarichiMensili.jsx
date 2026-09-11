@@ -8,6 +8,7 @@
  * - Column toggle salvato in localStorage
  */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -434,7 +435,15 @@ const CELL_RENDERERS = {
         <div className="font-mono text-[11px]">
             <div className="flex items-center gap-1">
                 {r.bloccato && <Lock size={11} className="text-amber-600" title={r.motivo_blocco} />}
-                {r.polizza_numero || "-"}
+                {r.polizza_id ? (
+                    <Link
+                        to={`/polizze/${r.polizza_id}`}
+                        className="text-sky-700 hover:underline"
+                        data-testid={`carico-polizza-link-${r.polizza_id}`}
+                    >
+                        {r.polizza_numero || "-"}
+                    </Link>
+                ) : (r.polizza_numero || "-")}
             </div>
             {r.numero_titolo && <div className="text-slate-400 text-[10px]">Q: {r.numero_titolo}</div>}
         </div>

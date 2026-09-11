@@ -38,7 +38,10 @@ const STATI = [
 // Colonne tabella Sinistri — selezionabili/riordinabili per utente
 const SINISTRI_COLS = [
     { key: "numero_interno", label: "Num. Int.", sort: "numero_interno", thClass: "w-[120px]", tdClass: "font-medium text-amber-700", render: (s) => s.numero_interno || "—" },
-    { key: "numero_sinistro", label: "N. Sinistro", sort: "numero_sinistro", thClass: "w-[140px]", tdClass: "font-medium", render: (s) => s.numero_sinistro },
+    { key: "numero_sinistro", label: "N. Sinistro", sort: "numero_sinistro", thClass: "w-[140px]", tdClass: "font-medium", render: (s) => (
+        <Link to={`/sinistri/${s.id}`} className="text-sky-700 hover:underline font-medium"
+              data-testid={`sinistro-link-${s.id}`}>{s.numero_sinistro || "—"}</Link>
+    ) },
     {
         key: "contratto", label: "Contratto", sort: "numero_polizza", thClass: "w-[110px]",
         render: (s) => (
@@ -281,8 +284,7 @@ export default function Sinistri() {
                         <tbody>
                             {sorted.map((s) => (
                                 <tr key={s.id} data-testid={`sinistro-row-${s.id}`}
-                                    className="bg-sky-50/50 hover:bg-sky-100 cursor-pointer transition-colors"
-                                    onClick={() => navigate(`/sinistri/${s.id}`)}>
+                                    className="bg-sky-50/50 hover:bg-sky-100 transition-colors">
                                     {cols.map((c) => (
                                         <td key={c.key} className={c.tdClass}>{c.render(s)}</td>
                                     ))}

@@ -85,20 +85,20 @@ function KpiCard({ k, onClick }) {
     );
 }
 
-export default function KpiBar({ sezione, title, description, refreshKey }) {
+export default function KpiBar({ sezione, title, description, refreshKey, params }) {
     const navigate = useNavigate();
     const [data, setData] = useState(null);
     const [open, setOpen] = useState(false);
 
     const load = async () => {
         try {
-            const r = await api.get(`/kpi/${sezione}/stats`);
+            const r = await api.get(`/kpi/${sezione}/stats`, { params });
             setData(r.data);
         } catch (e) {
             // silent: KPI section è informativa, no toast invasivo
         }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [sezione, refreshKey]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [sezione, refreshKey, JSON.stringify(params || {})]);
 
     if (!data) return null;
     const allKpi = [...(data.default || []), ...(data.custom || [])];

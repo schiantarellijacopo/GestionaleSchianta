@@ -368,10 +368,19 @@ export default function Anagrafiche() {
 
             {/* Chips filtri categoria */}
             <div className="flex flex-wrap items-center gap-2 mb-3">
-                <CatChip active={catFilter === "all"} onClick={() => setCatFilter("all")} dot="bg-slate-300" label={`Tutte (${catCounts.tutte})`} />
                 <CatChip active={catFilter === "con_polizze"} onClick={() => setCatFilter("con_polizze")} dot="bg-sky-500" label={`Con polizze (${counts.con})`} />
-                <CatChip active={catFilter === "senza_polizze"} onClick={() => setCatFilter("senza_polizze")} dot="bg-red-500" label={`Senza polizze (${counts.senza})`} />
                 <CatChip active={catFilter === "condominio"} onClick={() => setCatFilter("condominio")} dot="bg-emerald-500" label={`Condomini (${counts.cond})`} />
+                <Select value={catFilter === "all" || catFilter === "senza_polizze" ? catFilter : "none"}
+                        onValueChange={(v) => setCatFilter(v === "none" ? "con_polizze" : v)}>
+                    <SelectTrigger className="w-52 h-8 text-xs" data-testid="anag-filter-categoria">
+                        <SelectValue placeholder="Altri filtri…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="none">Altri filtri…</SelectItem>
+                        <SelectItem value="all">Tutte le anagrafiche ({catCounts.tutte})</SelectItem>
+                        <SelectItem value="senza_polizze">Senza polizze ({counts.senza})</SelectItem>
+                    </SelectContent>
+                </Select>
                 {tagFilter && (
                     <button onClick={() => setTagFilter(null)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 hover:bg-amber-200" data-testid="anag-tag-active">
                         Tag: {tagFilter} <X size={10} />

@@ -2708,9 +2708,10 @@ async def list_titoli(
     scaduta_giorni_esatti: Optional[int] = None,  # scadenza == oggi - N (giorno esatto)
     scaduta_giorni_oltre: Optional[int] = None,   # scadenza < oggi - N (scaduti da oltre N giorni)
     scadenza_oltre_giorni: Optional[int] = None,  # in scadenza oltre N gg
-    # filtro periodo (sulla scadenza)
+    # filtro periodo — campo selezionabile (scadenza | data_copertura | data_incasso)
     dal: Optional[str] = None,
     al: Optional[str] = None,
+    data_campo: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 50000,
     user=Depends(current_user),
@@ -2810,15 +2811,16 @@ async def list_titoli(
     elif titolo_coperto is False:
         flt["$or"] = [{"titolo_coperto": {"$ne": True}}, {"titolo_coperto": None}]
 
-    # filtro periodo (sulla scadenza, sovrascrive eventuali altri set sulla scadenza)
+    # filtro periodo — applicato al campo scelto (default: scadenza)
     if dal or al:
+        campo = data_campo if data_campo in ("scadenza", "data_copertura", "data_incasso") else "scadenza"
         cond = {}
         if dal: cond["$gte"] = dal
         if al: cond["$lte"] = al
-        if isinstance(flt.get("scadenza"), dict):
-            flt["scadenza"] = {**flt["scadenza"], **cond}
+        if isinstance(flt.get(campo), dict):
+            flt[campo] = {**flt[campo], **cond}
         else:
-            flt["scadenza"] = cond
+            flt[campo] = cond
 
     items = await db.titoli.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(limit)
     pol_ids = list({t["polizza_id"] for t in items if t.get("polizza_id")})
@@ -9814,7 +9816,12 @@ async def stats_dashboard(user=Depends(current_user)):
     from datetime import date, timedelta
     sessanta_gg = (date.today() + timedelta(days=60)).isoformat()
 
-    n_anagrafiche = await db.anagrafiche.count_documents({} if user["role"] != "cliente" else {"id": user.get("anagrafica_id", "_none_")})
+    # Clienti: solo anagrafiche con almeno una polizza attiva
+    if user["role"] == "cliente":
+        n_anagrafiche = await db.anagrafiche.count_documents({"id": user.get("anagrafica_id", "_none_")})
+    else:
+        contraenti_attivi = await db.polizze.distinct("contraente_id", {**flt, "stato": "attiva"})
+        n_anagrafiche = len([c for c in contraenti_attivi if c])
     n_polizze = await db.polizze.count_documents(flt)
     polizze_attive = await db.polizze.count_documents({**flt, "stato": "attiva"})
     in_scadenza = await db.polizze.count_documents({

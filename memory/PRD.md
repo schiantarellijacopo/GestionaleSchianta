@@ -971,3 +971,16 @@ Usare integration_expert prima di implementare.
 - SINISTRI: KPI e elenco limitati all'anno in corso (filtro `dal` precompilato, modificabile).
 - Test: iteration_85/86/87.json tutti PASS (backend+frontend).
 
+
+
+## Sessione 2026-06 (fork) — KPI Titoli storici + correzioni dati OMNIA
+- **KPI Titoli storici** (routes/kpi.py `_stats_titoli(storico=True)`): mostra SOLO incassati anno corrente → Incassati {anno} (n+€ lordo), Incassati mese (n+€), Premio netto {anno} (€), Provvigioni {anno} (€). Rimosse Da incassare/Scaduti/Sospesi/Totale. Filtro anno/mese su `data_copertura` (coalesce `data_incasso`, via `$ifNull`). KpiBar.jsx accetta prop `params`; Titoli.jsx passa `{storico:true}` in storicoMode. Testato via API + screenshot.
+- **KPI Titoli correnti** (storico=False): Da incassare/Incassati/Scaduti/Sospesi/Totale limitati all'ANNO IN CORSO sulla `scadenza`.
+- **Griglia KPI in basso (Titoli.jsx)**: in storicoMode "Da pagare" sostituito da "Premio netto" (t_netto).
+- **Filtro periodo Titoli**: nuovo selettore campo data (`data_campo`: scadenza|data_copertura|data_incasso) in list_titoli (server.py) + Select UI in Titoli.jsx. Default scadenza.
+- **FIX SCADENZA titoli** (`/app/scripts/fix_scadenza_titoli.py`): 1.712 titoli con scadenza < effetto ricalcolati = effetto + frazionamento (OMNIA metteva in `data_scadenza_emesso` la data avviso). Importer ania_importer.py: ignora `data_scadenza_emesso` se precedente all'effetto.
+- **ANNULLAMENTO lapsed** (`/app/scripts/annulla_lapsed_2025.py`): 8 polizze attive scadute senza incasso dal 2025 annullate (+1 titolo stornato). Le 660 senza titoli sono tutte UCA → tenute; 56 con scadenza futura → non toccate. (Precedente cleanup: 0 attive con scadenza<2025 residue.)
+- **MERGE doppioni** (`/app/scripts/merge_polizze_dup.py`, MAX_COPIE=3): uniti 5 gruppi da 2 copie nel tenant 31b4950e (3 titoli spostati, 1 aperto duplicato eliminato, 5 polizze vuote rimosse). NON toccate le collettive/libro matricola (numeri 00058533412xxx con 59-391 copie).
+- **DUE TENANT**: 31b4950e (produzione utente schianta91@gmail.com, 49k polizze) e tenant-principale-schiantarelli (demo/test, admin@assicura.it) — isolati, il doppione cross-tenant 180992191 NON è un errore.
+- **CarichiMensili.jsx**: numero polizza ora cliccabile (Link a /polizze/:polizza_id).
+- **APERTO / da decidere**: 938 titoli "incassato" senza data incasso con effetto futuro. In OMNIA `stato_share`="incassato" MA `dt_pag_cliente` vuoto (nessuna data pagamento). Dato NON modificato in attesa di decisione utente (rispettato il flusso SHARE).

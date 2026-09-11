@@ -1084,12 +1084,19 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             if pol_id not in fraz_cache:
                 _p = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "frazionamento": 1})
                 fraz_cache[pol_id] = (_p or {}).get("frazionamento") or "annuale"
+            # Scadenza titolo: il flusso OMNIA, per i rinnovi futuri, mette in
+            # `data_scadenza_emesso` la data di emissione dell'avviso (precedente
+            # all'effetto). In quel caso è errata → calcola effetto+frazionamento.
+            _scad_emesso = _parse_date(row.get("data_scadenza_emesso", ""))
+            if _scad_emesso and eff_titolo and _scad_emesso < eff_titolo:
+                _scad_emesso = None
+            _scadenza_val = (_scad_emesso
+                             or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
+                             or eff_titolo)
             data = {
                 "polizza_id": pol_id,
                 "effetto": eff_titolo,
-                "scadenza": (_parse_date(row.get("data_scadenza_emesso", ""))
-                             or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
-                             or eff_titolo),
+                "scadenza": _scadenza_val,
                 "stato": ("incassato" if lordo <= 0 else stato),  # titoli a premio 0: nulla da incassare
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,
