@@ -1012,3 +1012,16 @@ Usare integration_expert prima di implementare.
 - Mapping chiave: NumPolizza→numero_polizza, Copertura→data_copertura, TipoPag→mezzo_pagamento, DataPagam→data_incasso, Totale→importo_lordo, Netto→importo_netto, Imposte→imposte, Provvigioni→provvigioni, RataDel→effetto, Operatore 1..4→ripartizione provvigioni.
 - **NUOVA REGOLA** (import_massivo titolo): titolo INCASSATO senza mezzo_pagamento → `pagamento_in_direzione=True`.
 - **Fix Import Massivo AI titoli**: rilevamento entità titolo aggiunto (copertura/tipopag/datapagam); alias mezzo_pagamento estesi con "tipopag"/"tipo pag".
+
+### Import OMNIA ZIP (A_OW8) + arretrati/sospesi Axicura (2026-06 fork)
+- ZIP OMNIA arricchimento (vincolato) via `import_omnia_axicura.py` (fasi: iban/polizze_dettagli/prodotti/sinistri/sostituzioni). Matching numero polizza con NORMALIZZAZIONE zeri iniziali (000585=585) → 26.351 match. Fix in ania_importer `_resolve_polizza_id` (fallback lstrip '0').
+  - IBAN: 486 aggiunti a conti_correnti (no email/cellulare/operatore toccati).
+  - Veicoli (rec21) + Garanzie (rec30 163k): 25.378 polizze con garanzie, 16.396 con targa/massimali. Nessuna modifica a date/operatore/ramo/titoli.
+  - Prodotti (rec100): nome prodotto aggiornato su 25.556 polizze (prodotto_originale=codice).
+  - Sinistri (rec50/52): 6.410 creati + 5.169 liquidazioni.
+  - Sostituzioni: 7.395 vecchie collegate (stato sostituita + sostituita_da_polizza_id); frazionamento OMNIA vince; 734 annullate a scadenza (frazionamento unico/temporaneo scaduto).
+- Indici creati: polizze.id, polizze.numero_polizza, titoli.polizza_id, titoli.id_titolo_exp, anagrafiche.id, sinistri.id_sinistro_exp (velocizzano bulk).
+- Arretrati (`import_arretrati_axicura.py`, file 'stampa', 447): 398 titoli da_incassare; netto/imposte/provvigioni ricostruiti dalle proporzioni di un titolo di riferimento della polizza; date parse via `_parse_date_flexible` (gestisce DD-MM-YYYY e DD/MM/YY).
+- Sospesi/anticipi (`import_sospesi_axicura.py`, 76): 62 titoli da_incassare + titolo_coperto=True + data_copertura dalle date file. NB: Titolo NON ha stato 'sospeso' → anticipo = da_incassare+coperto.
+- Annullate su richiesta: 72 polizze sospese con numero prefisso 58533. Prefissi '0'/'2015' → 0 match (numeri in DB senza zeri iniziali).
+- APERTO (utente ha detto NON toccare ora): garanzie mappate 'FAMIGLIA' (codici D21/T04/E07) che dovrebbero essere 'I.P. Infortunio' su alcune polizze.

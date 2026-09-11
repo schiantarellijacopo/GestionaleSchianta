@@ -899,6 +899,11 @@ async def _resolve_polizza_id(db, row: dict, polizza_id_map: Dict[str, str]) -> 
     numero = (row.get("numero_polizza_cmp") or "").strip()
     if numero:
         pol = await db.polizze.find_one({"numero_polizza": numero}, {"_id": 0, "id": 1})
+        if not pol:
+            # I numeri OMNIA hanno zeri iniziali assenti nel gestionale (000585 = 585)
+            stripped = numero.lstrip("0")
+            if stripped and stripped != numero:
+                pol = await db.polizze.find_one({"numero_polizza": stripped}, {"_id": 0, "id": 1})
         if pol:
             # cache it per le righe successive
             if pol_exp:
