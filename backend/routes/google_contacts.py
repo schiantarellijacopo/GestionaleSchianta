@@ -88,14 +88,15 @@ def _persona(ana: dict) -> dict:
             "country": "IT",
         }]
     tels = []
-    if ana.get("cellulare"):
-        tels.append({"value": ana["cellulare"], "type": "mobile"})
-    if ana.get("telefono"):
-        tels.append({"value": ana["telefono"], "type": "home"})
+    for v in (ana.get("cellulare"), ana.get("telefono")):
+        v = (v or "").strip()
+        if sum(ch.isdigit() for ch in v) >= 6:
+            tels.append({"value": v, "type": "mobile" if v == (ana.get("cellulare") or "").strip() else "home"})
     if tels:
         body["phoneNumbers"] = tels
-    if ana.get("email"):
-        body["emailAddresses"] = [{"value": ana["email"]}]
+    email = (ana.get("email") or "").strip()
+    if "@" in email:
+        body["emailAddresses"] = [{"value": email}]
     return body
 
 
