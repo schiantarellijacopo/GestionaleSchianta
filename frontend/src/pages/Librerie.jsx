@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
