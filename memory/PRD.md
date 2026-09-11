@@ -1028,3 +1028,7 @@ Usare integration_expert prima di implementare.
 
 ### Correzione arretrati con valori esatti rec40 (2026-06 fork)
 - `fix_arretrati_da_rec40.py`: match arretrati (file stampa) ↔ rec40 OMNIA per (numero polizza normalizzato + effetto_titolo == 'Rata del'). Applica valori ESATTI: importo_netto=netto_totale, imposte=tasse_totale (netto+tasse=lordo), accessori, importo_lordo=lordo_totale, provvigioni=provvigioni_totale. 397/447 titoli aggiornati; 10 senza corrispondenza nel rec40 (mantengono il calcolo proporzionale). Nota: Titolo non ha campo SSN (ssn è componente delle tasse).
+
+### Import titoli PS (pagamento in direzione) da rec40 (2026-06 fork)
+- `import_ps_direzione_axicura.py`: importati dal rec40 OMNIA 2.466 titoli con mezzo_pagamento_cmp='PS' non ancora presenti (dedup per polizza+effetto+lordo). mezzo_pagamento="Pagamento in direzione", pagamento_in_direzione=True, valori esatti (netto/tasse/accessori/lordo/provv), stato incassato se dt_pag_cliente presente (2.464), data_incasso/data_copertura=dt_pag_cliente. note_carico='OMNIA PS - pagamento in direzione'. 187 dup saltati, 2 senza polizza.
+- Codici pagamento OMNIA titoli: mezzo_pag_share SEC=SDD Compagnia, ID=direzione; mezzo_pagamento_cmp RD=RID/SDD, PS=pagamento sportello/diretto, BN=bonifico, AS=assegno, CO=contanti.
