@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 86 — Backend + Frontend tests per (a) ultimo_premio_pagato dal titolo incassato più recente in GET /polizze/{pid}, (b) PUT /polizze con stato 'annullata'+data_annullamento+motivo_annullamento, (c) filtro/conteggio 'annullata', (d) sezione 'Vita/Previdenza' condizionata a ramo vita nel tab Garanzie, (e) badge 'annullata' in testata + preset elenco, (f) campo 'Data emissione' in testata. Backend 4/4 pytest PASS. Frontend 5/5 flussi UI PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/polizze", "issue": "Il campo 'data_emissione' passato al POST viene silenziosamente ignorato/scartato (probabilmente non presente nella whitelist di create_polizza), mentre PUT /polizze/{id} accetta e salva correttamente il campo. Non è stato oggetto di test formale nel review ma è emerso durante il setup: creare la polizza con data_emissione poi rileggendola torna None; la stessa PUT successiva salva correttamente. Coerenza input consigliata."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter86_ultimo_premio_annullata.py",
+    "/app/test_reports/pytest/iter86.xml"
+  ],
+  "action_items": [
+    "Opzionale (minor): includere 'data_emissione' nella whitelist dei campi accettati da POST /api/polizze — al momento è persistibile solo via PUT.",
+    "Opzionale: rimuovere i dati di test creati (contraente TEST_UI86_*, polizze TESTP86-*, TESTUI86-INC-*, TESTUI86-VITA-*, TESTUI86-ANN-*, con relativi titoli)."
+  ],
+  "critical_code_review_comments": [
+    "server.py get_polizza (righe 2477-2484): sort([('data_incasso', -1), ('effetto', -1)]) è correttamente indicizzato; l'assegnamento `ult[0].get('importo_lordo') or 0` fa fallback a 0 se None (ok). Ok.",
+    "get_polizza (righe 2505-2514): sovrascrive ultimo_titolo_scadenza anche quando il titolo non è 'incassato' (usa stati coperto/abbuonato ordinando per scadenza desc). Comportamento intenzionale ma può creare incoerenza rispetto al blocco precedente (che valorizza ultimo_titolo_scadenza dal titolo INCASSATO più recente); il secondo blocco vince sempre. Verificare che sia intenzionale — non impatta i requisiti del review.",
+    "PolizzaDetail.jsx riga 138: isRamoVita include il fallback `(pol.rendita_annua||0) > 0` — buona idea per non nascondere il campo su polizze già valorizzate. Nel test la polizza VITA appena creata rispetta comunque il regex sul ramo.",
+    "PolizzaDetail.jsx riga 437: `{pol.data_emissione && <F .../>}` — condizionamento corretto sull'esistenza del valore, evita di mostrare '—' su polizze legacy."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter86_ultimo_premio_annullata.py"],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% (5/5)"},
+  "test_credentials": "admin@assicura.it / Admin123! (tenant di test, come da /app/memory/test_credentials.md). Non è stato toccato il tenant di produzione 31b4950e-85c2-4232-a31f-ba226b7923fe.",
+  "seed_data_creation": "Creati nel tenant admin@assicura.it: contraente TEST_UI86_{ts} + TEST_Iter86_{ts}, polizze TESTP86-*, TESTP86N-*, TESTP86A-*, TESTP86L-*, TESTUI86-INC-{ts} (INCENDIO, data_emissione=2023-12-15, 1 titolo incassato 250€ del 05/01/2024), TESTUI86-VITA-{ts} (VITA, rendita_annua=1234.50 impostato via UI), TESTUI86-ANN-{ts} (INCENDIO annullata con data 2017-03-08).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Data-testids UI verificati: rendita-annua-value/input/salva (tab Garanzie di polizza VITA), preset tabs polizze 'Annullate' (in tab list, non con data-testid dedicato). La sezione 'Vita/Previdenza' compare SOLO quando `isRamoVita` è vero (regex su ramo/ramo_originale/prodotto + fallback rendita_annua>0). Campo 'Data emissione' in testata visibile solo se `pol.data_emissione` è valorizzato. Il 'Ultimo premio pagato' in testata usa `pol.ultimo_premio_pagato` calcolato in backend dall'ultimo titolo con stato 'incassato' (sort desc su data_incasso, poi effetto). Tab Annullate mostra 28174 polizze totali (comprende le 51 chiuse dallo script one-off).",
+  "rca of the issue": "Il bug originale sulla polizza 00058523300016 (attiva pur senza copertura dal 2016) è risolto dallo script /app/scripts/chiudi_polizze_scadute.py già eseguito (51 polizze del tenant di produzione annullate). Le modifiche di supporto testate: (1) modello PolizzaStato accetta 'annullata' + 'sostituita' via PUT; (2) get_polizza arricchisce ultimo_premio_pagato/ultimo_titolo_data_incasso dal titolo INCASSATO più recente evitando così che 'Ultimo premio pagato' resti a 0 quando in DB c'è solo il campo aggregato; (3) UI condiziona sezione Vita/Previdenza al ramo vita evitando falsi positivi sui rami danni; (4) UI mostra Data emissione solo se valorizzata evitando '—' su polizze legacy senza il dato."
+}

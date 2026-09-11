@@ -16,7 +16,7 @@ Architettura:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -233,9 +233,11 @@ async def _stats_titoli(scope_filter: dict) -> list[dict]:
 
 
 async def _stats_sinistri(scope_filter: dict) -> list[dict]:
-    """KPI Sinistri: Aperti · Liquidati · Chiusi · Riserva totale."""
+    """KPI Sinistri dell'ANNO IN CORSO: Aperti · Liquidati · Chiusi · Riserva."""
+    anno = datetime.now(timezone.utc).year
+    flt = {**scope_filter, "data_avvenimento": {"$gte": f"{anno}-01-01", "$lte": f"{anno}-12-31"}}
     pipeline = [
-        {"$match": scope_filter},
+        {"$match": flt},
         {"$group": {"_id": "$stato", "n": {"$sum": 1},
                     "riserva": {"$sum": "$importo_riserva"},
                     "liquidato": {"$sum": "$importo_liquidato"}}},
@@ -259,7 +261,7 @@ async def _stats_sinistri(scope_filter: dict) -> list[dict]:
         {"key": "respinti", "label": "Respinti",
          "value": res.get("respinto", {}).get("n", 0),
          "color": "indigo", "icon": "XCircle", "link": "/sinistri?stato=respinto"},
-        {"key": "totale", "label": "Totale",
+        {"key": "totale", "label": f"Totale {datetime.now(timezone.utc).year}",
          "value": sum(r["n"] for r in res.values()),
          "color": "violet", "icon": "Layers", "link": "/sinistri"},
     ]

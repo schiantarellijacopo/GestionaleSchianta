@@ -27,6 +27,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
     const [dichiarato, setDichiarato] = useState(polizza.regolazione_base_dichiarata_cliente ?? 0);
     const [tasso, setTasso] = useState(polizza.regolazione_tasso || 0);
     const [tassoUnita, setTassoUnita] = useState("percento"); // "percento" | "permille"
+    const [impostaPct, setImpostaPct] = useState(polizza.regolazione_imposta_pct ?? 22.25);
     const [periodo, setPeriodo] = useState(String(new Date().getFullYear() - 1));
     const [note, setNote] = useState("");
     const [storico, setStorico] = useState([]);
@@ -52,6 +53,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                 base_effettiva: parseFloat(dichiarato) || 0,
                 base_tipo: baseTipo,
                 tasso_override: tasso ? (tassoUnita === "permille" ? parseFloat(tasso) / 10 : parseFloat(tasso)) : null,
+                imposta_pct: impostaPct === "" ? null : parseFloat(impostaPct),
                 periodo, note, salva,
             });
             setRisultato(r.data);
@@ -120,10 +122,17 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                                 </Select>
                             </div>
                         </div>
+                        <div>
+                            <Label className="text-xs">Imposta di polizza % — riproposta nei calcoli futuri</Label>
+                            <Input type="number" step="0.01" value={impostaPct}
+                                onChange={(e) => setImpostaPct(e.target.value)}
+                                placeholder="22,25" data-testid="reg-imposta-pct" />
+                        </div>
                         {/* Anteprima differenza live */}
                         <div className="text-xs bg-slate-50 border border-slate-200 rounded p-2 flex justify-between" data-testid="reg-anteprima">
                             <span className="text-slate-500">Differenza: <b className={differenza < 0 ? "text-rose-600" : "text-slate-800"}>{fmtBase(differenza)}</b></span>
                             <span className="text-slate-500">Premio: <b className="text-violet-700">{fmtEur(premioLive)}</b></span>
+                            <span className="text-slate-500">Con imposta: <b className="text-violet-700">{fmtEur(premioLive * (1 + (parseFloat(impostaPct) || 0) / 100))}</b></span>
                         </div>
                         <div>
                             <Label className="text-xs">Note</Label>
@@ -147,6 +156,8 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                                     <div><span className="text-slate-500">Tasso:</span> <b className="font-mono">{risultato.tasso_applicato_pct}%</b></div>
                                     <div><span className="text-slate-500">Premio calcolato:</span> <b className="font-mono">{fmtEur(risultato.premio_calcolato)}</b></div>
                                     <div><span className="text-slate-500">Minimo non rimb.:</span> <b className="font-mono">{fmtEur(risultato.minimo_non_rimborsabile)}</b></div>
+                                    <div><span className="text-slate-500">Imposta {risultato.imposta_pct}%:</span> <b className="font-mono" data-testid="reg-imposta">{fmtEur(risultato.imposta)}</b></div>
+                                    <div><span className="text-slate-500">Premio netto:</span> <b className="font-mono">{fmtEur(risultato.premio_netto)}</b></div>
                                 </div>
                                 <div className="mt-3 pt-3 border-t border-violet-200 flex justify-between items-end">
                                     <span className="text-sm font-medium text-slate-700">Dovuto cliente:</span>

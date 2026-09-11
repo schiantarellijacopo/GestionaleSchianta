@@ -133,6 +133,10 @@ export default function PolizzaDetail() {
     }, []);
     if (!pol) return <Loading />;
 
+    // Sezione Vita/Previdenza: solo per polizze del ramo vita/previdenza
+    const _ramoTxt = `${pol.ramo || ""} ${pol.ramo_originale || ""} ${pol.prodotto || ""}`.toUpperCase();
+    const isRamoVita = /VITA|PREVID|TCM|TEMPORANEA CASO MORTE/.test(_ramoTxt) || (pol.rendita_annua || 0) > 0;
+
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
     const isVeicoloPol = /rca|rc\s*auto|autovettur|autocarr|motocicl|ciclomotor|\bauto\b|\bmoto\b|veicol|natant|imbarcaz/i
         .test(`${pol.ramo || ""} ${pol.prodotto || ""}`);
@@ -331,7 +335,11 @@ export default function PolizzaDetail() {
                     <GeneraDocumentoButton sezione="polizza" entitaId={id} firmatarioId={pol.contraente_id} onSaved={load} />
                     {canDelete && (
                         <Button variant="outline" size="sm" onClick={handleDelete}
-                                className="text-rose-700 hover:bg-rose-50 hover:text-rose-800" data-testid="pol-delete-button">
+                                disabled={haTitoliBloccanti}
+                                title={haTitoliBloccanti
+                                    ? "Polizza con titoli incassati o coperti: non eliminabile, usa Annulla o Sostituisci"
+                                    : "Elimina polizza"}
+                                className="text-rose-700 hover:bg-rose-50 hover:text-rose-800 disabled:opacity-50" data-testid="pol-delete-button">
                             <Trash2 size={14} className="mr-1" /> Elimina
                         </Button>
                     )}
@@ -712,6 +720,7 @@ export default function PolizzaDetail() {
                 </TabsContent>
 
                 <TabsContent value="garanzie">
+                    {isRamoVita && (
                     <Card className="p-6 border-slate-200 mt-4">
                         <SezioneTitolo titolo="Vita / Previdenza" />
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -723,6 +732,7 @@ export default function PolizzaDetail() {
                             <F label="Capitale assicurato" value={fmtEur(pol.capitale_assicurato)} mono />
                         </div>
                     </Card>
+                    )}
 
                     <Card className="border-slate-200 mt-4 overflow-hidden">
                         {(!pol.garanzie || pol.garanzie.length === 0) ? (

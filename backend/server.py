@@ -2667,6 +2667,18 @@ async def patch_polizza_garanzia(
 
 @api.delete("/polizze/{pid}")
 async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
+    # Blocco: una polizza con titoli incassati o coperti non è eliminabile
+    bloccanti = await db.titoli.count_documents(
+        {"polizza_id": pid,
+         "$or": [{"stato": "incassato"}, {"titolo_coperto": True},
+                 {"data_copertura": {"$nin": [None, ""]}}]},
+    )
+    if bloccanti:
+        raise HTTPException(
+            409,
+            f"Polizza non eliminabile: ha {bloccanti} titoli incassati/coperti. "
+            "Annullala o sostituiscila invece di eliminarla.",
+        )
     await db.polizze.delete_one({"id": pid})
     await log_attivita(user, "delete", "polizza", pid)
     return {"ok": True}

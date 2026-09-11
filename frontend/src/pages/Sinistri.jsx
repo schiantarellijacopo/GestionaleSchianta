@@ -93,7 +93,9 @@ export default function Sinistri() {
 
     const [filters, setFilters] = useState({
         q: "", stato: initialStato, compagnia_id: "all", ramo: "all",
-        collaboratore_id: "all", tipologia: "all", dal: "", al: "",
+        collaboratore_id: "all", tipologia: "all",
+        // per velocità carico di default solo l'anno in corso (modificabile dai filtri)
+        dal: `${new Date().getFullYear()}-01-01`, al: "",
     });
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
 

@@ -1111,8 +1111,15 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                     data.pop("scadenza", None)
                 if not data.get("mezzo_pagamento") and existing.get("mezzo_pagamento"):
                     data.pop("mezzo_pagamento", None)
+                elif not data.get("mezzo_pagamento") and data.get("stato") == "incassato":
+                    # Titolo pagato ma senza metodo: incasso avvenuto in direzione
+                    data["mezzo_pagamento"] = "Pagamento in direzione"
+                    data["pagamento_in_direzione"] = True
                 await db.titoli.update_one({"id": existing["id"]}, {"$set": data})
             else:
+                if not data.get("mezzo_pagamento") and data.get("stato") == "incassato":
+                    data["mezzo_pagamento"] = "Pagamento in direzione"
+                    data["pagamento_in_direzione"] = True
                 obj = Titolo(**data)
                 await db.titoli.insert_one(obj.model_dump())
                 log.titoli_creati += 1

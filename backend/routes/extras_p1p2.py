@@ -897,6 +897,7 @@ class RegolazioneCalcBody(BaseModel):
     base_effettiva: Optional[float] = None   # base effettivamente dichiarata (consuntivo)
     base_tipo: Optional[str] = None          # fatturato / addetti / retribuzioni
     tasso_override: Optional[float] = None   # override del tasso polizza
+    imposta_pct: Optional[float] = None      # imposta di polizza % (default 22,25)
     periodo: Optional[str] = None            # es. "2025"
     note: Optional[str] = None
     salva: bool = True
@@ -930,11 +931,20 @@ async def calcola_regolazione(
         differenza = None
         premio_calcolato = round((base_display * tasso) / 100.0, 2)
 
+    # Imposta di polizza (% sul premio calcolato): default polizza → 22,50
+    imposta_pct = (body.imposta_pct if body.imposta_pct is not None
+                   else pol.get("regolazione_imposta_pct"))
+    if imposta_pct is None:
+        imposta_pct = 22.25
+    imposta_pct = float(imposta_pct)
+
     # Dovuto: applica il minimo non rimborsabile solo su importi positivi
     if premio_calcolato >= 0:
-        dovuto = max(premio_calcolato, minima)
+        premio_netto = max(premio_calcolato, minima)
     else:
-        dovuto = premio_calcolato  # regolazione a credito
+        premio_netto = premio_calcolato  # regolazione a credito
+    imposta = round(premio_netto * imposta_pct / 100.0, 2)
+    dovuto = round(premio_netto + imposta, 2)
 
     risultato = {
         "polizza_id": pid,
@@ -947,6 +957,9 @@ async def calcola_regolazione(
         "tasso_applicato_pct": tasso,
         "premio_calcolato": premio_calcolato,
         "minimo_non_rimborsabile": minima,
+        "premio_netto": premio_netto,
+        "imposta_pct": imposta_pct,
+        "imposta": imposta,
         "dovuto": dovuto,
         "data_calcolo": _now_iso()[:10],
         "operatore_id": user.get("id"),
@@ -966,6 +979,8 @@ async def calcola_regolazione(
             upd["regolazione_base_preventivo"] = base_prev
         if body.tasso_override is not None:
             upd["regolazione_tasso"] = tasso
+        # L'imposta di polizza viene memorizzata e riproposta nei calcoli futuri
+        upd["regolazione_imposta_pct"] = imposta_pct
         await db.polizze.update_one({"id": pid}, {"$set": upd})
     return risultato
 
