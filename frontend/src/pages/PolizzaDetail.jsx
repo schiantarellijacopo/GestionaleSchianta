@@ -430,6 +430,7 @@ export default function PolizzaDetail() {
                     <F label="Iter" value={pol.iter_status} />
                     <F label="Frazionamento" value={pol.frazionamento ? `${pol.frazionamento}${pol.tacito_rinnovo ? " · tacito rinnovo" : ""}` : "—"} />
                     <F label="Effetto" value={fmtDate(pol.effetto)} />
+                    {pol.data_emissione && <F label="Data emissione" value={fmtDate(pol.data_emissione)} />}
                     <F label="Presa in carico" value={fmtDate(pol.presa_in_carico)} />
                     <F label="Prossima quietanza" value={fmtDate(pol.prossima_quietanza)} />
                     <F label="Scad. copertura" value={fmtDate(pol.copertura_fino_a || pol.scadenza_copertura || pol.scadenza)} />

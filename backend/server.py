@@ -2473,6 +2473,15 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         )
         if u:
             doc["collaboratore_nome"] = u.get("name") or u.get("email")
+    # Ultimo premio realmente pagato + data, dal titolo incassato più recente
+    ult = await db.titoli.find(
+        {"polizza_id": pid, "stato": "incassato"},
+        {"_id": 0, "importo_lordo": 1, "data_incasso": 1, "scadenza": 1, "effetto": 1},
+    ).sort([("data_incasso", -1), ("effetto", -1)]).limit(1).to_list(1)
+    if ult:
+        doc["ultimo_premio_pagato"] = ult[0].get("importo_lordo") or 0
+        doc["ultimo_titolo_data_incasso"] = ult[0].get("data_incasso")
+        doc["ultimo_titolo_scadenza"] = ult[0].get("scadenza") or doc.get("ultimo_titolo_scadenza")
     # Arricchimento polizza sostituita: numero leggibile per la UI
     doc["sostituisce_numero"] = None
     if doc.get("sostituisce_polizza"):

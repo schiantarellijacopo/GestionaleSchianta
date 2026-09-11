@@ -664,11 +664,12 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "stato": stato,
         "effetto": effetto,
         "data_emissione": data_emissione,
-        # Scadenza contratto: calcolata da effetto + frazionamento (le colonne
-        # AK/AL/AM del flusso NON vanno usate; AL/AM solo come ultima spiaggia).
-        "scadenza": (_scadenza_da_effetto(effetto, frazionamento)
-                     or _parse_date(row.get("scadenza_emesso", ""))
-                     or _parse_date(row.get("scadenza_incassato", ""))
+        # Scadenza contratto: rec20 col AK = scadenza_effettiva. Se risulta più
+        # vecchia dell'ultimo titolo pagato viene poi allineata da
+        # `_aggiorna_scadenza_da_titoli` (post-pass).
+        "scadenza": (_parse_date(row.get("scadenza_effettiva", ""))
+                     or _parse_date(row.get("scadenza_originale", ""))
+                     or _scadenza_da_effetto(effetto, frazionamento)
                      or _now_iso()[:10]),
         # Frazionamento (rec20 col AN — frazionamento_share)
         "frazionamento": frazionamento,
@@ -1366,6 +1367,27 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
 # ---------------------------------------------------------------------------
 # Entrypoint pubblico
 # ---------------------------------------------------------------------------
+async def _aggiorna_scadenza_da_titoli(db) -> int:
+    """Se la scadenza contratto (col AK) è più vecchia dell'ultimo titolo pagato,
+    la allinea: cliente che ha pagato nel 2025 → scadenza 2026."""
+    scad_max: Dict[str, str] = {}
+    async for t in db.titoli.find(
+        {"stato": "incassato"},
+        {"_id": 0, "polizza_id": 1, "scadenza": 1},
+    ):
+        pid, sc = t.get("polizza_id"), t.get("scadenza")
+        if pid and sc and sc > scad_max.get(pid, ""):
+            scad_max[pid] = sc
+    n = 0
+    async for p in db.polizze.find({}, {"_id": 0, "id": 1, "scadenza": 1}):
+        sc = scad_max.get(p["id"])
+        if sc and sc > (p.get("scadenza") or ""):
+            res = await db.polizze.update_one(
+                {"id": p["id"]}, {"$set": {"scadenza": sc, "updated_at": _now_iso()}})
+            n += res.modified_count
+    return n
+
+
 async def _marca_polizze_sostituite(db) -> int:
     """Le polizze citate nel campo `sostituisce_polizza` passano a stato
     'sostituita', con backlink alla polizza che le ha rimpiazzate."""
@@ -1473,6 +1495,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     # Passo 1: regola stato polizza in base all'ultimo titolo pagato
     await _applica_regola_stato_da_titoli(db, polizza_id_map, log)
     counts["polizze_sostituite"] = await _marca_polizze_sostituite(db)
+    counts["scadenze_allineate"] = await _aggiorna_scadenza_da_titoli(db)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)

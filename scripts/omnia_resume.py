@@ -57,6 +57,8 @@ async def main():
 
     n = await ai._marca_polizze_sostituite(db)
     print("polizze marcate sostituite:", n, flush=True)
+    n2 = await ai._aggiorna_scadenza_da_titoli(db)
+    print("scadenze contratto allineate all'ultimo titolo pagato:", n2, flush=True)
 
     # titoli a premio zero → incassati
     r = await db.titoli.update_many({"importo_lordo": {"$lte": 0}, "stato": {"$ne": "incassato"}},
