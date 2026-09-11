@@ -215,6 +215,7 @@ function GoogleContattiSezione() {
     const [job, setJob] = useState(null);
     const [cid, setCid] = useState("");
     const [csec, setCsec] = useState("");
+    const [gmail, setGmail] = useState("");
     const pollRef = useRef(null);
 
     const load = () => api.get("/google/status").then((r) => { setSt(r.data); setCid(r.data.client_id || ""); })
@@ -237,7 +238,8 @@ function GoogleContattiSezione() {
 
     const collega = async () => {
         try {
-            const r = await api.get("/google/connect");
+            const q = gmail.trim() ? `?email=${encodeURIComponent(gmail.trim())}` : "";
+            const r = await api.get(`/google/connect${q}`);
             window.location.assign(r.data.authorization_url);
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
@@ -328,9 +330,13 @@ function GoogleContattiSezione() {
 
             <div className="flex flex-wrap gap-2 pt-1">
                 {!st.collegato ? (
-                    <Button onClick={collega} disabled={!st.configurato} className="bg-sky-700 hover:bg-sky-800" data-testid="google-collega">
-                        <ExternalLink size={14} className="mr-1" /> Collega account Google
-                    </Button>
+                    <>
+                        <Input className="w-64" placeholder="Email Google da collegare (opzionale)" value={gmail}
+                            onChange={(e) => setGmail(e.target.value)} data-testid="google-login-hint" />
+                        <Button onClick={collega} disabled={!st.configurato} className="bg-sky-700 hover:bg-sky-800" data-testid="google-collega">
+                            <ExternalLink size={14} className="mr-1" /> Collega account Google
+                        </Button>
+                    </>
                 ) : (
                     <>
                         <Button onClick={syncTutti} className="bg-emerald-700 hover:bg-emerald-800" data-testid="google-sync-tutti">

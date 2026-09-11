@@ -225,7 +225,8 @@ async def google_config_delete(user: dict = Depends(require_user("admin"))) -> d
 
 
 @router.get("/google/connect")
-async def google_connect(user: dict = Depends(require_user("admin"))) -> dict:
+async def google_connect(email: Optional[str] = None,
+                         user: dict = Depends(require_user("admin"))) -> dict:
     tid = user_tenant_id(user)
     if not tid:
         raise HTTPException(400, "Nessuna agenzia associata all'utente")
@@ -235,8 +236,10 @@ async def google_connect(user: dict = Depends(require_user("admin"))) -> dict:
         {"state": state}, {"$set": {"state": state, "agenzia_tenant_id": tid, "created_at": _now()}},
         upsert=True)
     cid, csec = await _credenziali_app(tid)
+    extra = {"login_hint": email.strip()} if email else {}
     url, _ = _flow(cid, csec, state).authorization_url(
-        access_type="offline", include_granted_scopes="true", prompt="consent")
+        access_type="offline", include_granted_scopes="true",
+        prompt="consent select_account", **extra)
     return {"authorization_url": url}
 
 
