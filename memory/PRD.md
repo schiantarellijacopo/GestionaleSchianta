@@ -984,3 +984,8 @@ Usare integration_expert prima di implementare.
 - **DUE TENANT**: 31b4950e (produzione utente schianta91@gmail.com, 49k polizze) e tenant-principale-schiantarelli (demo/test, admin@assicura.it) — isolati, il doppione cross-tenant 180992191 NON è un errore.
 - **CarichiMensili.jsx**: numero polizza ora cliccabile (Link a /polizze/:polizza_id).
 - **APERTO / da decidere**: 938 titoli "incassato" senza data incasso con effetto futuro. In OMNIA `stato_share`="incassato" MA `dt_pag_cliente` vuoto (nessuna data pagamento). Dato NON modificato in attesa di decisione utente (rispettato il flusso SHARE).
+
+### Follow-up: storno titoli aperti "morti" (2026-06 fork)
+- CAUSA "titoli 2003 ancora presenti": polizze morte (annullata/sostituita/scaduta) conservavano titoli in stato `da_incassare` mai stornati; la correzione scadenza li aveva riportati alle date reali (es. 2003/2004) rendendoli visibili nel preset "Tutti (da incassare)".
+- `/app/scripts/storna_titoli_aperti_morti.py`: stornati 3.218 titoli aperti (3.174 su polizze annullata/sostituita/scaduta + 44 residui pre-2025 su polizze attive). Tenant 31b4950e. Residui: 0.
+- NOTA: un re-import OMNIA potrebbe re-introdurli; valutare safeguard nell'importer (storno automatico titoli aperti su polizze morte in post-pass).
