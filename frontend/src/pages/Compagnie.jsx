@@ -20,7 +20,7 @@ export default function Compagnie() {
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
 
-    const load = () => api.get("/compagnie").then((r) => setList(r.data));
+    const load = () => api.get("/compagnie?tutte=true").then((r) => setList(r.data));
     useEffect(() => { load(); api.get("/agenzie").then((r) => setAgenzie(r.data)); }, []);
 
     const del = async (c) => {

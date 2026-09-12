@@ -853,9 +853,23 @@ async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[s
 # COMPAGNIE
 # ============================================================
 @api.get("/compagnie")
-async def list_compagnie(user=Depends(current_user)):
+async def list_compagnie(tutte: bool = False, user=Depends(current_user)):
+    """Elenco compagnie.
+
+    Default (filtri/form): nasconde le compagnie disabilitate (`attiva=False`)
+    che non hanno più polizze attive. `tutte=true` (Librerie/Compagnie) le
+    restituisce tutte per la gestione.
+    """
     items = await db.compagnie.find({}, {"_id": 0}).to_list(1000)
-    return items
+    if tutte:
+        return items
+    disattive_ids = [c["id"] for c in items if c.get("attiva") is False]
+    con_polizze_attive = set()
+    if disattive_ids:
+        con_polizze_attive = set(await db.polizze.distinct(
+            "compagnia_id", {"compagnia_id": {"$in": disattive_ids}, "stato": "attiva"}))
+    return [c for c in items
+            if c.get("attiva") is not False or c["id"] in con_polizze_attive]
 
 
 @api.post("/compagnie", status_code=201)

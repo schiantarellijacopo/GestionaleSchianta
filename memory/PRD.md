@@ -1035,3 +1035,10 @@ Usare integration_expert prima di implementare.
 
 ### Import titoli SDD (SEC/RD) da rec40 come pagamento in direzione (2026-06 fork)
 - `import_sdd_direzione_axicura.py`: 1.845 titoli con mezzo_pag_share='SEC' o mezzo_pagamento_cmp='RD' importati (dedup polizza+effetto+lordo, 16 saltati), mezzo_pagamento="Pagamento in direzione", valori esatti. Titoli tenant Axicura tot: 56.091.
+
+### Sessione fork 2026-06 — Mora/Disdetta, RID Direzione, Provvigioni, Filtro compagnie, Riprendi contratto
+- **Verifica termini OMNIA rec20**: `disdetta_share`=0 ovunque (assente); `giorni_mora` presente per 938 polizze (15/30). Script `update_mora_da_omnia.py`: aggiornate 1.030 polizze (mora>0) + 32 record libreria Prodotti (valore prevalente per prodotto). Non azzera i default.
+- **RID DIREZIONE (SDD)**: `set_rid_direzione_sdd.py` — 1.845 titoli SDD (note_carico='OMNIA SDD - pagamento in direzione') → mezzo_pagamento='RID DIREZIONE'; 127 polizze → mezzo_pagamento_preferito='RID DIREZIONE'. PS e preesistenti non toccati.
+- **Provvigioni da titoli**: `fill_provvigioni_da_titoli.py` — 21.261 polizze senza provvigione valorizzate con la provvigione del titolo PIU' RECENTE (annualità corrente). Solo dove >0.
+- **Filtro compagnie disabilitate**: `GET /api/compagnie` ora nasconde di default le compagnie `attiva=False` senza polizze attive; param `?tutte=true` per gestione (Compagnie.jsx, Librerie.jsx). Filtri/form usano il default filtrato.
+- **Riprendi contratto**: nuovo `POST /api/polizze/{pid}/riprendi` (annullata→attiva, pulisce data/motivo, opz. ripristina titoli stornati) + `GET /api/polizze/{pid}/titoli-stornati-annullamento`. UI: pulsante verde "Riprendi Contratto" nel banner del tab Azioni (`AzioniPolizzaTab.jsx`) solo per polizze annullate, con popup ripristino titoli. Testato e2e (curl) + screenshot UI.
