@@ -1089,3 +1089,6 @@ Usare integration_expert prima di implementare.
 - Backend (routes/setup_scambio.py): `POST /setup-iniziale?forza=true` ora ELIMINA gli artefatti del setup precedente (movimenti/sospesi/titoli is_setup_iniziale) e li ricrea con i nuovi dati (= modifica). Nuovo `GET /setup-iniziale/dati` ricostruisce i valori correnti (una riga per movimento, nessun raggruppamento -> no perdita dati) per precompilare il form.
 - Frontend (SetupIniziale.jsx): nella card "completato" pulsante "Modifica setup" (carica i dati e apre il form in editMode) + banner "stai modificando" con "Annulla modifica"; submit usa ?forza=true e mostra "Salva modifiche". Reset invariato.
 - Verificato round-trip (dati->forza) senza perdita: totali dare/avere e n. movimenti identici.
+
+### Sessione fork 2026-06 — Sovrascrittura sospesi da CSV
+- Script sovrascrivi_sospesi_csv.py: legge /tmp/sospesi_new.csv (col: Num.Contratto;Rata del;Contraente;Targa;Frazionamento;Rata=da pagare). Tenant c5ae2d0e: 76 righe valide -> 72 titoli aggiornati coperti + 4 creati, importo_da_pagare=Rata, data_copertura=Rata del, pregresso=False. Ex-sospesi non nel CSV -> incassati. Totale sospesi = 31.786,28 € (match footer CSV). Skippate righe footer/totale vuote.
