@@ -27,6 +27,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         importo_netto: round2(titolo.importo_netto),
         imposte: round2(titolo.imposte),
         ssn: round2(titolo.ssn),
+        diritti: round2(titolo.diritti),
+        accessori: round2(titolo.accessori),
         provvigioni: titolo.provvigioni != null ? round2(titolo.provvigioni) : titolo.provvigioni,
     }));
     const [giornataChiusa, setGiornataChiusa] = useState(false);
@@ -80,9 +82,19 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             const r = await api.get("/librerie/schema-provvigionale", { params: { collaboratore_id: collabId } });
             const schemi = r.data || [];
             const schema = schemi.find((s) => s.attivo !== false) || schemi[0];
-            const pct = parseFloat(schema?.percentuale_collaboratore) || 0;
-            if (pct <= 0) return null;
-            return Math.round((parseFloat(baseTotale) || 0) * pct / 100 * 100) / 100;
+            if (!schema) return null;
+            const pctColl = parseFloat(schema.percentuale_collaboratore) || 0;
+            const pctNet = parseFloat(schema.percentuale_su_premio_netto) || 0;
+            // Schema a % del compenso provvigionale
+            if (pctColl > 0) {
+                return Math.round((parseFloat(baseTotale) || 0) * pctColl / 100 * 100) / 100;
+            }
+            // Schema a % del premio netto (es. BS BROKER: 4,5% del netto)
+            if (pctNet > 0) {
+                const netto = parseFloat(f.importo_netto) || 0;
+                return Math.round(netto * pctNet / 100 * 100) / 100;
+            }
+            return null;
         } catch { return null; }
     };
     const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
@@ -180,6 +192,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             importo_netto: round2(f.importo_netto),
             imposte: round2(f.imposte),
             ssn: round2(f.ssn),
+            diritti: round2(f.diritti),
+            accessori: round2(f.accessori),
             descrizione: (f.descrizione || "").trim() || null,
             provvigioni: provvTot,
             provvigioni_operatori: opsClean,
@@ -263,6 +277,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
                     <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
                     <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.ssn || 0} onChange={(e) => set("ssn", e.target.value)} data-testid="titolo-ssn" /></div>
+                    <div><Label>Diritti €</Label><Input type="number" step="0.01" value={f.diritti || 0} onChange={(e) => set("diritti", e.target.value)} data-testid="titolo-diritti" /></div>
+                    <div><Label>Accessori €</Label><Input type="number" step="0.01" value={f.accessori || 0} onChange={(e) => set("accessori", e.target.value)} data-testid="titolo-accessori" /></div>
                     <div>
                         <Label>Provvigioni € (totale)</Label>
                         <div className="flex gap-2">

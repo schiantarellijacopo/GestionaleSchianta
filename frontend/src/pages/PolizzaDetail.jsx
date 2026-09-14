@@ -142,8 +142,14 @@ export default function PolizzaDetail() {
     );
 
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
-    const isVeicoloPol = /rca|rc\s*auto|autovettur|autocarr|motocicl|ciclomotor|\bauto\b|\bmoto\b|veicol|natant|imbarcaz/i
+    const isVeicoloPolRaw = /rca|rc\s*auto|autovettur|autocarr|motocicl|ciclomotor|\bauto\b|\bmoto\b|veicol|natant|imbarcaz/i
         .test(`${pol.ramo || ""} ${pol.prodotto || ""}`);
+    // Su polizze Libro Matricola / cumulative NON si mostra la singola tab "Veicolo"
+    // (si usa la tab Libro Matricola / Assicurati con applicazioni per veicolo/persona).
+    const isVeicoloPol = isVeicoloPolRaw && !pol.is_libro_matricola && !pol.is_cumulativa_assicurati;
+    const defaultTab = pol.is_libro_matricola ? "libro-matricola"
+        : pol.is_cumulativa_assicurati ? "assicurati"
+        : isVeicoloPol ? "veicolo" : "garanzie";
     const canDelete = user?.role === "admin";
 
     const incassa = async (tid) => {
@@ -471,7 +477,7 @@ export default function PolizzaDetail() {
 
             <TaskCollegati entitaTipo="polizza" entitaId={id} />
 
-            <Tabs defaultValue={isVeicoloPol ? "veicolo" : "garanzie"}>
+            <Tabs defaultValue={defaultTab}>
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
                     {isVeicoloPol && <TabsTrigger value="veicolo"><Car size={13} className="mr-1" />Veicolo</TabsTrigger>}
                     <TabsTrigger value="garanzie"><ShieldCheck size={13} className="mr-1" />Garanzie</TabsTrigger>
@@ -1024,6 +1030,24 @@ export default function PolizzaDetail() {
                                                         data-testid={`titolo-edit-${t.id}`}
                                                         title="Modifica"
                                                     >✎</Button>
+                                                    <Button
+                                                        size="sm" variant="outline"
+                                                        className="h-7 px-2 text-xs text-sky-700 hover:bg-sky-50"
+                                                        onClick={() => setTitoloEditing({
+                                                            ...t,
+                                                            _new: true,
+                                                            id: undefined,
+                                                            numero_titolo: undefined,
+                                                            stato: "da_incassare",
+                                                            titolo_coperto: false,
+                                                            data_incasso: null,
+                                                            data_copertura: null,
+                                                            importo_pagato: null,
+                                                            conto_cassa_id: null,
+                                                        })}
+                                                        data-testid={`titolo-copy-${t.id}`}
+                                                        title="Copia titolo (crea un nuovo titolo con gli stessi dati)"
+                                                    >⧉</Button>
                                                     <Button
                                                         size="sm" variant="outline"
                                                         className="h-7 px-2 text-xs text-rose-700 hover:bg-rose-50"

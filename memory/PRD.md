@@ -1,6 +1,24 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 14/09/2026 (fork) — Campi SSN + Descrizione libera nel titolo
+## Sessione 14/09/2026 (fork) — Batch multiplo (titoli, tab, ricerche, performance polizze)
+
+**Completato e verificato:**
+- **Provvigione BS BROKER**: `quotaCollaboratore` (TitoloDialog) ora gestisce anche lo schema "% su premio netto" (BS BROKER = 4,5% del netto), non solo `percentuale_collaboratore`.
+- **Campi titolo**: aggiunti al modello `Titolo` e al dialog i campi **SSN**, **Diritti**, **Accessori**, **Descrizione libera**; arrotondamento a 2 decimali (frontend + backend create/update).
+- **Tab Libro Matricola / Cumulativa**: il dettaglio polizza risolve `is_libro_matricola`/`is_cumulativa_assicurati` dal PRODOTTO (anche per polizze importate prima del flag) e mostra la tab giusta nascondendo la singola "Veicolo".
+- **Date polizza automatiche**: quando un titolo diventa coperto/incassato, la polizza aggiorna `scadenza_copertura`, `prossima_quietanza`, `scadenza` (solo in avanti) — helper `_aggiorna_scadenze_polizza_da_titolo` in incassa/bulk-copertura/marca-sospeso.
+- **Ultimo premio pagato**: include ora anche i titoli **coperti** (non solo incassati).
+- **Ricerca polizze in scheda anagrafica** (PolizzeTab AnagraficaDetail): campo di ricerca per numero/compagnia/ramo/prodotto.
+- **Copia titolo**: pulsante ⧉ in scheda polizza che apre il dialog precompilato con gli stessi dati (nuovo titolo da_incassare).
+- **Performance lista Polizze**: le polizze **annullate** sono escluse da tutte le viste/ricerche (param `escludi_annullate`) tranne quando si sceglie esplicitamente lo stato "annullata" → default 49.276→21.102 polizze caricate.
+
+**Da completare / da chiarire (aperti):**
+- Auto-creazione del PRIMO titolo alla creazione polizza (con gli stessi dati) — NON ancora implementato.
+- Auto-calcolo scadenza polizza + prossima quietanza da effetto+frazionamento (nuova/sostituzione/titolo) — NON ancora implementato.
+- Visual-edit "togli cella" (PolizzaDetail riga 2011, componente `F`): ambigua, chiesto quale campo.
+- Visual-edit "aggiungi inclusione/esclusione" su un select: ambigua, da chiarire quale select.
+
+
 
 - Aggiunti al modello `Titolo` i campi `ssn` (float, contributo SSN) e `descrizione` (nota libera). Nel dialog `TitoloDialog.jsx`: nuovo input **SSN €** (accanto a Imposte) e textarea **Descrizione (nota libera)** a tutta larghezza. Salvataggio + arrotondamento a 2 decimali (SSN) in create/update titolo. Verificato: SSN 12.345→12.35 e descrizione persistiti via API.
 

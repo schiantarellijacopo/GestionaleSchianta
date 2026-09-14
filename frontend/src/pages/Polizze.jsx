@@ -124,6 +124,9 @@ export default function Polizze() {
         const p = { ...presetParams(filters.preset) };
         if (filters.q) p.q = filters.q;
         if (filters.stato !== "all") p.stato = filters.stato;
+        // Le polizze ANNULLATE si vedono solo scegliendo esplicitamente lo stato/preset
+        // "annullata" (velocizza il caricamento delle altre viste).
+        if (p.stato !== "annullata") p.escludi_annullate = true;
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;

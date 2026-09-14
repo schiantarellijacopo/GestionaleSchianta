@@ -801,13 +801,27 @@ const isPolizzaAttiva = (p) => _STATI_ATTIVI.has((p.stato || "").toLowerCase());
 
 function PolizzeTab({ polizze, filter, onClearFilter }) {
     const [soloAttive, setSoloAttive] = useState(true);
+    const [qPol, setQPol] = useState("");
     // Se arriva un filtro esplicito (click da KPI) ha priorità; altrimenti applica "solo attive"
-    const filtered = filter
+    const base = filter
         ? polizze.filter((p) => (p.stato || "").toLowerCase() === filter)
         : (soloAttive ? polizze.filter(isPolizzaAttiva) : polizze);
+    const term = qPol.trim().toLowerCase();
+    const filtered = term
+        ? base.filter((p) => (`${p.numero_polizza || ""} ${p.compagnia_nome || ""} ${p.ramo || ""} ${p.prodotto || ""}`).toLowerCase().includes(term))
+        : base;
     const nAttive = polizze.filter(isPolizzaAttiva).length;
     return (
         <Card className="border-slate-200 mt-4 overflow-hidden">
+            <div className="px-4 py-2 border-b border-slate-200 bg-white">
+                <Input
+                    value={qPol}
+                    onChange={(e) => setQPol(e.target.value)}
+                    placeholder="Cerca polizza per numero, compagnia, ramo, prodotto..."
+                    className="h-8 text-sm"
+                    data-testid="anag-polizze-search"
+                />
+            </div>
             {filter ? (
                 <div className="px-4 py-2 bg-sky-50 border-b border-sky-200 text-xs text-sky-900 flex items-center justify-between">
                     <span>Filtro attivo: <b>stato = {filter}</b> · {filtered.length}/{polizze.length}</span>

@@ -2557,12 +2557,16 @@ async def list_polizze(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
+    escludi_annullate: bool = False,
     limit: int = 50000,
     user=Depends(current_user),
 ):
     flt = await visibility_filter(user)
     if stato:
         flt["stato"] = stato
+    elif escludi_annullate:
+        # velocizza le viste non-annullate escludendo le polizze annullate
+        flt["stato"] = {"$ne": "annullata"}
     if ramo:
         flt["ramo"] = ramo
     if prodotto:
@@ -2769,6 +2773,25 @@ async def get_polizza(pid: str, user=Depends(current_user)):
             )
     doc["contraente"] = await db.anagrafiche.find_one({"id": doc.get("contraente_id")}, {"_id": 0}) if doc.get("contraente_id") else None
     doc["compagnia"] = await db.compagnie.find_one({"id": doc.get("compagnia_id")}, {"_id": 0}) if doc.get("compagnia_id") else None
+    # Risolvi is_libro_matricola / is_cumulativa_assicurati dal PRODOTTO in libreria
+    # (le polizze importate prima del flag sul prodotto non lo avevano). Idempotente.
+    if not doc.get("is_libro_matricola") or not doc.get("is_cumulativa_assicurati"):
+        _prod_flt = {"nome": doc.get("prodotto")}
+        if doc.get("compagnia_id"):
+            _prod_flt["compagnia_id"] = doc.get("compagnia_id")
+        _prod = None
+        if doc.get("prodotto"):
+            _prod = await db.prodotti.find_one(_prod_flt, {"_id": 0, "is_libro_matricola": 1, "is_cumulativa_assicurati": 1})
+            if not _prod:
+                _prod = await db.prodotti.find_one({"nome": doc.get("prodotto")}, {"_id": 0, "is_libro_matricola": 1, "is_cumulativa_assicurati": 1})
+        if _prod:
+            _upd = {}
+            if _prod.get("is_libro_matricola") and not doc.get("is_libro_matricola"):
+                doc["is_libro_matricola"] = True; _upd["is_libro_matricola"] = True
+            if _prod.get("is_cumulativa_assicurati") and not doc.get("is_cumulativa_assicurati"):
+                doc["is_cumulativa_assicurati"] = True; _upd["is_cumulativa_assicurati"] = True
+            if _upd:
+                await db.polizze.update_one({"id": pid}, {"$set": {**_upd, "updated_at": _now_iso()}})
     # Arricchimento collaboratore (operatore)
     doc["collaboratore_nome"] = None
     if doc.get("collaboratore_id"):
@@ -2777,11 +2800,11 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         )
         if u:
             doc["collaboratore_nome"] = u.get("name") or u.get("email")
-    # Ultimo premio realmente pagato + data, dal titolo incassato più recente
+    # Ultimo premio realmente pagato/coperto + data, dal titolo incassato o coperto più recente
     ult = await db.titoli.find(
-        {"polizza_id": pid, "stato": "incassato"},
-        {"_id": 0, "importo_lordo": 1, "data_incasso": 1, "scadenza": 1, "effetto": 1},
-    ).sort([("data_incasso", -1), ("effetto", -1)]).limit(1).to_list(1)
+        {"polizza_id": pid, "$or": [{"stato": "incassato"}, {"titolo_coperto": True}]},
+        {"_id": 0, "importo_lordo": 1, "data_incasso": 1, "data_copertura": 1, "scadenza": 1, "effetto": 1},
+    ).sort([("data_incasso", -1), ("data_copertura", -1), ("effetto", -1)]).limit(1).to_list(1)
     if ult:
         doc["ultimo_premio_pagato"] = ult[0].get("importo_lordo") or 0
         doc["ultimo_titolo_data_incasso"] = ult[0].get("data_incasso")
@@ -3472,6 +3495,36 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
     return {"incassati": n_incassati, "totale": round(tot, 2)}
 
 
+
+async def _aggiorna_scadenze_polizza_da_titolo(polizza_id: str):
+    """Dopo copertura/incasso di un titolo, allinea le date della polizza
+    (prossima quietanza, scad. copertura, scad. contratto) alla scadenza del
+    titolo coperto/incassato più recente (solo in avanti)."""
+    if not polizza_id:
+        return
+    pol = await db.polizze.find_one(
+        {"id": polizza_id}, {"_id": 0, "scadenza": 1, "scadenza_copertura": 1, "prossima_quietanza": 1})
+    if not pol:
+        return
+    t = await db.titoli.find(
+        {"polizza_id": polizza_id, "$or": [{"stato": "incassato"}, {"titolo_coperto": True}]},
+        {"_id": 0, "scadenza": 1},
+    ).sort("scadenza", -1).limit(1).to_list(1)
+    if not t or not t[0].get("scadenza"):
+        return
+    scad = t[0]["scadenza"]
+    upd = {}
+    if not pol.get("scadenza_copertura") or scad > pol["scadenza_copertura"]:
+        upd["scadenza_copertura"] = scad
+    if not pol.get("prossima_quietanza") or scad > pol["prossima_quietanza"]:
+        upd["prossima_quietanza"] = scad
+    if not pol.get("scadenza") or scad > pol["scadenza"]:
+        upd["scadenza"] = scad
+    if upd:
+        upd["updated_at"] = _now_iso()
+        await db.polizze.update_one({"id": polizza_id}, {"$set": upd})
+
+
 @api.post("/titoli/bulk-copertura")
 async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """Marca i titoli come 'coperti' (anticipo provvigioni) creando il movimento
@@ -3547,6 +3600,10 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     await log_attivita(user, "bulk_copertura", "titolo", None,
                        f"{res.modified_count} titoli coperti dall'agenzia il {data_copertura} "
                        f"({n_movimenti} movimenti Prima Nota creati)")
+    # Allinea le date delle polizze coinvolte alla scadenza dei titoli coperti
+    _pol_ids = await db.titoli.distinct("polizza_id", {"id": {"$in": ids}})
+    for _pid in _pol_ids:
+        await _aggiorna_scadenze_polizza_da_titolo(_pid)
     return {
         "aggiornati": res.modified_count,
         "data_copertura": data_copertura,
@@ -3641,6 +3698,7 @@ async def marca_sospeso(tid: str, user=Depends(require_user("admin", "collaborat
         n_mov = 1
     await log_attivita(user, "marca_sospeso", "titolo", tid,
                        f"Titolo marcato sospeso ({n_del} incassi annullati, {n_mov} copertura creata)")
+    await _aggiorna_scadenze_polizza_da_titolo(t.get("polizza_id"))
     return {"ok": True, "incassi_annullati": n_del, "copertura_creata": n_mov}
 
 
@@ -3937,7 +3995,7 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
         if not body.get("collaboratore_id") and pol_pre.get("collaboratore_id"):
             body["collaboratore_id"] = pol_pre["collaboratore_id"]
     # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
-    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "provvigioni", "importo_da_pagare"):
+    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "diritti", "accessori", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
     obj = Titolo(**body)
@@ -3957,7 +4015,7 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
     body["updated_at"] = _now_iso()
     # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
-    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "provvigioni", "importo_da_pagare"):
+    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "diritti", "accessori", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
     res = await db.titoli.update_one({"id": tid}, {"$set": body})
@@ -4159,6 +4217,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         extra_label = f" residuo sospeso €{residuo:.2f}"
     await log_attivita(user, "incasso", "titolo", tid,
                        f"€{importo_pagato:.2f}{extra_label}".strip())
+    # Allinea le date della polizza (prossima quietanza, scad. copertura, scad. contratto)
+    await _aggiorna_scadenze_polizza_da_titolo(titolo.get("polizza_id"))
     # Auto-genera Lettera di Abbuono se è stato applicato uno sconto
     lettera_id = None
     if sconto_applicato > 0:
