@@ -397,6 +397,11 @@ async def estratto_provvigioni(
     pol_filter = {"collaboratore_id": cid}
     pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1})]
 
+    # Cutoff setup: escludi il pregresso (dati gestiti nel vecchio gestionale)
+    _cutoff = await _setup_cutoff_date()
+    if _cutoff:
+        dal = max(dal, _cutoff) if dal else _cutoff
+
     titolo_filter = {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}
     inc_cond = {}
     if dal: inc_cond["$gte"] = dal
@@ -1059,6 +1064,18 @@ async def delete_compagnia(cid: str, user=Depends(require_user("admin"))):
 # ============================================================
 # COMPAGNIE — Estratto conto e Saldo cassa
 # ============================================================
+async def _setup_cutoff_date() -> Optional[str]:
+    """Data di avvio (go-live) del nuovo gestionale: la più antica data dei
+    movimenti di setup iniziale. Sotto questa data i dati sono 'pregresso' e
+    NON entrano negli estratti conto (che partono dal saldo di apertura setup)."""
+    s = await db.setup_iniziale.find_one({"completato_at": {"$ne": None}}, {"_id": 0, "completato_at": 1})
+    if not s:
+        return None
+    m = await db.movimenti.find({"is_setup_iniziale": True}, {"_id": 0, "data_movimento": 1}) \
+        .sort("data_movimento", 1).to_list(1)
+    return m[0]["data_movimento"] if m else None
+
+
 async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Optional[str], collaboratore_id: Optional[str] = None) -> dict:
     """Aggrega dare/avere per una compagnia su un periodo.
 
@@ -1075,6 +1092,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     # delle provvigioni; altrimenti è il premio pieno.
     trattiene = bool(comp.get("trattiene_provvigioni", True))
     tipo_mandato = comp.get("tipo_mandato", "diretto")
+
+    # Cutoff setup: escludi il pregresso, parti dal saldo iniziale del setup
+    _cutoff = await _setup_cutoff_date()
+    if _cutoff:
+        dal = max(dal, _cutoff) if dal else _cutoff
 
     pol_flt: dict = {"compagnia_id": compagnia_id}
     if collaboratore_id:
@@ -1161,6 +1183,27 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "_movimento_id": m.get("id"),
         })
         totale_avere += imp
+
+    # Saldo di apertura dal setup iniziale (non è pregresso, va mostrato)
+    if _cutoff:
+        setup_movs = await db.movimenti.find(
+            {"compagnia_id": compagnia_id, "is_setup_iniziale": True}, {"_id": 0}).to_list(50)
+        for sm in setup_movs:
+            imp = float(sm.get("importo") or 0)
+            cat = sm.get("categoria")
+            riga = {"data": sm.get("data_movimento"), "tipo": "saldo_iniziale",
+                    "polizza": None, "contraente": None, "ramo": None, "dare": 0.0, "avere": 0.0,
+                    "descrizione": sm.get("descrizione") or "Saldo iniziale (setup)",
+                    "_movimento_id": sm.get("id"), "is_setup": True}
+            if cat == "setup_iniziale_compagnia_dare":
+                riga["dare"] = imp
+                totale_dare += imp
+            elif cat == "setup_iniziale_compagnia_avere":
+                riga["avere"] = imp
+                totale_avere += imp
+            else:
+                continue
+            righe.append(riga)
 
     righe.sort(key=lambda r: r["data"] or "")
     saldo = totale_dare - totale_avere
