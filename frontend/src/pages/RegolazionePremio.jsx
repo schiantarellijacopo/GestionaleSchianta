@@ -249,9 +249,17 @@ function LetteraDialog({ row, onClose, onSent }) {
 }
 
 function TitoloDialog({ row, onClose, onDone }) {
+    const ratio = row.imposte_ratio || 0;
     const [importo, setImporto] = useState(row.dovuto || 0);
-    const [imposte, setImposte] = useState(0);
+    const [imposte, setImposte] = useState(() => Math.round(((row.dovuto || 0) * ratio) * 100) / 100);
+    const [impTouched, setImpTouched] = useState(false);
     const [busy, setBusy] = useState(false);
+
+    // Riporta in automatico le imposte in proporzione all'aliquota della polizza,
+    // finché l'utente non le modifica manualmente.
+    useEffect(() => {
+        if (!impTouched) setImposte(Math.round(((parseFloat(importo) || 0) * ratio) * 100) / 100);
+    }, [importo, ratio, impTouched]);
 
     const genera = async () => {
         if (!importo || importo <= 0) { toast.error("Importo dovuto mancante: calcola prima la regolazione"); return; }
@@ -274,7 +282,7 @@ function TitoloDialog({ row, onClose, onDone }) {
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                     <div><Label className="text-xs">Importo lordo €</Label><Input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)} data-testid="reg-titolo-importo" /></div>
-                    <div><Label className="text-xs">di cui imposte €</Label><Input type="number" step="0.01" value={imposte} onChange={(e) => setImposte(e.target.value)} data-testid="reg-titolo-imposte" /></div>
+                    <div><Label className="text-xs">di cui imposte €</Label><Input type="number" step="0.01" value={imposte} onChange={(e) => { setImpTouched(true); setImposte(e.target.value); }} data-testid="reg-titolo-imposte" /></div>
                     <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
                         Verrà creato un titolo di tipo <b>regolazione</b> in stato "da incassare" collegato alla polizza.
                     </div>

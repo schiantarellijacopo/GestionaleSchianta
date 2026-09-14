@@ -12,6 +12,20 @@ def _uid() -> str:
     return str(uuid.uuid4())
 
 
+def add_months(iso_date: str, months: int) -> str:
+    """Somma `months` mesi a una data ISO (YYYY-MM-DD), gestendo fine mese."""
+    import calendar
+    from datetime import date
+    y, m, d = map(int, str(iso_date)[:10].split("-"))
+    total = (m - 1) + months
+    y2 = y + total // 12
+    m2 = total % 12 + 1
+    d2 = min(d, calendar.monthrange(y2, m2)[1])
+    return date(y2, m2, d2).isoformat()
+
+
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

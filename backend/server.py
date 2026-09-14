@@ -2931,8 +2931,41 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
         )
         if calc["provvigione_totale"]:
             body["provvigioni"] = calc["provvigione_totale"]
+    # Auto-calcolo scadenza polizza + prossima quietanza + scad. copertura da effetto+frazionamento
+    _eff = body.get("effetto")
+    if _eff:
+        from db_models import add_months as _add_months
+        _fraz = (body.get("frazionamento") or "annuale").lower()
+        _mesi_fraz = {"annuale": 12, "semestrale": 6, "quadrimestrale": 4,
+                      "trimestrale": 3, "mensile": 1, "unica": 12}.get(_fraz, 12)
+        if not body.get("scadenza"):
+            body["scadenza"] = _add_months(_eff, 12)  # contratto annuale
+        if not body.get("prossima_quietanza"):
+            body["prossima_quietanza"] = _add_months(_eff, _mesi_fraz)
+        if not body.get("scadenza_copertura"):
+            body["scadenza_copertura"] = body["prossima_quietanza"]
     obj = Polizza(**body)
     await db.polizze.insert_one(obj.model_dump())
+    # Primo titolo automatico con gli stessi dati della polizza (se non già creato altrove)
+    if obj.effetto:
+        from db_models import add_months as _add_months2
+        _mesi = {"annuale": 12, "semestrale": 6, "quadrimestrale": 4,
+                 "trimestrale": 3, "mensile": 1, "unica": 12}.get((obj.frazionamento or "annuale").lower(), 12)
+        primo = Titolo(
+            polizza_id=obj.id,
+            tipo="nuova",
+            effetto=obj.effetto,
+            scadenza=_add_months2(obj.effetto, _mesi),
+            importo_lordo=round(float(getattr(obj, "premio_lordo", 0) or 0), 2),
+            importo_netto=round(float(getattr(obj, "premio_netto", 0) or 0), 2),
+            imposte=round(float(getattr(obj, "premio_tasse", 0) or 0) + float(getattr(obj, "premio_imposte", 0) or 0), 2),
+            ssn=round(float(getattr(obj, "premio_ssn", 0) or 0), 2),
+            accessori=round(float(getattr(obj, "premio_accessori", 0) or 0), 2),
+            provvigioni=round(float(getattr(obj, "provvigioni", 0) or 0), 2),
+            collaboratore_id=getattr(obj, "collaboratore_id", None),
+            stato="da_incassare",
+        )
+        await db.titoli.insert_one(primo.model_dump())
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
     # Alert: polizza emessa
     from alert_dispatcher import safe_dispatch

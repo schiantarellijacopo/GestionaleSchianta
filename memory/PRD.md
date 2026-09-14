@@ -1,6 +1,12 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 14/09/2026 (fork) — Batch multiplo (titoli, tab, ricerche, performance polizze)
+## Sessione 14/09/2026 (fork) — Primo titolo automatico, scadenze da frazionamento, imposte auto in Regolazione
+
+- **Primo titolo automatico** (`create_polizza`): alla creazione della polizza viene generato il primo titolo (tipo "nuova") con effetto/scadenza/premi/provvigioni/imposte della polizza. Verificato e2e.
+- **Scadenze da frazionamento** (`create_polizza` + helper `add_months` in db_models): da effetto+frazionamento calcola in automatico `scadenza` (contratto = +12 mesi), `prossima_quietanza` (+intervallo frazionamento) e `scadenza_copertura`. Es. effetto 14/09/2026 semestrale → scad 2027-09-14, prox quietanza 2027-03-14.
+- **Imposte automatiche in Regolazione Premio** (`GeneraTitoloDialog`): il campo "di cui imposte €" si compila in automatico in proporzione all'aliquota della polizza (`imposte_ratio` = (tasse+imposte+ssn)/lordo, aggiunto alla riga backend), ricalcolato al variare dell'importo finché l'utente non lo modifica manualmente.
+
+
 
 **Completato e verificato:**
 - **Provvigione BS BROKER**: `quotaCollaboratore` (TitoloDialog) ora gestisce anche lo schema "% su premio netto" (BS BROKER = 4,5% del netto), non solo `percentuale_collaboratore`.

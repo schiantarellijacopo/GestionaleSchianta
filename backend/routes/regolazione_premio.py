@@ -111,6 +111,10 @@ async def list_regolazioni(
             "stato": st,
             "ultimo_calcolo": p.get("regolazione_ultimo_calcolo"),
             "dovuto": p.get("regolazione_dovuto") or 0,
+            "imposte_ratio": (
+                round((float(p.get("premio_tasse") or 0) + float(p.get("premio_imposte") or 0) + float(p.get("premio_ssn") or 0)) / float(p.get("premio_lordo")), 6)
+                if float(p.get("premio_lordo") or 0) > 0 else 0
+            ),
             "lettera_inviata_data": p.get("regolazione_lettera_inviata_data"),
             "titolo_id": p.get("regolazione_titolo_id"),
             "da_inviare": da_inviare,
