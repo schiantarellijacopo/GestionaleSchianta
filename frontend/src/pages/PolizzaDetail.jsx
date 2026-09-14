@@ -129,7 +129,7 @@ export default function PolizzaDetail() {
         /* eslint-disable-next-line */
     }, [pol]);
     useEffect(() => {
-        api.get("/librerie/conti-cassa").then((r) => setConti(r.data || [])).catch(() => {});
+        api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data || [])).catch(() => {});
     }, []);
     if (!pol) return <Loading />;
 

@@ -1,0 +1,34 @@
+{
+  "summary": "Backend+frontend testing su KPI (Contabilità/Polizze/Titoli/Sinistri), KPI custom CRUD, tag età automatici e filtri (conti/compagnie/rami/prodotti). Trovato e fixato bug critico: _resolve_custom_kpi in /app/backend/routes/kpi.py era incompleta (nessun return) → qualsiasi KPI custom faceva crashare /kpi/{sezione}/stats. Dopo il fix tutti i 12 test pytest passano e la UI mostra i KPI custom correttamente.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/kpi/{sezione}/stats con custom", "issue": "_resolve_custom_kpi non aveva return; ritornava None causando TypeError quando la sezione aveva KPI custom. FIXATO: ora ritorna {value:count, sub:euro_sum, link:deep-link}.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Pagina /sinistri caricamento", "issue": "In UI test la kpi-bar-sinistri non è comparsa entro 20s (pagina resta in 'Caricamento...' più a lungo delle altre); il backend /kpi/sinistri/stats risponde correttamente in <1s (test pytest verde). Possibile lentezza dovuta ad altre chiamate della pagina, non al KPI. Consigliato indagare rendering iniziale della pagina Sinistri.", "affected_selectors": ["[data-testid='kpi-bar-sinistri']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter88_kpi_tags_filters.py", "/app/test_reports/pytest/iter88.xml"],
+  "action_items": [
+    "(Opzionale) Investigare la lentezza iniziale della pagina /sinistri: il KPI stesso funziona ma la barra impiega >20s a comparire nel test headless; probabilmente altre chiamate parallele saturano.",
+    "Confermare comportamento del deep-link generato per KPI custom (aggiunto ora in _resolve_custom_kpi) — es. /polizze?tag=<tag> — verificare che la pagina Polizze applichi il filtro tag da query string."
+  ],
+  "critical_code_review_comments": [
+    "kpi.py _resolve_custom_kpi era chiaramente incompleta: la funzione terminava dopo aver calcolato sum_field senza return. Bug pre-esistente esposto dal path 'crea KPI custom → apri sezione'.",
+    "KpiBar.jsx: nel dialog non è presente data-testid sui trigger dei Select 'Filtra per' (solo su 'Valore filtro'); i test end-to-end sui Select colore/icona/filtro-kind risultano più fragili.",
+    "kpi.py: state_cnt non gestisce lo stato 'sospesa' pur essendo listato in stati_map delle opzioni polizze; conteggio 'per stato' incompleto."
+  ],
+  "updated_files": ["/app/backend/routes/kpi.py", "/app/backend/tests/test_iter88_kpi_tags_filters.py"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "~85% (Contabilità/Polizze/Titoli KPI + Personalizza KPI verificati; Sinistri timeout in headless)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Nessun dato residuo: KPI custom TEST_UI_KPI_88 rimossa; anagrafica TEST_AgeTag_* rimossa in fixture teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Bug KPI custom risolto in _resolve_custom_kpi (kpi.py righe ~447+). Verificato via curl+pytest+UI: contabilità mostra '€ 951,50 / € 5,00 / € 946,50'. Age tags automatici verificati (create 1950→anziano_over_65+gen_anni_50, update 2006→giovane_under_30+gen_anni_00, tag manuale 'vip' preservato). Filtri conti/compagnie/rami/prodotti attivi=default. Se il main agent vuole ri-verificare velocemente, eseguire: pytest /app/backend/tests/test_iter88_kpi_tags_filters.py -v.",
+  "rca of the issue": "Root cause: durante la refactor delle KPI l'autore ha lasciato _resolve_custom_kpi troncata (calcolava count e sum_field ma senza return dict). Chiamando /kpi/<sez>/stats con almeno una KPI custom, il backend faceva r['value'] su None → TypeError 500. Reproduzione: POST /kpi/custom {sezione:'polizze', filtro_kind:'tag', filtro_params:{tag:'vip'}} → GET /kpi/polizze/stats → 500. Mitigazione: aggiunto blocco di calcolo somma (aggregate $sum su campo importo per sezione), formato sub come '€ X,XX' e link deep verso la sezione con querystring param."
+}

@@ -1070,20 +1070,13 @@ async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[s
 async def list_compagnie(tutte: bool = False, user=Depends(current_user)):
     """Elenco compagnie.
 
-    Default (filtri/form): nasconde le compagnie disabilitate (`attiva=False`)
-    che non hanno più polizze attive. `tutte=true` (Librerie/Compagnie) le
-    restituisce tutte per la gestione.
+    Default (filtri/form): nasconde TUTTE le compagnie disabilitate (`attiva=False`).
+    `tutte=true` (Librerie/Compagnie) le restituisce tutte per la gestione/riattivazione.
     """
     items = await db.compagnie.find({}, {"_id": 0}).to_list(1000)
     if tutte:
         return items
-    disattive_ids = [c["id"] for c in items if c.get("attiva") is False]
-    con_polizze_attive = set()
-    if disattive_ids:
-        con_polizze_attive = set(await db.polizze.distinct(
-            "compagnia_id", {"compagnia_id": {"$in": disattive_ids}, "stato": "attiva"}))
-    return [c for c in items
-            if c.get("attiva") is not False or c["id"] in con_polizze_attive]
+    return [c for c in items if c.get("attiva") is not False]
 
 
 @api.post("/compagnie", status_code=201)
@@ -1171,7 +1164,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     mov_inc_flt: dict = {
         "polizza_id": {"$in": list(pol_index.keys())},
         "tipo": "entrata",
-        "categoria": {"$in": ["incasso_premio", "copertura_titolo"]},
+        "categoria": {"$in": ["incasso_premio", "copertura_titolo", "incasso_premio_direzione"]},
         "pregresso": {"$ne": True},
     }
     if dal or al:
@@ -1199,11 +1192,16 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     for m in mov_inc:
         pol = pol_index.get(m["polizza_id"], {})
         provv = float(m.get("provvigioni") or 0)
-        lordo = float(m.get("importo") or 0) + float(m.get("quota_sconto") or 0)
-        dovuto_alla_compagnia = (lordo - provv) if trattiene else lordo
+        _is_dir = m.get("categoria") == "incasso_premio_direzione"
+        if _is_dir:
+            lordo = float(m.get("importo") or 0)
+            dovuto_alla_compagnia = -provv  # cliente paga la compagnia: ci deve solo le provvigioni
+        else:
+            lordo = float(m.get("importo") or 0) + float(m.get("quota_sconto") or 0)
+            dovuto_alla_compagnia = (lordo - provv) if trattiene else lordo
         righe.append({
             "data": m.get("data_movimento"),
-            "tipo": "incasso",
+            "tipo": "incasso_direzione" if _is_dir else "incasso",
             "titolo_id": m.get("titolo_id"),
             "polizza_id": pol.get("id"),
             "polizza": pol.get("numero_polizza"),
@@ -6034,7 +6032,15 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             cum_entrate += importo
             cum_provv += provv_riga
             cum_saldo += (importo - provv_riga) if trattiene else (-provv_riga)
-        if is_e and cat == "provvigioni":
+        if is_e and cat == "incasso_premio_direzione":
+            # Incasso IN DIREZIONE: il cliente paga la compagnia direttamente.
+            # Entrate = lordo (fittizia), Provvigioni maturate; il SALDO è ridotto
+            # SOLO delle provvigioni (la compagnia ci deve le provvigioni). Nessun
+            # premio a debito. Coerente con la riga giornaliera del Brogliaccio.
+            provv_riga = float(m.get("provvigioni") or 0)
+            cum_entrate += importo
+            cum_provv += provv_riga
+            cum_saldo += -provv_riga
             cum_rappel += importo  # rappel: NON in provvigioni, riduce/alimenta il saldo cassa
         if is_e and cat == "incasso_premio":
             provv_riga = float(m.get("provvigioni") or 0)
@@ -6177,6 +6183,17 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rimesse = rim_agg[0]["tot"] if rim_agg else 0.0
+        # provvigioni maturate su incassi IN DIREZIONE (cliente paga la compagnia):
+        # la compagnia ci deve le provvigioni → riducono il saldo da versare.
+        direzione_provv = 0.0
+        if pol_ids:
+            dir_agg = await db.movimenti.aggregate([
+                {"$match": {"polizza_id": {"$in": pol_ids}, "tipo": "entrata",
+                            "categoria": "incasso_premio_direzione", "pregresso": {"$ne": True},
+                            "data_movimento": ({"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a})}},
+                {"$group": {"_id": None, "provv": {"$sum": "$provvigioni"}}},
+            ]).to_list(1)
+            direzione_provv = (dir_agg[0]["provv"] or 0.0) if dir_agg else 0.0
         # ritenute trattenute dalla compagnia (riducono il saldo da versare)
         rit_agg = await db.movimenti.aggregate([
             {"$match": {
@@ -6208,8 +6225,8 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                     setup_avere += imp
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
         saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare
-        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute - setup_avere
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01:
+        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute - setup_avere - direzione_provv
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
             "compagnia_id": cid,

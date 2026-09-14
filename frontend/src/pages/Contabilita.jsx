@@ -40,7 +40,7 @@ export default function Contabilita() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al]);
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
-    useEffect(() => { api.get("/librerie/conti-cassa").then((r) => setConti(r.data || [])); }, []);
+    useEffect(() => { api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data || [])); }, []);
 
     const caricaEstratto = (id) => {
         setEstrattoAna(id);

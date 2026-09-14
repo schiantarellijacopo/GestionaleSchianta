@@ -382,17 +382,18 @@ async def _stats_prima_nota(scope_filter: dict) -> list[dict]:
     r = r[0] if r else {"entrate": 0, "uscite": 0, "n": 0}
     entrate = _eur(r["entrate"])
     uscite = _eur(abs(r["uscite"]))
+
+    def _e(v):
+        return f"€ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
     return [
         {"key": "movimenti", "label": "Movimenti mese", "value": r["n"],
          "color": "sky", "icon": "Receipt", "link": "/contabilita"},
-        {"key": "entrate", "label": "Entrate", "value": 0,
-         "sub": f"€ {entrate:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        {"key": "entrate", "label": "Entrate mese", "value": _e(entrate),
          "color": "emerald", "icon": "TrendingUp", "link": "/contabilita?tipo=entrata"},
-        {"key": "uscite", "label": "Uscite", "value": 0,
-         "sub": f"€ {uscite:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        {"key": "uscite", "label": "Uscite mese", "value": _e(uscite),
          "color": "rose", "icon": "TrendingDown", "link": "/contabilita?tipo=uscita"},
-        {"key": "saldo", "label": "Saldo mese", "value": 0,
-         "sub": f"€ {(entrate - uscite):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        {"key": "saldo", "label": "Saldo mese", "value": _e(entrate - uscite),
          "color": "violet", "icon": "Wallet", "link": "/contabilita"},
     ]
 
@@ -450,6 +451,28 @@ async def _resolve_custom_kpi(custom: dict) -> dict:
         "sinistri": "importo_liquidato",
         "avvisi": "importo_lordo", "prima_nota": "importo",
     }.get(sezione)
+    sub = None
+    if sum_field:
+        try:
+            agg = await coll.aggregate([
+                {"$match": flt},
+                {"$group": {"_id": None, "tot": {"$sum": f"${sum_field}"}}},
+            ]).to_list(1)
+            tot = float((agg[0] or {}).get("tot", 0)) if agg else 0.0
+            sub = f"€ {tot:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            sub = None
+    # Costruisci link deep verso la lista sezione
+    section_route = {
+        "polizze": "/polizze", "titoli": "/titoli", "sinistri": "/sinistri",
+        "avvisi": "/avvisi", "prima_nota": "/contabilita",
+    }.get(sezione)
+    link = None
+    if section_route and link_params:
+        qs = "&".join(f"{k}={v}" for k, v in link_params)
+        link = f"{section_route}?{qs}"
+    return {"value": n, "sub": sub, "link": link}
+
 
 @router.get("/kpi/options")
 async def kpi_filter_options(

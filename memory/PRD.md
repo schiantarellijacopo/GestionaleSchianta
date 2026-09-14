@@ -1,5 +1,23 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — KPI reali, tag età automatici, filtri nascondono disabilitati/senza-polizze, saldo direzione
+
+- **Fix KPI Contabilità (prima_nota)** (`routes/kpi.py` `_stats_prima_nota`): Entrate/Uscite/Saldo mostravano "0" come valore grande con l'importo reale relegato in `sub`. Ora il valore principale è l'importo in euro. Verificato via curl (es. Uscite value="€ 31.219,95").
+- **Fix critico KPI custom** (trovato dal testing agent, `_resolve_custom_kpi`): la funzione non aveva `return` → qualsiasi KPI custom mandava in crash `/kpi/{sezione}/stats`. Ora ritorna `{value:count, sub:euro, link:deep-link}`. 12/12 pytest verdi.
+- **Tag età AUTOMATICI** (`routes/anagrafiche.py` `_age_tags`/`_apply_age_tags`): su create/update anagrafica, dalla `data_nascita` si applicano automaticamente `gen_anni_XX` + `anziano_over_65`/`giovane_under_30`, preservando i tag manuali. Verificato via curl (1955→over_65; update 2005→under_30; "vip" preservato). Coerente con l'endpoint bulk `/anagrafiche/tags/auto-genera`.
+- **Filtri nascondono elementi disabilitati/vuoti**:
+  - Conti/Banche disabilitate: le tendine filtro passano `attivi=true` (Titoli, TitoliSospesi, Contabilita, EstrattoContoCompagnie, PolizzaDetail). La gestione Librerie continua a mostrare gli archiviati.
+  - Compagnie disabilitate: `/compagnie` default esclude TUTTE le `attiva=False`; Librerie > Compagnie usa `?tutte=true`.
+  - Rami/Prodotti senza polizze: nuovi param `con_polizze=1` su `/librerie/rami` e `/librerie/prodotti`, applicati ai filtri di Polizze e Titoli (non ai form di creazione). Verificato (rami 49→3).
+- **Saldo direzione nei cumulativi** (`_compute_brogliaccio` KPI cumulativi, `_compute_saldi_compagnie`, `_compagnia_estratto_data`): un incasso IN DIREZIONE ora riduce il saldo verso compagnia delle SOLE provvigioni (−provv), coerente giorno/cumulativo/E-C. Verificato: CATTOLICA E/C=widget=43.183,72 (DELTA=0).
+- **Fix "incasso registrato due volte"** (`DialogIncassoCopertura.jsx`): la copertura separata parte solo se NON si incassa contemporaneamente → un incasso diretto = una sola riga `incasso_premio` (Entrate/Provv/Saldo/Banca).
+
+### Limiti noti / prossimi passi
+- I deep-link generati dalle card KPI (es. `/polizze?tag=`, `/contabilita?tipo=entrata`) NON vengono ancora applicati come filtro dalle pagine di destinazione (Polizze non ha un filtro "tag"; la lista Contabilità non filtra per `tipo`). Da implementare se si vuole il click-through filtrato.
+- KPI custom con filtro "tag" su sezioni polizze/titoli: i tag sono sulle anagrafiche, non su polizze/titoli → il conteggio richiederebbe un join contraente→polizze (attualmente conterebbe 0).
+- Pagina /sinistri: in test headless la barra KPI tarda a comparire (>20s) per lentezza di caricamento della pagina, non del KPI (backend <1s). Da investigare.
+
+
 ## Sessione 14/09/2026 (fork) — Fix incasso "registrato due volte" (copertura + incasso_coperto)
 
 - **🔴 Fix doppia riga in Prima Nota all'incasso** (`DialogIncassoCopertura.jsx`): la checkbox "Copertura" è attiva di default; se l'utente incassava anche (checkbox Incasso), venivano create DUE righe — `copertura_titolo` (Entrate/Provv/Saldo/Sospesi) + `incasso_coperto` (−Sospesi/+Banca). L'utente vuole un unico incasso. Ora la copertura separata (`bulk-copertura`) viene eseguita SOLO se NON si sta incassando nello stesso momento (`copertura && !giaCoperto && !incasso`). Incassando direttamente su un titolo non coperto, l'endpoint `incassa` registra una SOLA riga `incasso_premio` = Entrate + Provvigioni + Saldo + Banca. Verificato e2e (1 solo movimento incasso_premio con provv e conto). Per correggere i titoli già sdoppiati: usare il nuovo pulsante ↩ "Rimetti in arretrato" e re-incassare.

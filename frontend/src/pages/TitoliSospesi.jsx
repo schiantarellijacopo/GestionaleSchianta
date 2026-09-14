@@ -36,7 +36,7 @@ export default function TitoliSospesi() {
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollab(r.data));
-        api.get("/librerie/conti-cassa").then((r) => setConti(r.data));
+        api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
     }, []);
     useEffect(() => { load(); }, [load]);
 

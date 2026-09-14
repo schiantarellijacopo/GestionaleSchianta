@@ -32,7 +32,7 @@ const SECTIONS = [
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "tipologie-sinistri", label: "Tipologie sinistri", icon: <AlertTriangle size={14} />, endpoint: "/librerie/tipologie-sinistri" },
-    { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie" },
+    { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie?tutte=true" },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
     { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },

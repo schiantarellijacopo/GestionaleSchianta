@@ -842,6 +842,7 @@ def _ramo_aliases(ramo: str) -> list[str]:
 async def list_prodotti(
     compagnia_id: Optional[str] = None,
     ramo: Optional[str] = None,
+    con_polizze: bool = False,
     user: dict = Depends(current_user),
 ) -> list[dict]:
     flt: dict = {}
@@ -851,7 +852,11 @@ async def list_prodotti(
         # Match fuzzy: cerca tutti gli alias del ramo (case-insensitive con/senza spazi)
         aliases = _ramo_aliases(ramo)
         flt["$or"] = [{"ramo": {"$regex": f"^{re.escape(a)}$", "$options": "i"}} for a in aliases]
-    return await db.prodotti.find(flt, {"_id": 0}).sort("nome", 1).to_list(1000)
+    docs = await db.prodotti.find(flt, {"_id": 0}).sort("nome", 1).to_list(1000)
+    if con_polizze:
+        usati = {(p or "").strip().lower() for p in await db.polizze.distinct("prodotto") if p}
+        docs = [d for d in docs if (d.get("nome") or "").strip().lower() in usati]
+    return docs
 
 
 @router.post("/librerie/prodotti", status_code=201)
@@ -1035,23 +1040,27 @@ async def seed_default_tipologie_sinistri() -> None:
 
 # --- RAMI ---
 @router.get("/librerie/rami")
-async def list_rami(dedup: bool = False, user: dict = Depends(current_user)) -> list[dict]:
-    """`dedup=1` (per le tendine): esclude archiviati e doppioni con stesso codice."""
+async def list_rami(dedup: bool = False, con_polizze: bool = False, user: dict = Depends(current_user)) -> list[dict]:
+    """`dedup=1` (per le tendine): esclude archiviati e doppioni con stesso codice.
+    `con_polizze=1` (filtri): mostra solo i rami effettivamente usati da almeno una polizza."""
     docs = await db.rami.find({}, {"_id": 0}).sort("nome", 1).to_list(300)
     docs = [d for d in docs if not d.get("unito_in_ramo_id")]
-    if not dedup:
-        return docs
-    visti: set[str] = set()
-    out = []
-    for d in docs:
-        if d.get("attivo") is False:
-            continue
-        k = (d.get("codice") or "").strip().upper()
-        if k in visti:
-            continue
-        visti.add(k)
-        out.append(d)
-    return out
+    if dedup:
+        visti: set[str] = set()
+        out = []
+        for d in docs:
+            if d.get("attivo") is False:
+                continue
+            k = (d.get("codice") or "").strip().upper()
+            if k in visti:
+                continue
+            visti.add(k)
+            out.append(d)
+        docs = out
+    if con_polizze:
+        usati = {(r or "").strip().lower() for r in await db.polizze.distinct("ramo") if r}
+        docs = [d for d in docs if (d.get("nome") or "").strip().lower() in usati]
+    return docs
 
 
 @router.post("/librerie/rami", status_code=201)

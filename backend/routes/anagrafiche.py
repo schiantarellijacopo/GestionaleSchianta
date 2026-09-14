@@ -596,6 +596,31 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
     return doc
 
 
+def _age_tags(data_nascita) -> list:
+    """Tag anagrafici basati sull'età (auto): gen_anni_XX + fascia età.
+    Coerente con l'endpoint bulk /anagrafiche/tags/auto-genera."""
+    from datetime import date
+    try:
+        d = date.fromisoformat(str(data_nascita)[:10])
+    except Exception:
+        return []
+    today = date.today()
+    eta = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
+    tags = [f"gen_anni_{str((d.year // 10) * 10)[-2:]}"]
+    if eta >= 65:
+        tags.append("anziano_over_65")
+    if eta < 30:
+        tags.append("giovane_under_30")
+    return tags
+
+
+def _apply_age_tags(tags, data_nascita) -> list:
+    """Riapplica i tag età mantenendo intatti i tag manuali/altri automatici."""
+    base = [t for t in (tags or [])
+            if not (str(t).startswith("gen_anni_") or t in {"anziano_over_65", "giovane_under_30"})]
+    return sorted(set(base + _age_tags(data_nascita)))
+
+
 @router.post("/anagrafiche", status_code=201)
 async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     body = _normalize_upper(body)
@@ -641,6 +666,8 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
                            f"Anagrafica sovrascritta da import: {updated.get('ragione_sociale')}")
         return updated
 
+    # Tag età automatici (gen_anni_XX / fascia età) da data_nascita
+    body["tags"] = _apply_age_tags(body.get("tags"), body.get("data_nascita"))
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")
@@ -665,6 +692,13 @@ async def update_anagrafica(aid: str, body: dict, user: dict = Depends(require_u
         body["lat"] = None
         body["lng"] = None
         body = await _auto_geocode(body)
+    # Tag età automatici: riapplica se cambia data_nascita o tags
+    if "data_nascita" in body or "tags" in body:
+        _cur = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "tags": 1, "data_nascita": 1}) or {}
+        body["tags"] = _apply_age_tags(
+            body.get("tags", _cur.get("tags")),
+            body.get("data_nascita", _cur.get("data_nascita")),
+        )
     body["updated_at"] = _now_iso()
     res = await db.anagrafiche.update_one({"id": aid}, {"$set": body})
     if res.matched_count == 0:

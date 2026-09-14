@@ -135,10 +135,10 @@ export default function Titoli({ storicoMode = false } = {}) {
     useEffect(() => { load(); }, [filters]);
     useEffect(() => {
         Promise.all([
-            api.get("/compagnie"), api.get("/librerie/rami?dedup=1"),
-            api.get("/librerie/conti-cassa"),
+            api.get("/compagnie"), api.get("/librerie/rami?dedup=1&con_polizze=1"),
+            api.get("/librerie/conti-cassa", { params: { attivi: true } }),
             api.get("/auth/users").catch(() => ({ data: [] })),
-            api.get("/librerie/prodotti").catch(() => ({ data: [] })),
+            api.get("/librerie/prodotti", { params: { con_polizze: true } }).catch(() => ({ data: [] })),
         ]).then(([c, r, cc, u, p]) => {
             setCompagnie(c.data); setRami(r.data); setConti(cc.data);
             setUtenti((u.data || []).filter((x) => x.role !== "cliente" && x.attivo !== false));

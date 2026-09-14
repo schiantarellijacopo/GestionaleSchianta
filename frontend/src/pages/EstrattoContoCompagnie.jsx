@@ -143,7 +143,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
         api.get("/collaboratori").then((r) => setCollaboratori(
             (r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))
         )).catch(() => {});
-        api.get("/librerie/conti-cassa").then((r) => setConti(r.data || []));
+        api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data || []));
     }, []);
 
     const load = useCallback(() => {

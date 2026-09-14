@@ -166,7 +166,7 @@ export default function Polizze() {
 
     useEffect(() => {
         Promise.all([
-            api.get("/compagnie"), api.get("/librerie/rami?dedup=1"),
+            api.get("/compagnie"), api.get("/librerie/rami?dedup=1&con_polizze=1"),
             api.get("/auth/users").catch(() => ({ data: [] })),
         ]).then(([c, r, u]) => {
             setCompagnie(c.data); setRami(r.data);
