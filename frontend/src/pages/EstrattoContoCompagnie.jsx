@@ -137,6 +137,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const [data, setData] = useState(null);
     const [selected, setSelected] = useState(new Set());
     const [payOpen, setPayOpen] = useState(false);
+    const [voceOpen, setVoceOpen] = useState(false);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollaboratori(
@@ -157,7 +158,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
     const altreVoci = (data?.righe || []).filter(
-        (r) => r.tipo === "rappel" || r.tipo === "ritenuta_compagnia" || r.tipo === "fattura_partner",
+        (r) => r.tipo === "rappel" || r.tipo === "ritenuta_compagnia" || r.tipo === "fattura_partner" || r.tipo === "voce_manuale",
     );
     // Solo non-pagati + pagamenti + altre voci (rappel/ritenute/fatture partner) nella tab "Movimenti & versamenti".
     // I titoli già pagati sono visibili solo nello "Storico rimesse".
@@ -185,6 +186,16 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const toggle = (id) => setSelected((p) => {
         const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
     });
+
+    const deleteVoce = async (vid) => {
+        if (!window.confirm("Rimuovere questa voce manuale?")) return;
+        try {
+            await api.delete(`/compagnie/${compagnia.id}/voci-manuali/${vid}`);
+            load();
+        } catch (e) {
+            alert(e.response?.data?.detail || "Errore");
+        }
+    };
     const toggleAll = () => {
         if (selected.size > 0) setSelected(new Set());
         else setSelected(new Set(daVersare.map((r) => r.titolo_id)));
@@ -243,6 +254,10 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         </Select>
                     </div>
                     <Button onClick={load} data-testid="ec-applica">Applica</Button>
+                    <Button variant="outline" onClick={() => setVoceOpen(true)}
+                        className="border-sky-300 text-sky-700 hover:bg-sky-50" data-testid="ec-add-voce">
+                        + Voce manuale
+                    </Button>
                     {data && (
                         <div className="ml-auto flex gap-6 text-sm">
                             <div><span className="text-slate-500">Dare:</span> <span className="font-bold num">{fmtEur(data.totale_dare)}</span></div>
@@ -310,8 +325,17 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         {r.tipo === "rappel" && <span className="badge bg-fuchsia-100 text-fuchsia-700">rappel</span>}
                                         {r.tipo === "ritenuta_compagnia" && <span className="badge bg-rose-100 text-rose-700">ritenuta</span>}
                                         {r.tipo === "fattura_partner" && <span className="badge bg-amber-100 text-amber-700">fattura partner</span>}
+                                        {r.tipo === "voce_manuale" && <span className="badge bg-sky-100 text-sky-700">voce manuale</span>}
                                     </td>
-                                    <td className="font-mono text-xs">{r.polizza || (r.descrizione ? <span className="text-slate-600">{r.descrizione}</span> : "-")}</td>
+                                    <td className="font-mono text-xs">
+                                        {r.polizza || (r.descrizione ? <span className="text-slate-600">{r.descrizione}</span> : "-")}
+                                        {r.is_voce_manuale && (
+                                            <button onClick={() => deleteVoce(r.voce_manuale_id)}
+                                                className="ml-2 text-rose-600 hover:text-rose-800 text-xs"
+                                                title="Elimina voce manuale"
+                                                data-testid={`ec-del-voce-${r.voce_manuale_id}`}>✕</button>
+                                        )}
+                                    </td>
                                     <td className="text-xs">{r.contraente || "-"}</td>
                                     <td className="text-xs text-sky-700">{r.collaboratore || "-"}</td>
                                     <td className="text-xs">{r.ramo || "-"}</td>
@@ -341,6 +365,15 @@ function DettaglioEstratto({ compagnia, onBack }) {
                     conti={conti}
                     onClose={(refresh) => {
                         setPayOpen(false);
+                        if (refresh) load();
+                    }}
+                />
+            )}
+            {voceOpen && (
+                <VoceManualeDialog
+                    compagnia={compagnia}
+                    onClose={(refresh) => {
+                        setVoceOpen(false);
                         if (refresh) load();
                     }}
                 />
@@ -492,6 +525,80 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
                 </tr>
             )}
         </>
+    );
+}
+
+function VoceManualeDialog({ compagnia, onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [data, setData] = useState(today);
+    const [causale, setCausale] = useState("");
+    const [tipo, setTipo] = useState("dare");
+    const [importo, setImporto] = useState("");
+    const [note, setNote] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    const conferma = async () => {
+        if (!causale.trim()) { alert("Inserisci la causale"); return; }
+        const imp = parseFloat(importo);
+        if (isNaN(imp) || imp <= 0) { alert("Inserisci un importo valido (in valore assoluto)"); return; }
+        setSaving(true);
+        try {
+            await api.post(`/compagnie/${compagnia.id}/voci-manuali`, {
+                data, causale, tipo, importo: imp, note,
+            });
+            onClose(true);
+        } catch (e) {
+            alert(e.response?.data?.detail || "Errore");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" data-testid="ec-voce-dialog">
+            <Card className="bg-white p-6 max-w-md w-full">
+                <h3 className="font-semibold text-lg mb-3">Nuova voce manuale — {compagnia.ragione_sociale}</h3>
+                <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900 mb-3">
+                    Rettifica manuale del saldo verso la compagnia. <b>Dare</b> aumenta il dovuto alla compagnia; <b>Avere</b> lo riduce (credito).
+                </div>
+                <div className="space-y-3">
+                    <div>
+                        <Label>Data</Label>
+                        <Input type="date" value={data} onChange={(e) => setData(e.target.value)} data-testid="ec-voce-data" />
+                    </div>
+                    <div>
+                        <Label>Causale *</Label>
+                        <Input value={causale} onChange={(e) => setCausale(e.target.value)}
+                            placeholder="Es. Conguaglio / Storno / Rettifica" data-testid="ec-voce-causale" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                        <div>
+                            <Label>Tipo</Label>
+                            <Select value={tipo} onValueChange={setTipo}>
+                                <SelectTrigger data-testid="ec-voce-tipo"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="dare">Dare (aumenta)</SelectItem>
+                                    <SelectItem value="avere">Avere (riduce)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="col-span-2">
+                            <Label>Importo € *</Label>
+                            <Input type="number" step="0.01" min="0" value={importo}
+                                onChange={(e) => setImporto(e.target.value)} data-testid="ec-voce-importo" />
+                        </div>
+                    </div>
+                    <div>
+                        <Label>Note (opzionale)</Label>
+                        <Input value={note} onChange={(e) => setNote(e.target.value)} data-testid="ec-voce-note" />
+                    </div>
+                </div>
+                <div className="flex gap-2 justify-end mt-5">
+                    <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
+                    <Button onClick={conferma} disabled={saving} className="bg-sky-700 hover:bg-sky-800" data-testid="ec-voce-save">
+                        {saving ? "Salvataggio…" : "Salva voce"}
+                    </Button>
+                </div>
+            </Card>
+        </div>
     );
 }
 

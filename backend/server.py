@@ -556,6 +556,57 @@ async def delete_voce_manuale_collab(
     return {"ok": True}
 
 
+# --- Voci manuali (DARE/AVERE) sull'estratto conto compagnia ---
+@api.get("/compagnie/{cid}/voci-manuali")
+async def list_voci_manuali_compagnia(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    f = {"compagnia_id": cid}
+    cond = {}
+    if dal: cond["$gte"] = dal
+    if al: cond["$lte"] = al
+    if cond: f["data"] = cond
+    return await db.voci_manuali_compagnia.find(f, {"_id": 0}).sort("data", -1).to_list(500)
+
+
+@api.post("/compagnie/{cid}/voci-manuali", status_code=201)
+async def create_voce_manuale_compagnia(cid: str, body: dict, user=Depends(require_user("admin"))):
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    if not body.get("causale"):
+        raise HTTPException(400, "Causale obbligatoria")
+    if body.get("importo") in (None, ""):
+        raise HTTPException(400, "Importo obbligatorio")
+    tipo = body.get("tipo")
+    if tipo not in ("dare", "avere"):
+        raise HTTPException(400, "Tipo obbligatorio: 'dare' o 'avere'")
+    import uuid as _uuid
+    voce = {
+        "id": str(_uuid.uuid4()), "compagnia_id": cid,
+        "data": body.get("data") or _now_iso()[:10],
+        "causale": str(body["causale"]).strip(),
+        "importo": abs(float(body["importo"])), "tipo": tipo,
+        "note": body.get("note"), "created_at": _now_iso(),
+    }
+    await db.voci_manuali_compagnia.insert_one(dict(voce))
+    await log_attivita(user, "create", "voce_manuale_compagnia", voce["id"],
+                       f"Voce manuale {voce['causale']} €{voce['importo']:.2f} ({tipo}) compagnia {cid}")
+    return voce
+
+
+@api.delete("/compagnie/{cid}/voci-manuali/{vid}")
+async def delete_voce_manuale_compagnia(cid: str, vid: str, user=Depends(require_user("admin"))):
+    v = await db.voci_manuali_compagnia.find_one({"id": vid, "compagnia_id": cid}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Voce non trovata")
+    await db.voci_manuali_compagnia.delete_one({"id": vid})
+    await log_attivita(user, "delete", "voce_manuale_compagnia", vid)
+    return {"ok": True}
+
+
+
 # ====================== VOCI RICORSIVE COLLABORATORI ======================
 def _genera_date_ricorsive(regola: dict, fino_a: str) -> list[str]:
     """Restituisce la lista di date (YYYY-MM-DD) in cui la regola genera una voce,
@@ -1296,6 +1347,41 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         totale_avere += totale_fatture_partner
         saldo -= totale_fatture_partner
 
+    # ----- Voci manuali (rettifiche operatore): DARE aumenta il dovuto,
+    # AVERE lo riduce. Sempre incluse nell'estratto (nel periodo se filtrato).
+    vm_flt: dict = {"compagnia_id": compagnia_id}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        vm_flt["data"] = cond
+    voci_manuali = await db.voci_manuali_compagnia.find(vm_flt, {"_id": 0}).sort("data", 1).to_list(2000)
+    totale_voci_manuali_dare = 0.0
+    totale_voci_manuali_avere = 0.0
+    for v in voci_manuali:
+        imp = abs(float(v.get("importo") or 0))
+        is_dare = v.get("tipo") == "dare"
+        righe.append({
+            "data": v.get("data"),
+            "tipo": "voce_manuale",
+            "polizza": None,
+            "contraente": None,
+            "ramo": None,
+            "dare": imp if is_dare else 0.0,
+            "avere": 0.0 if is_dare else imp,
+            "descrizione": v.get("causale") + (f" · {v.get('note')}" if v.get("note") else ""),
+            "_movimento_id": v.get("id"),
+            "voce_manuale_id": v.get("id"),
+            "is_voce_manuale": True,
+        })
+        if is_dare:
+            totale_voci_manuali_dare += imp
+        else:
+            totale_voci_manuali_avere += imp
+    totale_dare += totale_voci_manuali_dare
+    totale_avere += totale_voci_manuali_avere
+    saldo += totale_voci_manuali_dare - totale_voci_manuali_avere
+
     righe.sort(key=lambda r: r["data"] or "")
     return {
         "compagnia": comp,
@@ -1305,6 +1391,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         "totale_rappel": round(totale_rappel, 2),
         "totale_ritenute_compagnia": round(totale_ritenute_comp, 2),
         "totale_fatture_partner": round(totale_fatture_partner, 2),
+        "totale_voci_manuali_dare": round(totale_voci_manuali_dare, 2),
+        "totale_voci_manuali_avere": round(totale_voci_manuali_avere, 2),
         "saldo": round(saldo, 2),
         "periodo": {"dal": dal, "al": al},
         "trattiene_provvigioni": trattiene,
@@ -3328,7 +3416,6 @@ async def _total_sospesi_as_of(data_giorno: str) -> float:
     pipeline = [
         {"$match": {
             "titolo_coperto": True,
-            "data_copertura": {"$lte": data_giorno},
             "$or": [
                 {"stato": {"$in": ["da_incassare", "insoluto"]}},
                 {"$and": [
@@ -3337,7 +3424,7 @@ async def _total_sospesi_as_of(data_giorno: str) -> float:
                 ]},
             ],
         }},
-        {"$group": {"_id": None, "tot": {"$sum": "$importo_lordo"}}},
+        {"$group": {"_id": None, "tot": {"$sum": {"$ifNull": ["$importo_da_pagare", "$importo_lordo"]}}}},
     ]
     agg = await db.titoli.aggregate(pipeline).to_list(1)
     return round(float(agg[0]["tot"]) if agg else 0.0, 2)
@@ -5349,7 +5436,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     # 2) Movimenti del giorno + arricchimento polizza->compagnia
     movs = await db.movimenti.find(
-        {"data_movimento": data_giorno}, {"_id": 0}
+        {"data_movimento": data_giorno, "pregresso": {"$ne": True}}, {"_id": 0}
     ).sort("created_at", 1).to_list(2000)
 
     # raccogli polizza_ids per risolvere compagnie + numero polizza + contraente
@@ -5593,7 +5680,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     conti_riepilogo = []
     for c in conti:
         prev = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}}},
+            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}}},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}},
@@ -5620,7 +5707,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     # 5) KPI CUMULATIVI fino al giorno corrente compreso (totali progressivi che crescono ogni giorno)
     cum_movs = await db.movimenti.find(
-        {"data_movimento": {"$lte": data_giorno}}, {"_id": 0}
+        {"data_movimento": {"$lte": data_giorno}, "pregresso": {"$ne": True}}, {"_id": 0}
     ).to_list(50000)
     # carica le compagnie per applicare "trattiene_provvigioni" correttamente
     all_comp_ids = list({m.get("compagnia_id") for m in cum_movs if m.get("compagnia_id")})
@@ -5646,6 +5733,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
+        if str(cat).startswith("setup_iniziale"):
+            continue  # saldi di apertura: non sono entrate/spese operative
         # Regola contabile dell'utente:
         # ENTRATE = SOLO premi/titoli/appendici (incasso_premio)
         # Rappel (entrata cat=provvigioni) -> in PROVVIGIONI, non in Entrate
@@ -5705,7 +5794,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     sum_conti = 0.0
     for c in conti_attivi:
         agg = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno}}},
+            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno}, "pregresso": {"$ne": True}}},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
@@ -5753,6 +5842,9 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
     age_map: dict[str, str] = {}
     async for a in db.agenzie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
         age_map[a["id"]] = a.get("ragione_sociale")
+    # Cutoff setup: come per l'estratto conto compagnia, il pregresso è escluso
+    # e il saldo parte dal saldo di apertura del setup iniziale.
+    _cutoff = await _setup_cutoff_date()
     for c in compagnie:
         cid = c["id"]
         trattiene = c.get("trattiene_provvigioni", True)
@@ -5762,13 +5854,15 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
         )]
         incassi = 0.0; provv = 0.0
         if pol_ids:
+            _inc_match = {
+                "polizza_id": {"$in": pol_ids},
+                "tipo": "entrata",
+                "categoria": "incasso_premio",
+                "pregresso": {"$ne": True},
+                "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a},
+            }
             agg = await db.movimenti.aggregate([
-                {"$match": {
-                    "polizza_id": {"$in": pol_ids},
-                    "tipo": "entrata",
-                    "categoria": "incasso_premio",
-                    "data_movimento": {"$lte": fino_a},
-                }},
+                {"$match": _inc_match},
                 {"$group": {"_id": None,
                             "tot": {"$sum": {"$add": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$quota_sconto", 0]}]}},
                             "provv": {"$sum": "$provvigioni"}}},
@@ -5782,7 +5876,8 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                 "compagnia_id": cid,
                 "tipo": "uscita",
                 "categoria": "pagamento_compagnia",
-                "data_movimento": {"$lte": fino_a},
+                "pregresso": {"$ne": True},
+                "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a},
             }},
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
@@ -5793,21 +5888,33 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                 "compagnia_id": cid,
                 "tipo": "uscita",
                 "categoria": "ritenuta_compagnia",
-                "data_movimento": {"$lte": fino_a},
+                "pregresso": {"$ne": True},
+                "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a},
             }},
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         ritenute = rit_agg[0]["tot"] if rit_agg else 0.0
         # rappel cumulativi per questa compagnia (riducono il saldo da versare)
         rap_agg = await db.rappel.aggregate([
-            {"$match": {"compagnia_id": cid, "data": {"$lte": fino_a}}},
+            {"$match": {"compagnia_id": cid, "pregresso": {"$ne": True},
+                        "data": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a}}},
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rappel = rap_agg[0]["tot"] if rap_agg else 0.0
+        # Saldo di apertura dal setup iniziale (non pregresso): dare aumenta, avere riduce
+        setup_dare = 0.0; setup_avere = 0.0
+        if _cutoff:
+            async for sm in db.movimenti.find(
+                {"compagnia_id": cid, "is_setup_iniziale": True}, {"_id": 0, "categoria": 1, "importo": 1}):
+                imp = float(sm.get("importo") or 0)
+                if sm.get("categoria") == "setup_iniziale_compagnia_dare":
+                    setup_dare += imp
+                elif sm.get("categoria") == "setup_iniziale_compagnia_avere":
+                    setup_avere += imp
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
-        saldo_dovuto = (incassi - provv) if trattiene else incassi
-        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01:
+        saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare
+        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute - setup_avere
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
             "compagnia_id": cid,
@@ -5856,7 +5963,7 @@ async def dati_compagnie(
         # ---- importi del PERIODO (filtrati su data_incasso) ----
         incassi_lordi = 0.0; provv_periodo = 0.0
         if pol_ids:
-            match_t: dict = {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}
+            match_t: dict = {"polizza_id": {"$in": pol_ids}, "stato": "incassato", "pregresso": {"$ne": True}}
             if dal or al:
                 cond_t: dict = {}
                 if dal: cond_t["$gte"] = dal
@@ -5902,7 +6009,7 @@ async def dati_compagnie(
         saldo_attuale = 0.0
         if pol_ids:
             agg_cum = await db.titoli.aggregate([
-                {"$match": {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}},
+                {"$match": {"polizza_id": {"$in": pol_ids}, "stato": "incassato", "pregresso": {"$ne": True}}},
                 {"$group": {"_id": None,
                             "lordo": {"$sum": "$importo_lordo"},
                             "provv": {"$sum": "$provvigioni"}}},
