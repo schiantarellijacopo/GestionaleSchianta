@@ -1,6 +1,11 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 14/09/2026 (fork) — Primo titolo automatico, scadenze da frazionamento, imposte auto in Regolazione
+## Sessione 14/09/2026 (fork) — Tipo Inclusione/Esclusione + fix provvigioni BS BROKER
+
+- **Tipo titolo**: aggiunte le opzioni **Inclusione** ed **Esclusione** al dropdown "Tipo (riferimento)" (TitoloDialog) e al Literal `Titolo.tipo`. Verificato via screenshot.
+- **Provvigioni BS BROKER**: gli schemi "diretti sul premio netto" (es. BS BROKER 4,5% del netto) con `percentuale_collaboratore=0` ora assegnano al collaboratore l'INTERO importo (netto×%), non 0. Corretti `_calcola_provvigione` e `_provv_breakdown`; l'endpoint `/provvigioni/calcola` e il pulsante "Auto" del dialog ora passano anche `premio_netto` (e compagnia_id). NB: non testabile live via API perché BS BROKER è sul tenant Axicura (no login jacopo); logica verificata su dati schema confermati (netto 496,99 × 4,5% = 22,36).
+
+
 
 - **Primo titolo automatico** (`create_polizza`): alla creazione della polizza viene generato il primo titolo (tipo "nuova") con effetto/scadenza/premi/provvigioni/imposte della polizza. Verificato e2e.
 - **Scadenze da frazionamento** (`create_polizza` + helper `add_months` in db_models): da effetto+frazionamento calcola in automatico `scadenza` (contratto = +12 mesi), `prossima_quietanza` (+intervallo frazionamento) e `scadenza_copertura`. Es. effetto 14/09/2026 semestrale → scad 2027-09-14, prox quietanza 2027-03-14.

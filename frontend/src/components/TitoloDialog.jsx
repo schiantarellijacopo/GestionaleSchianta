@@ -132,7 +132,9 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             const r = await api.get("/provvigioni/calcola", {
                 params: {
                     premio_lordo: f.importo_lordo || 0,
+                    premio_netto: f.importo_netto || 0,
                     collaboratore_id: operatori[0]?.operatore_id || f.collaboratore_id || undefined,
+                    compagnia_id: titolo.compagnia_id || undefined,
                     ramo: titolo.ramo || undefined,
                 },
             });
@@ -253,6 +255,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                                     ["nuova", "Polizza nuova"],
                                     ["rinnovo", "Rinnovo"],
                                     ["appendice", "Appendice"],
+                                    ["inclusione", "Inclusione"],
+                                    ["esclusione", "Esclusione"],
                                     ["annullo", "Annullo"],
                                     ["sostituzione", "Sostituzione"],
                                     ["regolazione", "Regolazione premio"],

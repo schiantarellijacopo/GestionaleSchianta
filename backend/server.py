@@ -4862,9 +4862,12 @@ async def _calcola_provvigione(
     # Provvigione TOTALE agenzia: da premio netto (se configurato e disponibile) altrimenti da premio lordo
     if pct_su_premio_netto > 0 and premio_netto and premio_netto > 0:
         provv_tot = round(premio_netto * pct_su_premio_netto / 100.0, 2)
+        # Schema "diretto sul premio netto" (es. BS BROKER 4,5%): la provvigione del
+        # collaboratore è l'intero importo, salvo una % di ripartizione esplicita.
+        provv_collab = round(provv_tot * pct_collab / 100.0, 2) if pct_collab > 0 else provv_tot
     else:
         provv_tot = round(premio_lordo * pct_su_premio / 100.0, 2)
-    provv_collab = round(provv_tot * pct_collab / 100.0, 2)
+        provv_collab = round(provv_tot * pct_collab / 100.0, 2)
     # RETE PIRAMIDALE: le quote upline sono % sulla PROVVIGIONE TOTALE AGENZIA (provv_tot),
     # coerente con l'esempio: agenzia 100€ → collab sottorete 50% = 50€, capo-rete 10% = 10€.
     upline_breakdown = []
@@ -4938,6 +4941,10 @@ async def _provv_breakdown(
             pct_collab = float(schema.get("percentuale_collaboratore") or 0)
             schema_id = schema.get("id")
             schema_nome = schema.get("nome")
+            # Schema "diretto sul premio netto" senza % di ripartizione: il collaboratore
+            # prende l'intero importo (es. BS BROKER 4,5% del netto).
+            if pct_collab <= 0 and float(schema.get("percentuale_su_premio_netto") or 0) > 0:
+                pct_collab = 100.0
     provv_collab = round(tot * pct_collab / 100.0, 2)
     provv_margine = round(tot - provv_collab, 2)
     return {
@@ -4954,10 +4961,11 @@ async def _provv_breakdown(
 async def calcola_provvigione_endpoint(
     premio_lordo: float, collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    premio_netto: Optional[float] = None,
     user=Depends(current_user),
 ):
     """Calcola la provvigione attesa per un dato premio + collaboratore + compagnia + ramo."""
-    return await _calcola_provvigione(premio_lordo, collaboratore_id, compagnia_id, ramo)
+    return await _calcola_provvigione(premio_lordo, collaboratore_id, compagnia_id, ramo, premio_netto=premio_netto)
 
 
 # ============================================================

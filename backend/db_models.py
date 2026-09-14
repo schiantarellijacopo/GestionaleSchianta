@@ -529,7 +529,7 @@ TitoloStato = Literal["incassato", "da_incassare", "insoluto", "stornato"]
 class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
-    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo"] = "rinnovo"
+    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione"] = "rinnovo"
     effetto: str
     scadenza: str
     stato: TitoloStato = "da_incassare"
