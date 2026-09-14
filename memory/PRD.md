@@ -1063,3 +1063,9 @@ Usare integration_expert prima di implementare.
 - `GET /api/collaboratori`: param `tutti` (default False). Di default esclude `attivo=False` (collaboratori disattivati/uniti) così non compaiono nei filtri "Filtra per collaboratore" in tutto il programma. `?tutti=true` per la gestione.
 - Frontend: filtri basati su `/auth/users` ora escludono `attivo!==false` (Titoli, Sinistri, Polizze, Ritenute, Alert già ok, DocumentiMancantiWidget). CollaboratoreInlineSelect lasciato invariato (mostra "(inattivo)" per risolvere i nomi storici, non è un filtro).
 - Verificato via endpoint (admin: default 6 senza disattivati vs tutti=true 17 con 11 disattivati) e via wrapper tenant Axicura (collaboratore unito escluso: 19 su 20).
+
+### Sessione fork 2026-06 — Riconciliazione Sospesi/Anticipi Axicura (da PDF)
+- Titolo 730801946 → incassato 01/09/2026, mezzo "BONIFICO BPER SONDRIO".
+- Script `scripts/riconcilia_sospesi_axicura.py` (DRY env var): dal PDF ufficiale 40 righe → 34 titoli impostati coperti (titolo_coperto=True, stato=da_incassare, data_copertura da PDF, importo_da_pagare da colonna "Da Pagare") +2 stragglers cross-tenant via client diretto. 35 sospesi NON nel PDF → incassati (erano già saldati).
+- Non applicabili: 3 note di credito (importi negativi, nessun titolo) e 184643448 (titolo inesistente in DB).
+- Endpoint `/api/titoli/sospesi` ora ritorna `importo_da_pagare`; pagina TitoliSospesi mostra colonna "Da Pagare €" (fallback importo_lordo) su totali, riepilogo collaboratori e righe.

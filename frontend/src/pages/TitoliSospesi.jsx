@@ -56,7 +56,7 @@ export default function TitoliSospesi() {
         const arr = items || [];
         return {
             count: arr.length,
-            importo: arr.reduce((s, t) => s + (t.importo_lordo || 0), 0),
+            importo: arr.reduce((s, t) => s + (t.importo_da_pagare != null ? t.importo_da_pagare : (t.importo_lordo || 0)), 0),
             piuVecchio: arr.reduce((m, t) => Math.max(m, t.giorni_anticipo || 0), 0),
         };
     }, [items]);
@@ -69,7 +69,7 @@ export default function TitoliSospesi() {
             const nome = t.collaboratore_nome || "— senza collaboratore —";
             const cur = map.get(id) || { id, nome, count: 0, importo: 0 };
             cur.count += 1;
-            cur.importo += (t.importo_lordo || 0);
+            cur.importo += (t.importo_da_pagare != null ? t.importo_da_pagare : (t.importo_lordo || 0));
             map.set(id, cur);
         }
         return Array.from(map.values()).sort((a, b) => b.importo - a.importo);
@@ -96,7 +96,7 @@ export default function TitoliSospesi() {
         [visibleItems, selectedIds],
     );
     const selectedTotal = useMemo(
-        () => selectedItems.reduce((s, t) => s + (t.importo_lordo || 0), 0),
+        () => selectedItems.reduce((s, t) => s + (t.importo_da_pagare != null ? t.importo_da_pagare : (t.importo_lordo || 0)), 0),
         [selectedItems],
     );
     // Reset selection when filtroCollab or items change materially
@@ -231,7 +231,7 @@ export default function TitoliSospesi() {
                                 <th>Coperto il</th>
                                 <th>Anticipo</th>
                                 <th>Scad. polizza</th>
-                                <th className="text-right">Importo €</th>
+                                <th className="text-right">Da Pagare €</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -273,7 +273,7 @@ export default function TitoliSospesi() {
                                             </span>
                                         </td>
                                         <td className="num text-xs">{fmtDate(t.scadenza_polizza)}</td>
-                                        <td className="num text-right font-bold">{fmtEur(t.importo_lordo)}</td>
+                                        <td className="num text-right font-bold">{fmtEur(t.importo_da_pagare != null ? t.importo_da_pagare : t.importo_lordo)}</td>
                                         <td className="text-right">
                                             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"
                                                     onClick={() => setPaying(t)}

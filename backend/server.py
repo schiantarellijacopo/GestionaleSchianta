@@ -3251,6 +3251,7 @@ async def titoli_sospesi(
             "scadenza_polizza": p.get("scadenza"),
             "scadenza_titolo": t.get("scadenza"),
             "importo_lordo": t.get("importo_lordo", 0.0),
+            "importo_da_pagare": (t.get("importo_da_pagare") if t.get("importo_da_pagare") is not None else t.get("importo_lordo", 0.0)),
             "provvigioni": t.get("provvigioni", 0.0),
             "giorni_anticipo": _giorni_da_oggi(t.get("data_copertura")),
             "mezzo_pagamento_preferito": p.get("mezzo_pagamento_preferito"),
