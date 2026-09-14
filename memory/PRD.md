@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Fix Anagrafiche (premi/ricerca/collegati) + ripristino 2 sospesi
+
+- **Ripristino sospesi** (tenant Axicura): i titoli correnti delle polizze **182259867** (€ 382,00) e **184642872** (€ 485,00), erroneamente `incassato`, riportati a SOSPESO (`titolo_coperto=True`, `stato=da_incassare`, `data_incasso=None`). Script `scripts/ripristina_sospesi_due.py`. Verificato a DB (compaiono in /titoli/sospesi; esclusi dall'E/C compagnia perché non più incassati).
+- **🔴 Fix "premi e provvigioni a 0" nel network** (`routes/anagrafiche.py` `_stats`): leggeva solo `premio_totale`/`provvigione_totale`; le polizze Axicura usano `premio_lordo`/`provvigioni`. Aggiunto fallback → network SCHIANTARELLI JACOPO ora premio 56.399,85 / provv 4.749,80. Vale per lista Anagrafiche e card "Posizione assicurativa del network".
+- **🔴 Fix ricerca "Aggiungi relazione"** (`AnagraficaDetail.jsx` AlberoGenealogico): caricava max 5000 anagrafiche lato client e filtrava → su tenant con >5000 anagrafiche (Axicura 5580, principale 10607) i nomi in fondo (es. VANOLI LUCIA) non si trovavano. Ora **ricerca server-side** `/anagrafiche?q=` (debounce 250ms, min 2 caratteri). Verificato: "bott" → 29 risultati dal server.
+- **🔴 Fix nomi collegati troncati** (`index.css`): le regole CSS delle colonne congelate (`.tbl-scroll .freeze-*`) si propagavano via selettore discendente alla tabella annidata "Collegati" della riga espansa → prima colonna a 32px con ellissi ("B...", "SC..."). Aggiunto override `.tbl-scroll table table td/th` (width auto, no sticky/ellissi).
+
+
 ## Sessione 14/09/2026 (fork) — Brogliaccio: formule liquidità + KPI da Setup agenzia
 
 - **Nuove formule liquidità** (`_compute_brogliaccio` + `statistiche_contabilita`): **Liquidità Disponibile = conti − debito compagnie** (non sottrae più i sospesi); **Liquidità Postera = conti + sospesi − debito compagnie** (ora somma i sospesi come incassi futuri). Descrizioni aggiornate anche in `BrogliaccioTab.jsx` e `StatisticheTab.jsx`. Verificato su tenant principale (disponibile −2305,32 / postera 750,68) e su Axicura (disponibile 221.615,68 / postera 253.401,96).

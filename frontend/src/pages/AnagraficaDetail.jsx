@@ -860,10 +860,21 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
     const [handicap, setHandicap] = useState(false);
     const [options, setOptions] = useState([]);
     const [q, setQ] = useState(""); // testo di ricerca per l'anagrafica collegata
+    const [targetLabel, setTargetLabel] = useState(""); // nome dell'anagrafica selezionata
     const [showList, setShowList] = useState(false);
     const [editing, setEditing] = useState(null);
     const [network, setNetwork] = useState(null);
-    useEffect(() => { api.get("/anagrafiche").then((r) => setOptions(r.data.filter((a) => a.id !== ana.id))); }, [ana.id]);
+    // Ricerca server-side (scala su migliaia di anagrafiche): interroga /anagrafiche?q=
+    useEffect(() => {
+        const term = q.trim();
+        if (term.length < 2) { setOptions([]); return; }
+        const t = setTimeout(() => {
+            api.get("/anagrafiche", { params: { q: term, limit: 40 } })
+                .then((r) => setOptions((r.data || []).filter((a) => a.id !== ana.id)))
+                .catch(() => {});
+        }, 250);
+        return () => clearTimeout(t);
+    }, [q, ana.id]);
     useEffect(() => { api.get(`/anagrafiche/${ana.id}/network`).then((r) => setNetwork(r.data)).catch(() => setNetwork(null)); }, [ana.id, ana.relazioni_risolte?.length]);
 
     // mostra attributi differenti in base alla relazione
@@ -960,8 +971,8 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                     <Label>Anagrafica collegata</Label>
                                     {target ? (
                                         <div className="flex items-center justify-between border border-slate-300 rounded-md px-3 py-2 text-sm" data-testid="rel-target-selected">
-                                            <span className="font-medium truncate">{options.find((o) => o.id === target)?.ragione_sociale || "Anagrafica selezionata"}</span>
-                                            <button type="button" onClick={() => { setTarget(""); setQ(""); }} className="text-slate-400 hover:text-rose-600 ml-2" data-testid="rel-target-clear">✕</button>
+                                            <span className="font-medium truncate">{targetLabel || "Anagrafica selezionata"}</span>
+                                            <button type="button" onClick={() => { setTarget(""); setTargetLabel(""); setQ(""); }} className="text-slate-400 hover:text-rose-600 ml-2" data-testid="rel-target-clear">✕</button>
                                         </div>
                                     ) : (
                                         <div className="relative">
@@ -973,17 +984,16 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
                                                 className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
                                                 data-testid="rel-target-search"
                                             />
-                                            {showList && q.trim().length >= 1 && (
+                                            {showList && q.trim().length >= 2 && (
                                                 <div className="absolute z-50 mt-1 w-full max-h-56 overflow-auto bg-white border border-slate-200 rounded-md shadow-lg" data-testid="rel-target-list">
                                                     {(() => {
-                                                        const term = q.trim().toLowerCase();
-                                                        const filtered = options.filter((o) => (`${o.ragione_sociale || ""} ${o.codice_fiscale || ""} ${o.partita_iva || ""}`).toLowerCase().includes(term));
+                                                        const filtered = options;
                                                         if (filtered.length === 0) return <div className="px-3 py-2 text-xs text-slate-400">Nessun risultato</div>;
                                                         return filtered.slice(0, 50).map((o) => (
                                                             <button
                                                                 key={o.id}
                                                                 type="button"
-                                                                onClick={() => { setTarget(o.id); setShowList(false); setQ(""); }}
+                                                                onClick={() => { setTarget(o.id); setTargetLabel(o.ragione_sociale); setShowList(false); setQ(""); }}
                                                                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-sky-50"
                                                                 data-testid={`rel-opt-${o.id}`}
                                                             >

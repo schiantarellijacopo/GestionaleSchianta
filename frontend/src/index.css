@@ -137,6 +137,22 @@ h1, h2, h3, h4, h5 {
     text-overflow: ellipsis;
 }
 
+/* Le tabelle ANNIDATE (es. la riga espansa "Collegati" del network anagrafiche)
+   NON devono ereditare larghezze/ellissi/sticky delle colonne congelate del parent. */
+.tbl-scroll table table td,
+.tbl-scroll table table th {
+    position: static !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    left: auto !important;
+    box-shadow: none !important;
+}
+
+
 /* =====================================================================
    STICKY tables (header in alto + prime N colonne a sinistra).
    Wrappa la tabella in un div con class "tbl-scroll" per attivare lo scroll.

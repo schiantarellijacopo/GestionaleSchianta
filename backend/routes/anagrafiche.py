@@ -779,7 +779,8 @@ async def anagrafica_network(aid: str, user: dict = Depends(current_user)):
         provv = 0.0
         async for p in db.polizze.find(
             {"contraente_id": anag_id},
-            {"_id": 0, "stato": 1, "premio_totale": 1, "provvigione_totale": 1, "numero_polizza": 1},
+            {"_id": 0, "stato": 1, "premio_totale": 1, "premio_lordo": 1,
+             "provvigione_totale": 1, "provvigioni": 1, "numero_polizza": 1},
         ):
             n_tot += 1
             stato = (p.get("stato") or "").lower()
@@ -787,8 +788,8 @@ async def anagrafica_network(aid: str, user: dict = Depends(current_user)):
                 n_attive += 1
             elif stato in ("preventivo", "bozza"):
                 n_preventivo += 1
-            premio += float(p.get("premio_totale") or 0)
-            provv += float(p.get("provvigione_totale") or 0)
+            premio += float(p.get("premio_totale") or p.get("premio_lordo") or 0)
+            provv += float(p.get("provvigione_totale") or p.get("provvigioni") or 0)
         return {
             "n_polizze_attive": n_attive,
             "n_preventivi": n_preventivo,
