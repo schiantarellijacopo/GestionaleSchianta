@@ -1,5 +1,11 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Brogliaccio: formule liquidità + KPI da Setup agenzia
+
+- **Nuove formule liquidità** (`_compute_brogliaccio` + `statistiche_contabilita`): **Liquidità Disponibile = conti − debito compagnie** (non sottrae più i sospesi); **Liquidità Postera = conti + sospesi − debito compagnie** (ora somma i sospesi come incassi futuri). Descrizioni aggiornate anche in `BrogliaccioTab.jsx` e `StatisticheTab.jsx`. Verificato su tenant principale (disponibile −2305,32 / postera 750,68) e su Axicura (disponibile 221.615,68 / postera 253.401,96).
+- **KPI cumulativi dai valori del Setup agenzia**: i KPI Entrate/Provvigioni/Spese/Rimesse ora includono i saldi di apertura del setup (`setup_iniziale_entrata/provvigione/spesa/rimessa`), prima esclusi dal `continue`. Per Axicura: Entrate 2.428.563,95 · Provvigioni 502.735,72 · Spese 483.506,91 · Rimesse 1.899.248,30. Il saldo dei **conti cassa resta invariato** (i valori setup sono solo KPI storici, non toccano i conti) e il `saldo_cassa` KPI non è influenzato dalle rimesse setup (accumulatori separati).
+
+
 ## Sessione 14/09/2026 (fork) — Voci manuali E/C Compagnie + fix Saldo Cassa Brogliaccio
 
 - **Voci manuali su Estratto Conto Compagnie** (come per i collaboratori): CRUD backend già presente (`GET/POST/DELETE /api/compagnie/{cid}/voci-manuali`, collezione `voci_manuali_compagnia`, tenant-scoped). Completata l'**integrazione nel calcolo** (`_compagnia_estratto_data`): le voci con `tipo=dare` aumentano il dovuto alla compagnia, `tipo=avere` lo riducono; aggiunte come righe (`tipo=voce_manuale`) e nei totali (`totale_voci_manuali_dare/avere`, saldo). **UI** in `EstrattoContoCompagnie.jsx` (DettaglioEstratto): pulsante "+ Voce manuale" → dialog `VoceManualeDialog` (data, causale, tipo Dare/Avere, importo, note); le voci compaiono nella tab "Movimenti & versamenti" con badge "voce manuale" e ✕ per eliminarle. Verificato e2e (curl + UI: save +55€ → dare 257.489,60→257.544,60, delete → ripristinato).

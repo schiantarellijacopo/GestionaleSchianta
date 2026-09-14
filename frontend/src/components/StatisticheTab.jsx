@@ -61,7 +61,7 @@ export default function StatisticheTab() {
                     </div>
                     <div className="text-3xl font-bold text-emerald-700 num">{fmtEur(d.liquidita_disponibile)}</div>
                     <div className="text-[11px] text-slate-500 mt-2">
-                        {fmtEur(d.sum_conti)} (conti) − {fmtEur(d.crediti_attivi)} (sospesi/anticipi) − {fmtEur(d.kpi.saldo_cassa_compagnie)} (debito vs. compagnie)
+                        {fmtEur(d.sum_conti)} (conti) − {fmtEur(d.kpi.saldo_cassa_compagnie)} (debito vs. compagnie)
                     </div>
                 </Card>
                 <Card className="p-5 border-sky-200 border-l-4 border-l-sky-500 bg-sky-50/30">
@@ -70,7 +70,7 @@ export default function StatisticheTab() {
                     </div>
                     <div className="text-3xl font-bold text-sky-700 num">{fmtEur(d.liquidita_postera)}</div>
                     <div className="text-[11px] text-slate-500 mt-2">
-                        {fmtEur(d.sum_conti)} (conti) − {fmtEur(d.kpi.saldo_cassa_compagnie)} (debito vs. compagnie)
+                        {fmtEur(d.sum_conti)} (conti) + {fmtEur(d.crediti_attivi)} (sospesi/anticipi) − {fmtEur(d.kpi.saldo_cassa_compagnie)} (debito vs. compagnie)
                     </div>
                 </Card>
             </div>

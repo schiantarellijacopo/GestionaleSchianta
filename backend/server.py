@@ -5730,11 +5730,23 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     cum_rimesse = 0.0; cum_sconti = 0.0; cum_spese = 0.0; cum_saldo = 0.0
     cum_ritenute_comp = 0.0
     cum_rappel = 0.0
+    # Valori di apertura dal Setup agenzia: alimentano SOLO i KPI cumulativi storici
+    # (Entrate/Provvigioni/Spese/Rimesse). NON toccano i conti cassa né il saldo cassa
+    # (il debito compagnie da setup è già in _compute_saldi_compagnie).
+    setup_entrate = 0.0; setup_provv = 0.0; setup_spese = 0.0; setup_rimesse = 0.0
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
         if str(cat).startswith("setup_iniziale"):
-            continue  # saldi di apertura: non sono entrate/spese operative
+            if cat == "setup_iniziale_entrata":
+                setup_entrate += importo
+            elif cat == "setup_iniziale_provvigione":
+                setup_provv += importo
+            elif cat == "setup_iniziale_spesa":
+                setup_spese += importo
+            elif cat == "setup_iniziale_rimessa":
+                setup_rimesse += importo
+            continue  # saldi di apertura: gestiti come KPI storici, non operativi
         # Regola contabile dell'utente:
         # ENTRATE = SOLO premi/titoli/appendici (incasso_premio)
         # Rappel (entrata cat=provvigioni) -> in PROVVIGIONI, non in Entrate
@@ -5773,12 +5785,12 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 cum_sconti += importo
 
     riepilogo_kpi = {
-        "entrate": round(cum_entrate, 2),
-        "provvigioni": round(cum_provv, 2),
+        "entrate": round(cum_entrate + setup_entrate, 2),
+        "provvigioni": round(cum_provv + setup_provv, 2),
         "crediti": round(cum_sospesi, 2),
-        "rimesse": round(cum_rimesse, 2),
+        "rimesse": round(cum_rimesse + setup_rimesse, 2),
         "sconti": round(cum_sconti, 2),
-        "spese": round(cum_spese, 2),
+        "spese": round(cum_spese + setup_spese, 2),
         "saldo_cassa": round(cum_saldo - cum_rimesse + cum_ritenute_comp - cum_rappel, 2),
         "rappel": round(cum_rappel, 2),
     }
@@ -5809,8 +5821,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         "sum_conti": round(sum_conti, 2),
         "sospesi_attivi": round(sospesi_attivi, 2),
         "saldo_cassa_compagnie": saldo_cassa_compagnie_tot,
-        "liquidita_disponibile": round(sum_conti - sospesi_attivi - saldo_cassa_compagnie_tot, 2),
-        "liquidita_postera": round(sum_conti - saldo_cassa_compagnie_tot, 2),
+        "liquidita_disponibile": round(sum_conti - saldo_cassa_compagnie_tot, 2),
+        "liquidita_postera": round(sum_conti + sospesi_attivi - saldo_cassa_compagnie_tot, 2),
     }
 
     # 6) Chiusura?
@@ -6153,8 +6165,8 @@ async def statistiche_contabilita(
     ]).to_list(1)
     crediti_attivi = (crediti_agg[0]["tot"] if crediti_agg else 0) - (crediti_storno[0]["tot"] if crediti_storno else 0)
 
-    liquidita_disponibile = round(sum_conti - crediti_attivi - saldo_cassa_compagnie_tot, 2)
-    liquidita_postera = round(sum_conti - saldo_cassa_compagnie_tot, 2)
+    liquidita_disponibile = round(sum_conti - saldo_cassa_compagnie_tot, 2)
+    liquidita_postera = round(sum_conti + crediti_attivi - saldo_cassa_compagnie_tot, 2)
 
     # KPI di periodo per le 7 cards (semantica brogliaccio)
     kpi = {

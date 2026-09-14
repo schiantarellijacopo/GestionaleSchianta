@@ -458,14 +458,14 @@ export default function BrogliaccioTab({ refreshKey }) {
                         <div className="text-xs uppercase tracking-wider text-emerald-800 mb-1">Liquidità Disponibile</div>
                         <div className="text-3xl font-bold text-emerald-700 num">{fmt(b.liquidita.liquidita_disponibile, true)}</div>
                         <div className="text-[11px] text-slate-500 mt-2">
-                            {fmt(b.liquidita.sum_conti, true)} (conti) − {fmt(b.liquidita.sospesi_attivi, true)} (sospesi/anticipi) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
+                            {fmt(b.liquidita.sum_conti, true)} (conti) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
                         </div>
                     </Card>
                     <Card className="p-5 border-sky-200 border-l-4 border-l-sky-500 bg-sky-50/30">
                         <div className="text-xs uppercase tracking-wider text-sky-800 mb-1">Liquidità Postera</div>
                         <div className="text-3xl font-bold text-sky-700 num">{fmt(b.liquidita.liquidita_postera, true)}</div>
                         <div className="text-[11px] text-slate-500 mt-2">
-                            {fmt(b.liquidita.sum_conti, true)} (conti) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
+                            {fmt(b.liquidita.sum_conti, true)} (conti) + {fmt(b.liquidita.sospesi_attivi, true)} (sospesi/anticipi) − {fmt(b.liquidita.saldo_cassa_compagnie, true)} (debito vs. compagnie)
                         </div>
                     </Card>
                 </div>
