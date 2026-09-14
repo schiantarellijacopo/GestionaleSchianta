@@ -1079,3 +1079,8 @@ Usare integration_expert prima di implementare.
 - Ricalcolo provvigione_collaboratore su tutto il portafoglio c5ae2d0e (script ricalcola_provvigioni_portafoglio.py): 11.453 polizze e 25.590 titoli valorizzati. Regola: pct_su_premio_netto>0 -> netto*%; pct_su_premio>0 -> lordo*%; pct_collaboratore>0 -> provvigione_agenzia*% (es. BS 4,5% netto=55,02; altri 70% su provv agenzia). Resolver gerarchico identico al backend.
 - Fix attribuzione 74€: titoli 975218000 (48) e 1001004878 (26) riassegnati da BS Broker a Importazione Axicura (come da PDF). Totali per collaboratore ora esatti.
 - Estratti conto (compagnia `_compagnia_estratto_data` e collaboratori `estratto_provvigioni`): nuovo `_setup_cutoff_date()` = min data movimenti setup iniziale (go-live). Sotto il cutoff = pregresso escluso; l'estratto parte dal saldo di apertura del setup (righe tipo 'saldo_iniziale'). Tenant tenuti DISTINTI (nessuna fusione, richiesta utente).
+
+### Sessione fork 2026-06 — Reset estratti conto (solo setup)
+- Aggiunto flag `pregresso` sui dati migrati. Estratti conto (compagnia + collaboratori) escludono `pregresso=True`: mostrano solo il saldo iniziale del setup + operazioni future.
+- Reset c5ae2d0e: 55.644 titoli incassato -> pregresso=True (sospesi da_incassare e movimenti di setup NON toccati). Endpoints `_compagnia_estratto_data` (titoli/mov/rappel/ritenute) e `estratto_provvigioni` (titolo_filter) filtrano pregresso!=True.
+- Verificato: estratto compagnia = solo 4 righe saldo_iniziale setup; estratto collaboratori = 0 incassi pregressi.

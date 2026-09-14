@@ -402,7 +402,7 @@ async def estratto_provvigioni(
     if _cutoff:
         dal = max(dal, _cutoff) if dal else _cutoff
 
-    titolo_filter = {"polizza_id": {"$in": pol_ids}, "stato": "incassato"}
+    titolo_filter = {"polizza_id": {"$in": pol_ids}, "stato": "incassato", "pregresso": {"$ne": True}}
     inc_cond = {}
     if dal: inc_cond["$gte"] = dal
     if al: inc_cond["$lte"] = al
@@ -1113,6 +1113,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     titoli_flt: dict = {
         "polizza_id": {"$in": list(pol_index.keys())},
         "stato": "incassato",
+        "pregresso": {"$ne": True},
     }
     if dal or al:
         cond = {}
@@ -1161,7 +1162,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         totale_dare += dovuto_alla_compagnia
 
     # pagamenti verso compagnia
-    mov_flt: dict = {"compagnia_id": compagnia_id, "categoria": "pagamento_compagnia"}
+    mov_flt: dict = {"compagnia_id": compagnia_id, "categoria": "pagamento_compagnia", "pregresso": {"$ne": True}}
     if dal or al:
         cond = {}
         if dal: cond["$gte"] = dal
@@ -1208,7 +1209,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     righe.sort(key=lambda r: r["data"] or "")
     saldo = totale_dare - totale_avere
     # ----- Rappel (sovraprovvigioni): accreditate fittiziamente, riducono saldo -----
-    rap_flt: dict = {"compagnia_id": compagnia_id}
+    rap_flt: dict = {"compagnia_id": compagnia_id, "pregresso": {"$ne": True}}
     if dal or al:
         cond = {}
         if dal: cond["$gte"] = dal
@@ -1238,7 +1239,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     # compagnia ci trattiene -> dobbiamo versarle nel saldo) — solo mandato diretto
     totale_ritenute_comp = 0.0
     if tipo_mandato == "diretto":
-        rit_flt: dict = {"compagnia_id": compagnia_id}
+        rit_flt: dict = {"compagnia_id": compagnia_id, "pregresso": {"$ne": True}}
         if dal or al:
             cond = {}
             if dal: cond["$gte"] = dal
