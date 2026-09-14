@@ -145,8 +145,11 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                 nota: notaTitolo || null,
             });
 
-            // 2) COPERTURA (se richiesta e non già coperto)
-            if (copertura && !giaCoperto) {
+            // 2) COPERTURA (solo se richiesta, non già coperto E NON si sta incassando).
+            //    Se si incassa nello stesso momento, l'incasso registra già l'intera
+            //    entrata (Entrate/Provvigioni/Saldo/Banca) in UN'UNICA riga: la copertura
+            //    separata creerebbe una seconda riga (copertura_titolo + incasso_coperto).
+            if (copertura && !giaCoperto && !incasso) {
                 await api.post(`/titoli/bulk-copertura`, {
                     ids: [titolo.id],
                     data_copertura: dataCopertura,
@@ -201,7 +204,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             }
 
             const msg = [
-                copertura && !giaCoperto ? "copertura registrata" : null,
+                copertura && !giaCoperto && !incasso ? "copertura registrata" : null,
                 incasso && !giaIncassato
                     ? (hasResiduo
                         ? (inc.tipo_chiusura === "sospeso"

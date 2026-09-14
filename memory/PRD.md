@@ -1,5 +1,10 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Fix incasso "registrato due volte" (copertura + incasso_coperto)
+
+- **🔴 Fix doppia riga in Prima Nota all'incasso** (`DialogIncassoCopertura.jsx`): la checkbox "Copertura" è attiva di default; se l'utente incassava anche (checkbox Incasso), venivano create DUE righe — `copertura_titolo` (Entrate/Provv/Saldo/Sospesi) + `incasso_coperto` (−Sospesi/+Banca). L'utente vuole un unico incasso. Ora la copertura separata (`bulk-copertura`) viene eseguita SOLO se NON si sta incassando nello stesso momento (`copertura && !giaCoperto && !incasso`). Incassando direttamente su un titolo non coperto, l'endpoint `incassa` registra una SOLA riga `incasso_premio` = Entrate + Provvigioni + Saldo + Banca. Verificato e2e (1 solo movimento incasso_premio con provv e conto). Per correggere i titoli già sdoppiati: usare il nuovo pulsante ↩ "Rimetti in arretrato" e re-incassare.
+
+
 ## Sessione 14/09/2026 (fork) — Form premi polizza, colonna Ritenuta, E/C compagnie = widget, pulsanti stato titolo
 
 - **Form premi polizza (dialog "Modifica polizza" tab Economici + tab "Premi")** (`PolizzaDetail.jsx`): rimosso il campo **Tasse**; aggiunti **Accessori** e **Addizionale**; il **Premio lordo è ora AUTOMATICO** (readonly) = Netto + Imposte + SSN + Accessori + Addizionale. `Diritti` resta come voce separata (non entra nel lordo). Aggiunto `premio_addizionale` al modello `Polizza` (db_models). Verificato via screenshot (tab Economici mostra i 5 campi + lordo auto, niente Tasse).
