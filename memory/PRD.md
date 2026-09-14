@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Form premi polizza, colonna Ritenuta, E/C compagnie = widget, pulsanti stato titolo
+
+- **Form premi polizza (dialog "Modifica polizza" tab Economici + tab "Premi")** (`PolizzaDetail.jsx`): rimosso il campo **Tasse**; aggiunti **Accessori** e **Addizionale**; il **Premio lordo è ora AUTOMATICO** (readonly) = Netto + Imposte + SSN + Accessori + Addizionale. `Diritti` resta come voce separata (non entra nel lordo). Aggiunto `premio_addizionale` al modello `Polizza` (db_models). Verificato via screenshot (tab Economici mostra i 5 campi + lordo auto, niente Tasse).
+- **Colonna RITENUTA nel Brogliaccio/Prima Nota** (`_compute_brogliaccio`): quando si registra una `ritenuta_compagnia` l'importo ora popola ANCHE la colonna dedicata "Ritenuta" (oltre a Saldo). Verificato via API (riga ritenuta: saldo=138,71 e ritenuta=138,71).
+- **🔴 E/C Compagnie allineato al widget "Saldo cassa"** (`_compagnia_estratto_data`): il DARE era gonfiato perché contava tutti i titoli `stato=incassato` (incl. i coperti PRIMA del go-live poi incassati via `incasso_coperto`, il cui ricavo è già nel saldo di apertura → doppio conteggio, es. CATTOLICA 50.220 vs 43.195). Ora il DARE = ricavi reali dei movimenti `incasso_premio` + `copertura_titolo` post-cutoff (al netto provvigioni), STESSA fonte del widget → coincidono al centesimo. Dettaglio righe ricostruito dai movimenti (contraente/polizza/ramo/collaboratore). Verificato: CATTOLICA e UCA DELTA=0,00 vs widget. `polizze.to_list(None)` (niente più cap 20000).
+- **Pulsanti stato titolo (PolizzaDetail tab Titoli)**: sui titoli **incassati** ora compaiono **⏸ "Rimetti coperto"** (marca-sospeso: annulla incasso e torna sospeso) e **↩ "Rimetti in arretrato"** (nuovo endpoint `POST /api/titoli/{tid}/rimetti-arretrato`: annulla incasso + storna copertura + reset a da_incassare, rimuove i movimenti Prima Nota su giornate aperte). Verificato e2e (incassa→coperto→incassa→arretrato, stato pulito) + screenshot pulsanti.
+
+
 ## Sessione 14/09/2026 (fork) — Tipo Inclusione/Esclusione + fix provvigioni BS BROKER
 
 - **Tipo titolo**: aggiunte le opzioni **Inclusione** ed **Esclusione** al dropdown "Tipo (riferimento)" (TitoloDialog) e al Literal `Titolo.tipo`. Verificato via screenshot.

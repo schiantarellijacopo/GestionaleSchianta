@@ -169,25 +169,30 @@ export default function PolizzaDetail() {
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
+    const rimettiArretrato = async (tid) => {
+        if (!window.confirm("Riportare questo titolo in ARRETRATO (da incassare)? Verranno annullati incasso e copertura e rimossi i relativi movimenti in Prima Nota.")) return;
+        try { await api.post(`/titoli/${tid}/rimetti-arretrato`); toast.success("Titolo riportato in arretrato"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
     const startPremiEdit = () => {
         setPremiForm({
             premio_netto: pol.premio_netto ?? 0,
-            premio_tasse: pol.premio_tasse ?? 0,
             premio_imposte: pol.premio_imposte ?? 0,
             premio_ssn: pol.premio_ssn ?? 0,
             premio_accessori: pol.premio_accessori ?? 0,
+            premio_addizionale: pol.premio_addizionale ?? 0,
             diritti: pol.diritti ?? 0,
         });
         setPremiEdit(true);
     };
-    const calcLordo = (f) => (
+    const calcLordo = (f) => Math.round((
         (parseFloat(f.premio_netto) || 0) +
-        (parseFloat(f.premio_tasse) || 0) +
         (parseFloat(f.premio_imposte) || 0) +
         (parseFloat(f.premio_ssn) || 0) +
         (parseFloat(f.premio_accessori) || 0) +
-        (parseFloat(f.diritti) || 0)
-    );
+        (parseFloat(f.premio_addizionale) || 0)
+    ) * 100) / 100;
     const savePremi = async () => {
         setPremiSaving(true);
         try {
@@ -704,10 +709,10 @@ export default function PolizzaDetail() {
                         {!premiEdit ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
-                                <F label="Tasse" value={fmtEur(pol.premio_tasse)} />
                                 <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
                                 <F label="SSN" value={fmtEur(pol.premio_ssn)} />
                                 <F label="Accessori" value={fmtEur(pol.premio_accessori)} />
+                                <F label="Addizionale" value={fmtEur(pol.premio_addizionale)} />
                                 <F label="Diritti" value={fmtEur(pol.diritti)} />
                                 <F label="Premio lordo" value={<span className="font-semibold text-slate-900 num">{fmtEur(pol.premio_lordo)}</span>} />
                             </div>
@@ -715,10 +720,10 @@ export default function PolizzaDetail() {
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 {[
                                     ["premio_netto", "Premio netto"],
-                                    ["premio_tasse", "Tasse"],
                                     ["premio_imposte", "Imposte"],
                                     ["premio_ssn", "SSN"],
                                     ["premio_accessori", "Accessori"],
+                                    ["premio_addizionale", "Addizionale"],
                                     ["diritti", "Diritti"],
                                 ].map(([k, lbl]) => (
                                     <div key={k}>
@@ -734,7 +739,7 @@ export default function PolizzaDetail() {
                                         value={calcLordo(premiForm).toFixed(2)}
                                         className="bg-slate-100 font-semibold"
                                         data-testid="premi-input-premio_lordo" />
-                                    <div className="text-[10px] text-slate-400 mt-0.5">Netto + Tasse + Imposte + SSN + Accessori + Diritti</div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5">Netto + Imposte + SSN + Accessori + Addizionale</div>
                                 </div>
                             </div>
                         )}
@@ -996,13 +1001,13 @@ export default function PolizzaDetail() {
                                                             title="Incasso/Copertura"
                                                         >€</Button>
                                                     )}
-                                                    {t.stato !== "incassato" && t.stato !== "stornato" && !t.titolo_coperto && !t.data_copertura && (
+                                                    {t.stato !== "stornato" && (t.stato === "incassato" || (!t.titolo_coperto && !t.data_copertura)) && (
                                                         <Button
                                                             size="sm" variant="outline"
                                                             className="h-7 px-2 text-xs text-amber-700 hover:bg-amber-50 border-amber-300"
                                                             onClick={() => marcaSospeso(t.id)}
                                                             data-testid={`pol-titolo-sospeso-${t.id}`}
-                                                            title="Segna come sospeso (coperto dall'agenzia)"
+                                                            title={t.stato === "incassato" ? "Rimetti coperto (annulla incasso, torna sospeso)" : "Segna come sospeso (coperto dall'agenzia)"}
                                                         >⏸</Button>
                                                     )}
                                                     {(t.titolo_coperto || t.data_copertura) && t.stato !== "incassato" && (
@@ -1013,6 +1018,15 @@ export default function PolizzaDetail() {
                                                             data-testid={`pol-titolo-storna-cop-${t.id}`}
                                                             title="Storna copertura"
                                                         >↺</Button>
+                                                    )}
+                                                    {t.stato === "incassato" && (
+                                                        <Button
+                                                            size="sm" variant="outline"
+                                                            className="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 border-slate-300"
+                                                            onClick={() => rimettiArretrato(t.id)}
+                                                            data-testid={`pol-titolo-arretrato-${t.id}`}
+                                                            title="Rimetti in arretrato (da incassare)"
+                                                        >↩</Button>
                                                     )}
                                                     {(t.sconto_applicato || 0) > 0 && (
                                                         <Button
@@ -1357,6 +1371,8 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         premio_tasse: pol.premio_tasse || 0,
         premio_imposte: pol.premio_imposte || 0,
         premio_ssn: pol.premio_ssn || 0,
+        premio_accessori: pol.premio_accessori || 0,
+        premio_addizionale: pol.premio_addizionale || 0,
         premio_lordo: pol.premio_lordo || 0,
         provvigioni: pol.provvigioni || 0,
         targa: pol.targa || "",
@@ -1402,6 +1418,14 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         regolazione_base_preventivo: pol.regolazione_base_preventivo ?? "",
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    // Premio lordo = netto + imposte + ssn + accessori + addizionale (auto-calcolato)
+    const setEcon = (k, v) => setF((p) => {
+        const n = { ...p, [k]: v };
+        n.premio_lordo = Math.round(((parseFloat(n.premio_netto) || 0) + (parseFloat(n.premio_imposte) || 0)
+            + (parseFloat(n.premio_ssn) || 0) + (parseFloat(n.premio_accessori) || 0)
+            + (parseFloat(n.premio_addizionale) || 0)) * 100) / 100;
+        return n;
+    });
 
     // Calcola la prossima scadenza quietanza = effetto + intervallo frazionamento
     const MESI_FRAZ = { annuale: 12, semestrale: 6, quadrimestrale: 4, trimestrale: 3, mensile: 1, unica: 12 };
@@ -1419,7 +1443,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     const save = async () => {
         try {
             const payload = { ...f };
-            ["premio_netto", "premio_tasse", "premio_imposte", "premio_ssn", "premio_lordo",
+            ["premio_netto", "premio_tasse", "premio_imposte", "premio_ssn", "premio_accessori", "premio_addizionale", "premio_lordo",
              "provvigioni", "termini_mora_giorni", "termini_disdetta_giorni",
              "pejus", "franchigia", "valore_veicolo", "valore_residuo_veicolo", "valore_accessori"].forEach((k) => {
                 if (payload[k] !== "" && payload[k] !== null && payload[k] !== undefined) {
@@ -1568,11 +1592,17 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
 
                     <TabsContent value="economici">
                         <div className="grid grid-cols-2 gap-3 py-3">
-                            <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => set("premio_netto", e.target.value)} data-testid="edit-pol-premio-netto" /></div>
-                            <div><Label>Tasse €</Label><Input type="number" step="0.01" value={f.premio_tasse} onChange={(e) => set("premio_tasse", e.target.value)} data-testid="edit-pol-tasse" /></div>
-                            <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.premio_imposte} onChange={(e) => set("premio_imposte", e.target.value)} data-testid="edit-pol-imposte" /></div>
-                            <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => set("premio_ssn", e.target.value)} data-testid="edit-pol-ssn" /></div>
-                            <div><Label>Premio lordo €</Label><Input type="number" step="0.01" value={f.premio_lordo} onChange={(e) => set("premio_lordo", e.target.value)} data-testid="edit-pol-premio-lordo" /></div>
+                            <div><Label>Premio netto €</Label><Input type="number" step="0.01" value={f.premio_netto} onChange={(e) => setEcon("premio_netto", e.target.value)} data-testid="edit-pol-premio-netto" /></div>
+                            <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.premio_imposte} onChange={(e) => setEcon("premio_imposte", e.target.value)} data-testid="edit-pol-imposte" /></div>
+                            <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.premio_ssn} onChange={(e) => setEcon("premio_ssn", e.target.value)} data-testid="edit-pol-ssn" /></div>
+                            <div><Label>Accessori €</Label><Input type="number" step="0.01" value={f.premio_accessori} onChange={(e) => setEcon("premio_accessori", e.target.value)} data-testid="edit-pol-accessori" /></div>
+                            <div><Label>Addizionale €</Label><Input type="number" step="0.01" value={f.premio_addizionale} onChange={(e) => setEcon("premio_addizionale", e.target.value)} data-testid="edit-pol-addizionale" /></div>
+                            <div>
+                                <Label>Premio lordo € (automatico)</Label>
+                                <Input type="number" step="0.01" readOnly disabled value={f.premio_lordo}
+                                    className="bg-slate-100 font-semibold" data-testid="edit-pol-premio-lordo" />
+                                <div className="text-[10px] text-slate-400 mt-0.5">Netto + Imposte + SSN + Accessori + Addizionale</div>
+                            </div>
                             <div>
                                 <Label>Provvigioni €</Label>
                                 <div className="flex gap-2">

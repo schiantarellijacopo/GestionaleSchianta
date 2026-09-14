@@ -1155,27 +1155,36 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     polizze = await db.polizze.find(
         pol_flt,
         {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1, "collaboratore_id": 1},
-    ).to_list(20000)
+    ).to_list(None)
     pol_index = {p["id"]: p for p in polizze}
     if not pol_index:
         return {"compagnia": comp, "righe": [], "totale_dare": 0.0, "totale_avere": 0.0, "saldo": 0.0,
                 "periodo": {"dal": dal, "al": al}, "trattiene_provvigioni": trattiene}
 
-    titoli_flt: dict = {
+    # DARE verso la compagnia = ricavi EFFETTIVI registrati in Prima Nota dopo il
+    # go-live: movimenti `incasso_premio` + `copertura_titolo` (al netto delle
+    # provvigioni se la compagnia trattiene). Stessa identica fonte del widget
+    # "Saldo cassa per compagnia" → i due valori coincidono al centesimo.
+    # NB: i titoli coperti PRIMA del cutoff hanno il ricavo (copertura) già nel
+    # saldo di apertura del setup → il loro `incasso_coperto` successivo NON
+    # rigenera DARE (evita il doppio conteggio che gonfiava il saldo).
+    mov_inc_flt: dict = {
         "polizza_id": {"$in": list(pol_index.keys())},
-        "stato": "incassato",
+        "tipo": "entrata",
+        "categoria": {"$in": ["incasso_premio", "copertura_titolo"]},
         "pregresso": {"$ne": True},
     }
     if dal or al:
         cond = {}
         if dal: cond["$gte"] = dal
         if al: cond["$lte"] = al
-        titoli_flt["data_incasso"] = cond
-    titoli = await db.titoli.find(titoli_flt, {"_id": 0}).sort("data_incasso", 1).to_list(20000)
+        mov_inc_flt["data_movimento"] = cond
+    mov_inc = await db.movimenti.find(mov_inc_flt, {"_id": 0}).sort("data_movimento", 1).to_list(None)
 
-    # arricchimento contraenti e collaboratori
-    contr_ids = list({pol_index[t["polizza_id"]].get("contraente_id") for t in titoli if t["polizza_id"] in pol_index})
-    collab_ids = list({pol_index[t["polizza_id"]].get("collaboratore_id") for t in titoli if t["polizza_id"] in pol_index and pol_index[t["polizza_id"]].get("collaboratore_id")})
+    # arricchimento contraenti e collaboratori (dalle polizze dei movimenti)
+    _pids = {m["polizza_id"] for m in mov_inc if m.get("polizza_id") in pol_index}
+    contr_ids = list({pol_index[p].get("contraente_id") for p in _pids})
+    collab_ids = list({pol_index[p].get("collaboratore_id") for p in _pids if pol_index[p].get("collaboratore_id")})
     contr_map = {}
     if contr_ids:
         async for c in db.anagrafiche.find({"id": {"$in": contr_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1}):
@@ -1187,15 +1196,15 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 
     righe = []
     totale_dare = 0.0
-    for t in titoli:
-        pol = pol_index.get(t["polizza_id"], {})
-        provv = float(t.get("provvigioni") or 0)
-        lordo = float(t.get("importo_lordo") or 0)
+    for m in mov_inc:
+        pol = pol_index.get(m["polizza_id"], {})
+        provv = float(m.get("provvigioni") or 0)
+        lordo = float(m.get("importo") or 0) + float(m.get("quota_sconto") or 0)
         dovuto_alla_compagnia = (lordo - provv) if trattiene else lordo
         righe.append({
-            "data": t.get("data_incasso") or t.get("scadenza"),
+            "data": m.get("data_movimento"),
             "tipo": "incasso",
-            "titolo_id": t.get("id"),
+            "titolo_id": m.get("titolo_id"),
             "polizza_id": pol.get("id"),
             "polizza": pol.get("numero_polizza"),
             "contraente_id": pol.get("contraente_id"),
@@ -1205,10 +1214,9 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "collaboratore": collab_map.get(pol.get("collaboratore_id", "")),
             "dare": round(dovuto_alla_compagnia, 2),
             "avere": 0.0,
-            "lordo": lordo, "provvigioni": provv,
-            "stato_pagamento": t.get("pagato_alla_compagnia") and "pagato" or "da_versare",
-            "data_pagamento_compagnia": t.get("data_pagamento_compagnia"),
-            "_movimento_id": t.get("id"),
+            "lordo": round(lordo, 2), "provvigioni": provv,
+            "stato_pagamento": "da_versare",
+            "_movimento_id": m.get("id"),
         })
         totale_dare += dovuto_alla_compagnia
 
@@ -3735,6 +3743,38 @@ async def marca_sospeso(tid: str, user=Depends(require_user("admin", "collaborat
     return {"ok": True, "incassi_annullati": n_del, "copertura_creata": n_mov}
 
 
+@api.post("/titoli/{tid}/rimetti-arretrato")
+async def rimetti_arretrato(tid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Riporta un titolo allo stato ARRETRATO (da_incassare, non coperto, non incassato):
+    annulla l'eventuale incasso e storna l'eventuale copertura, rimuovendo i relativi
+    movimenti dalla Prima Nota (solo su giornate aperte)."""
+    t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Titolo non trovato")
+    movs = await db.movimenti.find(
+        {"titolo_id": tid, "categoria": {"$in": ["incasso_premio", "incasso_coperto",
+         "incasso_premio_direzione", "copertura_titolo", "anticipo"]}},
+        {"_id": 0},
+    ).to_list(200)
+    for mv in movs:
+        await assert_giornata_aperta(mv.get("data_movimento"), azione="rimettere il titolo in arretrato (Prima Nota chiusa)")
+    n_del = 0
+    for mv in movs:
+        await db.movimenti.delete_one({"id": mv["id"]})
+        n_del += 1
+    await db.titoli.update_one(
+        {"id": tid},
+        {"$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
+         "$unset": {"data_incasso": "", "conto_cassa_id": "", "importo_pagato": "",
+                    "mezzo_pagamento": "", "sconto_applicato": "", "pagamento_in_direzione": "",
+                    "data_copertura": ""}},
+    )
+    await log_attivita(user, "rimetti_arretrato", "titolo", tid,
+                       f"Titolo riportato in arretrato ({n_del} movimenti Prima Nota rimossi)")
+    await _aggiorna_scadenze_polizza_da_titolo(t.get("polizza_id"))
+    return {"ok": True, "movimenti_rimossi": n_del}
+
+
 
 @api.post("/titoli/notifica-copertura")
 async def notifica_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
@@ -5823,8 +5863,10 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 # Alimenta il SALDO col segno scelto (di norma + : la compagnia
                 # trattiene provvigioni → aumenta il saldo da versare;
                 # con importo negativo lo riduce).
+                # Mostrata ANCHE nella colonna dedicata "Ritenuta" (solo visualizzazione).
                 c_totale = 0.0
                 c_saldo = importo
+                c_ritenuta = importo
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.

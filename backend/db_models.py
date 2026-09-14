@@ -417,6 +417,7 @@ class Polizza(BaseDoc):
     premio_imposte: float = 0.0    # altre imposte/oneri
     premio_ssn: float = 0.0        # contributo SSN
     premio_accessori: float = 0.0  # accessori del premio
+    premio_addizionale: float = 0.0  # addizionale del premio
     provvigioni: float = 0.0
     note: Optional[str] = None
     targa: Optional[str] = None
