@@ -26,6 +26,7 @@ export default function TitoliSospesi() {
     const [paying, setPaying] = useState(null);  // titolo in pagamento singolo
     const [selectedIds, setSelectedIds] = useState(new Set());
     const [bulkOpen, setBulkOpen] = useState(false);
+    const [q, setQ] = useState("");  // ricerca testuale sui sospesi
 
     const load = useCallback(() => {
         const params = {};
@@ -42,9 +43,15 @@ export default function TitoliSospesi() {
     // Filtro derivato da URL ?gg_min=N
     const visibleItems = useMemo(() => {
         if (!items) return null;
-        if (!ggMin) return items;
-        return items.filter((t) => (t.giorni_anticipo || 0) >= ggMin);
-    }, [items, ggMin]);
+        let list = ggMin ? items.filter((t) => (t.giorni_anticipo || 0) >= ggMin) : items;
+        const term = q.trim().toLowerCase();
+        if (term) {
+            list = list.filter((t) =>
+                (`${t.contraente_nome || ""} ${t.numero_polizza || ""} ${t.collaboratore_nome || ""} ${t.ramo || ""} ${t.targa || ""} ${t.cellulare || ""}`)
+                    .toLowerCase().includes(term));
+        }
+        return list;
+    }, [items, ggMin, q]);
 
     const clearGgMin = () => {
         const p = new URLSearchParams(searchParams);
@@ -130,6 +137,15 @@ export default function TitoliSospesi() {
             </div>
 
             <Card className="border-slate-200 p-3 mb-4 flex items-end gap-3 flex-wrap">
+                <div className="flex-1 min-w-[220px] max-w-sm">
+                    <Label className="text-xs">Cerca</Label>
+                    <Input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="Contraente, n° polizza, ramo, targa, telefono..."
+                        data-testid="sospesi-search"
+                    />
+                </div>
                 <div className="flex-1 max-w-xs">
                     <Label className="text-xs">Filtra per collaboratore</Label>
                     <Select value={filtroCollab} onValueChange={setFiltroCollab}>

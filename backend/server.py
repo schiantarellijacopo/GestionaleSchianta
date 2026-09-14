@@ -3500,16 +3500,25 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     if note:
         set_fields["note_copertura"] = note
 
+    # Titoli GIÀ coperti PRIMA di questa chiamata: la copertura era già stata
+    # contabilizzata (anche in passato/pregresso) -> NON ricreare la registrazione
+    # (niente riga ENTRATE/PROVVIGIONI/SALDO/SOSPESI in Prima Nota).
+    gia_coperti = set()
+    async for tc in db.titoli.find({"id": {"$in": ids}, "titolo_coperto": True}, {"_id": 0, "id": 1}):
+        gia_coperti.add(tc["id"])
+
     # 1) Aggiorna i titoli
     res = await db.titoli.update_many(
         {"id": {"$in": ids}},
         {"$set": set_fields},
     )
 
-    # 2) Crea i movimenti di COPERTURA in Prima Nota per ciascun titolo (idempotente:
-    #    skip se esiste già un movimento di copertura per quel titolo+data).
+    # 2) Crea i movimenti di COPERTURA in Prima Nota SOLO per i titoli NON già coperti
+    #    (idempotente: skip anche se esiste già un movimento di copertura sul giorno).
     n_movimenti = 0
     async for t in db.titoli.find({"id": {"$in": ids}}, {"_id": 0}):
+        if t["id"] in gia_coperti:
+            continue  # già coperto in precedenza: nessuna nuova registrazione
         # idempotenza: se esiste già un movimento di copertura per questo titolo, salta
         existing = await db.movimenti.find_one(
             {"titolo_id": t["id"], "categoria": {"$in": ["copertura_titolo", "anticipo"]},
@@ -3543,6 +3552,97 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
         "data_copertura": data_copertura,
         "movimenti_creati": n_movimenti,
     }
+
+
+@api.post("/titoli/{tid}/storna-copertura")
+async def storna_copertura(tid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Annulla una copertura errata: rimuove i movimenti di copertura dalla Prima Nota
+    e riporta il titolo a NON coperto (stato da_incassare)."""
+    t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Titolo non trovato")
+    if not (t.get("titolo_coperto") or t.get("data_copertura")):
+        raise HTTPException(400, "Il titolo non risulta coperto")
+    if t.get("stato") == "incassato":
+        raise HTTPException(400, "Titolo già incassato: prima ripristinalo a sospeso, poi storna la copertura")
+    # Rimuove i movimenti di copertura (nuovo + legacy 'anticipo'), solo su giornate aperte
+    movs = await db.movimenti.find(
+        {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}}, {"_id": 0},
+    ).to_list(100)
+    n_del = 0
+    for mv in movs:
+        await assert_giornata_aperta(mv.get("data_movimento"), azione="stornare la copertura (Prima Nota chiusa)")
+        await db.movimenti.delete_one({"id": mv["id"]})
+        n_del += 1
+    await db.titoli.update_one(
+        {"id": tid},
+        {"$set": {"stato": "da_incassare", "updated_at": _now_iso()},
+         "$unset": {"titolo_coperto": "", "data_copertura": "", "note_copertura": ""}},
+    )
+    await log_attivita(user, "storna_copertura", "titolo", tid,
+                       f"Copertura stornata ({n_del} movimenti Prima Nota rimossi)")
+    return {"ok": True, "movimenti_rimossi": n_del}
+
+
+@api.post("/titoli/{tid}/marca-sospeso")
+async def marca_sospeso(tid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Marca/ripristina un titolo come SOSPESO (coperto dall'agenzia). Se era incassato,
+    annulla prima l'incasso (rimuove i movimenti dalla Prima Nota su giornate aperte)."""
+    t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Titolo non trovato")
+    oggi = _now_iso()[:10]
+    n_del = 0
+    # 1) Se incassato -> annulla l'incasso
+    if t.get("stato") == "incassato":
+        inc_movs = await db.movimenti.find(
+            {"titolo_id": tid, "categoria": {"$in": ["incasso_premio", "incasso_coperto", "incasso_premio_direzione"]}},
+            {"_id": 0},
+        ).to_list(100)
+        for mv in inc_movs:
+            await assert_giornata_aperta(mv.get("data_movimento"), azione="ripristinare a sospeso (Prima Nota chiusa)")
+        for mv in inc_movs:
+            await db.movimenti.delete_one({"id": mv["id"]})
+            n_del += 1
+        await db.titoli.update_one(
+            {"id": tid},
+            {"$unset": {"data_incasso": "", "conto_cassa_id": "", "importo_pagato": "",
+                        "mezzo_pagamento": "", "sconto_applicato": "", "pagamento_in_direzione": ""}},
+        )
+    # 2) Marca coperto/sospeso
+    data_cop = t.get("data_copertura") or oggi
+    await assert_giornata_aperta(data_cop, azione="marcare come sospeso (Prima Nota chiusa)")
+    await db.titoli.update_one(
+        {"id": tid},
+        {"$set": {"titolo_coperto": True, "stato": "da_incassare", "data_copertura": data_cop,
+                  "importo_da_pagare": t.get("importo_da_pagare") if t.get("importo_da_pagare") is not None else float(t.get("importo_lordo") or 0.0),
+                  "updated_at": _now_iso()}},
+    )
+    # 3) Crea il movimento di copertura in Prima Nota (idempotente) SOLO se il titolo
+    #    NON era già coperto prima di questa chiamata (altrimenti la copertura era già
+    #    contabilizzata: non va ri-registrata).
+    n_mov = 0
+    was_coperto = bool(t.get("titolo_coperto"))
+    existing = await db.movimenti.find_one(
+        {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}, "data_movimento": data_cop},
+        {"_id": 0, "id": 1},
+    )
+    if not was_coperto and not existing:
+        pol = await db.polizze.find_one({"id": t.get("polizza_id")}, {"_id": 0}) or {}
+        mov = MovimentoContabile(
+            data_movimento=data_cop, tipo="entrata", categoria="copertura_titolo",
+            importo=float(t.get("importo_lordo") or 0.0),
+            descrizione=f"Copertura anticipata polizza {pol.get('numero_polizza') or t.get('polizza_id', '')}",
+            polizza_id=t.get("polizza_id"), titolo_id=tid,
+            anagrafica_id=pol.get("contraente_id"), compagnia_id=pol.get("compagnia_id"),
+            conto_cassa_id=None, provvigioni=float(t.get("provvigioni") or 0.0),
+        )
+        await db.movimenti.insert_one(mov.model_dump())
+        n_mov = 1
+    await log_attivita(user, "marca_sospeso", "titolo", tid,
+                       f"Titolo marcato sospeso ({n_del} incassi annullati, {n_mov} copertura creata)")
+    return {"ok": True, "incassi_annullati": n_del, "copertura_creata": n_mov}
+
 
 
 @api.post("/titoli/notifica-copertura")
@@ -5809,6 +5909,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             cum_ritenute_comp += importo
         elif (not is_e) and cat == "anticipo":
             cum_sospesi -= importo
+        elif (not is_e) and cat == "giroconto":
+            pass  # giroconto: trasferimento tra conti, NON è una spesa
         elif not is_e:
             cum_spese += importo
             if cat == "sconto_cliente":
@@ -6205,7 +6307,7 @@ async def statistiche_contabilita(
         "crediti": round(crediti_per, 2),
         "rimesse": round(by_cat.get("pagamento_compagnia", 0), 2),
         "sconti": round(by_cat.get("sconto_cliente", 0), 2),
-        "spese": round(sum(v for k, v in by_cat.items() if k != "pagamento_compagnia"), 2),
+        "spese": round(sum(v for k, v in by_cat.items() if k not in ("pagamento_compagnia", "giroconto", "anticipo", "ritenuta_compagnia")), 2),
         "saldo_cassa_compagnie": saldo_cassa_compagnie_tot,
     }
 

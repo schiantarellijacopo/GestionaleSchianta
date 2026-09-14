@@ -1,5 +1,15 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Fix copertura già-coperti, giroconto, storno/sospeso, ricerca sospesi
+
+- **🔴 Fix doppia registrazione copertura**: se un titolo era GIÀ coperto (`titolo_coperto=True` da prima), `bulk-copertura`/`marca-sospeso` NON ricreano più la riga di copertura (ENTRATE/PROVV/SALDO/SOSPESI) — la copertura era già contabilizzata. All'incasso di un già-coperto viene registrata SOLO la riga incasso (−SOSPESI +BANCA). Rimossi i 2 movimenti copertura errati sui titoli reali 184642872 (€485) e 182259867 (€382). Verificato: copertura ripetuta → 0 movimenti.
+- **🔴 Giroconto NON è una spesa**: escluso dal totale SPESE sia nel Brogliaccio (`_compute_brogliaccio`, cum loop) sia in `statistiche_contabilita` (esclusi anche anticipo/ritenuta_compagnia).
+- **Endpoint + pulsanti Storno copertura** (`POST /titoli/{id}/storna-copertura`): rimuove i movimenti di copertura dalla Prima Nota (giornate aperte) e riporta il titolo a da_incassare. Pulsante ↺ in PolizzaDetail.
+- **Endpoint + pulsante Marca/Ripristina sospeso** (`POST /titoli/{id}/marca-sospeso`): marca un titolo come sospeso/coperto; se era incassato annulla prima l'incasso. Pulsante ⏸ in PolizzaDetail. Verificato round-trip marca→storna (titolo torna pulito).
+- **Ricerca in Sospesi/Anticipi**: campo di ricerca testuale (contraente, n° polizza, collaboratore, ramo, targa, telefono) in `TitoliSospesi.jsx`. Verificato via screenshot.
+- **Metodi di calcolo globali**: tutte le logiche contabili (liquidità, saldo cassa da setup, copertura/incasso, giroconto) sono in funzioni condivise di server.py, NON tenant-specifiche → valgono per TUTTE le agenzie; i dati restano persistiti per-tenant nel DB.
+
+
 ## Sessione 14/09/2026 (fork) — Contabilità copertura/incasso titoli coperti (Prima Nota)
 
 - **Copertura titolo (solo coperto)**: `bulk_copertura` ora crea un movimento `entrata/copertura_titolo` (importo=lordo, nessun conto cassa, provvigioni dal titolo) invece del vecchio `uscita/anticipo`. Riga Prima Nota: **ENTRATE=lordo · PROVVIGIONI · SALDO=lordo−provv (debito vs compagnia) · SOSPESI=+lordo · Banca=0**. Verificato: titolo €850/€85 → 850/85/765/850.

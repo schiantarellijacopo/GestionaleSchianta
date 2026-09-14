@@ -151,6 +151,18 @@ export default function PolizzaDetail() {
         catch { toast.error("Errore"); }
     };
 
+    const marcaSospeso = async (tid) => {
+        if (!window.confirm("Segnare questo titolo come SOSPESO (coperto dall'agenzia)? Se era incassato, l'incasso verrà annullato.")) return;
+        try { await api.post(`/titoli/${tid}/marca-sospeso`); toast.success("Titolo segnato come sospeso"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const stornaCopertura = async (tid) => {
+        if (!window.confirm("Stornare la copertura di questo titolo? I relativi movimenti in Prima Nota verranno rimossi.")) return;
+        try { await api.post(`/titoli/${tid}/storna-copertura`); toast.success("Copertura stornata"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
     const startPremiEdit = () => {
         setPremiForm({
             premio_netto: pol.premio_netto ?? 0,
@@ -976,6 +988,24 @@ export default function PolizzaDetail() {
                                                             data-testid={`pol-titolo-incassa-${t.id}`}
                                                             title="Incasso/Copertura"
                                                         >€</Button>
+                                                    )}
+                                                    {t.stato !== "incassato" && t.stato !== "stornato" && !t.titolo_coperto && !t.data_copertura && (
+                                                        <Button
+                                                            size="sm" variant="outline"
+                                                            className="h-7 px-2 text-xs text-amber-700 hover:bg-amber-50 border-amber-300"
+                                                            onClick={() => marcaSospeso(t.id)}
+                                                            data-testid={`pol-titolo-sospeso-${t.id}`}
+                                                            title="Segna come sospeso (coperto dall'agenzia)"
+                                                        >⏸</Button>
+                                                    )}
+                                                    {(t.titolo_coperto || t.data_copertura) && t.stato !== "incassato" && (
+                                                        <Button
+                                                            size="sm" variant="outline"
+                                                            className="h-7 px-2 text-xs text-orange-700 hover:bg-orange-50 border-orange-300"
+                                                            onClick={() => stornaCopertura(t.id)}
+                                                            data-testid={`pol-titolo-storna-cop-${t.id}`}
+                                                            title="Storna copertura"
+                                                        >↺</Button>
                                                     )}
                                                     {(t.sconto_applicato || 0) > 0 && (
                                                         <Button
