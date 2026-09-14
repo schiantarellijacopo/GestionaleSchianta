@@ -1,5 +1,9 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Colonna "Azioni" sticky a destra (tabella Titoli)
+
+- La colonna "Azioni" della tabella titoli in PolizzaDetail è ora **ancorata a destra** (position sticky) tramite classe `.col-azioni` (index.css) su `<th>`/`<td>`: resta sempre visibile senza scorrere, con ombra di separazione e background coerente (righe pari/hover). Verificato a 1280px: la tabella scorre ma i pulsanti Azioni restano fissi.
+
 ## Sessione 14/09/2026 (fork) — Fix colonna "Azioni" tagliata nella tabella Titoli (PolizzaDetail)
 
 - **Causa**: la Card della tabella titoli aveva `overflow-hidden`; quando la tabella (14 colonne) superava la larghezza del contenitore, l'ultima colonna "Azioni" (✎ modifica, 🗑 elimina, €, ⏸, ↺) veniva tagliata senza scrollbar. La colonna era comunque sempre nel markup.

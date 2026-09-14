@@ -924,7 +924,7 @@ export default function PolizzaDetail() {
                         ) : (
                             <div className="overflow-x-auto">
                             <table className="tbl w-full min-w-[1100px]">
-                                <thead><tr><th>Tipo</th><th>N° Polizza</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th>Nota</th><th className="text-center">Allegati</th><th className="text-center w-40">Azioni</th></tr></thead>
+                                <thead><tr><th>Tipo</th><th>N° Polizza</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th>Nota</th><th className="text-center">Allegati</th><th className="text-center w-40 col-azioni">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
                                         <tr key={t.id}
@@ -972,7 +972,7 @@ export default function PolizzaDetail() {
                                                     onChange={load}
                                                 />
                                             </td>
-                                            <td className="text-center">
+                                            <td className="text-center col-azioni">
                                                 <div className="flex gap-1 justify-center">
                                                     {t.stato !== "incassato" && t.stato !== "stornato" && (
                                                         <Button

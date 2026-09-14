@@ -91,6 +91,19 @@ h1, h2, h3, h4, h5 {
 .tbl tbody tr:hover { @apply bg-slate-50; }
 .tbl tbody tr:nth-child(even) { background-color: #fbfcfe; }
 
+/* Colonna "Azioni" ancorata a destra (resta visibile senza scorrere) */
+.tbl th.col-azioni, .tbl td.col-azioni {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background: #ffffff;
+    box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.12);
+}
+.tbl thead th.col-azioni { background: #f8fafc; z-index: 3; }
+.tbl tbody tr:nth-child(even) td.col-azioni { background: #fbfcfe; }
+.tbl tbody tr:hover td.col-azioni { background: #f1f5f9; }
+
+
 /* Tables ultra-compact (per liste larghe come Titoli) */
 .tbl-compact { table-layout: auto; border-collapse: separate; border-spacing: 0; }
 .tbl-compact thead th {
