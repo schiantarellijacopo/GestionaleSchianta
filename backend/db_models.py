@@ -522,6 +522,8 @@ class Titolo(BaseDoc):
     importo_lordo: float = 0.0
     importo_netto: float = 0.0
     imposte: float = 0.0
+    ssn: float = 0.0          # contributo SSN (Servizio Sanitario Nazionale)
+    descrizione: Optional[str] = None   # descrizione libera del titolo
     accessori: float = 0.0    # accessori del titolo (rec40 col AU accessori_totale)
     provvigioni: float = 0.0
     data_incasso: Optional[str] = None

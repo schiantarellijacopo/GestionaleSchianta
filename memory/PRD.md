@@ -1,6 +1,10 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 14/09/2026 (fork) — Colonna "Azioni" sticky a destra (tabella Titoli)
+## Sessione 14/09/2026 (fork) — Campi SSN + Descrizione libera nel titolo
+
+- Aggiunti al modello `Titolo` i campi `ssn` (float, contributo SSN) e `descrizione` (nota libera). Nel dialog `TitoloDialog.jsx`: nuovo input **SSN €** (accanto a Imposte) e textarea **Descrizione (nota libera)** a tutta larghezza. Salvataggio + arrotondamento a 2 decimali (SSN) in create/update titolo. Verificato: SSN 12.345→12.35 e descrizione persistiti via API.
+
+
 
 - La colonna "Azioni" della tabella titoli in PolizzaDetail è ora **ancorata a destra** (position sticky) tramite classe `.col-azioni` (index.css) su `<th>`/`<td>`: resta sempre visibile senza scorrere, con ombra di separazione e background coerente (righe pari/hover). Verificato a 1280px: la tabella scorre ma i pulsanti Azioni restano fissi.
 

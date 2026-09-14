@@ -3937,7 +3937,7 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
         if not body.get("collaboratore_id") and pol_pre.get("collaboratore_id"):
             body["collaboratore_id"] = pol_pre["collaboratore_id"]
     # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
-    for _k in ("importo_lordo", "importo_netto", "imposte", "provvigioni", "importo_da_pagare"):
+    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
     obj = Titolo(**body)
@@ -3957,7 +3957,7 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
     body["updated_at"] = _now_iso()
     # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
-    for _k in ("importo_lordo", "importo_netto", "imposte", "provvigioni", "importo_da_pagare"):
+    for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
     res = await db.titoli.update_one({"id": tid}, {"$set": body})

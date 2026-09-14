@@ -26,6 +26,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         importo_lordo: round2(titolo.importo_lordo),
         importo_netto: round2(titolo.importo_netto),
         imposte: round2(titolo.imposte),
+        ssn: round2(titolo.ssn),
         provvigioni: titolo.provvigioni != null ? round2(titolo.provvigioni) : titolo.provvigioni,
     }));
     const [giornataChiusa, setGiornataChiusa] = useState(false);
@@ -178,6 +179,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             importo_lordo: round2(f.importo_lordo),
             importo_netto: round2(f.importo_netto),
             imposte: round2(f.imposte),
+            ssn: round2(f.ssn),
+            descrizione: (f.descrizione || "").trim() || null,
             provvigioni: provvTot,
             provvigioni_operatori: opsClean,
             collaboratore_id: opsClean[0]?.operatore_id || f.collaboratore_id || null,
@@ -259,6 +262,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} onChange={(e) => set("importo_lordo", e.target.value)} /></div>
                     <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
                     <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
+                    <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.ssn || 0} onChange={(e) => set("ssn", e.target.value)} data-testid="titolo-ssn" /></div>
                     <div>
                         <Label>Provvigioni € (totale)</Label>
                         <div className="flex gap-2">
@@ -268,6 +272,16 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                             <Button type="button" variant="outline" size="sm" onClick={recalcProvvigione} disabled={incassato} data-testid="titolo-provv-auto">Auto</Button>
                         </div>
                         {operatori.length > 0 && <p className="text-[10px] text-slate-400 mt-0.5">Ripartito fra {operatori.length} collab. · totale {totOperatori.toFixed(2)}€ (modificabile)</p>}
+                    </div>
+                    <div className="col-span-2">
+                        <Label>Descrizione (nota libera)</Label>
+                        <textarea
+                            className="w-full min-h-[64px] rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                            value={f.descrizione || ""}
+                            onChange={(e) => set("descrizione", e.target.value)}
+                            placeholder="Note libere sul titolo (facoltativo)"
+                            data-testid="titolo-descrizione"
+                        />
                     </div>
                     <div className="col-span-2 border border-slate-200 rounded-lg p-3 bg-slate-50/60">
                         <div className="flex items-center justify-between mb-2">
