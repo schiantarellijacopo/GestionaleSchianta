@@ -1,5 +1,11 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Fix colonna "Azioni" tagliata nella tabella Titoli (PolizzaDetail)
+
+- **Causa**: la Card della tabella titoli aveva `overflow-hidden`; quando la tabella (14 colonne) superava la larghezza del contenitore, l'ultima colonna "Azioni" (✎ modifica, 🗑 elimina, €, ⏸, ↺) veniva tagliata senza scrollbar. La colonna era comunque sempre nel markup.
+- **Fix** (`PolizzaDetail.jsx`): tabella titoli avvolta in `div.overflow-x-auto` + `min-w-[1100px]` → la colonna Azioni è sempre raggiungibile (scroll orizzontale sugli schermi stretti). Verificato via screenshot: Azioni visibile con tutti i pulsanti.
+
+
 ## Sessione 14/09/2026 (fork) — Doppioni polizze da import OMNIA incrementale (diagnosi + pulizia + fix)
 
 - **Causa**: l'import OMNIA incrementale del 14/09 (`A_OW8_23774_20260914161500_88_P_I.zip`, job 14:16) ha creato 255 polizze duplicate. `_upsert_polizza` deduplicava SOLO su `id_polizza_exp`; le polizze dell'import iniziale (11/09) avevano `id_polizza_exp=None`, quindi nessun match → nuove polizze (con codici ramo grezzi 3N/01/3S… non mappati).

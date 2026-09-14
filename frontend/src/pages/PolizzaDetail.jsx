@@ -922,7 +922,8 @@ export default function PolizzaDetail() {
                         {pol.titoli?.length === 0 ? (
                             <div className="p-8 text-center text-slate-500 text-sm">Nessun titolo.</div>
                         ) : (
-                            <table className="tbl w-full">
+                            <div className="overflow-x-auto">
+                            <table className="tbl w-full min-w-[1100px]">
                                 <thead><tr><th>Tipo</th><th>N° Polizza</th><th>Effetto</th><th>Scadenza</th><th>Stato</th><th className="text-right">Lordo</th><th className="text-right">Provv. tot.</th><th className="text-right">Provv. collab.</th><th className="text-right">Margine</th><th>Coperto il</th><th>Pagato il</th><th>Nota</th><th className="text-center">Allegati</th><th className="text-center w-40">Azioni</th></tr></thead>
                                 <tbody>
                                     {pol.titoli?.map((t) => (
@@ -1043,6 +1044,7 @@ export default function PolizzaDetail() {
                                     ))}
                                 </tbody>
                             </table>
+                            </div>
                         )}
                     </Card>
                 </TabsContent>
