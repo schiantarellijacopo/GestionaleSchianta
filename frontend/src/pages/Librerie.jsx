@@ -89,6 +89,7 @@ function Sezione({ section }) {
     const [editing, setEditing] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
     const [mergeOpen, setMergeOpen] = useState(false);
+    const [mergeUtentiOpen, setMergeUtentiOpen] = useState(false);
     const [codiciOpen, setCodiciOpen] = useState(false);
 
     const load = () => api.get(section.endpoint).then((r) => {
@@ -133,6 +134,7 @@ function Sezione({ section }) {
     const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
     const showBulkRename = section.key === "prodotti";
     const showMerge = section.key === "rami";
+    const showMergeUtenti = section.key === "utenti";
 
     return (
         <div>
@@ -157,6 +159,11 @@ function Sezione({ section }) {
                     {showMerge && (
                         <Button variant="outline" size="sm" onClick={() => setCodiciOpen(true)} data-testid="lib-mappa-codici-rami">
                             <Tags size={13} className="mr-1" /> Mappa codici polizze
+                        </Button>
+                    )}
+                    {showMergeUtenti && list && list.length > 1 && (
+                        <Button variant="outline" size="sm" onClick={() => setMergeUtentiOpen(true)} data-testid="lib-merge-utenti">
+                            <GitMerge size={13} className="mr-1" /> Unisci utenti
                         </Button>
                     )}
                     <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
@@ -204,6 +211,14 @@ function Sezione({ section }) {
                     open={codiciOpen}
                     rami={list || []}
                     onClose={() => { setCodiciOpen(false); load(); }}
+                />
+            )}
+
+            {showMergeUtenti && mergeUtentiOpen && (
+                <MergeUtentiDialog
+                    open={mergeUtentiOpen}
+                    utenti={list || []}
+                    onClose={() => { setMergeUtentiOpen(false); load(); }}
                 />
             )}
         </div>
@@ -604,6 +619,135 @@ function MergeRamiDialog({ open, rami, onClose }) {
         </Dialog>
     );
 }
+
+function MergeUtentiDialog({ open, utenti, onClose }) {
+    const [targetId, setTargetId] = useState("");
+    const [sourceIds, setSourceIds] = useState([]);
+    const [preview, setPreview] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    const disponibili = (utenti || []).filter((u) => u.role !== "cliente");
+
+    const toggleSource = (id) => {
+        if (id === targetId) return;
+        setPreview(null);
+        setSourceIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    };
+
+    const setTarget = (id) => {
+        setPreview(null);
+        setTargetId(id);
+        setSourceIds((prev) => prev.filter((x) => x !== id));
+    };
+
+    const caricaPreview = async () => {
+        setLoading(true);
+        try {
+            const r = await api.post("/auth/users/merge-preview", { target_id: targetId, source_ids: sourceIds });
+            setPreview(r.data);
+        } catch (e) { toast.error(errMsg(e, "Errore anteprima")); }
+        finally { setLoading(false); }
+    };
+
+    const conferma = async () => {
+        setLoading(true);
+        try {
+            const r = await api.post("/auth/users/merge", { target_id: targetId, source_ids: sourceIds });
+            const s = r.data.spostati || {};
+            toast.success(`Unione completata: ${r.data.uniti} utenti disattivati · ${s.polizze || 0} polizze, ${s.titoli || 0} titoli, ${s.anagrafiche || 0} anagrafiche riassegnate`);
+            onClose();
+        } catch (e) { toast.error(errMsg(e, "Errore unione")); }
+        finally { setLoading(false); }
+    };
+
+    const canPreview = targetId && sourceIds.length > 0 && !sourceIds.includes(targetId);
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+            <DialogContent className="max-w-3xl" data-testid="merge-utenti-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2"><GitMerge size={16} /> Unisci utenti / collaboratori</DialogTitle>
+                </DialogHeader>
+
+                <p className="text-sm text-slate-500">
+                    Scegli l&apos;utente <b>destinazione</b> da mantenere e spunta gli utenti <b>da unire</b>:
+                    polizze, titoli, anagrafiche, provvigioni, trattative e rete provvigionale verranno
+                    riassegnati alla destinazione. Gli utenti uniti restano <b>disattivati</b> (non eliminati).
+                </p>
+
+                <div className="max-h-72 overflow-auto border border-slate-200 rounded-md">
+                    <table className="tbl w-full text-sm">
+                        <thead><tr><th className="w-20">Destinaz.</th><th className="w-16">Da unire</th><th>Nome</th><th>Email</th><th>Ruolo</th></tr></thead>
+                        <tbody>
+                            {disponibili.map((u) => (
+                                <tr key={u.id} className={targetId === u.id ? "bg-emerald-50" : sourceIds.includes(u.id) ? "bg-rose-50" : ""}>
+                                    <td className="text-center">
+                                        <input type="radio" name="utente-target" checked={targetId === u.id}
+                                            onChange={() => setTarget(u.id)}
+                                            data-testid={`merge-utente-target-${u.id}`} />
+                                    </td>
+                                    <td className="text-center">
+                                        <input type="checkbox" checked={sourceIds.includes(u.id)} disabled={targetId === u.id}
+                                            onChange={() => toggleSource(u.id)}
+                                            data-testid={`merge-utente-source-${u.id}`} />
+                                    </td>
+                                    <td className="font-medium">{u.name}</td>
+                                    <td className="text-xs text-slate-500">{u.email}</td>
+                                    <td><span className="badge badge-neutral">{u.role}</span></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {preview && (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm" data-testid="merge-utenti-preview">
+                        <div className="font-semibold text-emerald-900 mb-1.5">
+                            Destinazione: {preview.target?.name} ({preview.target?.email})
+                        </div>
+                        <table className="tbl w-full text-xs bg-white rounded">
+                            <thead><tr><th>Da unire</th><th className="text-right">Polizze</th><th className="text-right">Titoli</th><th className="text-right">Anagrafiche</th><th className="text-right">Trattative</th></tr></thead>
+                            <tbody>
+                                {preview.sources.map((d) => (
+                                    <tr key={d.id}>
+                                        <td>{d.name} <span className="text-slate-400">({d.email})</span></td>
+                                        <td className="num text-right">{d.polizze}</td>
+                                        <td className="num text-right">{d.titoli}</td>
+                                        <td className="num text-right">{d.anagrafiche}</td>
+                                        <td className="num text-right">{d.trattative}</td>
+                                    </tr>
+                                ))}
+                                <tr className="font-semibold">
+                                    <td>Totale da spostare</td>
+                                    <td className="num text-right">{preview.totali.polizze}</td>
+                                    <td className="num text-right">{preview.totali.titoli}</td>
+                                    <td className="num text-right">{preview.totali.anagrafiche}</td>
+                                    <td className="num text-right">{preview.totali.trattative}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose} data-testid="merge-utenti-annulla">Annulla</Button>
+                    {!preview ? (
+                        <Button disabled={!canPreview || loading} onClick={caricaPreview}
+                            className="bg-sky-700 hover:bg-sky-800" data-testid="merge-utenti-preview-btn">
+                            {loading ? "Calcolo…" : "Anteprima"}
+                        </Button>
+                    ) : (
+                        <Button disabled={loading} onClick={conferma}
+                            className="bg-emerald-700 hover:bg-emerald-800" data-testid="merge-utenti-conferma">
+                            {loading ? "Unione…" : `Unisci ${preview.sources.length} utenti`}
+                        </Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
 function BulkRenameProdottiDialog({ open, prodotti, onClose }) {
     const [filter, setFilter] = useState("auto");  // 'auto' | 'tutti'

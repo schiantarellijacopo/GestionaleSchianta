@@ -195,6 +195,101 @@ async def delete_user(uid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
+# Collezioni con `collaboratore_id` da riassegnare in caso di unione utenti
+_MERGE_USER_COLLECTIONS = [
+    "anagrafiche", "polizze", "titoli", "trattative",
+    "voci_manuali_collab", "voci_ricorsive_collab",
+    "pagamenti_provvigioni", "schema_provvigionale",
+]
+
+
+@api.post("/auth/users/merge-preview")
+async def merge_users_preview(body: dict, user=Depends(require_user("admin"))):
+    """Anteprima: quanti record verrebbero spostati unendo le sorgenti nel target."""
+    target_id = body.get("target_id")
+    source_ids = [s for s in (body.get("source_ids") or []) if s and s != target_id]
+    if not source_ids:
+        raise HTTPException(400, "Nessun utente da unire selezionato")
+    sources = []
+    for sid in source_ids:
+        u = await db.users.find_one({"id": sid}, {"_id": 0, "name": 1, "email": 1})
+        row = {"id": sid, "name": (u or {}).get("name") or "?", "email": (u or {}).get("email")}
+        row["polizze"] = await db.polizze.count_documents({"collaboratore_id": sid})
+        row["titoli"] = await db.titoli.count_documents({"collaboratore_id": sid})
+        row["anagrafiche"] = await db.anagrafiche.count_documents({"collaboratore_id": sid})
+        row["trattative"] = await db.trattative.count_documents({"collaboratore_id": sid})
+        sources.append(row)
+    totali = {k: sum(r[k] for r in sources) for k in ("polizze", "titoli", "anagrafiche", "trattative")}
+    target = await db.users.find_one({"id": target_id}, {"_id": 0, "name": 1, "email": 1})
+    return {"target": target, "sources": sources, "totali": totali}
+
+
+@api.post("/auth/users/merge")
+async def merge_users(body: dict, user=Depends(require_user("admin"))):
+    """Unisce uno o più utenti (sorgenti) in un utente destinazione.
+
+    Tutti i riferimenti (`collaboratore_id`, `operatore_id` annidati, rete
+    piramidale) vengono riassegnati al target. Le sorgenti restano ma
+    disattivate (`attivo=False`, `merged_into=target_id`). Nessun cliente.
+    """
+    target_id = body.get("target_id")
+    source_ids = [s for s in (body.get("source_ids") or []) if s and s != target_id]
+    if not target_id or not source_ids:
+        raise HTTPException(400, "Seleziona la destinazione e almeno un utente da unire")
+    if user["id"] in source_ids:
+        raise HTTPException(400, "Non puoi unire il tuo stesso account")
+    target = await db.users.find_one({"id": target_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utente destinazione non trovato")
+    if target.get("role") == "cliente":
+        raise HTTPException(400, "La destinazione non può essere un cliente")
+    sources = await db.users.find({"id": {"$in": source_ids}}, {"_id": 0}).to_list(500)
+    if len(sources) != len(set(source_ids)):
+        raise HTTPException(404, "Alcuni utenti da unire non sono stati trovati")
+    if any(s.get("role") == "cliente" for s in sources):
+        raise HTTPException(400, "Non puoi unire un cliente")
+    tname = target.get("name") or ""
+    spostati: dict = {}
+    for col in _MERGE_USER_COLLECTIONS:
+        r = await db[col].update_many(
+            {"collaboratore_id": {"$in": source_ids}},
+            {"$set": {"collaboratore_id": target_id, "updated_at": _now_iso()}},
+        )
+        if r.modified_count:
+            spostati[col] = r.modified_count
+    # Nome denormalizzato dove presente
+    for col in ("pagamenti_provvigioni", "schema_provvigionale"):
+        await db[col].update_many(
+            {"collaboratore_id": target_id},
+            {"$set": {"collaboratore_nome": tname}},
+        )
+    # Ripartizioni provvigione annidate (provvigioni_operatori[].operatore_id)
+    for col in ("polizze", "titoli"):
+        r = await db[col].update_many(
+            {"provvigioni_operatori.operatore_id": {"$in": source_ids}},
+            {"$set": {"provvigioni_operatori.$[e].operatore_id": target_id,
+                      "provvigioni_operatori.$[e].operatore_nome": tname}},
+            array_filters=[{"e.operatore_id": {"$in": source_ids}}],
+        )
+        if r.modified_count:
+            spostati[f"{col}_provv_operatori"] = r.modified_count
+    # Rete piramidale: chi riportava a una sorgente ora riporta al target
+    r = await db.users.update_many(
+        {"parent_collaboratore_id": {"$in": source_ids}},
+        {"$set": {"parent_collaboratore_id": target_id}},
+    )
+    if r.modified_count:
+        spostati["utenti_rete"] = r.modified_count
+    # Disattiva le sorgenti (non eliminate)
+    await db.users.update_many(
+        {"id": {"$in": source_ids}},
+        {"$set": {"attivo": False, "merged_into": target_id, "updated_at": _now_iso()}},
+    )
+    await log_attivita(user, "merge", "user", target_id,
+                       f"Uniti {len(source_ids)} utenti in {tname}")
+    return {"ok": True, "target_id": target_id, "uniti": len(source_ids), "spostati": spostati}
+
+
 # ============================================================
 # COLLABORATORI / PROVVIGIONI
 # ============================================================
