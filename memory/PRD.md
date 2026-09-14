@@ -1047,3 +1047,14 @@ Usare integration_expert prima di implementare.
 - **Backend**: `POST /api/auth/users/merge-preview` (conteggi polizze/titoli/anagrafiche/trattative per sorgente) e `POST /api/auth/users/merge` (body {target_id, source_ids}). Riassegna `collaboratore_id` su 8 collezioni (anagrafiche, polizze, titoli, trattative, voci_manuali_collab, voci_ricorsive_collab, pagamenti_provvigioni, schema_provvigionale), aggiorna `collaboratore_nome` denormalizzato, riassegna `provvigioni_operatori[].operatore_id/operatore_nome` (arrayFilters) su polizze/titoli, riassegna `parent_collaboratore_id` (rete piramidale). Le sorgenti restano DISATTIVATE (`attivo=False`, `merged_into=target_id`), non eliminate. Nessun cliente ammesso. Tenant-scoped via wrapper.
 - **Frontend**: Librerie → Utenti/Collaboratori → pulsante "Unisci utenti" apre `MergeUtentiDialog` (radio destinazione + checkbox da unire + Anteprima conteggi + conferma). testid: lib-merge-utenti, merge-utenti-dialog, merge-utente-target-{id}, merge-utente-source-{id}, merge-utenti-preview-btn, merge-utenti-conferma.
 - Testato e2e via curl (anagrafica+titolo+provvigioni_operatori riassegnati al target, sorgente disattivata) + screenshot UI dialog.
+
+### Sessione fork 2026-06 — Nuove causali contabili
+- Aggiunte 4 causali al movimento contabile: `prelievo_soci`, `compenso_amministratore`, `imposte`, `stipendi` (enum `MovimentoCategoria` in db_models.py).
+- Cervello Mini Bilancio: nuove righe di COSTO distinte (Prelievo Soci, Compenso Amministratore, Imposte, Stipendi) in `_MB_AUTO_COSTI` + mapping in `_mb_classify` (routes/cervello.py).
+- Frontend: SelectItem aggiunti in "Causali standard" (Contabilita.jsx). Testato via API (movimento stipendi/imposte → righe costo Mini Bilancio).
+
+### Sessione fork 2026-06 — Ripristino unione utenti + Filtro attivi
+- **Merge con provenienza**: il merge ora stampa `merged_from_user_id` sui documenti riassegnati, `merged_from_operatore_id` sugli elementi di provvigioni_operatori, `merged_parent_from` sugli utenti della rete, e `merged_at` sulla sorgente. (server.py)
+- **Unmerge**: `POST /api/auth/users/{uid}/unmerge` riporta alla sorgente i dati tracciati, rimuove gli stamp, riattiva l'utente (attivo=True, unset merged_into/merged_at). Le unioni precedenti al tracciamento riattivano soltanto l'utente.
+- **Filtro Attivi (frontend Librerie.jsx)**: la tab Utenti nasconde di default gli utenti `attivo===false`; toggle "Mostra anche disattivati (N)" (testid lib-toggle-inactive-utenti). Badge "unito"/"disattivato" sulle righe; azione "Ripristina unione" nel menu ⋮ (testid utente-unmerge-{id}) solo per utenti con merged_into.
+- Testato: ciclo merge→unmerge via API (anagrafica/titolo/provvigioni_operatori riportati alla sorgente, utente riattivato) + smoke test UI.

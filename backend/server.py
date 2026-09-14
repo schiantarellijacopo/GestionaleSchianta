@@ -251,12 +251,13 @@ async def merge_users(body: dict, user=Depends(require_user("admin"))):
     tname = target.get("name") or ""
     spostati: dict = {}
     for col in _MERGE_USER_COLLECTIONS:
-        r = await db[col].update_many(
-            {"collaboratore_id": {"$in": source_ids}},
-            {"$set": {"collaboratore_id": target_id, "updated_at": _now_iso()}},
-        )
-        if r.modified_count:
-            spostati[col] = r.modified_count
+        for sid in source_ids:
+            r = await db[col].update_many(
+                {"collaboratore_id": sid},
+                {"$set": {"collaboratore_id": target_id, "merged_from_user_id": sid, "updated_at": _now_iso()}},
+            )
+            if r.modified_count:
+                spostati[col] = spostati.get(col, 0) + r.modified_count
     # Nome denormalizzato dove presente
     for col in ("pagamenti_provvigioni", "schema_provvigionale"):
         await db[col].update_many(
@@ -265,29 +266,84 @@ async def merge_users(body: dict, user=Depends(require_user("admin"))):
         )
     # Ripartizioni provvigione annidate (provvigioni_operatori[].operatore_id)
     for col in ("polizze", "titoli"):
-        r = await db[col].update_many(
-            {"provvigioni_operatori.operatore_id": {"$in": source_ids}},
-            {"$set": {"provvigioni_operatori.$[e].operatore_id": target_id,
-                      "provvigioni_operatori.$[e].operatore_nome": tname}},
-            array_filters=[{"e.operatore_id": {"$in": source_ids}}],
+        for sid in source_ids:
+            r = await db[col].update_many(
+                {"provvigioni_operatori.operatore_id": sid},
+                {"$set": {"provvigioni_operatori.$[e].operatore_id": target_id,
+                          "provvigioni_operatori.$[e].operatore_nome": tname,
+                          "provvigioni_operatori.$[e].merged_from_operatore_id": sid}},
+                array_filters=[{"e.operatore_id": sid}],
+            )
+            if r.modified_count:
+                spostati[f"{col}_provv_operatori"] = spostati.get(f"{col}_provv_operatori", 0) + r.modified_count
+    # Rete piramidale: chi riportava a una sorgente ora riporta al target
+    for sid in source_ids:
+        r = await db.users.update_many(
+            {"parent_collaboratore_id": sid},
+            {"$set": {"parent_collaboratore_id": target_id, "merged_parent_from": sid}},
         )
         if r.modified_count:
-            spostati[f"{col}_provv_operatori"] = r.modified_count
-    # Rete piramidale: chi riportava a una sorgente ora riporta al target
-    r = await db.users.update_many(
-        {"parent_collaboratore_id": {"$in": source_ids}},
-        {"$set": {"parent_collaboratore_id": target_id}},
-    )
-    if r.modified_count:
-        spostati["utenti_rete"] = r.modified_count
+            spostati["utenti_rete"] = spostati.get("utenti_rete", 0) + r.modified_count
     # Disattiva le sorgenti (non eliminate)
     await db.users.update_many(
         {"id": {"$in": source_ids}},
-        {"$set": {"attivo": False, "merged_into": target_id, "updated_at": _now_iso()}},
+        {"$set": {"attivo": False, "merged_into": target_id, "merged_at": _now_iso(), "updated_at": _now_iso()}},
     )
     await log_attivita(user, "merge", "user", target_id,
                        f"Uniti {len(source_ids)} utenti in {tname}")
     return {"ok": True, "target_id": target_id, "uniti": len(source_ids), "spostati": spostati}
+
+
+@api.post("/auth/users/{uid}/unmerge")
+async def unmerge_user(uid: str, user=Depends(require_user("admin"))):
+    """Ripristina un utente unito per errore: riattiva l'utente e gli riporta
+    i dati che gli erano stati sottratti durante l'unione (tracciati con
+    `merged_from_user_id`). Le unioni fatte prima del tracciamento riattivano
+    l'utente ma non ripristinano i dati.
+    """
+    src = await db.users.find_one({"id": uid}, {"_id": 0})
+    if not src:
+        raise HTTPException(404, "Utente non trovato")
+    if not src.get("merged_into"):
+        raise HTTPException(400, "Questo utente non risulta unito ad un altro")
+    sname = src.get("name") or ""
+    ripristinati: dict = {}
+    for col in _MERGE_USER_COLLECTIONS:
+        r = await db[col].update_many(
+            {"merged_from_user_id": uid},
+            {"$set": {"collaboratore_id": uid, "updated_at": _now_iso()},
+             "$unset": {"merged_from_user_id": ""}},
+        )
+        if r.modified_count:
+            ripristinati[col] = r.modified_count
+    for col in ("pagamenti_provvigioni", "schema_provvigionale"):
+        await db[col].update_many(
+            {"collaboratore_id": uid},
+            {"$set": {"collaboratore_nome": sname}},
+        )
+    for col in ("polizze", "titoli"):
+        r = await db[col].update_many(
+            {"provvigioni_operatori.merged_from_operatore_id": uid},
+            {"$set": {"provvigioni_operatori.$[e].operatore_id": uid,
+                      "provvigioni_operatori.$[e].operatore_nome": sname},
+             "$unset": {"provvigioni_operatori.$[e].merged_from_operatore_id": ""}},
+            array_filters=[{"e.merged_from_operatore_id": uid}],
+        )
+        if r.modified_count:
+            ripristinati[f"{col}_provv_operatori"] = r.modified_count
+    r = await db.users.update_many(
+        {"merged_parent_from": uid},
+        {"$set": {"parent_collaboratore_id": uid}, "$unset": {"merged_parent_from": ""}},
+    )
+    if r.modified_count:
+        ripristinati["utenti_rete"] = r.modified_count
+    await db.users.update_one(
+        {"id": uid},
+        {"$set": {"attivo": True, "updated_at": _now_iso()},
+         "$unset": {"merged_into": "", "merged_at": ""}},
+    )
+    await log_attivita(user, "unmerge", "user", uid, f"Ripristinato {sname}")
+    return {"ok": True, "user_id": uid, "ripristinati": ripristinati}
 
 
 # ============================================================

@@ -333,6 +333,10 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                             <SelectItem value="cat:rimborso_cliente">Rimborso cliente</SelectItem>
                             <SelectItem value="cat:sconto_cliente">Sconto cliente</SelectItem>
                             <SelectItem value="cat:spese_amministrative">Spese amministrative</SelectItem>
+                            <SelectItem value="cat:prelievo_soci">Prelievo soci</SelectItem>
+                            <SelectItem value="cat:compenso_amministratore">Compenso amministratore</SelectItem>
+                            <SelectItem value="cat:imposte">Imposte</SelectItem>
+                            <SelectItem value="cat:stipendi">Stipendi</SelectItem>
                             <SelectItem value="cat:anticipo">Anticipo / Sospeso</SelectItem>
                             <SelectItem value="cat:altro">Altro</SelectItem>
                             {vociBil.length > 0 && <div className="px-2 py-1 mt-1 text-[10px] uppercase tracking-wide text-slate-400 border-t border-slate-100">Voci di bilancio (mini-bilancio)</div>}

@@ -400,6 +400,10 @@ _MB_AUTO_COSTI = [
     ("storni_rivalse", "Storni Provvigionali / Rivalse"),
     ("provvigioni_passive", "Provvigioni Passive Collaboratori"),
     ("spese_varie", "Spese Generali / Varie"),
+    ("prelievo_soci", "Prelievo Soci"),
+    ("compenso_amministratore", "Compenso Amministratore"),
+    ("imposte", "Imposte"),
+    ("stipendi", "Stipendi"),
 ]
 _MB_EXCLUDE = {
     "giroconto", "anticipo", "pagamento_compagnia",
@@ -437,6 +441,8 @@ def _mb_classify(m: dict, voci_map: dict) -> list[tuple[str, str, float]]:
         return [("costo", "storni_rivalse", imp)]
     if cat == "spese_amministrative":
         return [("costo", "spese_varie", imp)]
+    if cat in ("prelievo_soci", "compenso_amministratore", "imposte", "stipendi"):
+        return [("costo", cat, imp)]
     # generiche
     if tipo == "entrata":
         return [("ricavo", "storni_ricavi", imp)]

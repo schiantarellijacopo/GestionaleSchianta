@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
 
@@ -91,6 +91,17 @@ function Sezione({ section }) {
     const [mergeOpen, setMergeOpen] = useState(false);
     const [mergeUtentiOpen, setMergeUtentiOpen] = useState(false);
     const [codiciOpen, setCodiciOpen] = useState(false);
+    const [showInactive, setShowInactive] = useState(false);
+
+    const unmergeUtente = async (u) => {
+        if (!window.confirm(`Ripristinare "${u.name}"? Verrà riattivato e gli verranno riportati i dati che gli erano stati sottratti con l'unione.`)) return;
+        try {
+            const r = await api.post(`/auth/users/${u.id}/unmerge`);
+            const rp = r.data.ripristinati || {};
+            toast.success(`Ripristinato: ${rp.polizze || 0} polizze, ${rp.titoli || 0} titoli, ${rp.anagrafiche || 0} anagrafiche riportate`);
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore ripristino")); }
+    };
 
     const load = () => api.get(section.endpoint).then((r) => {
         let data = r.data;
@@ -136,11 +147,24 @@ function Sezione({ section }) {
     const showMerge = section.key === "rami";
     const showMergeUtenti = section.key === "utenti";
 
+    // Filtro attivi: di default nasconde gli utenti disattivati (es. uniti in un altro)
+    const viewList = (section.key === "utenti" && list && !showInactive)
+        ? list.filter((u) => u.attivo !== false)
+        : list;
+    const nInactive = section.key === "utenti" && list
+        ? list.filter((u) => u.attivo === false).length : 0;
+
     return (
         <div>
             <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-slate-500 num">{list ? `${list.length} elementi` : ""}</span>
+                <span className="text-sm text-slate-500 num">{viewList ? `${viewList.length} elementi` : ""}</span>
                 <div className="flex gap-2">
+                    {showMergeUtenti && nInactive > 0 && (
+                        <Button variant="outline" size="sm" onClick={() => setShowInactive((v) => !v)} data-testid="lib-toggle-inactive-utenti">
+                            {showInactive ? <EyeOff size={13} className="mr-1" /> : <Eye size={13} className="mr-1" />}
+                            {showInactive ? "Nascondi disattivati" : `Mostra anche disattivati (${nInactive})`}
+                        </Button>
+                    )}
                     {showApplica && (
                         <Button variant="outline" size="sm" onClick={applicaMapping} data-testid={`lib-apply-${section.key}`}>
                             Applica a polizze esistenti
@@ -185,8 +209,8 @@ function Sezione({ section }) {
             </div>
 
             <Card className="border-slate-200 overflow-hidden">
-                {list === null ? <Loading /> : list.length === 0 ? <Empty /> :
-                    <ListaSezione section={section} list={list} onEdit={setEditing} onDelete={elimina} onQuickUpdate={quickUpdate} />
+                {list === null ? <Loading /> : viewList.length === 0 ? <Empty /> :
+                    <ListaSezione section={section} list={viewList} onEdit={setEditing} onDelete={elimina} onQuickUpdate={quickUpdate} onUnmerge={unmergeUtente} />
                 }
             </Card>
 
@@ -895,7 +919,7 @@ function BulkRenameProdottiDialog({ open, prodotti, onClose }) {
     );
 }
 
-function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
+function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerge }) {
     if (section.key === "conti-cassa") {
         return (
             <table className="tbl w-full">
@@ -1174,12 +1198,17 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
             <thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Anagrafica collegata</th><th></th></tr></thead>
             <tbody>
                 {list.map((u) => (
-                    <tr key={u.id}>
+                    <tr key={u.id} className={u.attivo === false ? "opacity-60" : ""}>
                         <td className="font-medium flex items-center gap-2">
                             <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-semibold">
                                 {(u.name || "?").charAt(0).toUpperCase()}
                             </div>
                             {u.name}
+                            {u.attivo === false && (
+                                <span className="badge badge-neutral text-[10px]" data-testid={`utente-disattivato-${u.id}`}>
+                                    {u.merged_into ? "unito" : "disattivato"}
+                                </span>
+                            )}
                         </td>
                         <td className="text-xs">{u.email}</td>
                         <td><span className={`badge ${ROLE_COLORS[u.role] || "badge-neutral"} inline-flex items-center gap-1`}>
@@ -1187,7 +1216,17 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate }) {
                         </span></td>
                         <td className="text-xs text-slate-500 num">{u.anagrafica_id ? u.anagrafica_id.slice(0, 8) : "-"}</td>
                         <td className="text-right">
-                            <RowActions onEdit={() => onEdit(u)} onDelete={() => onDelete(u.id)} label="utente" />
+                            <RowActions
+                                onEdit={() => onEdit(u)}
+                                onDelete={() => onDelete(u.id)}
+                                label="utente"
+                                extra={u.merged_into ? [{
+                                    label: "Ripristina unione",
+                                    icon: <Undo2 size={14} />,
+                                    onClick: () => onUnmerge?.(u),
+                                    testid: `utente-unmerge-${u.id}`,
+                                }] : []}
+                            />
                         </td>
                     </tr>
                 ))}
