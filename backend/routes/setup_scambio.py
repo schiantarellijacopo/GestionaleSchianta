@@ -89,19 +89,63 @@ async def stato_setup(user=Depends(require_user("admin"))) -> dict:
     }
 
 
+@router.get("/setup-iniziale/dati")
+async def dati_setup(user=Depends(require_user("admin"))) -> dict:
+    """Ricostruisce i valori correnti del setup (per precompilare la modifica)."""
+    saldi_banche, saldi_compagnie, sospesi, voci_pregresse = [], [], [], []
+    async for m in db.movimenti.find({"is_setup_iniziale": True}, {"_id": 0}):
+        cat = m.get("categoria") or ""
+        imp = float(m.get("importo") or 0)
+        if cat == "setup_iniziale_banca":
+            saldi_banche.append({"conto_id": m.get("conto_cassa_id"),
+                                 "saldo": imp if m.get("tipo") == "entrata" else -imp,
+                                 "data": m.get("data_movimento")})
+        elif cat == "setup_iniziale_compagnia_dare":
+            saldi_compagnie.append({"compagnia_id": m.get("compagnia_id"), "saldo_dare": imp,
+                                    "saldo_avere": 0.0, "data": m.get("data_movimento"),
+                                    "descrizione": m.get("descrizione")})
+        elif cat == "setup_iniziale_compagnia_avere":
+            saldi_compagnie.append({"compagnia_id": m.get("compagnia_id"), "saldo_dare": 0.0,
+                                    "saldo_avere": imp, "data": m.get("data_movimento"),
+                                    "descrizione": m.get("descrizione")})
+        elif cat.startswith("setup_iniziale_"):
+            voci_pregresse.append({"tipo": cat.replace("setup_iniziale_", ""),
+                                   "importo": imp, "data": m.get("data_movimento"),
+                                   "compagnia_id": m.get("compagnia_id"),
+                                   "descrizione": m.get("descrizione")})
+    async for t in db.titoli.find({"is_setup_iniziale": True}, {"_id": 0}):
+        sm = await db.sospesi_manuali.find_one({"titolo_id": t.get("id")}, {"_id": 0}) or {}
+        sospesi.append({"anagrafica_id": t.get("contraente_id_setup") or sm.get("anagrafica_id"),
+                        "polizza_id": t.get("polizza_id") or sm.get("polizza_id"),
+                        "importo": float(t.get("importo_lordo") or 0),
+                        "data": t.get("data_copertura"),
+                        "descrizione": t.get("descrizione")})
+    s = await db.setup_iniziale.find_one({}, {"_id": 0}) or {}
+    return {"saldi_banche": saldi_banche, "saldi_compagnie": saldi_compagnie,
+            "sospesi": sospesi, "voci_pregresse": voci_pregresse, "note": s.get("note") or ""}
+
+
+
 @router.post("/setup-iniziale")
 async def esegui_setup(
     body: SetupInizialeBody,
+    forza: bool = False,
     user=Depends(require_user("admin")),
 ) -> dict:
-    """Esegue il setup iniziale. Idempotente solo se non ancora completato:
-    se già completato, blocca a meno di forzare `?forza=true`."""
+    """Esegue il setup iniziale. Se già completato blocca, a meno di `?forza=true`
+    (modifica): in tal caso i movimenti/sospesi/titoli di setup precedenti vengono
+    prima eliminati e poi ricreati con i nuovi dati."""
     existing = await db.setup_iniziale.find_one({}, {"_id": 0})
-    if existing and existing.get("completato_at"):
+    if existing and existing.get("completato_at") and not forza:
         raise HTTPException(
             409,
-            "Setup iniziale già completato. Modificare i dati manualmente da Prima Nota / Conti.",
+            "Setup iniziale già completato. Usa 'Modifica setup' per aggiornarlo.",
         )
+    if forza:
+        # pulizia degli artefatti del setup precedente (come il reset)
+        await db.movimenti.delete_many({"is_setup_iniziale": True})
+        await db.sospesi_manuali.delete_many({"is_setup_iniziale": True})
+        await db.titoli.delete_many({"is_setup_iniziale": True})
 
     # 1. Saldi banche -> movimenti iniziali di apertura
     for sb in body.saldi_banche:

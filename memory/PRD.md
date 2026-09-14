@@ -1084,3 +1084,8 @@ Usare integration_expert prima di implementare.
 - Aggiunto flag `pregresso` sui dati migrati. Estratti conto (compagnia + collaboratori) escludono `pregresso=True`: mostrano solo il saldo iniziale del setup + operazioni future.
 - Reset c5ae2d0e: 55.644 titoli incassato -> pregresso=True (sospesi da_incassare e movimenti di setup NON toccati). Endpoints `_compagnia_estratto_data` (titoli/mov/rappel/ritenute) e `estratto_provvigioni` (titolo_filter) filtrano pregresso!=True.
 - Verificato: estratto compagnia = solo 4 righe saldo_iniziale setup; estratto collaboratori = 0 incassi pregressi.
+
+### Sessione fork 2026-06 — Modifica setup iniziale
+- Backend (routes/setup_scambio.py): `POST /setup-iniziale?forza=true` ora ELIMINA gli artefatti del setup precedente (movimenti/sospesi/titoli is_setup_iniziale) e li ricrea con i nuovi dati (= modifica). Nuovo `GET /setup-iniziale/dati` ricostruisce i valori correnti (una riga per movimento, nessun raggruppamento -> no perdita dati) per precompilare il form.
+- Frontend (SetupIniziale.jsx): nella card "completato" pulsante "Modifica setup" (carica i dati e apre il form in editMode) + banner "stai modificando" con "Annulla modifica"; submit usa ?forza=true e mostra "Salva modifiche". Reset invariato.
+- Verificato round-trip (dati->forza) senza perdita: totali dare/avere e n. movimenti identici.

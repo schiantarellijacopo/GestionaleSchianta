@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, AlertCircle, CheckCircle2, RotateCcw, Building2, Coins, Banknote, FileWarning } from "lucide-react";
+import { Plus, Trash2, AlertCircle, CheckCircle2, RotateCcw, Building2, Coins, Banknote, FileWarning, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SetupIniziale() {
@@ -26,6 +26,7 @@ export default function SetupIniziale() {
     const [sospesi, setSospesi] = useState([]);
     const [vociPregresse, setVociPregresse] = useState([]);
     const [note, setNote] = useState("");
+    const [editMode, setEditMode] = useState(false);
 
     const dataDefault = new Date().toISOString().slice(0, 10);
     const dataIniziale = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -42,12 +43,25 @@ export default function SetupIniziale() {
             toast.error("Aggiungi almeno una voce"); return;
         }
         try {
-            const r = await api.post("/setup-iniziale", {
+            const r = await api.post(`/setup-iniziale${editMode ? "?forza=true" : ""}`, {
                 saldi_banche: saldiBanca, saldi_compagnie: saldiComp,
                 sospesi, voci_pregresse: vociPregresse, note,
             });
-            toast.success("Setup iniziale completato"); load();
+            toast.success(editMode ? "Setup iniziale aggiornato" : "Setup iniziale completato");
+            setEditMode(false); load();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const modifica = async () => {
+        try {
+            const r = await api.get("/setup-iniziale/dati");
+            setSaldiBanca(r.data.saldi_banche || []);
+            setSaldiComp(r.data.saldi_compagnie || []);
+            setSospesi(r.data.sospesi || []);
+            setVociPregresse(r.data.voci_pregresse || []);
+            setNote(r.data.note || "");
+            setEditMode(true);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore caricamento dati"); }
     };
 
     const reset = async () => {
@@ -61,7 +75,7 @@ export default function SetupIniziale() {
 
     if (!stato) return <Loading />;
 
-    if (stato.completato) {
+    if (stato.completato && !editMode) {
         return (
             <div data-testid="setup-iniziale-page" className="space-y-5">
                 <PageHeader title="Setup iniziale" subtitle="Configurazione contabile iniziale dell&rsquo;agenzia" />
@@ -82,10 +96,16 @@ export default function SetupIniziale() {
                         <KStat label="Voci pregresse" v={stato.n_voci_pregresse} />
                     </div>
                     {stato.note && <div className="mt-4 text-xs text-slate-600 italic">"{stato.note}"</div>}
-                    <Button variant="outline" onClick={reset} className="mt-4 text-rose-700 border-rose-300"
-                        data-testid="setup-reset">
-                        <RotateCcw size={14} className="mr-1" /> Reset setup
-                    </Button>
+                    <div className="mt-4 flex gap-2">
+                        <Button onClick={modifica} className="bg-sky-700 hover:bg-sky-800"
+                            data-testid="setup-modifica">
+                            <Pencil size={14} className="mr-1" /> Modifica setup
+                        </Button>
+                        <Button variant="outline" onClick={reset} className="text-rose-700 border-rose-300"
+                            data-testid="setup-reset">
+                            <RotateCcw size={14} className="mr-1" /> Reset setup
+                        </Button>
+                    </div>
                 </Card>
             </div>
         );
@@ -93,7 +113,15 @@ export default function SetupIniziale() {
 
     return (
         <div data-testid="setup-iniziale-page" className="space-y-5">
-            <PageHeader title="Setup iniziale" subtitle="Configurazione contabile iniziale dell&rsquo;agenzia" />
+            <PageHeader title={editMode ? "Modifica setup iniziale" : "Setup iniziale"} subtitle="Configurazione contabile iniziale dell&rsquo;agenzia" />
+            {editMode && (
+                <Card className="p-3 border-l-4 border-sky-500 bg-sky-50/40 text-sm text-sky-900 flex items-center justify-between" data-testid="setup-editmode-banner">
+                    <span>Stai <b>modificando</b> il setup già confermato. Al salvataggio i saldi di apertura verranno riscritti.</span>
+                    <Button size="sm" variant="outline" onClick={() => { setEditMode(false); load(); }} data-testid="setup-annulla-modifica">
+                        Annulla modifica
+                    </Button>
+                </Card>
+            )}
 
             <Card className="p-4 border-l-4 border-amber-400 bg-amber-50/20">
                 <div className="flex items-start gap-2">
@@ -206,7 +234,7 @@ export default function SetupIniziale() {
 
             <div className="flex justify-end gap-2 sticky bottom-0 bg-white border-t border-slate-200 py-3 -mx-6 px-6">
                 <Button onClick={submit} className="bg-emerald-700 hover:bg-emerald-800" data-testid="setup-submit">
-                    <CheckCircle2 size={14} className="mr-1" /> Conferma setup iniziale
+                    <CheckCircle2 size={14} className="mr-1" /> {editMode ? "Salva modifiche" : "Conferma setup iniziale"}
                 </Button>
             </div>
         </div>
