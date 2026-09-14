@@ -1069,3 +1069,8 @@ Usare integration_expert prima di implementare.
 - Script `scripts/riconcilia_sospesi_axicura.py` (DRY env var): dal PDF ufficiale 40 righe → 34 titoli impostati coperti (titolo_coperto=True, stato=da_incassare, data_copertura da PDF, importo_da_pagare da colonna "Da Pagare") +2 stragglers cross-tenant via client diretto. 35 sospesi NON nel PDF → incassati (erano già saldati).
 - Non applicabili: 3 note di credito (importi negativi, nessun titolo) e 184643448 (titolo inesistente in DB).
 - Endpoint `/api/titoli/sospesi` ora ritorna `importo_da_pagare`; pagina TitoliSospesi mostra colonna "Da Pagare €" (fallback importo_lordo) su totali, riepilogo collaboratori e righe.
+
+### Sessione fork 2026-06 — Sovrascrittura Sospesi da PDF (tenant c5ae2d0e)
+- SCOPERTA: dati Axicura DUPLICATI su due tenant (c5ae2d0e=jacopo@schiantarelli.it "Importazione Axicura", 56k titoli; tenant-principale-schiantarelli). Il tenant operativo dell'utente è c5ae2d0e (la fusione collaboratori è avvenuta lì).
+- Script `scripts/riconcilia_sospesi_c5ae2d0e.py`: sovrascrive i sospesi in c5ae2d0e col PDF 'Sospesi.pdf' (48 righe): 41 titoli aggiornati + 7 creati (coperti, data_copertura + importo_da_pagare da PDF). Totale sospesi = 21.455,88 € (match esatto). Altri sospesi -> incassati. 730801946 -> incassato 01/09/2026 BONIFICO BPER SONDRIO. Puliti 3 negativi stray su tenant-principale.
+- Aperto: differenza 74€ attribuzione BS Broker vs Importazione Axicura. Aperto: ricalcolo provvigione collaboratore su TUTTO il portafoglio (schema: 70% su provvigione agenzia / BS 4,5% su netto) non ancora eseguito.
