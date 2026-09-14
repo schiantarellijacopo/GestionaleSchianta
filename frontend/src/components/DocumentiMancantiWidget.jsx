@@ -30,7 +30,7 @@ export default function DocumentiMancantiWidget() {
 
     useEffect(() => {
         api.get("/auth/users").then((r) => setCollaboratori(
-            (r.data || []).filter((u) => ["admin", "collaboratore", "dipendente"].includes(u.role))
+            (r.data || []).filter((u) => ["admin", "collaboratore", "dipendente"].includes(u.role) && u.attivo !== false)
         )).catch(() => setCollaboratori([]));
         api.get("/insights/documenti-mancanti/note").then((r) => {
             const map = {};

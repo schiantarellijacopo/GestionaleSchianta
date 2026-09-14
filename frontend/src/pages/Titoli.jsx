@@ -141,7 +141,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             api.get("/librerie/prodotti").catch(() => ({ data: [] })),
         ]).then(([c, r, cc, u, p]) => {
             setCompagnie(c.data); setRami(r.data); setConti(cc.data);
-            setUtenti((u.data || []).filter((x) => x.role !== "cliente"));
+            setUtenti((u.data || []).filter((x) => x.role !== "cliente" && x.attivo !== false));
             setProdotti(p.data || []);
         });
     }, []);

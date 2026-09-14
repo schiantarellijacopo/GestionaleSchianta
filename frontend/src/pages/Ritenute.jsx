@@ -32,7 +32,7 @@ export default function Ritenute() {
     useEffect(() => {
         api.get("/auth/users").then((r) => {
             // Mostra tutti gli utenti tranne i clienti (anche se role è vuoto)
-            const list = (r.data || []).filter((x) => (x.role || "") !== "cliente");
+            const list = (r.data || []).filter((x) => (x.role || "") !== "cliente" && x.attivo !== false);
             setCollabs(list);
         }).catch(() => setCollabs([]));
     }, []);

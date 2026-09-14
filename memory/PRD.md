@@ -1058,3 +1058,8 @@ Usare integration_expert prima di implementare.
 - **Unmerge**: `POST /api/auth/users/{uid}/unmerge` riporta alla sorgente i dati tracciati, rimuove gli stamp, riattiva l'utente (attivo=True, unset merged_into/merged_at). Le unioni precedenti al tracciamento riattivano soltanto l'utente.
 - **Filtro Attivi (frontend Librerie.jsx)**: la tab Utenti nasconde di default gli utenti `attivo===false`; toggle "Mostra anche disattivati (N)" (testid lib-toggle-inactive-utenti). Badge "unito"/"disattivato" sulle righe; azione "Ripristina unione" nel menu ⋮ (testid utente-unmerge-{id}) solo per utenti con merged_into.
 - Testato: ciclo merge→unmerge via API (anagrafica/titolo/provvigioni_operatori riportati alla sorgente, utente riattivato) + smoke test UI.
+
+### Sessione fork 2026-06 — Collaboratori uniti esclusi dai filtri
+- `GET /api/collaboratori`: param `tutti` (default False). Di default esclude `attivo=False` (collaboratori disattivati/uniti) così non compaiono nei filtri "Filtra per collaboratore" in tutto il programma. `?tutti=true` per la gestione.
+- Frontend: filtri basati su `/auth/users` ora escludono `attivo!==false` (Titoli, Sinistri, Polizze, Ritenute, Alert già ok, DocumentiMancantiWidget). CollaboratoreInlineSelect lasciato invariato (mostra "(inattivo)" per risolvere i nomi storici, non è un filtro).
+- Verificato via endpoint (admin: default 6 senza disattivati vs tutti=true 17 con 11 disattivati) e via wrapper tenant Axicura (collaboratore unito escluso: 19 su 20).

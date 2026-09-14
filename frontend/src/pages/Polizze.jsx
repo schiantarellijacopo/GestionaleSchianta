@@ -167,7 +167,7 @@ export default function Polizze() {
             api.get("/auth/users").catch(() => ({ data: [] })),
         ]).then(([c, r, u]) => {
             setCompagnie(c.data); setRami(r.data);
-            setUtenti((u.data || []).filter((x) => x.role !== "cliente"));
+            setUtenti((u.data || []).filter((x) => x.role !== "cliente" && x.attivo !== false));
         });
     }, []);
 

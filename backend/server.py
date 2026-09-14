@@ -350,10 +350,17 @@ async def unmerge_user(uid: str, user=Depends(require_user("admin"))):
 # COLLABORATORI / PROVVIGIONI
 # ============================================================
 @api.get("/collaboratori")
-async def list_collaboratori(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Utenti operatori (admin/collaboratore/dipendente) della propria agenzia."""
+async def list_collaboratori(tutti: bool = False, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Utenti operatori (admin/collaboratore/dipendente) della propria agenzia.
+
+    Default: esclude i collaboratori disattivati/uniti (`attivo=False`) così non
+    compaiono nei filtri "Filtra per collaboratore" in tutto il programma.
+    `tutti=true` li include (gestione).
+    """
     from tenant import tenant_filter
     flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, **(tenant_filter(user) or {})}
+    if not tutti:
+        flt["attivo"] = {"$ne": False}
     items = await db.users.find(
         flt,
         {"_id": 0, "password_hash": 0},
