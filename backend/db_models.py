@@ -606,6 +606,7 @@ MovimentoCategoria = Literal[
     "incasso_premio", "incasso_premio_direzione", "pagamento_compagnia", "provvigioni",
     "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto",
     "sconto_cliente", "prelievo_soci", "compenso_amministratore", "imposte", "stipendi",
+    "copertura_titolo", "incasso_coperto",
     "altro",
 ]
 

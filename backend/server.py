@@ -3506,14 +3506,14 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
         {"$set": set_fields},
     )
 
-    # 2) Crea i movimenti "anticipo" in Prima Nota per ciascun titolo (idempotente:
+    # 2) Crea i movimenti di COPERTURA in Prima Nota per ciascun titolo (idempotente:
     #    skip se esiste già un movimento di copertura per quel titolo+data).
     n_movimenti = 0
     async for t in db.titoli.find({"id": {"$in": ids}}, {"_id": 0}):
         # idempotenza: se esiste già un movimento di copertura per questo titolo, salta
         existing = await db.movimenti.find_one(
-            {"titolo_id": t["id"], "categoria": "anticipo",
-             "data_movimento": data_copertura, "tipo": "uscita"},
+            {"titolo_id": t["id"], "categoria": {"$in": ["copertura_titolo", "anticipo"]},
+             "data_movimento": data_copertura},
             {"_id": 0, "id": 1},
         )
         if existing:
@@ -3522,13 +3522,14 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
         importo = float(t.get("importo_lordo") or 0.0)
         mov = MovimentoContabile(
             data_movimento=data_copertura,
-            tipo="uscita", categoria="anticipo",
-            importo=importo,
+            tipo="entrata", categoria="copertura_titolo",
+            importo=importo,  # LORDO → ENTRATE + SOSPESI; nessun conto cassa (no contante)
             descrizione=f"Copertura anticipata polizza {pol.get('numero_polizza') or t.get('polizza_id', '')}",
             polizza_id=t.get("polizza_id"), titolo_id=t["id"],
             anagrafica_id=pol.get("contraente_id"),
             compagnia_id=pol.get("compagnia_id"),
-            conto_cassa_id=conto_id,
+            conto_cassa_id=None,
+            provvigioni=float(t.get("provvigioni") or 0.0),
             note=note,
         )
         await db.movimenti.insert_one(mov.model_dump())
@@ -3881,6 +3882,9 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     mezzo = body.get("mezzo_pagamento") or "bonifico"
     # Rileva "pagamento in direzione" (case-insensitive) — cliente paga direttamente in compagnia
     is_direzione = "direzione" in (mezzo or "").lower()
+    # Titolo già coperto (anticipato dall'agenzia): l'incasso sposta solo da sospeso a banca,
+    # senza riregistrare entrate/provvigioni/saldo (già contabilizzati alla copertura).
+    is_coperto = bool(titolo.get("titolo_coperto")) and not is_direzione
     conto_id = body.get("conto_cassa_id")
     if not conto_id:
         conto_id = await _resolve_conto_cassa(mezzo)
@@ -3939,7 +3943,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
-        categoria="incasso_premio_direzione" if is_direzione else "incasso_premio",
+        categoria="incasso_premio_direzione" if is_direzione else ("incasso_coperto" if is_coperto else "incasso_premio"),
         # In direzione: importo=LORDO (entrata fittizia). L'esclusione da banche
         # avviene via is_direzione=True nel _compute_brogliaccio.
         importo=importo_pagato,
@@ -3954,8 +3958,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         compagnia_id=pol.get("compagnia_id") if pol else None,
         conto_cassa_id=None if is_direzione else conto_id,
         mezzo_pagamento=mezzo,
-        provvigioni=titolo.get("provvigioni", 0.0),
-        quota_sconto=0.0 if is_direzione else sconto_applicato,
+        provvigioni=0.0 if is_coperto else titolo.get("provvigioni", 0.0),
+        quota_sconto=0.0 if (is_direzione or is_coperto) else sconto_applicato,
         is_direzione=is_direzione,
         note=(
             "Pagamento effettuato dal cliente direttamente in direzione compagnia. "
@@ -5552,6 +5556,23 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             c_direzione = importo            # colonna dedicata = LORDO, non provv
             c_saldo = -provv_riga            # compagnia mi deve le provvigioni
             # NON tocca banche/cassa (per_conto vuoto grazie a is_dir check sotto)
+        elif is_entrata and cat == "copertura_titolo":
+            # TITOLO SOLO COPERTO (anticipato dall'agenzia): premio a sospeso, nessun contante.
+            # ENTRATE = lordo · PROVVIGIONI · SALDO (debito vs compagnia) · SOSPESI +lordo.
+            provv_riga = float(m.get("provvigioni") or 0)
+            trattiene = (compagnia_riga or {}).get("trattiene_provvigioni", True)
+            c_totale = importo                                   # ENTRATE = lordo
+            c_provv = provv_riga                                 # PROVVIGIONI
+            c_saldo = (importo - provv_riga) if trattiene else (-provv_riga)  # SALDO vs compagnia
+            c_crediti = importo                                  # SOSPESI +
+            # conto_cassa_id = None → nessun movimento banca/cassa
+        elif is_entrata and cat == "incasso_coperto":
+            # INCASSO di un titolo GIÀ coperto: sposta da sospeso a banca.
+            # SOSPESI −importo · BANCA +importo (segni invertiti se il titolo è negativo).
+            # NON tocca ENTRATE/PROVVIGIONI/SALDO (già registrati alla copertura).
+            c_totale = 0.0
+            c_crediti = -importo                                 # SOSPESI − (o + se negativo)
+            # BANCA gestita da per_conto (entrata sul conto = +importo)
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
@@ -5753,6 +5774,15 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         # Tutte le altre entrate generiche NON contano in Entrate
         if is_e and cat == "incasso_premio":
             cum_entrate += importo + float(m.get("quota_sconto") or 0)  # LORDO
+        if is_e and cat == "copertura_titolo":
+            # Copertura: il premio lordo entra in ENTRATE/PROVVIGIONI/SALDO (una sola volta,
+            # qui alla copertura; l'incasso successivo del coperto NON li riconta).
+            provv_riga = float(m.get("provvigioni") or 0)
+            ccid = m.get("compagnia_id") or (polizze_map.get(m.get("polizza_id"), {}) or {}).get("compagnia_id")
+            trattiene = (comp_map.get(ccid) or {}).get("trattiene_provvigioni", True)
+            cum_entrate += importo
+            cum_provv += provv_riga
+            cum_saldo += (importo - provv_riga) if trattiene else (-provv_riga)
         if is_e and cat == "provvigioni":
             cum_rappel += importo  # rappel: NON in provvigioni, riduce/alimenta il saldo cassa
         if is_e and cat == "incasso_premio":
@@ -5869,7 +5899,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             _inc_match = {
                 "polizza_id": {"$in": pol_ids},
                 "tipo": "entrata",
-                "categoria": "incasso_premio",
+                "categoria": {"$in": ["incasso_premio", "copertura_titolo"]},
                 "pregresso": {"$ne": True},
                 "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a},
             }

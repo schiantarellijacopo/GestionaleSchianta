@@ -1,5 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Contabilità copertura/incasso titoli coperti (Prima Nota)
+
+- **Copertura titolo (solo coperto)**: `bulk_copertura` ora crea un movimento `entrata/copertura_titolo` (importo=lordo, nessun conto cassa, provvigioni dal titolo) invece del vecchio `uscita/anticipo`. Riga Prima Nota: **ENTRATE=lordo · PROVVIGIONI · SALDO=lordo−provv (debito vs compagnia) · SOSPESI=+lordo · Banca=0**. Verificato: titolo €850/€85 → 850/85/765/850.
+- **Incasso di titolo GIÀ coperto**: `incassa_titolo` per i titoli `titolo_coperto=True` crea `entrata/incasso_coperto` (provvigioni 0, sconto 0). Riga Prima Nota: **SOSPESI=−importo · BANCA=+importo**, nessun movimento su ENTRATE/PROVVIGIONI/SALDO (già contabilizzati alla copertura → niente doppioni). Segni invertiti per titoli negativi. Verificato: sospesi −850, banca +850, totale giornata sospesi netto 0.
+- **KPI cumulativi** (`_compute_brogliaccio`): ENTRATE/PROVVIGIONI/SALDO includono le coperture (una sola volta, alla copertura); l'incasso del coperto non li riconta. SOSPESI KPI resta da `_total_sospesi_as_of` (titoli).
+- **Saldo compagnie** (`_compute_saldi_compagnie`): incassi = `incasso_premio` + `copertura_titolo` → il debito verso la compagnia aumenta già alla copertura; `incasso_coperto` escluso (non cambia il debito).
+- **Modello**: aggiunte le categorie `copertura_titolo` e `incasso_coperto` a `MovimentoCategoria` (db_models.py). Comportamento applicato solo ai movimenti futuri (storico invariato).
+
+
 ## Sessione 14/09/2026 (fork) — Fix Anagrafiche (premi/ricerca/collegati) + ripristino 2 sospesi
 
 - **Ripristino sospesi** (tenant Axicura): i titoli correnti delle polizze **182259867** (€ 382,00) e **184642872** (€ 485,00), erroneamente `incassato`, riportati a SOSPESO (`titolo_coperto=True`, `stato=da_incassare`, `data_incasso=None`). Script `scripts/ripristina_sospesi_due.py`. Verificato a DB (compaiono in /titoli/sospesi; esclusi dall'E/C compagnia perché non più incassati).
