@@ -1,5 +1,10 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Fix arrotondamento importi titolo (float)
+
+- **🔴 Fix Lordo 686,9999… → 687,00**: il dialog "Nuovo/Modifica titolo" mostrava artefatti float. Ora `TitoloDialog.jsx` arrotonda a 2 decimali sia il prefill (importo_lordo/netto/imposte/provvigioni) sia i valori salvati. Lato backend `create_titolo`/`update_titolo` arrotondano gli stessi campi (+ importo_da_pagare) a 2 decimali per prevenire futuri artefatti.
+
+
 ## Sessione 14/09/2026 (fork) — Fix copertura già-coperti, giroconto, storno/sospeso, ricerca sospesi
 
 - **🔴 Fix doppia registrazione copertura**: se un titolo era GIÀ coperto (`titolo_coperto=True` da prima), `bulk-copertura`/`marca-sospeso` NON ricreano più la riga di copertura (ENTRATE/PROVV/SALDO/SOSPESI) — la copertura era già contabilizzata. All'incasso di un già-coperto viene registrata SOLO la riga incasso (−SOSPESI +BANCA). Rimossi i 2 movimenti copertura errati sui titoli reali 184642872 (€485) e 182259867 (€382). Verificato: copertura ripetuta → 0 movimenti.

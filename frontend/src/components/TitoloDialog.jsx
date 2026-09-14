@@ -20,7 +20,14 @@ import SelectTipoPagamento from "@/components/SelectTipoPagamento";
  *  - onDelete?: opzionale, se passato mostra pulsante elimina
  */
 export default function TitoloDialog({ titolo, onClose, onDelete }) {
-    const [f, setF] = useState({ ...titolo });
+    const round2 = (x) => Math.round((parseFloat(x) || 0) * 100) / 100;
+    const [f, setF] = useState(() => ({
+        ...titolo,
+        importo_lordo: round2(titolo.importo_lordo),
+        importo_netto: round2(titolo.importo_netto),
+        imposte: round2(titolo.imposte),
+        provvigioni: titolo.provvigioni != null ? round2(titolo.provvigioni) : titolo.provvigioni,
+    }));
     const [giornataChiusa, setGiornataChiusa] = useState(false);
     const [collaboratori, setCollaboratori] = useState([]);
     // Ripartizione provvigione multi-collaboratore
@@ -164,13 +171,13 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                 return { operatore_id: o.operatore_id, operatore_nome: c ? (c.name || c.email) : "", provvigione: parseFloat(o.provvigione) || 0 };
             });
         const provvTot = (f.provvigioni !== "" && f.provvigioni != null)
-            ? parseFloat(f.provvigioni) || 0
-            : (opsClean.length > 0 ? opsClean.reduce((s, o) => s + o.provvigione, 0) : 0);
+            ? round2(f.provvigioni)
+            : (opsClean.length > 0 ? round2(opsClean.reduce((s, o) => s + o.provvigione, 0)) : 0);
         const payload = {
             tipo: f.tipo, effetto: f.effetto, scadenza: f.scadenza,
-            importo_lordo: parseFloat(f.importo_lordo) || 0,
-            importo_netto: parseFloat(f.importo_netto) || 0,
-            imposte: parseFloat(f.imposte) || 0,
+            importo_lordo: round2(f.importo_lordo),
+            importo_netto: round2(f.importo_netto),
+            imposte: round2(f.imposte),
             provvigioni: provvTot,
             provvigioni_operatori: opsClean,
             collaboratore_id: opsClean[0]?.operatore_id || f.collaboratore_id || null,

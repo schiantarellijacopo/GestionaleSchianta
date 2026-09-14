@@ -3936,6 +3936,10 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
         # Eredita collaboratore_id dalla polizza se non specificato
         if not body.get("collaboratore_id") and pol_pre.get("collaboratore_id"):
             body["collaboratore_id"] = pol_pre["collaboratore_id"]
+    # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
+    for _k in ("importo_lordo", "importo_netto", "imposte", "provvigioni", "importo_da_pagare"):
+        if body.get(_k) is not None:
+            body[_k] = round(float(body[_k]), 2)
     obj = Titolo(**body)
     await db.titoli.insert_one(obj.model_dump())
     await log_attivita(user, "create", "titolo", obj.id)
@@ -3952,6 +3956,10 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
     if body.get("data_incasso"):
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
     body["updated_at"] = _now_iso()
+    # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
+    for _k in ("importo_lordo", "importo_netto", "imposte", "provvigioni", "importo_da_pagare"):
+        if body.get(_k) is not None:
+            body[_k] = round(float(body[_k]), 2)
     res = await db.titoli.update_one({"id": tid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Non trovato")
