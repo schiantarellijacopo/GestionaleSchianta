@@ -693,8 +693,15 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
 
 async def _upsert_polizza(db, data: dict, log: ImportLog,
                           polizza_id_map: Dict[str, str], id_exp: str) -> None:
-    """Esegue insert o update di una polizza in base al matching id_polizza_exp."""
-    existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
+    """Esegue insert o update di una polizza. Matching robusto: prima per
+    id_polizza_exp, poi (fallback) per numero_polizza nello stesso tenant — così
+    non si creano doppioni quando id_polizza_exp manca o cambia tra import."""
+    existing = None
+    if id_exp:
+        existing = await db.polizze.find_one({"id_polizza_exp": id_exp})
+    if not existing and data.get("numero_polizza"):
+        # db è già tenant-scoped dal wrapper -> match per numero polizza
+        existing = await db.polizze.find_one({"numero_polizza": data["numero_polizza"]})
     if existing:
         await db.polizze.update_one({"id": existing["id"]}, {"$set": data})
         polizza_id_map[id_exp] = existing["id"]

@@ -1,5 +1,12 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 14/09/2026 (fork) — Doppioni polizze da import OMNIA incrementale (diagnosi + pulizia + fix)
+
+- **Causa**: l'import OMNIA incrementale del 14/09 (`A_OW8_23774_20260914161500_88_P_I.zip`, job 14:16) ha creato 255 polizze duplicate. `_upsert_polizza` deduplicava SOLO su `id_polizza_exp`; le polizze dell'import iniziale (11/09) avevano `id_polizza_exp=None`, quindi nessun match → nuove polizze (con codici ramo grezzi 3N/01/3S… non mappati).
+- **Fix importer** (`ania_importer.py` `_upsert_polizza`): match robusto — prima `id_polizza_exp`, poi fallback su `numero_polizza` (db già tenant-scoped) → niente più doppioni anche se l'id OMNIA manca/cambia.
+- **Pulizia** (`scripts/pulisci_doppioni_omnia_14092026.py`): eliminati **253 doppioni** del 14/09 (+ 181 titoli, **0 movimenti** = nessun impatto contabile), copiato il loro `id_polizza_exp` sull'originale 11/09 (per i futuri import), tenute le 2 polizze senza gemello. Backup CSV in `/app/doppioni_omnia_14092026.csv`. Risultato: 0 numeri polizza duplicati. Es. COGO ENRICA 730021025 → 1 sola polizza MULTIRISCHIO con 4 titoli.
+
+
 ## Sessione 14/09/2026 (fork) — Fix arrotondamento importi titolo (float)
 
 - **🔴 Fix Lordo 686,9999… → 687,00**: il dialog "Nuovo/Modifica titolo" mostrava artefatti float. Ora `TitoloDialog.jsx` arrotonda a 2 decimali sia il prefill (importo_lordo/netto/imposte/provvigioni) sia i valori salvati. Lato backend `create_titolo`/`update_titolo` arrotondano gli stessi campi (+ importo_da_pagare) a 2 decimali per prevenire futuri artefatti.
