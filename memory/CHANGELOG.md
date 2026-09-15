@@ -9,7 +9,11 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — PNC nel widget "Saldo cassa compagnie" ✅
+## 2026-06 — Pulizia rami doppioni ✅
+- Verificato lo stato: la maggior parte dei doppioni (RC AUTO, VITA, INCENDIO, INFORTUNI, TRASPORTI, RCG) era **già archiviata** (attivo=False / `unito_in_ramo_id`) da merge precedenti → già esclusi dalle tendine.
+- Restava attivo un solo doppione reale: **MULTIRISCHIO** (2 voci "Multirischio"/"MULTIRISCHIO"). Unificato con lo script `scripts/unifica_rami_doppioni.py` (stessa logica dell'endpoint `/librerie/rami/merge`): 5366 polizze + 76 prodotti riassegnati al master, doppione archiviato; ripuntati anche gli `import_mappings` ramo.
+- Risultato: dropdown rami senza codici duplicati (49 rami), polizze/prodotti intatti. La UI "Unisci doppioni" in Librerie resta disponibile per future unificazioni.
+
 - Il widget cumulativo `_compute_saldi_compagnie` (dashboard/brogliaccio, `saldo_cassa`) ora include le **PNC versate** (movimenti categoria `pnc`), che alimentano il saldo esattamente come le ritenute compagnia: `saldo = dovuto − rimesse − rappel + ritenute + pnc_versate − ...`.
 - Aggiunto campo `pnc` all'output per compagnia; guardia anti-skip aggiornata. Nessuna modifica frontend (il widget mostra il `saldo_cassa` aggregato, già comprensivo di PNC).
 - Verificato: PNC versata +200 → `saldo_cassa` 1360→1560, campo `pnc`=200.
