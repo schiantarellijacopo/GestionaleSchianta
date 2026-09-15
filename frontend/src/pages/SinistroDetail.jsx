@@ -258,14 +258,16 @@ export default function SinistroDetail() {
                             entita_tipo="sinistro"
                             entita_id={id}
                             canEdit={true}
-                            titolo="Documenti sinistro · gestione visibilità"
-                            sottotitolo="Allega CID, perizia, foto, fatture riparazione. Separa documenti visibili al cliente da quelli interni allo staff."
+                            layout="quadrotti"
+                            titolo="Documenti sinistro"
+                            sottotitolo="Documenti organizzati per categoria (CID, perizia, foto, fatture, denuncia). Ogni riquadro indica se il documento è visibile al cliente."
                             categorie={[
-                                { key: "cid", label: "CID", icon: "📝", default_visibile: true },
-                                { key: "perizia", label: "Perizia", icon: "🔎", default_visibile: false },
-                                { key: "foto", label: "Foto", icon: "📸", default_visibile: true },
-                                { key: "fattura", label: "Fattura", icon: "🧾", default_visibile: true },
-                                { key: "denuncia", label: "Denuncia", icon: "📋", default_visibile: true },
+                                { key: "cid", label: "CID", icon: "📝", default_visibile: true, multiple: true, descrizione: "Constatazione amichevole di incidente" },
+                                { key: "perizia", label: "Perizia", icon: "🔎", default_visibile: false, multiple: true, descrizione: "Perizia del liquidatore / perito" },
+                                { key: "foto", label: "Foto", icon: "📸", default_visibile: true, multiple: true, descrizione: "Foto del danno / sinistro" },
+                                { key: "fattura", label: "Fattura", icon: "🧾", default_visibile: true, multiple: true, descrizione: "Fatture di riparazione / spese" },
+                                { key: "denuncia", label: "Denuncia", icon: "📋", default_visibile: true, multiple: true, descrizione: "Modulo di denuncia sinistro" },
+                                { key: "altri", label: "Documenti altri", icon: "📎", default_visibile: false, multiple: true, descrizione: "Altri documenti ad uso interno" },
                             ]}
                         />
                     </div>
