@@ -48,7 +48,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
 
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
-            .then((r) => setCollaboratori(r.data || []))
+            .then((r) => setCollaboratori((r.data || []).filter((u) => u.attivo !== false)))
             .catch(() => setCollaboratori([]));
     }, []);
 

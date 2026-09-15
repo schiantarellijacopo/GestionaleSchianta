@@ -81,7 +81,7 @@ export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, 
                 data-testid="collaboratore-inline-select"
             >
                 <option value="" className="text-slate-800">— Nessuno —</option>
-                {users.map((u) => (
+                {users.filter((u) => u.attivo !== false || u.id === selValue).map((u) => (
                     <option key={u.id} value={u.id} className="text-slate-800">
                         {u.name || u.email}{u.attivo === false ? " (inattivo)" : ""}
                     </option>

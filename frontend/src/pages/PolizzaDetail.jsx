@@ -1386,7 +1386,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     const [prodotti, setProdotti] = useState([]);
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
-            .then((r) => setCollaboratori(r.data || []))
+            .then((r) => setCollaboratori((r.data || []).filter((u) => u.attivo !== false)))
             .catch(() => setCollaboratori([]));
         api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data || []));
     }, []);

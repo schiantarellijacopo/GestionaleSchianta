@@ -1,7 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
-## Sessione 15/09/2026 (fork) — Saldo Cassa Compagnie completato + fix isolamento tenant voci compagnia
+## Sessione 15/09/2026 (fork) — Tendine collaboratori: nascosti inattivi/artefatti import
+
+- **Chiarito: NESSUN leak tra tenant.** Verificato a DB: i 23 utenti nella tendina di ripartizione provvigioni appartengono TUTTI al tenant `c5ae2d0e` (ASSICURAZIONI SCHIANTARELLI). Erano artefatti da import OMNIA (`@import.assicurapro.it` / `@import-auto.local`). Il tenant separato `tenant-principale-schiantarelli` (19 utenti) NON compariva.
+- **Fix (scelta utente)**: nascondere dalle tendine di SELEZIONE collaboratore gli utenti `attivo=false` (che includono già "ERR", "Produttore - 021 - FILIALE CHIURO", "Produttore - 024 - BS BROKER SAS", "ASSICURAZIONI SCHIANTARELLI MARCO ANDREA SAS"). Le agenzie/broker partner attive (BS BROKER, MIDA, UNIVALT) RESTANO. Filtro `u.attivo !== false` applicato in: `TitoloDialog.jsx` (ripartizione provvigioni — fonte dello screenshot), `PolizzaDetail.jsx` EditPolizzaDialog, `Polizze.jsx` NuovaPolizzaDialog. `CollaboratoreInlineSelect.jsx`: opzioni filtrate mantenendo però l'eventuale operatore già assegnato. (`ProvvigioniOperatoriEditor` già filtrava.) La pagina Librerie > Utenti continua a mostrarli per riattivarli.
+- Verificato: build OK (nessun errore, 4269 polizze). Le 4 voci target sono `attivo=false` → escluse dal filtro.
+
+
 
 - **🔴 Contabilità non più rotta**: `Contabilita.jsx` referenziava `saldoCassaOpen` e `SaldoCassaCompagnieDialog` mai definiti (pagina in crash). Aggiunto lo state e creato il componente `SaldoCassaCompagnieDialog` (accanto a Giroconto/Nuovo movimento nella toolbar).
 - **Dialog Saldo Cassa Compagnie**: elenca tutte le compagnie attive del tenant con campo importo (positivo=debito / negativo=credito verso compagnia) + data + ricerca; precarica i saldi già registrati (`GET /contabilita/saldo-cassa-compagnie`); salva via `POST` (idempotente, sostituisce i saldi iniziali precedenti). Ogni riga scrive un movimento Prima Nota `saldo_iniziale_compagnia` (solo colonna SALDO) + una voce "Saldo iniziale" nell'E/C compagnia. Backend già presente (server.py:637-690).

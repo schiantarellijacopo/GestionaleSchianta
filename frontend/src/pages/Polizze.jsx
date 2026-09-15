@@ -520,7 +520,7 @@ function NuovaPolizzaDialog({ onClose }) {
         api.get("/agenzie").then((r) => setAgenzie(r.data || [])).catch(() => setAgenzie([]));
         api.get("/librerie/rami?dedup=1").then((r) => setRami(r.data || []));
         api.get("/auth/users", { params: { role: "collaboratore" } })
-            .then((r) => setCollaboratori(r.data || []))
+            .then((r) => setCollaboratori((r.data || []).filter((u) => u.attivo !== false)))
             .catch(() => setCollaboratori([]));
     }, []);
 
