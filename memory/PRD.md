@@ -7,7 +7,9 @@
 - **OCR Libretto → solo nel quadro "Libretto veicolo"**: la lista piatta "Documenti" (`DocumentiPolizzaTab`) ora nasconde i documenti già categorizzati (polizza/condizioni/libretto_veicolo/quietanza/…), evitando la duplicazione. L'OCR libretto salva già `categoria=libretto_veicolo`.
 - **Estratto Conto Collaboratori**: lista COLLABORATORI mostra ora SOLO utenti con ruolo `collaboratore` (esclusi admin/dipendente). Filtro client-side in `Provvigioni.jsx`.
 
-## eSignature (OpenAPI.it) — IMPLEMENTATO in sandbox (15/09/2026)
+## eSignature (OpenAPI.it) — IN PRODUZIONE dal 15/09/2026
+- **LIVE**: `OPENAPI_ESIGNATURE_SANDBOX="false"` in backend/.env → host `esignature.openapi.com`. Verificato che lo scope EU-AES è attivo in prod con le credenziali OPENAPI_IT esistenti (token prod ottenuto). Ogni firma consuma credito OpenAPI e invia SMS/email reali.
+## eSignature (OpenAPI.it) — IMPLEMENTATO (15/09/2026)
 - **Estensioni (iter 92, verde)**: tasto firma su **polizza, sinistro E anagrafica** (FirmaButton esportato da DocumentiSezioneSplit, aggiunto anche in AnagraficaDetail/AllegatiCartella); **badge stato** accanto a ogni PDF ("In firma"/"Firmato") leggendo `/esignature/richieste`; **promemoria WhatsApp dopo 48h** nel poller (`finalizza_pending`, campo `reminder_sent`); **contatore Dashboard** "Firme in attesa" (widget DocumentiMancantiWidget, 5ª card + dialog tipo='firme') alimentato da `/insights/documenti-mancanti` (`totali.firme_in_attesa` + array).
 
 - **Backend**: `esignature_openapi.py` (service EU-AES OTP SMS, token OAuth dedicato, sandbox via env `OPENAPI_ESIGNATURE_SANDBOX` default true, riusa OPENAPI_IT_CLIENT_ID/SECRET) + `routes/esignature_it.py` (prefix `/api/esignature`):
