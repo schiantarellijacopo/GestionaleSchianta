@@ -68,6 +68,7 @@ import CopilotWidget from "@/components/CopilotWidget";
 import FattureAgenziaPartner from "@/pages/FattureAgenziaPartner";
 import LeadListe from "@/pages/LeadListe";
 import RitenuteHub from "@/pages/RitenuteHub";
+import Pnc from "@/pages/Pnc";
 import SetupIniziale from "@/pages/SetupIniziale";
 import ScambioDati from "@/pages/ScambioDati";
 import DocumentiInbox from "@/pages/DocumentiInbox";
@@ -126,6 +127,7 @@ function App() {
                             <Route path="/cervello" element={<Cervello />} />
                             <Route path="/libro-matricola" element={<LibroMatricolaPage />} />
                             <Route path="/regolazione-premio" element={<RegolazionePremio />} />
+                            <Route path="/pnc" element={<Pnc />} />
                             <Route path="/corsi-ivass" element={<CorsiIvass />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={

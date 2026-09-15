@@ -5736,7 +5736,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     righe = []
     tot = {"totale": 0.0, "provv": 0.0, "saldo": 0.0,
            "crediti": 0.0, "spese": 0.0, "sconti": 0.0, "rimesse": 0.0,
-           "ritenuta": 0.0, "direzione": 0.0, "rappel": 0.0}
+           "ritenuta": 0.0, "direzione": 0.0, "rappel": 0.0, "pnc": 0.0}
     per_conto_tot: dict = {c["id"]: 0.0 for c in conti}
 
     CATS_ANTICIPI = ("anticipo",)  # sospesi/anticipi
@@ -5754,7 +5754,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         # default
         c_totale = 0.0; c_provv = 0.0; c_saldo = 0.0
         c_crediti = 0.0; c_spese = 0.0; c_sconti = 0.0; c_rimesse = 0.0
-        c_ritenuta = 0.0; c_direzione = 0.0; c_rappel = 0.0
+        c_ritenuta = 0.0; c_direzione = 0.0; c_rappel = 0.0; c_pnc = 0.0
 
         compagnia_riga = _compagnia_di(m)
         polizza_riga = polizze_map.get(m.get("polizza_id"))
@@ -5865,6 +5865,13 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_totale = 0.0
                 c_saldo = importo
                 c_ritenuta = importo
+            elif cat == "pnc":
+                # Versamento PNC (Rivalsa/Cassa Agenti/Fondo Pensione/Gruppo Agenti):
+                # stesso comportamento della Ritenuta compagnia. Non è cassa reale,
+                # incide sul SALDO e sulla colonna dedicata "PNC".
+                c_totale = 0.0
+                c_saldo = importo
+                c_pnc = importo
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.
@@ -5913,6 +5920,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "ritenuta": c_ritenuta,
             "direzione": c_direzione,
             "rappel": c_rappel,
+            "pnc": c_pnc,
             "per_conto": per_conto,
             "conto_cassa_id": m.get("conto_cassa_id"),
             "mezzo_pagamento": m.get("mezzo_pagamento"),
@@ -5929,6 +5937,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         tot["ritenuta"] += c_ritenuta
         tot["direzione"] += c_direzione
         tot["rappel"] += c_rappel
+        tot["pnc"] += c_pnc
 
     # arricchimento allegati count
     ids = [r["id"] for r in righe]

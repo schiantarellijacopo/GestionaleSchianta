@@ -254,6 +254,199 @@ async def delete_ritenuta(
 
 
 # ===========================================================
+#  PARTITE PNC (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti)
+#  Funziona ESATTAMENTE come le Ritenute collaboratore, con un campo `tipo`.
+#  Il versamento crea un movimento in Prima Nota (categoria "pnc"), stesso
+#  meccanismo della Ritenuta compagnia: non è cassa reale, incide sul saldo.
+# ===========================================================
+PNC_TIPI = {"rivalsa", "cassa_agenti", "fondo_pensione", "gruppo_agenti"}
+PNC_TIPO_LABEL = {
+    "rivalsa": "Rivalsa", "cassa_agenti": "Cassa Agenti",
+    "fondo_pensione": "Fondo Pensione", "gruppo_agenti": "Gruppo Agenti",
+}
+
+
+class PncBody(BaseModel):
+    anno: int
+    tipo: str  # rivalsa | cassa_agenti | fondo_pensione | gruppo_agenti
+    collaboratore_id: str
+    descrizione: Optional[str] = None
+    imponibile: float = 0
+    aliquota: float = 0
+    importo: float = 0
+    causale: Optional[str] = None
+    data: Optional[str] = None  # YYYY-MM-DD
+    note: Optional[str] = None
+
+
+async def _enrich_pnc(r: dict) -> dict:
+    if r.get("collaboratore_id"):
+        u = await db.users.find_one(
+            {"id": r["collaboratore_id"]}, {"_id": 0, "name": 1, "email": 1},
+        ) or {}
+        r["collaboratore_nome"] = u.get("name") or u.get("email")
+    r["tipo_label"] = PNC_TIPO_LABEL.get(r.get("tipo"), r.get("tipo"))
+    return r
+
+
+@router.get("/pnc")
+async def list_pnc(
+    anno: Optional[int] = None,
+    tipo: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> list[dict]:
+    flt: dict = {}
+    if anno: flt["anno"] = anno
+    if tipo: flt["tipo"] = tipo
+    if collaboratore_id: flt["collaboratore_id"] = collaboratore_id
+    items = await db.pnc.find(flt, {"_id": 0}).sort([("anno", -1), ("data", -1)]).to_list(5000)
+    for r in items:
+        await _enrich_pnc(r)
+    return items
+
+
+@router.get("/pnc/totali")
+async def totali_pnc(
+    anno: Optional[int] = None,
+    tipo: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    match: dict = {}
+    if anno: match["anno"] = anno
+    if tipo: match["tipo"] = tipo
+    pipeline = [
+        {"$match": match} if match else {"$match": {}},
+        {"$group": {
+            "_id": "$collaboratore_id",
+            "n_record": {"$sum": 1},
+            "imponibile_tot": {"$sum": {"$ifNull": ["$imponibile", 0]}},
+            "importo_tot": {"$sum": {"$ifNull": ["$importo", 0]}},
+            "versata_tot": {"$sum": {"$cond": [{"$eq": ["$stato", "versata"]},
+                                                {"$ifNull": ["$importo", 0]}, 0]}},
+        }},
+    ]
+    rows = await db.pnc.aggregate(pipeline).to_list(500)
+    ids = [r["_id"] for r in rows if r["_id"]]
+    users_map: dict = {}
+    if ids:
+        async for u in db.users.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            users_map[u["id"]] = u.get("name") or u.get("email")
+    out_rows = [{
+        "collaboratore_id": r["_id"],
+        "collaboratore_nome": users_map.get(r["_id"]),
+        "n_record": r["n_record"],
+        "imponibile_tot": round(r["imponibile_tot"], 2),
+        "importo_tot": round(r["importo_tot"], 2),
+        "versata_tot": round(r["versata_tot"], 2),
+    } for r in rows]
+    out_rows.sort(key=lambda x: x["importo_tot"], reverse=True)
+    # Totali per tipo
+    pipe_tipo = [
+        {"$match": match} if match else {"$match": {}},
+        {"$group": {"_id": "$tipo", "importo_tot": {"$sum": {"$ifNull": ["$importo", 0]}},
+                    "n_record": {"$sum": 1}}},
+    ]
+    per_tipo = [{
+        "tipo": r["_id"], "tipo_label": PNC_TIPO_LABEL.get(r["_id"], r["_id"]),
+        "importo_tot": round(r["importo_tot"], 2), "n_record": r["n_record"],
+    } async for r in db.pnc.aggregate(pipe_tipo)]
+    return {"anno": anno, "per_collaboratore": out_rows, "per_tipo": per_tipo}
+
+
+@router.post("/pnc", status_code=201)
+async def create_pnc(body: PncBody, user=Depends(require_user("admin"))) -> dict:
+    if body.tipo not in PNC_TIPI:
+        raise HTTPException(400, f"Tipo PNC non valido. Ammessi: {sorted(PNC_TIPI)}")
+    if not body.collaboratore_id:
+        raise HTTPException(400, "Collaboratore obbligatorio")
+    if not body.importo and body.imponibile and body.aliquota:
+        body.importo = round(body.imponibile * body.aliquota / 100.0, 2)
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(),
+           "stato": "da_versare", "data_versamento": None, "movimento_id": None,
+           "created_at": _now_iso()}
+    await db.pnc.insert_one(doc); doc.pop("_id", None)
+    fresh = await db.pnc.find_one({"id": doc["id"]}, {"_id": 0})
+    return await _enrich_pnc(fresh)
+
+
+@router.put("/pnc/{pid}")
+async def update_pnc(pid: str, body: PncBody, user=Depends(require_user("admin"))) -> dict:
+    if body.tipo not in PNC_TIPI:
+        raise HTTPException(400, f"Tipo PNC non valido. Ammessi: {sorted(PNC_TIPI)}")
+    data = body.model_dump()
+    if not data.get("importo") and data.get("imponibile") and data.get("aliquota"):
+        data["importo"] = round(data["imponibile"] * data["aliquota"] / 100.0, 2)
+    data["updated_at"] = _now_iso()
+    res = await db.pnc.update_one({"id": pid}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(404, "PNC non trovata")
+    doc = await db.pnc.find_one({"id": pid}, {"_id": 0})
+    return await _enrich_pnc(doc)
+
+
+@router.delete("/pnc/{pid}")
+async def delete_pnc(pid: str, user=Depends(require_user("admin"))) -> dict:
+    cur = await db.pnc.find_one({"id": pid}, {"_id": 0, "movimento_id": 1})
+    if not cur:
+        raise HTTPException(404, "PNC non trovata")
+    if cur.get("movimento_id"):
+        await db.movimenti.delete_one({"id": cur["movimento_id"]})
+    await db.pnc.delete_one({"id": pid})
+    return {"ok": True}
+
+
+@router.post("/pnc/{pid}/versa")
+async def versa_pnc(pid: str, body: dict | None = None,
+                    user=Depends(require_user("admin"))) -> dict:
+    """Versamento PNC: crea un movimento in Prima Nota (categoria 'pnc') e marca
+    lo stato come 'versata'. Come la Ritenuta compagnia: non è cassa reale."""
+    r = await db.pnc.find_one({"id": pid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "PNC non trovata")
+    if r.get("stato") == "versata":
+        return await _enrich_pnc(r)
+    body = body or {}
+    data_vers = body.get("data_versamento") or _now_iso()[:10]
+    u = await db.users.find_one({"id": r.get("collaboratore_id")}, {"_id": 0, "name": 1, "email": 1}) or {}
+    nome = u.get("name") or u.get("email") or ""
+    mov_id = str(uuid.uuid4())
+    await db.movimenti.insert_one({
+        "id": mov_id,
+        "tipo": "uscita",
+        "categoria": "pnc",
+        "data_movimento": data_vers,
+        "importo": round(float(r.get("importo") or 0), 2),
+        "descrizione": f"PNC {PNC_TIPO_LABEL.get(r.get('tipo'), r.get('tipo'))} · {nome}: {r.get('descrizione') or ''}".strip(),
+        "collaboratore_id": r.get("collaboratore_id"),
+        "pnc_id": pid,
+        "tipo_pnc": r.get("tipo"),
+        "created_at": _now_iso(),
+        "created_by": user.get("id"),
+    })
+    await db.pnc.update_one({"id": pid}, {"$set": {
+        "stato": "versata", "data_versamento": data_vers, "movimento_id": mov_id,
+    }})
+    fresh = await db.pnc.find_one({"id": pid}, {"_id": 0})
+    return await _enrich_pnc(fresh)
+
+
+@router.post("/pnc/{pid}/storna")
+async def storna_pnc(pid: str, user=Depends(require_user("admin"))) -> dict:
+    r = await db.pnc.find_one({"id": pid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "PNC non trovata")
+    if r.get("movimento_id"):
+        await db.movimenti.delete_one({"id": r["movimento_id"]})
+    await db.pnc.update_one({"id": pid}, {"$set": {
+        "stato": "da_versare", "movimento_id": None, "data_versamento": None,
+    }})
+    fresh = await db.pnc.find_one({"id": pid}, {"_id": 0})
+    return await _enrich_pnc(fresh)
+
+
+
+# ===========================================================
 #  RITENUTE COMPAGNIA (gemella negativa del Rappel)
 # ===========================================================
 class RitenutaCompagniaBody(BaseModel):

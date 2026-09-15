@@ -9,7 +9,7 @@ import {
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
-    Smartphone, ImagePlus, Percent,
+    Smartphone, ImagePlus, Percent, Landmark,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -40,8 +40,9 @@ const ALL_MENU_ITEMS = [
     { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_contraente", path: "/contraente-estratto", icon: "FileText", label: "E/C contraente", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
-    { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "contabilita", roles: ["admin", "collaboratore"] },
+    { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "partite_pnc", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "partite_pnc", roles: ["admin", "collaboratore"] },
+    { id: "pnc", path: "/pnc", icon: "Landmark", label: "PNC", section: "partite_pnc", roles: ["admin", "collaboratore"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "statistiche", path: "/statistiche", icon: "Activity", label: "Statistiche", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "cervello", path: "/cervello", icon: "Brain", label: "Il Cervello", section: "strumenti", roles: ["admin"] },
@@ -78,7 +79,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark,
 };
 
 const SECTION_LABELS = {
@@ -86,6 +87,7 @@ const SECTION_LABELS = {
     anagrafiche: "Anagrafiche",
     assicurazione: "Assicurazione",
     contabilita: "Contabilità",
+    partite_pnc: "Partite PNC",
     marketing: "Marketing",
     strumenti: "Strumenti",
     amministrazione: "Amministrazione",

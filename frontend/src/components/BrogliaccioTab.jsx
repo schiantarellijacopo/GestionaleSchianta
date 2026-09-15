@@ -35,6 +35,7 @@ const FIXED_COLS = [
     { key: "saldo", label: "Saldo", default: true },
     { key: "crediti", label: "Sospesi", default: true },
     { key: "ritenuta", label: "Ritenuta", default: true },
+    { key: "pnc", label: "PNC", default: true },
     { key: "rappel", label: "Rappel", default: true },
     { key: "rimesse", label: "Rimesse E/C", default: true },
     { key: "direzione", label: "Incassi Direzione", default: true },
@@ -308,6 +309,7 @@ export default function BrogliaccioTab({ refreshKey }) {
                                     if (key === "crediti") return v > 0 ? "text-amber-700" : v < 0 ? "text-emerald-700" : "";
                                     if (key === "spese") return "text-rose-600";
                                     if (key === "ritenuta") return v > 0 ? "text-purple-700" : "";
+                                    if (key === "pnc") return v > 0 ? "text-fuchsia-700" : "";
                                     if (key === "direzione") return v > 0 ? "text-teal-700" : "";
                                     if (key === "rappel") return v > 0 ? "text-indigo-700" : "";
                                     if (key === "rimesse") return v > 0 ? "text-violet-700" : "";
