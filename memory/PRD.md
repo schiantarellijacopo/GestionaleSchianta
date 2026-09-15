@@ -1,5 +1,11 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 15/09/2026 (fork) — Allegato incasso visibile al cliente sotto Quietanze
+
+- **Allegato Incasso/Copertura → visibile al cliente + Quietanze** (`DialogIncassoCopertura.jsx`): l'upload ora passa `visibile_cliente: true` (le quietanze sono visibili al cliente). Prima finiva in "Interni · solo staff". Verificato via API (categoria=quietanza, visibile_cliente=True).
+- **PENDENTE**: rifare i quadrotti dei documenti della POLIZZA con lo stesso formato di quelli dell'ANAGRAFICA. La polizza usa `DocumentiPolizzaTab`+`DocumentiSezioneSplit`; l'anagrafica usa `DocumentiTab` (layout quadrotti dedicato, `pages/AnagraficaDetail.jsx` ~riga 1944). Da allineare come task UI dedicato.
+
+
 ## Sessione 15/09/2026 (fork) — Fix logo/save compagnie (405), ramo mappato, stampa saldo cassa, allegato→Quietanze
 
 - **🔴 Fix "Method Not Allowed" salvataggio compagnie** (`Librerie.jsx`): avevo impostato l'endpoint sezione a `/compagnie?tutte=true`; il CRUD generico costruisce `${endpoint}/${id}` → URL corrotto `/compagnie?tutte=true/ID` → PUT senza id → 405. Ripristinato `endpoint: "/compagnie"` + `listParams: { tutte: true }` (lista mostra tutte, CRUD usa il path base). PUT /compagnie/{id} verificato 200.

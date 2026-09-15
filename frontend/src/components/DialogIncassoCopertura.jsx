@@ -199,6 +199,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                             entita_tipo: "polizza",
                             entita_id: titolo.polizza_id,
                             categoria: "quietanza",
+                            visibile_cliente: true,
                             descrizione: "Quietanza (da incasso/copertura)",
                         },
                         headers: { "Content-Type": "multipart/form-data" },
