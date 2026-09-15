@@ -26,6 +26,7 @@ export default function Provvigioni() {
     const [selectedTitoli, setSelectedTitoli] = useState(new Set());
     const [selectedVoci, setSelectedVoci] = useState(new Set());
     const [voceOpen, setVoceOpen] = useState(false);
+    const [base, setBase] = useState("incasso");
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
@@ -34,7 +35,7 @@ export default function Provvigioni() {
 
     const load = () => {
         if (!sel) return;
-        const params = {};
+        const params = { base };
         if (dal) params.dal = dal;
         if (al) params.al = al;
         api.get(`/collaboratori/${sel.id}/estratto-provvigioni`, { params }).then((r) => {
@@ -43,7 +44,7 @@ export default function Provvigioni() {
             setSelectedVoci(new Set());
         });
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al, base]);
 
     const stampa = () => {
         const qs = new URLSearchParams();
@@ -67,7 +68,7 @@ export default function Provvigioni() {
     };
     const selectAllUnpaid = () => {
         if (!data) return;
-        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato).map((r) => r.titolo_id)));
+        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato && r.incassato !== false).map((r) => r.titolo_id)));
         setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id)));
     };
 
@@ -133,6 +134,15 @@ export default function Provvigioni() {
                                     </div>
                                     <div className="ml-auto flex gap-2 items-end">
                                         <div>
+                                            <Label className="text-[10px] block mb-1">Base</Label>
+                                            <div className="flex rounded border border-slate-200 overflow-hidden">
+                                                <button onClick={() => setBase("incasso")} data-testid="prov-base-incasso"
+                                                    className={`text-xs px-3 py-2 ${base === "incasso" ? "bg-slate-800 text-white" : "bg-white text-slate-600"}`}>Solo incassate</button>
+                                                <button onClick={() => setBase("copertura")} data-testid="prov-base-copertura"
+                                                    className={`text-xs px-3 py-2 border-l border-slate-200 ${base === "copertura" ? "bg-slate-800 text-white" : "bg-white text-slate-600"}`}>Coperte + incassate</button>
+                                            </div>
+                                        </div>
+                                        <div>
                                             <Label className="text-[10px]">Dal</Label>
                                             <Input data-testid="prov-dal" type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-36" />
                                         </div>
@@ -148,9 +158,12 @@ export default function Provvigioni() {
                             </Card>
 
                             {/* Totali */}
-                            <div className="grid grid-cols-6 gap-3">
+                            <div className={`grid ${base === "copertura" ? "grid-cols-7" : "grid-cols-6"} gap-3`}>
                                 <Stat label="Provv. lorde periodo" value={fmtEur(data.totali.provvigioni_lorde_periodo)} />
                                 <Stat label="Da pagare" value={fmtEur(data.totali.provvigioni_da_pagare)} accent="amber" />
+                                {base === "copertura" && (
+                                    <Stat label="Maturande (coperte)" value={fmtEur(data.totali.provvigioni_maturande || 0)} accent="amber" />
+                                )}
                                 <Stat label="Ritenuta acconto" value={`- ${fmtEur(data.totali.ritenuta_acconto_calcolata)}`} accent="rose" />
                                 <Stat label="Contributi" value={`- ${fmtEur(data.totali.contributi_calcolati)}`} accent="rose" />
                                 <Stat
@@ -197,21 +210,25 @@ export default function Provvigioni() {
                                         </thead>
                                         <tbody>
                                             {righeDaPagare.map((r) => (
-                                                <tr key={r.titolo_id} className={selectedTitoli.has(r.titolo_id) ? "bg-sky-50" : ""}>
+                                                <tr key={r.titolo_id} className={selectedTitoli.has(r.titolo_id) ? "bg-sky-50" : (r.incassato === false ? "bg-amber-50/40" : "")}>
                                                     <td>
                                                         <input
                                                             type="checkbox"
                                                             checked={selectedTitoli.has(r.titolo_id)}
+                                                            disabled={r.incassato === false}
+                                                            title={r.incassato === false ? "Coperta ma non ancora incassata: matura all'incasso" : ""}
                                                             onChange={() => toggleTitolo(r.titolo_id)}
                                                             data-testid={`select-titolo-${r.titolo_id}`}
                                                         />
                                                     </td>
-                                                    <td className="num">{fmtDate(r.data_incasso)}</td>
+                                                    <td className="num">{fmtDate(r.data_incasso || r.data_copertura)}</td>
                                                     <td className="num text-xs">{r.numero_polizza || "-"}</td>
-                                                    <td>{r.contraente || "-"}</td>
+                                                    <td>{r.contraente || "-"}
+                                                        {r.incassato === false && <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 px-1 rounded">coperta · non incassata</span>}
+                                                    </td>
                                                     <td className="text-xs">{r.ramo || "-"}</td>
                                                     <td className="num text-right">{fmtEur(r.importo_lordo)}</td>
-                                                    <td className="num text-right font-medium text-emerald-700">{fmtEur(r.provvigione)}</td>
+                                                    <td className={`num text-right font-medium ${r.incassato === false ? "text-amber-600" : "text-emerald-700"}`}>{fmtEur(r.provvigione)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

@@ -371,9 +371,15 @@ async def list_collaboratori(tutti: bool = False, user=Depends(require_user("adm
 @api.get("/collaboratori/{cid}/estratto-provvigioni")
 async def estratto_provvigioni(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    base: str = "incasso",
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Estratto conto provvigioni: titoli incassati nel periodo + pagamenti effettuati.
+
+    base: "incasso" (solo titoli incassati) | "copertura" (incassati + coperti non
+    ancora incassati). In modalità copertura i titoli coperti-non-incassati sono
+    mostrati come "maturande" ma NON entrano nel "da pagare" (la provvigione matura
+    solo all'incasso).
 
     Restituisce:
       - titoli con provvigione maturata (da pagare o già pagata)
@@ -402,11 +408,23 @@ async def estratto_provvigioni(
     if _cutoff:
         dal = max(dal, _cutoff) if dal else _cutoff
 
-    titolo_filter = {"polizza_id": {"$in": pol_ids}, "stato": "incassato", "pregresso": {"$ne": True}}
+    titolo_filter = {"polizza_id": {"$in": pol_ids}, "pregresso": {"$ne": True}}
     inc_cond = {}
     if dal: inc_cond["$gte"] = dal
     if al: inc_cond["$lte"] = al
-    if inc_cond: titolo_filter["data_incasso"] = inc_cond
+    if base == "copertura":
+        # incassati nel periodo (per data_incasso) OPPURE coperti nel periodo ma non ancora incassati
+        cop_cond = dict(inc_cond) if inc_cond else {}
+        or_clause = [{"stato": "incassato", **({"data_incasso": inc_cond} if inc_cond else {})}]
+        cov = {"stato": {"$nin": ["incassato", "stornato", "annullato"]}, "data_copertura": {"$ne": None}}
+        if cop_cond:
+            cov["data_copertura"] = cop_cond
+        or_clause.append(cov)
+        titolo_filter["$or"] = or_clause
+    else:
+        titolo_filter["stato"] = "incassato"
+        if inc_cond:
+            titolo_filter["data_incasso"] = inc_cond
 
     titoli = await db.titoli.find(titolo_filter, {"_id": 0}).to_list(5000)
     # arricchimento polizza/contraente
@@ -435,10 +453,12 @@ async def estratto_provvigioni(
     rows = []
     tot_lordo = 0.0
     tot_da_pagare = 0.0
+    tot_maturande = 0.0
     for t in titoli:
         pol = pol_map.get(t["polizza_id"], {})
         ana = ana_map.get(pol.get("contraente_id", ""), {})
         provv = t.get("provvigioni", 0.0) or 0.0
+        incassato = t.get("stato") == "incassato"
         gia_pagato = t["id"] in titoli_gia_pagati
         rows.append({
             "titolo_id": t["id"],
@@ -447,13 +467,20 @@ async def estratto_provvigioni(
             "contraente": ana.get("ragione_sociale"),
             "ramo": pol.get("ramo"),
             "data_incasso": t.get("data_incasso"),
+            "data_copertura": t.get("data_copertura"),
+            "stato": t.get("stato"),
+            "incassato": incassato,
             "importo_lordo": t.get("importo_lordo", 0.0),
             "provvigione": provv,
             "gia_pagato": gia_pagato,
         })
-        tot_lordo += provv
-        if not gia_pagato:
-            tot_da_pagare += provv
+        if incassato:
+            tot_lordo += provv
+            if not gia_pagato:
+                tot_da_pagare += provv
+        else:
+            # coperto ma non ancora incassato → maturanda (non conteggiata nel da pagare)
+            tot_maturande += provv
 
     # calcolo trattenute sul "da pagare"
     rit = collab.get("perc_ritenuta_acconto", 0.0) or 0.0
@@ -489,6 +516,7 @@ async def estratto_provvigioni(
         "totali": {
             "provvigioni_lorde_periodo": round(tot_lordo, 2),
             "provvigioni_da_pagare": round(tot_da_pagare, 2),
+            "provvigioni_maturande": round(tot_maturande, 2),
             "ritenuta_acconto_calcolata": ritenuta_calc,
             "contributi_calcolati": contributi_calc,
             "voci_manuali_periodo": round(tot_voci_totale, 2),
