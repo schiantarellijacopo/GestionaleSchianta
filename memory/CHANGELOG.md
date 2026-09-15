@@ -9,7 +9,11 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — PNC nell'Estratto Conto Compagnie ✅
+## 2026-06 — PNC nel widget "Saldo cassa compagnie" ✅
+- Il widget cumulativo `_compute_saldi_compagnie` (dashboard/brogliaccio, `saldo_cassa`) ora include le **PNC versate** (movimenti categoria `pnc`), che alimentano il saldo esattamente come le ritenute compagnia: `saldo = dovuto − rimesse − rappel + ritenute + pnc_versate − ...`.
+- Aggiunto campo `pnc` all'output per compagnia; guardia anti-skip aggiornata. Nessuna modifica frontend (il widget mostra il `saldo_cassa` aggregato, già comprensivo di PNC).
+- Verificato: PNC versata +200 → `saldo_cassa` 1360→1560, campo `pnc`=200.
+
 - Le partite PNC ora compaiono nell'E/C compagnie insieme a rappel, ritenute e fatture partner (solo mandato diretto), lette dai record `db.pnc` come le ritenute compagnia.
 - Importo firmato: `+` alimenta il DARE (aumenta il saldo da versare), `−` va in AVERE. Incidono su `totale_dare`/`totale_avere`/`saldo`; aggiunto `totale_pnc` alla risposta.
 - Backend `server.py` `_compagnia_estratto_data` (la lista saldi `saldi_cassa_compagnie` deriva da qui → coerente). Frontend `EstrattoContoCompagnie.jsx`: riga PNC in "Movimenti & versamenti" con badge viola "PNC · <tipo>".

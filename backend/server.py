@@ -6260,6 +6260,18 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
         ]).to_list(1)
         rappel = rap_agg[0]["tot"] if rap_agg else 0.0
+        # PNC VERSATE (movimenti categoria 'pnc') → alimentano il saldo come le ritenute
+        pnc_agg = await db.movimenti.aggregate([
+            {"$match": {
+                "compagnia_id": cid,
+                "tipo": "uscita",
+                "categoria": "pnc",
+                "pregresso": {"$ne": True},
+                "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a},
+            }},
+            {"$group": {"_id": None, "tot": {"$sum": "$importo"}}},
+        ]).to_list(1)
+        pnc_versate = pnc_agg[0]["tot"] if pnc_agg else 0.0
         # Saldo di apertura dal setup iniziale (non pregresso): dare aumenta, avere riduce
         setup_dare = 0.0; setup_avere = 0.0
         if _cutoff:
@@ -6272,8 +6284,8 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                     setup_avere += imp
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
         saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare
-        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute - setup_avere - direzione_provv
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01:
+        saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute + pnc_versate - setup_avere - direzione_provv
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(pnc_versate) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
             "compagnia_id": cid,
@@ -6288,6 +6300,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             "rimesse_pagate": round(rimesse, 2),
             "rappel": round(rappel, 2),
             "ritenute": round(ritenute, 2),
+            "pnc": round(pnc_versate, 2),
             "saldo_cassa": round(saldo_residuo, 2),
         })
     # ordina per saldo_cassa descendente (le più "da pagare" in cima)
