@@ -77,6 +77,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     const [conti, setConti] = useState([]);
     const [utenti, setUtenti] = useState([]);
     const [prodotti, setProdotti] = useState([]);
+    const [tagOptions, setTagOptions] = useState([]);
     const { mezzi: mezziPagamento } = useMezziPagamento();
     const [editing, setEditing] = useState(null);
     const [showFilters, setShowFilters] = useState(false);
@@ -91,7 +92,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     const [filters, setFilters] = useState({
         preset: urlPreset && ACCEPTED_PRESETS.includes(urlPreset) ? urlPreset : defaultPreset,
         q: "",
-        stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
+        stato: "all", compagnia_id: "all", ramo: "all", tag: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
         dal: "", al: "", data_campo: "scadenza",
     });
@@ -117,6 +118,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         if (filters.stato !== "all" && (filters.preset === "tutti_aperti" || filters.preset === "storico")) p.stato = filters.stato;
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
+        if (filters.tag && filters.tag !== "all") p.tag = filters.tag;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
         if (filters.conto_cassa_id !== "all") p.conto_cassa_id = filters.conto_cassa_id;
         if (filters.prodotto) p.prodotto = filters.prodotto;
@@ -144,6 +146,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             setUtenti((u.data || []).filter((x) => x.role !== "cliente" && x.attivo !== false));
             setProdotti(p.data || []);
         });
+        api.get("/anagrafiche/tags").then((r) => setTagOptions(r.data || [])).catch(() => {});
     }, []);
 
     const baseList = list || [];
@@ -377,6 +380,13 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <SelectContent>
                                 <SelectItem value="all">Tutti rami</SelectItem>
                                 {rami.map((r) => <SelectItem key={r.id} value={r.codice}>{r.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.tag} onValueChange={(v) => setF("tag", v)}>
+                            <SelectTrigger data-testid="f-tag"><SelectValue placeholder="Tag" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti i tag</SelectItem>
+                                {tagOptions.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                             </SelectContent>
                         </Select>
                         <Select value={filters.collaboratore_id} onValueChange={(v) => setF("collaboratore_id", v)}>

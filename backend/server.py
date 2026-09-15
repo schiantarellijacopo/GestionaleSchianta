@@ -2587,6 +2587,7 @@ async def list_polizze(
     contraente_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
+    tag: Optional[str] = None,
     categoria: Optional[str] = None,  # auto_priv|auto_az|altri_priv|altri_az|vita_inv|vita_prot
     catastrofale: Optional[bool] = None,
     check_up: Optional[bool] = None,
@@ -2621,6 +2622,8 @@ async def list_polizze(
         flt["compagnia_id"] = compagnia_id
     if collaboratore_id:
         flt["collaboratore_id"] = collaboratore_id
+    if tag:
+        flt["tags"] = tag
     if q:
         qrx = {"$regex": q, "$options": "i"}
         ana_ids = [a["id"] async for a in db.anagrafiche.find(
@@ -3138,12 +3141,15 @@ async def list_titoli(
     al: Optional[str] = None,
     data_campo: Optional[str] = None,
     q: Optional[str] = None,
+    tag: Optional[str] = None,
     limit: int = 50000,
     user=Depends(current_user),
 ):
     flt: dict = {}
     if polizza_id:
         flt["polizza_id"] = polizza_id
+    if tag:
+        flt["tags"] = tag
     if stato:
         flt["stato"] = stato
     if stato_not:
@@ -5088,11 +5094,22 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
     """
     solo_arretrati = body.get("solo_arretrati", True)
     dry_run = bool(body.get("dry_run", False))
+    schema_id = body.get("schema_id")
     flt = {}
     if solo_arretrati:
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
     else:
         flt["stato"] = {"$ne": "stornato"}
+
+    # Riassegnazione PER ASSEGNAZIONE (schema): limita ai titoli nello scope dello schema.
+    schema_scope = None
+    if schema_id:
+        schema_scope = await db.schema_provvigionale.find_one({"id": schema_id}, {"_id": 0})
+        if not schema_scope:
+            raise HTTPException(404, "Schema provvigionale non trovato")
+        cid = schema_scope.get("collaboratore_id")
+        if cid:
+            flt["$or"] = [{"collaboratore_id": cid}, {"provvigioni_operatori.operatore_id": cid}]
 
     schema_cache: dict = {}
     pol_cache: dict = {}
@@ -5110,6 +5127,12 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
         pol = pol_cache[pid]
         compagnia_id = pol.get("compagnia_id")
         ramo = pol.get("ramo")
+        # Scope schema: se lo schema è legato a compagnia/ramo specifici, salta i non pertinenti
+        if schema_scope:
+            if schema_scope.get("compagnia_id") and schema_scope["compagnia_id"] != compagnia_id:
+                continue
+            if schema_scope.get("ramo") and schema_scope["ramo"] != ramo:
+                continue
         lordo = float(t.get("importo_lordo") or 0)
         netto = float(t.get("importo_netto") or 0)
         if lordo <= 0:
@@ -5177,6 +5200,8 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
     return {
         "dry_run": dry_run,
         "solo_arretrati": solo_arretrati,
+        "schema_id": schema_id,
+        "schema_nome": (schema_scope or {}).get("nome"),
         "titoli_esaminati": esaminati,
         "titoli_aggiornati": aggiornati,
         "delta_provvigioni_totale": round(delta_tot, 2),

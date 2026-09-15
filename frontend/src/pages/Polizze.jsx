@@ -102,7 +102,7 @@ const presetParams = (key) => {
 
 const INITIAL_FILTERS = {
     preset: "attive", q: "",
-    stato: "all", compagnia_id: "all", ramo: "all", prodotto: "",
+    stato: "all", compagnia_id: "all", ramo: "all", tag: "all", prodotto: "",
     collaboratore_id: "all", contraente_id: "all",
     dal: "", al: "",
 };
@@ -112,6 +112,7 @@ export default function Polizze() {
     const [list, setList] = useState(null);
     const [compagnie, setCompagnie] = useState([]);
     const [rami, setRami] = useState([]);
+    const [tagOptions, setTagOptions] = useState([]);
     const [utenti, setUtenti] = useState([]);
     const [open, setOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
@@ -129,6 +130,7 @@ export default function Polizze() {
         if (p.stato !== "annullata") p.escludi_annullate = true;
         if (filters.compagnia_id !== "all") p.compagnia_id = filters.compagnia_id;
         if (filters.ramo !== "all") p.ramo = filters.ramo;
+        if (filters.tag && filters.tag !== "all") p.tag = filters.tag;
         if (filters.collaboratore_id !== "all") p.collaboratore_id = filters.collaboratore_id;
         if (filters.contraente_id !== "all") p.contraente_id = filters.contraente_id;
         if (filters.prodotto) p.prodotto = filters.prodotto;
@@ -172,6 +174,7 @@ export default function Polizze() {
             setCompagnie(c.data); setRami(r.data);
             setUtenti((u.data || []).filter((x) => x.role !== "cliente" && x.attivo !== false));
         });
+        api.get("/anagrafiche/tags").then((r) => setTagOptions(r.data || [])).catch(() => {});
     }, []);
 
     const baseList = list || [];
@@ -335,6 +338,13 @@ export default function Polizze() {
                             <SelectContent>
                                 <SelectItem value="all">Tutti collaboratori</SelectItem>
                                 {utenti.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={filters.tag} onValueChange={(v) => setF("tag", v)}>
+                            <SelectTrigger data-testid="pol-f-tag"><SelectValue placeholder="Tag" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti i tag</SelectItem>
+                                {tagOptions.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                             </SelectContent>
                         </Select>
                         <Input

@@ -9,7 +9,11 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Riassegna provvigioni + verifica BS Broker ✅
+## 2026-06 — Riassegna provvigioni PER SCHEMA + filtri per tag ✅
+- La riassegna provvigioni è ora **per singola assegnazione/schema** (non globale): colonna "Riassegna" con pulsanti **Arretrati** / **Tutti** su ogni riga del Sistema Provvigionale.
+- Endpoint `POST /provvigioni/riassegna` accetta `schema_id`: limita ai titoli nello scope dello schema (collaboratore + eventuale compagnia/ramo). Sicurezze invariate (salta senza schema, non azzera mai). Verificato: schema "pro70" → 98 titoli in scope vs 6350 globali.
+- **Filtri per tag** aggiunti negli elenchi **Polizze** e **Titoli** (backend param `tag` in `/polizze` e `/titoli`; Select "Tutti i tag" popolato da `/anagrafiche/tags`). Verificato: `?tag=vip` filtra correttamente.
+
 - **Verifica BS Broker**: lo schema "provvigioni Bs" (4,5% sul netto, collaboratore prende l'intero) è corretto e viene applicato ai NUOVI titoli. MA i titoli **importati** hanno un valore provvigione piatto (es. 216,34 costante) NON calcolato dallo schema → le provvigioni BS non erano automatiche sullo storico.
 - **Nuovo endpoint** `POST /provvigioni/riassegna` (`{solo_arretrati, dry_run}`): ricalcola le provvigioni dei titoli con gli schemi attuali. Due modalità: solo arretrati (da_incassare/insoluti) o tutti. Riscrive `provvigioni` e `provvigioni_operatori`.
 - **Sicurezze**: (1) salta i titoli senza schema applicabile; (2) NON azzera mai una provvigione reale esistente (uno schema che calcola 0 non cancella). Verificato con dry-run: 0 modifiche indebite nel tenant senza schemi validi.

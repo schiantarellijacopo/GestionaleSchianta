@@ -16,43 +16,31 @@ import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
 import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
-function RiassegnaProvvigioniButton() {
+function RiassegnaProvvigioniButton({ schema }) {
     const [busy, setBusy] = useState(false);
-    const [res, setRes] = useState(null);
     const run = async (soloArretrati) => {
-        const label = soloArretrati ? "solo i titoli in arretrato (da incassare/insoluti)" : "TUTTI i titoli esistenti";
-        if (!window.confirm(`Ricalcolare e riassegnare le provvigioni con gli schemi attuali su ${label}?\n\nGli importi già incassati NON vengono ritoccati in Prima Nota.`)) return;
-        setBusy(true); setRes(null);
+        const label = soloArretrati ? "solo i titoli in arretrato (da incassare/insoluti)" : "TUTTI i titoli";
+        if (!window.confirm(`Riassegnare le provvigioni dello schema "${schema.nome}" su ${label}?\n\nVengono ricalcolati solo i titoli di questa assegnazione. Gli importi già incassati NON vengono ritoccati in Prima Nota.`)) return;
+        setBusy(true);
         try {
-            const r = await api.post("/provvigioni/riassegna", { solo_arretrati: soloArretrati, dry_run: false });
-            setRes(r.data);
-            toast.success(`Riassegnate: ${r.data.titoli_aggiornati} titoli aggiornati su ${r.data.titoli_esaminati} esaminati`);
+            const r = await api.post("/provvigioni/riassegna", { schema_id: schema.id, solo_arretrati: soloArretrati, dry_run: false });
+            const d = r.data;
+            toast.success(`"${schema.nome}": aggiornati ${d.titoli_aggiornati}/${d.titoli_esaminati} titoli · Δ ${d.delta_provvigioni_totale} €`);
         } catch (e) { toast.error(e.response?.data?.detail || "Errore riassegnazione"); }
         finally { setBusy(false); }
     };
     return (
-        <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 flex flex-wrap items-center gap-3" data-testid="riassegna-provvigioni-box">
-            <div className="flex-1 min-w-[220px] text-xs text-sky-900">
-                <div className="font-semibold flex items-center gap-1"><Percent size={13} /> Riassegna provvigioni aggiornate</div>
-                <div className="text-slate-600 mt-0.5">Ricalcola le provvigioni dei titoli esistenti con gli schemi attuali (es. BS BROKER 4,5% sul netto).</div>
-            </div>
-            <div className="flex gap-2">
-                <button onClick={() => run(true)} disabled={busy}
-                    className="text-xs px-3 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"
-                    data-testid="riassegna-arretrati">
-                    <RotateCw size={12} className={busy ? "animate-spin" : ""} /> Solo arretrati
-                </button>
-                <button onClick={() => run(false)} disabled={busy}
-                    className="text-xs px-3 py-1.5 rounded-md bg-sky-700 text-white hover:bg-sky-800 disabled:opacity-50 flex items-center gap-1"
-                    data-testid="riassegna-tutti">
-                    <RotateCw size={12} className={busy ? "animate-spin" : ""} /> Tutti i titoli
-                </button>
-            </div>
-            {res && (
-                <div className="w-full text-[11px] text-slate-600 border-t border-sky-200 pt-2" data-testid="riassegna-risultato">
-                    Esaminati <b>{res.titoli_esaminati}</b> · Aggiornati <b className="text-emerald-700">{res.titoli_aggiornati}</b> · Δ provvigioni <b>{res.delta_provvigioni_totale} €</b>
-                </div>
-            )}
+        <div className="flex gap-1">
+            <button onClick={() => run(true)} disabled={busy} title="Riassegna su titoli in arretrato di questo schema"
+                className="text-[10px] px-2 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1"
+                data-testid={`riassegna-arretrati-${schema.id}`}>
+                <RotateCw size={11} className={busy ? "animate-spin" : ""} /> Arretrati
+            </button>
+            <button onClick={() => run(false)} disabled={busy} title="Riassegna su tutti i titoli di questo schema"
+                className="text-[10px] px-2 py-1 rounded bg-sky-700 text-white hover:bg-sky-800 disabled:opacity-50 flex items-center gap-1"
+                data-testid={`riassegna-tutti-${schema.id}`}>
+                <RotateCw size={11} className={busy ? "animate-spin" : ""} /> Tutti
+            </button>
         </div>
     );
 }
@@ -1161,29 +1149,27 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
     }
     if (section.key === "schema-provvigionale") {
         return (
-            <div className="space-y-3">
-                <RiassegnaProvvigioniButton />
-                <table className="tbl w-full">
-                    <thead><tr><th>Nome</th><th>Collaboratore</th><th>Compagnia</th><th>Ramo</th><th className="text-right">% Collab</th><th className="text-right">% Premio</th><th className="text-right">% Netto</th><th>Attivo</th><th></th></tr></thead>
-                    <tbody>
-                        {list.map((s) => (
-                            <tr key={s.id}>
-                                <td className="font-medium">{s.nome}</td>
-                                <td className="text-xs">{s.collaboratore_nome || <span className="text-slate-400">tutti</span>}</td>
-                                <td className="text-xs">{s.compagnia_nome || <span className="text-slate-400">tutte</span>}</td>
-                                <td><span className="badge badge-neutral">{s.ramo || "tutti"}</span></td>
-                                <td className="num text-right font-semibold text-emerald-700">{s.percentuale_collaboratore}%</td>
-                                <td className="num text-right text-slate-600">{s.percentuale_su_premio}%</td>
-                                <td className="num text-right text-sky-700">{s.percentuale_su_premio_netto || 0}%</td>
-                                <td>{s.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
-                                <td className="text-right">
-                                    <RowActions onEdit={() => onEdit(s)} onDelete={() => onDelete(s.id)} label="schema" />
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <table className="tbl w-full">
+                <thead><tr><th>Nome</th><th>Collaboratore</th><th>Compagnia</th><th>Ramo</th><th className="text-right">% Collab</th><th className="text-right">% Premio</th><th className="text-right">% Netto</th><th>Attivo</th><th>Riassegna</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((s) => (
+                        <tr key={s.id}>
+                            <td className="font-medium">{s.nome}</td>
+                            <td className="text-xs">{s.collaboratore_nome || <span className="text-slate-400">tutti</span>}</td>
+                            <td className="text-xs">{s.compagnia_nome || <span className="text-slate-400">tutte</span>}</td>
+                            <td><span className="badge badge-neutral">{s.ramo || "tutti"}</span></td>
+                            <td className="num text-right font-semibold text-emerald-700">{s.percentuale_collaboratore}%</td>
+                            <td className="num text-right text-slate-600">{s.percentuale_su_premio}%</td>
+                            <td className="num text-right text-sky-700">{s.percentuale_su_premio_netto || 0}%</td>
+                            <td>{s.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td><RiassegnaProvvigioniButton schema={s} /></td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(s)} onDelete={() => onDelete(s.id)} label="schema" />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         );
     }
     // mapping garanzie ANIA → nome personalizzato
