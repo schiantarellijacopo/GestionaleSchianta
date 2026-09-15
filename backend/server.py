@@ -4605,7 +4605,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         conto_cassa_id=None if is_direzione else conto_id,
         mezzo_pagamento=mezzo,
         provvigioni=0.0 if is_coperto else titolo.get("provvigioni", 0.0),
-        quota_sconto=0.0 if (is_direzione or is_coperto) else sconto_applicato,
+        quota_sconto=0.0 if is_direzione else sconto_applicato,
         is_direzione=is_direzione,
         note=(
             "Pagamento effettuato dal cliente direttamente in direzione compagnia. "
@@ -6371,11 +6371,18 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             # conto_cassa_id = None → nessun movimento banca/cassa
         elif is_entrata and cat == "incasso_coperto":
             # INCASSO di un titolo GIÀ coperto: sposta da sospeso a banca.
-            # SOSPESI −importo · BANCA +importo (segni invertiti se il titolo è negativo).
+            # I SOSPESI si riducono del LORDO (contante incassato + eventuale sconto),
+            # così azzerano esattamente quanto messo a sospeso alla copertura.
+            # Lo sconto (differenza lordo − pagato) va in SCONTI/SPESE (a carico agenzia).
+            # BANCA +importo (contante) gestita da per_conto.
             # NON tocca ENTRATE/PROVVIGIONI/SALDO (già registrati alla copertura).
+            sconto_riga = float(m.get("quota_sconto") or 0)
+            lordo_riga = importo + sconto_riga
             c_totale = 0.0
-            c_crediti = -importo                                 # SOSPESI − (o + se negativo)
-            # BANCA gestita da per_conto (entrata sul conto = +importo)
+            c_crediti = -lordo_riga                              # SOSPESI − LORDO
+            if sconto_riga > 0:
+                c_spese = sconto_riga
+                c_sconti = sconto_riga
         elif is_entrata and cat == "anticipo":
             # anticipo che entra in cassa: alimenta crediti positivamente
             c_totale = importo
@@ -6609,6 +6616,13 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             cum_provv += provv_riga
             cum_saldo += -provv_riga
             cum_rappel += importo  # rappel: NON in provvigioni, riduce/alimenta il saldo cassa
+        if is_e and cat == "incasso_coperto":
+            # Incasso di un coperto: lo sconto (a carico agenzia) alimenta Sconti+Spese.
+            # ENTRATE/PROVVIGIONI/SALDO restano invariati (registrati alla copertura).
+            quota_sc = float(m.get("quota_sconto") or 0)
+            if quota_sc > 0:
+                cum_sconti += quota_sc
+                cum_spese += quota_sc
         if is_e and cat == "incasso_premio":
             provv_riga = float(m.get("provvigioni") or 0)
             quota_sc = float(m.get("quota_sconto") or 0)

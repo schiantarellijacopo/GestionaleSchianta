@@ -1,7 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
-## Sessione 15/09/2026 (fork) — Tendine collaboratori: nascosti inattivi/artefatti import
+## Sessione 15/09/2026 (fork) — Fix incasso titolo coperto: sospesi al LORDO + sconto in Sconti/Spese
+
+- **Bug**: incassando un titolo GIÀ coperto con sconto (es. BRUNA MARINELLA, pol. 730043034: lordo 78,50 / pagato 77,67 / sconto 0,83), il brogliaccio riduceva i SOSPESI solo del contante (−77,67) lasciando 0,83 "appeso" e NON registrava lo sconto in SCONTI/SPESE né nel KPI Sconti.
+- **Cause**: (1) `incassa` (server.py:4608) forzava `quota_sconto=0` per i titoli coperti (`is_coperto`); (2) il ramo `incasso_coperto` in `_compute_brogliaccio` riduceva i SOSPESI di `importo` invece del LORDO e ignorava lo sconto; (3) il loop KPI cumulativo non sommava lo sconto dei coperti.
+- **Fix**: (1) `quota_sconto=0.0 if is_direzione else sconto_applicato` (lo sconto resta sul movimento anche per i coperti); (2) `incasso_coperto`: `c_crediti = -(importo+sconto)` (SOSPESI −LORDO), `c_spese=c_sconti=sconto`; BANCA +importo invariato, SALDO/ENTRATE/PROVV invariati (già alla copertura); (3) KPI: `cum_sconti/cum_spese += quota_sconto` per `incasso_coperto`. **Backfill** del movimento esistente (`quota_sconto` da `titolo.sconto_applicato`).
+- **Verificato** (Axicura, `_compute_brogliaccio` 2026-09-15): riga BRUNA → crediti −78,50 · sconti 0,83 · spese 0,83 · banca 77,67; totali giornata sconti/spese 0,83; KPI Sconti 0,83.
+
+
 
 - **Chiarito: NESSUN leak tra tenant.** Verificato a DB: i 23 utenti nella tendina di ripartizione provvigioni appartengono TUTTI al tenant `c5ae2d0e` (ASSICURAZIONI SCHIANTARELLI). Erano artefatti da import OMNIA (`@import.assicurapro.it` / `@import-auto.local`). Il tenant separato `tenant-principale-schiantarelli` (19 utenti) NON compariva.
 - **Fix (scelta utente)**: nascondere dalle tendine di SELEZIONE collaboratore gli utenti `attivo=false` (che includono già "ERR", "Produttore - 021 - FILIALE CHIURO", "Produttore - 024 - BS BROKER SAS", "ASSICURAZIONI SCHIANTARELLI MARCO ANDREA SAS"). Le agenzie/broker partner attive (BS BROKER, MIDA, UNIVALT) RESTANO. Filtro `u.attivo !== false` applicato in: `TitoloDialog.jsx` (ripartizione provvigioni — fonte dello screenshot), `PolizzaDetail.jsx` EditPolizzaDialog, `Polizze.jsx` NuovaPolizzaDialog. `CollaboratoreInlineSelect.jsx`: opzioni filtrate mantenendo però l'eventuale operatore già assegnato. (`ProvvigioniOperatoriEditor` già filtrava.) La pagina Librerie > Utenti continua a mostrarli per riattivarli.
