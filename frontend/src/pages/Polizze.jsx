@@ -347,6 +347,20 @@ export default function Polizze() {
                                 {tagOptions.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                             </SelectContent>
                         </Select>
+                        <button
+                            onClick={async () => {
+                                try {
+                                    const r = await api.post("/polizze/auto-tag", {});
+                                    toast.success(`Auto-tag applicati: ${r.data.polizze_aggiornate} polizze, ${r.data.titoli_aggiornati} titoli`);
+                                    api.get("/anagrafiche/tags").then((rr) => setTagOptions(rr.data || []));
+                                    load();
+                                } catch (e) { toast.error(e.response?.data?.detail || "Errore auto-tag"); }
+                            }}
+                            className="text-xs px-3 py-1.5 rounded-md bg-fuchsia-700 text-white hover:bg-fuchsia-800 whitespace-nowrap"
+                            title="Applica tag automatici (in_scadenza, scaduta, sinistrosa)"
+                            data-testid="pol-autotag-btn">
+                            Auto-tag
+                        </button>
                         <Input
                             placeholder="Prodotto..." value={filters.prodotto}
                             onChange={(e) => setF("prodotto", e.target.value)}

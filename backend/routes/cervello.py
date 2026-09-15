@@ -197,68 +197,89 @@ async def analisi_pl(
 # ============= TOP 100 CLIENTI (PARETO) =============
 @router.get("/top-clienti")
 async def top_clienti(limit: int = 100, anno: Optional[int] = None,
-                       user=Depends(current_user)) -> dict:
-    """Classifica clienti per provvigioni generate (Pareto 80/20)."""
+                       tutti: bool = False, user=Depends(current_user)) -> dict:
+    """Classifica clienti per provvigioni generate nell'anno (Pareto 80/20).
+
+    Fonte reale: titoli con data_incasso nell'anno (stessa base della sezione
+    Premi/Provvigioni). `tutti=true` → carica TUTTI i clienti attivi (no limite).
+    """
     now = datetime.now(timezone.utc)
     anno = anno or now.year
     inizio = f"{anno}-01-01"
     fine = f"{anno}-12-31"
-    # Map polizza→contraente
-    pols = await db.polizze.find({}, {"_id": 0, "id": 1, "contraente_id": 1}).to_list(50000)
-    pol_to_ana = {p["id"]: p.get("contraente_id") for p in pols}
-    # Aggrega provvigioni per cliente
-    bucket: dict[str, float] = {}
-    n_per_cli: dict[str, int] = {}
-    async for m in db.movimenti_contabili.find({
-        "categoria": "provvigioni",
-        "data": {"$gte": inizio, "$lte": fine},
-    }, {"_id": 0, "polizza_id": 1, "importo": 1, "tipo": 1}):
-        ana_id = pol_to_ana.get(m.get("polizza_id"))
-        if not ana_id:
+
+    # Polizze: mappa polizza→contraente, prima decorrenza e conteggio attive per cliente
+    pols = await db.polizze.find(
+        {}, {"_id": 0, "id": 1, "contraente_id": 1, "stato": 1, "decorrenza": 1, "effetto": 1},
+    ).to_list(80000)
+    pol_to_ana: dict[str, str] = {}
+    n_pol_attive: dict[str, int] = {}
+    prima_decorrenza: dict[str, str] = {}
+    active_clients: set[str] = set()
+    for p in pols:
+        pid = p["id"]
+        cid = p.get("contraente_id")
+        pol_to_ana[pid] = cid
+        if not cid:
             continue
-        delta = float(m.get("importo") or 0)
-        if m.get("tipo") == "uscita":
-            delta = -delta
-        bucket[ana_id] = bucket.get(ana_id, 0) + delta
-        n_per_cli[ana_id] = n_per_cli.get(ana_id, 0) + 1
-    if not bucket:
-        # fallback: aggrega per premio polizza (proxy)
-        for p in pols:
-            ana_id = p.get("contraente_id")
-            if ana_id:
-                bucket[ana_id] = bucket.get(ana_id, 0) + 0
-                n_per_cli[ana_id] = n_per_cli.get(ana_id, 0) + 1
-    # Top N
-    ranked = sorted(bucket.items(), key=lambda x: x[1], reverse=True)[:limit]
-    ids = [r[0] for r in ranked]
+        if p.get("stato") in ("attiva", "in_emissione"):
+            n_pol_attive[cid] = n_pol_attive.get(cid, 0) + 1
+            active_clients.add(cid)
+        dec = (p.get("decorrenza") or p.get("effetto") or "")[:10]
+        if dec and (cid not in prima_decorrenza or dec < prima_decorrenza[cid]):
+            prima_decorrenza[cid] = dec
+
+    # Aggrega provvigioni e premi netti REALI dai titoli incassati nell'anno
+    bucket_prov: dict[str, float] = {}
+    bucket_netto: dict[str, float] = {}
+    async for t in db.titoli.find({
+        "data_incasso": {"$gte": inizio, "$lte": fine},
+        "stato": {"$ne": "stornato"},
+    }, {"_id": 0, "polizza_id": 1, "provvigioni": 1, "importo_netto": 1}):
+        cid = pol_to_ana.get(t.get("polizza_id"))
+        if not cid:
+            continue
+        bucket_prov[cid] = bucket_prov.get(cid, 0) + float(t.get("provvigioni") or 0)
+        bucket_netto[cid] = bucket_netto.get(cid, 0) + float(t.get("importo_netto") or 0)
+
+    # Insieme dei clienti: attivi + quelli con movimenti nell'anno
+    all_ids = set(active_clients) | set(bucket_prov.keys())
+    ranked_ids = sorted(all_ids, key=lambda c: bucket_prov.get(c, 0.0), reverse=True)
+    if not tutti:
+        ranked_ids = ranked_ids[:limit]
+
     anas = {a["id"]: a async for a in db.anagrafiche.find(
-        {"id": {"$in": ids}},
+        {"id": {"$in": ranked_ids}},
         {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
          "tipo": 1, "created_at": 1})}
-    # Conta polizze attive per cliente
-    n_pol_attive: dict[str, int] = {}
-    async for p in db.polizze.find(
-            {"contraente_id": {"$in": ids}, "stato": {"$in": ["attiva", "in_emissione"]}},
-            {"_id": 0, "contraente_id": 1}):
-        cid = p["contraente_id"]
-        n_pol_attive[cid] = n_pol_attive.get(cid, 0) + 1
 
-    total_all = sum(bucket.values()) or 1
+    total_all = sum(bucket_prov.values()) or 1
     cum = 0.0
     rows = []
-    for i, (ana_id, prov) in enumerate(ranked):
+    for i, cid in enumerate(ranked_ids):
+        prov = bucket_prov.get(cid, 0.0)
         cum += prov
-        a = anas.get(ana_id, {})
+        a = anas.get(cid, {})
+        # Anni da cliente: da prima decorrenza polizza (fallback created_at)
+        anni_cliente = None
+        base_date = prima_decorrenza.get(cid) or (a.get("created_at") or "")[:10]
+        if base_date and len(base_date) >= 4:
+            try:
+                anni_cliente = max(0, now.year - int(base_date[:4]))
+            except ValueError:
+                anni_cliente = None
         rows.append({
             "rank": i + 1,
-            "anagrafica_id": ana_id,
+            "anagrafica_id": cid,
             "nome": a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip(),
             "tipo": a.get("tipo"),
             "provvigioni_anno": round(prov, 2),
+            "premi_netti_anno": round(bucket_netto.get(cid, 0.0), 2),
             "incidenza_pct": round(100 * prov / total_all, 2),
             "incidenza_cumulata_pct": round(100 * cum / total_all, 2),
-            "n_polizze_attive": n_pol_attive.get(ana_id, 0),
-            "cliente_da": a.get("created_at"),
+            "n_polizze_attive": n_pol_attive.get(cid, 0),
+            "anni_cliente": anni_cliente,
+            "cliente_dal": prima_decorrenza.get(cid),
         })
 
     # Calcolo soglia Pareto (80/20)
@@ -267,9 +288,10 @@ async def top_clienti(limit: int = 100, anno: Optional[int] = None,
     ) + 1
     return {
         "anno": anno,
-        "totale_provvigioni": round(total_all, 2),
+        "totale_provvigioni": round(total_all if bucket_prov else 0.0, 2),
         "n_clienti_top": len(rows),
         "pareto_80_idx": pareto_idx,
+        "tutti": tutti,
         "items": rows,
     }
 

@@ -6,6 +6,8 @@ import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import StatistichePremi from "@/pages/StatistichePremi";
+import { TopClientiModulo, SegmentazioneModulo } from "@/pages/StatisticheClienti";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -38,9 +40,21 @@ export default function Statistiche() {
                     <TabsTrigger value="isa" data-testid="stat-tab-isa">
                         <Gauge size={14} className="mr-1" /> Indice ISA
                     </TabsTrigger>
+                    <TabsTrigger value="premi" data-testid="stat-tab-premi">
+                        <TrendingUp size={14} className="mr-1" /> Premi / Provvigioni
+                    </TabsTrigger>
+                    <TabsTrigger value="topclienti" data-testid="stat-tab-topclienti">
+                        <Trophy size={14} className="mr-1" /> Top Clienti
+                    </TabsTrigger>
+                    <TabsTrigger value="segmentazione" data-testid="stat-tab-segmentazione">
+                        <PieChart size={14} className="mr-1" /> Segmentazione
+                    </TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview" className="space-y-4 mt-4"><OverviewModulo /></TabsContent>
                 <TabsContent value="isa" className="space-y-4 mt-4"><IsaModulo /></TabsContent>
+                <TabsContent value="premi" className="space-y-4 mt-4"><StatistichePremi /></TabsContent>
+                <TabsContent value="topclienti" className="space-y-4 mt-4"><TopClientiModulo /></TabsContent>
+                <TabsContent value="segmentazione" className="space-y-4 mt-4"><SegmentazioneModulo /></TabsContent>
             </Tabs>
         </div>
     );

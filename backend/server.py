@@ -3061,6 +3061,131 @@ async def update_polizza_tags(pid: str, body: dict, user=Depends(require_user("a
     return {"id": pid, "tags": tags}
 
 
+AUTO_TAGS_POLIZZA = {"in_scadenza", "scaduta", "sinistrosa"}
+AUTO_TAGS_TITOLO = {"insoluto"}
+
+
+@api.post("/polizze/auto-tag")
+async def applica_auto_tag(body: dict = None, user=Depends(require_user("admin", "collaboratore"))):
+    """Applica tag automatici preservando quelli manuali:
+    - polizze: 'scaduta' (scadenza passata), 'in_scadenza' (entro 30 gg), 'sinistrosa' (ha sinistri).
+    - titoli: 'insoluto' (stato insoluto).
+    """
+    from datetime import date as _date, timedelta as _td
+    oggi = _date.today()
+    limite = (oggi + _td(days=30)).isoformat()
+    oggi_s = oggi.isoformat()
+    con_sinistri = set(await db.sinistri.distinct("polizza_id"))
+
+    pol_agg = 0
+    async for p in db.polizze.find({}, {"_id": 0, "id": 1, "scadenza": 1, "tags": 1, "stato": 1}):
+        auto = set()
+        sc = (p.get("scadenza") or "")[:10]
+        if sc:
+            if sc < oggi_s:
+                auto.add("scaduta")
+            elif sc <= limite:
+                auto.add("in_scadenza")
+        if p["id"] in con_sinistri:
+            auto.add("sinistrosa")
+        manuali = [t for t in (p.get("tags") or []) if t not in AUTO_TAGS_POLIZZA]
+        nuovi = manuali + sorted(auto)
+        if set(nuovi) != set(p.get("tags") or []):
+            await db.polizze.update_one({"id": p["id"]}, {"$set": {"tags": nuovi, "updated_at": _now_iso()}})
+            pol_agg += 1
+
+    tit_agg = 0
+    async for t in db.titoli.find({}, {"_id": 0, "id": 1, "stato": 1, "tags": 1}):
+        auto = {"insoluto"} if t.get("stato") == "insoluto" else set()
+        manuali = [x for x in (t.get("tags") or []) if x not in AUTO_TAGS_TITOLO]
+        nuovi = manuali + sorted(auto)
+        if set(nuovi) != set(t.get("tags") or []):
+            await db.titoli.update_one({"id": t["id"]}, {"$set": {"tags": nuovi, "updated_at": _now_iso()}})
+            tit_agg += 1
+
+    return {"polizze_aggiornate": pol_agg, "titoli_aggiornati": tit_agg}
+
+
+@api.get("/statistiche/premi-provvigioni")
+async def statistiche_premi_provvigioni(
+    anni: str,  # es. "2026,2025"
+    data_field: str = "incasso",  # incasso | rata | copertura
+    mese_da: int = 1,
+    mese_a: int = 12,
+    compagnia_id: Optional[str] = None,
+    operatore_id: Optional[str] = None,
+    ramo: Optional[str] = None,   # comma list
+    tipo: Optional[str] = None,   # comma list; vuoto = tutti
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    years = sorted({int(a) for a in anni.split(",") if a.strip()}, reverse=True)
+    if not years:
+        raise HTTPException(400, "Specificare almeno un anno")
+    date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
+    rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
+    tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
+
+    # Un collaboratore vede SOLO i propri premi/provvigioni: forziamo l'operatore su di lui.
+    scoped = user.get("role") != "admin"
+    eff_op = user.get("id") if scoped else operatore_id
+
+    flt: dict = {date_key: {"$ne": None}, "stato": {"$ne": "stornato"}}
+    if eff_op:
+        flt["$or"] = [{"collaboratore_id": eff_op}, {"provvigioni_operatori.operatore_id": eff_op}]
+    if tipi:
+        flt["tipo"] = {"$in": tipi}
+
+    need_pol = bool(compagnia_id or rami)
+    pol_cache: dict = {}
+
+    def _provv_share(t: dict) -> float:
+        if not eff_op:
+            return float(t.get("provvigioni") or 0)
+        for op in (t.get("provvigioni_operatori") or []):
+            if op.get("operatore_id") == eff_op:
+                return float(op.get("provvigione") or 0)
+        return float(t.get("provvigioni") or 0) if t.get("collaboratore_id") == eff_op else 0.0
+
+    def _empty():
+        return {"netto": [0.0] * 12, "provvigioni": [0.0] * 12, "lordo": [0.0] * 12}
+    mesi = {y: _empty() for y in years}
+    async for t in db.titoli.find(flt, {"_id": 0, date_key: 1, "importo_lordo": 1, "importo_netto": 1,
+                                        "provvigioni": 1, "provvigioni_operatori": 1, "collaboratore_id": 1,
+                                        "polizza_id": 1}):
+        d = (t.get(date_key) or "")[:10]
+        if len(d) < 7:
+            continue
+        try:
+            y = int(d[:4]); m = int(d[5:7])
+        except ValueError:
+            continue
+        if y not in mesi or m < mese_da or m > mese_a:
+            continue
+        if need_pol:
+            pid = t.get("polizza_id")
+            if pid not in pol_cache:
+                pol_cache[pid] = await db.polizze.find_one({"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1}) or {}
+            pol = pol_cache[pid]
+            if compagnia_id and pol.get("compagnia_id") != compagnia_id:
+                continue
+            if rami and pol.get("ramo") not in rami:
+                continue
+        i = m - 1
+        mesi[y]["netto"][i] += float(t.get("importo_netto") or 0)
+        mesi[y]["provvigioni"][i] += _provv_share(t)
+        mesi[y]["lordo"][i] += float(t.get("importo_lordo") or 0)
+
+    out_anni = []
+    for y in years:
+        s = mesi[y]
+        serie = {k: [round(x, 2) for x in v] for k, v in s.items()}
+        tot = {k: round(sum(v), 2) for k, v in serie.items()}
+        out_anni.append({"anno": y, "netto": serie["netto"], "provvigioni": serie["provvigioni"],
+                         "lordo": serie["lordo"], "totali": tot})
+    return {"anni": out_anni, "data_field": data_field, "mese_da": mese_da, "mese_a": mese_a,
+            "scoped_operatore": scoped}
+
+
 
 @api.patch("/polizze/{pid}/garanzie/{idx}")
 async def patch_polizza_garanzia(

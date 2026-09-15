@@ -1,6 +1,28 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
-## Sessione 15/09/2026 (fork) — Cella "Agenzia partner" compagnie (many-to-many) + ramo mappato su re-import
+## Sessione 15/09/2026 (fork) — Statistiche Premi/Provvigioni (tab nell'hub Statistiche)
+
+- **Hub Statistiche** (`/statistiche`, `Statistiche.jsx`) ora ha 5 tab: Overview, Indice ISA, **Premi / Provvigioni**, **Top Clienti**, **Segmentazione**.
+- **Top Clienti + Segmentazione SPOSTATI** da "Il Cervello" all'hub Statistiche (richiesta utente). Nuovo file `pages/StatisticheClienti.jsx` con `TopClientiModulo` (selettore anno interno) e `SegmentazioneModulo`. Rimossi da `Cervello.jsx` (restano: Conto Economico, Costi & Bilancio, Mini Bilancio).
+- **Premi / Provvigioni** (`StatistichePremi.jsx` + backend `GET /api/statistiche/premi-provvigioni` ~server.py:3109):
+  - Tabella mensile con **metriche selezionabili** (Premio Netto · Provvigioni · Premio Lordo, chip toggle, min 1).
+  - **Filtro periodo (mesi)**: Da → A (mese singolo, intervallo, o anno intero Gen–Dic). Totale + Δ% calcolati sul periodo scelto.
+  - Multi-selezione anni (ultimi 5), confronto 2 anni con Δ%.
+  - Filtri: Data (incasso/rata/copertura), Tipo titolo, Compagnia, Operatore (solo admin).
+  - **Scoping per ruolo**: un collaboratore vede SOLO i propri premi/provvigioni (backend forza `operatore_id=user.id`, provvigioni = sua quota da `provvigioni_operatori`; filtro Operatore nascosto in UI). Flag `scoped_operatore` nella risposta. Verificato via curl (collaboratore scoped=True) + screenshot.
+- **STATO: in attesa di verifica utente** prima di procedere con "Statistiche per Operatore" e "Rami tenant-aware".
+
+### Top Clienti — dati reali + nuove colonne (15/09/2026)
+- **Fix "non prende i dati"**: `GET /api/cervello/top-clienti` (`routes/cervello.py`) prendeva le provvigioni da `movimenti_contabili` (categoria=provvigioni) che è VUOTA in questo tenant → tutto 0. Riscritto per aggregare i **dati reali dai titoli** (`data_incasso` nell'anno, esclusi stornato): `provvigioni` + `importo_netto` per contraente. Ora 2026 tot provv 101.218 (coerente con tab Premi).
+- **Nuove colonne**: "Cliente da" (anni da prima decorrenza polizza, fallback created_at → `anni_cliente`), "Premi netti" (`premi_netti_anno`), "Regalo (X%)" = provvigioni × % impostabile in UI (default 5%, input `topcli-pct-regalo`).
+- **Primi 100 / Tutti gli attivi**: param `tutti=true` → carica TUTTI i clienti attivi (attiva/in_emissione) senza limite (toggle `topcli-primi100`/`topcli-tutti`). Verificato: tutti=2317 clienti.
+
+
+### Prossimi (concordati con l'utente)
+- **Statistiche per Operatore** (P0): tabella per operatore con Premi/Provvigioni + confronto anni, stessi toggle.
+- **Rami tenant-aware** (P1): ministeriali globali, custom solo al tenant creatore.
+
+
 
 - **Compagnie: cella "Mandato" → "Agenzia partner" multi-selezione** (`Librerie.jsx` CompagniaForm + `db_models.py` + `routes/agenzie.py`): rinominata la cella e trasformata in multi-select delle agenzie partner (checkbox), salvata nel nuovo campo array `agenzie_partner_ids` sul modello Compagnia (una compagnia può avere PIÙ agenzie partner). Il conteggio/elenco "compagnie collegate" in Agenzie usa `$or` tra `agenzia_partner_id` (legacy) e `agenzie_partner_ids`. Persistenza verificata via API.
 - **Ramo import su re-import** (`ania_importer.py` `_upsert_polizza`): `ramo` e `prodotto` ora si aggiornano anche sulle polizze già presenti quando il mapping risolve un valore diverso (es. "3N" → "RC AUTO"), così la correzione del mapping si propaga (prima la regola "solo dati mancanti" li lasciava invariati).

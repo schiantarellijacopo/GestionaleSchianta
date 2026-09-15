@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MiniBilancioTab from "@/components/MiniBilancioTab";
 import { PageHeader, Loading } from "@/components/Shared";
-import { Brain, Save, Upload, TrendingUp, Trophy, PieChart, Wallet, Users, Sparkles } from "lucide-react";
+import { Brain, Save, Upload, TrendingUp, Wallet, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const COMP_COLOR = { auto: "sky", persone: "emerald", aziende: "amber", vita: "violet" };
@@ -45,14 +45,10 @@ export default function Cervello() {
             <Tabs defaultValue="pl">
                 <TabsList>
                     <TabsTrigger value="pl" data-testid="tab-pl"><TrendingUp size={14} className="mr-1" /> Conto Economico</TabsTrigger>
-                    <TabsTrigger value="top" data-testid="tab-top"><Trophy size={14} className="mr-1" /> Top Clienti</TabsTrigger>
-                    <TabsTrigger value="seg" data-testid="tab-seg"><PieChart size={14} className="mr-1" /> Segmentazione</TabsTrigger>
                     <TabsTrigger value="costi" data-testid="tab-costi"><Wallet size={14} className="mr-1" /> Costi & Bilancio</TabsTrigger>
                     <TabsTrigger value="minibilancio" data-testid="tab-minibilancio"><TrendingUp size={14} className="mr-1" /> Mini Bilancio</TabsTrigger>
                 </TabsList>
                 <TabsContent value="pl"><ContoEconomicoTab anno={anno} /></TabsContent>
-                <TabsContent value="top"><TopClientiTab anno={anno} /></TabsContent>
-                <TabsContent value="seg"><SegmentazioneTab /></TabsContent>
                 <TabsContent value="costi"><CostiBilancioTab anno={anno} /></TabsContent>
                 <TabsContent value="minibilancio"><MiniBilancioTab /></TabsContent>
             </Tabs>
@@ -112,88 +108,6 @@ function ContoEconomicoTab({ anno }) {
                     </tbody>
                 </table>
             </Card>
-        </div>
-    );
-}
-
-function TopClientiTab({ anno }) {
-    const [data, setData] = useState(null);
-    useEffect(() => {
-        api.get("/cervello/top-clienti", { params: { anno, limit: 100 } }).then((r) => setData(r.data));
-    }, [anno]);
-    if (!data) return <Loading />;
-    return (
-        <div className="space-y-4 pt-3">
-            <Card className="p-3 bg-violet-50/40 border-violet-200">
-                <div className="flex items-center gap-3 text-sm">
-                    <Trophy className="text-violet-600" />
-                    <div>
-                        <div className="font-semibold">Pareto 80/20</div>
-                        <div className="text-xs text-slate-600">
-                            I primi <b>{data.pareto_80_idx}</b> clienti generano l&apos;80% delle provvigioni (totale: {fmtEur(data.totale_provvigioni)} su {data.n_clienti_top} clienti)
-                        </div>
-                    </div>
-                </div>
-            </Card>
-            <Card className="p-2">
-                <table className="w-full text-xs">
-                    <thead><tr className="text-left border-b text-slate-500">
-                        <th className="py-2 w-10">#</th>
-                        <th>Cliente</th><th>Tipo</th>
-                        <th className="text-right">Polizze attive</th>
-                        <th className="text-right">Provvigioni</th>
-                        <th className="text-right">% sul totale</th>
-                        <th className="text-right">% cumulata</th>
-                    </tr></thead>
-                    <tbody>
-                        {data.items.map((r, i) => (
-                            <tr key={r.anagrafica_id} className={`border-b border-slate-100 ${i < data.pareto_80_idx ? "bg-amber-50/40 font-medium" : ""}`}>
-                                <td className="py-1.5 font-mono">{r.rank}</td>
-                                <td>{r.nome}</td>
-                                <td className="text-xs text-slate-500">{r.tipo === "persona_giuridica" ? "Azienda" : "Privato"}</td>
-                                <td className="text-right">{r.n_polizze_attive}</td>
-                                <td className="text-right font-mono font-semibold">{fmtEur(r.provvigioni_anno)}</td>
-                                <td className="text-right text-slate-500">{r.incidenza_pct}%</td>
-                                <td className="text-right text-slate-500">{r.incidenza_cumulata_pct}%</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </Card>
-        </div>
-    );
-}
-
-function SegmentazioneTab() {
-    const [data, setData] = useState(null);
-    useEffect(() => { api.get("/cervello/segmentazione").then((r) => setData(r.data)); }, []);
-    if (!data) return <Loading />;
-    const b = data.breakdown;
-    return (
-        <div className="space-y-4 pt-3">
-            <Card className="p-4 bg-emerald-50/40 border-emerald-200">
-                <div className="flex items-center gap-3">
-                    <Users className="text-emerald-600" size={24} />
-                    <div>
-                        <div className="text-3xl font-bold text-slate-800">{data.tasso_multi_comparto_pct}%</div>
-                        <div className="text-xs text-slate-600">
-                            Tasso di multi-comparto · <b>{data.totale_clienti_con_polizze}</b> clienti con polizze attive
-                        </div>
-                    </div>
-                </div>
-                <div className="text-xs text-slate-500 mt-2">
-                    Più comparti = più fidelizzazione. Target ideale: &gt;25% multi-comparto.
-                </div>
-            </Card>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <SegCard label="Mono Auto" value={b.mono_auto} hint="Massimo rischio churn" color="rose" />
-                <SegCard label="Mono Persone" value={b.mono_persone} hint="Cross-selling target" color="amber" />
-                <SegCard label="Mono Aziende" value={b.mono_aziende} hint="Up-selling target" color="indigo" />
-                <SegCard label="Mono Vita" value={b.mono_vita} hint="Solo Vita: cross-sell" color="violet" />
-                <SegCard label="2 Comparti" value={b.due_comparti} hint="Fidelizzati" color="sky" />
-                <SegCard label="3 Comparti" value={b.tre_comparti} hint="Molto fidelizzati" color="emerald" />
-                <SegCard label="4 Comparti" value={b.quattro_comparti} hint="Top fidelizzazione" color="emerald" />
-            </div>
         </div>
     );
 }
@@ -343,13 +257,6 @@ const KCard = ({ label, value, color, mono }) => (
     <Card className={`p-3 border-l-4 bg-white ${COLOR_MAP[color] || COLOR_MAP.sky}`}>
         <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
         <div className={`text-2xl font-bold mt-0.5 ${mono ? "font-mono" : ""}`}>{value ?? "—"}</div>
-    </Card>
-);
-const SegCard = ({ label, value, hint, color }) => (
-    <Card className={`p-3 border-l-4 bg-white ${COLOR_MAP[color] || COLOR_MAP.sky}`}>
-        <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-        <div className="text-2xl font-bold mt-0.5">{value ?? "—"}</div>
-        <div className="text-[10px] text-slate-500 italic">{hint}</div>
     </Card>
 );
 const Campo = ({ label, value, onChange, testid }) => (
