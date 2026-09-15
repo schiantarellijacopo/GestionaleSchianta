@@ -10,6 +10,7 @@ Flusso:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -123,22 +124,28 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     }
     await db.firma_requests.insert_one(dict(rec))
 
-    # Consegna link via WhatsApp + Email
-    canali = {"whatsapp": None, "email": None}
-    if signing_url:
+    # Consegna link via WhatsApp + Email IN BACKGROUND (non blocca la risposta:
+    # SMTP è sincrono/bloccante e Evolution può essere lento → eviterebbe timeout/502).
+    async def _deliver():
+        if not signing_url:
+            return
         testo = (
             f"Gentile {signer['name']} {signer['surname']},\n"
             f"le è stato inviato un documento da firmare digitalmente ({display}).\n\n"
             f"🔗 Firma qui: {signing_url}\n\n"
             f"Riceverà un codice OTP via SMS per completare la firma. Il link è personale."
         )
-        from notification_helpers import send_email, send_whatsapp_message
-        if body.get("invia_whatsapp", True) and signer["mobile"]:
-            canali["whatsapp"] = await send_whatsapp_message(signer["mobile"], testo)
-        if body.get("invia_email", True) and signer["email"]:
-            canali["email"] = await send_email(signer["email"], f"Documento da firmare — {display}", testo)
+        try:
+            from notification_helpers import send_email, send_whatsapp_message
+            if body.get("invia_whatsapp", True) and signer["mobile"]:
+                await send_whatsapp_message(signer["mobile"], testo)
+            if body.get("invia_email", True) and signer["email"]:
+                await send_email(signer["email"], f"Documento da firmare — {display}", testo)
+        except Exception as e:
+            logger.warning("Consegna link firma fallita: %s", e)
 
-    return {**rec, "canali": canali}
+    asyncio.create_task(_deliver())
+    return {**rec, "canali": "in_invio"}
 
 
 @router.get("/richieste")
