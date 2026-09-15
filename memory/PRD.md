@@ -1,5 +1,17 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 15/09/2026 (fork) — Fix logo/save compagnie (405), ramo mappato, stampa saldo cassa, allegato→Quietanze
+
+- **🔴 Fix "Method Not Allowed" salvataggio compagnie** (`Librerie.jsx`): avevo impostato l'endpoint sezione a `/compagnie?tutte=true`; il CRUD generico costruisce `${endpoint}/${id}` → URL corrotto `/compagnie?tutte=true/ID` → PUT senza id → 405. Ripristinato `endpoint: "/compagnie"` + `listParams: { tutte: true }` (lista mostra tutte, CRUD usa il path base). PUT /compagnie/{id} verificato 200.
+- **Ramo import mostra il NOME di destinazione** (`ania_importer.py`): per i rami mappati usava il `codice` (es. "3N"); ora usa il `nome` del ramo di destinazione (es. "RC AUTO"), come già per i prodotti. Vale per le importazioni successive.
+- **Stampa Brogliaccio saldo cassa** (`server.py` `_generate_brogliaccio_pdf` + `pdf_brogliaccio.py`): l'ultimo KPI del PDF mostrava `riepilogo_kpi.saldo_cassa` (non presente a schermo); ora mostra `saldo_cassa_compagnie` ("SALDO CASSA CMP.") coerente con lo schermo + box Liquidità.
+- **Allegato Incasso/Copertura → Quietanze** (`DialogIncassoCopertura.jsx`): l'upload era dentro il blocco copertura (saltato in incasso) e in categoria "copertura"; ora è sempre eseguito e salvato sulla POLIZZA in categoria `quietanza` → compare nei Documenti > Quietanze. Verificato via API.
+
+### Pendenti / prossimi passi
+- **Cella "Mandato" compagnie → collega agenzie partner**: NON ancora implementato (feature nuova).
+- **Cancellare rami senza polizze**: i rami sono GLOBALI (condivisi tra tutti i tenant, nessun campo tenant). Rimosso l'endpoint per-tenant (non sicuro: cancellerebbe rami usati da altri tenant). Serve decidere una pulizia GLOBALE (uso su TUTTI i tenant) prima di eliminare. Nel frattempo i rami senza polizze sono già NASCOSTI dai filtri (`con_polizze`).
+
+
 ## Sessione 15/09/2026 (fork) — Libro Matricola: elimina tutte, header ordinabili, sezione Escluse, cambio intestatario
 
 - **Elimina tutte le applicazioni** (per polizza): nuovo pulsante "Elimina tutte" su ogni card + endpoint `DELETE /api/libro-matricola/polizze/{pid}/applicazioni` (`extras_p1p2.py`). Conferma richiesta.

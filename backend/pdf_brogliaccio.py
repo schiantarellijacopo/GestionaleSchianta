@@ -232,9 +232,9 @@ def _tabella_saldi_compagnie(saldi: list) -> Table:
 
 
 def _tabella_kpi_bottom(k: dict) -> Table:
-    headers = ["ENTRATE", "PROVVIGIONI", "CREDITI", "RIMESSE", "SCONTI", "SPESE", "SALDO CASSA"]
+    headers = ["ENTRATE", "PROVVIGIONI", "CREDITI", "RIMESSE", "SCONTI", "SPESE", "SALDO CASSA CMP."]
     values = [_eur_zero(k.get(key, 0)) for key in
-              ("entrate", "provvigioni", "crediti", "rimesse", "sconti", "spese", "saldo_cassa")]
+              ("entrate", "provvigioni", "crediti", "rimesse", "sconti", "spese", "saldo_cassa_compagnie")]
     tbl = Table([headers, values], colWidths=[35 * mm] * 7)
     tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),

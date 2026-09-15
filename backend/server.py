@@ -6515,6 +6515,13 @@ async def _generate_brogliaccio_pdf(payload: dict) -> bytes:
         ch = payload["chiusura"]
         chiusura_info = {"closed_at": ch.get("created_at", "")[:19].replace("T", " "),
                          "closed_by_name": ch.get("closed_by_name", "")}
+    # Allinea i KPI del PDF a quelli a schermo: l'ultimo KPI mostra il
+    # "Saldo Cassa Compagnie" (debito verso compagnie) + box Liquidità.
+    rk = dict(payload.get("riepilogo_kpi") or {})
+    liq = payload.get("liquidita") or {}
+    rk["saldo_cassa_compagnie"] = liq.get("saldo_cassa_compagnie", 0)
+    rk["liquidita_disponibile"] = liq.get("liquidita_disponibile")
+    rk["liquidita_postera"] = liq.get("liquidita_postera")
     return pdf_brogliaccio.stampa_brogliaccio(
         data_giorno=payload["data"],
         azienda=az,
@@ -6522,7 +6529,7 @@ async def _generate_brogliaccio_pdf(payload: dict) -> bytes:
         righe=payload["righe"],
         totali_giornata=payload["totali_giornata"],
         conti_riepilogo=payload["conti_riepilogo"],
-        riepilogo_kpi=payload["riepilogo_kpi"],
+        riepilogo_kpi=rk,
         saldi_compagnie=payload.get("saldi_compagnie"),
         chiusura_info=chiusura_info,
         logo_bytes=logo_bytes,

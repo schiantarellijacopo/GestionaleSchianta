@@ -156,22 +156,6 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     comunicazione_incasso: comunicazioneIncasso,
                     data_contabile: dataContabile,
                 });
-                // Upload allegato di copertura se presente
-                if (allegatoFile) {
-                    try {
-                        const fd = new FormData();
-                        fd.append("file", allegatoFile);
-                        await api.post("/allegati", fd, {
-                            params: {
-                                entita_tipo: "titolo",
-                                entita_id: titolo.id,
-                                categoria: "copertura",
-                                descrizione: "Documento copertura titolo",
-                            },
-                            headers: { "Content-Type": "multipart/form-data" },
-                        });
-                    } catch { /* non bloccante */ }
-                }
                 if (emailOperatori || emailContraenti || emailContraente || emailOperatoreAccount || emailSegnalazione) {
                     try {
                         await api.post(`/titoli/notifica-copertura`, {
@@ -201,6 +185,25 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                             : null,
                 });
                 letteraId = r.data?.lettera_abbuono_id || null;
+            }
+
+            // Allega documento → salvato sulla POLIZZA in categoria "quietanza",
+            // così compare nella sezione Documenti > Quietanze (sempre, sia in
+            // copertura sia in incasso).
+            if (allegatoFile && titolo.polizza_id) {
+                try {
+                    const fd = new FormData();
+                    fd.append("file", allegatoFile);
+                    await api.post("/allegati", fd, {
+                        params: {
+                            entita_tipo: "polizza",
+                            entita_id: titolo.polizza_id,
+                            categoria: "quietanza",
+                            descrizione: "Quietanza (da incasso/copertura)",
+                        },
+                        headers: { "Content-Type": "multipart/form-data" },
+                    });
+                } catch { /* non bloccante */ }
             }
 
             const msg = [

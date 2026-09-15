@@ -32,7 +32,7 @@ const SECTIONS = [
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
     { key: "tipologie-sinistri", label: "Tipologie sinistri", icon: <AlertTriangle size={14} />, endpoint: "/librerie/tipologie-sinistri" },
-    { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie?tutte=true" },
+    { key: "compagnie", label: "Compagnie", icon: <Building2 size={14} />, endpoint: "/compagnie", listParams: { tutte: true } },
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
     { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },
@@ -103,7 +103,7 @@ function Sezione({ section }) {
         } catch (e) { toast.error(errMsg(e, "Errore ripristino")); }
     };
 
-    const load = () => api.get(section.endpoint).then((r) => {
+    const load = () => api.get(section.endpoint, section.listParams ? { params: section.listParams } : undefined).then((r) => {
         let data = r.data;
         if (section.key === "utenti") data = (data || []).filter((u) => u.role !== "cliente");
         // rami uniti in un master: restano in DB per lo storico, non si mostrano in libreria

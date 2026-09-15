@@ -764,10 +764,12 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                 mapped_ramo_id = (import_mappings or {}).get("ramo", {}).get(ramo_raw)
                 if mapped_ramo_id:
                     ramo_doc = await db.rami.find_one(
-                        {"id": mapped_ramo_id}, {"_id": 0, "codice": 1},
+                        {"id": mapped_ramo_id}, {"_id": 0, "nome": 1, "codice": 1},
                     )
-                    if ramo_doc and ramo_doc.get("codice"):
-                        ramo_mapped = ramo_doc["codice"]
+                    if ramo_doc:
+                        # Usa il NOME del ramo di destinazione (es. "RC AUTO"),
+                        # non il codice grezzo Omnia (es. "3N").
+                        ramo_mapped = ramo_doc.get("nome") or ramo_doc.get("codice")
                 else:
                     # Ramo non mappato → crea il ramo nella libreria e assegnalo
                     ramo_mapped = await _get_or_create_ramo(db, ramo_raw, rami_cache)
