@@ -1322,6 +1322,43 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         totale_dare += totale_ritenute_comp
         saldo += totale_ritenute_comp
 
+    # ----- Partite PNC (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti):
+    # come le ritenute compagnia, alimentano il dare (importo firmato) — solo mandato diretto.
+    totale_pnc = 0.0
+    if tipo_mandato == "diretto":
+        _PNC_LBL = {"rivalsa": "Rivalsa", "cassa_agenti": "Cassa Agenti",
+                    "fondo_pensione": "Fondo Pensione", "gruppo_agenti": "Gruppo Agenti"}
+        pnc_flt: dict = {"compagnia_id": compagnia_id, "pregresso": {"$ne": True}}
+        if dal or al:
+            cond = {}
+            if dal: cond["$gte"] = dal
+            if al: cond["$lte"] = al
+            pnc_flt["data"] = cond
+        pnc_rows = await db.pnc.find(pnc_flt, {"_id": 0}).sort("data", 1).to_list(5000)
+        for r in pnc_rows:
+            imp = float(r.get("importo") or 0)
+            tlabel = _PNC_LBL.get(r.get("tipo"), r.get("tipo"))
+            righe.append({
+                "data": r.get("data"),
+                "tipo": "pnc",
+                "polizza": None,
+                "contraente": None,
+                "ramo": None,
+                "dare": imp if imp >= 0 else 0.0,
+                "avere": -imp if imp < 0 else 0.0,
+                "descrizione": f"PNC {tlabel} {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
+                "_movimento_id": r.get("id"),
+                "is_pnc": True,
+                "tipo_pnc": r.get("tipo"),
+                "stato_pnc": r.get("stato"),
+            })
+            totale_pnc += imp
+        if totale_pnc >= 0:
+            totale_dare += totale_pnc
+        else:
+            totale_avere += -totale_pnc
+        saldo += totale_pnc
+
     # ----- Fatture agenzia partner (solo mandato collaborazione) — sono
     # provvigioni che ci pagherà la partner: AVERE che riduce dare verso la compagnia.
     totale_fatture_partner = 0.0
@@ -1396,6 +1433,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         "totale_avere": round(totale_avere, 2),
         "totale_rappel": round(totale_rappel, 2),
         "totale_ritenute_compagnia": round(totale_ritenute_comp, 2),
+        "totale_pnc": round(totale_pnc, 2),
         "totale_fatture_partner": round(totale_fatture_partner, 2),
         "totale_voci_manuali_dare": round(totale_voci_manuali_dare, 2),
         "totale_voci_manuali_avere": round(totale_voci_manuali_avere, 2),

@@ -9,7 +9,12 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Collegamento bidirezionale Agenzia partner ↔ Compagnie ✅
+## 2026-06 — PNC nell'Estratto Conto Compagnie ✅
+- Le partite PNC ora compaiono nell'E/C compagnie insieme a rappel, ritenute e fatture partner (solo mandato diretto), lette dai record `db.pnc` come le ritenute compagnia.
+- Importo firmato: `+` alimenta il DARE (aumenta il saldo da versare), `−` va in AVERE. Incidono su `totale_dare`/`totale_avere`/`saldo`; aggiunto `totale_pnc` alla risposta.
+- Backend `server.py` `_compagnia_estratto_data` (la lista saldi `saldi_cassa_compagnie` deriva da qui → coerente). Frontend `EstrattoContoCompagnie.jsx`: riga PNC in "Movimenti & versamenti" con badge viola "PNC · <tipo>".
+- Verificato: PNC +120 → saldo E/C 1825→1945, `totale_pnc`=120, riga visibile.
+
 - Il legame Agenzia partner ↔ Compagnia ora si sincronizza da entrambi i lati (campo plurale `agenzie_partner_ids`).
 - Sorgente di verità: `compagnia.agenzie_partner_ids`. Il lato agenzia lavora in **write-through** (aggiorna le compagnie) e **derive-on-read** (`agenzia.compagnie_ids` calcolato). Nessun impatto sulla contabilità (che usa il singolare `agenzia_partner_id` + `tipo_mandato`, invariato).
 - Backend `routes/agenzie.py`: `AgenziaBody.compagnie_ids`, helper `_compagnie_ids_of` / `_sync_agenzia_to_compagnie`; `create/update/get/list` ritornano `compagnie_ids`; `delete` pulisce i riferimenti plurali.
