@@ -1,5 +1,16 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 15/09/2026 (fork) — Cella "Agenzia partner" compagnie (many-to-many) + ramo mappato su re-import
+
+- **Compagnie: cella "Mandato" → "Agenzia partner" multi-selezione** (`Librerie.jsx` CompagniaForm + `db_models.py` + `routes/agenzie.py`): rinominata la cella e trasformata in multi-select delle agenzie partner (checkbox), salvata nel nuovo campo array `agenzie_partner_ids` sul modello Compagnia (una compagnia può avere PIÙ agenzie partner). Il conteggio/elenco "compagnie collegate" in Agenzie usa `$or` tra `agenzia_partner_id` (legacy) e `agenzie_partner_ids`. Persistenza verificata via API.
+- **Ramo import su re-import** (`ania_importer.py` `_upsert_polizza`): `ramo` e `prodotto` ora si aggiornano anche sulle polizze già presenti quando il mapping risolve un valore diverso (es. "3N" → "RC AUTO"), così la correzione del mapping si propaga (prima la regola "solo dati mancanti" li lasciava invariati).
+
+### Pendenti
+- **Quadrotti documenti polizza in stile anagrafica** (UI, `DocumentiSezioneSplit` vs `DocumentiTab`).
+- **Rami tenant-aware**: ministeriali visibili a tutti, custom solo al tenant creatore. I rami sono attualmente GLOBALI; serve schema (`agenzia_tenant_id`/`ministeriale`) + migrazione + filtro in `list_rami`. Non ancora implementato.
+- Se il mapping "3N→RC AUTO" non fosse configurato in `import_mappings` (tipo=ramo), l'import continua a creare "3N": verificare la presenza del mapping.
+
+
 ## Sessione 15/09/2026 (fork) — Allegato incasso visibile al cliente sotto Quietanze
 
 - **Allegato Incasso/Copertura → visibile al cliente + Quietanze** (`DialogIncassoCopertura.jsx`): l'upload ora passa `visibile_cliente: true` (le quietanze sono visibili al cliente). Prima finiva in "Interni · solo staff". Verificato via API (categoria=quietanza, visibile_cliente=True).

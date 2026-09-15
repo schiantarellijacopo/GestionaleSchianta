@@ -1814,10 +1814,14 @@ function TipologiaSinistroForm({ section, editing, onClose }) {
 
 
 function CompagniaForm({ section, editing, onClose }) {
+    const [agenzie, setAgenzie] = useState([]);
+    useEffect(() => {
+        api.get("/agenzie").then((r) => setAgenzie((r.data || []).filter((a) => a.tipo !== "principale"))).catch(() => {});
+    }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose}
         defaults={{
             codice: "", ragione_sociale: "", referente: "", email: "", telefono: "",
-            sito_web: "", mandato: "", trattiene_provvigioni: true, attiva: true,
+            sito_web: "", mandato: "", agenzie_partner_ids: [], trattiene_provvigioni: true, attiva: true,
         }}
         fields={(f, set) => (
             <>
@@ -1827,7 +1831,27 @@ function CompagniaForm({ section, editing, onClose }) {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                     <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} /></div>
-                    <div><Label>Mandato</Label><Input value={f.mandato || ""} onChange={(e) => set("mandato", e.target.value)} /></div>
+                    <div>
+                        <Label>Agenzia partner <span className="text-[10px] text-slate-400 font-normal">(anche più di una)</span></Label>
+                        <div className="max-h-28 overflow-auto border border-slate-200 rounded-md p-1.5 space-y-1 bg-white" data-testid="compagnia-agenzie-partner">
+                            {agenzie.length === 0
+                                ? <span className="text-xs text-slate-400">Nessuna agenzia partner disponibile</span>
+                                : agenzie.map((a) => {
+                                    const sel = (f.agenzie_partner_ids || []).includes(a.id);
+                                    return (
+                                        <label key={a.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                                            <input type="checkbox" checked={sel}
+                                                onChange={(e) => {
+                                                    const cur = f.agenzie_partner_ids || [];
+                                                    set("agenzie_partner_ids", e.target.checked ? [...cur, a.id] : cur.filter((x) => x !== a.id));
+                                                }}
+                                                data-testid={`compagnia-partner-${a.id}`} />
+                                            {a.ragione_sociale || a.nome}
+                                        </label>
+                                    );
+                                })}
+                        </div>
+                    </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                     <div><Label>Email</Label><Input value={f.email || ""} onChange={(e) => set("email", e.target.value)} /></div>

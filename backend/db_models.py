@@ -256,6 +256,9 @@ class Compagnia(BaseDoc):
     # Se tipo_mandato="collaborazione" → id dell'agenzia partner (libreria
     # `agenzie`) con cui collaboriamo per questa compagnia.
     agenzia_partner_id: Optional[str] = None
+    # Agenzie partner collegate (many-to-many): una compagnia può collaborare con
+    # più agenzie partner. Impostate dalla libreria Compagnie (cella "Agenzia partner").
+    agenzie_partner_ids: list[str] = []
     # Logo compagnia — url pubblico servito da GET /api/compagnie/{id}/logo
     logo_url: Optional[str] = None
     logo_storage_path: Optional[str] = None

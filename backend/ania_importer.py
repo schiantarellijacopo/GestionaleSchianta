@@ -707,8 +707,16 @@ async def _upsert_polizza(db, data: dict, log: ImportLog,
         # (né azzerare) i valori già presenti/rettificati manualmente.
         def _vuoto(v):
             return v is None or v == "" or v == [] or v == {}
-        upd = {k: v for k, v in data.items()
-               if k not in ("id", "created_at") and not _vuoto(v) and _vuoto(existing.get(k))}
+        # `ramo` e `prodotto` sono guidati dai mapping: se l'import risolve un valore
+        # (es. mapping "3N" → "RC AUTO") va aggiornato anche se già presente, così la
+        # correzione del mapping si propaga alle polizze già importate.
+        _sempre = {"ramo", "prodotto"}
+        upd = {}
+        for k, v in data.items():
+            if k in ("id", "created_at") or _vuoto(v):
+                continue
+            if _vuoto(existing.get(k)) or (k in _sempre and v != existing.get(k)):
+                upd[k] = v
         upd["updated_at"] = _now_iso()
         await db.polizze.update_one({"id": existing["id"]}, {"$set": upd})
         polizza_id_map[id_exp] = existing["id"]

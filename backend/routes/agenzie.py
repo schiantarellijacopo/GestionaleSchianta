@@ -61,7 +61,7 @@ async def list_agenzie(
             )
         else:
             a["n_compagnie_collegate"] = await db.compagnie.count_documents(
-                {"agenzia_partner_id": a["id"]},
+                {"$or": [{"agenzia_partner_id": a["id"]}, {"agenzie_partner_ids": a["id"]}]},
             )
     return items
 
@@ -72,7 +72,7 @@ async def get_agenzia(aid: str, user=Depends(current_user)) -> dict:
     if not a:
         raise HTTPException(404, "Agenzia non trovata")
     a["compagnie_collegate"] = await db.compagnie.find(
-        {"agenzia_partner_id": aid},
+        {"$or": [{"agenzia_partner_id": aid}, {"agenzie_partner_ids": aid}]},
         {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1, "tipo_mandato": 1},
     ).to_list(200)
     return a
