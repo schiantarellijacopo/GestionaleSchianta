@@ -42,6 +42,28 @@ class AgenziaBody(BaseModel):
     # Ritenuta d'acconto applicata alle fatture provvigioni dell'agenzia
     # (es. 20% per professionisti, 23% per società di intermediazione).
     perc_ritenuta_acconto: float = 0
+    # Collegamento bidirezionale (informativo) con le compagnie partner.
+    # Sorgente di verità = compagnia.agenzie_partner_ids: qui è "passthrough".
+    compagnie_ids: Optional[list[str]] = None
+
+
+async def _compagnie_ids_of(aid: str) -> list[str]:
+    """Compagnie collegate a questa agenzia via campo plurale agenzie_partner_ids."""
+    return [c["id"] async for c in db.compagnie.find(
+        {"agenzie_partner_ids": aid}, {"_id": 0, "id": 1})]
+
+
+async def _sync_agenzia_to_compagnie(aid: str, compagnie_ids: list[str]) -> None:
+    """Write-through dal lato agenzia: allinea compagnia.agenzie_partner_ids."""
+    compagnie_ids = compagnie_ids or []
+    if compagnie_ids:
+        await db.compagnie.update_many(
+            {"id": {"$in": compagnie_ids}},
+            {"$addToSet": {"agenzie_partner_ids": aid}})
+    # rimuovi il legame dalle compagnie non più selezionate
+    await db.compagnie.update_many(
+        {"agenzie_partner_ids": aid, "id": {"$nin": compagnie_ids}},
+        {"$pull": {"agenzie_partner_ids": aid}})
 
 
 @router.get("")
@@ -63,6 +85,7 @@ async def list_agenzie(
             a["n_compagnie_collegate"] = await db.compagnie.count_documents(
                 {"$or": [{"agenzia_partner_id": a["id"]}, {"agenzie_partner_ids": a["id"]}]},
             )
+            a["compagnie_ids"] = await _compagnie_ids_of(a["id"])
     return items
 
 
@@ -75,6 +98,7 @@ async def get_agenzia(aid: str, user=Depends(current_user)) -> dict:
         {"$or": [{"agenzia_partner_id": aid}, {"agenzie_partner_ids": aid}]},
         {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1, "tipo_mandato": 1},
     ).to_list(200)
+    a["compagnie_ids"] = await _compagnie_ids_of(aid)
     return a
 
 
@@ -91,8 +115,12 @@ async def create_agenzia(
         if existing:
             raise HTTPException(400, "Esiste già un'agenzia principale (modifica quella)")
     doc = {"id": str(uuid.uuid4()), **body.model_dump(), "created_at": _now_iso()}
+    compagnie_ids = doc.pop("compagnie_ids", None)
     await db.agenzie.insert_one(doc)
     doc.pop("_id", None)
+    if compagnie_ids is not None:
+        await _sync_agenzia_to_compagnie(doc["id"], compagnie_ids)
+    doc["compagnie_ids"] = await _compagnie_ids_of(doc["id"])
     return doc
 
 
@@ -102,22 +130,30 @@ async def update_agenzia(
     user=Depends(require_user("admin")),
 ) -> dict:
     data = body.model_dump()
+    compagnie_ids = data.pop("compagnie_ids", None)  # non persistito: derivato
     data["updated_at"] = _now_iso()
     res = await db.agenzie.update_one({"id": aid}, {"$set": data})
     if res.matched_count == 0:
         raise HTTPException(404, "Agenzia non trovata")
-    return await db.agenzie.find_one({"id": aid}, {"_id": 0})
+    if compagnie_ids is not None:
+        await _sync_agenzia_to_compagnie(aid, compagnie_ids)
+    doc = await db.agenzie.find_one({"id": aid}, {"_id": 0})
+    doc["compagnie_ids"] = await _compagnie_ids_of(aid)
+    return doc
 
 
 @router.delete("/{aid}")
 async def delete_agenzia(
     aid: str, user=Depends(require_user("admin")),
 ) -> dict:
-    # blocco se ci sono compagnie collegate
+    # blocco se ci sono compagnie collegate col mandato (singolare)
     n = await db.compagnie.count_documents({"agenzia_partner_id": aid})
     if n > 0:
         raise HTTPException(400, f"Impossibile eliminare: {n} compagnie sono collegate a questa agenzia")
     res = await db.agenzie.delete_one({"id": aid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Agenzia non trovata")
+    # pulizia: rimuovi il riferimento dalle compagnie collegate (plurale)
+    await db.compagnie.update_many(
+        {"agenzie_partner_ids": aid}, {"$pull": {"agenzie_partner_ids": aid}})
     return {"ok": True}

@@ -261,14 +261,23 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
         ragione_sociale: "", codice: "", tipo: "partner",
         referente: "", email: "", telefono: "", indirizzo: "", citta: "", provincia: "", cap: "",
         partita_iva: "", codice_fiscale: "", iban: "", note: "", attiva: true,
-        perc_ritenuta_acconto: 0,
+        perc_ritenuta_acconto: 0, compagnie_ids: [],
     });
+    const [compagnie, setCompagnie] = useState([]);
+    useEffect(() => {
+        api.get("/compagnie").then((r) => setCompagnie((r.data || []).filter((c) => c.attiva !== false))).catch(() => {});
+    }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const toggleComp = (id) => {
+        const cur = f.compagnie_ids || [];
+        set("compagnie_ids", cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+    };
     const save = async () => {
         if (!f.ragione_sociale.trim()) { toast.error("Ragione sociale obbligatoria"); return; }
         try {
-            if (editing?.id) await api.put(`/agenzie/${editing.id}`, f);
-            else await api.post("/agenzie", f);
+            const payload = { ...f, compagnie_ids: f.compagnie_ids || [] };
+            if (editing?.id) await api.put(`/agenzie/${editing.id}`, payload);
+            else await api.post("/agenzie", payload);
             toast.success(editing?.id ? "Aggiornata" : "Creata"); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
@@ -328,6 +337,28 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     <Checkbox id="att" checked={!!f.attiva} onCheckedChange={(v) => set("attiva", !!v)} />
                     <Label htmlFor="att" className="text-xs">Attiva</Label>
                 </div>
+                {f.tipo === "partner" && (
+                    <div className="col-span-2">
+                        <Label>Compagnie partner collegate <span className="text-[10px] text-slate-400 font-normal">(sincronizzate col campo "Agenzia partner" della compagnia)</span></Label>
+                        <div className="max-h-40 overflow-auto border border-slate-200 rounded-md p-1.5 space-y-1 bg-white mt-1" data-testid="age-compagnie-collegate">
+                            {compagnie.length === 0
+                                ? <div className="text-xs text-slate-400 p-2">Nessuna compagnia disponibile</div>
+                                : compagnie.map((c) => {
+                                    const sel = (f.compagnie_ids || []).includes(c.id);
+                                    return (
+                                        <label key={c.id} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-sm ${sel ? "bg-sky-50" : "hover:bg-slate-50"}`}>
+                                            <Checkbox checked={sel} onCheckedChange={() => toggleComp(c.id)} data-testid={`age-comp-${c.id}`} />
+                                            <span className="flex-1">{c.ragione_sociale}</span>
+                                            {c.codice && <span className="text-[10px] text-slate-400 font-mono">{c.codice}</span>}
+                                        </label>
+                                    );
+                                })}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Selezionando qui una compagnia, questa agenzia viene aggiunta al suo campo "Agenzia partner" (e viceversa).
+                        </div>
+                    </div>
+                )}
             </div>
             <DialogFooter>
                 <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="age-save">

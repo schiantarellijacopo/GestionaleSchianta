@@ -9,7 +9,13 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Sezione PARTITE PNC + colonna PNC in Prima Nota ✅
+## 2026-06 — Collegamento bidirezionale Agenzia partner ↔ Compagnie ✅
+- Il legame Agenzia partner ↔ Compagnia ora si sincronizza da entrambi i lati (campo plurale `agenzie_partner_ids`).
+- Sorgente di verità: `compagnia.agenzie_partner_ids`. Il lato agenzia lavora in **write-through** (aggiorna le compagnie) e **derive-on-read** (`agenzia.compagnie_ids` calcolato). Nessun impatto sulla contabilità (che usa il singolare `agenzia_partner_id` + `tipo_mandato`, invariato).
+- Backend `routes/agenzie.py`: `AgenziaBody.compagnie_ids`, helper `_compagnie_ids_of` / `_sync_agenzia_to_compagnie`; `create/update/get/list` ritornano `compagnie_ids`; `delete` pulisce i riferimenti plurali.
+- Frontend `Agenzie.jsx`: nuova multi-select "Compagnie partner collegate" nell'AgenziaDialog (solo agenzie partner). Il form Compagnia (`Librerie.jsx`) già gestisce il multi-select "Agenzia partner".
+- Verificato end-to-end: creare/rimuovere dal lato agenzia aggiorna `compagnia.agenzie_partner_ids`; modificare dal lato compagnia si riflette in `agenzia.compagnie_ids`.
+
 - Nuovo gruppo sidebar **"Partite PNC"** contenente Rappel, Ritenute (hub) e la nuova voce **PNC** (`Sidebar.jsx` section `partite_pnc`, route `/pnc` in `App.js`).
 - Pagina **PNC** (`frontend/src/pages/Pnc.jsx`) **identica alle Ritenute Compagnia** (compagnia solo mandato diretto, Data, Segno +/−, Importo €, Descrizione, Note, azione **Versa/Storna**) con in più la **tendina "Tipo PNC"** (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti) e filtro in alto per tipo. KPI Totale/Da versare/Versate.
 - Backend `routes/commerciale.py`: nuova raccolta `pnc` + endpoint `GET/POST/PUT/DELETE /pnc`, `/pnc/totali` (per_tipo), `/pnc/{id}/versa` (crea movimento categoria `pnc` in Prima Nota, come la Ritenuta compagnia) e `/pnc/{id}/storna`.
