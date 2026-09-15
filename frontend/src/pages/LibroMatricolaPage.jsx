@@ -20,8 +20,54 @@ import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import { ApplicazioniTable } from "@/components/LibroMatricolaTab";
-import { ClipboardList, Car, Search, FileText, Paperclip, X, Ban, AlertTriangle, Plus, ChevronDown, ChevronRight, Building2 } from "lucide-react";
+import { ClipboardList, Car, Search, FileText, Paperclip, X, Ban, AlertTriangle, Plus, ChevronDown, ChevronRight, Building2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+function EditIntestatarioDialog({ app, onClose }) {
+    const [nome, setNome] = useState(app.intestatario || "");
+    const [anaId, setAnaId] = useState(app.intestatario_anagrafica_id || null);
+    const [saving, setSaving] = useState(false);
+    const salva = async () => {
+        setSaving(true);
+        try {
+            await api.put(`/libro-matricola/applicazioni/${app.id}`, {
+                intestatario: nome || null,
+                intestatario_anagrafica_id: anaId || null,
+            });
+            toast.success("Intestatario aggiornato");
+            onClose(true);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore aggiornamento intestatario");
+            setSaving(false);
+        }
+    };
+    return (
+        <Dialog open onOpenChange={() => onClose(false)}>
+            <DialogContent className="max-w-md" data-testid="lm-edit-intestatario-dialog">
+                <DialogHeader>
+                    <DialogTitle>Cambia intestatario — {app.targa || app.matricola || `#${app.numero}`}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                    <label className="text-xs font-medium text-slate-600">Intestatario (persona/azienda)</label>
+                    <IntestatarioAutocomplete
+                        value={nome}
+                        anagraficaId={anaId}
+                        onChange={(name, id) => { setNome(name); setAnaId(id); }}
+                    />
+                    <p className="text-[11px] text-slate-400">
+                        Puoi digitare un nome libero oppure collegare un'anagrafica esistente.
+                    </p>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => onClose(false)} data-testid="lm-edit-intestatario-cancel">Annulla</Button>
+                    <Button onClick={salva} disabled={saving} data-testid="lm-edit-intestatario-save">
+                        {saving ? "Salvataggio…" : "Salva"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
 
 export default function LibroMatricolaPage() {
     const [polizze, setPolizze] = useState(null);
@@ -216,8 +262,20 @@ export default function LibroMatricolaPage() {
 
 function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onToggle, onOpenDocs, onAnnullaApp, onConflictApp, onNewApp }) {
     const [innerQ, setInnerQ] = useState("");
-    const [sortBy, setSortBy] = useState("numero");   // numero | targa | intestatario | data | valore
+    const [sortBy, setSortBy] = useState("numero");   // numero | targa | intestatario | data | valore | stato | esclusione
     const [sortDir, setSortDir] = useState("asc");
+    const [editIntest, setEditIntest] = useState(null);
+    const [showEscluse, setShowEscluse] = useState(false);
+    const eliminaTutte = async () => {
+        const n = (p.applicazioni || []).length;
+        if (!n) { toast.info("Nessuna applicazione da eliminare"); return; }
+        if (!window.confirm(`Eliminare TUTTE le ${n} applicazioni di questa polizza (${p.numero_polizza})? L'operazione non è reversibile.`)) return;
+        try {
+            const r = await api.delete(`/libro-matricola/polizze/${p.id}/applicazioni`);
+            toast.success(`Eliminate ${r.data.eliminate} applicazioni`);
+            window.location.reload();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore eliminazione"); }
+    };
     const changeSort = (col) => {
         if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
         else { setSortBy(col); setSortDir("asc"); }
@@ -269,6 +327,12 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
                                 data-testid={`btn-new-app-${p.id}`}>
                             <Plus size={13} className="mr-1" /> Nuova applicazione
                         </Button>
+                        <Button size="sm" variant="outline" onClick={eliminaTutte}
+                                className="text-rose-700 border-rose-300 hover:bg-rose-50"
+                                data-testid={`btn-del-all-apps-${p.id}`}
+                                title="Elimina TUTTE le applicazioni di questa polizza">
+                            <Trash2 size={13} className="mr-1" /> Elimina tutte
+                        </Button>
                     </div>
                 </div>
             </div>
@@ -290,87 +354,91 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
                         </div>
                     </div>
                     {(() => {
-                        // Filtra storiche + ricerca testuale
                         const term = innerQ.trim().toLowerCase();
-                        let appsFiltrate = showStoriche
-                            ? p.applicazioni
-                            : p.applicazioni.filter((a) => {
-                                const st = (a.stato || "").toLowerCase();
-                                if (["annullata", "sostituita"].includes(st)) return false;
-                                if (a.data_esclusione || a.data_cessazione) return false;
-                                return true;
-                            });
-                        if (term) {
-                            appsFiltrate = appsFiltrate.filter((a) => {
-                                const veic = [a.marca, a.modello, a.tipo_veicolo, a.descrizione_veicolo].filter(Boolean).join(" ");
-                                const hay = [
-                                    a.targa, a.matricola, a.intestatario, veic, a.telaio,
-                                    a.data_inclusione, a.data_esclusione, a.numero
-                                ].filter(Boolean).join(" ").toLowerCase();
-                                return hay.includes(term);
-                            });
-                        }
-                        // Sort
+                        const matchTerm = (a) => {
+                            if (!term) return true;
+                            const veic = [a.marca, a.modello, a.tipo_veicolo, a.descrizione_veicolo].filter(Boolean).join(" ");
+                            const hay = [a.targa, a.matricola, a.intestatario, veic, a.telaio,
+                                a.data_inclusione, a.data_esclusione, a.numero].filter(Boolean).join(" ").toLowerCase();
+                            return hay.includes(term);
+                        };
+                        const isEsclusa = (a) => {
+                            const st = (a.stato || "").toLowerCase();
+                            return Boolean(a.data_esclusione || a.data_cessazione)
+                                || ["annullata", "sostituita", "cessata", "esclusa"].includes(st);
+                        };
                         const cmp = (a, b, key) => {
-                            const va = a[key] ?? "";
-                            const vb = b[key] ?? "";
+                            const va = a[key] ?? "", vb = b[key] ?? "";
                             if (typeof va === "number" || typeof vb === "number") return (Number(va) || 0) - (Number(vb) || 0);
                             return String(va).localeCompare(String(vb), "it", { sensitivity: "base" });
                         };
-                        appsFiltrate = [...appsFiltrate].sort((a, b) => {
-                            let r = 0;
-                            if (sortBy === "numero") r = cmp(a, b, "numero");
-                            else if (sortBy === "targa") r = cmp(a, b, "targa");
-                            else if (sortBy === "intestatario") r = cmp(a, b, "intestatario");
-                            else if (sortBy === "data") r = cmp(a, b, "data_inclusione");
-                            else if (sortBy === "valore") r = cmp(a, b, "valore_veicolo");
+                        const keyMap = { numero: "numero", targa: "targa", intestatario: "intestatario",
+                            data: "data_inclusione", esclusione: "data_esclusione", valore: "valore_veicolo", stato: "stato" };
+                        const sortApps = (arr) => [...arr].sort((a, b) => {
+                            const r = cmp(a, b, keyMap[sortBy] || "numero");
                             return sortDir === "asc" ? r : -r;
                         });
-                        if (appsFiltrate.length === 0) {
+                        const base = p.applicazioni.filter(matchTerm);
+                        const attive = sortApps(base.filter((a) => !isEsclusa(a)));
+                        const escluse = sortApps(base.filter(isEsclusa));
+
+                        if (attive.length === 0 && escluse.length === 0) {
                             return (
                                 <div className="p-4 text-center text-xs text-slate-500 italic">
                                     {p.applicazioni.length === 0 ? (
                                         <>Nessuna applicazione registrata su questa polizza —{" "}
                                             <button onClick={onNewApp} className="text-sky-700 hover:underline font-semibold"
-                                                    data-testid={`btn-first-app-${p.id}`}>
-                                                Aggiungi la prima
-                                            </button>
+                                                    data-testid={`btn-first-app-${p.id}`}>Aggiungi la prima</button>
                                         </>
-                                    ) : (
-                                        <>Nessuna applicazione attiva. <button onClick={() => setShowStoriche(true)}
-                                            className="text-sky-700 hover:underline font-semibold">Mostra storiche ({p.applicazioni.length})</button></>
-                                    )}
+                                    ) : <>Nessun risultato per la ricerca corrente.</>}
                                 </div>
                             );
                         }
-                        return (
-                        <ApplicazioniTable
-                            items={appsFiltrate}
-                            onEdit={(a) => {
-                                // La modifica completa avviene dentro la polizza (stesso dato)
-                                toast.info("Apro la polizza per modificare l'applicazione…");
-                                window.location.href = `/polizze/${p.id}?applicazione=${a.id}`;
-                            }}
-                            onDelete={async (a) => {
+                        const commonHandlers = {
+                            sortBy, sortDir, onSort: changeSort,
+                            onEdit: (a) => { window.location.href = `/polizze/${p.id}?applicazione=${a.id}`; },
+                            onEditIntestatario: (a) => setEditIntest({ ...a, polizza_id: p.id }),
+                            onDelete: async (a) => {
                                 if (!window.confirm(`Eliminare l'applicazione ${a.targa || a.matricola || a.numero}?`)) return;
-                                try {
-                                    await api.delete(`/libro-matricola/applicazioni/${a.id}`);
-                                    toast.success("Applicazione eliminata");
-                                    // ricarica la pagina padre
-                                    window.location.reload();
-                                } catch (e) { toast.error(e.response?.data?.detail || "Errore eliminazione"); }
-                            }}
-                            onSostituisci={(a) => {
-                                toast.info("Apro la polizza per la sostituzione veicolo…");
-                                window.location.href = `/polizze/${p.id}?applicazione=${a.id}&action=sostituisci`;
-                            }}
-                            onAnnulla={(a) => onAnnullaApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
-                            onDocs={(a) => onOpenDocs({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
-                            onConflict={(a) => onConflictApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
-                        />
+                                try { await api.delete(`/libro-matricola/applicazioni/${a.id}`); toast.success("Applicazione eliminata"); window.location.reload(); }
+                                catch (e) { toast.error(e.response?.data?.detail || "Errore eliminazione"); }
+                            },
+                            onDocs: (a) => onOpenDocs({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome }),
+                            onConflict: (a) => onConflictApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome }),
+                        };
+                        return (
+                            <>
+                                {attive.length > 0 ? (
+                                    <ApplicazioniTable
+                                        items={attive}
+                                        {...commonHandlers}
+                                        onSostituisci={(a) => { window.location.href = `/polizze/${p.id}?applicazione=${a.id}&action=sostituisci`; }}
+                                        onAnnulla={(a) => onAnnullaApp({ ...a, polizza_numero: p.numero_polizza, contraente_nome: p.contraente_nome })}
+                                    />
+                                ) : (
+                                    <div className="p-3 text-center text-xs text-slate-500 italic">Nessuna applicazione attiva.</div>
+                                )}
+                                {escluse.length > 0 && (
+                                    <div className="border-t border-slate-200">
+                                        <button onClick={() => setShowEscluse((v) => !v)}
+                                            className="w-full px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 hover:bg-amber-200 flex items-center gap-1"
+                                            data-testid={`lm-toggle-escluse-${p.id}`}>
+                                            {showEscluse ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                            Escluse ({escluse.length})
+                                        </button>
+                                        {showEscluse && (
+                                            <ApplicazioniTable items={escluse} isStorico {...commonHandlers} />
+                                        )}
+                                    </div>
+                                )}
+                            </>
                         );
                     })()}
                 </div>
+            )}
+            {editIntest && (
+                <EditIntestatarioDialog app={editIntest}
+                    onClose={(reload) => { setEditIntest(null); if (reload) window.location.reload(); }} />
             )}
         </Card>
     );

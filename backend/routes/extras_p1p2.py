@@ -540,6 +540,15 @@ async def delete_applicazione(
     return {"ok": True}
 
 
+@router.delete("/libro-matricola/polizze/{pid}/applicazioni")
+async def delete_all_applicazioni(
+    pid: str, user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Elimina TUTTE le applicazioni di una polizza a libro matricola."""
+    res = await db.applicazioni.delete_many({"polizza_id": pid})
+    return {"ok": True, "eliminate": res.deleted_count}
+
+
 def _norm_intestatario(s: str) -> str:
     """Normalizza un intestatario per il matching robusto:
     lower + rimozione punteggiatura + forme giuridiche uniformate + spazi collassati.

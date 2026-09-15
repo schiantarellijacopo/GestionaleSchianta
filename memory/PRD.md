@@ -1,5 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 15/09/2026 (fork) — Libro Matricola: elimina tutte, header ordinabili, sezione Escluse, cambio intestatario
+
+- **Elimina tutte le applicazioni** (per polizza): nuovo pulsante "Elimina tutte" su ogni card + endpoint `DELETE /api/libro-matricola/polizze/{pid}/applicazioni` (`extras_p1p2.py`). Conferma richiesta.
+- **Header tabella ordinabili**: le intestazioni (Numero, Veicolo/targa, Stato, Inclusione, Esclusione, Valore, Intestatario) sono ora cliccabili per ordinare (asc/desc), con indicatore ▲/▼ (`ApplicazioniTable` in `LibroMatricolaTab.jsx` + `changeSort` in `LibroMatricolaPage.jsx`).
+- **Sezione "Escluse" separata**: la card mostra di default solo le applicazioni ATTIVE; quelle escluse/cessate/annullate/sostituite sono in una sezione "Escluse (n)" collassabile a parte.
+- **Cambio intestatario manuale**: pulsante UserCog su ogni riga → dialog `EditIntestatarioDialog` con `IntestatarioAutocomplete` (nome libero o collegamento anagrafica), salva via `PUT /api/libro-matricola/applicazioni/{aid}`.
+- Verificato via screenshot (admin@assicura.it, 4 polizze/423 applicazioni): header ordinabili funzionanti, 2 pulsanti intestatario per riga, "Elimina tutte" su tutte le card.
+
+
 ## Sessione 15/09/2026 (fork) — Import Omnia: regole polizze/titoli (mai stati automatici)
 
 - **Import Omnia/ANIA** (`ania_importer.py`), su richiesta utente:

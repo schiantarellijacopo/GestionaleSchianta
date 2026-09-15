@@ -12,7 +12,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowLeftRight, History, X, Upload, Download, Ban, Paperclip, AlertTriangle, Building2, Loader2, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ImportTargheStub } from "@/pages/Importazione";
 import { API_BASE } from "@/lib/api";
@@ -252,8 +252,18 @@ export default function LibroMatricolaTab({ polizzaId, polizza = null }) {
     );
 }
 
-export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, onAnnulla, onDocs, onConflict, isStorico = false }) {
+export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisci, onAnnulla, onDocs, onConflict, onEditIntestatario, isStorico = false, sortBy, sortDir, onSort }) {
     if (!items || items.length === 0) return null;
+    const Th = ({ col, label, className }) => {
+        if (!onSort) return <th className={className}>{label}</th>;
+        const active = sortBy === col;
+        return (
+            <th className={`${className || ""} cursor-pointer select-none hover:text-sky-700`}
+                onClick={() => onSort(col)} data-testid={`lm-th-${col}`} title="Ordina">
+                {label}{active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+            </th>
+        );
+    };
     return (
         <div className={isStorico ? "border-t border-slate-200 bg-amber-50/30" : ""}>
             {isStorico && (
@@ -264,15 +274,15 @@ export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisc
             <table className="tbl-compact w-full text-xs">
                 <thead>
                     <tr>
-                        <th className="w-16">Numero</th>
-                        <th className="w-28">Veicolo</th>
+                        <Th col="numero" label="Numero" className="w-16" />
+                        <Th col="targa" label="Veicolo" className="w-28" />
                         <th className="w-32">Marca/Modello</th>
-                        <th className="w-24">Stato</th>
-                        <th className="w-28">Inclusione</th>
-                        <th className="w-28">Esclusione</th>
-                        <th className="w-24">Valore</th>
+                        <Th col="stato" label="Stato" className="w-24" />
+                        <Th col="data" label="Inclusione" className="w-28" />
+                        <Th col="esclusione" label="Esclusione" className="w-28" />
+                        <Th col="valore" label="Valore" className="w-24" />
                         <th className="w-28">Scad. leasing</th>
-                        <th>Intestatario / Note</th>
+                        <Th col="intestatario" label="Intestatario / Note" />
                         <th className="w-32 text-center">Azioni</th>
                     </tr>
                 </thead>
@@ -323,6 +333,13 @@ export function ApplicazioniTable({ title, items, onEdit, onDelete, onSostituisc
                                         onClick={() => onEdit(a)} data-testid={`lm-edit-${a.id}`} title="Modifica">
                                         <Pencil size={12} />
                                     </Button>
+                                    {onEditIntestatario && (
+                                        <Button size="sm" variant="outline" className="h-7 px-2 text-indigo-700 hover:bg-indigo-50"
+                                            onClick={() => onEditIntestatario(a)} data-testid={`lm-edit-intestatario-${a.id}`}
+                                            title="Cambia intestatario">
+                                            <UserCog size={12} />
+                                        </Button>
+                                    )}
                                     {a.targa && onConflict && (
                                         <Button size="sm" variant="outline" className="h-7 px-2 text-amber-700 hover:bg-amber-50"
                                             onClick={() => onConflict(a)} data-testid={`lm-conflict-${a.id}`}
