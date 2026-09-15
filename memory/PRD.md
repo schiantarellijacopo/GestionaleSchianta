@@ -1,5 +1,15 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Sessione 15/09/2026 (fork) — Import Omnia: regole polizze/titoli (mai stati automatici)
+
+- **Import Omnia/ANIA** (`ania_importer.py`), su richiesta utente:
+  - **Polizza esistente** (dedup per `id_polizza_exp` → fallback `numero_polizza`): non si sovrascrive più tutto; ora si compilano SOLO i dati MANCANTI (campi vuoti), preservando i valori già presenti/rettificati manualmente (`_upsert_polizza`).
+  - **Titolo esistente** (dedup per `id_titolo_exp` → fallback chiave naturale polizza+effetto+scadenza): NON si fa NULLA (nessun update).
+  - **Titolo mancante**: creato SEMPRE come `da_incassare`. **Mai** impostato a incassato/coperto/pagato (rimossi: mapping stato_share→incassato, dt_pag→incassato, premio-0→incassato, `data_incasso`, `mezzo_pagamento`, "pagamento in direzione"). Incasso/copertura sono operazioni SOLO manuali.
+  - Verificato e2e con lo ZIP reale (`A_OW8_23774...zip`) nel sandbox: import #1 → 158 polizze, 138 titoli tutti `da_incassare` (0 coperti, 0 con data_incasso); re-import → 0 polizze nuove, 158 aggiornate (solo dati mancanti), 0 titoli nuovi, 0 duplicati id_titolo_exp.
+- Nota: i titoli già importati in passato con stati coperto/incassato (pre-fix) restano tali; per correggerli manualmente usare il pulsante ↩ "Rimetti in arretrato" sul titolo.
+
+
 ## Sessione 14/09/2026 (fork) — KPI reali, tag età automatici, filtri nascondono disabilitati/senza-polizze, saldo direzione
 
 - **Fix KPI Contabilità (prima_nota)** (`routes/kpi.py` `_stats_prima_nota`): Entrate/Uscite/Saldo mostravano "0" come valore grande con l'importo reale relegato in `sub`. Ora il valore principale è l'importo in euro. Verificato via curl (es. Uscite value="€ 31.219,95").

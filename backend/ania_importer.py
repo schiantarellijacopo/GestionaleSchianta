@@ -703,7 +703,14 @@ async def _upsert_polizza(db, data: dict, log: ImportLog,
         # db è già tenant-scoped dal wrapper -> match per numero polizza
         existing = await db.polizze.find_one({"numero_polizza": data["numero_polizza"]})
     if existing:
-        await db.polizze.update_one({"id": existing["id"]}, {"$set": data})
+        # Polizza già presente: sovrascrivi SOLO i dati MANCANTI, senza toccare
+        # (né azzerare) i valori già presenti/rettificati manualmente.
+        def _vuoto(v):
+            return v is None or v == "" or v == [] or v == {}
+        upd = {k: v for k, v in data.items()
+               if k not in ("id", "created_at") and not _vuoto(v) and _vuoto(existing.get(k))}
+        upd["updated_at"] = _now_iso()
+        await db.polizze.update_one({"id": existing["id"]}, {"$set": upd})
         polizza_id_map[id_exp] = existing["id"]
         log.polizze_aggiornate += 1
     else:
@@ -1062,16 +1069,8 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             if not pol_id:
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
-            stato = _MAP_STATO_TITOLO.get((row.get("stato_share") or "").lower(), "da_incassare")
-            # Regola: se il titolo ha una data di pagamento cliente deve risultare
-            # INCASSATO, così finisce nei titoli storici (a prescindere dallo stato SHARE).
-            _dt_pag = _parse_date(row.get("dt_pag_cliente", ""))
-            if _dt_pag:
-                stato = "incassato"
-            existing = await db.titoli.find_one({"id_titolo_exp": id_t})
             # 🔧 FIX titoli import ANIA:
             # Il flusso fornisce netto_totale (netto tecnico) + tasse_totale + accessori.
-            # L'utente si aspetta: `netto commerciale = lordo - tasse` (visibile in fattura).
             # Ricalcoliamo il netto come lordo - imposte per garantire coerenza al display
             # (netto + imposte = lordo). Le imposte sono le "tasse assicurative" del flusso.
             lordo = _parse_float(row.get("lordo_totale", ""))
@@ -1105,43 +1104,44 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             _scadenza_val = (_scad_emesso
                              or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
                              or eff_titolo)
+
+            # ═══ REGOLA IMPORT (richiesta utente) ═══
+            # 1) Verifica se il titolo ESISTE già:
+            #      - per id_titolo_exp, oppure (fallback) per chiave naturale
+            #        polizza + effetto + scadenza.
+            #    Se esiste → NON fare NULLA (incasso/pagamento/copertura sono
+            #    operazioni SEMPRE manuali: non vanno mai toccate dall'import).
+            # 2) Se MANCA → crealo SEMPRE come "da_incassare" (mai
+            #    incassato/coperto/pagato).
+            existing = await db.titoli.find_one({"id_titolo_exp": id_t})
+            if not existing:
+                existing = await db.titoli.find_one({
+                    "polizza_id": pol_id,
+                    "effetto": eff_titolo,
+                    "scadenza": _scadenza_val,
+                })
+            if existing:
+                continue
+
             data = {
                 "polizza_id": pol_id,
                 "effetto": eff_titolo,
                 "scadenza": _scadenza_val,
-                "stato": ("incassato" if lordo <= 0 else stato),  # titoli a premio 0: nulla da incassare
+                "stato": "da_incassare",  # MAI incassato/coperto/pagato: operazione manuale
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,
                 "imposte": round(imposte_eff, 2),
                 "accessori": round(accessori_titolo, 2),
                 "provvigioni": _parse_float(row.get("provvigioni_totale", "")),
-                "data_incasso": _parse_date(row.get("dt_pag_cliente", "")),
-                "mezzo_pagamento": row.get("mezzo_pag_share") or None,
                 "id_titolo_exp": id_t,
                 "fonte": "import_ania",
                 "updated_at": _now_iso(),
             }
             if coll_id_titolo:
                 data["collaboratore_id"] = coll_id_titolo
-            if existing:
-                # Non sovrascrivere con valori calcolati/vuoti i dati già rettificati
-                # (scadenza reale e metodo di pagamento dal file pagamenti).
-                if not _parse_date(row.get("data_scadenza_emesso", "")) and existing.get("scadenza"):
-                    data.pop("scadenza", None)
-                if not data.get("mezzo_pagamento") and existing.get("mezzo_pagamento"):
-                    data.pop("mezzo_pagamento", None)
-                elif not data.get("mezzo_pagamento") and data.get("stato") == "incassato":
-                    # Titolo pagato ma senza metodo: incasso avvenuto in direzione
-                    data["mezzo_pagamento"] = "Pagamento in direzione"
-                    data["pagamento_in_direzione"] = True
-                await db.titoli.update_one({"id": existing["id"]}, {"$set": data})
-            else:
-                if not data.get("mezzo_pagamento") and data.get("stato") == "incassato":
-                    data["mezzo_pagamento"] = "Pagamento in direzione"
-                    data["pagamento_in_direzione"] = True
-                obj = Titolo(**data)
-                await db.titoli.insert_one(obj.model_dump())
-                log.titoli_creati += 1
+            obj = Titolo(**data)
+            await db.titoli.insert_one(obj.model_dump())
+            log.titoli_creati += 1
 
             # back-fill provvigione su polizza se vuota
             titolo_provv = data.get("provvigioni", 0) or 0
