@@ -9,7 +9,12 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Import Omnia: collegamento bidirezionale Prodotto ↔ Ramo ✅
+## 2026-06 — Sezione PARTITE PNC + colonna PNC in Prima Nota ✅
+- Nuovo gruppo sidebar **"Partite PNC"** contenente Rappel, Ritenute (hub) e la nuova voce **PNC** (`Sidebar.jsx` section `partite_pnc`, route `/pnc` in `App.js`).
+- Pagina **PNC** (`frontend/src/pages/Pnc.jsx`) **identica alle Ritenute Compagnia** (compagnia solo mandato diretto, Data, Segno +/−, Importo €, Descrizione, Note, azione **Versa/Storna**) con in più la **tendina "Tipo PNC"** (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti) e filtro in alto per tipo. KPI Totale/Da versare/Versate.
+- Backend `routes/commerciale.py`: nuova raccolta `pnc` + endpoint `GET/POST/PUT/DELETE /pnc`, `/pnc/totali` (per_tipo), `/pnc/{id}/versa` (crea movimento categoria `pnc` in Prima Nota, come la Ritenuta compagnia) e `/pnc/{id}/storna`.
+- **Prima Nota**: nuova colonna **PNC** (`BrogliaccioTab.jsx` FIXED_COLS + `server.py` brogliaccio builder categoria `pnc` → `c_pnc`, incide sul `saldo`, `totale`=0, non è cassa reale). Verificato: versamento 250,50 € → colonna PNC=250,50 e saldo=250,50.
+
 - I prodotti in libreria hanno già il ramo di appartenenza: ora il ramo della polizza **deriva automaticamente dal prodotto mappato** (niente più mapping ramo separato / codici "3N" spuri).
 - `ania_importer.py` (`_processa_polizze`): se il prodotto è mappato a un prodotto di libreria, `polizza.ramo` = `prodotto.ramo` (priorità sul ramo del tracciato).
 - `server.py apply_import_mappings` (tipo prodotto): il back-fill ora propaga anche `polizza.ramo` dal ramo del prodotto.

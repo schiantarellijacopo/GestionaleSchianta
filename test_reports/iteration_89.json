@@ -1,0 +1,24 @@
+{
+  "summary": "Test end-to-end UI del flusso Partite PNC completato con successo. Login admin, sidebar 'PARTITE PNC' con Rappel/Ritenute(hub)/PNC, creazione PNC (Rivalsa, imponibile 1000 × aliquota 4% = 40 verificato), filtri per tipo (Tutti/Rivalsa/Cassa Agenti), versa→'Versata' con data, storna→'Da versare', ri-versa e verifica in Prima Nota: colonna 'PNC' presente in Brogliaccio con importo 40,00 € correttamente riportato e concorrente al saldo di giornata (40,00 €). Cleanup effettuato (PNC eliminata).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog Nuova PNC", "issues": ["Warning React (a11y): Missing Description or aria-describedby={undefined} per DialogContent - non bloccante"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Pnc.jsx: aggiungere DialogDescription al PncDialog per risolvere warning di accessibilità di shadcn Dialog.",
+    "Nel riepilogo per tipo, il testo appare come 'Rivalsa · 1' e '40,00 €' su stessa riga: leggibilità ok ma senza etichetta 'n record' esplicita."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Creata e poi eliminata 1 partita PNC di test (Rivalsa, 1000/4%/40) su collaboratore SCHIANTARELLI JACOPO anno 2026.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Flusso PNC UI validato end-to-end. Colonna PNC nel Brogliaccio confermata (screenshot: /app/test_reports/primanota.png). Se retest, usare data-testid nav-pnc, pnc-new, pnc-tipo, pnc-collab, pnc-imp, pnc-importo, pnc-save, pnc-filter-<tipo>, pnc-row-<id>, pnc-versa-<id>, pnc-storna-<id>, pnc-del-<id>, brog-th-pnc. Ricordare wait_for_timeout(200-400) dopo apertura Select shadcn nel dialog."
+}
