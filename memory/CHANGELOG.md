@@ -9,8 +9,14 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Import Omnia: Ramo tracciato per il wizard (da verificare) ⚠️
-- `ania_importer.py`: i rami non mappati ora vengono tracciati con `_track_unmapped` (crea stub in `import_mappings`) così il tab "Ramo" del wizard di mapping si abilita; aggiunto "ramo" al dizionario `plural`. Fallback: se non mappato viene comunque creato in libreria. NON ancora verificato end-to-end (richiede una re-importazione ZIP).
+## 2026-06 — Import Omnia: collegamento bidirezionale Prodotto ↔ Ramo ✅
+- I prodotti in libreria hanno già il ramo di appartenenza: ora il ramo della polizza **deriva automaticamente dal prodotto mappato** (niente più mapping ramo separato / codici "3N" spuri).
+- `ania_importer.py` (`_processa_polizze`): se il prodotto è mappato a un prodotto di libreria, `polizza.ramo` = `prodotto.ramo` (priorità sul ramo del tracciato).
+- `server.py apply_import_mappings` (tipo prodotto): il back-fill ora propaga anche `polizza.ramo` dal ramo del prodotto.
+- `server.py list_unmapped_entities`: il tab **Prodotto** del wizard ora **pre-seleziona il ramo già collegato** al prodotto (`ramo_corrente_id`), con lookup su rami ATTIVI + alias comuni (RCA→RC AUTO) e match normalizzato. `save_mapping` ora aggiorna sempre il ramo del prodotto scelto nel wizard (override, non solo se vuoto).
+- `Importazione.jsx`: il select prodotto usa `ramo_corrente_id` come valore corrente; il confronto "modificato" in `saveAll` usa il ramo corrente per i prodotti.
+- Verificato: 88/88 prodotti mappati risolvono il ramo e lo mostrano pre-selezionato nel wizard (screenshot).
+- NB: il tab "Ramo" resta disabilitato di proposito (non necessario: si collega il prodotto al ramo).
 
 
 ## 2026-09-02 (parte 7) — Filtri, contatori, provvigioni, KPI ✅

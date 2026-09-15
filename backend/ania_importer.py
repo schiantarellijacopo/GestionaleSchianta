@@ -764,8 +764,10 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             operatore_codice, collaboratore_id = await _resolve_operatore_codice(
                 db, row, mapping_operatori, tracker=tracker, import_mappings=import_mappings,
             )
-            # Ramo: traccia come entità da mappare nel wizard (Ramo → RamoLibreria).
-            # Se già mappato, applica il codice del ramo (es. "3D" → "INFORTUNI").
+            # Ramo: derivato PRIMARIAMENTE dal prodotto mappato (i prodotti in
+            # libreria hanno già il ramo di appartenenza — collegamento bidirezionale
+            # prodotto ↔ ramo). In assenza di prodotto mappato si usa il ramo del
+            # tracciato (mapping "ramo" o, come fallback, auto-create in libreria).
             ramo_raw = (row.get("ramo_share") or row.get("ramo_cmp") or "").strip()
             ramo_mapped = None
             if ramo_raw and ramo_raw != "VARIE":
@@ -779,27 +781,26 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                         # non il codice grezzo Omnia (es. "3N").
                         ramo_mapped = ramo_doc.get("nome") or ramo_doc.get("codice")
                 else:
-                    # Ramo non mappato → traccia per il wizard di mapping
-                    # (abilita il tab "Ramo") e, come fallback, crea il ramo
-                    # nella libreria e assegnalo così la polizza non resta senza ramo.
-                    if tracker is not None:
-                        await _track_unmapped(
-                            db, tracker, "ramo", ramo_raw,
-                            label=ramo_raw, import_mappings=import_mappings,
-                        )
+                    # Ramo non mappato → crea il ramo nella libreria e assegnalo
                     ramo_mapped = await _get_or_create_ramo(db, ramo_raw, rami_cache)
-            # Traccia prodotto come non mappato (verrà associato manualmente dalla libreria Prodotti)
+            # Prodotto: se mappato a un prodotto di libreria, usa il suo NOME e
+            # DERIVA il ramo della polizza dal ramo assegnato al prodotto
+            # (collegamento bidirezionale prodotto → ramo, priorità sul ramo del tracciato).
             prodotto_raw = (row.get("prodotto_cmp") or "").strip()
             prodotto_mapped = None
             if prodotto_raw:
                 prodotto_mapped_id = (import_mappings or {}).get("prodotto", {}).get(prodotto_raw)
                 if prodotto_mapped_id:
-                    # 🔧 FIX: risolvi il NOME del prodotto (non l'UUID)
                     prod_doc = await db.prodotti.find_one(
-                        {"id": prodotto_mapped_id}, {"_id": 0, "nome": 1},
+                        {"id": prodotto_mapped_id}, {"_id": 0, "nome": 1, "ramo": 1},
                     )
-                    if prod_doc and prod_doc.get("nome"):
-                        prodotto_mapped = prod_doc["nome"]
+                    if prod_doc:
+                        if prod_doc.get("nome"):
+                            prodotto_mapped = prod_doc["nome"]
+                        # Ramo dal prodotto → aggancio automatico (priorità).
+                        ramo_da_prodotto = (prod_doc.get("ramo") or "").strip()
+                        if ramo_da_prodotto:
+                            ramo_mapped = ramo_da_prodotto
                 if not prodotto_mapped and tracker is not None:
                     await _track_unmapped(
                         db, tracker, "prodotto", prodotto_raw,
@@ -1545,11 +1546,11 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_liquidazioni(db, files_data, counts)
     _conta_record_residui(files_data, counts)
 
-    # Entità non mappate raccolte durante l'import
+    # Entità non mappate raccolte durante l'import (NB: rami NON sono tracciati:
+    # il ramo della polizza deriva dal prodotto mappato — vedi _processa_polizze)
     plural = {
         "compagnia": "compagnie", "prodotto": "prodotti",
         "collaboratore": "collaboratori", "garanzia": "garanzie",
-        "ramo": "rami",
     }
     entita_non_mappate: dict = {}
     for tipo, items in tracker.items():

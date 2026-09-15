@@ -517,7 +517,9 @@ function MappingWizardDialog({ open, onClose }) {
         const byId = Object.fromEntries(items.map((it) => [it.id, it]));
         // Considera "modificato" se edits[id] è diverso dal current entita_id (o "" per scollegare)
         const updates = Object.entries(edits).filter(([mid, v]) => {
-            const cur = byId[mid]?.entita_id || "";
+            const it = byId[mid];
+            const isProd = (data.prodotto || []).some((x) => x.id === mid);
+            const cur = isProd ? (it?.ramo_corrente_id || "") : (it?.entita_id || "");
             return v !== cur;  // ogni valore esplicitamente diverso (anche "" per scollegare)
         });
         if (!updates.length) {
@@ -739,8 +741,10 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                 </thead>
                 <tbody>
                     {items.map((it) => {
-                        // Se l'utente ha modificato il valore, usa quello; altrimenti il valore corrente
-                        const currentVal = edits[it.id] !== undefined ? edits[it.id] : (it.entita_id || "");
+                        // Per 'prodotto' il valore corrente del select è il RAMO collegato
+                        // al prodotto (non l'id prodotto): collegamento bidirezionale.
+                        const currentRef = tipo === "prodotto" ? (it.ramo_corrente_id || "") : (it.entita_id || "");
+                        const currentVal = edits[it.id] !== undefined ? edits[it.id] : currentRef;
                         const isMapped = !!it.entita_id;
                         const hasLabel = it.label_flusso && it.label_flusso !== it.valore_flusso;
                         // 🆕 Auto-suggestion: prodotto con ramo suggerito ma non ancora scelto/salvato
@@ -792,7 +796,7 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                                         onChange={(e) => onChange(it.id, e.target.value)}
                                         className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${
                                             isSuggested ? "border-sky-400 ring-1 ring-sky-200"
-                                            : isMapped && currentVal === (it.entita_id || "") ? "border-emerald-400" : ""
+                                            : isMapped && currentVal === currentRef ? "border-emerald-400" : ""
                                         }`}
                                         data-testid={`wizard-select-${it.id}`}
                                     >

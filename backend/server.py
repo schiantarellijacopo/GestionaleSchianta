@@ -7055,6 +7055,45 @@ async def list_unmapped_entities(
             product_name = it.get("label_flusso") or it.get("valore_flusso") or ""
             it["suggested_entita_id"] = _suggest_ramo_id(product_name, rami_list)
 
+    # 🆕 Pre-selezione ramo per i prodotti GIÀ in libreria: mostra nel wizard il
+    # ramo attualmente collegato al prodotto (collegamento bidirezionale prodotto ↔ ramo).
+    # Il campo prodotto.ramo memorizza il CODICE del ramo (es. "MALATTIA").
+    ramo_lookup: dict[str, str] = {}
+    ramo_lookup_norm: dict[str, str] = {}
+
+    def _norm_ramo(s: str) -> str:
+        return "".join(ch for ch in (s or "").upper() if ch.isalnum())
+
+    # Alias comuni: valori storici del campo prodotto.ramo → codice ramo di libreria
+    _RAMO_ALIAS = {"RCA": "RC AUTO", "RCAUTO": "RC AUTO", "AUTO": "RC AUTO"}
+    # Solo rami ATTIVI: così l'id risolto è sempre presente tra le opzioni del dropdown.
+    async for rd in db.rami.find({"attivo": {"$ne": False}}, {"_id": 0, "id": 1, "codice": 1, "nome": 1}):
+        for k in (rd.get("codice"), rd.get("nome")):
+            if k:
+                ramo_lookup[k.strip().upper()] = rd["id"]
+                ramo_lookup_norm[_norm_ramo(k)] = rd["id"]
+
+    def _resolve_ramo_id(ramo_code: str):
+        up = ramo_code.strip().upper()
+        return (ramo_lookup.get(up)
+                or ramo_lookup_norm.get(_norm_ramo(ramo_code))
+                or ramo_lookup.get(_RAMO_ALIAS.get(up, "").upper())
+                or ramo_lookup_norm.get(_norm_ramo(_RAMO_ALIAS.get(up, ""))))
+
+    mapped_prod_ids = [it["entita_id"] for it in by_tipo["prodotto"] if it.get("entita_id")]
+    prods_ramo = {
+        p["id"]: p.get("ramo")
+        async for p in db.prodotti.find(
+            {"id": {"$in": mapped_prod_ids}}, {"_id": 0, "id": 1, "ramo": 1},
+        )
+    }
+    for it in by_tipo["prodotto"]:
+        if it.get("entita_id"):
+            ramo_code = (prods_ramo.get(it["entita_id"]) or "").strip()
+            if ramo_code:
+                it["ramo_corrente_id"] = _resolve_ramo_id(ramo_code)
+                it["ramo_corrente_label"] = ramo_code
+
     # 🆕 Auto-creazione stub user per ogni OPERATORE non ancora mappato.
     # Copre due casi:
     #   - flussi importati PRIMA di questa feature (legacy stub in import_mappings
@@ -7139,7 +7178,9 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
         )
         if existing_prod:
             prod_id = existing_prod["id"]
-            if not existing_prod.get("ramo"):
+            # Aggiorna sempre il ramo al valore scelto nel wizard (collegamento
+            # bidirezionale: l'operatore può correggere/ri-assegnare il ramo del prodotto).
+            if existing_prod.get("ramo") != ramo_code:
                 await db.prodotti.update_one(
                     {"id": prod_id}, {"$set": {"ramo": ramo_code, "updated_at": _now_iso()}},
                 )
@@ -7269,11 +7310,16 @@ async def apply_import_mappings(
 
         elif tipo == "prodotto":
             # 🔧 FIX: usa il nome del prodotto (non l'UUID) come valore in polizze.prodotto
-            prod = await db.prodotti.find_one({"id": entita_id}, {"_id": 0, "nome": 1})
+            # e DERIVA il ramo della polizza dal ramo assegnato al prodotto (bidirezionale).
+            prod = await db.prodotti.find_one({"id": entita_id}, {"_id": 0, "nome": 1, "ramo": 1})
             nome_prod = (prod or {}).get("nome") or entita_id
+            set_fields = {"prodotto": nome_prod, "updated_at": _now_iso()}
+            ramo_prod = ((prod or {}).get("ramo") or "").strip()
+            if ramo_prod:
+                set_fields["ramo"] = ramo_prod
             r = await db.polizze.update_many(
                 {"$or": [{"prodotto": valore}, {"prodotto_originale": valore}]},
-                {"$set": {"prodotto": nome_prod, "updated_at": _now_iso()}},
+                {"$set": set_fields},
             )
             summary["polizze_prodotto"] += r.modified_count
 
