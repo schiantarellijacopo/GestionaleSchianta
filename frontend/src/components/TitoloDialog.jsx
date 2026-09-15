@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import TagsEditor from "@/components/TagsEditor";
 
 /**
  * Dialog di modifica titolo, condiviso tra pagina Titoli e PolizzaDetail.
@@ -203,6 +204,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             mezzo_pagamento: f.mezzo_pagamento || null,
             data_incasso: f.data_incasso || null,
             coperto_fino_a: f.coperto_fino_a || null,
+            tags: Array.isArray(f.tags) ? f.tags : [],
         };
         try {
             if (isNew) {
@@ -301,6 +303,15 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                             onChange={(e) => set("descrizione", e.target.value)}
                             placeholder="Note libere sul titolo (facoltativo)"
                             data-testid="titolo-descrizione"
+                        />
+                    </div>
+                    <div className="col-span-2">
+                        <Label>Tag titolo</Label>
+                        <TagsEditor
+                            value={f.tags || []}
+                            testid="titolo-tags"
+                            placeholder="Aggiungi tag al titolo..."
+                            onChange={(tags) => set("tags", tags)}
                         />
                     </div>
                     <div className="col-span-2 border border-slate-200 rounded-lg p-3 bg-slate-50/60">

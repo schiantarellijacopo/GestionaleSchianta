@@ -409,6 +409,7 @@ class Polizza(BaseDoc):
     contraente_id: str  # anagrafica_id del contraente
     assicurato_ids: List[str] = Field(default_factory=list)  # anagrafica_id assicurati
     ramo: str  # RCA, INCENDIO, VITA, ecc.
+    tags: List[str] = Field(default_factory=list)
     prodotto: Optional[str] = None
     stato: PolizzaStato = "attiva"
     effetto: str  # YYYY-MM-DD
@@ -533,6 +534,7 @@ TitoloStato = Literal["incassato", "da_incassare", "insoluto", "stornato"]
 class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione"] = "rinnovo"
     effetto: str
     scadenza: str

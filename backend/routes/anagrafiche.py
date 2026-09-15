@@ -163,8 +163,10 @@ async def list_tags(user: dict = Depends(current_user)):
     if user["role"] == "cliente":
         return []
     tags = await db.anagrafiche.distinct("tags")
+    tags_pol = await db.polizze.distinct("tags")
+    tags_tit = await db.titoli.distinct("tags")
     canonici = {"condominio", "parrocchia", "azienda"}
-    uniti = {str(t).strip().lower() for t in tags if t} | canonici
+    uniti = {str(t).strip().lower() for t in (tags + tags_pol + tags_tit) if t} | canonici
     return sorted(uniti)
 
 

@@ -31,6 +31,7 @@ import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
+import TagsEditor from "@/components/TagsEditor";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
 import AllegatiCell from "@/components/AllegatiCell";
 
@@ -474,6 +475,30 @@ export default function PolizzaDetail() {
                     <F label="Termini disdetta" value={pol.termini_disdetta_giorni ? `${pol.termini_disdetta_giorni} gg` : "—"} />
                     <F label="Oggetto assicurato" value={pol.oggetto_assicurato || pol.targa} />
                 </div>
+            </Card>
+
+            <Card className="p-4" data-testid="polizza-tags-card">
+                <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Tag polizza</span>
+                    {(pol.tags || []).length > 0 && <span className="text-[10px] text-slate-400">{pol.tags.length}</span>}
+                </div>
+                {canEdit ? (
+                    <TagsEditor
+                        value={pol.tags || []}
+                        testid="polizza-tags"
+                        placeholder="Aggiungi tag alla polizza..."
+                        onChange={async (tags) => {
+                            setPol((p) => ({ ...p, tags }));
+                            try { await api.put(`/polizze/${id}/tags`, { tags }); }
+                            catch { toast.error("Errore salvataggio tag"); }
+                        }}
+                    />
+                ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                        {(pol.tags || []).length === 0 ? <span className="text-xs text-slate-400">Nessun tag</span>
+                            : pol.tags.map((t) => <span key={t} className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200">{t}</span>)}
+                    </div>
+                )}
             </Card>
 
             {pol.targa && (

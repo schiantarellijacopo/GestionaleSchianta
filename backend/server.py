@@ -3038,6 +3038,27 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     return strip_mongo_id(await db.polizze.find_one({"id": pid}, {"_id": 0}))
 
 
+def _norm_tags(raw) -> list:
+    """Normalizza una lista di tag: lowercase, underscore, univoci, non vuoti."""
+    out = []
+    for t in (raw or []):
+        v = str(t).strip().lower().replace(" ", "_")
+        if v and v not in out:
+            out.append(v)
+    return out
+
+
+@api.put("/polizze/{pid}/tags")
+async def update_polizza_tags(pid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    tags = _norm_tags(body.get("tags"))
+    res = await db.polizze.update_one({"id": pid}, {"$set": {"tags": tags, "updated_at": _now_iso()}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Polizza non trovata")
+    await log_attivita(user, "update_tags", "polizza", pid)
+    return {"id": pid, "tags": tags}
+
+
+
 @api.patch("/polizze/{pid}/garanzie/{idx}")
 async def patch_polizza_garanzia(
     pid: str, idx: int, body: dict,
@@ -4132,6 +4153,16 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
         raise HTTPException(404, "Non trovato")
     await log_attivita(user, "update", "titolo", tid)
     return strip_mongo_id(await db.titoli.find_one({"id": tid}, {"_id": 0}))
+
+
+@api.put("/titoli/{tid}/tags")
+async def update_titolo_tags(tid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    tags = _norm_tags(body.get("tags"))
+    res = await db.titoli.update_one({"id": tid}, {"$set": {"tags": tags, "updated_at": _now_iso()}})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Titolo non trovato")
+    await log_attivita(user, "update_tags", "titolo", tid)
+    return {"id": tid, "tags": tags}
 
 
 @api.post("/titoli/{tid}/incassa")
