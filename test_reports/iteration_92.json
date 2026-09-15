@@ -1,0 +1,21 @@
+{
+  "summary": "Testing completo eSignature OpenAPI (creazione richiesta firma, status polling, listing, dashboard counter) + regressioni Brogliaccio collab / dedup libretto / Provvigioni collab-only. Backend: 6 pytest passati + 1 skip (nessun allegato non-PDF disponibile sulla polizza per test 400). Sandbox OpenAPI ritorna signing_url reale https://test.esign.openapi.com/... e stato WAIT_SIGNERS. Frontend: card 'Firme in attesa' presente sul Dashboard (data-testid missing-firme-card) con contatore 2, click apre dialog 'Documenti inviati per firma — in attesa (2)' con firma-row-* items e badge WAIT_SIGNERS. Su Polizza a9183098-c6e6-4218-9ab2-312eccfb2d65 tab Documenti: 2 doc-firma-* (pen violet) e 2 firma-badge-*; click apre firma-dialog con firma-nome/cognome/email/cellulare/invia-btn. Brogliaccio tab su /contabilita: brogliaccio-collab presente con default 'Tutti i collaboratori'. /ritenute-collaboratori: nessuna traccia di admin@/dipendente@/collaboratore@ nel body (frontend filtra role=='collaboratore' in Provvigioni.jsx line 31). Sanity: e2e sign completo NON tentato (richiede OTP umano) come da nota agent-to-agent.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter92_esignature.py", "/app/test_reports/pytest/iter92.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/esignature_it.py::start_scheduler crea uno scheduler ad ogni chiamata: verificare che sia invocato UNA sola volta all'avvio (in server.py). Se il modulo viene reimportato, si potrebbero avere più scheduler concorrenti (mitigato da id='esignature_poller' + replace_existing=True, ma AsyncIOScheduler ISTANZE diverse non condividono job store in-memory).",
+    "esignature_it.py::finalizza_pending scansiona TUTTE le firme non completate senza limite/paginazione: OK ora ma va monitorata la crescita della collection firma_requests.",
+    "esignature_it.py::_finalizza in caso di eccezione durante insert_one/update_one dopo put_object il PDF resta in storage 'orfano' senza record allegato (piccolo leak). Considerare rollback o log strutturato per riprocesso.",
+    "DocumentiMancantiWidget.jsx: il conteggio firme_in_attesa non ha filtro per collaboratore (a differenza di polizze/veicoli/anagrafiche che hanno la select collab). Se serve, aggiungere filtro backend."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter92_esignature.py"],
+  "success_rate": {"backend": "100% (6/6, 1 skip legittimo)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "1 firma_request creata via /api/esignature/invia sul PDF libretto-fb828cv5.pdf della polizza a9183098-c6e6-4218-9ab2-312eccfb2d65 (sandbox OpenAPI). Prima del run c'era già 1 firma_request pre-esistente → totale attuale 2 (visibili nel dashboard e sulla polizza).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Data-testid usati: missing-firme-card, missing-dialog-firme, firma-row-<id>, doc-firma-<allegatoId>, firma-badge-<origId>, firma-dialog, firma-nome, firma-cognome, firma-email, firma-cellulare, firma-invia-btn, brogliaccio-collab. Endpoint chiavi: POST /api/esignature/invia (body {allegato_id, invia_whatsapp, invia_email, firmatario}), GET /api/esignature/stato/{req_id}, GET /api/esignature/richieste?entita_tipo=&entita_id=, GET /api/insights/documenti-mancanti (ora ha totali.firme_in_attesa + array firme_in_attesa). Sandbox signing_url pattern: https://test.esign.openapi.com/... e2e sign impossibile senza OTP umano. Nel test 'non_pdf 400' pytest skippa se la polizza non ha allegati non-PDF: per riprodurre il caso 400 caricare un JPG/PNG sulla polizza.",
+  "rca of the issue": "N/A - tutto verde su feature nuove e regressioni."
+}

@@ -8,6 +8,8 @@
 - **Estratto Conto Collaboratori**: lista COLLABORATORI mostra ora SOLO utenti con ruolo `collaboratore` (esclusi admin/dipendente). Filtro client-side in `Provvigioni.jsx`.
 
 ## eSignature (OpenAPI.it) — IMPLEMENTATO in sandbox (15/09/2026)
+- **Estensioni (iter 92, verde)**: tasto firma su **polizza, sinistro E anagrafica** (FirmaButton esportato da DocumentiSezioneSplit, aggiunto anche in AnagraficaDetail/AllegatiCartella); **badge stato** accanto a ogni PDF ("In firma"/"Firmato") leggendo `/esignature/richieste`; **promemoria WhatsApp dopo 48h** nel poller (`finalizza_pending`, campo `reminder_sent`); **contatore Dashboard** "Firme in attesa" (widget DocumentiMancantiWidget, 5ª card + dialog tipo='firme') alimentato da `/insights/documenti-mancanti` (`totali.firme_in_attesa` + array).
+
 - **Backend**: `esignature_openapi.py` (service EU-AES OTP SMS, token OAuth dedicato, sandbox via env `OPENAPI_ESIGNATURE_SANDBOX` default true, riusa OPENAPI_IT_CLIENT_ID/SECRET) + `routes/esignature_it.py` (prefix `/api/esignature`):
   - `POST /esignature/invia` {allegato_id, firmatario?, invia_whatsapp?, invia_email?} → crea richiesta EU-AES da un allegato PDF, salva in `db.firma_requests` (provider=openapi_esignature) con entità+categoria del documento, invia il `signing_url` via **WhatsApp** (Evolution) + **Email**.
   - `GET /esignature/richieste?entita_tipo&entita_id` → lista/badge.
