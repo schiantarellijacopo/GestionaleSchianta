@@ -52,6 +52,7 @@ export default function PolizzaDetail() {
     const [provvVal, setProvvVal] = useState("");
     const [provvSaving, setProvvSaving] = useState(false);
     const [mupBusy, setMupBusy] = useState(false);
+    const [mupFirmaMenu, setMupFirmaMenu] = useState(false);
     const [mupOpen, setMupOpen] = useState(false);
     const [mupArea, setMupArea] = useState("");
     const [mupRighe, setMupRighe] = useState([]);
@@ -95,22 +96,23 @@ export default function PolizzaDetail() {
         } catch { toast.error("Errore generazione MUP"); } finally { setMupBusy(false); }
     };
 
-    const firmaMup = async () => {
+    const firmaMup = async (canali = { wa: true, email: true }) => {
         setMupBusy(true);
         try {
             // 1) Genera e archivia il MUP come allegato PDF della polizza
             const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: true });
             const allegatoId = r0.data.allegato_id;
             if (!allegatoId) throw new Error("MUP non archiviato");
-            // 2) Invia per firma (OpenAPI eSignature, OTP SMS). Il firmatario = contraente (risolto dal backend)
-            const r = await api.post("/esignature/invia", { allegato_id: allegatoId });
+            // 2) Invia per firma (OpenAPI eSignature, OTP SMS) con i canali scelti
+            const r = await api.post("/esignature/invia", { allegato_id: allegatoId, invia_whatsapp: !!canali.wa, invia_email: !!canali.email });
             if (r.data.signing_url) window.open(r.data.signing_url, "_blank");
-            toast.success("MUP inviato per firma: link via WhatsApp/Email + OTP SMS al contraente");
+            const via = [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") || "solo link";
+            toast.success(`MUP inviato per firma (${via}) + OTP SMS al contraente`);
             setMupOpen(false);
             load();
         } catch (e) {
             toast.error(e.response?.data?.detail || e.message || "Errore firma MUP");
-        } finally { setMupBusy(false); }
+        } finally { setMupBusy(false); setMupFirmaMenu(false); }
     };
     const [searchParams, setSearchParams] = useSearchParams();
     const [conti, setConti] = useState([]);
@@ -1351,8 +1353,20 @@ export default function PolizzaDetail() {
                         <Button variant="outline" onClick={() => setMupOpen(false)}>Chiudi</Button>
                         <Button variant="outline" onClick={() => generaMup(false)} disabled={mupBusy}
                             className="border-slate-300" data-testid="mup-anteprima-btn">Anteprima PDF</Button>
-                        <Button variant="outline" onClick={firmaMup} disabled={mupBusy}
-                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="mup-firma-btn">Genera e invia per firma</Button>
+                        <div className="relative">
+                            <Button variant="outline" onClick={() => setMupFirmaMenu((v) => !v)} disabled={mupBusy}
+                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="mup-firma-btn">
+                                {mupBusy ? "Invio…" : "Genera e invia per firma ▾"}
+                            </Button>
+                            {mupFirmaMenu && (
+                                <div className="absolute bottom-full right-0 mb-1 w-56 bg-white border border-slate-200 rounded-md shadow-lg z-50 overflow-hidden" data-testid="mup-firma-menu">
+                                    <div className="px-3 py-1.5 text-[10px] uppercase text-slate-400 bg-slate-50">Invia il link di firma via…</div>
+                                    <button onClick={() => firmaMup({ wa: true, email: false })} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="mup-firma-wa">🟢 WhatsApp</button>
+                                    <button onClick={() => firmaMup({ wa: false, email: true })} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="mup-firma-email">✉️ Email</button>
+                                    <button onClick={() => firmaMup({ wa: true, email: true })} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="mup-firma-both">📨 WhatsApp + Email</button>
+                                </div>
+                            )}
+                        </div>
                         <Button onClick={() => generaMup(true)} disabled={mupBusy}
                             className="bg-indigo-700 hover:bg-indigo-800" data-testid="mup-archivia-btn">
                             {mupBusy ? "…" : "Genera e archivia"}

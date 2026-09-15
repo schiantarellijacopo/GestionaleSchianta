@@ -360,13 +360,14 @@ export function FirmaButton({ allegato, stato, onDone }) {
     const [signer, setSigner] = useState({ name: "", surname: "", email: "", mobile: "" });
     const [req, setReq] = useState(null);
     const [checking, setChecking] = useState(false);
+    const [canali, setCanali] = useState({ wa: true, email: true });
     if (!isPdf(allegato)) return null;
     const giaFirmato = (stato || "").toUpperCase() === "DONE";
 
     const invia = async () => {
         setSending(true);
         try {
-            const payload = { allegato_id: allegato.id };
+            const payload = { allegato_id: allegato.id, invia_whatsapp: canali.wa, invia_email: canali.email };
             if (signer.mobile || signer.email || signer.name || signer.surname) payload.firmatario = signer;
             const r = await api.post("/esignature/invia", payload);
             setReq(r.data);
@@ -422,6 +423,15 @@ export function FirmaButton({ allegato, stato, onDone }) {
                             <div><Label className="text-xs">Cognome</Label><Input value={signer.surname} onChange={(e) => setSigner({ ...signer, surname: e.target.value })} data-testid="firma-cognome" /></div>
                             <div><Label className="text-xs">Email</Label><Input value={signer.email} onChange={(e) => setSigner({ ...signer, email: e.target.value })} data-testid="firma-email" /></div>
                             <div><Label className="text-xs">Cellulare</Label><Input value={signer.mobile} onChange={(e) => setSigner({ ...signer, mobile: e.target.value })} placeholder="+39…" data-testid="firma-cellulare" /></div>
+                        </div>
+                        <div>
+                            <div className="text-[11px] text-slate-500 mb-1">Invia il link di firma via:</div>
+                            <div className="flex gap-2">
+                                <button type="button" onClick={() => setCanali((c) => ({ ...c, wa: !c.wa }))} data-testid="firma-canale-wa"
+                                    className={`text-xs px-2 py-1 rounded border ${canali.wa ? "bg-emerald-600 text-white border-emerald-600" : "bg-white border-slate-200 text-slate-500"}`}>🟢 WhatsApp</button>
+                                <button type="button" onClick={() => setCanali((c) => ({ ...c, email: !c.email }))} data-testid="firma-canale-email"
+                                    className={`text-xs px-2 py-1 rounded border ${canali.email ? "bg-sky-600 text-white border-sky-600" : "bg-white border-slate-200 text-slate-500"}`}>✉️ Email</button>
+                            </div>
                         </div>
                         {req && (
                             <div className="text-xs bg-emerald-50 border border-emerald-200 rounded p-2 space-y-1">
