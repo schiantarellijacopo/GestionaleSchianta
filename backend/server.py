@@ -5075,6 +5075,116 @@ async def calcola_provvigione_endpoint(
     return await _calcola_provvigione(premio_lordo, collaboratore_id, compagnia_id, ramo, premio_netto=premio_netto)
 
 
+@api.post("/provvigioni/riassegna")
+async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin"))):
+    """Ricalcola e riassegna le provvigioni sui titoli esistenti usando gli schemi
+    provvigionali attuali (es. dopo aver aggiornato BS BROKER al 4,5% sul netto).
+
+    body: { solo_arretrati: bool = True, dry_run: bool = False }
+      - solo_arretrati=True  → solo titoli 'da_incassare'/'insoluto' (non ancora incassati,
+        nessun impatto contabile).
+      - solo_arretrati=False → tutti i titoli (anche incassati: aggiorna solo il valore
+        provvigione memorizzato, NON tocca i movimenti di Prima Nota già registrati).
+    """
+    solo_arretrati = body.get("solo_arretrati", True)
+    dry_run = bool(body.get("dry_run", False))
+    flt = {}
+    if solo_arretrati:
+        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
+    else:
+        flt["stato"] = {"$ne": "stornato"}
+
+    schema_cache: dict = {}
+    pol_cache: dict = {}
+    esaminati = 0
+    aggiornati = 0
+    delta_tot = 0.0
+    esempi = []
+
+    async for t in db.titoli.find(flt, {"_id": 0}):
+        esaminati += 1
+        pid = t.get("polizza_id")
+        if pid not in pol_cache:
+            pol_cache[pid] = await db.polizze.find_one(
+                {"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1}) or {}
+        pol = pol_cache[pid]
+        compagnia_id = pol.get("compagnia_id")
+        ramo = pol.get("ramo")
+        lordo = float(t.get("importo_lordo") or 0)
+        netto = float(t.get("importo_netto") or 0)
+        if lordo <= 0:
+            continue
+
+        operatori = t.get("provvigioni_operatori") or []
+        nuovi_operatori = []
+        schema_trovato = False
+        if operatori:
+            nuovo_tot = 0.0
+            for op in operatori:
+                oid = op.get("operatore_id")
+                ck = (oid, compagnia_id, ramo)
+                if ck not in schema_cache:
+                    schema_cache[ck] = await _calcola_provvigione(lordo, oid, compagnia_id, ramo, premio_netto=netto)
+                calc = schema_cache[ck]
+                if calc.get("schema_id"):
+                    schema_trovato = True
+                    quota = calc.get("provvigione_collaboratore") or 0.0
+                    nuovi_operatori.append({**op, "provvigione": quota})
+                    nuovo_tot += quota
+                else:
+                    # nessuno schema per questo operatore → mantieni il valore esistente
+                    nuovi_operatori.append({**op})
+                    nuovo_tot += float(op.get("provvigione") or 0)
+            nuovo_tot = round(nuovo_tot, 2)
+        else:
+            oid = t.get("collaboratore_id")
+            ck = (oid, compagnia_id, ramo)
+            if ck not in schema_cache:
+                schema_cache[ck] = await _calcola_provvigione(lordo, oid, compagnia_id, ramo, premio_netto=netto)
+            calc = schema_cache[ck]
+            if calc.get("schema_id"):
+                schema_trovato = True
+                nuovo_tot = round(calc.get("provvigione_totale") or 0.0, 2)
+            else:
+                nuovo_tot = round(float(t.get("provvigioni") or 0), 2)
+
+        # SICUREZZA: se nessuno schema applicabile, non toccare il titolo
+        # (evita di azzerare provvigioni reali importate senza schema).
+        if not schema_trovato:
+            continue
+
+        vecchio_tot = round(float(t.get("provvigioni") or 0), 2)
+        # SICUREZZA 2: non azzerare mai una provvigione esistente. Uno schema
+        # che calcola 0 (mal configurato/default) NON deve cancellare valori reali.
+        if nuovo_tot <= 0 and vecchio_tot > 0:
+            continue
+        if abs(nuovo_tot - vecchio_tot) < 0.01:
+            continue
+        delta_tot += (nuovo_tot - vecchio_tot)
+        if len(esempi) < 20:
+            esempi.append({
+                "titolo_id": t["id"], "numero_titolo": t.get("numero_titolo"),
+                "polizza_id": pid, "stato": t.get("stato"),
+                "provvigione_prima": vecchio_tot, "provvigione_dopo": nuovo_tot,
+            })
+        if not dry_run:
+            upd = {"provvigioni": nuovo_tot, "updated_at": _now_iso()}
+            if operatori:
+                upd["provvigioni_operatori"] = nuovi_operatori
+            await db.titoli.update_one({"id": t["id"]}, {"$set": upd})
+        aggiornati += 1
+
+    return {
+        "dry_run": dry_run,
+        "solo_arretrati": solo_arretrati,
+        "titoli_esaminati": esaminati,
+        "titoli_aggiornati": aggiornati,
+        "delta_provvigioni_totale": round(delta_tot, 2),
+        "esempi": esempi,
+    }
+
+
+
 # ============================================================
 # LIBRO MATRICOLA — Applicazioni veicoli su polizza RCA flotta
 # ============================================================

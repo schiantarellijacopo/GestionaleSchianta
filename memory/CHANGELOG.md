@@ -9,7 +9,12 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Tag su Polizze e Titoli + verifica KPI ✅
+## 2026-06 — Riassegna provvigioni + verifica BS Broker ✅
+- **Verifica BS Broker**: lo schema "provvigioni Bs" (4,5% sul netto, collaboratore prende l'intero) è corretto e viene applicato ai NUOVI titoli. MA i titoli **importati** hanno un valore provvigione piatto (es. 216,34 costante) NON calcolato dallo schema → le provvigioni BS non erano automatiche sullo storico.
+- **Nuovo endpoint** `POST /provvigioni/riassegna` (`{solo_arretrati, dry_run}`): ricalcola le provvigioni dei titoli con gli schemi attuali. Due modalità: solo arretrati (da_incassare/insoluti) o tutti. Riscrive `provvigioni` e `provvigioni_operatori`.
+- **Sicurezze**: (1) salta i titoli senza schema applicabile; (2) NON azzera mai una provvigione reale esistente (uno schema che calcola 0 non cancella). Verificato con dry-run: 0 modifiche indebite nel tenant senza schemi validi.
+- **Frontend**: box "Riassegna provvigioni aggiornate" nella libreria Sistema Provvigionale con pulsanti "Solo arretrati" e "Tutti i titoli" + riepilogo esito (esaminati/aggiornati/Δ).
+
 - Aggiunta la possibilità di assegnare **tag** anche a **polizze** e **titoli** (prima solo anagrafiche). Campo `tags` nei modelli `Polizza`/`Titolo`.
 - Backend: `PUT /polizze/{id}/tags` e `PUT /titoli/{id}/tags` (helper `_norm_tags`: lowercase, underscore, univoci). Titolo salva i tag anche dal payload di `update_titolo`. `GET /anagrafiche/tags` ora unisce i tag di anagrafiche + polizze + titoli per l'autocomplete.
 - Frontend: card "TAG POLIZZA" in `PolizzaDetail` (salva subito via API) e campo "Tag titolo" nel `TitoloDialog`, entrambi con `TagsEditor` riusabile.
