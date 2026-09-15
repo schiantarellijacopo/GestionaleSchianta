@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+
+## Sessione 15/09/2026 (fork) — Saldo Cassa Compagnie completato + fix isolamento tenant voci compagnia
+
+- **🔴 Contabilità non più rotta**: `Contabilita.jsx` referenziava `saldoCassaOpen` e `SaldoCassaCompagnieDialog` mai definiti (pagina in crash). Aggiunto lo state e creato il componente `SaldoCassaCompagnieDialog` (accanto a Giroconto/Nuovo movimento nella toolbar).
+- **Dialog Saldo Cassa Compagnie**: elenca tutte le compagnie attive del tenant con campo importo (positivo=debito / negativo=credito verso compagnia) + data + ricerca; precarica i saldi già registrati (`GET /contabilita/saldo-cassa-compagnie`); salva via `POST` (idempotente, sostituisce i saldi iniziali precedenti). Ogni riga scrive un movimento Prima Nota `saldo_iniziale_compagnia` (solo colonna SALDO) + una voce "Saldo iniziale" nell'E/C compagnia. Backend già presente (server.py:637-690).
+- **🔴 Fix isolamento tenant**: `voci_manuali_compagnia` NON era in `TENANT_SCOPED_COLLECTIONS` → il `set_saldo_cassa` avrebbe cancellato/mescolato le voci di TUTTI i tenant. Aggiunta alla lista (collezione era vuota, nessuna migrazione necessaria). Verificato e2e: admin scrive Allianz 1500€ → visibile solo al suo tenant; login sandbox → `[]` (isolato). Cleanup effettuato.
+- **STATO**: verificato via curl (POST/GET/isolamento) + screenshot dialog. Rami tenant-aware e verifica leak collaboratori: RINVIATI su richiesta utente ("assuming defaults for now").
+
 ## Fix rapidi (15/09/2026, sessione fork)
 
 - **Contatore "Anagrafiche senza C.I."**: ora riconosce anche la CI salvata in `anagrafiche.documenti.{carta_identita|patente|passaporto|documento_identita}` (embedded), non solo in `db.allegati`. (`routes/extras_p1p2.py` documenti-mancanti). Verificato: Schiantarelli Andrea non più tra i "senza C.I." (+15 anagrafiche).

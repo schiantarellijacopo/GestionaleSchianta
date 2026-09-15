@@ -63,7 +63,6 @@ export default function BrogliaccioTab({ refreshKey }) {
     const [storicoOpen, setStoricoOpen] = useState(false);
     const [storico, setStorico] = useState([]);
     const [editMov, setEditMov] = useState(null);  // movimento aperto in modifica
-    const [saldoOpen, setSaldoOpen] = useState(false);
     const [contiCassa, setContiCassa] = useState([]);
     const [collab, setCollab] = useState("all");
     const [compagnia, setCompagnia] = useState("all");
@@ -249,10 +248,6 @@ export default function BrogliaccioTab({ refreshKey }) {
                     )}
 
                     <div className="ml-auto flex gap-2">
-                        <Button variant="outline" onClick={() => setSaldoOpen(true)}
-                            className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="brogliaccio-saldo-cassa">
-                            Saldo Cassa Compagnie
-                        </Button>
                         <Button variant="outline" onClick={stampa} data-testid="brogliaccio-stampa">
                             <Printer size={14} className="mr-1" /> Stampa PDF
                         </Button>

@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Calendar, ArrowLeftRight, Printer, Trash2, Search } from "lucide-react";
+import { Plus, Calendar, ArrowLeftRight, Printer, Trash2, Search, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
@@ -29,6 +29,7 @@ export default function Contabilita() {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [open, setOpen] = useState(false);
     const [giroOpen, setGiroOpen] = useState(false);
+    const [saldoCassaOpen, setSaldoCassaOpen] = useState(false);
     const [conti, setConti] = useState([]);
     const [refreshTick, setRefreshTick] = useState(0);
 
@@ -62,6 +63,14 @@ export default function Contabilita() {
                                 </Button>
                             </DialogTrigger>
                             <GirocontoDialog conti={conti} onClose={() => { setGiroOpen(false); load(); setRefreshTick((t) => t + 1); }} />
+                        </Dialog>
+                        <Dialog open={saldoCassaOpen} onOpenChange={setSaldoCassaOpen}>
+                            <DialogTrigger asChild>
+                                <Button variant="outline" data-testid="saldo-cassa-button" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                                    <Wallet size={16} className="mr-1" /> Saldo Cassa Compagnie
+                                </Button>
+                            </DialogTrigger>
+                            <SaldoCassaCompagnieDialog onClose={() => { setSaldoCassaOpen(false); load(); setRefreshTick((t) => t + 1); }} />
                         </Dialog>
                         <Dialog open={open} onOpenChange={setOpen}>
                             <DialogTrigger asChild>
@@ -479,6 +488,138 @@ function GirocontoDialog({ conti, onClose }) {
         </DialogContent>
     );
 }
+
+function SaldoCassaCompagnieDialog({ onClose }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const [data, setData] = useState(today);
+    const [compagnie, setCompagnie] = useState([]);
+    const [importi, setImporti] = useState({}); // { compagnia_id: "valore" }
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [q, setQ] = useState("");
+
+    useEffect(() => {
+        let mounted = true;
+        Promise.all([
+            api.get("/compagnie"),
+            api.get("/contabilita/saldo-cassa-compagnie"),
+        ]).then(([rc, rs]) => {
+            if (!mounted) return;
+            const comps = (rc.data || []).filter((c) => c.attiva !== false)
+                .sort((a, b) => (a.ragione_sociale || "").localeCompare(b.ragione_sociale || ""));
+            setCompagnie(comps);
+            const map = {};
+            let ultimaData = null;
+            (rs.data?.items || []).forEach((it) => {
+                if (it.compagnia_id) map[it.compagnia_id] = String(it.importo ?? "");
+                if (it.data_movimento) ultimaData = it.data_movimento;
+            });
+            setImporti(map);
+            if (ultimaData) setData(String(ultimaData).slice(0, 10));
+        }).catch(() => {
+            toast.error("Errore nel caricamento compagnie");
+        }).finally(() => mounted && setLoading(false));
+        return () => { mounted = false; };
+    }, []);
+
+    const setImp = (cid, v) => setImporti((p) => ({ ...p, [cid]: v }));
+
+    const compagnieFiltrate = compagnie.filter((c) =>
+        !q || (c.ragione_sociale || "").toLowerCase().includes(q.toLowerCase()));
+
+    const totale = compagnie.reduce((s, c) => s + (parseFloat(importi[c.id]) || 0), 0);
+
+    const save = async () => {
+        const righe = compagnie
+            .map((c) => ({ compagnia_id: c.id, importo: parseFloat(importi[c.id]) }))
+            .filter((r) => !isNaN(r.importo) && r.importo !== 0);
+        setSaving(true);
+        try {
+            const r = await api.post("/contabilita/saldo-cassa-compagnie", { data, righe });
+            toast.success(`Saldo cassa registrato: ${r.data.creati} compagnie`);
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio saldo cassa");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <DialogContent className="max-w-2xl" data-testid="dialog-saldo-cassa">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                    <Wallet size={18} className="text-emerald-700" />
+                    Saldo Cassa Compagnie
+                </DialogTitle>
+            </DialogHeader>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 text-xs text-emerald-900">
+                <strong>Cosa fa:</strong> registra il saldo iniziale di cassa per ogni compagnia. Ogni importo scrive
+                una riga nel <strong>Brogliaccio (colonna SALDO)</strong> e una voce "Saldo iniziale" nell'
+                <strong>Estratto Conto Compagnie</strong>. Importo <strong>positivo = a debito</strong> verso la compagnia,
+                <strong> negativo = a credito</strong>. L'operazione sostituisce i saldi iniziali precedenti.
+            </div>
+            <div className="py-2 space-y-3">
+                <ChiusuraGiornoBanner data={data} />
+                <div className="flex items-end gap-3">
+                    <div>
+                        <Label>Data saldo</Label>
+                        <Input type="date" value={data} onChange={(e) => setData(e.target.value)} className="w-44" data-testid="saldo-cassa-data" />
+                    </div>
+                    <div className="flex-1">
+                        <Label className="text-xs">Cerca compagnia</Label>
+                        <div className="relative">
+                            <Search size={12} className="absolute left-2 top-2.5 text-slate-400" />
+                            <Input value={q} onChange={(e) => setQ(e.target.value)} className="pl-7" placeholder="filtra..." data-testid="saldo-cassa-cerca" />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-md max-h-80 overflow-y-auto">
+                    {loading ? <Loading /> : compagnieFiltrate.length === 0 ? (
+                        <Empty message="Nessuna compagnia" />
+                    ) : (
+                        <table className="tbl w-full">
+                            <thead className="sticky top-0 bg-slate-100 z-10">
+                                <tr>
+                                    <th className="text-left px-3 py-2">Compagnia</th>
+                                    <th className="text-right px-3 py-2 w-48">Saldo iniziale €</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {compagnieFiltrate.map((c) => (
+                                    <tr key={c.id} className="hover:bg-slate-50">
+                                        <td className="px-3 py-1.5 font-medium">{c.ragione_sociale}</td>
+                                        <td className="px-3 py-1.5 text-right">
+                                            <Input
+                                                type="number" step="0.01"
+                                                value={importi[c.id] ?? ""}
+                                                onChange={(e) => setImp(c.id, e.target.value)}
+                                                className="text-right num h-8"
+                                                placeholder="0,00"
+                                                data-testid={`saldo-cassa-imp-${c.id}`}
+                                            />
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                <div className="flex justify-between items-center text-sm px-1">
+                    <span className="text-slate-500">Compagnie con importo: {compagnie.filter((c) => parseFloat(importi[c.id])).length}</span>
+                    <span className="font-semibold">Totale: <span className="num text-emerald-700">{fmtEur(totale)}</span></span>
+                </div>
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={onClose}>Annulla</Button>
+                <Button onClick={save} disabled={saving || loading} className="bg-emerald-700 hover:bg-emerald-800" data-testid="saldo-cassa-save">
+                    {saving ? "Salvataggio…" : "Registra saldo cassa"}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    );
+}
+
 
 
 function StoricoPrimaNotaTab() {
