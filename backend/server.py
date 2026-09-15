@@ -6784,10 +6784,18 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
                     setup_dare += imp
                 elif sm.get("categoria") == "setup_iniziale_compagnia_avere":
                     setup_avere += imp
+        # Saldo iniziale cassa compagnia dal dialog "Saldo Cassa Compagnie"
+        # (categoria saldo_iniziale_compagnia): importo firmato, positivo = a debito
+        # verso compagnia (aumenta il saldo), negativo = a credito (lo riduce).
+        saldo_iniziale = 0.0
+        async for sm in db.movimenti.find(
+            {"compagnia_id": cid, "categoria": "saldo_iniziale_compagnia"},
+            {"_id": 0, "importo": 1}):
+            saldo_iniziale += float(sm.get("importo") or 0)
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
-        saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare
+        saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare + saldo_iniziale
         saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute + pnc_versate - setup_avere - direzione_provv
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(pnc_versate) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01:
+        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(pnc_versate) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01 and abs(saldo_iniziale) < 0.01:
             continue  # skip compagnie senza movimenti
         out.append({
             "compagnia_id": cid,
