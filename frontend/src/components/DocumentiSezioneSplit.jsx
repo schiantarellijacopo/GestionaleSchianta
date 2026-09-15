@@ -8,8 +8,12 @@ import { useEffect, useState } from "react";
 import { api, API_BASE } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles, PenTool } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function DocumentiSezioneSplit({
     entita_tipo,
@@ -270,6 +274,7 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                             </div>
                             {canEdit && (
                                 <div className="flex items-center gap-1.5">
+                                    <FirmaButton allegato={a} />
                                     <Switch checked={!!a.visibile_cliente} onCheckedChange={() => onToggle(a)}
                                         className="scale-75" data-testid={`doc-visibile-${a.id}`} />
                                     <button onClick={() => onDelete(a.id)} className="text-rose-500 hover:bg-rose-50 p-1 rounded opacity-0 group-hover:opacity-100"
@@ -307,5 +312,99 @@ function CategoriaUpload({ categoria, onPick, busy }) {
             <span className="text-[9px] text-violet-600 block mt-0.5">{busy ? "Caricamento…" : "Click per caricare"}</span>
             <input type="file" multiple={categoria.multiple !== false} hidden onChange={(e) => onPick(e.target.files)} />
         </label>
+    );
+}
+
+
+function isPdf(a) {
+    return (a.content_type || "").toLowerCase().includes("pdf") || (a.nome_file || "").toLowerCase().endsWith(".pdf");
+}
+
+function FirmaButton({ allegato }) {
+    const [open, setOpen] = useState(false);
+    const [sending, setSending] = useState(false);
+    const [signer, setSigner] = useState({ name: "", surname: "", email: "", mobile: "" });
+    const [req, setReq] = useState(null);
+    const [checking, setChecking] = useState(false);
+    if (!isPdf(allegato)) return null;
+
+    const invia = async () => {
+        setSending(true);
+        try {
+            const payload = { allegato_id: allegato.id };
+            if (signer.mobile || signer.email || signer.name || signer.surname) payload.firmatario = signer;
+            const r = await api.post("/esignature/invia", payload);
+            setReq(r.data);
+            toast.success("Richiesta di firma inviata (link via WhatsApp/Email)");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio firma");
+        } finally {
+            setSending(false);
+        }
+    };
+
+    const controlla = async () => {
+        if (!req?.id) return;
+        setChecking(true);
+        try {
+            const r = await api.get(`/esignature/stato/${req.id}`);
+            if (r.data.allegato_firmato_id) {
+                toast.success("Documento firmato ricevuto e salvato in questa sezione!");
+                setOpen(false);
+                setTimeout(() => window.location.reload(), 800);
+            } else {
+                toast(`Stato firma: ${r.data.stato}`);
+            }
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore verifica stato");
+        } finally {
+            setChecking(false);
+        }
+    };
+
+    return (
+        <>
+            <button onClick={() => setOpen(true)} title="Invia per firma (FEA · OTP SMS)"
+                className="text-violet-600 hover:bg-violet-50 p-1 rounded" data-testid={`doc-firma-${allegato.id}`}>
+                <PenTool size={12} />
+            </button>
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogContent className="max-w-md" data-testid="firma-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><PenTool size={16} className="text-violet-600" /> Invia per firma</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                        <div className="text-xs text-slate-500 bg-slate-50 rounded p-2">
+                            Documento: <b>{allegato.nome_file}</b><br />
+                            Firma Elettronica Avanzata con OTP via SMS. Il firmatario riceve il link via WhatsApp ed email.
+                        </div>
+                        <div className="text-[11px] text-slate-500">Dati firmatario (lascia vuoto per usare il contraente):</div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div><Label className="text-xs">Nome</Label><Input value={signer.name} onChange={(e) => setSigner({ ...signer, name: e.target.value })} data-testid="firma-nome" /></div>
+                            <div><Label className="text-xs">Cognome</Label><Input value={signer.surname} onChange={(e) => setSigner({ ...signer, surname: e.target.value })} data-testid="firma-cognome" /></div>
+                            <div><Label className="text-xs">Email</Label><Input value={signer.email} onChange={(e) => setSigner({ ...signer, email: e.target.value })} data-testid="firma-email" /></div>
+                            <div><Label className="text-xs">Cellulare</Label><Input value={signer.mobile} onChange={(e) => setSigner({ ...signer, mobile: e.target.value })} placeholder="+39…" data-testid="firma-cellulare" /></div>
+                        </div>
+                        {req && (
+                            <div className="text-xs bg-emerald-50 border border-emerald-200 rounded p-2 space-y-1">
+                                <div>✅ Inviata. Stato: <b>{req.stato}</b></div>
+                                {req.signing_url && <a href={req.signing_url} target="_blank" rel="noreferrer" className="text-sky-700 underline break-all">Apri link di firma</a>}
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        {!req ? (
+                            <Button onClick={invia} disabled={sending} className="bg-violet-600 hover:bg-violet-700" data-testid="firma-invia-btn">
+                                {sending ? "Invio…" : "Invia richiesta firma"}
+                            </Button>
+                        ) : (
+                            <Button onClick={controlla} disabled={checking} variant="outline" data-testid="firma-controlla-btn">
+                                {checking ? "Controllo…" : "Controlla stato / scarica firmato"}
+                            </Button>
+                        )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }

@@ -6131,7 +6131,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     if pol_ids:
         async for p in db.polizze.find(
             {"id": {"$in": pol_ids}},
-            {"_id": 0, "id": 1, "compagnia_id": 1, "numero_polizza": 1, "contraente_id": 1},
+            {"_id": 0, "id": 1, "compagnia_id": 1, "numero_polizza": 1, "contraente_id": 1,
+             "collaboratore_id": 1},
         ):
             polizze_map[p["id"]] = p
 
@@ -6157,6 +6158,18 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             {"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "trattiene_provvigioni": 1}
         ):
             comp_map[c["id"]] = c
+
+    # collaboratori (dalla polizza o dal movimento) → nome per il filtro brogliaccio
+    coll_ids = list(
+        {p.get("collaboratore_id") for p in polizze_map.values() if p.get("collaboratore_id")}
+        | {m.get("collaboratore_id") for m in movs if m.get("collaboratore_id")}
+    )
+    coll_map = {}
+    if coll_ids:
+        async for u in db.users.find(
+            {"id": {"$in": coll_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}
+        ):
+            coll_map[u["id"]] = u.get("name") or u.get("email")
 
     def _compagnia_di(m: dict) -> Optional[dict]:
         if m.get("compagnia_id"):
@@ -6343,6 +6356,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "tipo": m["tipo"],
             "compagnia": (compagnia_riga or {}).get("ragione_sociale"),
             "compagnia_id": (compagnia_riga or {}).get("id"),
+            "collaboratore_id": (polizza_riga or {}).get("collaboratore_id") or m.get("collaboratore_id"),
+            "collaboratore": coll_map.get((polizza_riga or {}).get("collaboratore_id") or m.get("collaboratore_id")),
             "trattiene_provvigioni": (compagnia_riga or {}).get("trattiene_provvigioni"),
             "is_direzione": is_dir,
             "totale": c_totale,
@@ -14359,6 +14374,8 @@ app.include_router(_chat_portale_router)
 # ============================================================
 from firma_router import router as _firma_router  # noqa: E402
 app.include_router(_firma_router)
+from routes.esignature_it import router as _esignature_router  # noqa: E402
+app.include_router(_esignature_router)
 
 # GZip: comprime le risposte JSON grandi (liste 5-6MB → ~500KB) per ricerche veloci
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
@@ -14565,6 +14582,13 @@ async def startup():
         _cloud_ocr_start(db)
     except Exception as e:
         logger.warning("Scheduler Cloud OCR non avviato: %s", e)
+
+    # Poller firme eSignature (finalizza automaticamente i documenti firmati)
+    try:
+        from routes.esignature_it import start_scheduler as _esign_start
+        _esign_start()
+    except Exception as e:
+        logger.warning("Scheduler eSignature non avviato: %s", e)
 
     # Seed modelli di default (idempotente)
     try:

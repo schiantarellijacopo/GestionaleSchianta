@@ -28,7 +28,7 @@ export default function Provvigioni() {
     const [voceOpen, setVoceOpen] = useState(false);
 
     useEffect(() => {
-        api.get("/collaboratori").then((r) => setCollabs(r.data));
+        api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data));
     }, []);
 

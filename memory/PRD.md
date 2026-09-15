@@ -1,5 +1,27 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
+## Fix rapidi (15/09/2026, sessione fork)
+
+- **Contatore "Anagrafiche senza C.I."**: ora riconosce anche la CI salvata in `anagrafiche.documenti.{carta_identita|patente|passaporto|documento_identita}` (embedded), non solo in `db.allegati`. (`routes/extras_p1p2.py` documenti-mancanti). Verificato: Schiantarelli Andrea non più tra i "senza C.I." (+15 anagrafiche).
+- **Brogliaccio (Prima Nota) → filtro Collaboratore**: aggiunto dropdown "Collaboratore" (`brogliaccio-collab`). Backend `_compute_brogliaccio` (server.py) aggiunge `collaboratore_id`/`collaboratore` a ogni riga (dalla polizza o dal movimento). Filtro client-side + riga TOTALE ricalcolata sul filtro. Riepilogo conti/KPI/liquidità restano globali.
+- **OCR Libretto → solo nel quadro "Libretto veicolo"**: la lista piatta "Documenti" (`DocumentiPolizzaTab`) ora nasconde i documenti già categorizzati (polizza/condizioni/libretto_veicolo/quietanza/…), evitando la duplicazione. L'OCR libretto salva già `categoria=libretto_veicolo`.
+- **Estratto Conto Collaboratori**: lista COLLABORATORI mostra ora SOLO utenti con ruolo `collaboratore` (esclusi admin/dipendente). Filtro client-side in `Provvigioni.jsx`.
+
+## eSignature (OpenAPI.it) — IMPLEMENTATO in sandbox (15/09/2026)
+- **Backend**: `esignature_openapi.py` (service EU-AES OTP SMS, token OAuth dedicato, sandbox via env `OPENAPI_ESIGNATURE_SANDBOX` default true, riusa OPENAPI_IT_CLIENT_ID/SECRET) + `routes/esignature_it.py` (prefix `/api/esignature`):
+  - `POST /esignature/invia` {allegato_id, firmatario?, invia_whatsapp?, invia_email?} → crea richiesta EU-AES da un allegato PDF, salva in `db.firma_requests` (provider=openapi_esignature) con entità+categoria del documento, invia il `signing_url` via **WhatsApp** (Evolution) + **Email**.
+  - `GET /esignature/richieste?entita_tipo&entita_id` → lista/badge.
+  - `GET /esignature/stato/{req_id}` → aggiorna stato; se DONE scarica il PDF firmato e lo salva come Allegato nella STESSA entità e STESSA categoria (stesso quadro), `visibile_cliente=true`.
+  - **Poller** `finalizza_pending` (AsyncIOScheduler ogni 2 min, avviato in startup) → salvataggio AUTOMATICO del firmato appena il cliente firma.
+- **Frontend**: `DocumentiSezioneSplit.jsx` → componente `FirmaButton` (icona penna viola, `doc-firma-{id}`) su ogni allegato PDF nei quadrotti; dialog per firmatario (default = contraente), invio e "Controlla stato / scarica firmato".
+- **Verificato in SANDBOX** (admin@assicura.it): richiesta creata (signature_id, `signing_url` https://test.esign.openapi.com/...), stato → WAIT_SIGNERS. Lo scope EU-AES sandbox è attivo con le credenziali esistenti.
+- **Per andare LIVE**: impostare `OPENAPI_ESIGNATURE_SANDBOX=false` dopo aver confermato con OpenAPI.it l'entitlement dello scope EU-AES in produzione.
+
+## eSignature (OpenAPI.it) — DA IMPLEMENTARE (requisiti + playbook pronti)
+- Requisiti: FEA/AES OTP via SMS; invio link firma via **WhatsApp** (Evolution) + email; avvio dagli **Allegati/Documenti** (polizza/sinistro/anagrafica) tasto "Invia per firma" su PDF esistente; firmatario = contraente (email+cellulare da anagrafica); documento firmato torna in Allegati come "firmato"; riuso OPENAPI_IT_CLIENT_ID/SECRET + scope eSignature.
+- API: `POST https://esignature.openapi.com/EU-AES` (sandbox test.esignature...); risposta `data.signers[].url` + `data.id`; stato `GET /signatures/{id}/detail` (WAIT_VALIDATION/WAIT_SIGN/WAIT_SIGNER/DONE/ERROR); download `GET /signatures/{id}/signedDocument`; scope OAuth `POST:esignature.openapi.com/EU-AES`, `GET:esignature.openapi.com/signatures`. Callback opzionale. Verificare entitlement scope EU-AES in prod con OpenAPI.it.
+
+
 ## Sessione 15/09/2026 (fork) — Statistiche Premi/Provvigioni (tab nell'hub Statistiche)
 
 - **Hub Statistiche** (`/statistiche`, `Statistiche.jsx`) ora ha 5 tab: Overview, Indice ISA, **Premi / Provvigioni**, **Top Clienti**, **Segmentazione**.

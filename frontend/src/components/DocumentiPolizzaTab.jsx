@@ -40,6 +40,15 @@ export default function DocumentiPolizzaTab({ polizzaId, canEdit = true, onAfter
     const [ocrLibrettoOpen, setOcrLibrettoOpen] = useState(false);
     const inputRef = useRef(null);
 
+    // Categorie gestite dai "quadrotti" sottostanti: questi documenti NON vanno
+    // duplicati qui — restano solo nella loro categoria (es. OCR libretto → Libretto veicolo).
+    const QUADRO_CATS = new Set([
+        "polizza", "condizioni", "appendici", "libretto_veicolo", "libretto",
+        "libretto_circolazione", "atto_vendita", "quietanza", "mup", "questionario",
+        "regolazione", "preventivo", "appunti",
+    ]);
+    const shown = (items || []).filter((it) => !QUADRO_CATS.has(it.categoria));
+
     const load = async () => {
         const r = await api.get("/allegati", { params: { entita_tipo: "polizza", entita_id: polizzaId } });
         setItems(r.data || []);
@@ -83,7 +92,7 @@ export default function DocumentiPolizzaTab({ polizzaId, canEdit = true, onAfter
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <div>
                     <h3 className="font-semibold text-slate-900">Documenti</h3>
-                    <p className="text-xs text-slate-500">PDF, immagini, ricevute, libretto veicolo — {items?.length || 0} elementi</p>
+                    <p className="text-xs text-slate-500">Documenti generici non categorizzati — {shown.length} elementi. I documenti per categoria (polizza, libretto, quietanze…) sono nei riquadri sottostanti.</p>
                 </div>
                 {canEdit && (
                     <div className="flex gap-2 flex-wrap">
@@ -122,11 +131,11 @@ export default function DocumentiPolizzaTab({ polizzaId, canEdit = true, onAfter
                 <div className="py-12 text-center text-sm text-slate-400">
                     <Loader2 size={18} className="inline animate-spin mr-1" /> Caricamento…
                 </div>
-            ) : items.length === 0 ? (
+            ) : shown.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-md">
                     <FileSearch size={28} className="mx-auto text-slate-300 mb-1" />
-                    Nessun documento caricato per questa polizza.<br />
-                    {canEdit && <span className="text-xs">Usa &quot;Carica documento&quot; o &quot;OCR Libretto&quot; per iniziare.</span>}
+                    Nessun documento generico. I documenti per categoria sono nei riquadri sottostanti.<br />
+                    {canEdit && <span className="text-xs">Usa &quot;OCR Libretto&quot; per estrarre e archiviare il libretto nella sua categoria.</span>}
                 </div>
             ) : (
                 <table className="tbl w-full" data-testid="doc-table">

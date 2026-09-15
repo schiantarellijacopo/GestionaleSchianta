@@ -64,6 +64,7 @@ export default function BrogliaccioTab({ refreshKey }) {
     const [storico, setStorico] = useState([]);
     const [editMov, setEditMov] = useState(null);  // movimento aperto in modifica
     const [contiCassa, setContiCassa] = useState([]);
+    const [collab, setCollab] = useState("all");
     // Visibilità colonne (persistente localStorage)
     const [visibleCols, setVisibleCols] = useState(() =>
         loadVisible(LS_KEY_COLS,
@@ -164,6 +165,27 @@ export default function BrogliaccioTab({ refreshKey }) {
     const visibleFixed = FIXED_COLS.filter((c) => isColVisible(c.key));
     const visibleConti = conti.filter((c) => isBankVisible(c.id));
 
+    // Filtro collaboratori (client-side sul brogliaccio del giorno)
+    const collabOptions = Array.from(
+        new Map((b.righe || [])
+            .filter((r) => r.collaboratore_id)
+            .map((r) => [r.collaboratore_id, r.collaboratore || "—"])).entries()
+    ).sort((a, b2) => (a[1] || "").localeCompare(b2[1] || ""));
+    const righeView = collab === "all"
+        ? (b.righe || [])
+        : (b.righe || []).filter((r) => r.collaboratore_id === collab);
+    // Totale giornata coerente con il filtro
+    const totaliView = collab === "all" ? b.totali_giornata : (() => {
+        const keys = ["totale", "provv", "saldo", "crediti", "spese", "sconti", "rimesse", "ritenuta", "direzione", "rappel", "pnc"];
+        const t = Object.fromEntries(keys.map((k) => [k, 0]));
+        const per_conto = {};
+        righeView.forEach((r) => {
+            keys.forEach((k) => { t[k] += r[k] || 0; });
+            Object.entries(r.per_conto || {}).forEach(([cid, v]) => { per_conto[cid] = (per_conto[cid] || 0) + (v || 0); });
+        });
+        return { ...t, per_conto };
+    })();
+
     return (
         <div className="mt-4 space-y-4" data-testid="brogliaccio-tab">
             {/* Toolbar */}
@@ -178,6 +200,19 @@ export default function BrogliaccioTab({ refreshKey }) {
                         />
                     </div>
                     <Button variant="outline" size="sm" onClick={() => setData(today())} data-testid="brogliaccio-oggi">Oggi</Button>
+
+                    <div>
+                        <Label className="text-[10px] text-slate-500">Collaboratore</Label>
+                        <Select value={collab} onValueChange={setCollab}>
+                            <SelectTrigger className="w-52 h-9" data-testid="brogliaccio-collab"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutti i collaboratori</SelectItem>
+                                {collabOptions.map(([id, nome]) => (
+                                    <SelectItem key={id} value={id}>{nome}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
 
                     {b.chiusa && (
                         <div className="bg-emerald-50 border border-emerald-300 px-3 py-1.5 rounded-md text-xs text-emerald-800 inline-flex items-center gap-1.5" data-testid="brogliaccio-chiusa">
@@ -275,6 +310,11 @@ export default function BrogliaccioTab({ refreshKey }) {
                         <AlertCircle size={32} className="mx-auto text-slate-300 mb-2" />
                         Nessun movimento registrato per il {data}
                     </div>
+                ) : righeView.length === 0 ? (
+                    <div className="p-10 text-center text-sm text-slate-500">
+                        <AlertCircle size={32} className="mx-auto text-slate-300 mb-2" />
+                        Nessun movimento per il collaboratore selezionato in questa giornata
+                    </div>
                 ) : (
                     <table className="tbl w-full text-xs min-w-[1200px] border-separate border-spacing-0" data-testid="brogliaccio-tbl">
                         <thead>
@@ -300,7 +340,7 @@ export default function BrogliaccioTab({ refreshKey }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {b.righe.map((r, idx) => {
+                            {righeView.map((r, idx) => {
                                 const bgRow = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60";
                                 const colorFor = (key, v) => {
                                     if (key === "totale") return v >= 0 ? "text-emerald-700" : "text-rose-700";
@@ -386,22 +426,22 @@ export default function BrogliaccioTab({ refreshKey }) {
                                 </tr>
                             );})}
                             {/* TOTALE GIORNATA */}
-                            {b.totali_giornata && (
+                            {totaliView && (
                                 <tr className="bg-amber-100 font-bold border-t-2 border-slate-900">
-                                    <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">TOTALE GIORNATA</td>
+                                    <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">{collab === "all" ? "TOTALE GIORNATA" : "TOTALE (filtrato)"}</td>
                                     {visibleFixed.map((col, ci) => {
                                         const stickyCls = ci === 0
                                             ? "sticky left-[220px] z-10 bg-amber-100 border-r-4 border-amber-500"
                                             : "border-r-2 border-slate-400";
                                         return (
                                             <td key={col.key} className={`num text-right px-2 ${stickyCls} border-t-2 border-t-slate-900`}>
-                                                {fmt(b.totali_giornata[col.key], true)}
+                                                {fmt(totaliView[col.key], true)}
                                             </td>
                                         );
                                     })}
                                     {visibleConti.map((c) => (
                                         <td key={c.id} className="num text-right px-2 border-r-2 border-slate-400 border-t-2 border-t-slate-900">
-                                            {fmt(b.totali_giornata.per_conto?.[c.id], true)}
+                                            {fmt(totaliView.per_conto?.[c.id], true)}
                                         </td>
                                     ))}
                                     <td className="border-t-2 border-t-slate-900"></td>

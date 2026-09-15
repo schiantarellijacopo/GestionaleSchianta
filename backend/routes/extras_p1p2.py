@@ -106,7 +106,14 @@ async def documenti_mancanti(
     anagrafiche = await db.anagrafiche.find(ana_filter, {
         "_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
         "cellulare": 1, "email": 1,
+        "documenti.carta_identita": 1, "documenti.patente": 1,
+        "documenti.passaporto": 1, "documenti.documento_identita": 1,
     }).to_list(20000)
+
+    def _ha_ci_embedded(a: dict) -> bool:
+        docs = a.get("documenti") or {}
+        return any(docs.get(k) for k in ("carta_identita", "patente", "passaporto", "documento_identita"))
+
     if anagrafiche:
         a_ids = [a["id"] for a in anagrafiche]
         a_con_ci = set()
@@ -123,7 +130,9 @@ async def documenti_mancanti(
             {"_id": 0, "entita_id": 1},
         ):
             a_con_ci.add(a["entita_id"])
-        anagrafiche_senza_ci_all = [a for a in anagrafiche if a["id"] not in a_con_ci]
+        anagrafiche_senza_ci_all = [
+            a for a in anagrafiche if a["id"] not in a_con_ci and not _ha_ci_embedded(a)
+        ]
     else:
         anagrafiche_senza_ci_all = []
     tot_anagrafiche = len(anagrafiche_senza_ci_all)
