@@ -629,6 +629,7 @@ MovimentoCategoria = Literal[
     "rimborso_cliente", "spese_amministrative", "anticipo", "giroconto",
     "sconto_cliente", "prelievo_soci", "compenso_amministratore", "imposte", "stipendi",
     "copertura_titolo", "incasso_coperto",
+    "saldo_iniziale_compagnia",
     "altro",
 ]
 

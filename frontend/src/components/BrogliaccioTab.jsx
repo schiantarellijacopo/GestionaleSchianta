@@ -63,8 +63,10 @@ export default function BrogliaccioTab({ refreshKey }) {
     const [storicoOpen, setStoricoOpen] = useState(false);
     const [storico, setStorico] = useState([]);
     const [editMov, setEditMov] = useState(null);  // movimento aperto in modifica
+    const [saldoOpen, setSaldoOpen] = useState(false);
     const [contiCassa, setContiCassa] = useState([]);
     const [collab, setCollab] = useState("all");
+    const [compagnia, setCompagnia] = useState("all");
     // Visibilità colonne (persistente localStorage)
     const [visibleCols, setVisibleCols] = useState(() =>
         loadVisible(LS_KEY_COLS,
@@ -165,17 +167,23 @@ export default function BrogliaccioTab({ refreshKey }) {
     const visibleFixed = FIXED_COLS.filter((c) => isColVisible(c.key));
     const visibleConti = conti.filter((c) => isBankVisible(c.id));
 
-    // Filtro collaboratori (client-side sul brogliaccio del giorno)
+    // Filtro collaboratori + compagnia (client-side sul brogliaccio del giorno)
     const collabOptions = Array.from(
         new Map((b.righe || [])
             .filter((r) => r.collaboratore_id)
             .map((r) => [r.collaboratore_id, r.collaboratore || "—"])).entries()
     ).sort((a, b2) => (a[1] || "").localeCompare(b2[1] || ""));
-    const righeView = collab === "all"
-        ? (b.righe || [])
-        : (b.righe || []).filter((r) => r.collaboratore_id === collab);
+    const compagniaOptions = Array.from(
+        new Map((b.righe || [])
+            .filter((r) => r.compagnia_id)
+            .map((r) => [r.compagnia_id, r.compagnia || "—"])).entries()
+    ).sort((a, b2) => (a[1] || "").localeCompare(b2[1] || ""));
+    const filtroAttivo = collab !== "all" || compagnia !== "all";
+    const righeView = (b.righe || []).filter((r) =>
+        (collab === "all" || r.collaboratore_id === collab) &&
+        (compagnia === "all" || r.compagnia_id === compagnia));
     // Totale giornata coerente con il filtro
-    const totaliView = collab === "all" ? b.totali_giornata : (() => {
+    const totaliView = !filtroAttivo ? b.totali_giornata : (() => {
         const keys = ["totale", "provv", "saldo", "crediti", "spese", "sconti", "rimesse", "ritenuta", "direzione", "rappel", "pnc"];
         const t = Object.fromEntries(keys.map((k) => [k, 0]));
         const per_conto = {};
@@ -214,6 +222,19 @@ export default function BrogliaccioTab({ refreshKey }) {
                         </Select>
                     </div>
 
+                    <div>
+                        <Label className="text-[10px] text-slate-500">Compagnia</Label>
+                        <Select value={compagnia} onValueChange={setCompagnia}>
+                            <SelectTrigger className="w-52 h-9" data-testid="brogliaccio-compagnia"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tutte le compagnie</SelectItem>
+                                {compagniaOptions.map(([id, nome]) => (
+                                    <SelectItem key={id} value={id}>{nome}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     {b.chiusa && (
                         <div className="bg-emerald-50 border border-emerald-300 px-3 py-1.5 rounded-md text-xs text-emerald-800 inline-flex items-center gap-1.5" data-testid="brogliaccio-chiusa">
                             <Lock size={13} />
@@ -228,6 +249,10 @@ export default function BrogliaccioTab({ refreshKey }) {
                     )}
 
                     <div className="ml-auto flex gap-2">
+                        <Button variant="outline" onClick={() => setSaldoOpen(true)}
+                            className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="brogliaccio-saldo-cassa">
+                            Saldo Cassa Compagnie
+                        </Button>
                         <Button variant="outline" onClick={stampa} data-testid="brogliaccio-stampa">
                             <Printer size={14} className="mr-1" /> Stampa PDF
                         </Button>
@@ -313,7 +338,7 @@ export default function BrogliaccioTab({ refreshKey }) {
                 ) : righeView.length === 0 ? (
                     <div className="p-10 text-center text-sm text-slate-500">
                         <AlertCircle size={32} className="mx-auto text-slate-300 mb-2" />
-                        Nessun movimento per il collaboratore selezionato in questa giornata
+                        Nessun movimento per i filtri selezionati in questa giornata
                     </div>
                 ) : (
                     <table className="tbl w-full text-xs min-w-[1200px] border-separate border-spacing-0" data-testid="brogliaccio-tbl">
@@ -428,7 +453,7 @@ export default function BrogliaccioTab({ refreshKey }) {
                             {/* TOTALE GIORNATA */}
                             {totaliView && (
                                 <tr className="bg-amber-100 font-bold border-t-2 border-slate-900">
-                                    <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">{collab === "all" ? "TOTALE GIORNATA" : "TOTALE (filtrato)"}</td>
+                                    <td className="px-2 py-2 sticky left-0 z-10 bg-amber-100 border-r-2 border-slate-700 border-t-2 border-t-slate-900">{filtroAttivo ? "TOTALE (filtrato)" : "TOTALE GIORNATA"}</td>
                                     {visibleFixed.map((col, ci) => {
                                         const stickyCls = ci === 0
                                             ? "sticky left-[220px] z-10 bg-amber-100 border-r-4 border-amber-500"

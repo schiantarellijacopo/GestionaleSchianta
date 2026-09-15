@@ -254,10 +254,6 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         </Select>
                     </div>
                     <Button onClick={load} data-testid="ec-applica">Applica</Button>
-                    <Button variant="outline" onClick={() => setVoceOpen(true)}
-                        className="border-sky-300 text-sky-700 hover:bg-sky-50" data-testid="ec-add-voce">
-                        + Voce manuale
-                    </Button>
                     {data && (
                         <div className="ml-auto flex gap-6 text-sm">
                             <div><span className="text-slate-500">Dare:</span> <span className="font-bold num">{fmtEur(data.totale_dare)}</span></div>
