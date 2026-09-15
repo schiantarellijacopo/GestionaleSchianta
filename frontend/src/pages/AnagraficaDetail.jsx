@@ -18,6 +18,7 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import RowActions, { PrintButton } from "@/components/RowActions";
+import { FirmaButton } from "@/components/DocumentiSezioneSplit";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
 import {
@@ -1726,7 +1727,10 @@ function AllegatiCartella({ folder, files, onDelete }) {
                                     {fmtDate(a.created_at)} · {(a.size / 1024).toFixed(0)} KB · {a.content_type}
                                 </div>
                             </div>
-                            <RowActions onDelete={() => onDelete(a.id)} canEdit={false} label="allegato" />
+                            <div className="flex items-center gap-1.5">
+                                <FirmaButton allegato={a} />
+                                <RowActions onDelete={() => onDelete(a.id)} canEdit={false} label="allegato" />
+                            </div>
                         </li>
                     ))}
                 </ul>

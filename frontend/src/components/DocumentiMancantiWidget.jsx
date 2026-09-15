@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { FileWarning, FileText, IdCard, Car, X, ChevronRight, AlertTriangle, Printer, FileSpreadsheet, Paperclip, StickyNote, CheckCircle2, Loader2 } from "lucide-react";
+import { FileWarning, FileText, IdCard, Car, X, ChevronRight, AlertTriangle, Printer, FileSpreadsheet, Paperclip, StickyNote, CheckCircle2, Loader2, PenLine } from "lucide-react";
 import { toast } from "sonner";
 
 export default function DocumentiMancantiWidget() {
@@ -43,7 +43,7 @@ export default function DocumentiMancantiWidget() {
     useEffect(reload, [collabId]);
 
     if (!data || !data.totali) return null;
-    const { polizze, veicoli, anagrafiche, sostituzioni_veicolo = 0 } = data.totali;
+    const { polizze, veicoli, anagrafiche, sostituzioni_veicolo = 0, firme_in_attesa = 0 } = data.totali;
     const totale = polizze + veicoli + anagrafiche + sostituzioni_veicolo;
     const collNome = collaboratori.find((c) => c.id === collabId)?.name;
 
@@ -63,7 +63,7 @@ export default function DocumentiMancantiWidget() {
                     ))}
                 </select>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                 <CardMissing label="Polizze senza PDF" count={polizze} icon={FileText} color="rose"
                     onClick={() => polizze > 0 && setOpen("polizze")} testid="missing-polizze-card" />
                 <CardMissing label="Veicoli senza libretto" count={veicoli} icon={Car} color="amber"
@@ -72,6 +72,8 @@ export default function DocumentiMancantiWidget() {
                     onClick={() => sostituzioni_veicolo > 0 && setOpen("sostituzioni")} testid="missing-sostituzioni-card" />
                 <CardMissing label="Anagrafiche senza C.I." count={anagrafiche} icon={IdCard} color="orange"
                     onClick={() => anagrafiche > 0 && setOpen("anagrafiche")} testid="missing-anagrafiche-card" />
+                <CardMissing label="Firme in attesa" count={firme_in_attesa} icon={PenLine} color="violet"
+                    onClick={() => firme_in_attesa > 0 && setOpen("firme")} testid="missing-firme-card" />
             </div>
             {open && (
                 <ListaMancantiDialog
@@ -90,6 +92,7 @@ const COLORS = {
     rose: { bd: "border-rose-300", bg: "bg-rose-50", tx: "text-rose-700", ic: "text-rose-500" },
     amber: { bd: "border-amber-300", bg: "bg-amber-50", tx: "text-amber-700", ic: "text-amber-500" },
     orange: { bd: "border-orange-300", bg: "bg-orange-50", tx: "text-orange-700", ic: "text-orange-500" },
+    violet: { bd: "border-violet-300", bg: "bg-violet-50", tx: "text-violet-700", ic: "text-violet-500" },
 };
 
 function CardMissing({ label, count, icon: Icon, color, onClick, testid }) {
@@ -303,9 +306,27 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
                 uploading={uploadingId === s.id}
             />
         );
+    } else if (tipo === "firme") {
+        items = data.firme_in_attesa || [];
+        title = "Documenti inviati per firma — in attesa";
+        colonneCSV = [
+            ["Documento", (f) => f.nome_file || ""],
+            ["Firmatario", (f) => f.firmatario_nome || ""],
+            ["Stato", (f) => f.stato || ""],
+            ["Inviato il", (f) => (f.created_at || "").slice(0, 10)],
+        ];
+        renderRow = (f) => (
+            <div key={f.id} className="flex items-center gap-2 p-2 border-b border-slate-100 text-sm" data-testid={`firma-row-${f.id}`}>
+                <PenLine size={14} className="text-violet-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{f.nome_file}</div>
+                    <div className="text-[11px] text-slate-500">{f.firmatario_nome || "—"} · inviato {(f.created_at || "").slice(0, 10)}</div>
+                </div>
+                <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">{f.stato}</span>
+                {f.signing_url && <a href={f.signing_url} target="_blank" rel="noreferrer" className="text-[11px] text-sky-700 underline">link</a>}
+            </div>
+        );
     } else {
-        items = data.anagrafiche_senza_ci || [];
-        title = "Anagrafiche senza carta d'identità/patente";
         colonneCSV = [
             ["Cognome/Ragione", (a) => a.cognome || a.ragione_sociale || ""],
             ["Nome", (a) => a.nome || ""],

@@ -205,10 +205,13 @@ async def stato_richiesta(req_id: str, user=Depends(current_user)) -> dict:
 
 
 async def finalizza_pending() -> int:
-    """Scheduler: controlla le firme non ancora finalizzate e salva quelle completate."""
+    """Scheduler: finalizza le firme completate e invia solleciti WhatsApp dopo 48h."""
+    import datetime as _dt
     n = 0
+    now = _dt.datetime.now(_dt.timezone.utc)
     try:
         from database import raw_db
+        from notification_helpers import send_whatsapp_message
         cur = raw_db.firma_requests.find(
             {"provider": "openapi_esignature", "allegato_firmato_id": None,
              "stato": {"$nin": ["ERROR"]}},
@@ -218,12 +221,34 @@ async def finalizza_pending() -> int:
             if not rec.get("signature_id"):
                 continue
             det = await esvc.get_detail(rec["signature_id"])
+            state = (det.get("state") or "").upper()
             if esvc.is_done(det.get("state")):
                 if await _finalizza(rec):
                     n += 1
-            elif (det.get("state") or "").upper() == "ERROR":
+                continue
+            if state == "ERROR":
                 await raw_db.firma_requests.update_one(
                     {"id": rec["id"]}, {"$set": {"stato": "ERROR", "updated_at": _now_iso()}})
+                continue
+            # Sollecito WhatsApp dopo 48h se non ancora firmato e non già sollecitato
+            if not rec.get("reminder_sent") and rec.get("firmatario_mobile") and rec.get("signing_url"):
+                try:
+                    created = _dt.datetime.fromisoformat(str(rec.get("created_at")).replace("Z", "+00:00"))
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=_dt.timezone.utc)
+                except Exception:
+                    created = now
+                if (now - created).total_seconds() >= 48 * 3600:
+                    testo = (
+                        f"Promemoria: il documento \"{rec.get('nome_file')}\" è ancora in attesa della sua firma.\n"
+                        f"🔗 Firma qui: {rec['signing_url']}\n"
+                        f"Riceverà un codice OTP via SMS per completare."
+                    )
+                    await send_whatsapp_message(rec["firmatario_mobile"], testo)
+                    await raw_db.firma_requests.update_one(
+                        {"id": rec["id"]}, {"$set": {"reminder_sent": True, "reminder_at": _now_iso()}})
+            await raw_db.firma_requests.update_one(
+                {"id": rec["id"]}, {"$set": {"stato": det.get("state") or rec.get("stato"), "updated_at": _now_iso()}})
     except Exception as e:
         logger.warning("finalizza_pending errore: %s", e)
     return n

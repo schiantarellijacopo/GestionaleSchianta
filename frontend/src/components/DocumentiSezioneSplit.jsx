@@ -27,6 +27,14 @@ export default function DocumentiSezioneSplit({
 }) {
     const [items, setItems] = useState(null);
     const [uploading, setUploading] = useState(null);
+    const [firme, setFirme] = useState([]);
+
+    const loadFirme = async () => {
+        try {
+            const r = await api.get("/esignature/richieste", { params: { entita_tipo, entita_id } });
+            setFirme(r.data?.items || []);
+        } catch { setFirme([]); }
+    };
 
     const load = async () => {
         try {
@@ -41,8 +49,11 @@ export default function DocumentiSezioneSplit({
         } catch (e) {
             setItems([]);
         }
+        loadFirme();
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [entita_tipo, entita_id, applicazione_matricola_id]);
+    const firmeByOrig = Object.fromEntries(firme.map((f) => [f.allegato_origine_id, f]));
+    const firmatiIds = new Set(firme.filter((f) => f.allegato_firmato_id).map((f) => f.allegato_firmato_id));
 
     const upload = async (fileOrList, { visibile, categoria }) => {
         const files = fileOrList && fileOrList.length !== undefined && !(fileOrList instanceof File)
@@ -110,6 +121,9 @@ export default function DocumentiSezioneSplit({
                             onUpload={(files) => upload(files, { visibile: c.default_visibile ?? false, categoria: c.key })}
                             onToggle={toggleVisibilita}
                             onDelete={elimina}
+                            firmeByOrig={firmeByOrig}
+                            firmatiIds={firmatiIds}
+                            onFirmaChange={load}
                         />
                     ))}
                 </div>
@@ -155,6 +169,9 @@ export default function DocumentiSezioneSplit({
                     onDelete={elimina}
                     uploading={uploading === "visibile"}
                     testid="docs-box-visibili"
+                    firmeByOrig={firmeByOrig}
+                    firmatiIds={firmatiIds}
+                    onFirmaChange={load}
                 />
                 {/* === INTERNI === */}
                 <DocBox
@@ -168,6 +185,9 @@ export default function DocumentiSezioneSplit({
                     onDelete={elimina}
                     uploading={uploading === "interno"}
                     testid="docs-box-interni"
+                    firmeByOrig={firmeByOrig}
+                    firmatiIds={firmatiIds}
+                    onFirmaChange={load}
                 />
             </div>
         </div>
@@ -179,7 +199,7 @@ const COL = {
     slate: { ring: "border-slate-300", bg: "bg-slate-50/30", header: "text-slate-800 bg-slate-100", ic: "text-slate-600" },
 };
 
-function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle, onDelete, uploading, testid }) {
+function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle, onDelete, uploading, testid, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
     const c = COL[color];
     return (
         <Card className={`overflow-hidden border-2 ${c.ring}`} data-testid={testid}>
@@ -206,10 +226,12 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
                                     {a.descrizione && <span className="italic truncate">{a.descrizione}</span>}
                                     <span>· {(a.size / 1024).toFixed(0)} KB</span>
                                     {a.created_at && <span>· {a.created_at.slice(0, 10)}</span>}
+                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} />
                                 </div>
                             </div>
                             {canEdit && (
                                 <div className="flex items-center gap-1.5">
+                                    <FirmaButton allegato={a} stato={firmeByOrig[a.id]?.stato} onDone={onFirmaChange} />
                                     <label className="flex items-center gap-1 text-[10px] text-slate-500 cursor-pointer" title="Toggle visibilità">
                                         <Switch checked={!!a.visibile_cliente} onCheckedChange={() => onToggle(a)}
                                             className="scale-75" data-testid={`doc-visibile-${a.id}`} />
@@ -236,7 +258,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
     );
 }
 
-function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onToggle, onDelete }) {
+function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
     const [open, setOpen] = useState(true);
     const c = categoria;
     return (
@@ -270,11 +292,12 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                                         : <span className="bg-slate-100 text-slate-500 px-1 rounded">interno</span>}
                                     <span>· {(a.size / 1024).toFixed(0)} KB</span>
                                     {a.created_at && <span>· {a.created_at.slice(0, 10)}</span>}
+                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} />
                                 </div>
                             </div>
                             {canEdit && (
                                 <div className="flex items-center gap-1.5">
-                                    <FirmaButton allegato={a} />
+                                    <FirmaButton allegato={a} stato={firmeByOrig[a.id]?.stato} onDone={onFirmaChange} />
                                     <Switch checked={!!a.visibile_cliente} onCheckedChange={() => onToggle(a)}
                                         className="scale-75" data-testid={`doc-visibile-${a.id}`} />
                                     <button onClick={() => onDelete(a.id)} className="text-rose-500 hover:bg-rose-50 p-1 rounded opacity-0 group-hover:opacity-100"
@@ -320,13 +343,25 @@ function isPdf(a) {
     return (a.content_type || "").toLowerCase().includes("pdf") || (a.nome_file || "").toLowerCase().endsWith(".pdf");
 }
 
-function FirmaButton({ allegato }) {
+const STATO_FIRMA = {
+    DONE: { label: "Firmato", cls: "bg-emerald-100 text-emerald-700" },
+    ERROR: { label: "Errore firma", cls: "bg-rose-100 text-rose-700" },
+};
+function FirmaBadge({ rec, isFirmato }) {
+    if (isFirmato) return <span className="bg-emerald-600 text-white px-1.5 rounded font-medium">✓ Documento firmato</span>;
+    if (!rec) return null;
+    const s = STATO_FIRMA[(rec.stato || "").toUpperCase()] || { label: "In firma", cls: "bg-amber-100 text-amber-700" };
+    return <span className={`px-1.5 rounded font-medium ${s.cls}`} data-testid={`firma-badge-${rec.allegato_origine_id}`}>{s.label}</span>;
+}
+
+export function FirmaButton({ allegato, stato, onDone }) {
     const [open, setOpen] = useState(false);
     const [sending, setSending] = useState(false);
     const [signer, setSigner] = useState({ name: "", surname: "", email: "", mobile: "" });
     const [req, setReq] = useState(null);
     const [checking, setChecking] = useState(false);
     if (!isPdf(allegato)) return null;
+    const giaFirmato = (stato || "").toUpperCase() === "DONE";
 
     const invia = async () => {
         setSending(true);
@@ -336,6 +371,7 @@ function FirmaButton({ allegato }) {
             const r = await api.post("/esignature/invia", payload);
             setReq(r.data);
             toast.success("Richiesta di firma inviata (link via WhatsApp/Email)");
+            if (onDone) onDone();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore invio firma");
         } finally {
@@ -351,7 +387,7 @@ function FirmaButton({ allegato }) {
             if (r.data.allegato_firmato_id) {
                 toast.success("Documento firmato ricevuto e salvato in questa sezione!");
                 setOpen(false);
-                setTimeout(() => window.location.reload(), 800);
+                if (onDone) onDone(); else setTimeout(() => window.location.reload(), 800);
             } else {
                 toast(`Stato firma: ${r.data.stato}`);
             }
@@ -364,10 +400,12 @@ function FirmaButton({ allegato }) {
 
     return (
         <>
-            <button onClick={() => setOpen(true)} title="Invia per firma (FEA · OTP SMS)"
-                className="text-violet-600 hover:bg-violet-50 p-1 rounded" data-testid={`doc-firma-${allegato.id}`}>
-                <PenTool size={12} />
-            </button>
+            {!giaFirmato && (
+                <button onClick={() => setOpen(true)} title="Invia per firma (FEA · OTP SMS)"
+                    className="text-violet-600 hover:bg-violet-50 p-1 rounded" data-testid={`doc-firma-${allegato.id}`}>
+                    <PenTool size={12} />
+                </button>
+            )}
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="max-w-md" data-testid="firma-dialog">
                     <DialogHeader>

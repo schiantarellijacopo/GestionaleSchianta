@@ -190,16 +190,26 @@ async def documenti_mancanti(
     for p in polizze_senza + veicoli_senza + sostituzioni_senza_atto_list:
         p["contraente_nome"] = ana_map.get(p.get("contraente_id"), "—")
 
+    # Firme in attesa (documenti inviati per firma ma non ancora firmati)
+    firme_in_attesa = await db.firma_requests.find(
+        {"provider": "openapi_esignature", "allegato_firmato_id": None,
+         "stato": {"$nin": ["ERROR"]}},
+        {"_id": 0, "id": 1, "nome_file": 1, "firmatario_nome": 1, "stato": 1,
+         "entita_tipo": 1, "entita_id": 1, "created_at": 1, "signing_url": 1},
+    ).sort("created_at", -1).to_list(500)
+
     return {
         "polizze_senza_allegato": polizze_senza,
         "veicoli_senza_libretto": veicoli_senza,
         "anagrafiche_senza_ci": anagrafiche_senza_ci,
         "sostituzioni_senza_atto": sostituzioni_senza_atto_list,
+        "firme_in_attesa": firme_in_attesa,
         "totali": {
             "polizze": tot_polizze,
             "veicoli": tot_veicoli,
             "anagrafiche": tot_anagrafiche,
             "sostituzioni_veicolo": tot_sostituzioni,
+            "firme_in_attesa": len(firme_in_attesa),
         },
     }
 
