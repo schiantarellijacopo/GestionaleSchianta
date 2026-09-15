@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtEur, fmtDate } from "@/lib/api";
+import { api, fmtEur, fmtDate, API_BASE } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
-import { Mail, Calculator, Receipt, ExternalLink, AlertCircle, Download, CheckCircle2 } from "lucide-react";
+import { Mail, Calculator, Receipt, ExternalLink, AlertCircle, Download, CheckCircle2, Paperclip, Trash2, Upload, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 const STATI = [
@@ -51,6 +51,7 @@ export default function RegolazionePremio() {
     const [calcolaRow, setCalcolaRow] = useState(null);
     const [letteraRow, setLetteraRow] = useState(null);
     const [titoloRow, setTitoloRow] = useState(null);
+    const [docRow, setDocRow] = useState(null);
 
     const load = useCallback(() => {
         const params = filtro ? { stato: filtro } : {};
@@ -150,6 +151,10 @@ export default function RegolazionePremio() {
                                                 onClick={() => setTitoloRow(r)} data-testid={`reg-titolo-${r.polizza_id}`}>
                                                 <Receipt size={14} />
                                             </Button>
+                                            <Button size="sm" variant="ghost" className="h-7 px-2 text-amber-700 hover:bg-amber-50" title="Allega documenti regolazione"
+                                                onClick={() => setDocRow(r)} data-testid={`reg-doc-${r.polizza_id}`}>
+                                                <Paperclip size={14} />
+                                            </Button>
                                             <Link to={`/polizze/${r.polizza_id}`} className="h-7 px-2 flex items-center text-slate-400 hover:text-slate-700" title="Apri polizza">
                                                 <ExternalLink size={14} />
                                             </Link>
@@ -184,7 +189,98 @@ export default function RegolazionePremio() {
             {titoloRow && (
                 <TitoloDialog row={titoloRow} onClose={() => setTitoloRow(null)} onDone={() => { setTitoloRow(null); load(); }} />
             )}
+
+            {docRow && (
+                <DocumentiRegolazioneDialog row={docRow} onClose={() => setDocRow(null)} />
+            )}
         </div>
+    );
+}
+
+function DocumentiRegolazioneDialog({ row, onClose }) {
+    const [items, setItems] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [visibile, setVisibile] = useState(false);
+
+    const load = useCallback(async () => {
+        try {
+            const r = await api.get("/allegati", { params: { entita_tipo: "polizza", entita_id: row.polizza_id } });
+            setItems((r.data || []).filter((a) => a.categoria === "regolazione"));
+        } catch { setItems([]); }
+    }, [row.polizza_id]);
+
+    useEffect(() => { load(); }, [load]);
+
+    const upload = async (files) => {
+        const list = files ? Array.from(files) : [];
+        if (!list.length) return;
+        setUploading(true);
+        try {
+            for (const file of list) {
+                const fd = new FormData();
+                fd.append("file", file);
+                const params = new URLSearchParams({
+                    entita_tipo: "polizza", entita_id: row.polizza_id,
+                    categoria: "regolazione", visibile_cliente: visibile ? "true" : "false",
+                });
+                await api.post(`/allegati?${params.toString()}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            }
+            toast.success(list.length > 1 ? `${list.length} documenti caricati` : "Documento caricato");
+            await load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore upload"); }
+        finally { setUploading(false); }
+    };
+
+    const rimuovi = async (aid) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try { await api.delete(`/allegati/${aid}`); toast.success("Eliminato"); await load(); }
+        catch { toast.error("Errore"); }
+    };
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid="reg-doc-dialog">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2"><Paperclip className="text-amber-600" size={18} /> Documenti regolazione · {row.numero_polizza}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                    <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+                        I documenti vengono salvati sulla polizza nella categoria <b>Regolazione</b> e sono
+                        consultabili nel quadrotto "Regolazione" della scheda Documenti.
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                        <input type="checkbox" checked={visibile} onChange={(e) => setVisibile(e.target.checked)} data-testid="reg-doc-visibile" />
+                        Rendi visibile al cliente nel portale
+                    </label>
+                    <label className="block w-full p-4 text-center border-2 border-dashed border-amber-300 bg-amber-50 rounded cursor-pointer hover:bg-amber-100 text-xs text-amber-800"
+                        data-testid="reg-doc-upload">
+                        {uploading ? <><Loader2 size={14} className="inline animate-spin mr-1" /> Caricamento…</> : <><Upload size={14} className="inline mr-1" /> Carica documento (PDF, immagini)</>}
+                        <input type="file" multiple hidden accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx,.xls,.xlsx"
+                            onChange={(e) => upload(e.target.files)} />
+                    </label>
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                        {items === null ? (
+                            <div className="text-center text-xs text-slate-400 py-4"><Loader2 size={14} className="inline animate-spin mr-1" /> Caricamento…</div>
+                        ) : items.length === 0 ? (
+                            <div className="text-center text-xs text-slate-400 italic py-4">Nessun documento di regolazione caricato</div>
+                        ) : items.map((a) => (
+                            <div key={a.id} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200" data-testid={`reg-doc-row-${a.id}`}>
+                                <FileText size={14} className="text-sky-600 shrink-0" />
+                                <a href={`${API_BASE}/allegati/${a.id}/download`} target="_blank" rel="noreferrer"
+                                    className="flex-1 min-w-0 text-sm text-sky-700 hover:underline truncate">{a.nome_file}</a>
+                                {a.visibile_cliente && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded">cliente</span>}
+                                <button onClick={() => rimuovi(a.id)} className="text-rose-500 hover:text-rose-700" data-testid={`reg-doc-del-${a.id}`}>
+                                    <Trash2 size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Chiudi</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 

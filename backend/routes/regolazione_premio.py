@@ -55,12 +55,33 @@ def _data_invio_prevista(scadenza: Optional[str], giorni: int) -> Optional[str]:
         return None
 
 
+def _add_one_year(iso_date: Optional[str]) -> str:
+    """Ritorna la data + 1 anno (ISO). Se input non valido ritorna data lontana
+    (così una regolazione senza riferimento valido non si riapre mai da sola)."""
+    try:
+        d = date.fromisoformat((iso_date or "")[:10])
+    except (TypeError, ValueError):
+        return "9999-12-31"
+    try:
+        return d.replace(year=d.year + 1).isoformat()
+    except ValueError:  # 29 febbraio
+        return d.replace(year=d.year + 1, day=28).isoformat()
+
+
+def _titolo_saldato(tit: Optional[dict]) -> bool:
+    if not tit:
+        return False
+    return (tit.get("stato") in ("incassato", "coperto", "abbuonato")
+            or bool(tit.get("titolo_coperto")))
+
+
 # ============================================================================
 # LISTA + STATS
 # ============================================================================
 @router.get("/regolazione-premio")
 async def list_regolazioni(
     stato: Optional[str] = None,
+    includi_chiuse: bool = False,
     user=Depends(current_user),
 ) -> list[dict]:
     """Elenco polizze soggette a regolazione premio, arricchite con
@@ -95,21 +116,52 @@ async def list_regolazioni(
     for p in polizze:
         a = anags.get(p.get("contraente_id"), {})
         st = p.get("regolazione_stato") or "da_richiedere"
-        # Chiusura automatica: se il titolo di regolazione è saldato
-        # (incassato/coperto) l'attività è di fatto chiusa. Si auto-corregge:
-        # se il titolo torna "da incassare" la regolazione riapre a titolo_generato.
+        pid = p["id"]
         tit = titoli.get(p.get("regolazione_titolo_id"))
-        if tit is not None:
-            saldato = (tit.get("stato") in ("incassato", "coperto", "abbuonato")
-                       or bool(tit.get("titolo_coperto")))
-            if saldato and st == "titolo_generato":
-                st = "chiusa"
-                await db.polizze.update_one({"id": p["id"]}, {"$set": {
-                    "regolazione_stato": "chiusa", "updated_at": _now_iso()}})
-            elif not saldato and st == "chiusa":
+        if st == "chiusa":
+            # 1) Se il titolo collegato torna NON saldato (es. "rimetti arretrato")
+            #    riapri lo stesso ciclo a titolo_generato.
+            if tit is not None and not _titolo_saldato(tit):
                 st = "titolo_generato"
-                await db.polizze.update_one({"id": p["id"]}, {"$set": {
-                    "regolazione_stato": "titolo_generato", "updated_at": _now_iso()}})
+                await db.polizze.update_one({"id": pid}, {
+                    "$set": {"regolazione_stato": "titolo_generato", "updated_at": _now_iso()},
+                    "$unset": {"regolazione_chiusa_scadenza_rif": "", "regolazione_chiusa_il": ""},
+                })
+            else:
+                # 2) Riproposizione annuale: superata la scadenza dell'anno
+                #    successivo, riapri il ciclo azzerando il workflow ma
+                #    mantenendo base/tasso di polizza e lo storico titolo.
+                rif = p.get("regolazione_chiusa_scadenza_rif")
+                if rif and today >= _add_one_year(rif):
+                    st = "da_richiedere"
+                    await db.polizze.update_one({"id": pid}, {
+                        "$set": {"regolazione_stato": "da_richiedere", "updated_at": _now_iso()},
+                        "$unset": {
+                            "regolazione_titolo_id": "", "regolazione_dovuto": "",
+                            "regolazione_ultimo_calcolo": "",
+                            "regolazione_lettera_inviata_data": "",
+                            "regolazione_base_dichiarata_cliente": "",
+                            "regolazione_dato_cliente_data": "",
+                            "regolazione_chiusa_scadenza_rif": "",
+                            "regolazione_chiusa_il": "",
+                        },
+                    })
+                    await db.regolazione_storico.insert_one({
+                        "id": str(uuid.uuid4()), "polizza_id": pid,
+                        "evento": "riproposta_nuovo_anno", "data": today,
+                        "operatore_id": None, "created_at": _now_iso(),
+                    })
+                    p = {**p, "regolazione_titolo_id": None, "regolazione_dovuto": 0,
+                         "regolazione_ultimo_calcolo": None,
+                         "regolazione_lettera_inviata_data": None}
+        elif st == "titolo_generato" and _titolo_saldato(tit):
+            # Chiusura automatica: titolo di regolazione saldato → attività chiusa.
+            st = "chiusa"
+            await db.polizze.update_one({"id": pid}, {"$set": {
+                "regolazione_stato": "chiusa",
+                "regolazione_chiusa_scadenza_rif": p.get("scadenza"),
+                "regolazione_chiusa_il": today,
+                "updated_at": _now_iso()}})
         giorni = p.get("regolazione_giorni_invio", 30)
         data_invio = _data_invio_prevista(p.get("scadenza"), giorni)
         da_inviare = bool(data_invio and today >= data_invio and st in ("da_richiedere",))
@@ -140,10 +192,16 @@ async def list_regolazioni(
             ),
             "lettera_inviata_data": p.get("regolazione_lettera_inviata_data"),
             "titolo_id": p.get("regolazione_titolo_id"),
+            "chiusa_il": p.get("regolazione_chiusa_il"),
             "da_inviare": da_inviare,
             "note": p.get("regolazione_note"),
         }
-        if stato and st != stato:
+        if stato:
+            if st != stato:
+                continue
+        elif st == "chiusa" and not includi_chiuse:
+            # "Tutte" = solo attività in lavorazione; le chiuse restano
+            # consultabili solo col filtro esplicito "Chiuse".
             continue
         out.append(row)
 
@@ -154,7 +212,7 @@ async def list_regolazioni(
 
 @router.get("/regolazione-premio/stats")
 async def stats_regolazioni(user=Depends(current_user)) -> dict:
-    rows = await list_regolazioni(user=user)
+    rows = await list_regolazioni(includi_chiuse=True, user=user)
     stati = {}
     for r in rows:
         stati[r["stato"]] = stati.get(r["stato"], 0) + 1
@@ -162,7 +220,7 @@ async def stats_regolazioni(user=Depends(current_user)) -> dict:
         "totale": len(rows),
         "da_inviare": sum(1 for r in rows if r["da_inviare"]),
         "per_stato": stati,
-        "dovuto_totale": round(sum(r["dovuto"] or 0 for r in rows), 2),
+        "dovuto_totale": round(sum((r["dovuto"] or 0) for r in rows if r["stato"] != "chiusa"), 2),
     }
 
 

@@ -779,7 +779,14 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                         # non il codice grezzo Omnia (es. "3N").
                         ramo_mapped = ramo_doc.get("nome") or ramo_doc.get("codice")
                 else:
-                    # Ramo non mappato → crea il ramo nella libreria e assegnalo
+                    # Ramo non mappato → traccia per il wizard di mapping
+                    # (abilita il tab "Ramo") e, come fallback, crea il ramo
+                    # nella libreria e assegnalo così la polizza non resta senza ramo.
+                    if tracker is not None:
+                        await _track_unmapped(
+                            db, tracker, "ramo", ramo_raw,
+                            label=ramo_raw, import_mappings=import_mappings,
+                        )
                     ramo_mapped = await _get_or_create_ramo(db, ramo_raw, rami_cache)
             # Traccia prodotto come non mappato (verrà associato manualmente dalla libreria Prodotti)
             prodotto_raw = (row.get("prodotto_cmp") or "").strip()
@@ -1538,10 +1545,11 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_liquidazioni(db, files_data, counts)
     _conta_record_residui(files_data, counts)
 
-    # Entità non mappate raccolte durante l'import (NB: rami NON sono tracciati per scelta utente)
+    # Entità non mappate raccolte durante l'import
     plural = {
         "compagnia": "compagnie", "prodotto": "prodotti",
         "collaboratore": "collaboratori", "garanzia": "garanzie",
+        "ramo": "rami",
     }
     entita_non_mappate: dict = {}
     for tipo, items in tracker.items():

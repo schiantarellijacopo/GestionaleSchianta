@@ -1,4 +1,4 @@
-"""Test auto-chiusura regolazione premio quando il titolo è saldato."""
+"""Test: auto-chiusura + filtro Tutte/Chiuse + riproposizione annuale."""
 import asyncio
 import os
 import sys
@@ -13,47 +13,52 @@ async def main():
     client = AsyncIOMotorClient(MONGO_URL)
     db = client[DB_NAME]
 
-    # trova la polizza di regolazione col titolo collegato
     pol = await db.polizze.find_one({"numero_polizza": "732864759", "regolazione_premio": True})
     assert pol, "polizza test non trovata"
     pid = pol["id"]
     tit_id = pol.get("regolazione_titolo_id")
-    print("polizza", pid, "titolo", tit_id, "stato_reg", pol.get("regolazione_stato"))
+    print("polizza", pid, "titolo", tit_id, "scadenza", pol.get("scadenza"))
 
-    # snapshot per ripristino (valori noti originali forzati per sicurezza)
-    orig_reg_stato = "dati_ricevuti"
-    orig_tit_stato = "da_incassare"
+    from routes.regolazione_premio import list_regolazioni
+    U = {"role": "admin", "id": "x"}
 
-    # SETUP scenario: regolazione titolo_generato + titolo incassato
-    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": "titolo_generato"}})
+    # --- SCENARIO 1: titolo_generato + titolo incassato -> chiusa + sparisce da "Tutte"
+    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": "titolo_generato", "scadenza": "2026-12-31"}, "$unset": {"regolazione_chiusa_scadenza_rif": "", "regolazione_chiusa_il": ""}})
     await db.titoli.update_one({"id": tit_id}, {"$set": {"stato": "incassato"}})
 
-    # Simula la logica dell'endpoint list_regolazioni
-    from routes.regolazione_premio import list_regolazioni
+    tutte = await list_regolazioni(user=U)
+    in_tutte = any(r["polizza_id"] == pid for r in tutte)
+    chiuse = await list_regolazioni(stato="chiusa", user=U)
+    row_chiusa = next((r for r in chiuse if r["polizza_id"] == pid), None)
+    db_pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_stato": 1, "regolazione_chiusa_scadenza_rif": 1})
+    print("1) in Tutte?", in_tutte, "| in Chiuse?", bool(row_chiusa), "| stato db:", db_pol.get("regolazione_stato"), "| rif:", db_pol.get("regolazione_chiusa_scadenza_rif"))
+    ok1 = (not in_tutte) and row_chiusa and db_pol.get("regolazione_stato") == "chiusa" and db_pol.get("regolazione_chiusa_scadenza_rif") == "2026-12-31"
 
-    class _U:  # utente fittizio admin
-        pass
-    rows = await list_regolazioni(user={"role": "admin", "id": "x"})
-    row = next((r for r in rows if r["polizza_id"] == pid), None)
-    print("STATO CALCOLATO endpoint:", row["stato"] if row else None)
-    reloaded = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_stato": 1})
-    print("STATO PERSISTITO in db:", reloaded.get("regolazione_stato"))
-    ok_close = row and row["stato"] == "chiusa" and reloaded.get("regolazione_stato") == "chiusa"
-    print("AUTO-CHIUSURA OK:", ok_close)
+    # --- SCENARIO 2: rif nel passato (>1 anno fa) -> riproposta a da_richiedere
+    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": "chiusa", "regolazione_chiusa_scadenza_rif": "2020-12-31", "regolazione_dovuto": 999}})
+    tutte2 = await list_regolazioni(user=U)
+    row2 = next((r for r in tutte2 if r["polizza_id"] == pid), None)
+    db_pol2 = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    print("2) riproposta stato:", row2["stato"] if row2 else None, "| titolo_id azzerato:", db_pol2.get("regolazione_titolo_id"), "| dovuto:", db_pol2.get("regolazione_dovuto"))
+    ok2 = row2 and row2["stato"] == "da_richiedere" and not db_pol2.get("regolazione_titolo_id")
 
-    # SETUP scenario riapertura: titolo torna da_incassare, reg era chiusa
-    await db.titoli.update_one({"id": tit_id}, {"$set": {"stato": "da_incassare"}})
-    rows2 = await list_regolazioni(user={"role": "admin", "id": "x"})
-    row2 = next((r for r in rows2 if r["polizza_id"] == pid), None)
-    print("STATO dopo riapertura:", row2["stato"] if row2 else None)
-    ok_reopen = row2 and row2["stato"] == "titolo_generato"
-    print("AUTO-RIAPERTURA OK:", ok_reopen)
+    # --- SCENARIO 3: chiusa ma rif NON ancora superato -> resta chiusa
+    from datetime import date
+    anno_corrente = f"{date.today().year}-12-31"
+    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": "chiusa", "regolazione_chiusa_scadenza_rif": anno_corrente, "regolazione_titolo_id": tit_id}})
+    await db.titoli.update_one({"id": tit_id}, {"$set": {"stato": "incassato"}})
+    tutte3 = await list_regolazioni(user=U)
+    in_tutte3 = any(r["polizza_id"] == pid for r in tutte3)
+    db_pol3 = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_stato": 1})
+    print("3) rif futuro -> in Tutte?", in_tutte3, "| stato:", db_pol3.get("regolazione_stato"))
+    ok3 = (not in_tutte3) and db_pol3.get("regolazione_stato") == "chiusa"
 
     # RIPRISTINO
-    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": orig_reg_stato}})
-    if orig_tit_stato is not None:
-        await db.titoli.update_one({"id": tit_id}, {"$set": {"stato": orig_tit_stato}})
-    print("Ripristinato. RESULT:", "PASS" if (ok_close and ok_reopen) else "FAIL")
+    await db.polizze.update_one({"id": pid}, {"$set": {"regolazione_stato": "dati_ricevuti", "scadenza": pol.get("scadenza"), "regolazione_titolo_id": tit_id, "regolazione_dovuto": 0}, "$unset": {"regolazione_chiusa_scadenza_rif": "", "regolazione_chiusa_il": ""}})
+    await db.titoli.update_one({"id": tit_id}, {"$set": {"stato": "da_incassare"}})
+    await db.regolazione_storico.delete_many({"polizza_id": pid, "evento": "riproposta_nuovo_anno"})
+
+    print("RESULT:", "PASS" if (ok1 and ok2 and ok3) else f"FAIL ok1={ok1} ok2={ok2} ok3={ok3}")
     client.close()
 
 

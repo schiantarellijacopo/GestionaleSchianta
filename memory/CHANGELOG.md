@@ -2,9 +2,16 @@
 
 
 ## 2026-06 — Regolazione Premio: chiusura automatica ✅
-- **Auto-chiusura regolazione**: quando il titolo di regolazione collegato (`regolazione_titolo_id`) risulta saldato (stato `incassato`/`coperto`/`abbuonato` o `titolo_coperto=true`), lo stato della regolazione passa automaticamente da `titolo_generato` a `chiusa`. Logica in `routes/regolazione_premio.py` → `list_regolazioni` (persistita in DB, quindi coerente anche con pipeline/stats).
-- **Auto-riapertura**: se il titolo torna `da_incassare`, la regolazione riapre a `titolo_generato` (self-healing).
-- Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + riapertura + ripristino).
+- **Auto-chiusura regolazione**: quando il titolo di regolazione collegato (`regolazione_titolo_id`) risulta saldato (stato `incassato`/`coperto`/`abbuonato` o `titolo_coperto=true`), lo stato passa automaticamente a `chiusa`. Alla chiusura viene salvato `regolazione_chiusa_scadenza_rif` (scadenza polizza) e `regolazione_chiusa_il`.
+- **Sparisce dalla lista attiva**: le regolazioni `chiusa` NON compaiono più nel filtro "Tutte"; restano consultabili solo col filtro esplicito "Chiuse". `stats` conta comunque il totale (incl. chiuse).
+- **Riproposizione annuale**: superata la scadenza dell'anno successivo (`rif + 1 anno`), la regolazione si riapre a `da_richiedere` azzerando workflow (lettera, dato cliente, dovuto, ultimo calcolo, titolo_id) MA mantenendo base/tasso di polizza. Evento storico `riproposta_nuovo_anno`. Il titolo dell'anno precedente resta collegato nello storico.
+- **Auto-riapertura intra-anno**: se il titolo torna non saldato ("rimetti arretrato"), la regolazione riapre a `titolo_generato`.
+- **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
+- File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
+
+## 2026-06 — Import Omnia: Ramo tracciato per il wizard (da verificare) ⚠️
+- `ania_importer.py`: i rami non mappati ora vengono tracciati con `_track_unmapped` (crea stub in `import_mappings`) così il tab "Ramo" del wizard di mapping si abilita; aggiunto "ramo" al dizionario `plural`. Fallback: se non mappato viene comunque creato in libreria. NON ancora verificato end-to-end (richiede una re-importazione ZIP).
+
 
 ## 2026-09-02 (parte 7) — Filtri, contatori, provvigioni, KPI ✅
 - **Filtro collaboratori**: `/api/collaboratori` ora include anche l'admin/agente → la tendina non è più vuota nelle agenzie con un solo utente (verificato).
