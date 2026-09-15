@@ -1,5 +1,11 @@
 # Programma Assicurativo - CHANGELOG
 
+
+## 2026-06 — Regolazione Premio: chiusura automatica ✅
+- **Auto-chiusura regolazione**: quando il titolo di regolazione collegato (`regolazione_titolo_id`) risulta saldato (stato `incassato`/`coperto`/`abbuonato` o `titolo_coperto=true`), lo stato della regolazione passa automaticamente da `titolo_generato` a `chiusa`. Logica in `routes/regolazione_premio.py` → `list_regolazioni` (persistita in DB, quindi coerente anche con pipeline/stats).
+- **Auto-riapertura**: se il titolo torna `da_incassare`, la regolazione riapre a `titolo_generato` (self-healing).
+- Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + riapertura + ripristino).
+
 ## 2026-09-02 (parte 7) — Filtri, contatori, provvigioni, KPI ✅
 - **Filtro collaboratori**: `/api/collaboratori` ora include anche l'admin/agente → la tendina non è più vuota nelle agenzie con un solo utente (verificato).
 - **Contatore "Senza polizze"**: era 0 per overlap con i condomini; ora le 3 categorie (con_polizze/senza_polizze/condominio) sono mutuamente esclusive (verificato: 964+2122+102=3188).

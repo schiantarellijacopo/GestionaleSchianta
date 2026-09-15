@@ -82,11 +82,34 @@ async def list_regolazioni(
         {"id": {"$in": compagnia_ids}}, {"_id": 0, "id": 1, "nome": 1},
     )}
 
+    # Titoli di regolazione collegati: servono per chiudere automaticamente
+    # l'attività quando il titolo generato risulta già saldato (incassato/coperto).
+    titolo_ids = list({p.get("regolazione_titolo_id") for p in polizze if p.get("regolazione_titolo_id")})
+    titoli = {t["id"]: t async for t in db.titoli.find(
+        {"id": {"$in": titolo_ids}},
+        {"_id": 0, "id": 1, "stato": 1, "titolo_coperto": 1},
+    )}
+
     today = date.today().isoformat()
     out = []
     for p in polizze:
         a = anags.get(p.get("contraente_id"), {})
         st = p.get("regolazione_stato") or "da_richiedere"
+        # Chiusura automatica: se il titolo di regolazione è saldato
+        # (incassato/coperto) l'attività è di fatto chiusa. Si auto-corregge:
+        # se il titolo torna "da incassare" la regolazione riapre a titolo_generato.
+        tit = titoli.get(p.get("regolazione_titolo_id"))
+        if tit is not None:
+            saldato = (tit.get("stato") in ("incassato", "coperto", "abbuonato")
+                       or bool(tit.get("titolo_coperto")))
+            if saldato and st == "titolo_generato":
+                st = "chiusa"
+                await db.polizze.update_one({"id": p["id"]}, {"$set": {
+                    "regolazione_stato": "chiusa", "updated_at": _now_iso()}})
+            elif not saldato and st == "chiusa":
+                st = "titolo_generato"
+                await db.polizze.update_one({"id": p["id"]}, {"$set": {
+                    "regolazione_stato": "titolo_generato", "updated_at": _now_iso()}})
         giorni = p.get("regolazione_giorni_invio", 30)
         data_invio = _data_invio_prevista(p.get("scadenza"), giorni)
         da_inviare = bool(data_invio and today >= data_invio and st in ("da_richiedere",))
