@@ -80,31 +80,25 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
     const firmaEsign = async (modalita) => {
         setFirmando(true);
         try {
+            // 1) Genera il PDF privacy e archivialo come allegato dell'anagrafica
             const pdfRes = await api.get(`/anagrafiche/${anagrafica_id}/privacy/genera-pdf`, { responseType: "blob" });
             const fd = new FormData();
             fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "privacy.pdf");
-            fd.append("modalita", modalita);
-            fd.append("firmatario_id", anagrafica_id);
-            fd.append("display_name", "Informativa Privacy & Consensi");
-            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            const link = r.data.signing_url || r.data.viewer_link;
-            if (link) {
-                if (modalita === "link_whatsapp") {
-                    const tel = (ana?.cellulare || "").replace(/[^0-9]/g, "");
-                    const txt = encodeURIComponent(`Gentile cliente, firmi qui l'informativa privacy: ${link}`);
-                    window.open(`https://wa.me/${tel}?text=${txt}`, "_blank");
-                    toast.success("Apro WhatsApp con il link di firma");
-                } else {
-                    window.open(link, "_blank");
-                    toast.success("Richiesta firma creata");
-                }
-            } else {
-                toast.success("Richiesta firma inviata al cliente");
-            }
+            const up = await api.post("/allegati", fd, {
+                params: { entita_tipo: "anagrafica", entita_id: anagrafica_id, categoria: "privacy", descrizione: "Informativa Privacy & Consensi" },
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            const allegatoId = up.data.id;
+            // 2) Invia per firma (OpenAPI eSignature, OTP SMS)
+            const r = await api.post("/esignature/invia", {
+                allegato_id: allegatoId,
+                invia_whatsapp: modalita === "link_whatsapp",
+                invia_email: modalita !== "link_whatsapp",
+            });
+            if (r.data.signing_url) window.open(r.data.signing_url, "_blank");
+            toast.success("Privacy inviata per firma: link via WhatsApp/Email + OTP SMS al cliente");
         } catch (e) {
-            const msg = e.response?.data?.detail || "Errore invio firma";
-            if (String(msg).toLowerCase().includes("configur")) toast.error("eSignAnyWhere non configurato — vai in Librerie → Firme");
-            else toast.error(msg);
+            toast.error(e.response?.data?.detail || "Errore invio firma");
         } finally { setFirmando(false); setFirmaMenu(false); }
     };
 
@@ -310,14 +304,13 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                     </Button>
                     <div className="relative">
                         <Button onClick={() => setFirmaMenu((v) => !v)} disabled={firmando} className="bg-violet-700 hover:bg-violet-800" data-testid="cons-firma-esign">
-                            ✍️ {firmando ? "Invio…" : "Firma con eSignAnyWhere"} ▾
+                            ✍️ {firmando ? "Invio…" : "Invia per firma (OTP SMS)"} ▾
                         </Button>
                         {firmaMenu && (
                             <div className="absolute bottom-full right-0 mb-1 w-64 bg-white border border-slate-200 rounded-md shadow-lg z-50 overflow-hidden" data-testid="cons-firma-menu">
-                                <button onClick={() => firmaEsign("biometric")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-biometric">✒️ Grafometrica (su tablet)</button>
-                                <button onClick={() => firmaEsign("otp_sms")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-otp-sms">📱 OTP via SMS</button>
-                                <button onClick={() => firmaEsign("link_whatsapp")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-whatsapp">🟢 Link via WhatsApp</button>
-                                <button onClick={() => firmaEsign("link")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-email">✉️ Link via Email</button>
+                                <div className="px-3 py-1.5 text-[10px] uppercase text-slate-400 bg-slate-50">Invia il link di firma via…</div>
+                                <button onClick={() => firmaEsign("link_whatsapp")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-whatsapp">🟢 WhatsApp</button>
+                                <button onClick={() => firmaEsign("link")} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" data-testid="firma-mode-email">✉️ Email</button>
                             </div>
                         )}
                     </div>

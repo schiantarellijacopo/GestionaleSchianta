@@ -98,19 +98,18 @@ export default function PolizzaDetail() {
     const firmaMup = async () => {
         setMupBusy(true);
         try {
-            const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: false }, { responseType: "blob" });
-            const fd = new FormData();
-            fd.append("file", new Blob([r0.data], { type: "application/pdf" }), "MUP.pdf");
-            fd.append("modalita", "biometric");
-            fd.append("firmatario_id", pol?.contraente_id || "");
-            fd.append("display_name", "Modulo Unico Precontrattuale");
-            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            const link = r.data.signing_url || r.data.viewer_link;
-            if (link) window.open(link, "_blank");
-            toast.success("Richiesta firma MUP creata");
+            // 1) Genera e archivia il MUP come allegato PDF della polizza
+            const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: true });
+            const allegatoId = r0.data.allegato_id;
+            if (!allegatoId) throw new Error("MUP non archiviato");
+            // 2) Invia per firma (OpenAPI eSignature, OTP SMS). Il firmatario = contraente (risolto dal backend)
+            const r = await api.post("/esignature/invia", { allegato_id: allegatoId });
+            if (r.data.signing_url) window.open(r.data.signing_url, "_blank");
+            toast.success("MUP inviato per firma: link via WhatsApp/Email + OTP SMS al contraente");
+            setMupOpen(false);
+            load();
         } catch (e) {
-            const msg = e.response?.data?.detail || "Errore firma MUP";
-            toast.error(String(msg).toLowerCase().includes("configur") ? "eSignAnyWhere non configurato — Librerie → Firme" : msg);
+            toast.error(e.response?.data?.detail || e.message || "Errore firma MUP");
         } finally { setMupBusy(false); }
     };
     const [searchParams, setSearchParams] = useSearchParams();
@@ -1353,7 +1352,7 @@ export default function PolizzaDetail() {
                         <Button variant="outline" onClick={() => generaMup(false)} disabled={mupBusy}
                             className="border-slate-300" data-testid="mup-anteprima-btn">Anteprima PDF</Button>
                         <Button variant="outline" onClick={firmaMup} disabled={mupBusy}
-                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="mup-firma-btn">Firma (eSignAnyWhere)</Button>
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="mup-firma-btn">Genera e invia per firma</Button>
                         <Button onClick={() => generaMup(true)} disabled={mupBusy}
                             className="bg-indigo-700 hover:bg-indigo-800" data-testid="mup-archivia-btn">
                             {mupBusy ? "…" : "Genera e archivia"}
