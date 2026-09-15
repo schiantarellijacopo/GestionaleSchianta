@@ -109,8 +109,8 @@ export default function LibroMatricolaPage() {
     return (
         <div className="space-y-4" data-testid="libro-matricola-page">
             <PageHeader
-                title={<span className="flex items-center gap-2"><ClipboardList className="text-violet-600" /> Libro Matricola</span>}
-                subtitle="Polizze a libro matricola con relative applicazioni (veicoli/dipendenti coperti)"
+                title={<span className="flex items-center gap-2"><ClipboardList className="text-violet-600" /> Libro Matricola / Cumulative</span>}
+                subtitle="Polizze a libro matricola e polizze cumulative con relative applicazioni (veicoli/dipendenti coperti)"
             />
 
             {/* KPI */}
@@ -308,6 +308,9 @@ function PolizzaMatricolaCard({ p, expanded, showStoriche, setShowStoriche, onTo
                                     p.stato === "sospesa" ? "bg-amber-100 text-amber-800" :
                                     "bg-rose-100 text-rose-800"
                                 }`}>{p.stato}</span>
+                                <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                                    p.is_cumulativa_assicurati ? "bg-indigo-100 text-indigo-800" : "bg-slate-100 text-slate-700"
+                                }`}>{p.is_cumulativa_assicurati ? "Cumulativa" : "Libro matricola"}</span>
                             </div>
                             <div className="text-xs text-slate-600 mt-1 flex items-center gap-3 flex-wrap">
                                 <span><Building2 size={11} className="inline mr-0.5" /> {p.contraente_nome}</span>

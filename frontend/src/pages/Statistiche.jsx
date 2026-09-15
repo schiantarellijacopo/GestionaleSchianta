@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import StatistichePremi from "@/pages/StatistichePremi";
+import StatistichePerOperatore from "@/pages/StatistichePerOperatore";
 import { TopClientiModulo, SegmentazioneModulo } from "@/pages/StatisticheClienti";
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -14,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import {
     TrendingUp, Users, Building, FileText, AlertTriangle, Wallet,
-    Calendar, Trophy, PieChart, Gauge, BarChart3,
+    Calendar, Trophy, PieChart, Gauge, BarChart3, UserCog,
 } from "lucide-react";
 
 const COLOR = {
@@ -43,6 +44,9 @@ export default function Statistiche() {
                     <TabsTrigger value="premi" data-testid="stat-tab-premi">
                         <TrendingUp size={14} className="mr-1" /> Premi / Provvigioni
                     </TabsTrigger>
+                    <TabsTrigger value="operatore" data-testid="stat-tab-operatore">
+                        <UserCog size={14} className="mr-1" /> Per Operatore
+                    </TabsTrigger>
                     <TabsTrigger value="topclienti" data-testid="stat-tab-topclienti">
                         <Trophy size={14} className="mr-1" /> Top Clienti
                     </TabsTrigger>
@@ -53,6 +57,7 @@ export default function Statistiche() {
                 <TabsContent value="overview" className="space-y-4 mt-4"><OverviewModulo /></TabsContent>
                 <TabsContent value="isa" className="space-y-4 mt-4"><IsaModulo /></TabsContent>
                 <TabsContent value="premi" className="space-y-4 mt-4"><StatistichePremi /></TabsContent>
+                <TabsContent value="operatore" className="space-y-4 mt-4"><StatistichePerOperatore /></TabsContent>
                 <TabsContent value="topclienti" className="space-y-4 mt-4"><TopClientiModulo /></TabsContent>
                 <TabsContent value="segmentazione" className="space-y-4 mt-4"><SegmentazioneModulo /></TabsContent>
             </Tabs>
@@ -80,12 +85,20 @@ function OverviewModulo() {
                 {s.top_compagnie?.length > 0 && (
                     <Card className="p-4">
                         <h2 className="text-sm font-semibold mb-3 flex items-center gap-2"><Trophy size={16} className="text-amber-600" /> Top 5 Compagnie</h2>
-                        <table className="tbl-compact w-full text-xs"><tbody>
+                        <table className="tbl-compact w-full text-xs">
+                            <thead><tr className="text-slate-400 text-[10px] uppercase">
+                                <th></th><th></th>
+                                <th className="text-right">Pol.</th>
+                                <th className="text-right">Premio netto</th>
+                                <th className="text-right">Premio lordo</th>
+                            </tr></thead>
+                            <tbody>
                             {s.top_compagnie.map((c, i) => (
                                 <tr key={c.nome}>
                                     <td className="w-8 text-slate-400 font-bold">#{i + 1}</td>
                                     <td className="font-medium">{c.nome}</td>
-                                    <td className="text-right text-slate-500">{c.polizze} pol.</td>
+                                    <td className="text-right text-slate-500">{c.n_polizze}</td>
+                                    <td className="text-right font-mono text-sky-700">{fmtEur(c.premio_netto)}</td>
                                     <td className="text-right font-mono font-semibold text-emerald-700">{fmtEur(c.premio_totale)}</td>
                                 </tr>
                             ))}
@@ -100,7 +113,7 @@ function OverviewModulo() {
                                 <tr key={r.ramo}>
                                     <td className="w-8 text-slate-400 font-bold">#{i + 1}</td>
                                     <td className="font-medium">{r.ramo}</td>
-                                    <td className="text-right text-slate-500">{r.polizze} pol.</td>
+                                    <td className="text-right text-slate-500">{r.n_polizze} pol.</td>
                                     <td className="text-right font-mono font-semibold text-emerald-700">{fmtEur(r.premio_totale)}</td>
                                 </tr>
                             ))}

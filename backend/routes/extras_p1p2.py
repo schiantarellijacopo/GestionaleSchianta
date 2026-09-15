@@ -342,14 +342,15 @@ async def list_libro_matricola_polizze(
     - premio_totale (somma premi applicazioni attive)
     """
     from datetime import datetime as _dt
-    flt: dict = {"is_libro_matricola": True}
+    flt: dict = {"$or": [{"is_libro_matricola": True}, {"is_cumulativa_assicurati": True}]}
     if q and q.strip():
         rx = {"$regex": q.strip(), "$options": "i"}
-        flt["$or"] = [{"numero_polizza": rx}, {"ramo": rx}, {"prodotto": rx}]
+        flt = {"$and": [flt, {"$or": [{"numero_polizza": rx}, {"ramo": rx}, {"prodotto": rx}]}]}
     polizze = await db.polizze.find(flt, {
         "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
         "contraente_id": 1, "compagnia_id": 1, "effetto": 1, "scadenza": 1,
         "premio_lordo": 1, "stato": 1, "frazionamento": 1,
+        "is_libro_matricola": 1, "is_cumulativa_assicurati": 1,
     }).sort("effetto", -1).to_list(500)
     if not polizze:
         return []

@@ -242,8 +242,8 @@ async def top_clienti(limit: int = 100, anno: Optional[int] = None,
         bucket_prov[cid] = bucket_prov.get(cid, 0) + float(t.get("provvigioni") or 0)
         bucket_netto[cid] = bucket_netto.get(cid, 0) + float(t.get("importo_netto") or 0)
 
-    # Insieme dei clienti: attivi + quelli con movimenti nell'anno
-    all_ids = set(active_clients) | set(bucket_prov.keys())
+    # SOLO clienti con polizze attive (esclude RAPPEL e simili senza portafoglio attivo)
+    all_ids = set(active_clients)
     ranked_ids = sorted(all_ids, key=lambda c: bucket_prov.get(c, 0.0), reverse=True)
     if not tutti:
         ranked_ids = ranked_ids[:limit]
@@ -253,7 +253,7 @@ async def top_clienti(limit: int = 100, anno: Optional[int] = None,
         {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1,
          "tipo": 1, "created_at": 1})}
 
-    total_all = sum(bucket_prov.values()) or 1
+    total_all = sum(bucket_prov.get(c, 0.0) for c in active_clients) or 1
     cum = 0.0
     rows = []
     for i, cid in enumerate(ranked_ids):

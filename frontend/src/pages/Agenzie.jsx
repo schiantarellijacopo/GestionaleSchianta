@@ -48,7 +48,7 @@ export default function Agenzie() {
                                 <Plus size={14} className="mr-1" /> Nuova agenzia
                             </Button>
                         </DialogTrigger>
-                        <AgenziaDialog editing={editing} principaleExists={!!principale}
+                        <AgenziaDialog key={editing?.id || "new"} editing={editing} principaleExists={!!principale}
                             onClose={() => { setOpen(false); setEditing(null); load(); }} />
                     </Dialog>
                 }

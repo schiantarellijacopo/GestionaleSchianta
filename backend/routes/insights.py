@@ -280,7 +280,8 @@ async def statistiche_overview(user=Depends(current_user)) -> dict:
     # Top 5 compagnie per numero polizze
     agg_comp = await db.polizze.aggregate([
         {"$match": {"stato": {"$in": ["attiva", "in_emissione"]}}},
-        {"$group": {"_id": "$compagnia_id", "n": {"$sum": 1}, "premio": {"$sum": "$premio_lordo"}}},
+        {"$group": {"_id": "$compagnia_id", "n": {"$sum": 1},
+                    "premio": {"$sum": "$premio_lordo"}, "premio_netto": {"$sum": "$premio_netto"}}},
         {"$sort": {"premio": -1}}, {"$limit": 5},
     ]).to_list(5)
     comp_ids = [c["_id"] for c in agg_comp if c["_id"]]
@@ -289,6 +290,7 @@ async def statistiche_overview(user=Depends(current_user)) -> dict:
     top_compagnie = [{
         "id": c["_id"], "nome": comp_map.get(c["_id"], "—"),
         "n_polizze": c["n"], "premio_totale": c["premio"],
+        "premio_netto": c.get("premio_netto") or 0,
     } for c in agg_comp]
 
     # Top 5 rami per premio

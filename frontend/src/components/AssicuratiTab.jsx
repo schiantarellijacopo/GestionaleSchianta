@@ -17,6 +17,7 @@ export default function AssicuratiTab({ polizzaId }) {
     const [q, setQ] = useState("");
     const [editing, setEditing] = useState(null); // {…} or {new:true}
     const [importing, setImporting] = useState(false);
+    const [view, setView] = useState("attivi"); // attivi | usciti | totale
     const fileRef = useRef(null);
 
     const load = () => {
@@ -59,6 +60,8 @@ export default function AssicuratiTab({ polizzaId }) {
     };
 
     const filtered = rows.filter((r) => {
+        if (view === "attivi" && r.stato !== "attivo") return false;
+        if (view === "usciti" && r.stato !== "uscito") return false;
         if (!q) return true;
         const s = `${r.cognome} ${r.nome} ${r.ditta || ""} ${r.codice_fiscale || ""}`.toLowerCase();
         return s.includes(q.toLowerCase());
@@ -71,9 +74,12 @@ export default function AssicuratiTab({ polizzaId }) {
                     <div className="flex items-center gap-1.5 text-slate-700 font-semibold"><Users size={16} className="text-teal-600" /> Elenco assicurati</div>
                     {stats && (
                         <div className="flex gap-2 text-xs">
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Totale {stats.totale}</span>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Attivi {stats.attivi}</span>
-                            <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">Usciti {stats.usciti}</span>
+                            <button onClick={() => setView("totale")} data-testid="assicurati-filter-totale"
+                                className={`px-2 py-0.5 rounded-full border ${view === "totale" ? "bg-slate-700 text-white border-slate-700" : "bg-slate-100 text-slate-600 border-transparent hover:border-slate-300"}`}>Totale {stats.totale}</button>
+                            <button onClick={() => setView("attivi")} data-testid="assicurati-filter-attivi"
+                                className={`px-2 py-0.5 rounded-full border ${view === "attivi" ? "bg-emerald-600 text-white border-emerald-600" : "bg-emerald-100 text-emerald-700 border-transparent hover:border-emerald-300"}`}>Attivi {stats.attivi}</button>
+                            <button onClick={() => setView("usciti")} data-testid="assicurati-filter-usciti"
+                                className={`px-2 py-0.5 rounded-full border ${view === "usciti" ? "bg-slate-600 text-white border-slate-600" : "bg-slate-200 text-slate-500 border-transparent hover:border-slate-400"}`}>Usciti {stats.usciti}</button>
                         </div>
                     )}
                 </div>
@@ -109,7 +115,9 @@ export default function AssicuratiTab({ polizzaId }) {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {filtered.length === 0 && (
-                            <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400 italic">Nessun assicurato. Aggiungi manualmente o importa un Excel.</td></tr>
+                            <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400 italic">
+                                {view === "usciti" ? "Nessun assicurato uscito." : view === "attivi" ? "Nessun assicurato attivo." : "Nessun assicurato. Aggiungi manualmente o importa un Excel."}
+                            </td></tr>
                         )}
                         {filtered.map((r) => (
                             <tr key={r.id} className={r.stato === "uscito" ? "bg-slate-50/60 text-slate-400" : ""} data-testid={`assicurato-row-${r.id}`}>

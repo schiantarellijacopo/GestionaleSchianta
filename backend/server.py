@@ -3186,6 +3186,112 @@ async def statistiche_premi_provvigioni(
             "scoped_operatore": scoped}
 
 
+@api.get("/statistiche/per-operatore")
+async def statistiche_per_operatore(
+    anni: str,
+    data_field: str = "incasso",
+    mese_da: int = 1,
+    mese_a: int = 12,
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    tipo: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Premi e provvigioni aggregati PER OPERATORE, con confronto tra anni.
+
+    Le provvigioni sono la quota effettiva di ciascun operatore; i premi
+    (netto/lordo) sono ripartiti proporzionalmente alla quota provvigione
+    (se il titolo ha una sola assegnazione → tutto all'operatore)."""
+    years = sorted({int(a) for a in anni.split(",") if a.strip()}, reverse=True)
+    if not years:
+        raise HTTPException(400, "Specificare almeno un anno")
+    date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
+    rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
+    tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
+
+    # Un collaboratore vede solo se stesso
+    scoped = user.get("role") != "admin"
+    only_op = user.get("id") if scoped else None
+
+    flt: dict = {date_key: {"$ne": None}, "stato": {"$ne": "stornato"}}
+    if only_op:
+        flt["$or"] = [{"collaboratore_id": only_op}, {"provvigioni_operatori.operatore_id": only_op}]
+    if tipi:
+        flt["tipo"] = {"$in": tipi}
+
+    need_pol = bool(compagnia_id or rami)
+    pol_cache: dict = {}
+    # agg[operatore_id][year] = {netto, provvigioni, lordo}
+    agg: dict = {}
+    nomi: dict = {}
+
+    def _acc(oid, oname, y, netto, provv, lordo):
+        if only_op and oid != only_op:
+            return
+        nomi.setdefault(oid, oname or "—")
+        d = agg.setdefault(oid, {yy: {"netto": 0.0, "provvigioni": 0.0, "lordo": 0.0} for yy in years})
+        d[y]["netto"] += netto
+        d[y]["provvigioni"] += provv
+        d[y]["lordo"] += lordo
+
+    async for t in db.titoli.find(flt, {"_id": 0, date_key: 1, "importo_lordo": 1, "importo_netto": 1,
+                                        "provvigioni": 1, "provvigioni_operatori": 1, "collaboratore_id": 1,
+                                        "collaboratore_nome": 1, "polizza_id": 1}):
+        d = (t.get(date_key) or "")[:10]
+        if len(d) < 7:
+            continue
+        try:
+            y = int(d[:4]); m = int(d[5:7])
+        except ValueError:
+            continue
+        if y not in years or m < mese_da or m > mese_a:
+            continue
+        if need_pol:
+            pid = t.get("polizza_id")
+            if pid not in pol_cache:
+                pol_cache[pid] = await db.polizze.find_one({"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1}) or {}
+            pol = pol_cache[pid]
+            if compagnia_id and pol.get("compagnia_id") != compagnia_id:
+                continue
+            if rami and pol.get("ramo") not in rami:
+                continue
+        netto = float(t.get("importo_netto") or 0)
+        lordo = float(t.get("importo_lordo") or 0)
+        provv_tot = float(t.get("provvigioni") or 0)
+        ops = t.get("provvigioni_operatori") or []
+        if ops:
+            somma = sum(float(o.get("provvigione") or 0) for o in ops) or 0.0
+            for o in ops:
+                share = float(o.get("provvigione") or 0)
+                w = (share / somma) if somma > 0 else (1.0 / len(ops))
+                _acc(o.get("operatore_id"), o.get("operatore_nome"), y, netto * w, share, lordo * w)
+        elif t.get("collaboratore_id"):
+            _acc(t.get("collaboratore_id"), t.get("collaboratore_nome"), y, netto, provv_tot, lordo)
+        else:
+            _acc("__none__", "Non assegnato", y, netto, provv_tot, lordo)
+
+    operatori = []
+    # Risolvi i nomi mancanti dagli utenti
+    missing = [oid for oid in agg.keys() if oid != "__none__" and (not nomi.get(oid) or nomi.get(oid) == "—")]
+    if missing:
+        async for u in db.users.find({"id": {"$in": missing}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            nomi[u["id"]] = u.get("name") or u.get("email") or "—"
+    for oid, per_anno in agg.items():
+        per_anno_r = {str(yy): {k: round(v, 2) for k, v in per_anno[yy].items()} for yy in years}
+        operatori.append({
+            "operatore_id": oid,
+            "nome": nomi.get(oid, "—"),
+            "per_anno": per_anno_r,
+        })
+    # ordina per provvigioni dell'anno più recente, desc
+    y0 = str(years[0])
+    operatori.sort(key=lambda o: o["per_anno"][y0]["provvigioni"], reverse=True)
+    return {"anni": years, "operatori": operatori, "data_field": data_field,
+            "mese_da": mese_da, "mese_a": mese_a, "scoped_operatore": scoped}
+
+
+
+
 
 @api.patch("/polizze/{pid}/garanzie/{idx}")
 async def patch_polizza_garanzia(
