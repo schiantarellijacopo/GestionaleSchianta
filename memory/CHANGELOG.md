@@ -9,7 +9,12 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Documenti Polizza a "quadrotti" ✅
+## 2026-06 — Tag su Polizze e Titoli + verifica KPI ✅
+- Aggiunta la possibilità di assegnare **tag** anche a **polizze** e **titoli** (prima solo anagrafiche). Campo `tags` nei modelli `Polizza`/`Titolo`.
+- Backend: `PUT /polizze/{id}/tags` e `PUT /titoli/{id}/tags` (helper `_norm_tags`: lowercase, underscore, univoci). Titolo salva i tag anche dal payload di `update_titolo`. `GET /anagrafiche/tags` ora unisce i tag di anagrafiche + polizze + titoli per l'autocomplete.
+- Frontend: card "TAG POLIZZA" in `PolizzaDetail` (salva subito via API) e campo "Tag titolo" nel `TitoloDialog`, entrambi con `TagsEditor` riusabile.
+- **Verifica KPI/Tag** (testing agent iteration 90): 7/7 test backend, KPI Contabilità coerenti (Saldo=Entrate−Uscite, no NaN), KPI sezioni 200 OK, tag anagrafica/polizza/titolo persistono correttamente.
+
 - Il tab Documenti della scheda Polizza ora usa il layout a **griglia di card per categoria** (quadrotti), come la scheda Anagrafica.
 - Aggiunto prop `layout="quadrotti"` a `DocumentiSezioneSplit` + nuovo componente `QuadrottoCategoria`: ogni card mostra icona, etichetta, indicatore visibilità (occhio/lucchetto), conteggio, elenco file con toggle visibilità/elimina e pulsante di upload dedicato. Il layout "split" (due riquadri) resta per gli altri usi (sinistri, libro matricola, ecc.).
 - `PolizzaDetail.jsx`: attivato `layout="quadrotti"`. Verificato con screenshot (11 categorie, MUP con 2 file).

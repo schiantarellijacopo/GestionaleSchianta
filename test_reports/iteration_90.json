@@ -1,0 +1,29 @@
+{
+  "summary": "Test end-to-end di KPI e Tag su Anagrafiche/Polizze/Titoli completato. Backend: 7/7 pytest passati. KPI Prima Nota /api/kpi/prima_nota/stats restituisce 4 card (Movimenti/Entrate/Uscite/Saldo mese) con valori numerici coerenti (Saldo=Entrate-Uscite=946,50€, no NaN/undefined). KPI sezioni (polizze/titoli/sinistri/avvisi/prima_nota) tutti 200 OK. Tag Anagrafica persist via PUT /anagrafiche/{id}. Tag Polizza: PUT /polizze/{id}/tags con normalizzazione (lowercase+underscore, unicità, no vuoti), persist, autocomplete unificato. UI verificata end-to-end su PolizzaDetail: card 'polizza-tags-card' visibile, aggiunta chip 'test_ui_vip', persiste dopo reload, rimozione ok. Tag Titolo: PUT /titoli/{id}/tags e anche PUT /titoli/{id} con campo 'tags' nel payload — entrambi persistono; UI TitoloDialog aperto da Titoli.jsx, campo 'titolo-tags' visibile, chip mostrata, save funzionante (verifica via lista). Autocomplete /api/anagrafiche/tags unisce correttamente anagrafiche+polizze+titoli (18 tag totali). Tutti i tag di test rimossi.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/titoli/{tid}", "issue": "Restituisce 405 Method Not Allowed - endpoint singolo non esposto (esistono solo GET /api/titoli, PUT /api/titoli/{tid}, PUT /api/titoli/{tid}/tags). Incoerente rispetto a /api/polizze/{pid} e /api/anagrafiche/{aid} che invece supportano GET. Non blocca la feature tag ma può causare fallimenti in test/consumer che si aspettano GET singolo."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_tags_kpi.py", "/app/test_reports/pytest/tags_kpi.xml"],
+  "action_items": [
+    "Opzionale: esporre GET /api/titoli/{tid} per allineare l'API a polizze/anagrafiche e semplificare i controlli di persistenza lato client/test."
+  ],
+  "critical_code_review_comments": [
+    "server.py > 14k righe: candidato a split per moduli (contabilita, titoli, polizze, tags).",
+    "update_titolo accetta tags nel body senza whitelist né normalizzazione (a differenza di /titoli/{tid}/tags che usa _norm_tags). Se lo stesso campo viene salvato via due endpoint, la coerenza di normalizzazione va garantita anche in update_titolo/update_polizza (attualmente PUT /titoli/{id} salva i tag as-is)."
+  ],
+  "updated_files": ["/app/backend/tests/test_tags_kpi.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Creati e poi rimossi tag di test: test_ui_vip su polizza 4aec02e2..., test_ui_urgente/test_via_full_update/test_persist su titolo 564724a6..., TEST_ana su anagrafica (ripristinati tag originali).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "data-testid usati: polizza-tags-card, polizza-tags-input, tag-chip-<tag>, titolo-tags, titolo-tags-input, titolo-edit-dialog, titolo-link-<id> (per aprire dialog dalla lista Titoli). Backend KPI Prima Nota endpoint reale: GET /api/kpi/prima_nota/stats (ritorna {default: [...], custom: []}). GET singolo titolo non esiste (405): verificare persistenza via GET /api/titoli?limit=N e filter by id."
+}
