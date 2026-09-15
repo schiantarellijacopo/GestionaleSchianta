@@ -1164,6 +1164,7 @@ export default function PolizzaDetail() {
                                 { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true, descrizione: "Atto di vendita / passaggio proprietà" },
                                 { key: "quietanza", label: "Quietanze", icon: "🧾", default_visibile: true, multiple: true, descrizione: "Documenti di pagamento rilasciati al cliente (più quietanze secondo frazionamento)" },
                                 { key: "mup", label: "MUP", icon: "📋", default_visibile: true, multiple: true, descrizione: "Modulo Unico Precontrattuale (IVASS) — generato dalla polizza e firmabile" },
+                                { key: "questionario", label: "Questionario", icon: "🗒️", default_visibile: true, multiple: true, descrizione: "Questionario assuntivo / adeguatezza compilato e firmato dal cliente" },
                                 { key: "regolazione", label: "Regolazione", icon: "🧮", default_visibile: false, multiple: true, descrizione: "Documentazione della regolazione premio (dati consuntivi, comunicazioni, calcoli)" },
                                 { key: "preventivo", label: "Preventivi", icon: "📋", default_visibile: false, multiple: true },
                                 { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false, multiple: true },

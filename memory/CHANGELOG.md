@@ -13,6 +13,7 @@
 - Il tab Documenti della scheda Polizza ora usa il layout a **griglia di card per categoria** (quadrotti), come la scheda Anagrafica.
 - Aggiunto prop `layout="quadrotti"` a `DocumentiSezioneSplit` + nuovo componente `QuadrottoCategoria`: ogni card mostra icona, etichetta, indicatore visibilità (occhio/lucchetto), conteggio, elenco file con toggle visibilità/elimina e pulsante di upload dedicato. Il layout "split" (due riquadri) resta per gli altri usi (sinistri, libro matricola, ecc.).
 - `PolizzaDetail.jsx`: attivato `layout="quadrotti"`. Verificato con screenshot (11 categorie, MUP con 2 file).
+- Aggiunta categoria **Questionario** (🗒️, visibile al cliente) ai documenti polizza — questionario assuntivo/adeguatezza firmato.
 
 - Verificato lo stato: la maggior parte dei doppioni (RC AUTO, VITA, INCENDIO, INFORTUNI, TRASPORTI, RCG) era **già archiviata** (attivo=False / `unito_in_ramo_id`) da merge precedenti → già esclusi dalle tendine.
 - Restava attivo un solo doppione reale: **MULTIRISCHIO** (2 voci "Multirischio"/"MULTIRISCHIO"). Unificato con lo script `scripts/unifica_rami_doppioni.py` (stessa logica dell'endpoint `/librerie/rami/merge`): 5366 polizze + 76 prodotti riassegnati al master, doppione archiviato; ripuntati anche gli `import_mappings` ramo.
