@@ -9,7 +9,11 @@
 - **Documenti Regolazione**: nuovo quadrotto categoria `regolazione` nei Documenti polizza (`PolizzaDetail`); nuova azione 📎 nella pagina Regolazione Premio per allegare documenti (categoria `regolazione`, con toggle visibilità cliente).
 - File: `routes/regolazione_premio.py`, `frontend/src/pages/RegolazionePremio.jsx`, `frontend/src/pages/PolizzaDetail.jsx`. Testato con `scripts/test_regolazione_autoclose.py` (PASS: chiusura + filtro Tutte/Chiuse + riproposizione + rif futuro).
 
-## 2026-06 — Pulizia rami doppioni ✅
+## 2026-06 — Documenti Polizza a "quadrotti" ✅
+- Il tab Documenti della scheda Polizza ora usa il layout a **griglia di card per categoria** (quadrotti), come la scheda Anagrafica.
+- Aggiunto prop `layout="quadrotti"` a `DocumentiSezioneSplit` + nuovo componente `QuadrottoCategoria`: ogni card mostra icona, etichetta, indicatore visibilità (occhio/lucchetto), conteggio, elenco file con toggle visibilità/elimina e pulsante di upload dedicato. Il layout "split" (due riquadri) resta per gli altri usi (sinistri, libro matricola, ecc.).
+- `PolizzaDetail.jsx`: attivato `layout="quadrotti"`. Verificato con screenshot (11 categorie, MUP con 2 file).
+
 - Verificato lo stato: la maggior parte dei doppioni (RC AUTO, VITA, INCENDIO, INFORTUNI, TRASPORTI, RCG) era **già archiviata** (attivo=False / `unito_in_ramo_id`) da merge precedenti → già esclusi dalle tendine.
 - Restava attivo un solo doppione reale: **MULTIRISCHIO** (2 voci "Multirischio"/"MULTIRISCHIO"). Unificato con lo script `scripts/unifica_rami_doppioni.py` (stessa logica dell'endpoint `/librerie/rami/merge`): 5366 polizze + 76 prodotti riassegnati al master, doppione archiviato; ripuntati anche gli `import_mappings` ramo.
 - Risultato: dropdown rami senza codici duplicati (49 rami), polizze/prodotti intatti. La UI "Unisci doppioni" in Librerie resta disponibile per future unificazioni.

@@ -1153,8 +1153,9 @@ export default function PolizzaDetail() {
                             entita_tipo="polizza"
                             entita_id={pol.id}
                             canEdit={canEdit}
-                            titolo="Documenti polizza · gestione visibilità"
-                            sottotitolo="Polizza, condizioni, quietanze, libretto di pagamento, atto di vendita sono visibili al cliente. Preventivi, appunti e altro restano interni."
+                            layout="quadrotti"
+                            titolo="Documenti polizza"
+                            sottotitolo="Documenti organizzati per categoria. Polizza, condizioni, quietanze, libretto e atto di vendita sono di default visibili al cliente; preventivi, appunti e regolazione restano interni."
                             categorie={[
                                 { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true, multiple: true },
                                 { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true, multiple: true },
