@@ -491,60 +491,55 @@ function GirocontoDialog({ conti, onClose }) {
 
 function SaldoCassaCompagnieDialog({ onClose }) {
     const today = new Date().toISOString().slice(0, 10);
-    const [data, setData] = useState(today);
     const [compagnie, setCompagnie] = useState([]);
-    const [importi, setImporti] = useState({}); // { compagnia_id: "valore" }
-    const [loading, setLoading] = useState(true);
+    const [items, setItems] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [q, setQ] = useState("");
+    const [f, setF] = useState({ compagnia_id: "", data: today, segno: "+", importo: "", descrizione: "" });
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const loadItems = () => api.get("/contabilita/saldo-cassa-compagnie").then((r) => setItems(r.data?.items || []));
 
     useEffect(() => {
-        let mounted = true;
-        Promise.all([
-            api.get("/compagnie"),
-            api.get("/contabilita/saldo-cassa-compagnie"),
-        ]).then(([rc, rs]) => {
-            if (!mounted) return;
-            const comps = (rc.data || []).filter((c) => c.attiva !== false)
+        api.get("/compagnie").then((r) => {
+            const comps = (r.data || []).filter((c) => c.attiva !== false)
                 .sort((a, b) => (a.ragione_sociale || "").localeCompare(b.ragione_sociale || ""));
             setCompagnie(comps);
-            const map = {};
-            let ultimaData = null;
-            (rs.data?.items || []).forEach((it) => {
-                if (it.compagnia_id) map[it.compagnia_id] = String(it.importo ?? "");
-                if (it.data_movimento) ultimaData = it.data_movimento;
-            });
-            setImporti(map);
-            if (ultimaData) setData(String(ultimaData).slice(0, 10));
-        }).catch(() => {
-            toast.error("Errore nel caricamento compagnie");
-        }).finally(() => mounted && setLoading(false));
-        return () => { mounted = false; };
+        }).catch(() => toast.error("Errore caricamento compagnie"));
+        loadItems();
     }, []);
 
-    const setImp = (cid, v) => setImporti((p) => ({ ...p, [cid]: v }));
-
-    const compagnieFiltrate = compagnie.filter((c) =>
-        !q || (c.ragione_sociale || "").toLowerCase().includes(q.toLowerCase()));
-
-    const totale = compagnie.reduce((s, c) => s + (parseFloat(importi[c.id]) || 0), 0);
-
-    const save = async () => {
-        const righe = compagnie
-            .map((c) => ({ compagnia_id: c.id, importo: parseFloat(importi[c.id]) }))
-            .filter((r) => !isNaN(r.importo) && r.importo !== 0);
+    const aggiungi = async () => {
+        if (!f.compagnia_id) { toast.error("Seleziona la compagnia"); return; }
+        const imp = Math.abs(parseFloat(f.importo));
+        if (!imp) { toast.error("Importo deve essere diverso da zero"); return; }
+        const firmato = f.segno === "-" ? -imp : imp;
         setSaving(true);
         try {
-            const r = await api.post("/contabilita/saldo-cassa-compagnie", { data, righe });
-            toast.success(`Saldo cassa registrato: ${r.data.creati} compagnie`);
-            onClose();
+            await api.post("/contabilita/saldo-cassa-compagnie", {
+                compagnia_id: f.compagnia_id, data: f.data, importo: firmato,
+                descrizione: f.descrizione || null,
+            });
+            toast.success("Saldo cassa registrato");
+            setF((p) => ({ ...p, importo: "", descrizione: "" }));
+            loadItems();
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore salvataggio saldo cassa");
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
         } finally { setSaving(false); }
     };
 
+    const elimina = async (it) => {
+        if (!window.confirm(`Eliminare la registrazione di ${fmtEur(it.importo)}?\nVerrà rimossa dalla Prima Nota e dall'E/C compagnia.`)) return;
+        try {
+            await api.delete(`/contabilita/saldo-cassa-compagnie/${it.id}`);
+            toast.success("Registrazione eliminata");
+            loadItems();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const totale = (items || []).reduce((s, it) => s + (it.importo || 0), 0);
+
     return (
-        <DialogContent className="max-w-2xl" data-testid="dialog-saldo-cassa">
+        <DialogContent className="max-w-3xl" data-testid="dialog-saldo-cassa">
             <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                     <Wallet size={18} className="text-emerald-700" />
@@ -552,51 +547,82 @@ function SaldoCassaCompagnieDialog({ onClose }) {
                 </DialogTitle>
             </DialogHeader>
             <div className="bg-emerald-50 border border-emerald-200 rounded-md p-3 text-xs text-emerald-900">
-                <strong>Cosa fa:</strong> registra il saldo iniziale di cassa per ogni compagnia. Ogni importo scrive
-                una riga nel <strong>Brogliaccio (colonna SALDO)</strong> e una voce "Saldo iniziale" nell'
-                <strong>Estratto Conto Compagnie</strong>. Importo <strong>positivo = a debito</strong> verso la compagnia,
-                <strong> negativo = a credito</strong>. L'operazione sostituisce i saldi iniziali precedenti.
+                <strong>Cosa fa:</strong> registra manualmente (più volte) un saldo cassa per una compagnia. Ogni voce
+                scrive una riga nel <strong>Brogliaccio (colonna SALDO)</strong> con la tua descrizione e una voce nell'
+                <strong>Estratto Conto Compagnie</strong>. Segno <strong>+ = a debito</strong> verso la compagnia (alimenta il saldo),
+                <strong> − = a credito</strong> (lo riduce).
             </div>
+
             <div className="py-2 space-y-3">
-                <ChiusuraGiornoBanner data={data} />
-                <div className="flex items-end gap-3">
-                    <div>
-                        <Label>Data saldo</Label>
-                        <Input type="date" value={data} onChange={(e) => setData(e.target.value)} className="w-44" data-testid="saldo-cassa-data" />
+                <ChiusuraGiornoBanner data={f.data} />
+                <div className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-4">
+                        <Label className="text-xs">Compagnia *</Label>
+                        <Select value={f.compagnia_id} onValueChange={(v) => set("compagnia_id", v)}>
+                            <SelectTrigger data-testid="saldo-cassa-comp"><SelectValue placeholder="Seleziona" /></SelectTrigger>
+                            <SelectContent>
+                                {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
                     </div>
-                    <div className="flex-1">
-                        <Label className="text-xs">Cerca compagnia</Label>
-                        <div className="relative">
-                            <Search size={12} className="absolute left-2 top-2.5 text-slate-400" />
-                            <Input value={q} onChange={(e) => setQ(e.target.value)} className="pl-7" placeholder="filtra..." data-testid="saldo-cassa-cerca" />
-                        </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">Data *</Label>
+                        <Input type="date" value={f.data} onChange={(e) => set("data", e.target.value)} data-testid="saldo-cassa-data" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">Segno</Label>
+                        <select className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
+                            onChange={(e) => set("segno", e.target.value)} data-testid="saldo-cassa-segno">
+                            <option value="+">+ debito</option>
+                            <option value="-">− credito</option>
+                        </select>
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">Importo € *</Label>
+                        <Input type="number" step="0.01" min="0" value={f.importo}
+                            onChange={(e) => set("importo", e.target.value)} className="num" data-testid="saldo-cassa-importo" />
+                    </div>
+                    <div className="col-span-2">
+                        <Button onClick={aggiungi} disabled={saving} className="w-full bg-emerald-700 hover:bg-emerald-800" data-testid="saldo-cassa-add">
+                            <Plus size={15} className="mr-1" /> Aggiungi
+                        </Button>
+                    </div>
+                    <div className="col-span-12">
+                        <Label className="text-xs">Descrizione</Label>
+                        <Input value={f.descrizione} onChange={(e) => set("descrizione", e.target.value)}
+                            placeholder="es. Saldo iniziale cassa, rettifica dare/avere..." data-testid="saldo-cassa-descr" />
                     </div>
                 </div>
 
-                <div className="border border-slate-200 rounded-md max-h-80 overflow-y-auto">
-                    {loading ? <Loading /> : compagnieFiltrate.length === 0 ? (
-                        <Empty message="Nessuna compagnia" />
+                <div className="border border-slate-200 rounded-md max-h-72 overflow-y-auto">
+                    {items === null ? <Loading /> : items.length === 0 ? (
+                        <Empty message="Nessuna registrazione di saldo cassa" />
                     ) : (
-                        <table className="tbl w-full">
+                        <table className="tbl w-full text-sm">
                             <thead className="sticky top-0 bg-slate-100 z-10">
                                 <tr>
+                                    <th className="text-left px-3 py-2">Data</th>
                                     <th className="text-left px-3 py-2">Compagnia</th>
-                                    <th className="text-right px-3 py-2 w-48">Saldo iniziale €</th>
+                                    <th className="text-left px-3 py-2">Descrizione</th>
+                                    <th className="text-right px-3 py-2">Importo €</th>
+                                    <th className="w-10"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {compagnieFiltrate.map((c) => (
-                                    <tr key={c.id} className="hover:bg-slate-50">
-                                        <td className="px-3 py-1.5 font-medium">{c.ragione_sociale}</td>
-                                        <td className="px-3 py-1.5 text-right">
-                                            <Input
-                                                type="number" step="0.01"
-                                                value={importi[c.id] ?? ""}
-                                                onChange={(e) => setImp(c.id, e.target.value)}
-                                                className="text-right num h-8"
-                                                placeholder="0,00"
-                                                data-testid={`saldo-cassa-imp-${c.id}`}
-                                            />
+                                {items.map((it) => (
+                                    <tr key={it.id} className="hover:bg-slate-50" data-testid={`saldo-cassa-row-${it.id}`}>
+                                        <td className="px-3 py-1.5 num">{fmtDate(it.data_movimento)}</td>
+                                        <td className="px-3 py-1.5 font-medium">{it.compagnia_nome || "—"}</td>
+                                        <td className="px-3 py-1.5 text-slate-600">{it.descrizione}</td>
+                                        <td className={`px-3 py-1.5 num text-right font-semibold ${(it.importo || 0) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                                            {(it.importo || 0) < 0 ? "- " : "+ "}{fmtEur(Math.abs(it.importo))}
+                                        </td>
+                                        <td className="px-2 py-1.5 text-center">
+                                            <button onClick={() => elimina(it)}
+                                                className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"
+                                                title="Elimina" data-testid={`saldo-cassa-del-${it.id}`}>
+                                                <Trash2 size={12} />
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -606,15 +632,12 @@ function SaldoCassaCompagnieDialog({ onClose }) {
                 </div>
 
                 <div className="flex justify-between items-center text-sm px-1">
-                    <span className="text-slate-500">Compagnie con importo: {compagnie.filter((c) => parseFloat(importi[c.id])).length}</span>
-                    <span className="font-semibold">Totale: <span className="num text-emerald-700">{fmtEur(totale)}</span></span>
+                    <span className="text-slate-500">Registrazioni: {(items || []).length}</span>
+                    <span className="font-semibold">Totale SALDO: <span className="num text-emerald-700">{fmtEur(totale)}</span></span>
                 </div>
             </div>
             <DialogFooter>
-                <Button variant="outline" onClick={onClose}>Annulla</Button>
-                <Button onClick={save} disabled={saving || loading} className="bg-emerald-700 hover:bg-emerald-800" data-testid="saldo-cassa-save">
-                    {saving ? "Salvataggio…" : "Registra saldo cassa"}
-                </Button>
+                <Button onClick={onClose} className="bg-sky-700 hover:bg-sky-800" data-testid="saldo-cassa-close">Chiudi</Button>
             </DialogFooter>
         </DialogContent>
     );

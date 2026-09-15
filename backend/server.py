@@ -635,59 +635,77 @@ async def delete_voce_manuale_compagnia(cid: str, vid: str, user=Depends(require
 
 
 @api.get("/contabilita/saldo-cassa-compagnie")
-async def get_saldo_cassa_compagnie(user=Depends(require_user("admin", "collaboratore"))):
-    """Ritorna i saldi iniziali cassa per compagnia già registrati."""
+async def get_saldo_cassa_compagnie(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Ritorna le registrazioni manuali di saldo cassa per compagnia (ripetibili)."""
     items = await db.movimenti.find(
         {"categoria": "saldo_iniziale_compagnia"},
-        {"_id": 0, "compagnia_id": 1, "importo": 1, "data_movimento": 1},
-    ).to_list(2000)
+        {"_id": 0, "id": 1, "compagnia_id": 1, "importo": 1, "data_movimento": 1, "descrizione": 1},
+    ).sort("data_movimento", -1).to_list(2000)
+    comp_ids = list({it.get("compagnia_id") for it in items if it.get("compagnia_id")})
+    cmap: dict = {}
+    if comp_ids:
+        async for c in db.compagnie.find({"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+            cmap[c["id"]] = c.get("ragione_sociale")
+    for it in items:
+        it["compagnia_nome"] = cmap.get(it.get("compagnia_id"))
     return {"items": items}
 
 
-@api.post("/contabilita/saldo-cassa-compagnie")
-async def set_saldo_cassa_compagnie(body: dict, user=Depends(require_user("admin"))):
-    """Setup saldo iniziale cassa per compagnia.
+@api.post("/contabilita/saldo-cassa-compagnie", status_code=201)
+async def add_saldo_cassa_compagnia(body: dict, user=Depends(require_user("admin"))):
+    """Registra UNA voce manuale di saldo cassa per una compagnia (RIPETIBILE, come le Ritenute).
 
-    Per ogni riga con importo != 0 crea:
-      - un movimento in Prima Nota (categoria saldo_iniziale_compagnia) che alimenta
-        SOLO la colonna SALDO (nessuna Entrata/Uscita, nessun conto cassa);
-      - una voce nell'E/C della compagnia con causale "Saldo iniziale".
-    Importo positivo = a debito verso la compagnia; negativo = a credito.
-    Operazione IDEMPOTENTE: sostituisce eventuali saldi iniziali precedenti.
+    Scrive una riga in Prima Nota (categoria `saldo_iniziale_compagnia`) che alimenta
+    SOLO la colonna SALDO (nessuna Entrata/Uscita, nessun conto cassa) con la descrizione
+    inserita, e una voce nell'E/C della compagnia. Importo positivo = a debito verso la
+    compagnia (alimenta il saldo), negativo = a credito (lo riduce).
     """
-    data = body.get("data") or _now_iso()[:10]
-    righe = body.get("righe") or []
     import uuid as _uuid
-    # Rimuovi i saldi iniziali precedenti (rende ripetibile il setup)
-    await db.movimenti.delete_many({"categoria": "saldo_iniziale_compagnia"})
-    await db.voci_manuali_compagnia.delete_many({"origine": "saldo_iniziale"})
-    creati = 0
-    for r in righe:
-        cid = r.get("compagnia_id")
-        imp = r.get("importo")
-        if not cid or imp in (None, "", 0):
-            continue
-        imp = float(imp)
-        if imp == 0:
-            continue
-        mov = {
-            "id": str(_uuid.uuid4()), "data_movimento": data, "tipo": "entrata",
-            "categoria": "saldo_iniziale_compagnia", "importo": imp,
-            "descrizione": "Saldo iniziale cassa compagnia", "compagnia_id": cid,
-            "conto_cassa_id": None, "is_saldo_iniziale": True, "created_at": _now_iso(),
-        }
-        await db.movimenti.insert_one(dict(mov))
-        voce = {
-            "id": str(_uuid.uuid4()), "compagnia_id": cid, "data": data,
-            "causale": "Saldo iniziale", "importo": abs(imp),
-            "tipo": "dare" if imp > 0 else "avere", "origine": "saldo_iniziale",
-            "note": "Saldo cassa iniziale", "created_at": _now_iso(),
-        }
-        await db.voci_manuali_compagnia.insert_one(dict(voce))
-        creati += 1
-    await log_attivita(user, "set", "saldo_cassa_compagnie", None,
-                       f"{creati} saldi iniziali compagnie ({data})")
-    return {"ok": True, "creati": creati, "data": data}
+    cid = body.get("compagnia_id")
+    if not cid:
+        raise HTTPException(400, "Seleziona la compagnia")
+    try:
+        imp = float(body.get("importo"))
+    except (TypeError, ValueError):
+        imp = 0.0
+    if imp == 0:
+        raise HTTPException(400, "Importo deve essere diverso da zero")
+    data = body.get("data") or _now_iso()[:10]
+    descr = (body.get("descrizione") or "").strip() or "Saldo cassa compagnia"
+    mov_id = str(_uuid.uuid4())
+    mov = {
+        "id": mov_id, "data_movimento": data, "tipo": "entrata",
+        "categoria": "saldo_iniziale_compagnia", "importo": imp,
+        "descrizione": descr, "compagnia_id": cid,
+        "conto_cassa_id": None, "is_saldo_iniziale": True, "created_at": _now_iso(),
+    }
+    await db.movimenti.insert_one(dict(mov))
+    voce = {
+        "id": str(_uuid.uuid4()), "compagnia_id": cid, "data": data,
+        "causale": descr, "importo": abs(imp),
+        "tipo": "dare" if imp > 0 else "avere", "origine": "saldo_cassa",
+        "movimento_id": mov_id, "note": "Saldo cassa compagnia", "created_at": _now_iso(),
+    }
+    await db.voci_manuali_compagnia.insert_one(dict(voce))
+    await log_attivita(user, "create", "saldo_cassa_compagnie", mov_id, f"{descr} {imp} ({data})")
+    return {"ok": True, "id": mov_id, "data": data}
+
+
+@api.delete("/contabilita/saldo-cassa-compagnie/{mid}")
+async def delete_saldo_cassa_compagnia(mid: str, user=Depends(require_user("admin"))):
+    """Elimina una registrazione di saldo cassa: rimuove la riga Prima Nota e la voce E/C."""
+    mov = await db.movimenti.find_one({"id": mid, "categoria": "saldo_iniziale_compagnia"}, {"_id": 0})
+    if not mov:
+        raise HTTPException(404, "Registrazione non trovata")
+    await db.movimenti.delete_one({"id": mid})
+    # rimuove la voce E/C collegata (nuove: per movimento_id; legacy: per compagnia+origine)
+    await db.voci_manuali_compagnia.delete_many({"movimento_id": mid})
+    await db.voci_manuali_compagnia.delete_many({
+        "movimento_id": None, "compagnia_id": mov.get("compagnia_id"),
+        "origine": {"$in": ["saldo_iniziale", "saldo_cassa"]},
+        "importo": abs(float(mov.get("importo") or 0)),
+    })
+    return {"ok": True}
 
 
 
