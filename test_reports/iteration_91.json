@@ -1,0 +1,30 @@
+{
+  "summary": "Testing completo hub Statistiche + Agenzie edit + Libro Matricola/Cumulative + Assicurati filter + Mappa hidden + collaboratore scoping. Backend: 7/7 pytest OK. Frontend: tutti i 6 tab Statistiche presenti con relativi data-testid; Premi/Provvigioni con stat-chart+stat-table+metriche+periodo+add-anno (aggiunta 2019 -> chip stat-anno-2019 comparsa); Per Operatore con tabella+filtri+TOTALE; Top Clienti con topcli-table (100 righe primi100, 2227 righe Tutti gli attivi), pct-regalo input, NESSUN RAPPEL nella lista, provvigioni non zero (totale ~97.195€ per 2026). Overview mostra sia 'Premio netto' che 'Premio lordo'. Sidebar: 'Libro Matricola / Cumulative' label OK, nav-mappa correttamente ASSENTE, /mappa raggiungibile via URL diretto. Agenzie: click su matita apre dialog 'Modifica agenzia' con age-rs prefilled (Assicurazioni Schiantarelli, Agenzia Bottoni) e bottone 'Aggiorna'. Collaboratore su /statistiche > Premi/Provvigioni: NESSUN filtro operatore visibile, caption 'I tuoi premi e le tue provvigioni' presente.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter91_statistiche.py", "/app/test_reports/pytest/iter91.xml"],
+  "action_items": [
+    "Nota di scoping (non un bug): la polizza cumulativa numero 1000141941 vive nel tenant partner 'c5ae2d0e-283e-4513-aaf2-cbd97ef62d78', mentre admin@assicura.it opera nel tenant 'tenant-principale-schiantarelli'. Il TenantAwareCollection filtra correttamente per tenant, quindi 1000141941 NON compare nella lista /libro-matricola/polizze quando si è admin principale (in DB: 6 is_libro_matricola nel principale + 1 is_cumulativa_assicurati nel partner). Il filtro dell'endpoint (routes/extras_p1p2.py:345) include già BOTH flag correttamente. Se si vuole che l'admin veda anche il tenant partner, occorre allargare lo scoping (non consigliato) o testare con un utente del tenant partner."
+  ],
+  "critical_code_review_comments": [
+    "server.py > 14k righe: continua a essere candidato a split (già segnalato in iter 90).",
+    "In routes/extras_p1p2.py list_libro_matricola_polizze usa .to_list(500) senza paginazione: se il numero di polizze libro/cumulative cresce oltre 500 verrebbero troncate silenziosamente; aggiungere query param limit/offset e/o total count.",
+    "AgenziaDialog: usa key={editing?.id || 'new'} per il re-mount → OK per il prefill; verificare che i campi complessi (compagnie collegate) risettino correttamente la selezione all'apertura in edit di partner diversi.",
+    "Il pulsante di edit sulla card agenzia è una <button> HTML plain senza aria-label/testid dedicato: aggiungere data-testid={`age-edit-${a.id}`} per rendere il test più stabile."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter91_statistiche.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! ; collaboratore@assicura.it / Collab123!",
+  "seed_data_creation": "Nessuna",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Data-testid usati: stat-tab-{overview,isa,premi,operatore,topclienti,segmentazione}, stat-chart, stat-table, stat-metrica-{netto,provvigioni,lordo}, stat-mese-{da,a}, stat-add-anno (BUTTON con dropdown), stat-anno-{YYYY} chip, stat-op-table, stat-op-{metrica-*,datafield,tipo,compagnia}, topcli-table, topcli-pct-regalo, topcli-{primi100,tutti}, age-{principale,partner-<id>,rs,save}, assicurati-filter-{totale,attivi,usciti}, nav-libro_matricola. Per test agenzie edit: cliccare button.text-sky-700 dentro la card. GET /api/libro-matricola/polizze ritorna una LISTA (non oggetto). GET /api/cervello/top-clienti ha chiave 'items' e provvigioni sul campo 'provvigioni_anno'; totale_provvigioni 2026 ~97.195€. Overview top_compagnie ha 'premio_netto' e 'premio_totale' (usato come lordo).",
+  "rca of the issue": "N/A - tutto verde. Unico caveat non-bug: policy cumulativa 1000141941 non visibile all'admin principale per tenant scoping (comportamento corretto)."
+}

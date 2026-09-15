@@ -12,6 +12,19 @@
   - **Scoping per ruolo**: un collaboratore vede SOLO i propri premi/provvigioni (backend forza `operatore_id=user.id`, provvigioni = sua quota da `provvigioni_operatori`; filtro Operatore nascosto in UI). Flag `scoped_operatore` nella risposta. Verificato via curl (collaboratore scoped=True) + screenshot.
 - **STATO: in attesa di verifica utente** prima di procedere con "Statistiche per Operatore" e "Rami tenant-aware".
 
+### Statistiche — estensioni + fix vari (15/09/2026, iter 91 verde)
+- **Premi/Provvigioni**: metriche selezionabili (netto/provvigioni/lordo), filtro periodo mesi (Da→A), **grafico a barre** (recharts) sopra la tabella, **selezione anno libera** (dropdown `stat-add-anno` → qualsiasi anno fino al 2005, es. 2019). Scoping collaboratore (vede solo i suoi, filtro operatore nascosto).
+- **Nuovo tab "Per Operatore"** (`StatistichePerOperatore.jsx` + `GET /api/statistiche/per-operatore`): tabella per operatore, premi (netto/lordo, ripartiti pro-quota) e provvigioni (quota effettiva), confronto anni, stessi filtri. Nomi operatori risolti da `db.users`.
+- **Top Clienti**: dati reali dai titoli, colonne Cliente da / Premi netti / Provvigioni / Regalo(%) impostabile, toggle Primi 100 / Tutti gli attivi. **Solo clienti con polizze attive** (RAPPEL escluso).
+- **Overview → Top 5 Compagnie**: aggiunta colonna **Premio netto** (oltre al lordo). Backend `statistiche_overview` ritorna `premio_netto`.
+- **Helpers condivisi** `pages/statsShared.jsx` (YearPicker, MeseRange, FSel, costanti).
+
+### Altri fix (15/09/2026, iter 91 verde)
+- **Agenzie**: fix tasto Modifica che apriva form vuoto/creava duplicato → `AgenziaDialog key={editing?.id||'new'}` (remount con prefill). Aggiunti testid `age-edit-{id}`/`age-del-{id}`.
+- **Libro Matricola / Cumulative**: rinominata voce sidebar + titolo pagina; `list_libro_matricola_polizze` (extras_p1p2.py) ora include sia `is_libro_matricola` sia `is_cumulativa_assicurati`; badge "Libro matricola"/"Cumulativa" sulle card. NB: la polizza cumulativa vive nel tenant che la possiede (scoping per-tenant).
+- **Assicurati (tab cumulativa)**: badge Totale/Attivi/Usciti resi filtri cliccabili (`assicurati-filter-*`), default = solo Attivi.
+- **Mappa clienti**: voce nascosta dal menu (rimossa da `ALL_MENU_ITEMS`), route `/mappa` ancora attiva.
+
 ### Top Clienti — dati reali + nuove colonne (15/09/2026)
 - **Fix "non prende i dati"**: `GET /api/cervello/top-clienti` (`routes/cervello.py`) prendeva le provvigioni da `movimenti_contabili` (categoria=provvigioni) che è VUOTA in questo tenant → tutto 0. Riscritto per aggregare i **dati reali dai titoli** (`data_incasso` nell'anno, esclusi stornato): `provvigioni` + `importo_netto` per contraente. Ora 2026 tot provv 101.218 (coerente con tab Premi).
 - **Nuove colonne**: "Cliente da" (anni da prima decorrenza polizza, fallback created_at → `anni_cliente`), "Premi netti" (`premi_netti_anno`), "Regalo (X%)" = provvigioni × % impostabile in UI (default 5%, input `topcli-pct-regalo`).

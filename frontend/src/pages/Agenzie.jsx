@@ -115,8 +115,8 @@ function AgenziaCard({ a, onEdit, onDelete, testid }) {
                     </div>
                 </div>
                 <div className="flex gap-1">
-                    <button onClick={onEdit} className="text-sky-700 hover:bg-sky-50 p-1.5 rounded"><Edit size={13} /></button>
-                    <button onClick={() => onDelete(a)} className="text-rose-600 hover:bg-rose-50 p-1.5 rounded"><Trash2 size={13} /></button>
+                    <button onClick={onEdit} data-testid={`age-edit-${a.id}`} className="text-sky-700 hover:bg-sky-50 p-1.5 rounded"><Edit size={13} /></button>
+                    <button onClick={() => onDelete(a)} data-testid={`age-del-${a.id}`} className="text-rose-600 hover:bg-rose-50 p-1.5 rounded"><Trash2 size={13} /></button>
                 </div>
             </div>
             <div className="mt-2 text-xs text-slate-600 space-y-0.5">
