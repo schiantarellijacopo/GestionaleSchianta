@@ -11235,6 +11235,20 @@ async def preview_avvisi_scadenze(
     if mezzo_pagamento and mezzo_pagamento != "all":
         tit = [t for t in tit if (t.get("mezzo_pagamento") or "").lower() == mezzo_pagamento.lower()]
 
+    # Escludi i titoli per cui è GIÀ stato inviato un avviso: passano nella sezione
+    # "Storico avvisi inviati" e non devono più comparire fra i titoli arretrati.
+    avvisati: set = set()
+    async for s in db.storico_avvisi.find(
+        {"$or": [{"titolo_id": {"$ne": None}}, {"titoli_ids": {"$exists": True, "$ne": []}}]},
+        {"_id": 0, "titolo_id": 1, "titoli_ids": 1},
+    ):
+        if s.get("titolo_id"):
+            avvisati.add(s["titolo_id"])
+        for x in (s.get("titoli_ids") or []):
+            avvisati.add(x)
+    if avvisati:
+        tit = [t for t in tit if t.get("id") not in avvisati]
+
     return {
         "giorni": giorni,
         "polizze": pol,

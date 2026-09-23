@@ -1,7 +1,17 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
-## Sessione 23/09/2026 (fork) — Import Catasto → Patrimonio Immobili
+## Sessione 23/09/2026 (fork) — Avvisi scadenza: i titoli avvisati escono dagli arretrati
+
+- **Richiesta**: dopo l'invio dell'avviso di scadenza, il titolo deve passare in "Storico avvisi inviati" e non comparire più fra i "Titoli arretrati".
+- **Fix** (`preview_avvisi_scadenze`, server.py ~11236): la preview arretrati ora ESCLUDE i titoli che hanno già una voce in `storico_avvisi` (via `titolo_id` o `titoli_ids`). Tutti i canali (email/whatsapp/sms/pdf bulk) registrano già i `titoli_ids` nello storico.
+- **Verificato e2e** (curl): registrato un avviso per un titolo → sparisce dagli arretrati (1989→1988) e compare in `/storico-avvisi`. Voce di test rimossa.
+
+## Sessione 23/09/2026 (fork) — Immobili su mappa (già disponibile)
+
+- Verificato che `PatrimonioTab` (AnalisiClienteTab) mostra già la mappa Leaflet degli immobili con coordinate (`ImmobiliMap`, toggle "Mappa" attivo di default) e il pulsante "Geolocalizza immobili". L'import Catasto già geocodifica (`_geocode_immobile`): gli immobili importati risultano con lat/lng e compaiono sulla mappa.
+
+
 
 - **Problema**: gli immobili scaricati dal Catasto (OpenAPI.it) restavano nel pannello Anagrafica ma non comparivano in Analisi Cliente → Patrimonio → Immobili (0).
 - **Causa**: l'import in `analisi_cliente.immobili` avveniva solo dal modale `CatastoImportDialog`; il pannello inline `CadastrePanel` (quello mostrato dopo lo scarico) era di sola lettura, senza pulsante di import.
