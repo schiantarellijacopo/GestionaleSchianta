@@ -1469,3 +1469,9 @@ Usare integration_expert prima di implementare.
   * FirmaButton (DocumentiSezioneSplit.jsx): al apertura dialog verifica il contraente; se email/cellulare non validi mostra banner rosso e DISABILITA "Invia richiesta firma" finché non si compilano i campi manuali.
 - Badge stato firma: label fallback cambiata da "In firma" a "In attesa firma" sul documento (dettaglio polizza). La dashboard "Documenti mancanti" ha già la card "Firme in attesa" (extras_p1p2.py firme_in_attesa) — nessuna modifica necessaria lì.
 - Test: backend endpoint /esignature/firmatario + resolver/validatori verificati su dati reali (anagrafica con cell+email -> ok True). Frontend compila senza errori (risolto uso condizionale di useEffect in FirmaButton). Invio WhatsApp reale non testato e2e (consuma crediti/SMS).
+
+### Sessione fork 2026-06 (4) — Fix: WhatsApp apriva ancora wa.me nonostante API attiva
+- Sintomo (agenzia c5ae2d0e... jacopo@schiantarelli.it): attivata WhatsApp API dal marketplace super console, ma il pulsante WhatsApp ("Richiedi documento", ecc.) apriva ancora wa.me.
+- Causa: azienda_config.whatsapp_provider dell'agenzia era ancora "wame". L'attivazione marketplace connette l'istanza Evolution (whatsapp_instances state=open) ma NON flippa whatsapp_provider. L'endpoint POST /comunicazioni/whatsapp/invia sceglieva il provider solo da whatsapp_provider -> wame -> link wa.me.
+- Fix (server.py whatsapp_invia): auto-rilevamento. Se il tenant ha un'istanza whatsapp connessa (state open/connected) e non c'è provider esplicito nel body, il provider diventa "evolution" (invio via API, tracciato). Rispetta sempre body.provider se passato. Entrambe le collezioni (azienda_config, whatsapp_instances) sono tenant-scoped, quindi la scelta è per-agenzia.
+- Test: simulato il contesto tenant di jacopo -> az.whatsapp_provider="wame" + istanza "agenzia-0342706000" connessa -> PROVIDER FINALE = evolution. Backend riavviato ok.

@@ -12451,7 +12451,18 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
     if not numero or not messaggio:
         raise HTTPException(400, "numero e messaggio obbligatori")
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    provider = (body.get("provider") or az.get("whatsapp_provider") or "wame").lower()
+    provider = (body.get("provider") or az.get("whatsapp_provider") or "").lower()
+    # Auto-rilevamento: se l'agenzia ha un'istanza WhatsApp API connessa
+    # (marketplace attivo), i messaggi DEVONO passare dall'API anche se
+    # azienda_config è ancora impostata su "wame". Salvo scelta esplicita nel body.
+    if provider != "evolution" and not body.get("provider"):
+        inst_connessa = await db.whatsapp_instances.find_one(
+            {"state": {"$in": ["open", "connected"]}}, {"_id": 0, "instance_name": 1},
+        )
+        if inst_connessa:
+            provider = "evolution"
+    if not provider:
+        provider = "wame"
 
     cleaned = re.sub(r"[^\d+]", "", numero)
     if cleaned.startswith("00"):
