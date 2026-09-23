@@ -51,3 +51,24 @@ export const fmtDate = (s) => {
 
 export const fmtNum = (n) =>
     new Intl.NumberFormat("it-IT").format(Number(n || 0));
+
+// Invio WhatsApp unificato: se l'agenzia ha la WhatsApp API attiva (whatsapp_provider
+// = "evolution") invia server-side via Evolution; altrimenti apre il link wa.me.
+// Restituisce l'esito e gestisce apertura link / toast.
+export async function sendWhatsApp(numero, messaggio, extra = {}) {
+    const { toast } = await import("sonner");
+    if (!numero) { toast.error("Numero WhatsApp del destinatario mancante"); return { ok: false }; }
+    try {
+        const r = await api.post("/comunicazioni/whatsapp/invia", { numero, messaggio, ...extra });
+        const d = r.data || {};
+        if (d.provider === "wame" && d.url) {
+            window.open(d.url, "_blank");
+        } else if (d.provider === "evolution") {
+            toast.success("Messaggio WhatsApp inviato");
+        }
+        return { ok: true, ...d };
+    } catch (e) {
+        toast.error(formatError(e));
+        return { ok: false };
+    }
+}

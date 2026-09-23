@@ -1443,3 +1443,13 @@ Usare integration_expert prima di implementare.
 - SANDBOX: OPENAPI_ESIGNATURE_SANDBOX risulta disattivo -> chiamate verso PRODUZIONE esignature.openapi.com (token OK). Flusso: /polizze/{id}/mup/genera (salva) -> /esignature/invia -> create EU-AES -> link firma via WA/email in background + OTP SMS.
 - Test: _normalize_mobile verificato su 7 formati -> tutti +393402934389. Verifica live end-to-end NON eseguita (invia SMS reale + consuma crediti): da fare con numero di test dell'agenzia.
 - IN PAUSA (richiesta precedente non completata): wa.me -> invio via API Evolution quando l'agenzia ha WhatsApp API attiva. Esiste già provider wame|evolution; alcune UI forzano ancora wa.me (AnagraficaDetail 2234, ContrattoConsulenzaTab 178, upload-link "Invia via WhatsApp", ecc.). Da unificare su un helper che rispetti az.whatsapp_provider.
+
+### Sessione fork 2026-06 — eSignature: passaggio a FES (EU-SES) + wa.me/API (parziale)
+- Firma cambiata da EU-AES (Avanzata) a FES/SES (Semplice) con OTP SMS, SENZA documento d'identità (richiesta utente).
+  * esignature_openapi.py: endpoint POST /EU-SES (era /EU-AES), scope token POST:{host}/EU-SES, aggiunto signer.authentication=["sms"]. Mantiene _normalize_mobile E.164 e email obbligatoria.
+  * routes/esignature_it.py: email firmatario ora obbligatoria (OpenAPI la richiede, err 815).
+  * Test LIVE ok su 3402934389: EU-SES HTTP 200, state WAIT_VALIDATION, signing_url generato e inviato via WhatsApp (istanza agenzia-0342706000). OTP arriva via SMS quando il firmatario apre il link.
+- wa.me -> invio provider-aware (parziale):
+  * lib/api.js: nuovo helper sendWhatsApp(numero,messaggio,extra) che chiama POST /comunicazioni/whatsapp/invia (già esistente: rispetta azienda_config.whatsapp_provider — evolution=invio API, wame=apre link).
+  * AnagraficaDetail.jsx "Richiedi documento": pulsante WhatsApp ora usa sendWhatsApp (provider-aware) invece di wa.me hardcoded.
+  * DA COMPLETARE: ContrattoConsulenzaTab.jsx (usa firma legacy eSignAnyWhere, wa.me senza numero) e RubricaCompagnie.jsx (contatto compagnie). Non modificati per non rischiare.

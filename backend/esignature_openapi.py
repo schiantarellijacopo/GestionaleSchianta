@@ -74,7 +74,7 @@ async def _get_token(ttl_sec: int = 3600) -> Optional[str]:
     if not (cid and csec):
         return None
     host = _host()
-    scopes = [f"POST:{host}/EU-AES", f"GET:{host}/signatures"]
+    scopes = [f"POST:{host}/EU-SES", f"GET:{host}/signatures"]
     cache_key = f"{host}|" + "|".join(sorted(scopes))
     now = int(time.time())
     cached = _token_cache.get(cache_key)
@@ -129,6 +129,7 @@ async def create_signature(
             "email": signer.get("email") or "",
             "mobile": mobile,
             "message": message or "Documento da firmare",
+            "authentication": ["sms"],
             "signatures": [{"page": page, "x": str(x), "y": str(y), "name": "signature_1"}],
         }],
         "inputDocuments": base64.b64encode(pdf_bytes).decode(),
@@ -138,7 +139,7 @@ async def create_signature(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
-                f"https://{_host()}/EU-AES", json=body,
+                f"https://{_host()}/EU-SES", json=body,
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             )
         if r.status_code >= 400:

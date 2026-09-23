@@ -93,6 +93,8 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     }
     if not signer["mobile"]:
         raise HTTPException(400, "Cellulare del firmatario mancante (necessario per OTP SMS)")
+    if not signer["email"]:
+        raise HTTPException(400, "Email del firmatario mancante (obbligatoria per la firma OpenAPI)")
 
     display = al.get("nome_file") or "documento.pdf"
     res = await esvc.create_signature(

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, fmtDate, fmtEur } from "@/lib/api";
+import { api, fmtDate, fmtEur, sendWhatsApp } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
 import IconForRamo from "@/components/IconForRamo";
@@ -2228,10 +2228,10 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
         try { await api.delete(`/upload-links/${lid}`); toast.success("Richiesta eliminata"); load(); }
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
-    const waLink = (url) => {
+    const waSend = (url) => {
         const num = (ana?.cellulare || ana?.telefono || "").replace(/\D/g, "");
-        const msg = encodeURIComponent(`Salve, per completare la pratica carichi qui il documento richiesto: ${url}`);
-        return num ? `https://wa.me/${num.length <= 10 ? "39" + num : num}?text=${msg}` : null;
+        const msg = `Salve, per completare la pratica carichi qui il documento richiesto: ${url}`;
+        return sendWhatsApp(num, msg, { anagrafica_id: ana?.id });
     };
 
     return (
@@ -2265,7 +2265,7 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
             {links.length > 0 && (
                 <div className="mt-3 space-y-1.5">
                     {links.slice(0, 8).map((l) => {
-                        const wa = waLink(l.url);
+                        const hasNum = !!(ana?.cellulare || ana?.telefono);
                         return (
                             <div key={l.id} className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5">
                                 <span className="flex-1 min-w-0">
@@ -2273,7 +2273,7 @@ function RichiediDocumentoBox({ anagrafica_id, ana }) {
                                     <span className="text-slate-400 ml-1">· {(l.uploads || []).length} file caricati{l.used ? "" : " (in attesa)"}</span>
                                 </span>
                                 <button onClick={() => copia(l.url)} className="text-sky-600 hover:text-sky-800" title="Copia link" data-testid={`richiedi-doc-copy-${l.id}`}><Copy size={13} /></button>
-                                {wa && <a href={wa} target="_blank" rel="noreferrer" className="text-emerald-600 hover:text-emerald-800" title="Invia su WhatsApp"><Send size={13} /></a>}
+                                {hasNum && <button onClick={() => waSend(l.url)} className="text-emerald-600 hover:text-emerald-800" title="Invia su WhatsApp" data-testid={`richiedi-doc-wa-${l.id}`}><Send size={13} /></button>}
                                 <button onClick={() => elimina(l.id)} className="text-rose-500 hover:text-rose-700" title="Elimina richiesta" data-testid={`richiedi-doc-del-${l.id}`}><Trash2 size={13} /></button>
                             </div>
                         );
