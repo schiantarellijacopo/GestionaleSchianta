@@ -391,7 +391,7 @@ async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
             r = await client.post(
                 f"{url_base}/message/sendText/{instance_name}",
                 headers={"apikey": api_key, "Content-Type": "application/json"},
-                json={"number": to_clean, "text": (ctx.get("corpo") or "")[:2000]},
+                json={"number": to_clean, "text": (ctx.get("corpo") or "")[:2000], "linkPreview": False},
             )
         if r.status_code >= 400:
             return {"status": "errore", "error": f"Evolution API {r.status_code}: {r.text[:200]}"}

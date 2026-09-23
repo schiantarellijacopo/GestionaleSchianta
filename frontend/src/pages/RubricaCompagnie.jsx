@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, sendWhatsApp } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -165,7 +165,11 @@ export default function RubricaCompagnie() {
 function ContattoRow({ c, canEdit, canDelete, onEdit, onDelete }) {
     const fullName = [c.nome, c.cognome].filter(Boolean).join(" ");
     const cell = c.cellulare?.replace(/[^\d+]/g, "");
-    const waUrl = cell ? `https://wa.me/${cell}` : null;
+    const inviaWa = async () => {
+        if (!cell) return;
+        const msg = window.prompt(`Messaggio WhatsApp per ${fullName || "il contatto"}:`);
+        if (msg && msg.trim()) await sendWhatsApp(cell, msg.trim());
+    };
     return (
         <div className="border border-slate-100 rounded-md p-2.5 hover:border-sky-200 transition-colors" data-testid={`contatto-${c.id}`}>
             <div className="flex justify-between items-start gap-2">
@@ -201,10 +205,11 @@ function ContattoRow({ c, canEdit, canDelete, onEdit, onDelete }) {
                         <a href={`tel:${c.cellulare}`} className="flex items-center gap-1.5 text-emerald-700 hover:underline" data-testid={`contatto-cell-${c.id}`}>
                             <Smartphone size={11} /> {c.cellulare}
                         </a>
-                        {waUrl && (
-                            <a href={waUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-emerald-700 underline">
+                        {cell && (
+                            <button type="button" onClick={inviaWa} data-testid={`contatto-wa-${c.id}`}
+                                className="text-[10px] text-emerald-700 underline">
                                 WhatsApp
-                            </a>
+                            </button>
                         )}
                     </div>
                 )}

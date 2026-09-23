@@ -321,7 +321,7 @@ async def send_text(
     try:
         resp = await _call(
             "POST", f"/message/sendText/{name}",
-            json={"number": body.number, "text": body.text},
+            json={"number": body.number, "text": body.text, "linkPreview": False},
             instance_token=inst.get("token"),
         )
         return {"ok": True, "resp": resp}
@@ -947,7 +947,7 @@ async def send_text_via_evolution(number: str, text: str, instance_name: Optiona
     try:
         await _call(
             "POST", f"/message/sendText/{inst['instance_name']}",
-            json={"number": to_clean, "text": (text or "")[:3000]},
+            json={"number": to_clean, "text": (text or "")[:3000], "linkPreview": False},
             instance_token=inst.get("token"),
         )
     except HTTPException as e:

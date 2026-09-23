@@ -58,6 +58,37 @@ async def _resolve_signer(entita_tipo: str, entita_id: str) -> dict:
     }
 
 
+def _mobile_valido(m: str) -> bool:
+    digits = "".join(c for c in str(m or "") if c.isdigit())
+    return len(digits) >= 8
+
+
+def _email_valida(e: str) -> bool:
+    e = str(e or "").strip()
+    return "@" in e and "." in e.split("@")[-1]
+
+
+@router.get("/firmatario")
+async def firmatario_check(entita_tipo: str, entita_id: str, user=Depends(current_user)) -> dict:
+    """Restituisce i contatti del firmatario (contraente) e la validità di
+    email/cellulare, per mostrare un avviso in UI PRIMA dell'invio firma."""
+    resolved = await _resolve_signer(entita_tipo, entita_id)
+    email = resolved.get("email") or ""
+    mobile = resolved.get("mobile") or ""
+    email_ok = _email_valida(email)
+    mobile_ok = _mobile_valido(mobile)
+    return {
+        "nome": resolved.get("name") or "",
+        "cognome": resolved.get("surname") or resolved.get("ragione_sociale") or "",
+        "email": email,
+        "mobile": mobile,
+        "email_ok": email_ok,
+        "mobile_ok": mobile_ok,
+        "ok": email_ok and mobile_ok,
+    }
+
+
+
 @router.post("/invia")
 async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     """Invia un allegato PDF esistente per la firma FEA (OTP SMS).

@@ -162,13 +162,19 @@ async def get_contratto(aid: str, user=Depends(current_user)):
         raise HTTPException(404, "Anagrafica non trovata")
     cc = ana.get("contratto_consulenza")
     cons = await _consulente_info(user)
+    cliente = {
+        "cellulare": ana.get("cellulare") or ana.get("telefono") or "",
+        "email": ana.get("email") or "",
+        "nome": ana.get("nome") or "",
+        "cognome": ana.get("cognome") or ana.get("ragione_sociale") or "",
+    }
     if cc and cc.get("testo"):
-        return {**cc, "consulente": cons}
+        return {**cc, "consulente": cons, "cliente": cliente}
     importo = 0
     return {
         "testo": _costruisci_testo(ana, cons, importo),
         "importo": importo, "stato": "bozza",
-        "consulente": cons, "tipo": ana.get("tipo"),
+        "consulente": cons, "tipo": ana.get("tipo"), "cliente": cliente,
     }
 
 

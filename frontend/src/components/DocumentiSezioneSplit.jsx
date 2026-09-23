@@ -350,7 +350,7 @@ const STATO_FIRMA = {
 function FirmaBadge({ rec, isFirmato }) {
     if (isFirmato) return <span className="bg-emerald-600 text-white px-1.5 rounded font-medium">✓ Documento firmato</span>;
     if (!rec) return null;
-    const s = STATO_FIRMA[(rec.stato || "").toUpperCase()] || { label: "In firma", cls: "bg-amber-100 text-amber-700" };
+    const s = STATO_FIRMA[(rec.stato || "").toUpperCase()] || { label: "In attesa firma", cls: "bg-amber-100 text-amber-700" };
     return <span className={`px-1.5 rounded font-medium ${s.cls}`} data-testid={`firma-badge-${rec.allegato_origine_id}`}>{s.label}</span>;
 }
 
@@ -361,8 +361,21 @@ export function FirmaButton({ allegato, stato, onDone }) {
     const [req, setReq] = useState(null);
     const [checking, setChecking] = useState(false);
     const [canali, setCanali] = useState({ wa: true, email: true });
-    if (!isPdf(allegato)) return null;
+    const [firmatario, setFirmatario] = useState(null);
     const giaFirmato = (stato || "").toUpperCase() === "DONE";
+
+    useEffect(() => {
+        if (!open || !allegato.entita_tipo || !allegato.entita_id) return;
+        api.get("/esignature/firmatario", { params: { entita_tipo: allegato.entita_tipo, entita_id: allegato.entita_id } })
+            .then((r) => setFirmatario(r.data)).catch(() => setFirmatario(null));
+    }, [open, allegato.entita_tipo, allegato.entita_id]);
+
+    // Validità effettiva considerando eventuali dati inseriti manualmente
+    const emailOk = /.+@.+\..+/.test(signer.email) || (firmatario?.email_ok && !signer.email);
+    const mobileOk = (signer.mobile.replace(/\D/g, "").length >= 8) || (firmatario?.mobile_ok && !signer.mobile);
+    const bloccato = !!firmatario && (!emailOk || !mobileOk);
+
+    if (!isPdf(allegato)) return null;
 
     const invia = async () => {
         setSending(true);
@@ -418,6 +431,12 @@ export function FirmaButton({ allegato, stato, onDone }) {
                             Firma Elettronica Avanzata con OTP via SMS. Il firmatario riceve il link via WhatsApp ed email.
                         </div>
                         <div className="text-[11px] text-slate-500">Dati firmatario (lascia vuoto per usare il contraente):</div>
+                        {bloccato && (
+                            <div className="text-xs bg-rose-50 border border-rose-200 text-rose-700 rounded p-2" data-testid="firma-avviso-contatti">
+                                ⚠️ Il contraente non ha {(!emailOk && !mobileOk) ? "email e cellulare validi" : (!emailOk ? "un'email valida" : "un cellulare valido")}.
+                                La firma FES richiede <b>entrambi</b>: compila i campi sotto oppure aggiorna l'anagrafica.
+                            </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                             <div><Label className="text-xs">Nome</Label><Input value={signer.name} onChange={(e) => setSigner({ ...signer, name: e.target.value })} data-testid="firma-nome" /></div>
                             <div><Label className="text-xs">Cognome</Label><Input value={signer.surname} onChange={(e) => setSigner({ ...signer, surname: e.target.value })} data-testid="firma-cognome" /></div>
@@ -442,7 +461,7 @@ export function FirmaButton({ allegato, stato, onDone }) {
                     </div>
                     <DialogFooter>
                         {!req ? (
-                            <Button onClick={invia} disabled={sending} className="bg-violet-600 hover:bg-violet-700" data-testid="firma-invia-btn">
+                            <Button onClick={invia} disabled={sending || bloccato} className="bg-violet-600 hover:bg-violet-700" data-testid="firma-invia-btn">
                                 {sending ? "Invio…" : "Invia richiesta firma"}
                             </Button>
                         ) : (

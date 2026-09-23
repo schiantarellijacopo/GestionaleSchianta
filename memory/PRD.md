@@ -1453,3 +1453,19 @@ Usare integration_expert prima di implementare.
   * lib/api.js: nuovo helper sendWhatsApp(numero,messaggio,extra) che chiama POST /comunicazioni/whatsapp/invia (già esistente: rispetta azienda_config.whatsapp_provider — evolution=invio API, wame=apre link).
   * AnagraficaDetail.jsx "Richiedi documento": pulsante WhatsApp ora usa sendWhatsApp (provider-aware) invece di wa.me hardcoded.
   * DA COMPLETARE: ContrattoConsulenzaTab.jsx (usa firma legacy eSignAnyWhere, wa.me senza numero) e RubricaCompagnie.jsx (contatto compagnie). Non modificati per non rischiare.
+
+### Sessione fork 2026-06 (3) — Firma FES: no anteprima link + wa.me/API completato + avviso contatti + badge
+- Anteprima link WhatsApp (bandiera/immagine sul link firma): aggiunto "linkPreview": false su TUTTI gli invii sendText Evolution:
+  * routes/whatsapp_evo.py (send_text riga ~324, send_text_via_evolution ~950)
+  * server.py whatsapp_invia (~12507)
+  * alert_dispatcher.py (~394)
+  Ora i messaggi mostrano solo testo + link, senza preview.
+- wa.me -> API completato (provider-aware):
+  * ContrattoConsulenzaTab.jsx: firmaEsignContratto(link_whatsapp) ora usa sendWhatsApp(cellulare, testo, {anagrafica_id}). Cellulare/email cliente aggiunti alla GET /anagrafiche/{id}/contratto-consulenza (campo "cliente").
+  * RubricaCompagnie.jsx: pulsante WhatsApp ora chiede il messaggio (prompt) e invia via sendWhatsApp invece di aprire wa.me/{cell}.
+  (AnagraficaDetail già fatto in sessione precedente.)
+- Avviso email/cellulare firma (FES richiede entrambi):
+  * Nuovo endpoint GET /api/esignature/firmatario?entita_tipo=&entita_id= -> {email,mobile,email_ok,mobile_ok,ok}. Validatori _mobile_valido (>=8 cifre) e _email_valida.
+  * FirmaButton (DocumentiSezioneSplit.jsx): al apertura dialog verifica il contraente; se email/cellulare non validi mostra banner rosso e DISABILITA "Invia richiesta firma" finché non si compilano i campi manuali.
+- Badge stato firma: label fallback cambiata da "In firma" a "In attesa firma" sul documento (dettaglio polizza). La dashboard "Documenti mancanti" ha già la card "Firme in attesa" (extras_p1p2.py firme_in_attesa) — nessuna modifica necessaria lì.
+- Test: backend endpoint /esignature/firmatario + resolver/validatori verificati su dati reali (anagrafica con cell+email -> ok True). Frontend compila senza errori (risolto uso condizionale di useEffect in FirmaButton). Invio WhatsApp reale non testato e2e (consuma crediti/SMS).

@@ -12504,7 +12504,7 @@ async def whatsapp_invia(body: dict, user=Depends(current_user)):
                 resp = await http.post(
                     f"{url_base}/message/sendText/{instance_name}",
                     headers={"apikey": api_key, "Content-Type": "application/json"},
-                    json={"number": to_clean, "text": messaggio[:2000]},
+                    json={"number": to_clean, "text": messaggio[:2000], "linkPreview": False},
                 )
             if resp.status_code >= 400:
                 raise HTTPException(503, f"Errore Evolution API ({resp.status_code}): {resp.text[:300]}")

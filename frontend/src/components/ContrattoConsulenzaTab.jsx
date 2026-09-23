@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { api } from "@/lib/api";
+import { api, sendWhatsApp } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +76,7 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
     const [otpDebug, setOtpDebug] = useState(null);
     const [busy, setBusy] = useState(false);
     const [modelli, setModelli] = useState([]);
+    const [cliente, setCliente] = useState({});
     const testoRef = useRef(null);
 
     const insertPlaceholder = (token) => {
@@ -98,6 +99,7 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
             setStato(r.data.stato || "bozza");
             setFirmatoIl(r.data.firmato_il || null);
             setAllegatoId(r.data.allegato_id || null);
+            setCliente(r.data.cliente || {});
         });
     };
     useEffect(load, [anagrafica_id]);
@@ -174,8 +176,9 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
             const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
             const link = r.data.signing_url || r.data.viewer_link;
             if (link && modalita === "link_whatsapp") {
-                const txt = encodeURIComponent(`Gentile cliente, firmi qui il contratto di consulenza: ${link}`);
-                window.open(`https://wa.me/?text=${txt}`, "_blank");
+                const num = (cliente.cellulare || "").replace(/\D/g, "");
+                if (!num) { toast.error("Cellulare del cliente mancante per l'invio WhatsApp"); return; }
+                await sendWhatsApp(num, `Gentile cliente, firmi qui il contratto di consulenza: ${link}`, { anagrafica_id });
             } else if (link) {
                 window.open(link, "_blank");
             }
