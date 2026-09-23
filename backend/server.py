@@ -4491,8 +4491,31 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
     res = await db.titoli.update_one({"id": tid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Non trovato")
+    # Se il titolo è COPERTO, mantieni allineato il movimento di copertura in Prima Nota:
+    # da esso derivano sia il Brogliaccio sia l'Estratto Conto Compagnia, quindi
+    # aggiornando importo/provvigioni si aggiornano automaticamente entrambi.
+    updated = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if updated and updated.get("titolo_coperto"):
+        cop = await db.movimenti.find_one(
+            {"titolo_id": tid, "categoria": "copertura_titolo"}, {"_id": 0})
+        if cop:
+            nuovo_imp = round(float(updated.get("importo_lordo") or 0.0), 2)
+            nuovo_provv = round(float(updated.get("provvigioni") or 0.0), 2)
+            if (abs(float(cop.get("importo") or 0) - nuovo_imp) > 0.005
+                    or abs(float(cop.get("provvigioni") or 0) - nuovo_provv) > 0.005):
+                await assert_giornata_aperta(
+                    cop.get("data_movimento"),
+                    azione="aggiornare la copertura in Prima Nota")
+                pol = await db.polizze.find_one(
+                    {"id": updated.get("polizza_id")}, {"_id": 0}) or {}
+                await db.movimenti.update_one(
+                    {"id": cop["id"]},
+                    {"$set": {"importo": nuovo_imp, "provvigioni": nuovo_provv,
+                              "compagnia_id": pol.get("compagnia_id"),
+                              "updated_at": _now_iso()}},
+                )
     await log_attivita(user, "update", "titolo", tid)
-    return strip_mongo_id(await db.titoli.find_one({"id": tid}, {"_id": 0}))
+    return strip_mongo_id(updated)
 
 
 @api.put("/titoli/{tid}/tags")
@@ -5404,6 +5427,25 @@ async def _provv_breakdown(
     }
 
 
+def _quota_collab_da_schema(schema: dict, provv_titolo_tot: float,
+                            premio_netto: float, premio_lordo: float):
+    """Quota provvigione del SINGOLO collaboratore secondo il suo schema.
+
+    - schema "diretto sul netto" (es. BS BROKER 4,5%): quota = netto * %netto (× %collab se presente)
+    - schema di ripartizione (solo %collaboratore, es. 70%): quota = % della provvigione
+      GIÀ presente sul titolo/polizza (NON ricalcola né tocca il totale)
+    Ritorna None se lo schema non è una ripartizione collaboratore applicabile.
+    """
+    pct_netto = float(schema.get("percentuale_su_premio_netto") or 0)
+    pct_collab = float(schema.get("percentuale_collaboratore") or 0)
+    if pct_netto > 0 and premio_netto and premio_netto > 0:
+        base = round(premio_netto * pct_netto / 100.0, 2)
+        return round(base * pct_collab / 100.0, 2) if pct_collab > 0 else base
+    if pct_collab > 0:
+        return round(float(provv_titolo_tot or 0) * pct_collab / 100.0, 2)
+    return None
+
+
 @api.get("/provvigioni/calcola")
 async def calcola_provvigione_endpoint(
     premio_lordo: float, collaboratore_id: Optional[str] = None,
@@ -5445,28 +5487,115 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
         if cid:
             flt["$or"] = [{"collaboratore_id": cid}, {"provvigioni_operatori.operatore_id": cid}]
 
+    cid = schema_scope.get("collaboratore_id") if schema_scope else None
+    coll_nome = (schema_scope or {}).get("collaboratore_nome")
     schema_cache: dict = {}
     pol_cache: dict = {}
     esaminati = 0
     aggiornati = 0
     delta_tot = 0.0
     esempi = []
+    polizze_agg: set = set()
+
+    def _is_cid(op):
+        return (op.get("operatore_id") == cid) or (op.get("collaboratore_id") == cid)
 
     async for t in db.titoli.find(flt, {"_id": 0}):
         esaminati += 1
         pid = t.get("polizza_id")
         if pid not in pol_cache:
             pol_cache[pid] = await db.polizze.find_one(
-                {"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1}) or {}
+                {"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1, "provvigioni": 1,
+                              "provvigioni_operatori": 1, "collaboratore_id": 1,
+                              "importo_netto": 1, "premio_netto": 1}) or {}
         pol = pol_cache[pid]
         compagnia_id = pol.get("compagnia_id")
         ramo = pol.get("ramo")
-        # Scope schema: se lo schema è legato a compagnia/ramo specifici, salta i non pertinenti
+
         if schema_scope:
+            # ============================================================
+            # RIASSEGNA per COLLABORATORE: cambia SOLO la quota del
+            # collaboratore dello schema (nel titolo e in polizza).
+            # NON tocca MAI la provvigione totale di titolo/polizza.
+            # ============================================================
             if schema_scope.get("compagnia_id") and schema_scope["compagnia_id"] != compagnia_id:
                 continue
             if schema_scope.get("ramo") and schema_scope["ramo"] != ramo:
                 continue
+            operatori = [dict(o) for o in (t.get("provvigioni_operatori") or [])]
+            coinvolto = any(_is_cid(o) for o in operatori) or (t.get("collaboratore_id") == cid)
+            if not coinvolto:
+                continue
+            provv_tot_titolo = round(float(t.get("provvigioni") or 0), 2)
+            netto = float(t.get("importo_netto") or 0)
+            lordo = float(t.get("importo_lordo") or 0)
+            nuova_quota = _quota_collab_da_schema(schema_scope, provv_tot_titolo, netto, lordo)
+            if nuova_quota is None:
+                continue
+            nuova_quota = round(nuova_quota, 2)
+            vecchia = 0.0
+            if any(_is_cid(o) for o in operatori):
+                for o in operatori:
+                    if _is_cid(o):
+                        vecchia = round(float(o.get("provvigione") or 0), 2)
+                        break
+                # SICUREZZA: non azzerare una quota reale con uno schema a 0
+                if nuova_quota <= 0 and vecchia > 0:
+                    continue
+                if abs(nuova_quota - vecchia) < 0.01:
+                    continue
+                for o in operatori:
+                    if _is_cid(o):
+                        o["provvigione"] = nuova_quota
+            else:
+                # collaboratore_id == cid ma nessuna ripartizione esplicita: creala
+                if nuova_quota <= 0:
+                    continue
+                operatori.append({"operatore_id": cid,
+                                  "operatore_nome": coll_nome or t.get("collaboratore_nome") or "",
+                                  "provvigione": nuova_quota})
+            delta_tot += (nuova_quota - vecchia)
+            if len(esempi) < 20:
+                esempi.append({
+                    "titolo_id": t["id"], "numero_titolo": t.get("numero_titolo"),
+                    "polizza_id": pid, "stato": t.get("stato"),
+                    "provvigione_prima": vecchia, "provvigione_dopo": nuova_quota,
+                })
+            if not dry_run:
+                await db.titoli.update_one(
+                    {"id": t["id"]},
+                    {"$set": {"provvigioni_operatori": operatori, "updated_at": _now_iso()}})
+                # Aggiorna anche la POLIZZA (una sola volta), solo la quota del collaboratore
+                if pid not in polizze_agg:
+                    polizze_agg.add(pid)
+                    p_ops = [dict(o) for o in (pol.get("provvigioni_operatori") or [])]
+                    p_tot = round(float(pol.get("provvigioni") or 0), 2)
+                    p_netto = float(pol.get("importo_netto") or pol.get("premio_netto") or 0)
+                    p_quota = _quota_collab_da_schema(schema_scope, p_tot, p_netto, lordo)
+                    if p_quota is not None:
+                        p_quota = round(p_quota, 2)
+                        cambia = False
+                        if any(_is_cid(o) for o in p_ops):
+                            for o in p_ops:
+                                if _is_cid(o):
+                                    if not (p_quota <= 0 and float(o.get("provvigione") or 0) > 0):
+                                        o["provvigione"] = p_quota
+                                        cambia = True
+                        elif pol.get("collaboratore_id") == cid and p_quota > 0:
+                            p_ops.append({"operatore_id": cid,
+                                          "operatore_nome": coll_nome or "",
+                                          "provvigione": p_quota})
+                            cambia = True
+                        if cambia:
+                            await db.polizze.update_one(
+                                {"id": pid},
+                                {"$set": {"provvigioni_operatori": p_ops, "updated_at": _now_iso()}})
+            aggiornati += 1
+            continue
+
+        # ============================================================
+        # (fallback) nessuno schema specifico: vecchio comportamento
+        # ============================================================
         lordo = float(t.get("importo_lordo") or 0)
         netto = float(t.get("importo_netto") or 0)
         if lordo <= 0:
@@ -5530,6 +5659,7 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
                 upd["provvigioni_operatori"] = nuovi_operatori
             await db.titoli.update_one({"id": t["id"]}, {"$set": upd})
         aggiornati += 1
+
 
     return {
         "dry_run": dry_run,

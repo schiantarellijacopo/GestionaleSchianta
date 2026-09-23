@@ -202,7 +202,7 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
 
             {/* Pannelli dati */}
             {expanded === "company" && openapi.company && <CompanyPanel data={openapi.company} onClose={() => setExpanded(null)} />}
-            {expanded === "cadastre" && openapi.cadastre && <CadastrePanel data={openapi.cadastre} onClose={() => setExpanded(null)} />}
+            {expanded === "cadastre" && openapi.cadastre && <CadastrePanel data={openapi.cadastre} aid={ana.id} canEdit={canEdit} onImported={onReload} onClose={() => setExpanded(null)} />}
             {expanded === "automotive" && openapi.automotive && <VehiclesPanel data={openapi.automotive} onClose={() => setExpanded(null)} />}
             {expanded === "visura" && openapi.visura && <VisuraPanel data={openapi.visura} onClose={() => setExpanded(null)} />}
 
@@ -290,12 +290,24 @@ function CompanyPanel({ data, onClose }) {
     );
 }
 
-function CadastrePanel({ data, onClose }) {
+function CadastrePanel({ data, aid, canEdit, onImported, onClose }) {
+    const [importing, setImporting] = useState(false);
+    const importaTutti = async () => {
+        setImporting(true);
+        try {
+            const r = await api.post(`/openapi-it/cadastre/${aid}/importa-immobili`, { immobili: data });
+            toast.success(`${r.data.aggiunti} immobili importati nel Patrimonio (Analisi Cliente)`);
+            onImported?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore importazione immobili");
+        } finally { setImporting(false); }
+    };
     return (
         <PanelWrap title={`Catasto (${data.length} immobili)`} onClose={onClose}>
             {data.length === 0 ? (
                 <div className="text-xs text-slate-500 italic">Nessun immobile trovato al catasto.</div>
             ) : (
+                <>
                 <table className="w-full text-xs">
                     <thead className="text-[10px] uppercase text-slate-500 border-b border-slate-200">
                         <tr>
@@ -316,6 +328,19 @@ function CadastrePanel({ data, onClose }) {
                         ))}
                     </tbody>
                 </table>
+                {canEdit && (
+                    <div className="mt-3 flex justify-end">
+                        <button
+                            onClick={importaTutti}
+                            disabled={importing}
+                            data-testid="cadastre-importa-patrimonio"
+                            className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60"
+                        >
+                            <Home size={13} /> {importing ? "Importo…" : `Importa nel Patrimonio (${data.length})`}
+                        </button>
+                    </div>
+                )}
+                </>
             )}
         </PanelWrap>
     );

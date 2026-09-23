@@ -1,7 +1,21 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
-## Sessione 15/09/2026 (fork) — Fix incasso titolo coperto: sospesi al LORDO + sconto in Sconti/Spese
+## Sessione 23/09/2026 (fork) — Import Catasto → Patrimonio Immobili
+
+- **Problema**: gli immobili scaricati dal Catasto (OpenAPI.it) restavano nel pannello Anagrafica ma non comparivano in Analisi Cliente → Patrimonio → Immobili (0).
+- **Causa**: l'import in `analisi_cliente.immobili` avveniva solo dal modale `CatastoImportDialog`; il pannello inline `CadastrePanel` (quello mostrato dopo lo scarico) era di sola lettura, senza pulsante di import.
+- **Fix**: aggiunto pulsante **"Importa nel Patrimonio (N)"** in `CadastrePanel` (`OpenApiActions.jsx`) che chiama `POST /openapi-it/cadastre/{aid}/importa-immobili` (endpoint già esistente e funzionante, dedup su foglio+particella+comune, geocoding). Passati `aid`, `canEdit`, `onImported` al pannello.
+- **Nota**: gli immobili da catasto hanno `rendita_catastale` ma non `valore_commerciale`, quindi il totale € IMMOBILI resta 0 finché l'utente non inserisce il valore commerciale; l'elenco/conteggio però ora si popola.
+- Verificato: endpoint import provato (anagrafica con 15 immobili allineati catasto↔analisi_cliente); frontend compila senza errori.
+
+
+
+- **Fix `update_titolo` (server.py ~4491)**: modificando un titolo COPERTO, ora ri-sincronizza il movimento `copertura_titolo` (importo=lordo, provvigioni) da cui derivano SIA il Brogliaccio SIA l'E/C Compagnia (che legge importo/provvigioni del movimento, righe 1297-1303). Guardia `assert_giornata_aperta` sulla data copertura. Verificato e2e: E/C DARE 927,53→700,00 al variare di lordo/provv.
+- **Resync storico**: i coperti modificati PRIMA del fix erano disallineati. In Axicura risincronizzati 3 su giornate APERTE (es. GAGETTI eebefeaa: provv movimento 37,47→225,76). Restano 9 su giornata CHIUSA 14/09/2026 (non toccati: modificherebbero contabilità chiusa) — in attesa di decisione utente (riaprire il giorno o lasciare).
+- **Riassegna provvigioni per collaboratore (`/provvigioni/riassegna`)**: i tasti "Arretrati"/"Tutti" ora cambiano SOLO la quota del collaboratore dello schema (nel titolo e in polizza), MAI la provvigione totale di titolo/polizza. Nuovo helper `_quota_collab_da_schema` (schema %netto → netto×%; schema %collab → % della provvigione già presente sul titolo). Altri operatori invariati. Verificato dry-run + write con snapshot/restore: quota = 70%×provv_titolo, totale invariato.
+
+
 
 - **Bug**: incassando un titolo GIÀ coperto con sconto (es. BRUNA MARINELLA, pol. 730043034: lordo 78,50 / pagato 77,67 / sconto 0,83), il brogliaccio riduceva i SOSPESI solo del contante (−77,67) lasciando 0,83 "appeso" e NON registrava lo sconto in SCONTI/SPESE né nel KPI Sconti.
 - **Cause**: (1) `incassa` (server.py:4608) forzava `quota_sconto=0` per i titoli coperti (`is_coperto`); (2) il ramo `incasso_coperto` in `_compute_brogliaccio` riduceva i SOSPESI di `importo` invece del LORDO e ignorava lo sconto; (3) il loop KPI cumulativo non sommava lo sconto dei coperti.
