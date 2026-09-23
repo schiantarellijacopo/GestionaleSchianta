@@ -1421,3 +1421,8 @@ Usare integration_expert prima di implementare.
 - Task collegato a Titolo/Rata (Tasks.jsx): dialog "Collega a" ora ha opzione "Titolo / Rata": cerca la polizza -> carica /titoli?polizza_id -> scegli la rata (scadenza + importo + stato). collegamento_tipo=titolo (già supportato dal backend routes/tasks.py). label es. "Pol. N... · rata gg/mm/aaaa · € importo (stato)".
 - IBAN: GIA' implementato in AnagraficaDetail.jsx (righe ~432-443): campo IBAN nel riepilogo con fallback all'IBAN del conto corrente principale (ana.conti_correnti principale/primo); ContiCorrentiTab sincronizza ana.iban quando si imposta il conto principale. Solo verifica, nessuna nuova modifica.
 - "Titoli storici disallineati": nessuna azione (richiesta utente).
+
+### Sessione fork 2026-06 — WhatsApp: ripristino automatico chat archiviate + rename PNC->PNT
+- Sidebar.jsx: label voce menu "PNC" rinominata in "PNT".
+- WhatsApp (routes/whatsapp_evo.py): nuova _unarchive_chat(instance, number) che azzera whatsapp_chat_meta.archived quando arriva/parte un messaggio. Chiamata in: webhook (in/out), send_text, send_media, send_text_via_evolution (avvisi automatici). La vista "Archiviate" (toggle in Chat.jsx già esistente) resta il posto dove consultarle.
+- Comportamento: chat archiviata torna tra le attive se il cliente scrive o l'agenzia scrive al cliente. Testato (no-ctx webhook + con-ctx invio) -> archived False in entrambi i casi. Reversibile, nessun dato reale toccato.

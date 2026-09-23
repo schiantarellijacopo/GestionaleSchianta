@@ -30,6 +30,20 @@ from tenant import is_super_admin
 router = APIRouter(prefix="/whatsapp-evo", tags=["whatsapp-evo"])
 
 
+async def _unarchive_chat(instance_name: str, number: str) -> None:
+    """Se la conversazione è archiviata, la riporta tra le attive quando arriva/parte
+    un nuovo messaggio (cliente scrive o l'agenzia scrive al cliente)."""
+    try:
+        await db.whatsapp_chat_meta.update_one(
+            {"instance_name": instance_name, "number": number, "archived": True},
+            {"$set": {"archived": False, "archived_at": None, "archived_by": None,
+                      "archived_by_name": None, "unarchived_at": _now_iso(),
+                      "unarchived_reason": "nuovo messaggio", "updated_at": _now_iso()}},
+        )
+    except Exception:
+        pass
+
+
 # ---------- Client Evolution API ----------
 async def _cfg() -> tuple[str, str]:
     """Config del server Evolution: prima quella salvata dall'AGENZIA (tenant),
@@ -324,6 +338,7 @@ async def send_text(
             })
         except Exception:
             pass
+        await _unarchive_chat(name, body.number)
 
 
 # ---------- Webhook & Inbox messaggi ----------
@@ -416,6 +431,8 @@ async def evolution_webhook(name: str, request: Request) -> dict:
                 "created_at": _now_iso(),
                 "received_at": _now_iso() if direction == "in" else None,
             })
+            # Nuovo messaggio (in/out): riporta la chat tra le attive se archiviata
+            await _unarchive_chat(name, remote)
 
     # CONNECTION_UPDATE: aggiornamento stato
     if "connection" in str(event).lower():
@@ -631,6 +648,7 @@ async def send_media(
             })
         except Exception:
             pass
+        await _unarchive_chat(name, body.number)
 
 
 # ---------- Salva conversazione nel diario cliente ----------
@@ -942,4 +960,5 @@ async def send_text_via_evolution(number: str, text: str, instance_name: Optiona
         })
     except Exception:
         pass
+    await _unarchive_chat(inst["instance_name"], to_clean)
     return {"ok": True, "instance_name": inst["instance_name"]}
