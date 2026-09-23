@@ -184,7 +184,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             .filter((o) => o.operatore_id)
             .map((o) => {
                 const c = collaboratori.find((x) => x.id === o.operatore_id);
-                return { operatore_id: o.operatore_id, operatore_nome: c ? (c.name || c.email) : "", provvigione: parseFloat(o.provvigione) || 0 };
+                return { operatore_id: o.operatore_id, operatore_nome: c ? (c.name || c.email) : (o.operatore_nome || ""), provvigione: parseFloat(o.provvigione) || 0 };
             });
         const provvTot = (f.provvigioni !== "" && f.provvigioni != null)
             ? round2(f.provvigioni)

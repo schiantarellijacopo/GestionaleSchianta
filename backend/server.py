@@ -4477,9 +4477,10 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
 @api.put("/titoli/{tid}")
 async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     # Blocco se prima nota chiusa per la data di incasso/competenza del titolo
-    cur = await db.titoli.find_one({"id": tid}, {"_id": 0, "data_incasso": 1, "data_competenza": 1})
-    if cur:
-        await assert_giornata_aperta(cur.get("data_incasso") or cur.get("data_competenza"), azione="modificare il titolo")
+    cur = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not cur:
+        raise HTTPException(404, "Non trovato")
+    await assert_giornata_aperta(cur.get("data_incasso") or cur.get("data_competenza"), azione="modificare il titolo")
     # Se il body cambia la data_incasso, controlla anche la nuova data
     if body.get("data_incasso"):
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
@@ -4488,32 +4489,34 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
     for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "diritti", "accessori", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
-    res = await db.titoli.update_one({"id": tid}, {"$set": body})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Non trovato")
-    # Se il titolo è COPERTO, mantieni allineato il movimento di copertura in Prima Nota:
-    # da esso derivano sia il Brogliaccio sia l'Estratto Conto Compagnia, quindi
-    # aggiornando importo/provvigioni si aggiornano automaticamente entrambi.
-    updated = await db.titoli.find_one({"id": tid}, {"_id": 0})
-    if updated and updated.get("titolo_coperto"):
+    # Se il titolo è COPERTO, il movimento di copertura (da cui derivano Brogliaccio ed
+    # E/C Compagnia) va riallineato. Controlla la giornata di copertura PRIMA di scrivere
+    # il titolo: così, se quel giorno è chiuso, l'intera modifica viene rifiutata (niente
+    # write parziale che desincronizza titolo e contabilità).
+    cop_sync = None
+    if cur.get("titolo_coperto"):
         cop = await db.movimenti.find_one(
             {"titolo_id": tid, "categoria": "copertura_titolo"}, {"_id": 0})
         if cop:
-            nuovo_imp = round(float(updated.get("importo_lordo") or 0.0), 2)
-            nuovo_provv = round(float(updated.get("provvigioni") or 0.0), 2)
+            nuovo_imp = round(float(body.get("importo_lordo", cur.get("importo_lordo")) or 0.0), 2)
+            nuovo_provv = round(float(body.get("provvigioni", cur.get("provvigioni")) or 0.0), 2)
             if (abs(float(cop.get("importo") or 0) - nuovo_imp) > 0.005
                     or abs(float(cop.get("provvigioni") or 0) - nuovo_provv) > 0.005):
                 await assert_giornata_aperta(
                     cop.get("data_movimento"),
                     azione="aggiornare la copertura in Prima Nota")
-                pol = await db.polizze.find_one(
-                    {"id": updated.get("polizza_id")}, {"_id": 0}) or {}
-                await db.movimenti.update_one(
-                    {"id": cop["id"]},
-                    {"$set": {"importo": nuovo_imp, "provvigioni": nuovo_provv,
-                              "compagnia_id": pol.get("compagnia_id"),
-                              "updated_at": _now_iso()}},
-                )
+                cop_sync = {"id": cop["id"], "importo": nuovo_imp, "provvigioni": nuovo_provv}
+    res = await db.titoli.update_one({"id": tid}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Non trovato")
+    if cop_sync:  # giornata copertura già verificata aperta sopra
+        pol = await db.polizze.find_one({"id": cur.get("polizza_id")}, {"_id": 0}) or {}
+        await db.movimenti.update_one(
+            {"id": cop_sync["id"]},
+            {"$set": {"importo": cop_sync["importo"], "provvigioni": cop_sync["provvigioni"],
+                      "compagnia_id": pol.get("compagnia_id"), "updated_at": _now_iso()}},
+        )
+    updated = await db.titoli.find_one({"id": tid}, {"_id": 0})
     await log_attivita(user, "update", "titolo", tid)
     return strip_mongo_id(updated)
 
@@ -5488,6 +5491,8 @@ async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin")))
             flt["$or"] = [{"collaboratore_id": cid}, {"provvigioni_operatori.operatore_id": cid}]
 
     cid = schema_scope.get("collaboratore_id") if schema_scope else None
+    if schema_scope and not cid:
+        raise HTTPException(400, "Lo schema non ha un collaboratore associato: impossibile riassegnare la sua quota.")
     coll_nome = (schema_scope or {}).get("collaboratore_nome")
     schema_cache: dict = {}
     pol_cache: dict = {}
@@ -6951,7 +6956,9 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
         # verso compagnia (aumenta il saldo), negativo = a credito (lo riduce).
         saldo_iniziale = 0.0
         async for sm in db.movimenti.find(
-            {"compagnia_id": cid, "categoria": "saldo_iniziale_compagnia"},
+            {"compagnia_id": cid, "categoria": "saldo_iniziale_compagnia",
+             "pregresso": {"$ne": True},
+             "data_movimento": {"$lte": fino_a} if not _cutoff else {"$gte": _cutoff, "$lte": fino_a}},
             {"_id": 0, "importo": 1}):
             saldo_iniziale += float(sm.get("importo") or 0)
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)

@@ -1,7 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
-## Sessione 23/09/2026 (fork) — Avvisi scadenza: i titoli avvisati escono dagli arretrati
+## Sessione 23/09/2026 (fork) — Fix da Code Review
+
+- **HIGH — `update_titolo` write parziale**: su titolo coperto con giornata di copertura CHIUSA, il titolo veniva salvato ma il movimento di copertura no (errore dopo la write) → titolo ed E/C compagnia disallineati. FIX: il controllo `assert_giornata_aperta` sulla data copertura ora avviene PRIMA della write del titolo; se il giorno è chiuso l'intera modifica è rifiutata (nessuna write parziale). Verificato: aperta→sincronizza, chiusa→400 e titolo invariato.
+- **MEDIUM — riassegna schema senza collaboratore**: se lo schema non ha `collaboratore_id` (cid=None) si sarebbe creata una voce ripartizione con `operatore_id=None`. FIX: `HTTPException 400` se schema senza collaboratore.
+- **MEDIUM — `_compute_saldi_compagnie` saldo_iniziale senza filtro data**: aggiunto `pregresso!=True` e filtro `data_movimento`/`_cutoff` coerente con gli altri aggregati (no conteggio di saldi datati nel futuro / prima del cutoff).
+- **MEDIUM — nome collaboratore inattivo**: in `TitoloDialog` il salvataggio preserva `operatore_nome` esistente quando il collaboratore assegnato è inattivo (non più stringa vuota).
+
+
 
 - **Richiesta**: dopo l'invio dell'avviso di scadenza, il titolo deve passare in "Storico avvisi inviati" e non comparire più fra i "Titoli arretrati".
 - **Fix** (`preview_avvisi_scadenze`, server.py ~11236): la preview arretrati ora ESCLUDE i titoli che hanno già una voce in `storico_avvisi` (via `titolo_id` o `titoli_ids`). Tutti i canali (email/whatsapp/sms/pdf bulk) registrano già i `titoli_ids` nello storico.
