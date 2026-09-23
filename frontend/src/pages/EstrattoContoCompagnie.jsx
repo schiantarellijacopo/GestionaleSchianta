@@ -154,26 +154,45 @@ function DettaglioEstratto({ compagnia, onBack }) {
     }, [compagnia.id, dal, al, collaboratoreId]);
     useEffect(() => { load(); }, [load]);
 
+    const VOCE_TIPI = ["rappel", "ritenuta_compagnia", "pnc", "fattura_partner", "voce_manuale"];
+    const rowKey = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione") ? r.titolo_id : r._movimento_id);
+    const isSelectable = (r) => (r.tipo === "incasso" || r.tipo === "incasso_direzione" || VOCE_TIPI.includes(r.tipo));
+
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione");
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
+    // Voci di rettifica ancora da saldare (le saldate finiscono nello Storico rimesse)
     const altreVoci = (data?.righe || []).filter(
-        (r) => r.tipo === "rappel" || r.tipo === "ritenuta_compagnia" || r.tipo === "pnc" || r.tipo === "fattura_partner" || r.tipo === "voce_manuale",
+        (r) => VOCE_TIPI.includes(r.tipo) && !r.saldata,
     );
-    // Solo non-pagati + pagamenti + altre voci (rappel/ritenute/fatture partner) nella tab "Movimenti & versamenti".
-    // I titoli già pagati sono visibili solo nello "Storico rimesse".
+    // Titoli non pagati + voci non saldate + pagamenti nella tab "Movimenti & versamenti".
+    // Titoli pagati e voci saldate sono visibili solo nello "Storico rimesse".
     const righeAttive = [...daVersare, ...pagamenti, ...altreVoci].sort(
         (a, b) => (a.data || "").localeCompare(b.data || ""),
     );
-    const importoSel = incassi
-        .filter((r) => selected.has(r.titolo_id))
-        .reduce((s, r) => s + (r.dare || 0), 0);
+    // Righe selezionabili (versabili): titoli da versare + voci da saldare.
+    const righeSelezionabili = [...daVersare, ...altreVoci];
+    const righeSel = righeSelezionabili.filter((r) => selected.has(rowKey(r)));
+    const importoSel = righeSel.reduce((s, r) => s + (r.dare || 0) - (r.avere || 0), 0);
+
+    const buildPayload = () => {
+        const titoli_ids = righeSel
+            .filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione")
+            .map((r) => r.titolo_id);
+        const voci = righeSel
+            .filter((r) => VOCE_TIPI.includes(r.tipo))
+            .map((r) => ({ tipo: r.tipo, id: r._movimento_id }));
+        return { titoli_ids, voci };
+    };
 
     const stampaSelezionati = async () => {
         try {
+            const titoli_ids = righeSel
+                .filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione")
+                .map((r) => r.titolo_id);
             const r = await api.post(
                 `/stampa/compagnie/${compagnia.id}/titoli-selezionati`,
-                { titoli_ids: Array.from(selected) },
+                { titoli_ids },
                 { responseType: "blob" },
             );
             const url = URL.createObjectURL(r.data);
@@ -198,7 +217,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     };
     const toggleAll = () => {
         if (selected.size > 0) setSelected(new Set());
-        else setSelected(new Set(daVersare.map((r) => r.titolo_id)));
+        else setSelected(new Set(righeSelezionabili.map(rowKey)));
     };
 
     return (
@@ -265,7 +284,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                 {selected.size > 0 && (
                     <div className="mt-3 flex items-center gap-3 p-2 bg-amber-50 border border-amber-200 rounded">
                         <span className="text-sm font-medium text-amber-900">
-                            {selected.size} titoli selezionati · Totale: <span className="num">{fmtEur(importoSel)}</span>
+                            {selected.size} voci selezionate · Totale: <span className="num">{fmtEur(importoSel)}</span>
                         </span>
                         <div className="ml-auto flex gap-2">
                             <Button size="sm" variant="outline"
@@ -288,8 +307,8 @@ function DettaglioEstratto({ compagnia, onBack }) {
                             <tr>
                                 <th className="w-10 text-center">
                                     <input type="checkbox" onChange={toggleAll}
-                                        checked={selected.size > 0 && selected.size === daVersare.length}
-                                        ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < daVersare.length; }}
+                                        checked={selected.size > 0 && selected.size === righeSelezionabili.length}
+                                        ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < righeSelezionabili.length; }}
                                         data-testid="ec-check-all" />
                                 </th>
                                 <th>Data</th>
@@ -300,7 +319,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                 <th>Ramo</th>
                                 <th className="text-right">Lordo €</th>
                                 <th className="text-right">Provv. €</th>
-                                <th className="text-right">Dare €</th>
+                                <th className="text-right">Saldo €</th>
                                 <th className="text-right">Avere €</th>
                             </tr>
                         </thead>
@@ -308,10 +327,10 @@ function DettaglioEstratto({ compagnia, onBack }) {
                             {righeAttive.map((r, i) => (
                                 <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`}>
                                     <td className="text-center">
-                                        {(r.tipo === "incasso" || r.tipo === "incasso_direzione") && (
-                                            <input type="checkbox" checked={selected.has(r.titolo_id)}
-                                                onChange={() => toggle(r.titolo_id)}
-                                                data-testid={`ec-check-${r.titolo_id}`} />
+                                        {isSelectable(r) && (
+                                            <input type="checkbox" checked={selected.has(rowKey(r))}
+                                                onChange={() => toggle(rowKey(r))}
+                                                data-testid={`ec-check-${rowKey(r)}`} />
                                         )}
                                     </td>
                                     <td className="num text-xs">{fmtDate(r.data)}</td>
@@ -358,7 +377,8 @@ function DettaglioEstratto({ compagnia, onBack }) {
             {payOpen && (
                 <PagamentoDialog
                     compagnia={compagnia}
-                    titoliIds={Array.from(selected)}
+                    payload={buildPayload()}
+                    nRighe={selected.size}
                     totale={importoSel}
                     conti={conti}
                     onClose={(refresh) => {
@@ -600,9 +620,9 @@ function VoceManualeDialog({ compagnia, onClose }) {
     );
 }
 
-function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
+function PagamentoDialog({ compagnia, payload, nRighe, totale, conti, onClose }) {
     const [data, setData] = useState(new Date().toISOString().slice(0, 10));
-    const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${titoliIds.length} titoli`);
+    const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${nRighe} voci`);
     const [mezzo, setMezzo] = useState("");
     const [saving, setSaving] = useState(false);
 
@@ -610,7 +630,8 @@ function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
         setSaving(true);
         try {
             await api.post(`/compagnie/${compagnia.id}/paga-titoli`, {
-                titoli_ids: titoliIds,
+                titoli_ids: payload.titoli_ids,
+                voci: payload.voci,
                 mezzo_pagamento: mezzo,
                 data_movimento: data,
                 descrizione: descr,
@@ -628,7 +649,7 @@ function PagamentoDialog({ compagnia, titoliIds, totale, conti, onClose }) {
                 <p className="text-sm text-slate-600 mb-4">
                     Versare a <strong>{compagnia.ragione_sociale}</strong>{" "}
                     <span className="num font-semibold text-emerald-700">{fmtEur(totale)}</span>{" "}
-                    per {titoliIds.length} titoli.
+                    per {nRighe} voci.
                 </p>
                 <div className="space-y-3">
                     <div>

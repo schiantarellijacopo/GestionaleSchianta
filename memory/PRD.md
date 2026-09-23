@@ -1380,3 +1380,10 @@ Usare integration_expert prima di implementare.
 
 ### Sessione fork 2026-06 — Sovrascrittura sospesi da CSV
 - Script sovrascrivi_sospesi_csv.py: legge /tmp/sospesi_new.csv (col: Num.Contratto;Rata del;Contraente;Targa;Frazionamento;Rata=da pagare). Tenant c5ae2d0e: 76 righe valide -> 72 titoli aggiornati coperti + 4 creati, importo_da_pagare=Rata, data_copertura=Rata del, pregresso=False. Ex-sospesi non nel CSV -> incassati. Totale sospesi = 31.786,28 € (match footer CSV). Skippate righe footer/totale vuote.
+
+### Sessione fork 2026-06 — Paga compagnia estesa a ritenute/rappel/PNC/voci manuali
+- Richiesta utente: in Estratto Conto Compagnie le voci ritenuta/rappel/PNC/voce manuale (incl. saldo iniziale) formano il Saldo e devono rientrare nel "Paga compagnia" (selezionando tutto l'importo = Saldo, e dopo il versamento il Saldo va a 0).
+- Backend server.py `_compagnia_estratto_data`: aggiunto flag `saldata` (da `saldata_compagnia`) e `movimento_pagamento_id` a righe rappel/ritenute/pnc/fatture_partner/voci_manuali; righe incasso ora espongono `stato_pagamento` reale (pagato/da_versare) dal titolo.
+- Backend `paga-titoli`: accetta `voci:[{tipo,id}]` oltre a `titoli_ids`; importo = somma (Dare−Avere) delle righe selezionate calcolata dall'estratto (coerenza al centesimo, gestisce direzione/sconti); marca titoli `pagato_alla_compagnia` e voci `saldata_compagnia` con `movimento_pagamento_id`.
+- Frontend EstrattoContoCompagnie.jsx: checkbox su tutte le righe versabili (titoli+voci non saldate), importoSel=Σ(dare-avere), toggleAll estende a tutte, PagamentoDialog invia titoli_ids+voci. Colonna "Dare €" rinominata "Saldo €".
+- Voci saldate e titoli pagati spariscono dalla lista attiva (visibili solo se ancora aperti). Test E2E reversibile su CATTOLICA (tenant c5ae2d0e): saldo 51.501,22 → pagamento 51.501,22 (66 titoli+3 voci) → saldo 0,00 → rollback a 51.501,22. Nessun dato reale modificato.

@@ -1290,12 +1290,24 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
             collab_map[u["id"]] = u.get("name") or u.get("email")
 
+    # Stato pagamento dei titoli (per nascondere quelli già versati alla compagnia)
+    _tids_inc = [m.get("titolo_id") for m in mov_inc if m.get("titolo_id")]
+    _paid_map: dict = {}
+    if _tids_inc:
+        async for _t in db.titoli.find(
+            {"id": {"$in": _tids_inc}},
+            {"_id": 0, "id": 1, "pagato_alla_compagnia": 1, "data_pagamento_compagnia": 1, "movimento_pagamento_id": 1},
+        ):
+            _paid_map[_t["id"]] = _t
+
     righe = []
     totale_dare = 0.0
     for m in mov_inc:
         pol = pol_index.get(m["polizza_id"], {})
         provv = float(m.get("provvigioni") or 0)
         _is_dir = m.get("categoria") == "incasso_premio_direzione"
+        _tinfo = _paid_map.get(m.get("titolo_id"), {})
+        _pagato = bool(_tinfo.get("pagato_alla_compagnia"))
         if _is_dir:
             lordo = float(m.get("importo") or 0)
             dovuto_alla_compagnia = -provv  # cliente paga la compagnia: ci deve solo le provvigioni
@@ -1316,7 +1328,9 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "dare": round(dovuto_alla_compagnia, 2),
             "avere": 0.0,
             "lordo": round(lordo, 2), "provvigioni": provv,
-            "stato_pagamento": "da_versare",
+            "stato_pagamento": "pagato" if _pagato else "da_versare",
+            "movimento_pagamento_id": _tinfo.get("movimento_pagamento_id"),
+            "data_pagamento_compagnia": _tinfo.get("data_pagamento_compagnia"),
             "_movimento_id": m.get("id"),
         })
         totale_dare += dovuto_alla_compagnia
@@ -1390,6 +1404,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "descrizione": f"Rappel {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
             "_movimento_id": r.get("id"),
             "is_rappel": True,
+            "saldata": bool(r.get("saldata_compagnia")),
+            "movimento_pagamento_id": r.get("movimento_pagamento_id"),
         })
         totale_rappel += imp
     totale_avere += totale_rappel
@@ -1420,6 +1436,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "_movimento_id": r.get("id"),
                 "is_ritenuta_compagnia": True,
                 "stato_ritenuta": r.get("stato"),
+                "saldata": bool(r.get("saldata_compagnia")),
+                "movimento_pagamento_id": r.get("movimento_pagamento_id"),
             })
             totale_ritenute_comp += imp
         totale_dare += totale_ritenute_comp
@@ -1454,6 +1472,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "is_pnc": True,
                 "tipo_pnc": r.get("tipo"),
                 "stato_pnc": r.get("stato"),
+                "saldata": bool(r.get("saldata_compagnia")),
+                "movimento_pagamento_id": r.get("movimento_pagamento_id"),
             })
             totale_pnc += imp
         if totale_pnc >= 0:
@@ -1488,6 +1508,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "_movimento_id": f.get("id"),
                 "is_fattura_partner": True,
                 "stato_fattura": f.get("stato"),
+                "saldata": bool(f.get("saldata_compagnia")),
+                "movimento_pagamento_id": f.get("movimento_pagamento_id"),
             })
             totale_fatture_partner += imp
         totale_avere += totale_fatture_partner
@@ -1519,6 +1541,8 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "_movimento_id": v.get("id"),
             "voce_manuale_id": v.get("id"),
             "is_voce_manuale": True,
+            "saldata": bool(v.get("saldata_compagnia")),
+            "movimento_pagamento_id": v.get("movimento_pagamento_id"),
         })
         if is_dare:
             totale_voci_manuali_dare += imp
@@ -1650,20 +1674,23 @@ async def compagnia_paga_titoli(
     cid: str, body: dict,
     user=Depends(require_user("admin", "collaboratore")),
 ):
-    """Registra il pagamento alla compagnia di un insieme di titoli.
+    """Registra il pagamento alla compagnia di un insieme di titoli e/o voci.
 
     body: {
         titoli_ids: [str],
+        voci: [{tipo, id}],   # ritenuta_compagnia | rappel | pnc | fattura_partner | voce_manuale
         conto_cassa_id: str,
         data_movimento?: str (YYYY-MM-DD, default oggi),
         descrizione?: str,
     }
-    Crea un MovimentoContabile categoria 'pagamento_compagnia' e marca i titoli
-    come 'pagato_alla_compagnia' = True.
+    Crea un MovimentoContabile categoria 'pagamento_compagnia' con importo = somma
+    (Dare − Avere) delle righe selezionate (stesso calcolo dell'Estratto Conto), marca
+    i titoli come 'pagato_alla_compagnia' e le voci come 'saldata_compagnia'.
     """
     titoli_ids = body.get("titoli_ids") or []
-    if not titoli_ids:
-        raise HTTPException(400, "titoli_ids obbligatorio")
+    voci_sel = body.get("voci") or []
+    if not titoli_ids and not voci_sel:
+        raise HTTPException(400, "Selezionare almeno un titolo o una voce")
     conto_cassa_id = body.get("conto_cassa_id")
     if not conto_cassa_id:
         # auto-derive from mezzo or fallback to any active conto
@@ -1673,22 +1700,36 @@ async def compagnia_paga_titoli(
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
-    trattiene = bool(comp.get("trattiene_provvigioni", True))
 
-    titoli = await db.titoli.find({"id": {"$in": titoli_ids}, "stato": "incassato"}, {"_id": 0}).to_list(5000)
-    if not titoli:
-        raise HTTPException(404, "Nessun titolo incassato trovato")
+    # Importo dal calcolo ufficiale dell'Estratto Conto (Dare − Avere per riga):
+    # garantisce coerenza al centesimo tra ciò che vede l'utente e ciò che si versa
+    # (gestisce incassi in direzione, sconti, ritenute, rappel, pnc, voci manuali).
+    ec = await _compagnia_estratto_data(cid, None, None)
+    righe = ec.get("righe", [])
+    sel_titoli = set(titoli_ids)
+    sel_voci = {(v.get("tipo"), v.get("id")) for v in voci_sel}
+    _VOCE_TIPI = ("ritenuta_compagnia", "rappel", "pnc", "fattura_partner", "voce_manuale")
 
     totale = 0.0
-    for t in titoli:
-        lordo = float(t.get("importo_lordo") or 0)
-        provv = float(t.get("provvigioni") or 0)
-        totale += (lordo - provv) if trattiene else lordo
+    titoli_versati: list[str] = []
+    voci_versate: list[dict] = []
+    for r in righe:
+        net = float(r.get("dare") or 0) - float(r.get("avere") or 0)
+        if r.get("tipo") in ("incasso", "incasso_direzione") and r.get("titolo_id") in sel_titoli:
+            totale += net
+            titoli_versati.append(r.get("titolo_id"))
+        elif r.get("tipo") in _VOCE_TIPI and (r.get("tipo"), r.get("_movimento_id")) in sel_voci:
+            totale += net
+            voci_versate.append({"tipo": r.get("tipo"), "id": r.get("_movimento_id")})
 
+    if not titoli_versati and not voci_versate:
+        raise HTTPException(404, "Nessuna riga selezionata trovata nell'estratto conto")
+
+    n_righe = len(titoli_versati) + len(voci_versate)
     data_mov = body.get("data_movimento") or _now_iso()[:10]
     # Lock: pagare la compagnia crea un movimento in Prima Nota.
     await assert_giornata_aperta(data_mov, azione="pagare la compagnia nel giorno (Prima Nota chiusa)")
-    descrizione = body.get("descrizione") or f"Versamento {comp.get('ragione_sociale')} — {len(titoli)} titoli"
+    descrizione = body.get("descrizione") or f"Versamento {comp.get('ragione_sociale')} — {n_righe} voci"
 
     mov = {
         "id": str(uuid.uuid4()),
@@ -1699,26 +1740,48 @@ async def compagnia_paga_titoli(
         "conto_cassa_id": conto_cassa_id,
         "importo": round(totale, 2),
         "descrizione": descrizione,
-        "titoli_ids_versati": [t["id"] for t in titoli],
+        "titoli_ids_versati": titoli_versati,
+        "voci_versate": voci_versate,
         "created_at": _now_iso(),
         "creato_da": user.get("id"),
     }
     await db.movimenti.insert_one(mov)
 
     # Marca titoli come pagati alla compagnia
-    await db.titoli.update_many(
-        {"id": {"$in": [t["id"] for t in titoli]}},
-        {"$set": {
-            "pagato_alla_compagnia": True,
-            "data_pagamento_compagnia": data_mov,
-            "movimento_pagamento_id": mov["id"],
-            "updated_at": _now_iso(),
-        }},
-    )
+    if titoli_versati:
+        await db.titoli.update_many(
+            {"id": {"$in": titoli_versati}},
+            {"$set": {
+                "pagato_alla_compagnia": True,
+                "data_pagamento_compagnia": data_mov,
+                "movimento_pagamento_id": mov["id"],
+                "updated_at": _now_iso(),
+            }},
+        )
+    # Marca le voci (ritenute/rappel/pnc/fatture/voci manuali) come saldate
+    _COLL_VOCE = {
+        "ritenuta_compagnia": "ritenute_compagnia",
+        "rappel": "rappel",
+        "pnc": "pnc",
+        "fattura_partner": "fatture_agenzia_partner",
+        "voce_manuale": "voci_manuali_compagnia",
+    }
+    for v in voci_versate:
+        coll = _COLL_VOCE.get(v["tipo"])
+        if coll:
+            await db[coll].update_one(
+                {"id": v["id"]},
+                {"$set": {
+                    "saldata_compagnia": True,
+                    "movimento_pagamento_id": mov["id"],
+                    "data_pagamento_compagnia": data_mov,
+                    "updated_at": _now_iso(),
+                }},
+            )
     await log_attivita(user, "paga_compagnia", "movimento", mov["id"],
-                       f"Compagnia {comp.get('ragione_sociale')} · {len(titoli)} titoli · {round(totale, 2)}€")
+                       f"Compagnia {comp.get('ragione_sociale')} · {n_righe} voci · {round(totale, 2)}€")
     return {"ok": True, "movimento_id": mov["id"], "totale": round(totale, 2),
-            "titoli_pagati": len(titoli)}
+            "titoli_pagati": len(titoli_versati), "voci_pagate": len(voci_versate)}
 
 
 @api.get("/compagnie/saldi-cassa")
