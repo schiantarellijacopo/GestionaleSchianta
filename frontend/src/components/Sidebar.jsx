@@ -39,6 +39,7 @@ const ALL_MENU_ITEMS = [
     { id: "provvigioni", path: "/provvigioni", icon: "Wallet", label: "Estratto Conto Collaboratori", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_compagnie", path: "/compagnie-estratto", icon: "Coins", label: "E/C compagnie", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ec_contraente", path: "/contraente-estratto", icon: "FileText", label: "E/C contraente", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "banche", path: "/banche", icon: "Landmark", label: "Banche", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "partite_pnc", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "partite_pnc", roles: ["admin", "collaboratore"] },
     { id: "pnc", path: "/pnc", icon: "Landmark", label: "PNC", section: "partite_pnc", roles: ["admin", "collaboratore"] },

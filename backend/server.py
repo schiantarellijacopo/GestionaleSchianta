@@ -5443,6 +5443,162 @@ async def list_movimenti(
     return items
 
 
+@api.get("/contabilita/banche/saldi")
+async def banche_saldi(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Saldo attuale di ogni banca/conto cassa (saldo iniziale + entrate − uscite, tutto il tempo)."""
+    conti = await db.conti_cassa.find({}, {"_id": 0}).sort([("ordine", 1), ("nome", 1)]).to_list(200)
+    out = []
+    tot = 0.0
+    for c in conti:
+        agg = await db.movimenti.aggregate([
+            {"$match": {"conto_cassa_id": c["id"]}},
+            {"$group": {"_id": None,
+                        "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+        ]).to_list(1)
+        in_tot = agg[0]["in"] if agg else 0
+        out_tot = agg[0]["out"] if agg else 0
+        saldo = float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
+        if c.get("attivo", True):
+            tot += saldo
+        out.append({
+            "id": c["id"], "nome": c["nome"], "attivo": c.get("attivo", True),
+            "saldo_iniziale": round(float(c.get("saldo_iniziale", 0)), 2),
+            "entrate": round(in_tot, 2), "uscite": round(out_tot, 2),
+            "saldo_attuale": round(saldo, 2),
+        })
+    return {"conti": out, "saldo_totale": round(tot, 2)}
+
+
+@api.get("/contabilita/banche/movimenti")
+async def banche_movimenti(
+    conto_cassa_id: Optional[str] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    cliente: Optional[str] = None,
+    numero_polizza: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    limit: int = 5000,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Movimentazione bancaria filtrata. Con banca singola (senza filtri cliente/polizza/
+    collaboratore) calcola il saldo progressivo partendo dal saldo di apertura del periodo."""
+    import re as _re
+    flt: dict = {"conto_cassa_id": {"$ne": None}}
+    if conto_cassa_id:
+        flt["conto_cassa_id"] = conto_cassa_id
+    if dal or al:
+        cond = {}
+        if dal:
+            cond["$gte"] = dal
+        if al:
+            cond["$lte"] = al
+        flt["data_movimento"] = cond
+    and_clauses: list = []
+    if numero_polizza:
+        rgx = _re.escape(numero_polizza)
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"numero_polizza": {"$regex": rgx, "$options": "i"}}, {"_id": 0, "id": 1})]
+        and_clauses.append({"polizza_id": {"$in": pol_ids or ["__none__"]}})
+    if cliente:
+        rgx = _re.escape(cliente)
+        ana_ids = [a["id"] async for a in db.anagrafiche.find(
+            {"$or": [{"ragione_sociale": {"$regex": rgx, "$options": "i"}},
+                     {"cognome": {"$regex": rgx, "$options": "i"}},
+                     {"nome": {"$regex": rgx, "$options": "i"}}]}, {"_id": 0, "id": 1})]
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"contraente_id": {"$in": ana_ids}}, {"_id": 0, "id": 1})]
+        and_clauses.append({"$or": [{"anagrafica_id": {"$in": ana_ids}},
+                                    {"polizza_id": {"$in": pol_ids}}]})
+    if collaboratore_id:
+        pol_ids = [p["id"] async for p in db.polizze.find(
+            {"collaboratore_id": collaboratore_id}, {"_id": 0, "id": 1})]
+        and_clauses.append({"$or": [{"collaboratore_id": collaboratore_id},
+                                    {"polizza_id": {"$in": pol_ids}}]})
+    if and_clauses:
+        flt = {"$and": [flt, *and_clauses]}
+
+    movs = await db.movimenti.find(flt, {"_id": 0}).sort([("data_movimento", 1), ("created_at", 1)]).to_list(limit)
+
+    # Saldo progressivo solo se banca singola e nessun filtro entità
+    progressivo = bool(conto_cassa_id) and not (cliente or numero_polizza or collaboratore_id)
+    opening = 0.0
+    if progressivo:
+        c = await db.conti_cassa.find_one({"id": conto_cassa_id}, {"_id": 0})
+        opening = float(c.get("saldo_iniziale", 0)) if c else 0.0
+        if dal:
+            agg = await db.movimenti.aggregate([
+                {"$match": {"conto_cassa_id": conto_cassa_id, "data_movimento": {"$lt": dal}}},
+                {"$group": {"_id": None,
+                            "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
+                            "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
+            ]).to_list(1)
+            if agg:
+                opening += agg[0]["in"] - agg[0]["out"]
+
+    # Enrichment: polizza (numero/contraente/collaboratore), contraente nome, collaboratore nome, conto nome
+    pol_ids = list({m.get("polizza_id") for m in movs if m.get("polizza_id")})
+    pol_map = {}
+    async for p in db.polizze.find({"id": {"$in": pol_ids}},
+                                   {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "collaboratore_id": 1}):
+        pol_map[p["id"]] = p
+    ana_ids = list({m.get("anagrafica_id") for m in movs if m.get("anagrafica_id")}
+                   | {p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {}
+    async for a in db.anagrafiche.find({"id": {"$in": ana_ids}},
+                                       {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1}):
+        ana_map[a["id"]] = a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip() or None
+    coll_ids = list({m.get("collaboratore_id") for m in movs if m.get("collaboratore_id")}
+                    | {p.get("collaboratore_id") for p in pol_map.values() if p.get("collaboratore_id")})
+    coll_map = {}
+    async for u in db.users.find({"id": {"$in": coll_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+        coll_map[u["id"]] = u.get("name") or u.get("email")
+    conti_map = {}
+    async for c in db.conti_cassa.find({}, {"_id": 0, "id": 1, "nome": 1}):
+        conti_map[c["id"]] = c.get("nome")
+
+    righe = []
+    saldo = opening
+    tot_in = 0.0
+    tot_out = 0.0
+    for m in movs:
+        pol = pol_map.get(m.get("polizza_id"), {})
+        imp = float(m.get("importo") or 0)
+        signed = imp if m.get("tipo") == "entrata" else -imp
+        saldo += signed
+        if m.get("tipo") == "entrata":
+            tot_in += imp
+        else:
+            tot_out += imp
+        contr_id = m.get("anagrafica_id") or pol.get("contraente_id")
+        collab_id = m.get("collaboratore_id") or pol.get("collaboratore_id")
+        righe.append({
+            "id": m.get("id"),
+            "data_movimento": m.get("data_movimento"),
+            "tipo": m.get("tipo"),
+            "categoria": m.get("categoria"),
+            "descrizione": m.get("descrizione"),
+            "contraente": ana_map.get(contr_id),
+            "numero_polizza": pol.get("numero_polizza"),
+            "collaboratore": coll_map.get(collab_id),
+            "conto_id": m.get("conto_cassa_id"),
+            "conto_nome": conti_map.get(m.get("conto_cassa_id")),
+            "importo": round(imp, 2),
+            "saldo_progressivo": round(saldo, 2) if progressivo else None,
+        })
+    # Display: più recenti in cima
+    righe.reverse()
+    return {
+        "movimenti": righe,
+        "progressivo": progressivo,
+        "saldo_apertura": round(opening, 2) if progressivo else None,
+        "saldo_finale": round(saldo, 2) if progressivo else None,
+        "totale_entrate": round(tot_in, 2),
+        "totale_uscite": round(tot_out, 2),
+        "n_movimenti": len(righe),
+    }
+
+
 async def _risolvi_schema_provvigionale(
     collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,

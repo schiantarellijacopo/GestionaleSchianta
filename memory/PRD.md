@@ -1405,3 +1405,13 @@ Usare integration_expert prima di implementare.
   * riallinea scadenze polizza via _aggiorna_scadenze_polizza_da_titolo
 - brogliaccio row: aggiunto titolo_id. BrogliaccioTab.elimina mostra avviso esplicito ("il titolo tornerà COPERTO/ARRETRATO" o "titoli/voci NON saldati") prima di confermare.
 - Test diretto helper (titoli temporanei, poi rimossi): 5/5 scenari OK (arretrato/coperto/copertura/direzione/pagamento compagnia). Nessun dato reale toccato.
+
+### Sessione fork 2026-06 — Sezione Banche + verifica propagazione eliminazione
+- Nuova voce menu "Banche" (/banche, section contabilita) — Sidebar.jsx + App.js route + pages/Banche.jsx.
+- Backend server.py:
+  * GET /contabilita/banche/saldi -> saldo attuale per ogni conto_cassa (saldo_iniziale + entrate - uscite), + saldo_totale (solo conti attivi).
+  * GET /contabilita/banche/movimenti -> filtri conto_cassa_id, dal/al, cliente (regex nome/cognome/ragione_sociale), numero_polizza (regex), collaboratore_id. Enrichment contraente/polizza/collaboratore/conto. Saldo progressivo (con saldo di apertura periodo) SOLO se banca singola e nessun filtro entità.
+- Frontend Banche.jsx: card saldo cliccabili (selezionano la banca), filtri, tabella movimenti con Entrata/Uscita e Saldo progressivo, riga "Saldo di apertura periodo".
+- Punto 2 (elimina da "Movimenti elenco"): NON implementato su richiesta utente.
+- Punto 3 VERIFICATO con test: eliminando un movimento sparisce da banche/elenco/prima-nota (0/0/0); giroconto -> delete di una gamba elimina entrambe (2->0). Stessa fonte dati `movimenti`.
+- Test reale (tenant Axicura): 9 conti, totale 283.400,69; BPER SONDRIO saldo 249.085,92 con saldo progressivo coerente. Nessun dato reale modificato (insert/delete temporanei ripuliti).

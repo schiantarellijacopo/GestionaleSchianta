@@ -56,6 +56,7 @@ import Corsi from "@/pages/Corsi";
 import Calendario from "@/pages/Calendario";
 import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
 import EstrattoContoContraente from "@/pages/EstrattoContoContraente";
+import Banche from "@/pages/Banche";
 import TitoliSospesi from "@/pages/TitoliSospesi";
 import Marketing from "@/pages/Marketing";
 import Avvisi from "@/pages/Avvisi";
@@ -214,6 +215,14 @@ function App() {
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
                                         <EstrattoContoContraente />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/banche"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <Banche />
                                     </ProtectedRoute>
                                 }
                             />
