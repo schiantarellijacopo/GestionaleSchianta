@@ -1426,3 +1426,13 @@ Usare integration_expert prima di implementare.
 - Sidebar.jsx: label voce menu "PNC" rinominata in "PNT".
 - WhatsApp (routes/whatsapp_evo.py): nuova _unarchive_chat(instance, number) che azzera whatsapp_chat_meta.archived quando arriva/parte un messaggio. Chiamata in: webhook (in/out), send_text, send_media, send_text_via_evolution (avvisi automatici). La vista "Archiviate" (toggle in Chat.jsx già esistente) resta il posto dove consultarle.
 - Comportamento: chat archiviata torna tra le attive se il cliente scrive o l'agenzia scrive al cliente. Testato (no-ctx webhook + con-ctx invio) -> archived False in entrambi i casi. Reversibile, nessun dato reale toccato.
+
+### Sessione fork 2026-06 — Dashboard: card "Attività recenti dei clienti"
+- Backend routes/dashboard.py: GET /dashboard/attivita-clienti (giorni=30, limit=20). Aggrega 3 fonti risolvendo il tenant via entità collegate (robusto anche per endpoint pubblici senza contesto tenant):
+  * doc_link: upload_links.uploads (filtro agenzia_tenant_id) — cliente carica da link "Richiedi documento".
+  * regolazione: regolazione_storico evento=dato_cliente_ricevuto -> tenant via polizza.agenzia_tenant_id.
+  * app_upload: richieste_cliente tipo=upload_documento -> tenant via anagrafica.agenzia_tenant_id.
+  Ordina per data desc, ritorna {eventi, totale}.
+- Frontend Dashboard.jsx: nuovo componente ClientiAttivitaCard (dopo DashboardTasks, solo staff) con icona per tipo (Paperclip/Euro/Smartphone), cliente, descrizione, tempo relativo e link a scheda cliente/polizza. Empty-state se nessun evento.
+- Nessuna notifica campanella aggiunta (scelta utente). La regolazione premio continua a creare la sua notifica in-app come prima.
+- Test: endpoint verificato end-to-end su dati reali (evento doc_link "MARIO TEST · libretto.pdf" con link a /anagrafiche/...). Card renderizzata in Dashboard.

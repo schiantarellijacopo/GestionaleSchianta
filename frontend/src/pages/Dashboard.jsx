@@ -10,7 +10,7 @@ import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
     PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2, Inbox, Zap, AlarmClock } from "lucide-react";
+import { TrendingUp, FileText, AlertTriangle, Users, CalendarClock, Wallet, Link2, Plus, Pencil, Trash2, ExternalLink, Cake, Gift, FileWarning, FileClock, AlertOctagon, CheckCircle2, Inbox, Zap, AlarmClock, Paperclip, Euro, Smartphone, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +92,8 @@ export default function Dashboard() {
             </div>
 
             {!isClient && <DashboardTasks />}
+
+            {!isClient && <ClientiAttivitaCard />}
 
             {!isClient && <AutomazioniOggiWidget />}
 
@@ -207,6 +209,69 @@ export default function Dashboard() {
                 </div>
             )}
         </div>
+    );
+}
+
+
+function ClientiAttivitaCard() {
+    const [data, setData] = useState(null);
+    useEffect(() => {
+        api.get("/dashboard/attivita-clienti", { params: { giorni: 30, limit: 20 } })
+            .then((r) => setData(r.data)).catch(() => setData({ eventi: [] }));
+    }, []);
+
+    const ICON = { doc_link: Paperclip, regolazione: Euro, app_upload: Smartphone };
+    const COLOR = {
+        doc_link: "text-sky-600 bg-sky-50",
+        regolazione: "text-violet-600 bg-violet-50",
+        app_upload: "text-emerald-600 bg-emerald-50",
+    };
+    const fmtWhen = (iso) => {
+        if (!iso) return "";
+        const d = new Date(iso);
+        const diff = (Date.now() - d.getTime()) / 1000;
+        if (diff < 3600) return `${Math.max(1, Math.floor(diff / 60))} min fa`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)} h fa`;
+        return d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" });
+    };
+
+    const eventi = data?.eventi || [];
+    return (
+        <Card className="p-5 border-slate-200 mb-6" data-testid="dashboard-attivita-clienti">
+            <div className="flex items-center gap-2 mb-4">
+                <Activity size={18} className="text-sky-700" />
+                <h3 className="font-semibold text-slate-800">Attività recenti dei clienti</h3>
+                {eventi.length > 0 && (
+                    <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">{eventi.length}</span>
+                )}
+            </div>
+            {data === null ? (
+                <div className="text-sm text-slate-400">Caricamento…</div>
+            ) : eventi.length === 0 ? (
+                <div className="text-sm text-slate-400 py-4 text-center">Nessuna attività dei clienti negli ultimi 30 giorni.</div>
+            ) : (
+                <div className="divide-y divide-slate-100">
+                    {eventi.map((e, i) => {
+                        const Icon = ICON[e.tipo] || Activity;
+                        const row = (
+                            <div className="flex items-center gap-3 py-2.5" data-testid={`attivita-cliente-${i}`}>
+                                <span className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${COLOR[e.tipo] || "text-slate-600 bg-slate-100"}`}>
+                                    <Icon size={16} />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-medium text-slate-800 truncate">{e.cliente}</div>
+                                    <div className="text-xs text-slate-500 truncate">{e.descrizione}</div>
+                                </div>
+                                <div className="shrink-0 text-[11px] text-slate-400 whitespace-nowrap">{fmtWhen(e.data)}</div>
+                            </div>
+                        );
+                        return e.link
+                            ? <Link key={i} to={e.link} className="block hover:bg-slate-50 -mx-2 px-2 rounded transition-colors">{row}</Link>
+                            : <div key={i}>{row}</div>;
+                    })}
+                </div>
+            )}
+        </Card>
     );
 }
 

@@ -340,3 +340,103 @@ async def delete_dashboard_link(
     if res.deleted_count == 0:
         raise HTTPException(404, "Link non trovato")
     return {"ok": True}
+
+
+
+# ---------------------------------------------------------------------------
+# Attività recenti dei clienti (upload da link, regolazione premio, upload app)
+# ---------------------------------------------------------------------------
+@router.get("/dashboard/attivita-clienti")
+async def dashboard_attivita_clienti(
+    giorni: int = 30, limit: int = 20,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+) -> dict:
+    """Elenca gli ultimi eventi generati dai clienti:
+    - caricamento documento dal link 'Richiedi documento'
+    - risposta alla regolazione premio
+    - caricamento documento dall'App/Portale
+    Il tenant è risolto tramite le entità collegate (robusto anche per gli
+    endpoint pubblici che non impostano il contesto tenant)."""
+    from datetime import datetime, timezone
+    from database import raw_db
+    from tenant import user_tenant_id
+
+    tid = user_tenant_id(user)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, giorni))).isoformat()
+    eventi: list[dict] = []
+
+    def _anag_nome(a: dict) -> str:
+        return (a.get("ragione_sociale")
+                or f"{a.get('cognome', '')} {a.get('nome', '')}".strip()
+                or "Cliente")
+
+    # 1) Upload dal link "Richiedi documento" (upload_links: già con agenzia_tenant_id)
+    async for l in raw_db.upload_links.find(
+        {"agenzia_tenant_id": tid, "uploads.0": {"$exists": True}}, {"_id": 0},
+    ):
+        for up in (l.get("uploads") or []):
+            if (up.get("at") or "") >= cutoff:
+                eventi.append({
+                    "tipo": "doc_link", "icona": "Paperclip",
+                    "cliente": l.get("anagrafica_nome") or "Cliente",
+                    "descrizione": f"Ha caricato «{up.get('nome_file') or 'documento'}» — {l.get('descrizione') or 'documento richiesto'}",
+                    "data": up.get("at"),
+                    "link": f"/anagrafiche/{l.get('anagrafica_id')}" if l.get("anagrafica_id") else None,
+                })
+
+    # 2) Regolazione premio: dato ricevuto (risolvo tenant via polizza)
+    reg = await raw_db.regolazione_storico.find(
+        {"evento": "dato_cliente_ricevuto", "created_at": {"$gte": cutoff}}, {"_id": 0},
+    ).to_list(500)
+    pol_ids = list({r.get("polizza_id") for r in reg if r.get("polizza_id")})
+    pol_map = {}
+    if pol_ids:
+        async for p in raw_db.polizze.find(
+            {"id": {"$in": pol_ids}, "agenzia_tenant_id": tid},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1},
+        ):
+            pol_map[p["id"]] = p
+    ana_ids_reg = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
+    ana_map = {}
+    if ana_ids_reg:
+        async for a in raw_db.anagrafiche.find(
+            {"id": {"$in": ana_ids_reg}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1},
+        ):
+            ana_map[a["id"]] = _anag_nome(a)
+    for r in reg:
+        pol = pol_map.get(r.get("polizza_id"))
+        if not pol:
+            continue  # polizza di un altro tenant → salta
+        eventi.append({
+            "tipo": "regolazione", "icona": "Euro",
+            "cliente": ana_map.get(pol.get("contraente_id")) or "Cliente",
+            "descrizione": f"Ha risposto alla regolazione premio (dato dichiarato: {r.get('base_dichiarata')}) — polizza {pol.get('numero_polizza') or '?'}",
+            "data": r.get("created_at") or r.get("data"),
+            "link": f"/polizze/{r.get('polizza_id')}" if r.get("polizza_id") else None,
+        })
+
+    # 3) Upload dall'App/Portale (risolvo tenant via anagrafica del cliente)
+    ric = await raw_db.richieste_cliente.find(
+        {"tipo": "upload_documento", "created_at": {"$gte": cutoff}}, {"_id": 0},
+    ).to_list(500)
+    cli_ids = list({r.get("cliente_id") for r in ric if r.get("cliente_id")})
+    cli_map = {}
+    if cli_ids:
+        async for a in raw_db.anagrafiche.find(
+            {"id": {"$in": cli_ids}, "agenzia_tenant_id": tid},
+            {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1},
+        ):
+            cli_map[a["id"]] = _anag_nome(a)
+    for r in ric:
+        if r.get("cliente_id") not in cli_map:
+            continue  # cliente di un altro tenant → salta
+        eventi.append({
+            "tipo": "app_upload", "icona": "Smartphone",
+            "cliente": r.get("cliente_nome") or cli_map.get(r.get("cliente_id")) or "Cliente",
+            "descrizione": "Ha caricato un documento dall'App/Portale",
+            "data": r.get("created_at"),
+            "link": f"/anagrafiche/{r.get('cliente_id')}" if r.get("cliente_id") else None,
+        })
+
+    eventi.sort(key=lambda x: x.get("data") or "", reverse=True)
+    return {"eventi": eventi[:limit], "totale": len(eventi)}
