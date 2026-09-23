@@ -1649,15 +1649,61 @@ async def compagnia_rimesse_storico(
             t["targa"] = p.get("targa")
             t["contraente_nome"] = contr_map.get(p.get("contraente_id", ""))
 
+    # ---- Voci versate (ritenute/rappel/pnc/fatture/voci manuali) ----
+    _COLL_VOCE = {
+        "ritenuta_compagnia": "ritenute_compagnia", "rappel": "rappel", "pnc": "pnc",
+        "fattura_partner": "fatture_agenzia_partner", "voce_manuale": "voci_manuali_compagnia",
+    }
+    _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+                 "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
+
+    def _voce_net_descr(tipo, doc):
+        imp = float(doc.get("importo") or 0)
+        if tipo == "ritenuta_compagnia":
+            net = imp; descr = f"Ritenuta {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+        elif tipo == "rappel":
+            net = -imp; descr = f"Rappel {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+        elif tipo == "pnc":
+            net = imp; descr = f"PNC {doc.get('tipo') or ''} {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+        elif tipo == "fattura_partner":
+            net = -imp; descr = f"Fattura partner n. {doc.get('numero_fattura') or '—'}: {doc.get('descrizione') or ''}".strip()
+        else:  # voce_manuale
+            a = abs(imp); net = a if doc.get("tipo") == "dare" else -a
+            descr = (doc.get("causale") or "") + (f" · {doc.get('note')}" if doc.get("note") else "")
+        return round(net, 2), descr
+
+    # Pre-fetch tutte le voci referenziate dalle rimesse, per collezione
+    voci_map: dict = {}
+    _need: dict = {}
+    for r in rimesse:
+        for v in (r.get("voci_versate") or []):
+            _need.setdefault(v.get("tipo"), set()).add(v.get("id"))
+    for tipo, ids in _need.items():
+        coll = _COLL_VOCE.get(tipo)
+        if not coll:
+            continue
+        async for doc in db[coll].find({"id": {"$in": list(ids)}}, {"_id": 0}):
+            net, descr = _voce_net_descr(tipo, doc)
+            voci_map[(tipo, doc["id"])] = {
+                "tipo": tipo, "label": _VOCE_LBL.get(tipo, tipo),
+                "id": doc["id"], "data": doc.get("data"),
+                "descrizione": descr, "importo": net,
+            }
+
     # Conta allegati per ogni movimento
     out = []
     for r in rimesse:
         ids = r.get("titoli_ids_versati") or []
+        voci_ver = [voci_map[(v.get("tipo"), v.get("id"))]
+                    for v in (r.get("voci_versate") or [])
+                    if (v.get("tipo"), v.get("id")) in voci_map]
         n_all = await db.allegati.count_documents({"entita_tipo": "movimento", "entita_id": r["id"]})
         out.append({
             **r,
             "titoli": [titoli_map.get(i) for i in ids if titoli_map.get(i)],
+            "voci": voci_ver,
             "n_titoli": len(ids),
+            "n_voci": len(voci_ver),
             "n_allegati": n_all,
         })
     totale_pagato = round(sum(r.get("importo", 0) for r in rimesse), 2)
@@ -2113,7 +2159,8 @@ async def stampa_compagnia_estratto(
 
 
 class TitoliSelectionBody(BaseModel):
-    titoli_ids: list[str]
+    titoli_ids: list[str] = []
+    voci: list[dict] = []
 
 
 @api.post("/stampa/compagnie/{cid}/titoli-selezionati")
@@ -2121,9 +2168,9 @@ async def stampa_compagnia_titoli_selezionati(
     cid: str, body: TitoliSelectionBody,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Stampa PDF dei soli titoli selezionati di una compagnia, con totale somma."""
-    if not body.titoli_ids:
-        raise HTTPException(400, "Nessun titolo selezionato")
+    """Stampa PDF dei titoli/voci selezionati di una compagnia, con totale somma."""
+    if not body.titoli_ids and not body.voci:
+        raise HTTPException(400, "Nessuna riga selezionata")
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
@@ -2147,7 +2194,8 @@ async def stampa_compagnia_titoli_selezionati(
         pol = pol_map.get(t.get("polizza_id"), {})
         lordo = float(t.get("importo_lordo") or 0)
         provv = float(t.get("provvigioni") or 0)
-        dovuto = (lordo - provv) if trattiene else lordo
+        _dir = bool(t.get("pagamento_in_direzione"))
+        dovuto = (-provv) if _dir else ((lordo - provv) if trattiene else lordo)
         rows.append([
             t.get("data_incasso") or "",
             pol.get("numero_polizza") or "",
@@ -2158,10 +2206,33 @@ async def stampa_compagnia_titoli_selezionati(
         tot_lordo += lordo
         tot_provv += provv
         tot_dovuto += dovuto
+
+    # Voci selezionate (ritenute/rappel/PNC/voci manuali): importo = Dare − Avere dall'E/C
+    if body.voci:
+        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+                     "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
+        ec = await _compagnia_estratto_data(cid, None, None)
+        sel_voci = {(v.get("tipo"), v.get("id")) for v in body.voci}
+        voci_righe = [r for r in ec.get("righe", [])
+                      if (r.get("tipo"), r.get("_movimento_id")) in sel_voci]
+        if voci_righe:
+            rows.append(["", "", "", "", "", "", ""])
+            rows.append(["ALTRE VOCI", "", "", "", "", "", ""])
+            for r in sorted(voci_righe, key=lambda x: x.get("data") or ""):
+                net = float(r.get("dare") or 0) - float(r.get("avere") or 0)
+                rows.append([
+                    r.get("data") or "",
+                    _VOCE_LBL.get(r.get("tipo"), r.get("tipo")),
+                    (r.get("descrizione") or "")[:35],
+                    "", "", "", round(net, 2),
+                ])
+                tot_dovuto += net
+
     rows.append(["", "", "", "TOTALE", round(tot_lordo, 2), round(tot_provv, 2), round(tot_dovuto, 2)])
+    n_righe = len(titoli) + len(body.voci or [])
     pdf = pdf_report.stampa_elenco(
         f"Titoli selezionati — {comp.get('ragione_sociale')}",
-        f"N. titoli: {len(titoli)} · Totale dovuto: € {tot_dovuto:,.2f} · Trattiene provv: {'SI' if trattiene else 'NO'}",
+        f"N. voci: {n_righe} · Totale dovuto: € {tot_dovuto:,.2f} · Trattiene provv: {'SI' if trattiene else 'NO'}",
         headers, rows,
         col_widths_mm=[24, 30, 60, 22, 25, 25, 28], landscape_mode=False,
         **(await _intestazione_pdf()),
@@ -2210,7 +2281,43 @@ async def stampa_rimessa_compagnia(
         ])
         tot_lordo += float(t.get("importo_lordo") or 0)
         tot_provv += float(t.get("provvigioni") or 0)
-    rows.append(["", "", "", "TOTALE", round(tot_lordo, 2), round(tot_provv, 2)])
+    rows.append(["", "", "", "TOT. TITOLI", round(tot_lordo, 2), round(tot_provv, 2)])
+
+    # Voci versate (ritenute/rappel/pnc/fatture/voci manuali)
+    voci_ver = mov.get("voci_versate") or []
+    tot_voci = 0.0
+    if voci_ver:
+        _COLL_VOCE = {"ritenuta_compagnia": "ritenute_compagnia", "rappel": "rappel", "pnc": "pnc",
+                      "fattura_partner": "fatture_agenzia_partner", "voce_manuale": "voci_manuali_compagnia"}
+        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+                     "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
+        rows.append(["", "", "", "", "", ""])
+        rows.append(["ALTRE VOCI", "", "", "", "", ""])
+        for v in voci_ver:
+            coll = _COLL_VOCE.get(v.get("tipo"))
+            if not coll:
+                continue
+            doc = await db[coll].find_one({"id": v.get("id")}, {"_id": 0})
+            if not doc:
+                continue
+            imp = float(doc.get("importo") or 0)
+            if v["tipo"] == "ritenuta_compagnia":
+                net = imp; descr = f"Ritenuta {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+            elif v["tipo"] == "rappel":
+                net = -imp; descr = f"Rappel {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+            elif v["tipo"] == "pnc":
+                net = imp; descr = f"PNC {doc.get('tipo') or ''} {doc.get('anno') or ''}".strip()
+            elif v["tipo"] == "fattura_partner":
+                net = -imp; descr = f"Fattura partner n. {doc.get('numero_fattura') or '—'}".strip()
+            else:
+                a = abs(imp); net = a if doc.get("tipo") == "dare" else -a
+                descr = (doc.get("causale") or "")
+            rows.append([
+                _VOCE_LBL.get(v["tipo"], v["tipo"]), "", (descr or "")[:38],
+                doc.get("data") or "", round(net, 2), "",
+            ])
+            tot_voci += net
+        rows.append(["", "", "", "TOT. VOCI", round(tot_voci, 2), ""])
     pdf = pdf_report.stampa_elenco(
         f"Rimessa — {comp.get('ragione_sociale', 'Compagnia')}",
         f"Data: {mov.get('data_movimento') or '—'} · {mov.get('descrizione') or ''} · Importo versato: € {float(mov.get('importo') or 0):,.2f}",

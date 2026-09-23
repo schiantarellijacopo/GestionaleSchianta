@@ -66,6 +66,7 @@ export default function BrogliaccioTab({ refreshKey }) {
     const [contiCassa, setContiCassa] = useState([]);
     const [collab, setCollab] = useState("all");
     const [compagnia, setCompagnia] = useState("all");
+    const [search, setSearch] = useState("");
     // Visibilità colonne (persistente localStorage)
     const [visibleCols, setVisibleCols] = useState(() =>
         loadVisible(LS_KEY_COLS,
@@ -177,10 +178,12 @@ export default function BrogliaccioTab({ refreshKey }) {
             .filter((r) => r.compagnia_id)
             .map((r) => [r.compagnia_id, r.compagnia || "—"])).entries()
     ).sort((a, b2) => (a[1] || "").localeCompare(b2[1] || ""));
-    const filtroAttivo = collab !== "all" || compagnia !== "all";
+    const filtroAttivo = collab !== "all" || compagnia !== "all" || search.trim() !== "";
+    const _q = search.trim().toLowerCase();
     const righeView = (b.righe || []).filter((r) =>
         (collab === "all" || r.collaboratore_id === collab) &&
-        (compagnia === "all" || r.compagnia_id === compagnia));
+        (compagnia === "all" || r.compagnia_id === compagnia) &&
+        (_q === "" || `${r.contraente || ""} ${r.descrizione || ""}`.toLowerCase().includes(_q)));
     // Totale giornata coerente con il filtro
     const totaliView = !filtroAttivo ? b.totali_giornata : (() => {
         const keys = ["totale", "provv", "saldo", "crediti", "spese", "sconti", "rimesse", "ritenuta", "direzione", "rappel", "pnc"];
@@ -232,6 +235,15 @@ export default function BrogliaccioTab({ refreshKey }) {
                                 ))}
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    <div>
+                        <Label className="text-[10px] text-slate-500">Cerca contraente</Label>
+                        <Input
+                            type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Nome / cognome…"
+                            className="w-52 h-9" data-testid="brogliaccio-search"
+                        />
                     </div>
 
                     {b.chiusa && (

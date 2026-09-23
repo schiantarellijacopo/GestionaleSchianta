@@ -190,9 +190,12 @@ function DettaglioEstratto({ compagnia, onBack }) {
             const titoli_ids = righeSel
                 .filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione")
                 .map((r) => r.titolo_id);
+            const voci = righeSel
+                .filter((r) => VOCE_TIPI.includes(r.tipo))
+                .map((r) => ({ tipo: r.tipo, id: r._movimento_id }));
             const r = await api.post(
                 `/stampa/compagnie/${compagnia.id}/titoli-selezionati`,
-                { titoli_ids },
+                { titoli_ids, voci },
                 { responseType: "blob" },
             );
             const url = URL.createObjectURL(r.data);
@@ -481,7 +484,7 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
                 </td>
                 <td className="num text-xs">{fmtDate(r.data_movimento)}</td>
                 <td className="text-sm">{r.descrizione || "—"}</td>
-                <td className="num text-right">{r.n_titoli}</td>
+                <td className="num text-right">{r.n_titoli}{r.n_voci ? ` + ${r.n_voci}` : ""}</td>
                 <td className="num text-right font-semibold text-emerald-700">{fmtEur(r.importo)}</td>
                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
                     <AllegatiCell
@@ -538,6 +541,33 @@ function RowRimessa({ r, expanded, onToggle, onChange }) {
                                     ))}
                                 </tbody>
                             </table>
+                        )}
+                        {r.voci && r.voci.length > 0 && (
+                            <>
+                                <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mt-4 mb-2">
+                                    Altre voci versate ({r.voci.length})
+                                </div>
+                                <table className="tbl w-full text-xs" data-testid={`ec-stor-voci-${r.id}`}>
+                                    <thead>
+                                        <tr>
+                                            <th>Tipo</th>
+                                            <th>Descrizione</th>
+                                            <th>Data</th>
+                                            <th className="text-right">Importo €</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {r.voci.map((v) => (
+                                            <tr key={`${v.tipo}-${v.id}`}>
+                                                <td><span className="badge bg-slate-100 text-slate-700">{v.label}</span></td>
+                                                <td>{v.descrizione || "—"}</td>
+                                                <td className="num">{fmtDate(v.data)}</td>
+                                                <td className="num text-right">{fmtEur(v.importo)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </>
                         )}
                     </td>
                 </tr>
