@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import time
 import logging
 from typing import Optional
@@ -23,6 +24,22 @@ from typing import Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_mobile(raw: str) -> str:
+    """Normalizza il cellulare in formato E.164 richiesto da OpenAPI (es. +393401234567).
+    Gestisce numeri italiani salvati senza prefisso, con spazi/trattini, con 00 o +39."""
+    if not raw:
+        return ""
+    s = re.sub(r"[^\d+]", "", str(raw))
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    if s.startswith("+"):
+        return s
+    if s.startswith("39") and len(s) >= 12:
+        return "+" + s
+    # numero nazionale (es. 3401234567) → assume Italia
+    return "+39" + s
 
 
 def _sandbox() -> bool:
@@ -102,14 +119,15 @@ async def create_signature(
     token = await _get_token()
     if not token:
         return {"ok": False, "error": "Credenziali OpenAPI eSignature mancanti o scope non attivo"}
-    if not signer.get("mobile"):
+    mobile = _normalize_mobile(signer.get("mobile"))
+    if not mobile:
         return {"ok": False, "error": "Cellulare obbligatorio per la firma FEA con OTP SMS"}
     body = {
         "signers": [{
             "name": signer.get("name") or "",
             "surname": signer.get("surname") or "",
             "email": signer.get("email") or "",
-            "mobile": signer.get("mobile"),
+            "mobile": mobile,
             "message": message or "Documento da firmare",
             "signatures": [{"page": page, "x": str(x), "y": str(y), "name": "signature_1"}],
         }],

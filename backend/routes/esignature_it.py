@@ -100,7 +100,7 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         message=body.get("message") or f"Firma il documento: {display}",
     )
     if not res.get("ok"):
-        raise HTTPException(502, res.get("error") or "Errore creazione firma")
+        raise HTTPException(400, res.get("error") or "Errore creazione firma")
 
     signing_url = res.get("signing_url")
     rec = {

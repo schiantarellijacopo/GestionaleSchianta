@@ -1436,3 +1436,10 @@ Usare integration_expert prima di implementare.
 - Frontend Dashboard.jsx: nuovo componente ClientiAttivitaCard (dopo DashboardTasks, solo staff) con icona per tipo (Paperclip/Euro/Smartphone), cliente, descrizione, tempo relativo e link a scheda cliente/polizza. Empty-state se nessun evento.
 - Nessuna notifica campanella aggiunta (scelta utente). La regolazione premio continua a creare la sua notifica in-app come prima.
 - Test: endpoint verificato end-to-end su dati reali (evento doc_link "MARIO TEST · libretto.pdf" con link a /anagrafiche/...). Card renderizzata in Dashboard.
+
+### Sessione fork 2026-06 — Fix eSignature OpenAPI (invio MUP per firma)
+- Sintomo: "Genera e invia per firma" mostrava errore Cloudflare (520). Causa reale nei log: OpenAPI EU-AES risponde HTTP 422 {"message":"invalid signer 'mobile'"} perché il cellulare veniva inviato grezzo, mentre OpenAPI richiede E.164 (+39...). Il backend rilanciava 502 -> Cloudflare mostrava errore origin.
+- Fix: esignature_openapi.py nuova _normalize_mobile() -> E.164 (gestisce spazi/trattini/punti, 00, +39, numero nazionale). Applicata in create_signature (campo signer.mobile). routes/esignature_it.py: errore creazione firma ora HTTPException(400) con messaggio chiaro invece di 502.
+- SANDBOX: OPENAPI_ESIGNATURE_SANDBOX risulta disattivo -> chiamate verso PRODUZIONE esignature.openapi.com (token OK). Flusso: /polizze/{id}/mup/genera (salva) -> /esignature/invia -> create EU-AES -> link firma via WA/email in background + OTP SMS.
+- Test: _normalize_mobile verificato su 7 formati -> tutti +393402934389. Verifica live end-to-end NON eseguita (invia SMS reale + consuma crediti): da fare con numero di test dell'agenzia.
+- IN PAUSA (richiesta precedente non completata): wa.me -> invio via API Evolution quando l'agenzia ha WhatsApp API attiva. Esiste già provider wame|evolution; alcune UI forzano ancora wa.me (AnagraficaDetail 2234, ContrattoConsulenzaTab 178, upload-link "Invia via WhatsApp", ecc.). Da unificare su un helper che rispetti az.whatsapp_provider.
