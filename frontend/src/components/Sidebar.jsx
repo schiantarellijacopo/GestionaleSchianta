@@ -42,7 +42,7 @@ const ALL_MENU_ITEMS = [
     { id: "banche", path: "/banche", icon: "Landmark", label: "Banche", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "rappel", path: "/rappel", icon: "Gift", label: "Rappel", section: "partite_pnc", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "ritenute_hub", path: "/ritenute", icon: "Coins", label: "Ritenute (hub)", section: "partite_pnc", roles: ["admin", "collaboratore"] },
-    { id: "pnc", path: "/pnc", icon: "Landmark", label: "PNC", section: "partite_pnc", roles: ["admin", "collaboratore"] },
+    { id: "pnc", path: "/pnc", icon: "Landmark", label: "PNT", section: "partite_pnc", roles: ["admin", "collaboratore"] },
     { id: "calendario", path: "/calendario", icon: "Calendar", label: "Calendario", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "statistiche", path: "/statistiche", icon: "Activity", label: "Statistiche", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "cervello", path: "/cervello", icon: "Brain", label: "Il Cervello", section: "strumenti", roles: ["admin"] },
