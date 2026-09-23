@@ -154,7 +154,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     }, [compagnia.id, dal, al, collaboratoreId]);
     useEffect(() => { load(); }, [load]);
 
-    const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso");
+    const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione");
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
     const altreVoci = (data?.righe || []).filter(
@@ -308,7 +308,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                             {righeAttive.map((r, i) => (
                                 <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`}>
                                     <td className="text-center">
-                                        {r.tipo === "incasso" && (
+                                        {(r.tipo === "incasso" || r.tipo === "incasso_direzione") && (
                                             <input type="checkbox" checked={selected.has(r.titolo_id)}
                                                 onChange={() => toggle(r.titolo_id)}
                                                 data-testid={`ec-check-${r.titolo_id}`} />
@@ -317,6 +317,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                     <td className="num text-xs">{fmtDate(r.data)}</td>
                                     <td>
                                         {r.tipo === "incasso" && <span className="badge badge-info">incasso</span>}
+                                        {r.tipo === "incasso_direzione" && <span className="badge bg-emerald-100 text-emerald-700">incasso direzione</span>}
                                         {r.tipo === "pagamento" && <span className="badge badge-success">pagamento</span>}
                                         {r.tipo === "rappel" && <span className="badge bg-fuchsia-100 text-fuchsia-700">rappel</span>}
                                         {r.tipo === "ritenuta_compagnia" && <span className="badge bg-rose-100 text-rose-700">ritenuta</span>}
