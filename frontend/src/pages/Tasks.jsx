@@ -301,20 +301,42 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
 
     const [linkQ, setLinkQ] = useState("");
     const [linkResults, setLinkResults] = useState([]);
+    const [titoloPol, setTitoloPol] = useState(null);   // polizza scelta in modalità "titolo"
+    const [titoliOpts, setTitoliOpts] = useState([]);
     const cercaCollegamento = async (tipo, q) => {
         if (!tipo || !q || q.length < 2) { setLinkResults([]); return; }
+        // In modalità "titolo" si cerca prima la polizza
+        const searchTipo = tipo === "titolo" ? "polizza" : tipo;
         try {
-            const ep = tipo === "polizza" ? "/polizze" : "/anagrafiche";
+            const ep = searchTipo === "polizza" ? "/polizze" : "/anagrafiche";
             const r = await api.get(ep, { params: { q, limit: 8 } });
             const data = Array.isArray(r.data) ? r.data : (r.data.items || r.data.data || []);
             setLinkResults(data.map((x) => ({
                 id: x.id,
-                label: tipo === "polizza"
+                numero_polizza: x.numero_polizza,
+                label: searchTipo === "polizza"
                     ? `N. ${x.numero_polizza || "?"}${x.ramo ? " · " + x.ramo : ""}`
                     : (x.ragione_sociale || `${x.nome || ""} ${x.cognome || ""}`.trim() || "?"),
             })));
         } catch { setLinkResults([]); }
     };
+    const scegliPolizzaPerTitolo = async (res) => {
+        setTitoloPol(res);
+        setLinkResults([]); setLinkQ("");
+        try {
+            const r = await api.get("/titoli", { params: { polizza_id: res.id, limit: 500 } });
+            const arr = Array.isArray(r.data) ? r.data : (r.data.items || []);
+            setTitoliOpts(arr.sort((a, b) => (b.scadenza || "").localeCompare(a.scadenza || "")));
+        } catch { setTitoliOpts([]); }
+    };
+    const scegliTitolo = (t) => {
+        const scad = t.scadenza || t.effetto || t.data_incasso || "";
+        const lbl = `Pol. ${titoloPol?.numero_polizza || "?"} · rata ${scad ? scad.slice(0, 10) : "?"} · € ${Number(t.importo_lordo || 0).toFixed(2)} (${t.stato || t.tipo || ""})`;
+        set("collegamento_id", t.id);
+        set("collegamento_label", lbl);
+        setTitoliOpts([]);
+    };
+    const resetLink = () => { set("collegamento_id", null); set("collegamento_label", null); setTitoloPol(null); setTitoliOpts([]); };
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -351,21 +373,43 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                         <div className="flex gap-2 mt-1">
                             <select className="h-9 rounded-md border border-slate-300 px-2 text-sm w-40"
                                 value={f.collegamento_tipo || ""}
-                                onChange={(e) => { set("collegamento_tipo", e.target.value || null); set("collegamento_id", null); set("collegamento_label", null); setLinkResults([]); setLinkQ(""); }}
+                                onChange={(e) => { set("collegamento_tipo", e.target.value || null); set("collegamento_id", null); set("collegamento_label", null); setLinkResults([]); setLinkQ(""); setTitoloPol(null); setTitoliOpts([]); }}
                                 data-testid="task-link-tipo">
                                 <option value="">Nessun collegamento</option>
                                 <option value="anagrafica">Cliente / Anagrafica</option>
                                 <option value="polizza">Polizza</option>
+                                <option value="titolo">Titolo / Rata</option>
                             </select>
                             {f.collegamento_tipo && f.collegamento_id ? (
                                 <div className="flex-1 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded px-2 text-sm" data-testid="task-link-selected">
                                     <span className="flex-1 truncate text-emerald-800">{f.collegamento_label}</span>
                                     <button type="button" className="text-rose-500" title="Rimuovi"
-                                        onClick={() => { set("collegamento_id", null); set("collegamento_label", null); }}><X size={13} /></button>
+                                        onClick={resetLink}><X size={13} /></button>
+                                </div>
+                            ) : f.collegamento_tipo === "titolo" && titoloPol ? (
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 text-xs text-slate-600 mb-1">
+                                        <span className="truncate">Polizza {titoloPol.label}</span>
+                                        <button type="button" className="text-sky-600 underline" onClick={() => { setTitoloPol(null); setTitoliOpts([]); }}>cambia</button>
+                                    </div>
+                                    {titoliOpts.length === 0 ? (
+                                        <div className="text-xs text-slate-400">Nessuna rata/titolo per questa polizza</div>
+                                    ) : (
+                                        <div className="border border-slate-200 rounded-md max-h-48 overflow-y-auto" data-testid="task-titoli-list">
+                                            {titoliOpts.map((t) => (
+                                                <button key={t.id} type="button"
+                                                    className="w-full text-left px-3 py-1.5 hover:bg-sky-50 text-xs border-b border-slate-100 last:border-0"
+                                                    onClick={() => scegliTitolo(t)}
+                                                    data-testid={`task-titolo-opt-${t.id}`}>
+                                                    rata {(t.scadenza || t.effetto || t.data_incasso || "?").slice(0, 10)} · € {Number(t.importo_lordo || 0).toFixed(2)} · {t.stato || t.tipo || ""}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             ) : f.collegamento_tipo ? (
                                 <div className="flex-1 relative">
-                                    <Input placeholder={f.collegamento_tipo === "polizza" ? "Cerca n. polizza..." : "Cerca cliente..."}
+                                    <Input placeholder={f.collegamento_tipo === "anagrafica" ? "Cerca cliente..." : "Cerca n. polizza..."}
                                         value={linkQ} onChange={(e) => { setLinkQ(e.target.value); cercaCollegamento(f.collegamento_tipo, e.target.value); }}
                                         data-testid="task-link-search" />
                                     {linkResults.length > 0 && (
@@ -373,7 +417,10 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                                             {linkResults.map((res) => (
                                                 <button key={res.id} type="button"
                                                     className="w-full text-left px-3 py-2 hover:bg-sky-50 text-sm border-b border-slate-100 last:border-0"
-                                                    onClick={() => { set("collegamento_id", res.id); set("collegamento_label", res.label); setLinkResults([]); setLinkQ(""); }}
+                                                    onClick={() => {
+                                                        if (f.collegamento_tipo === "titolo") { scegliPolizzaPerTitolo(res); }
+                                                        else { set("collegamento_id", res.id); set("collegamento_label", res.label); setLinkResults([]); setLinkQ(""); }
+                                                    }}
                                                     data-testid={`task-link-opt-${res.id}`}>
                                                     {res.label}
                                                 </button>
@@ -383,7 +430,7 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                                 </div>
                             ) : null}
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-1">Il task attivo comparirà nella scheda del cliente o della polizza collegata.</div>
+                        <div className="text-[11px] text-slate-400 mt-1">Il task attivo comparirà nella scheda del cliente, della polizza o del titolo collegato.</div>
                     </div>
                     <div>
                         <Label className="flex items-center gap-1"><Share2 size={13} /> Condividi con operatori</Label>

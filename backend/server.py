@@ -5599,6 +5599,94 @@ async def banche_movimenti(
     }
 
 
+def _banche_pdf_rows(data: dict):
+    headers = ["Data", "Banca", "Descrizione", "Contraente", "Polizza", "Collab.", "Entrata €", "Uscita €"]
+    if data.get("progressivo"):
+        headers.append("Saldo €")
+    rows = []
+    for m in data.get("movimenti", []):
+        row = [
+            m.get("data_movimento") or "",
+            (m.get("conto_nome") or "")[:18],
+            (m.get("descrizione") or "")[:40],
+            (m.get("contraente") or "")[:28],
+            m.get("numero_polizza") or "",
+            (m.get("collaboratore") or "")[:18],
+            round(m["importo"], 2) if m.get("tipo") == "entrata" else "",
+            round(m["importo"], 2) if m.get("tipo") == "uscita" else "",
+        ]
+        if data.get("progressivo"):
+            row.append(round(m.get("saldo_progressivo") or 0, 2))
+        rows.append(row)
+    return headers, rows
+
+
+@api.get("/contabilita/banche/movimenti/stampa")
+async def banche_movimenti_stampa(
+    conto_cassa_id: Optional[str] = None, dal: Optional[str] = None, al: Optional[str] = None,
+    cliente: Optional[str] = None, numero_polizza: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Stampa PDF della movimentazione bancaria filtrata."""
+    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, 20000, user)
+    headers, rows = _banche_pdf_rows(data)
+    sub = (f"Movimenti: {data['n_movimenti']} · Entrate € {data['totale_entrate']:,.2f} · "
+           f"Uscite € {data['totale_uscite']:,.2f}")
+    if data.get("progressivo"):
+        sub += f" · Saldo finale € {data['saldo_finale']:,.2f}"
+    col_w = [20, 26, 48, 38, 26, 26, 24, 24] + ([26] if data.get("progressivo") else [])
+    pdf = pdf_report.stampa_elenco(
+        "Movimentazione bancaria", sub, headers, rows,
+        col_widths_mm=col_w, landscape_mode=True,
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, "movimentazione_banche.pdf")
+
+
+@api.get("/contabilita/banche/movimenti/export.xlsx")
+async def banche_movimenti_xlsx(
+    conto_cassa_id: Optional[str] = None, dal: Optional[str] = None, al: Optional[str] = None,
+    cliente: Optional[str] = None, numero_polizza: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Export Excel della movimentazione bancaria filtrata."""
+    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, 20000, user)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Banche"
+    headers = ["Data", "Banca", "Descrizione", "Categoria", "Contraente", "Polizza",
+               "Collaboratore", "Entrata €", "Uscita €"]
+    if data.get("progressivo"):
+        headers.append("Saldo €")
+    ws.append(headers)
+    head_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    head_font = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = head_fill; c.font = head_font; c.alignment = Alignment(horizontal="center")
+    for m in data.get("movimenti", []):
+        row = [
+            m.get("data_movimento"), m.get("conto_nome"), m.get("descrizione"),
+            m.get("categoria"), m.get("contraente"), m.get("numero_polizza"),
+            m.get("collaboratore"),
+            m["importo"] if m.get("tipo") == "entrata" else None,
+            m["importo"] if m.get("tipo") == "uscita" else None,
+        ]
+        if data.get("progressivo"):
+            row.append(m.get("saldo_progressivo"))
+        ws.append(row)
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 40)
+    out = _io.BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="movimentazione_banche.xlsx"'},
+    )
+
+
 async def _risolvi_schema_provvigionale(
     collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,

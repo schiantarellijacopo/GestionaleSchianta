@@ -1415,3 +1415,9 @@ Usare integration_expert prima di implementare.
 - Punto 2 (elimina da "Movimenti elenco"): NON implementato su richiesta utente.
 - Punto 3 VERIFICATO con test: eliminando un movimento sparisce da banche/elenco/prima-nota (0/0/0); giroconto -> delete di una gamba elimina entrambe (2->0). Stessa fonte dati `movimenti`.
 - Test reale (tenant Axicura): 9 conti, totale 283.400,69; BPER SONDRIO saldo 249.085,92 con saldo progressivo coerente. Nessun dato reale modificato (insert/delete temporanei ripuliti).
+
+### Sessione fork 2026-06 — Export Banche + Task collegato a Titolo/Rata + verifica IBAN
+- Export Banche (server.py): GET /contabilita/banche/movimenti/stampa (PDF landscape) e /export.xlsx (openpyxl) — stessi filtri di banche_movimenti; PDF valido, XLSX ~10KB (PK). Frontend Banche.jsx: pulsanti PDF/Excel in header che aprono l'URL con i filtri correnti.
+- Task collegato a Titolo/Rata (Tasks.jsx): dialog "Collega a" ora ha opzione "Titolo / Rata": cerca la polizza -> carica /titoli?polizza_id -> scegli la rata (scadenza + importo + stato). collegamento_tipo=titolo (già supportato dal backend routes/tasks.py). label es. "Pol. N... · rata gg/mm/aaaa · € importo (stato)".
+- IBAN: GIA' implementato in AnagraficaDetail.jsx (righe ~432-443): campo IBAN nel riepilogo con fallback all'IBAN del conto corrente principale (ana.conti_correnti principale/primo); ContiCorrentiTab sincronizza ana.iban quando si imposta il conto principale. Solo verifica, nessuna nuova modifica.
+- "Titoli storici disallineati": nessuna azione (richiesta utente).

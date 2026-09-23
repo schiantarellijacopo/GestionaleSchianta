@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Landmark, Search, RotateCcw } from "lucide-react";
+import { Landmark, Search, RotateCcw, Printer, FileSpreadsheet } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 export default function Banche() {
     const [saldi, setSaldi] = useState(null);
@@ -48,11 +49,34 @@ export default function Banche() {
     const contiAttivi = (saldi?.conti || []).filter((c) => c.attivo);
     const contiTutti = saldi?.conti || [];
 
+    const buildQuery = () => {
+        const p = new URLSearchParams();
+        if (conto !== "all") p.set("conto_cassa_id", conto);
+        if (dal) p.set("dal", dal);
+        if (al) p.set("al", al);
+        if (cliente.trim()) p.set("cliente", cliente.trim());
+        if (numeroPolizza.trim()) p.set("numero_polizza", numeroPolizza.trim());
+        if (collab !== "all") p.set("collaboratore_id", collab);
+        return p.toString();
+    };
+    const exportPdf = () => window.open(`${API_BASE}/contabilita/banche/movimenti/stampa?${buildQuery()}`, "_blank");
+    const exportXlsx = () => window.open(`${API_BASE}/contabilita/banche/movimenti/export.xlsx?${buildQuery()}`, "_blank");
+
     return (
         <div data-testid="banche-page">
             <PageHeader
                 title="Banche"
                 subtitle="Saldo e movimentazione di ogni conto/banca"
+                actions={
+                    <div className="flex gap-2">
+                        <Button variant="outline" onClick={exportPdf} data-testid="banche-pdf">
+                            <Printer size={14} className="mr-1" /> PDF
+                        </Button>
+                        <Button variant="outline" onClick={exportXlsx} data-testid="banche-xlsx">
+                            <FileSpreadsheet size={14} className="mr-1" /> Excel
+                        </Button>
+                    </div>
+                }
             />
 
             {/* Card saldi per banca */}
