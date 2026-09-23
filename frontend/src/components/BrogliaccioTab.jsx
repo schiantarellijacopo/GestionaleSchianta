@@ -88,9 +88,22 @@ export default function BrogliaccioTab({ refreshKey }) {
 
     const elimina = async (mov) => {
         const isGiro = mov.descrizione?.startsWith("Giroconto") || mov.tipo === "giroconto";
-        const msg = isGiro
+        const catRevert = ["incasso_premio", "incasso_coperto", "incasso_premio_direzione", "copertura_titolo"];
+        const isTitoloLinked = mov.titolo_id && catRevert.includes(mov.categoria);
+        const isPagComp = mov.categoria === "pagamento_compagnia";
+        let msg = isGiro
             ? `Eliminare il giroconto "${mov.contraente || mov.descrizione}"?\nVerranno cancellati entrambi i movimenti collegati.`
             : `Eliminare il movimento "${mov.contraente || mov.descrizione}" di ${fmtEur(mov.totale)}?`;
+        if (isTitoloLinked) {
+            const dest = mov.categoria === "incasso_coperto"
+                ? "il titolo tornerà COPERTO"
+                : mov.categoria === "copertura_titolo"
+                    ? "la copertura verrà annullata e il titolo tornerà ARRETRATO"
+                    : "il titolo tornerà ARRETRATO";
+            msg += `\n\n⚠️ Questo ripristinerà anche il titolo collegato: ${dest}.`;
+        } else if (isPagComp) {
+            msg += `\n\n⚠️ Questo annullerà il versamento: titoli e voci torneranno NON saldati.`;
+        }
         if (!window.confirm(msg)) return;
         try {
             await api.delete(`/contabilita/movimenti/${mov.id}`);

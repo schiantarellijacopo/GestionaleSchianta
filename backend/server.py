@@ -6412,6 +6412,77 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
     return strip_mongo_id(await db.movimenti.find_one({"id": mid}, {"_id": 0}))
 
 
+async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
+    """All'eliminazione di un movimento di Prima Nota, ripristina lo stato precedente
+    dell'entità collegata (titolo/copertura/incasso direzione/regolazione/pagamento
+    compagnia). Ritorna una breve descrizione dell'azione eseguita (o None)."""
+    cat = mov.get("categoria")
+    tid = mov.get("titolo_id")
+    azione = None
+
+    # --- Titoli: incasso / incasso coperto / incasso direzione / copertura ---
+    if tid and cat in ("incasso_premio", "incasso_coperto", "incasso_premio_direzione", "copertura_titolo"):
+        t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+        if t:
+            _unset_incasso = {"data_incasso": "", "conto_cassa_id": "", "importo_pagato": "",
+                              "mezzo_pagamento": "", "sconto_applicato": "", "pagamento_in_direzione": ""}
+            if cat == "incasso_coperto":
+                # Il titolo era COPERTO prima dell'incasso → torna coperto
+                await db.titoli.update_one({"id": tid}, {
+                    "$set": {"stato": "da_incassare", "updated_at": _now_iso()},
+                    "$unset": _unset_incasso,
+                })
+                azione = "titolo ripristinato a coperto"
+            elif cat in ("incasso_premio", "incasso_premio_direzione"):
+                # Il titolo era ARRETRATO/da incassare → torna arretrato
+                await db.titoli.update_one({"id": tid}, {
+                    "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
+                    "$unset": _unset_incasso,
+                })
+                azione = "titolo ripristinato ad arretrato"
+            elif cat == "copertura_titolo":
+                # La copertura viene annullata → torna arretrato
+                await db.titoli.update_one({"id": tid}, {
+                    "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
+                    "$unset": {"data_copertura": "", "note_copertura": ""},
+                })
+                azione = "copertura annullata, titolo ripristinato ad arretrato"
+            # Riallinea le scadenze della polizza
+            if t.get("polizza_id"):
+                try:
+                    await _aggiorna_scadenze_polizza_da_titolo(t.get("polizza_id"))
+                except Exception:
+                    pass
+            # Regolazione: se il titolo era di regolazione e l'attività risultava "chiusa",
+            # riportala a "titolo_generato" (coerenza pipeline regolazione premio)
+            pol_reg = await db.polizze.find_one(
+                {"regolazione_titolo_id": tid, "regolazione_stato": "chiusa"}, {"_id": 0, "id": 1})
+            if pol_reg:
+                await db.polizze.update_one({"id": pol_reg["id"]}, {
+                    "$set": {"regolazione_stato": "titolo_generato", "updated_at": _now_iso()},
+                    "$unset": {"regolazione_chiusa_il": "", "regolazione_chiusa_scadenza_rif": ""},
+                })
+                azione = (azione or "") + " · regolazione riaperta"
+
+    # --- Pagamento compagnia: ripristina titoli e voci come NON versati/saldati ---
+    if cat == "pagamento_compagnia":
+        ids = mov.get("titoli_ids_versati") or []
+        if ids:
+            await db.titoli.update_many({"id": {"$in": ids}}, {"$unset": {
+                "pagato_alla_compagnia": "", "data_pagamento_compagnia": "", "movimento_pagamento_id": ""}})
+        _COLL_VOCE = {"ritenuta_compagnia": "ritenute_compagnia", "rappel": "rappel", "pnc": "pnc",
+                      "fattura_partner": "fatture_agenzia_partner", "voce_manuale": "voci_manuali_compagnia"}
+        for v in (mov.get("voci_versate") or []):
+            coll = _COLL_VOCE.get(v.get("tipo"))
+            if coll:
+                await db[coll].update_one({"id": v.get("id")}, {"$unset": {
+                    "saldata_compagnia": "", "movimento_pagamento_id": "", "data_pagamento_compagnia": ""}})
+        n = len(ids) + len(mov.get("voci_versate") or [])
+        azione = f"pagamento compagnia annullato ({n} voci ripristinate)"
+
+    return azione
+
+
 @api.delete("/contabilita/movimenti/{mid}")
 async def delete_movimento(mid: str, user=Depends(require_user("admin", "collaboratore"))):
     cur = await db.movimenti.find_one({"id": mid}, {"_id": 0})
@@ -6448,8 +6519,11 @@ async def delete_movimento(mid: str, user=Depends(require_user("admin", "collabo
     res = await db.movimenti.delete_one({"id": mid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Movimento non trovato")
-    await log_attivita(user, "delete", "movimento", mid)
-    return {"ok": True}
+    # Ripristina l'entità collegata (titolo/copertura/regolazione/pagamento compagnia)
+    azione_revert = await _revert_entita_da_movimento(cur, user)
+    await log_attivita(user, "delete", "movimento", mid,
+                       azione_revert or "")
+    return {"ok": True, "revert": azione_revert}
 
 
 @api.get("/contabilita/estratto-conto/{anagrafica_id}")
@@ -6774,6 +6848,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "numero_polizza": (polizza_riga or {}).get("numero_polizza"),
             "categoria": cat,
             "tipo": m["tipo"],
+            "titolo_id": m.get("titolo_id"),
             "compagnia": (compagnia_riga or {}).get("ragione_sociale"),
             "compagnia_id": (compagnia_riga or {}).get("id"),
             "collaboratore_id": (polizza_riga or {}).get("collaboratore_id") or m.get("collaboratore_id"),

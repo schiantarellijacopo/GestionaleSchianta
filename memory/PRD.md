@@ -1393,3 +1393,15 @@ Usare integration_expert prima di implementare.
 - Task2 Stampa selezionati (server.py stampa_compagnia_titoli_selezionati): TitoliSelectionBody ora accetta voci[]; il PDF include sezione "ALTRE VOCI" (ritenute/rappel/pnc/voci manuali) con importo net (Dare-Avere) dall'E/C e nel totale. Frontend EstrattoContoCompagnie.stampaSelezionati invia titoli_ids+voci. Direzione gestita (dovuto=-provv).
 - Task3 Storico rimesse (server.py rimesse-storico + stampa_rimessa): risolve mov.voci_versate in righe leggibili (label/descrizione/importo net) -> campo `voci` e `n_voci`; PDF rimessa con sezione "ALTRE VOCI". Frontend RowRimessa mostra tabella "Altre voci versate" e conteggio "n_titoli + n_voci".
 - Test E2E reversibile CATTOLICA: stampa selezionati ok, rimessa storico n_titoli=66/n_voci=3 (138,71+26.732,00+80,19=26.950,90), PDF rimessa ok, rollback saldo 51.501,22. Nessun dato reale modificato.
+
+### Sessione fork 2026-06 — Ripristino entità all'eliminazione movimento Prima Nota
+- Verifica utente: prima l'eliminazione di un movimento NON ripristinava titolo/regolazione (restavano incassato/coperto/versato) -> disallineamento.
+- server.py: nuova `_revert_entita_da_movimento(mov,user)` chiamata da DELETE /contabilita/movimenti/{id} dopo la delete. Ripristino per categoria:
+  * incasso_coperto -> titolo torna COPERTO (stato da_incassare, titolo_coperto=True, data_copertura mantenuta, unset dati incasso)
+  * incasso_premio / incasso_premio_direzione -> titolo torna ARRETRATO (da_incassare, titolo_coperto=False, unset dati incasso + pagamento_in_direzione)
+  * copertura_titolo -> copertura annullata, titolo torna ARRETRATO (unset data_copertura/note_copertura)
+  * pagamento_compagnia -> titoli e voci (ritenute/rappel/pnc/voci manuali) tornano NON saldati
+  * regolazione: se titolo di regolazione e polizza.regolazione_stato=="chiusa" -> riportata a "titolo_generato"
+  * riallinea scadenze polizza via _aggiorna_scadenze_polizza_da_titolo
+- brogliaccio row: aggiunto titolo_id. BrogliaccioTab.elimina mostra avviso esplicito ("il titolo tornerà COPERTO/ARRETRATO" o "titoli/voci NON saldati") prima di confermare.
+- Test diretto helper (titoli temporanei, poi rimossi): 5/5 scenari OK (arretrato/coperto/copertura/direzione/pagamento compagnia). Nessun dato reale toccato.
