@@ -457,7 +457,7 @@ export default function PolizzaDetail() {
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-x-6 gap-y-3 px-6 py-4 text-sm">
                     <F label="N° contratto" value={pol.numero_polizza} mono />
                     <F label="Sostituisce" value={pol.sostituisce_numero
-                        ? <Link to={`/polizze/${pol.sostituisce_polizza}`} className="text-sky-700 hover:underline" data-testid="pol-sostituisce-link">N. {pol.sostituisce_numero}</Link>
+                        ? <Link to={`/polizze/${pol.sostituisce_polizza_id || pol.sostituisce_polizza}`} className="text-sky-700 hover:underline" data-testid="pol-sostituisce-link">N. {pol.sostituisce_numero}</Link>
                         : pol.sostituisce_polizza} />
                     <F label="Pagamento preferito" value={pol.mezzo_pagamento_preferito
                         ? pol.mezzo_pagamento_preferito.toUpperCase()

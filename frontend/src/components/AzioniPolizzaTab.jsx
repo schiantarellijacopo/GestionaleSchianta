@@ -75,12 +75,20 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     });
     const [sospLoading, setSospLoading] = useState(false);
     const doSospendi = async () => {
+        const creaTitolo = window.confirm(
+            "Vuoi creare in automatico il titolo di sospensione?\n\n" +
+            `Data: ${fmtDate(sospendi.data)} · Importo: 0,00 €\n\n` +
+            "OK = sospendi e crea il titolo\nAnnulla = sospendi senza titolo"
+        );
         setSospLoading(true);
         try {
-            await api.post(`/polizze/${polizza.id}/sospendi`, {
+            const r = await api.post(`/polizze/${polizza.id}/sospendi`, {
                 data_sospensione: sospendi.data, riattivazione_prevista: sospendi.riatt || null,
+                crea_titolo: creaTitolo,
             });
-            toast.success("Polizza sospesa");
+            toast.success(creaTitolo && r.data?.titolo_creato
+                ? "Polizza sospesa · titolo di sospensione creato"
+                : "Polizza sospesa");
             onChanged?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setSospLoading(false); }

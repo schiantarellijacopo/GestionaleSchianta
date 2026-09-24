@@ -1584,3 +1584,14 @@ Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente p
 - Nella tab Regolazione della polizza (RegolazionePolizzaTab.jsx), tabella "Regolazioni calcolate": aggiunte checkbox per riga + "seleziona tutte" + pulsante "Elimina selezionate (N)" per eliminare singoli calcoli dallo storico (non più solo "Elimina regolazione" che azzera tutto). data-testid: reg-calcoli-check-all, reg-calcolo-check-{i}, reg-elimina-selezionate.
 - Backend extras_p1p2.py: nuovo DELETE /polizze/{pid}/regolazione-premio/storico/{sid} (require admin/collaboratore) — elimina una singola voce di regolazione_storico. Verificato via curl (2→elimina 1→1, HTTP 200). Il pulsante "Elimina regolazione" (azzera tutta la regolazione + eventuale titolo) resta disponibile.
 - NB: richiede un nuovo deploy per andare online.
+
+### Sessione fork 2026-06 (20) — Sostituzione polizza (tipo titolo + cronologia + link) e titolo di sospensione
+**Sostituzione (server.py, PolizzaDetail.jsx):**
+- create_polizza: il PRIMO titolo automatico è tipo="sostituzione" se la polizza ha sostituisce_polizza (prima "nuova"). Verificato via curl.
+- Cronologia titoli catena: GET /polizze/{id} già caricava i titoli delle polizze sostituite, ma la risoluzione della catena e sostituisce_numero usavano solo l'ID; i dati reali salvano il NUMERO polizza in sostituisce_polizza → catena rotta. Fix: risoluzione per id O numero (find_one $or id/numero_polizza) sia per sostituisce_numero sia per il chain-walk. Aggiunto doc.sostituisce_polizza_id (id risolto). I titoli storici hanno polizza_origine_numero (colonne invariate, riga evidenziata ambra). Verificato: catena 183629775→183629412 mostra 3 titoli con origine corretta.
+- Link "Sostituisce" ora punta a /polizze/{sostituisce_polizza_id||sostituisce_polizza}.
+
+**Sospensione (server.py sospendi_polizza, AzioniPolizzaTab.jsx):**
+- Alla sospensione il frontend chiede (window.confirm) se creare in automatico il "titolo di sospensione". Se sì passa crea_titolo=true.
+- Backend crea Titolo tipo="sospensione" (nuovo valore aggiunto al Literal in db_models.py), effetto=scadenza=data_sospensione, importo 0, stato="incassato" (fuori da avvisi/arretrati), nota "Sospensione dal {data}". Verificato via curl.
+- _TIPO_COD estratto conto: aggiunto "sospensione":"SP".

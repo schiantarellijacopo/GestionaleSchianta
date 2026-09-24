@@ -535,7 +535,7 @@ class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
-    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione"] = "rinnovo"
+    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione", "sospensione"] = "rinnovo"
     effetto: str
     scadenza: str
     stato: TitoloStato = "da_incassare"

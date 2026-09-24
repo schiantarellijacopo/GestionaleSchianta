@@ -21,7 +21,8 @@ _GIORNI = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"
 _MESI = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio",
          "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
 _TIPO_COD = {"quietanza": "QU", "appendice": "AP", "rinnovo": "RI", "nuova": "NU",
-             "regolazione": "RE", "storno": "ST", "sostituzione": "SO", "annullo": "AN"}
+             "regolazione": "RE", "storno": "ST", "sostituzione": "SO", "annullo": "AN",
+             "sospensione": "SP"}
 
 
 def _to_iso(d: str | None) -> str | None:

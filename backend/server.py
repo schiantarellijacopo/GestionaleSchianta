@@ -3149,12 +3149,19 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         doc["ultimo_premio_pagato"] = ult[0].get("importo_lordo") or 0
         doc["ultimo_titolo_data_incasso"] = ult[0].get("data_incasso")
         doc["ultimo_titolo_scadenza"] = ult[0].get("scadenza") or doc.get("ultimo_titolo_scadenza")
-    # Arricchimento polizza sostituita: numero leggibile per la UI
+    # Arricchimento polizza sostituita: risolvi per ID oppure per NUMERO polizza
+    # (i dati importati salvano spesso il numero, non l'id) + id per il link UI
     doc["sostituisce_numero"] = None
+    doc["sostituisce_polizza_id"] = None
     if doc.get("sostituisce_polizza"):
-        _sp = await db.polizze.find_one({"id": doc["sostituisce_polizza"]}, {"_id": 0, "numero_polizza": 1})
+        _rif = doc["sostituisce_polizza"]
+        _sp = await db.polizze.find_one(
+            {"$or": [{"id": _rif}, {"numero_polizza": _rif}]},
+            {"_id": 0, "id": 1, "numero_polizza": 1},
+        )
         if _sp:
             doc["sostituisce_numero"] = _sp.get("numero_polizza")
+            doc["sostituisce_polizza_id"] = _sp.get("id")
     # Breakdown provvigione (totale REALE polizza -> collab + margine via schema)
     bk = await _provv_breakdown(
         float(doc.get("provvigioni") or 0),
@@ -3182,17 +3189,21 @@ async def get_polizza(pid: str, user=Depends(current_user)):
     else:
         doc["copertura_fino_a"] = None
         doc["ultimo_titolo_stato"] = None
-    # Raccogli IDs della catena di polizze sostituite (storia)
+    # Raccogli IDs della catena di polizze sostituite (storia).
+    # Il riferimento "sostituisce_polizza" può essere un id OPPURE un numero polizza.
     polizza_ids_catena = [pid]
-    cursor_id = doc.get("sostituisce_polizza")
+    cursor_rif = doc.get("sostituisce_polizza")
     visited = {pid}
-    while cursor_id and cursor_id not in visited:
-        visited.add(cursor_id)
-        polizza_ids_catena.append(cursor_id)
-        prev = await db.polizze.find_one({"id": cursor_id}, {"_id": 0, "sostituisce_polizza": 1, "numero_polizza": 1})
-        if not prev:
+    while cursor_rif:
+        prev = await db.polizze.find_one(
+            {"$or": [{"id": cursor_rif}, {"numero_polizza": cursor_rif}]},
+            {"_id": 0, "id": 1, "sostituisce_polizza": 1, "numero_polizza": 1},
+        )
+        if not prev or prev["id"] in visited:
             break
-        cursor_id = prev.get("sostituisce_polizza")
+        visited.add(prev["id"])
+        polizza_ids_catena.append(prev["id"])
+        cursor_rif = prev.get("sostituisce_polizza")
     # Carica titoli di tutta la catena (polizza corrente + sostituite)
     doc["titoli"] = await db.titoli.find(
         {"polizza_id": {"$in": polizza_ids_catena}}, {"_id": 0},
@@ -3293,7 +3304,7 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
                  "trimestrale": 3, "mensile": 1, "unica": 12}.get((obj.frazionamento or "annuale").lower(), 12)
         primo = Titolo(
             polizza_id=obj.id,
-            tipo="nuova",
+            tipo="sostituzione" if getattr(obj, "sostituisce_polizza", None) else "nuova",
             effetto=obj.effetto,
             scadenza=_add_months2(obj.effetto, _mesi),
             importo_lordo=round(float(getattr(obj, "premio_lordo", 0) or 0), 2),
@@ -6492,9 +6503,28 @@ async def sospendi_polizza(
         "riattivazione_prevista": riatt,
         "updated_at": _now_iso(),
     }})
+    # Titolo di sospensione automatico (importo 0, data = data sospensione)
+    titolo_creato = None
+    if body.get("crea_titolo"):
+        t = Titolo(
+            polizza_id=pid,
+            tipo="sospensione",
+            effetto=data_sosp,
+            scadenza=data_sosp,
+            importo_lordo=0.0,
+            importo_netto=0.0,
+            stato="incassato",
+            data_incasso=data_sosp,
+            collaboratore_id=pol.get("collaboratore_id"),
+        )
+        doc_t = t.model_dump()
+        doc_t["nota"] = f"Sospensione dal {data_sosp}"
+        await db.titoli.insert_one(doc_t)
+        titolo_creato = t.id
     await log_attivita(user, "sospendi", "polizza", pid,
                        f"Riatt prev: {riatt or '—'}")
-    return {"ok": True, "stato": "sospesa", "data_sospensione": data_sosp}
+    return {"ok": True, "stato": "sospesa", "data_sospensione": data_sosp,
+            "titolo_creato": titolo_creato}
 
 
 @api.post("/polizze/{pid}/riattiva")
