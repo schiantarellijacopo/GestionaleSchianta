@@ -1620,3 +1620,7 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Fix (server.py): nuovo helper _perc_provv_effettiva(cid) che risolve la % dallo schema generico del collaboratore (fallback: qualsiasi suo schema attivo; ordine percentuale_collaboratore → su_premio_netto → su_premio). Arricchisce sia GET /collaboratori (sidebar) sia /collaboratori/{cid}/estratto-provvigioni (header) quando il profilo utente è a 0.
 - Verificato su tenant Axicura: sidebar mostra BS BROKER 4.5%, SALVADORI 50%, MARCHESI/BUZZETTI/MOIOLA/OREGIONI/PRUNERI 70%; header estratto MARCHESI = 70%. (MIDA BROKER resta 0% perché non ha schema configurato.)
 - Nessuna modifica frontend (Provvigioni.jsx già legge perc_provvigione_default).
+
+### Sessione fork 2026-06 (24) — Titolo di sospensione = da_incassare (non auto-incassato)
+- server.py sospendi_polizza: il titolo di sospensione ora nasce stato="da_incassare" (rimosso stato="incassato" + data_incasso). Resta nei Titoli arretrati per registrazione manuale. Verificato via curl (stato da_incassare, data_incasso None, lordo 0).
+- Il titolo di ripresa (riattivazione) resta invariato per ora.

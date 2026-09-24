@@ -6542,8 +6542,7 @@ async def sospendi_polizza(
             scadenza=data_sosp,
             importo_lordo=0.0,
             importo_netto=0.0,
-            stato="incassato",
-            data_incasso=data_sosp,
+            stato="da_incassare",
             collaboratore_id=pol.get("collaboratore_id"),
         )
         doc_t = t.model_dump()
