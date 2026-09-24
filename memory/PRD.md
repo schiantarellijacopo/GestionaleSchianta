@@ -1614,3 +1614,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - L'utente ha chiarito: i movimenti "Ritenute da versare" sono ritenute d'acconto versate PER I COLLABORATORI, non verso la compagnia.
 - cervello.py: annullato il netting errato sulle ritenute compagnia. Ora ritenute_erario = solo ritenuta_acconto (compagnia, invariato) + nuovo campo separato ritenute_collaboratori = somma movimenti categoria=ritenute_versate.
 - MiniBilancioTab.jsx pannello DEBITI: due righe distinte — "Ritenute d'Acconto & Erario (compagnia)" e "Ritenute d'Acconto v/Collaboratori" (data-testid mb-ritenute-collaboratori). Verificato via curl: compagnia 0, collaboratori 55.
+
+### Sessione fork 2026-06 (23) — % Sistema Provvigionale visibile in Estratto Conto Collaboratori
+- Problema: le % caricate in Librerie→Sistema provvigionale (schema_provvigionale) non comparivano nell'estratto conto (mostrava 0%) perché header/sidebar leggevano solo users.perc_provvigione_default (a 0).
+- Fix (server.py): nuovo helper _perc_provv_effettiva(cid) che risolve la % dallo schema generico del collaboratore (fallback: qualsiasi suo schema attivo; ordine percentuale_collaboratore → su_premio_netto → su_premio). Arricchisce sia GET /collaboratori (sidebar) sia /collaboratori/{cid}/estratto-provvigioni (header) quando il profilo utente è a 0.
+- Verificato su tenant Axicura: sidebar mostra BS BROKER 4.5%, SALVADORI 50%, MARCHESI/BUZZETTI/MOIOLA/OREGIONI/PRUNERI 70%; header estratto MARCHESI = 70%. (MIDA BROKER resta 0% perché non ha schema configurato.)
+- Nessuna modifica frontend (Provvigioni.jsx già legge perc_provvigione_default).

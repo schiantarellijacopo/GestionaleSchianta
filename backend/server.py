@@ -385,7 +385,31 @@ async def list_collaboratori(tutti: bool = False, user=Depends(require_user("adm
         flt,
         {"_id": 0, "password_hash": 0},
     ).sort("name", 1).to_list(500)
+    # Arricchisci con la % risolta dal Sistema Provvigionale (se il profilo è a 0)
+    for it in items:
+        if not (it.get("perc_provvigione_default") or 0):
+            eff = await _perc_provv_effettiva(it.get("id"))
+            if eff is not None:
+                it["perc_provvigione_default"] = eff
     return items
+
+
+async def _perc_provv_effettiva(cid: str):
+    """Percentuale di provvigione effettiva del collaboratore dal Sistema Provvigionale
+    (schema generico collaboratore; fallback su qualsiasi suo schema attivo)."""
+    proj = {"_id": 0, "percentuale_collaboratore": 1, "percentuale_su_premio": 1, "percentuale_su_premio_netto": 1}
+    doc = await db.schema_provvigionale.find_one(
+        {"collaboratore_id": cid, "compagnia_id": None, "ramo": None, "attivo": True}, proj,
+    )
+    if not doc:
+        doc = await db.schema_provvigionale.find_one({"collaboratore_id": cid, "attivo": True}, proj)
+    if not doc:
+        return None
+    for k in ("percentuale_collaboratore", "percentuale_su_premio_netto", "percentuale_su_premio"):
+        v = doc.get(k) or 0
+        if v:
+            return float(v)
+    return 0.0
 
 
 @api.get("/collaboratori/{cid}/estratto-provvigioni")
@@ -411,6 +435,11 @@ async def estratto_provvigioni(
     collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
+    # Mostra la % del Sistema Provvigionale se il profilo utente è a 0
+    if not (collab.get("perc_provvigione_default") or 0):
+        _eff = await _perc_provv_effettiva(cid)
+        if _eff is not None:
+            collab["perc_provvigione_default"] = _eff
 
     # auto-materializza voci ricorsive fino ad oggi (idempotente)
     try:
