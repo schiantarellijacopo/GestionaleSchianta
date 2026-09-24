@@ -1517,3 +1517,8 @@ File: frontend/src/pages/Titoli.jsx
   * _format_titolo_record: campo "scadenza" mostrato = effetto; giorni calcolati su effetto.
 - routes/kpi.py _stats_avvisi: KPI "Titoli scaduti"/"Clienti da contattare" ora basati su effetto<oggi (prima usavano stato=="scaduto" inesistente -> 0). Distinct contraenti via $lookup polizze. Verificato jacopo: Clienti 206, Titoli scaduti 264 (€85.588,42), WhatsApp inviati 5. Preview arretrati usa date effetto.
 - Frontend Avvisi.jsx: KPI cliccabili -> /avvisi?storico=<canale> apre il tab "Storico avvisi inviati" filtrato per canale (mostra chi/destinatario + quando/sent_at). useSearchParams legge ?storico; StoricoAvvisiTab accetta initialCanale.
+
+### Sessione fork 2026-06 (11) — Titoli: colonna Effetto + tutti i calcoli/filtri su DATA EFFETTO
+- Frontend Titoli.jsx: aggiunta colonna "Effetto" (t.effetto) prima di Scadenza (selezionabile via "Colonne").
+- KPI Titoli (routes/kpi.py _stats_titoli correnti): filtro anno + Scaduti ora su DATA EFFETTO (era scadenza). Verificato jacopo: da_incassare 481, incassati 4619, scaduti 199, sospesi 67, totale 5103.
+- Preset lista /titoli ora su effetto: scaduti (scaduta_effetto=true -> effetto<oggi), scadute_oggi (effetto==oggi), scad_5g/10g/15 (scaduta_giorni_esatti -> effetto==oggi-N), scad_oltre15 (scaduta_giorni_oltre -> effetto<oggi-N), scadute_da_min/max. Aggiunto param scaduta_effetto all'endpoint. Questi param /titoli sono usati SOLO dalla pagina Titoli (Polizze usa /polizze).

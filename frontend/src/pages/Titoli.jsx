@@ -55,7 +55,7 @@ const firstOfMonthISO = () => {
 const presetParams = (key) => {
     switch (key) {
         case "sospesi": return { stato: "da_incassare", titolo_coperto: true };
-        case "scaduti": return { stato: "da_incassare", titolo_coperto: false, scaduta_giorni_oltre: 0 };
+        case "scaduti": return { stato: "da_incassare", titolo_coperto: false, scaduta_effetto: true };
         case "tutti_aperti": return { stato_not: "incassato,stornato" };
         case "storico": return { stato: "incassato" };
         case "storico_anno": return { stato: "incassato", dal: firstOfYearISO(), al: todayISO() };
@@ -283,6 +283,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             key: "margine", label: "Margine", sort: "margine_agenzia", thClass: "text-right w-[70px]", tdClass: "num text-right text-amber-700 font-medium",
             render: (t) => <span data-testid={`titolo-provv-margine-${t.id}`}>{fmtEur(t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0)))}</span>,
         },
+        { key: "effetto", label: "Effetto", sort: "effetto", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs whitespace-nowrap text-slate-700", render: (t) => t.effetto ? fmtDate(t.effetto) : "—" },
         { key: "scadenza", label: "Scadenza", sort: "data_scadenza", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs whitespace-nowrap", render: (t) => fmtDate(t.scadenza) },
         { key: "copertura", label: "Copertura", sort: "data_copertura", thClass: "w-[80px] whitespace-nowrap", tdClass: "num text-xs text-emerald-700 whitespace-nowrap", render: (t) => t.data_copertura ? fmtDate(t.data_copertura) : "—" },
         ...(showStorico ? [

@@ -3737,6 +3737,7 @@ async def list_titoli(
     scadute_da_max: Optional[int] = None,    # es. 14 (scadute al massimo da 14 giorni)
     scaduta_giorni_esatti: Optional[int] = None,  # scadenza == oggi - N (giorno esatto)
     scaduta_giorni_oltre: Optional[int] = None,   # scadenza < oggi - N (scaduti da oltre N giorni)
+    scaduta_effetto: Optional[bool] = None,   # scaduti in base alla DATA EFFETTO (effetto < oggi)
     scadenza_oltre_giorni: Optional[int] = None,  # in scadenza oltre N gg
     # filtro periodo — campo selezionabile (scadenza | data_copertura | data_incasso)
     dal: Optional[str] = None,
@@ -3809,28 +3810,33 @@ async def list_titoli(
 
     if scadute_oggi:
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
-        flt["scadenza"] = today_s
+        flt["effetto"] = today_s
 
     if scadute_da_min is not None or scadute_da_max is not None:
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
         cond = {}
         if scadute_da_min is not None:
-            # scadenza <= oggi-(min-1)  (conteggio inclusivo del giorno di scadenza)
+            # effetto <= oggi-(min-1)
             cond["$lte"] = (today - timedelta(days=int(scadute_da_min) - 1)).isoformat()
         if scadute_da_max is not None:
-            # scadenza >= oggi-(max-1)
+            # effetto >= oggi-(max-1)
             cond["$gte"] = (today - timedelta(days=int(scadute_da_max) - 1)).isoformat()
-        flt["scadenza"] = cond if isinstance(flt.get("scadenza"), str) is False else {**(flt.get("scadenza") if isinstance(flt.get("scadenza"), dict) else {}), **cond}
+        flt["effetto"] = cond if isinstance(flt.get("effetto"), str) is False else {**(flt.get("effetto") if isinstance(flt.get("effetto"), dict) else {}), **cond}
 
     if scaduta_giorni_esatti is not None:
-        # scaduti ESATTAMENTE da N giorni: scadenza == oggi - N
+        # scaduti ESATTAMENTE da N giorni in base alla DATA EFFETTO: effetto == oggi - N
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
-        flt["scadenza"] = (today - timedelta(days=int(scaduta_giorni_esatti))).isoformat()
+        flt["effetto"] = (today - timedelta(days=int(scaduta_giorni_esatti))).isoformat()
 
     if scaduta_giorni_oltre is not None:
-        # scaduti da OLTRE N giorni: scadenza < oggi - N
+        # scaduti da OLTRE N giorni in base alla DATA EFFETTO: effetto < oggi - N
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
-        flt["scadenza"] = {"$lt": (today - timedelta(days=int(scaduta_giorni_oltre))).isoformat()}
+        flt["effetto"] = {"$lt": (today - timedelta(days=int(scaduta_giorni_oltre))).isoformat()}
+
+    if scaduta_effetto:
+        # SCADUTI in base alla DATA EFFETTO (coerente con i KPI): effetto < oggi
+        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
+        flt["effetto"] = {"$nin": ["", None], "$lt": today_s}
 
     if coperti_non_pagati:
         flt["stato"] = {"$in": ["da_incassare", "insoluto"]}

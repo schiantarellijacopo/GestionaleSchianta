@@ -259,8 +259,8 @@ async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]
              "color": "violet", "icon": "TrendingUp"},
         ]
 
-    # Titoli correnti: limitati all'anno in corso sulla scadenza
-    flt = {**scope_filter, "scadenza": {"$gte": y_start, "$lte": y_end}}
+    # Titoli correnti: limitati all'anno in corso sulla DATA EFFETTO
+    flt = {**scope_filter, "effetto": {"$gte": y_start, "$lte": y_end}}
     pipeline = [
         {"$match": flt},
         {"$group": {"_id": "$stato", "n": {"$sum": 1},
@@ -270,13 +270,12 @@ async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]
     total_n = sum(r["n"] for r in res.values())
     total_eur = sum(r["tot"] for r in res.values())
 
-    # SCADUTI: titoli da incassare/insoluti, NON coperti, con scadenza già passata
-    # (la colonna "Scadenza" riporta una data anteriore ad oggi).
+    # SCADUTI: titoli da incassare/insoluti, NON coperti, con DATA EFFETTO già passata.
     today_str = now.strftime("%Y-%m-%d")
     _sc = await db.titoli.aggregate([
         {"$match": {**scope_filter, "stato": {"$in": ["da_incassare", "insoluto"]},
                     "titolo_coperto": {"$ne": True},
-                    "scadenza": {"$nin": ["", None], "$lt": today_str}}},
+                    "effetto": {"$nin": ["", None], "$lt": today_str}}},
         {"$group": {"_id": None, "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
     ]).to_list(1)
     scad = _sc[0] if _sc else {}
