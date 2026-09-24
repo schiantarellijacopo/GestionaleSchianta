@@ -1604,3 +1604,8 @@ Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente p
 - _mb_compute: esclude le voci con categoria_sistema dalle righe custom (evita duplicati vuoti). Verificato via screenshot dropdown + curl.
 
 Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/ripresa/storno) in PolizzaDetail Titoli; riattivazione polizza chiede se creare "titolo di ripresa" (tipo=ripresa, importo 0, data ripresa). Verificati via curl.
+
+### Sessione fork 2026-06 (22) — "Ritenute da versare" collegate al riquadro DEBITI
+- cervello.py mini-bilancio: il riquadro DEBITI ora mostra Ritenute d'Acconto MATURATE (somma movimenti.ritenuta_acconto) − VERSATE (somma movimenti categoria=ritenute_versate) = DA VERSARE all'Erario (residuo, clamp a 0). Nuovi campi restituiti: ritenute_maturate, ritenute_versate, ritenute_erario(=residuo).
+- MiniBilancioTab.jsx: 3 righe nel pannello DEBITI (maturate, − di cui versate, = Ritenute da versare Erario in grassetto). data-testid: mb-ritenute-maturate, mb-ritenute-versate, mb-ritenute-erario.
+- Verificato via curl: versamento ritenute_versate 40 → versate 40, residuo netto.

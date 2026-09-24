@@ -542,7 +542,15 @@ async def _mb_compute(dal: str, al: str) -> dict:
         {"$match": {"data_movimento": {"$lte": al}, "ritenuta_acconto": {"$gt": 0}}},
         {"$group": {"_id": None, "tot": {"$sum": "$ritenuta_acconto"}}},
     ]).to_list(1)
-    ritenute_erario = round(float(rit_agg[0]["tot"]) if rit_agg else 0.0, 2)
+    ritenute_maturate = round(float(rit_agg[0]["tot"]) if rit_agg else 0.0, 2)
+    # Ritenute già versate all'Erario (movimenti con categoria dedicata)
+    vers_agg = await db.movimenti.aggregate([
+        {"$match": {"data_movimento": {"$lte": al}, "categoria": "ritenute_versate"}},
+        {"$group": {"_id": None, "tot": {"$sum": {"$ifNull": ["$importo", 0]}}}},
+    ]).to_list(1)
+    ritenute_versate = round(float(vers_agg[0]["tot"]) if vers_agg else 0.0, 2)
+    # Residuo da versare all'Erario (non può essere negativo)
+    ritenute_erario = round(max(ritenute_maturate - ritenute_versate, 0.0), 2)
 
     return {
         "dal": dal, "al": al,
@@ -553,6 +561,8 @@ async def _mb_compute(dal: str, al: str) -> dict:
         "totale_liquidita": round(sum(s["saldo"] for s in saldi_conti), 2),
         "debiti_compagnie": debiti,
         "totale_debiti_compagnie": round(sum(d["saldo"] for d in debiti), 2),
+        "ritenute_maturate": ritenute_maturate,
+        "ritenute_versate": ritenute_versate,
         "ritenute_erario": ritenute_erario,
     }
 

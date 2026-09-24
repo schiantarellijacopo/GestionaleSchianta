@@ -183,8 +183,16 @@ export default function MiniBilancioTab() {
                                     <td className="px-3 py-2 text-right font-mono" data-testid="mb-debiti">{fmtEur(data.totale_debiti_compagnie)}</td>
                                 </tr>
                                 <tr>
-                                    <td className="px-3 py-1.5 text-slate-500">Ritenute d'Acconto &amp; Erario</td>
-                                    <td className="px-3 py-1.5 text-right font-mono" data-testid="mb-ritenute-erario">{fmtEur(data.ritenute_erario)}</td>
+                                    <td className="px-3 py-1.5 text-slate-500">Ritenute d'Acconto maturate</td>
+                                    <td className="px-3 py-1.5 text-right font-mono text-slate-500" data-testid="mb-ritenute-maturate">{fmtEur(data.ritenute_maturate ?? data.ritenute_erario)}</td>
+                                </tr>
+                                <tr>
+                                    <td className="px-3 py-1.5 text-slate-500 pl-6">− di cui già versate</td>
+                                    <td className="px-3 py-1.5 text-right font-mono text-emerald-600" data-testid="mb-ritenute-versate">{fmtEur(data.ritenute_versate || 0)}</td>
+                                </tr>
+                                <tr className="border-t border-violet-100">
+                                    <td className="px-3 py-1.5 font-semibold text-violet-800">Ritenute da versare (Erario)</td>
+                                    <td className="px-3 py-1.5 text-right font-mono font-semibold text-violet-800" data-testid="mb-ritenute-erario">{fmtEur(data.ritenute_erario)}</td>
                                 </tr>
                             </tbody>
                         </table>
