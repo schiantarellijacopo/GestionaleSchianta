@@ -1535,3 +1535,9 @@ File: frontend/src/pages/Titoli.jsx
 - server.py list_titoli ricerca: numero_polizza/targa ora regex ANCORATA a prefisso ^ SENZA case-insensitive (usa l'indice) → num polizza 1ms; ragione_sociale resta "contiene" case-insensitive (limit 500); pol_ids limit 5000.
 - Risultati (tenant jacopo, 56k titoli): count effetto anno 2ms (era full-scan), search polizza 1ms. HTTP: lista 0,36s, ricerca 0,15s, KPI 0,15s.
 - Tradeoff: ricerca numero polizza ora per PREFISSO (non frammento centrale) — coerente con l'uso reale (numero completo/iniziale).
+
+### Sessione fork 2026-06 (14) — Indici globali su tutte le sezioni
+- indexes.py esteso con indici compositi tenant-scoped per: anagrafiche (ragione_sociale/cognome/created_at/collaboratore), polizze (numero/contraente/scadenza/stato/compagnia/collaboratore/ramo/created_at), sinistri (stato/data_sinistro/contraente/compagnia; CORRETTO data_avvenimento->data_sinistro), movimenti/prima nota (data_movimento/categoria/tipo/conto_cassa_id/titolo_id + singoli id/polizza/anagrafica/compagnia/chiusura), allegati (entita+tenant/categoria), storico_avvisi (canale/contraente/titoli_ids), conti_cassa, whatsapp_messages, + id su tutte le collezioni principali.
+- ensure_indexes: 107 indici garantiti (idempotenti, background). Creati anche in preview.
+- Tempi misurati (tenant jacopo, dati reali): clienti 3ms, portafoglio 119ms, sinistri 2ms, prima nota 2ms, titoli storici 8ms, sospesi 6ms.
+- In PRODUZIONE gli indici vengono creati automaticamente allo startup (ensure_indexes) dopo il deploy.
