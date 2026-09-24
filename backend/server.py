@@ -4904,6 +4904,12 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     importo_pagato_raw = body.get("importo_pagato")
     importo_pagato = float(importo_pagato_raw) if importo_pagato_raw is not None else lordo
     residuo = round(max(0.0, lordo - importo_pagato), 2)
+    # Eccedenza: il cliente paga PIÙ del premio (simmetrico al residuo)
+    eccedenza = round(max(0.0, importo_pagato - lordo), 2)
+    importo_incasso_premio = round(min(importo_pagato, lordo), 2)
+    gestione_ecc = (body.get("gestione_eccedenza") or "maggiorazione").lower()
+    if gestione_ecc not in ("maggiorazione", "credito"):
+        raise HTTPException(400, "gestione_eccedenza deve essere 'maggiorazione' o 'credito'")
     tipo_chiusura = (body.get("tipo_chiusura") or "sconto").lower()
     if tipo_chiusura not in ("sconto", "sospeso"):
         raise HTTPException(400, "tipo_chiusura deve essere 'sconto' o 'sospeso'")
@@ -4968,7 +4974,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         categoria="incasso_premio_direzione" if is_direzione else ("incasso_coperto" if is_coperto else "incasso_premio"),
         # In direzione: importo=LORDO (entrata fittizia). L'esclusione da banche
         # avviene via is_direzione=True nel _compute_brogliaccio.
-        importo=importo_pagato,
+        importo=importo_incasso_premio,
         descrizione=(
             f"Incasso IN DIREZIONE (fittizio) titolo polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}"
             if is_direzione else
@@ -5048,6 +5054,46 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
                 f"(titolo {residuo_titolo.id[:8]})"
             )}},
         )
+
+    # ECCEDENZA: il cliente ha pagato più del premio (simmetrico al residuo)
+    eccedenza_titolo_id = None
+    if eccedenza > 0:
+        _numpol = pol["numero_polizza"] if pol else titolo["polizza_id"]
+        if gestione_ecc == "credito":
+            mov_ecc = MovimentoContabile(
+                data_movimento=data_incasso, tipo="entrata", categoria="altro",
+                importo=eccedenza, quota_credito=eccedenza,
+                descrizione=f"Eccedenza incasso a CREDITO cliente €{eccedenza:.2f} - polizza {_numpol} (pagato €{importo_pagato:.2f} su premio €{lordo:.2f})",
+                polizza_id=titolo["polizza_id"], titolo_id=tid,
+                anagrafica_id=pol.get("contraente_id") if pol else None,
+                compagnia_id=pol.get("compagnia_id") if pol else None,
+                conto_cassa_id=None if is_direzione else conto_id,
+                mezzo_pagamento=mezzo,
+            )
+            await db.movimenti.insert_one(mov_ecc.model_dump())
+            cred = Titolo(
+                polizza_id=titolo["polizza_id"], tipo="regolazione",
+                effetto=data_incasso, scadenza=titolo.get("scadenza") or data_incasso,
+                stato="da_incassare", importo_lordo=-eccedenza, importo_netto=0.0,
+                imposte=0.0, provvigioni=0.0,
+                collaboratore_id=titolo.get("collaboratore_id"), fonte="manuale",
+            )
+            doc_c = cred.model_dump()
+            doc_c["nota"] = f"Credito cliente da eccedenza incasso €{eccedenza:.2f}"
+            await db.titoli.insert_one(doc_c)
+            eccedenza_titolo_id = cred.id
+        else:  # maggiorazione (default): entrata extra in Prima Nota
+            mov_ecc = MovimentoContabile(
+                data_movimento=data_incasso, tipo="entrata", categoria="altro",
+                importo=eccedenza,
+                descrizione=f"Maggiorazione/eccedenza incasso €{eccedenza:.2f} - polizza {_numpol} (pagato €{importo_pagato:.2f} su premio €{lordo:.2f})",
+                polizza_id=titolo["polizza_id"], titolo_id=tid,
+                anagrafica_id=pol.get("contraente_id") if pol else None,
+                compagnia_id=pol.get("compagnia_id") if pol else None,
+                conto_cassa_id=None if is_direzione else conto_id,
+                mezzo_pagamento=mezzo,
+            )
+            await db.movimenti.insert_one(mov_ecc.model_dump())
 
     # Audit nel diario cliente per tracciabilità storica
     if pol and pol.get("contraente_id"):

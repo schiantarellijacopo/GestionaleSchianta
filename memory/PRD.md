@@ -1624,3 +1624,13 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 ### Sessione fork 2026-06 (24) — Titolo di sospensione = da_incassare (non auto-incassato)
 - server.py sospendi_polizza: il titolo di sospensione ora nasce stato="da_incassare" (rimosso stato="incassato" + data_incasso). Resta nei Titoli arretrati per registrazione manuale. Verificato via curl (stato da_incassare, data_incasso None, lordo 0).
 - Il titolo di ripresa (riattivazione) resta invariato per ora.
+
+### Sessione fork 2026-06 (25) — Incasso: gestione ECCEDENZA (cliente paga più del premio)
+- server.py incassa_titolo: nuovo calcolo eccedenza = max(0, importo_pagato − lordo); l'entrata "incasso_premio" ora registra min(pagato, lordo) (premio), e l'eccedenza è gestita a parte via body.gestione_eccedenza:
+  - "maggiorazione" (default): movimento entrata separato categoria "altro" per l'eccedenza (entra in Prima Nota).
+  - "credito": movimento "altro" con quota_credito + nuovo Titolo credito (importo_lordo negativo, da_incassare) a favore del cliente.
+- DialogIncasso.jsx: sezione "Eccedenza" (simmetrica a Residuo) con RadioGroup maggiorazione/credito, visibile quando importo_pagato > premio. data-testid: eccedenza-section, ecc-maggiorazione, ecc-credito, dlg-eccedenza.
+- Verificato via curl: pagato 124 su premio 122 → incasso_premio 122 + movimento altro 2 (maggiorazione).
+
+### PENDING (confermato dall'utente, non ancora implementato)
+- Margine provvigioni: regola "margine = provvigioni totali − provvigione collaboratore SEMPRE". Bug attuale: per schemi "% su premio netto" (es. BS BROKER 4,5%) il collaboratore riceve il 100% (margine 0). Fix richiede passare il premio (netto/lordo) a _provv_breakdown/_calc_provv_da_totale per calcolare la quota collaboratore reale (es. 4,5%×netto) e poi margine=tot−collab. Da implementare + pulsante ricalcolo titoli esistenti.

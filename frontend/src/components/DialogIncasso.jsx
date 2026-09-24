@@ -46,6 +46,7 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
         conto_cassa_id: conti?.[0]?.id || "",
         importo_pagato: lordo,
         tipo_chiusura: "sconto",
+        gestione_eccedenza: "maggiorazione",
         motivo_sconto: "",
     });
 
@@ -57,6 +58,8 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const residuo = Math.max(0, lordo - (parseFloat(f.importo_pagato) || 0));
     const hasResiduo = residuo > 0.005;
+    const eccedenza = Math.max(0, (parseFloat(f.importo_pagato) || 0) - lordo);
+    const hasEccedenza = eccedenza > 0.005;
 
     const conferma = async () => {
         try {
@@ -66,13 +69,20 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                 conto_cassa_id: null,
                 importo_pagato: parseFloat(f.importo_pagato) || 0,
                 tipo_chiusura: hasResiduo ? f.tipo_chiusura : "sconto",
+                gestione_eccedenza: hasEccedenza ? f.gestione_eccedenza : "maggiorazione",
                 motivo_sconto:
                     hasResiduo && f.tipo_chiusura === "sconto"
                         ? (f.motivo_sconto || "Sconto applicato")
                         : null,
             });
             const r = res.data || {};
-            if (!hasResiduo) {
+            if (hasEccedenza) {
+                toast.success(
+                    f.gestione_eccedenza === "credito"
+                        ? `Incassato ${fmtEur(f.importo_pagato)} — eccedenza ${fmtEur(eccedenza)} a credito cliente`
+                        : `Incassato ${fmtEur(f.importo_pagato)} — maggiorazione ${fmtEur(eccedenza)} in prima nota`,
+                );
+            } else if (!hasResiduo) {
                 toast.success(`Incassato ${fmtEur(f.importo_pagato)}`);
             } else if (f.tipo_chiusura === "sconto") {
                 toast.success(
@@ -221,6 +231,35 @@ export default function DialogIncasso({ titolo, conti, onClose, onDone }) {
                                         data-testid="inc-motivo-sconto"
                                     />
                                 )}
+                            </div>
+                        )}
+
+                        {hasEccedenza && (
+                            <div className="bg-white border border-sky-300 rounded p-3 mt-2 space-y-2" data-testid="eccedenza-section">
+                                <div className="flex items-center justify-between font-semibold text-sky-800">
+                                    <span>Eccedenza (pagato oltre il premio):</span>
+                                    <span className="num text-base" data-testid="dlg-eccedenza">{fmtEur(eccedenza)}</span>
+                                </div>
+                                <RadioGroup value={f.gestione_eccedenza} onValueChange={(v) => set("gestione_eccedenza", v)}>
+                                    <label className={`flex items-start gap-2 rounded border p-2 cursor-pointer ${f.gestione_eccedenza === "maggiorazione" ? "border-sky-400 bg-sky-50" : "border-slate-200"}`} data-testid="ecc-maggiorazione">
+                                        <RadioGroupItem value="maggiorazione" className="mt-0.5" />
+                                        <div>
+                                            <div className="font-semibold text-slate-900">Registra come maggiorazione</div>
+                                            <div className="text-xs text-slate-500">
+                                                <strong className="num">{fmtEur(eccedenza)}</strong> entra in Prima Nota come entrata extra (interessi/spese).
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label className={`flex items-start gap-2 rounded border p-2 cursor-pointer ${f.gestione_eccedenza === "credito" ? "border-sky-400 bg-sky-50" : "border-slate-200"}`} data-testid="ecc-credito">
+                                        <RadioGroupItem value="credito" className="mt-0.5" />
+                                        <div>
+                                            <div className="font-semibold text-slate-900">Lascia a credito del cliente</div>
+                                            <div className="text-xs text-slate-500">
+                                                Genera un titolo credito di <strong className="num">{fmtEur(eccedenza)}</strong> a favore del cliente.
+                                            </div>
+                                        </div>
+                                    </label>
+                                </RadioGroup>
                             </div>
                         )}
                     </div>
