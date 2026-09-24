@@ -269,6 +269,25 @@ async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]
     res = {r["_id"]: r async for r in db.titoli.aggregate(pipeline)}
     total_n = sum(r["n"] for r in res.values())
     total_eur = sum(r["tot"] for r in res.values())
+
+    # SCADUTI: titoli da incassare/insoluti, NON coperti, con scadenza già passata
+    # (la colonna "Scadenza" riporta una data anteriore ad oggi).
+    today_str = now.strftime("%Y-%m-%d")
+    _sc = await db.titoli.aggregate([
+        {"$match": {**scope_filter, "stato": {"$in": ["da_incassare", "insoluto"]},
+                    "titolo_coperto": {"$ne": True},
+                    "scadenza": {"$nin": ["", None], "$lt": today_str}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
+    ]).to_list(1)
+    scad = _sc[0] if _sc else {}
+
+    # SOSPESI: titoli COPERTI (anticipati dall'agenzia) non ancora incassati.
+    _so = await db.titoli.aggregate([
+        {"$match": {**scope_filter, "titolo_coperto": True,
+                    "stato": {"$in": ["da_incassare", "insoluto"]}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
+    ]).to_list(1)
+    sosp = _so[0] if _so else {}
     return [
         {"key": "da_incassare", "label": "Da incassare",
          "value": res.get("da_incassare", {}).get("n", 0),
@@ -281,12 +300,13 @@ async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]
          "color": "emerald", "icon": "CheckCircle",
          "link": "/titoli-storici?preset=storico_anno"},
         {"key": "scaduti", "label": "Scaduti",
-         "value": res.get("scaduto", {}).get("n", 0),
-         "sub": _fmt(res.get("scaduto", {}).get("tot", 0)),
+         "value": scad.get("n", 0),
+         "sub": _fmt(scad.get("tot", 0)),
          "color": "rose", "icon": "AlertTriangle",
-         "link": "/titoli?preset=scad_oltre15"},
+         "link": "/titoli?preset=scaduti"},
         {"key": "sospesi", "label": "Sospesi",
-         "value": res.get("sospeso", {}).get("n", 0),
+         "value": sosp.get("n", 0),
+         "sub": _fmt(sosp.get("tot", 0)),
          "color": "indigo", "icon": "Pause",
          "link": "/titoli?preset=sospesi"},
         {"key": "totale", "label": f"Totale {anno}", "value": total_n,

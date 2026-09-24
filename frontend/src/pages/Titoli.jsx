@@ -30,7 +30,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const PRESETS_CORRENTI = [
-    { key: "sospesi", label: "Sospesi (da incassare)" },
+    { key: "sospesi", label: "Sospesi (coperti)" },
+    { key: "scaduti", label: "Scaduti" },
     { key: "scadute_oggi", label: "Scadute oggi" },
     { key: "scad_5g", label: "Scadute da 5gg" },
     { key: "scad_10g", label: "Scadute da 10gg" },
@@ -54,6 +55,7 @@ const firstOfMonthISO = () => {
 const presetParams = (key) => {
     switch (key) {
         case "sospesi": return { stato: "da_incassare", titolo_coperto: true };
+        case "scaduti": return { stato: "da_incassare", titolo_coperto: false, scaduta_giorni_oltre: 0 };
         case "tutti_aperti": return { stato_not: "incassato,stornato" };
         case "storico": return { stato: "incassato" };
         case "storico_anno": return { stato: "incassato", dal: firstOfYearISO(), al: todayISO() };
@@ -85,7 +87,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
         ? ["storico_anno", "storico_mese"]
-        : ["sospesi", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
+        : ["sospesi", "scaduti", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
 
     const defaultPreset = storicoMode ? "storico_anno" : "tutti_aperti";
 

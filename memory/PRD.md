@@ -1504,3 +1504,9 @@ File: frontend/src/pages/Titoli.jsx
 - Bonifica eseguita sul DB PREVIEW per TUTTI i tenant: 0 titoli 'da incassare' con scadenza <= effetto rimasti. I ~476 gruppi (polizza+effetto) ancora duplicati sono record contabili LEGITTIMI (titoli incassati, storni positivo+negativo o pagamenti su date diverse) e NON vengono toccati.
 - Endpoint /manutenzione/correggi-scadenze-titoli esteso: param tutti_tenant=true (solo is_super_admin) esegue su tutte le agenzie via raw_db. Bottone "Correggi scadenze" in Titoli passa tutti_tenant=true automaticamente se l'utente è super admin.
 - NOTA PRODUZIONE: il DB scrivibile da questo ambiente è solo il PREVIEW (Mongo locale). Per la PRODUZIONE il super admin deve, DOPO il deploy, cliccare "Correggi scadenze" (esegue su tutte le agenzie).
+
+### Sessione fork 2026-06 (9) — Fix KPI Titoli (Scaduti/Sospesi mostravano 0)
+- routes/kpi.py _stats_titoli: prima raggruppava per stato e cercava stato=="scaduto"/"sospeso" (inesistenti) -> sempre 0.
+  * SCADUTI = titoli stato da_incassare/insoluto, NON coperti (titolo_coperto!=true), con scadenza < oggi. Verificato jacopo: 9 (€2.037,05).
+  * SOSPESI = titoli titolo_coperto=true non ancora incassati (anticipati dall'agenzia). Verificato: 67 (€26.554,48). Aggiunto anche il sub in €.
+- Frontend Titoli: aggiunto preset "scaduti" ({stato:da_incassare, titolo_coperto:false, scaduta_giorni_oltre:0}) e rinominato "Sospesi (coperti)"; KPI Scaduti/Sospesi ora linkano ai preset corrispondenti. ACCEPTED_PRESETS aggiornato.
