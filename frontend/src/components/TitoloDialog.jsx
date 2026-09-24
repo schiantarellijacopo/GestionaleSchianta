@@ -46,6 +46,30 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    // Frazionamento polizza → calcolo automatico scadenza da effetto
+    const MESI_FRAZ = { annuale: 12, semestrale: 6, quadrimestrale: 4, trimestrale: 3, bimestrale: 2, mensile: 1, unica: 12 };
+    const [polFraz, setPolFraz] = useState((titolo.frazionamento || "").toLowerCase());
+    const addMesiISO = (dateStr, mesi) => {
+        if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return "";
+        const [y, m, d] = dateStr.split("-").map(Number);
+        const base = new Date(Date.UTC(y, m - 1, d));
+        base.setUTCMonth(base.getUTCMonth() + mesi);
+        if (base.getUTCDate() !== d) base.setUTCDate(0); // fine mese
+        return base.toISOString().slice(0, 10);
+    };
+    const setEffetto = (v) => {
+        const mesi = MESI_FRAZ[polFraz] || 12;
+        setF((p) => ({ ...p, effetto: v, scadenza: v ? addMesiISO(v, mesi) : p.scadenza }));
+    };
+
+    // Premio LORDO = netto + imposte + SSN + diritti + accessori (auto)
+    useEffect(() => {
+        const lordo = round2((parseFloat(f.importo_netto) || 0) + (parseFloat(f.imposte) || 0)
+            + (parseFloat(f.ssn) || 0) + (parseFloat(f.diritti) || 0) + (parseFloat(f.accessori) || 0));
+        setF((p) => (round2(p.importo_lordo) === lordo ? p : { ...p, importo_lordo: lordo }));
+        // eslint-disable-next-line
+    }, [f.importo_netto, f.imposte, f.ssn, f.diritti, f.accessori]);
+
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori((r.data || []).filter((u) => u.attivo !== false)))
@@ -57,6 +81,16 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         const haGiaSuoi = Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0;
         if (!titolo.polizza_id) return;
         api.get(`/polizze/${titolo.polizza_id}`).then((r) => {
+            // Frazionamento: calcolo automatico scadenza da effetto
+            const fraz = (r.data?.frazionamento || "annuale").toLowerCase();
+            setPolFraz(fraz);
+            const mesi = MESI_FRAZ[fraz] || 12;
+            if (titolo._new) {
+                setF((p) => {
+                    const eff = p.effetto || r.data?.scadenza || r.data?.prossima_quietanza || r.data?.effetto || "";
+                    return { ...p, effetto: eff, scadenza: eff ? addMesiISO(eff, mesi) : p.scadenza };
+                });
+            }
             // Tipo di pagamento: eredita dal preferito della polizza se il titolo non ne ha uno
             const preferito = r.data?.mezzo_pagamento_preferito || r.data?.ultimo_mezzo_pagamento;
             if (preferito && !titolo.mezzo_pagamento) {
@@ -100,6 +134,16 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     };
     const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
     const removeOperatore = (i) => setOperatori((p) => p.filter((_, idx) => idx !== i));
+    // Ricalcolo automatico delle quote collaboratori quando cambia il totale provvigioni
+    const recalcOperatoriDaTotale = async (total) => {
+        if (operatori.length === 0) return;
+        const nuovi = await Promise.all(operatori.map(async (o) => {
+            if (!o.operatore_id) return o;
+            const q = await quotaCollaboratore(o.operatore_id, total);
+            return q !== null ? { ...o, provvigione: q } : o;
+        }));
+        setOperatori(nuovi);
+    };
     const setOperatore = (i, k, v) => {
         setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, [k]: v } : o));
         // AUTO-CALCOLO provvigioni dallo schema del collaboratore appena selezionato
@@ -277,9 +321,9 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                             testid="mezzo-pagamento-select"
                         />
                     </div>
-                    <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => set("effetto", e.target.value)} /></div>
-                    <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} /></div>
-                    <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} onChange={(e) => set("importo_lordo", e.target.value)} /></div>
+                    <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => setEffetto(e.target.value)} data-testid="titolo-effetto" /></div>
+                    <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} data-testid="titolo-scadenza" /><div className="text-[10px] text-slate-400 mt-0.5">Da effetto + frazionamento{polFraz ? ` (${polFraz})` : ""}</div></div>
+                    <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} readOnly disabled className="bg-slate-100" data-testid="titolo-lordo" /><div className="text-[10px] text-slate-400 mt-0.5">Calcolato: netto+imposte+SSN+diritti+accessori</div></div>
                     <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
                     <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
                     <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.ssn || 0} onChange={(e) => set("ssn", e.target.value)} data-testid="titolo-ssn" /></div>
@@ -289,7 +333,9 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         <Label>Provvigioni € (totale)</Label>
                         <div className="flex gap-2">
                             <Input type="number" step="0.01" value={f.provvigioni ?? 0}
-                                onChange={(e) => set("provvigioni", e.target.value)} disabled={incassato}
+                                onChange={(e) => set("provvigioni", e.target.value)}
+                                onBlur={(e) => recalcOperatoriDaTotale(parseFloat(e.target.value) || 0)}
+                                disabled={incassato}
                                 data-testid="titolo-provvigioni" />
                             <Button type="button" variant="outline" size="sm" onClick={recalcProvvigione} disabled={incassato} data-testid="titolo-provv-auto">Auto</Button>
                         </div>

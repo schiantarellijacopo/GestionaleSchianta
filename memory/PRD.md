@@ -1475,3 +1475,10 @@ Usare integration_expert prima di implementare.
 - Causa: azienda_config.whatsapp_provider dell'agenzia era ancora "wame". L'attivazione marketplace connette l'istanza Evolution (whatsapp_instances state=open) ma NON flippa whatsapp_provider. L'endpoint POST /comunicazioni/whatsapp/invia sceglieva il provider solo da whatsapp_provider -> wame -> link wa.me.
 - Fix (server.py whatsapp_invia): auto-rilevamento. Se il tenant ha un'istanza whatsapp connessa (state open/connected) e non c'è provider esplicito nel body, il provider diventa "evolution" (invio via API, tracciato). Rispetta sempre body.provider se passato. Entrambe le collezioni (azienda_config, whatsapp_instances) sono tenant-scoped, quindi la scelta è per-agenzia.
 - Test: simulato il contesto tenant di jacopo -> az.whatsapp_provider="wame" + istanza "agenzia-0342706000" connessa -> PROVIDER FINALE = evolution. Backend riavviato ok.
+
+### Sessione fork 2026-06 (5) — TitoloDialog: automazioni nuovo titolo
+File: frontend/src/components/TitoloDialog.jsx
+1. Premio LORDO auto-calcolato = netto+imposte+SSN+diritti+accessori (useEffect reattivo). Campo Lordo ora read-only/disabled con hint.
+2. Date effetto/scadenza da frazionamento polizza: al caricamento polizza si legge frazionamento (MESI_FRAZ annuale12/semestrale6/quadrimestrale4/trimestrale3/bimestrale2/mensile1/unica12). Per nuovo titolo effetto default = scadenza polizza (o prossima_quietanza/effetto), scadenza = effetto + N mesi. setEffetto ricalcola scadenza al cambio effetto. Gestione fine-mese (31/01 mensile -> 28/02).
+3. Ricalcolo automatico quote collaboratori quando cambia il totale provvigioni: onBlur del campo "Provvigioni € (totale)" chiama recalcOperatoriDaTotale() che ricomputa ogni quota via quotaCollaboratore(operatore_id, total) usando lo schema provvigionale (% compenso o % netto).
+Verifica: logica date/somma testata via node (ok). Compile frontend ok. NON testato in UI end-to-end: admin@assicura.it ha tenant vuoto, i dati reali sono in tenant c5ae2d0e (jacopo, pwd non disponibile), sandbox user inesistente. test_credentials.md risulta STALE.
