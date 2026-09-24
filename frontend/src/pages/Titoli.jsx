@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
@@ -129,12 +129,22 @@ export default function Titoli({ storicoMode = false } = {}) {
         return p;
     };
 
+    const loadSeq = useRef(0);
     const load = () => {
         setSelected(new Set());
-        api.get("/titoli", { params: buildParams() }).then((r) => setList(r.data));
+        const seq = ++loadSeq.current;
+        api.get("/titoli", { params: buildParams() }).then((r) => {
+            // Ignora risposte fuori-ordine (evita che una ricerca precedente sovrascriva l'ultima)
+            if (seq === loadSeq.current) setList(r.data);
+        });
     };
 
-    useEffect(() => { load(); }, [filters]);
+    // Debounce: evita una query per ogni tasto durante la digitazione della ricerca
+    useEffect(() => {
+        const t = setTimeout(() => { load(); }, 300);
+        return () => clearTimeout(t);
+        // eslint-disable-next-line
+    }, [filters]);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie"), api.get("/librerie/rami?dedup=1&con_polizze=1"),

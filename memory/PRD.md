@@ -1482,3 +1482,10 @@ File: frontend/src/components/TitoloDialog.jsx
 2. Date effetto/scadenza da frazionamento polizza: al caricamento polizza si legge frazionamento (MESI_FRAZ annuale12/semestrale6/quadrimestrale4/trimestrale3/bimestrale2/mensile1/unica12). Per nuovo titolo effetto default = scadenza polizza (o prossima_quietanza/effetto), scadenza = effetto + N mesi. setEffetto ricalcola scadenza al cambio effetto. Gestione fine-mese (31/01 mensile -> 28/02).
 3. Ricalcolo automatico quote collaboratori quando cambia il totale provvigioni: onBlur del campo "Provvigioni € (totale)" chiama recalcOperatoriDaTotale() che ricomputa ogni quota via quotaCollaboratore(operatore_id, total) usando lo schema provvigionale (% compenso o % netto).
 Verifica: logica date/somma testata via node (ok). Compile frontend ok. NON testato in UI end-to-end: admin@assicura.it ha tenant vuoto, i dati reali sono in tenant c5ae2d0e (jacopo, pwd non disponibile), sandbox user inesistente. test_credentials.md risulta STALE.
+
+### Sessione fork 2026-06 (6) — Fix: ricerca Titoli mostrava risultati non pertinenti
+File: frontend/src/pages/Titoli.jsx
+- Sintomo: digitando un numero polizza/nominativo completo, la lista mostrava polizze/contraenti non corrispondenti.
+- Causa: nessun debounce né guardia sulle risposte. La useEffect [filters] lanciava una GET /titoli ad ogni tasto. Le query con prefisso più corto matchano molte più polizze e sono più lente (enrichment provvigioni N titoli), quindi la loro risposta arrivava DOPO quella della query completa (2 risultati, veloce) e sovrascriveva la lista con risultati stale/non pertinenti (race condition out-of-order).
+- Fix: (1) loadSeq ref -> in load() si applica setList solo se seq === loadSeq.current (ignora risposte fuori-ordine); (2) debounce 300ms sull'effetto [filters] per non interrogare ad ogni tasto.
+- Verifica backend: con q=731040585 nel tenant di jacopo la query filtra correttamente 1 polizza / 2 titoli (backend OK, il problema era solo lato frontend). Compile frontend OK. NON testato in UI e2e (mancano credenziali con dati).
