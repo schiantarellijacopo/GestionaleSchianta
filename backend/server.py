@@ -3197,6 +3197,8 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         doc.get("collaboratore_id"),
         doc.get("compagnia_id"),
         doc.get("ramo"),
+        premio_netto=doc.get("premio_netto"),
+        premio_lordo=doc.get("premio_lordo"),
     )
     doc["provvigione_totale"] = bk["provvigione_totale"]
     doc["provvigione_collaboratore"] = bk["provvigione_collaboratore"]
@@ -3256,6 +3258,8 @@ async def get_polizza(pid: str, user=Depends(current_user)):
             t.get("collaboratore_id") or doc.get("collaboratore_id"),
             doc.get("compagnia_id"),
             doc.get("ramo"),
+            premio_netto=t.get("importo_netto") or t.get("premio_netto"),
+            premio_lordo=t.get("importo_lordo") or t.get("premio_lordo"),
         )
         t["provvigione_totale"] = tbk["provvigione_totale"]
         t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
@@ -3974,6 +3978,8 @@ async def list_titoli(
             p.get("compagnia_id"),
             p.get("ramo"),
             schema_cache=_schema_cache,
+            premio_netto=t.get("importo_netto") or t.get("premio_netto"),
+            premio_lordo=t.get("importo_lordo") or t.get("premio_lordo"),
         )
         t["provvigione_totale"] = tbk["provvigione_totale"]
         t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
@@ -6012,6 +6018,8 @@ async def _provv_breakdown(
     compagnia_id: Optional[str],
     ramo: Optional[str],
     schema_cache: Optional[dict] = None,
+    premio_netto: Optional[float] = None,
+    premio_lordo: Optional[float] = None,
 ) -> dict:
     """Suddivide una provvigione totale REALE (es. quella già impostata sulla polizza/
     titolo) in quota collaboratore e quota margine agenzia, usando la %
@@ -6040,6 +6048,7 @@ async def _provv_breakdown(
     pct_collab = 0.0
     schema_id = None
     schema_nome = None
+    provv_collab = 0.0
     if collaboratore_id:
         if schema_cache is not None:
             ck = (collaboratore_id, compagnia_id, ramo)
@@ -6054,11 +6063,19 @@ async def _provv_breakdown(
             pct_collab = float(schema.get("percentuale_collaboratore") or 0)
             schema_id = schema.get("id")
             schema_nome = schema.get("nome")
-            # Schema "diretto sul premio netto" senza % di ripartizione: il collaboratore
-            # prende l'intero importo (es. BS BROKER 4,5% del netto).
-            if pct_collab <= 0 and float(schema.get("percentuale_su_premio_netto") or 0) > 0:
-                pct_collab = 100.0
-    provv_collab = round(tot * pct_collab / 100.0, 2)
+            pct_netto = float(schema.get("percentuale_su_premio_netto") or 0)
+            # Quota REALE del collaboratore secondo il suo schema:
+            #  - schema "diretto sul netto" (es. BS BROKER 4,5%): quota = netto × %netto
+            #    (× %collab se prevista un'ulteriore ripartizione)
+            #  - schema di sola ripartizione (%collab): quota = %collab della provv. totale
+            q = _quota_collab_da_schema(
+                schema, tot, float(premio_netto or 0), float(premio_lordo or 0))
+            provv_collab = q if q is not None else 0.0
+            # % da mostrare: se lo schema è sul netto senza %collab, esponi la %netto
+            if pct_collab <= 0 and pct_netto > 0:
+                pct_collab = pct_netto
+    provv_collab = round(provv_collab, 2)
+    # MARGINE AGENZIA = provvigione totale − quota collaboratore (SEMPRE)
     provv_margine = round(tot - provv_collab, 2)
     return {
         "provvigione_totale": tot,

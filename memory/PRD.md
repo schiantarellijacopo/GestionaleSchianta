@@ -1632,5 +1632,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - DialogIncasso.jsx: sezione "Eccedenza" (simmetrica a Residuo) con RadioGroup maggiorazione/credito, visibile quando importo_pagato > premio. data-testid: eccedenza-section, ecc-maggiorazione, ecc-credito, dlg-eccedenza.
 - Verificato via curl: pagato 124 su premio 122 → incasso_premio 122 + movimento altro 2 (maggiorazione).
 
-### PENDING (confermato dall'utente, non ancora implementato)
-- Margine provvigioni: regola "margine = provvigioni totali − provvigione collaboratore SEMPRE". Bug attuale: per schemi "% su premio netto" (es. BS BROKER 4,5%) il collaboratore riceve il 100% (margine 0). Fix richiede passare il premio (netto/lordo) a _provv_breakdown/_calc_provv_da_totale per calcolare la quota collaboratore reale (es. 4,5%×netto) e poi margine=tot−collab. Da implementare + pulsante ricalcolo titoli esistenti.
+### 2026-06-15 — FIX Margine provvigioni (server.py `_provv_breakdown`)
+- Regola confermata utente: "margine = provvigioni totali − provvigione collaboratore SEMPRE".
+- Bug precedente: per schemi "% su premio netto" (es. BS BROKER 4,5%) con percentuale_collaboratore=0 il codice impostava pct_collab=100 → collab prendeva il 100% del totale → margine 0.
+- FIX: `_provv_breakdown` ora calcola la quota collaboratore tramite `_quota_collab_da_schema` (netto × %netto per schemi sul netto; %collab × totale per schemi di ripartizione). Aggiunti parametri `premio_netto`/`premio_lordo` propagati dai 3 chiamanti (dettaglio polizza, titoli catena polizza, lista titoli). margine = tot − collab sempre. La % mostrata (provvigione_pct_collab) espone la %netto (4,5) invece di 100.
+- Verificato con l'esempio utente: netto 100, tot 10, BS 4,5% → collab 4,50, margine 5,50 ✅.
+- ATTENZIONE: sui titoli reali BS il campo `provvigioni` (totale) è ancora quello vecchio/basso (es. 6,37) < quota collab (netto×4,5%), quindi margine risulta negativo finché non si esegue il RICALCOLO titoli esistenti (endpoint `/provvigioni/riassegna`) — step dedicato già previsto.
