@@ -284,6 +284,26 @@ async def merge_users(body: dict, user=Depends(require_user("admin"))):
         )
         if r.modified_count:
             spostati["utenti_rete"] = spostati.get("utenti_rete", 0) + r.modified_count
+    # Se una sorgente è uno stub-operatore importato, registra il mapping così
+    # i prossimi import OMNIA useranno direttamente il collaboratore reale.
+    for s in sources:
+        codice = (s.get("auto_created_from_codice") or "").strip()
+        if not codice:
+            continue
+        await db.import_mappings.update_one(
+            {"tipo": "collaboratore", "flusso": "omnia", "valore_flusso": codice},
+            {"$setOnInsert": {"id": str(uuid.uuid4()), "tipo": "collaboratore",
+                              "flusso": "omnia", "valore_flusso": codice,
+                              "created_at": _now_iso()},
+             "$set": {"entita_id": target_id, "label_flusso": codice,
+                      "label_programma": tname, "updated_at": _now_iso()}},
+            upsert=True,
+        )
+        spostati["mapping_import"] = spostati.get("mapping_import", 0) + 1
+        await db.mapping_operatori.update_many(
+            {"$or": [{"codice_ania": codice}, {"codice": codice}]},
+            {"$set": {"collaboratore_id": target_id, "updated_at": _now_iso()}},
+        )
     # Disattiva le sorgenti (non eliminate)
     await db.users.update_many(
         {"id": {"$in": source_ids}},

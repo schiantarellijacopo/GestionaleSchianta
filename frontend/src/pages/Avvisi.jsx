@@ -49,6 +49,7 @@ export default function Avvisi() {
     const [bulkOpen, setBulkOpen] = useState(false);
     const [storicoOpen, setStoricoOpen] = useState(false);
     const [collaboratori, setCollaboratori] = useState([]);
+    const [mezziPagamento, setMezziPagamento] = useState([]);
 
     // Filtri avanzati
     const [showFilters, setShowFilters] = useState(false);
@@ -61,6 +62,9 @@ export default function Avvisi() {
         api.get("/collaboratori").then((r) => setCollaboratori(
             (r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))
         )).catch(() => {});
+        api.get("/librerie/mezzi-pagamento", { params: { attivi: true } })
+            .then((r) => setMezziPagamento(r.data || []))
+            .catch(() => {});
     }, []);
 
     const load = async () => {
@@ -83,14 +87,14 @@ export default function Avvisi() {
     const resetFilters = () => setFilters({ dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all" });
     const hasActiveFilters = filters.dal || filters.al || filters.collaboratore_id !== "all" || filters.mezzo_pagamento !== "all";
 
-    // Fasce di scaduto calcolate sulla DATA EFFETTO (giorni di ritardo)
+    // Fasce di scaduto a DATA ESATTA sulla DATA EFFETTO ("Rata del")
     const inBucket = (t, b) => {
         const d = -(t.giorni_alla_scadenza ?? 0); // giorni di ritardo (>=0 = scaduto)
         switch (b) {
             case "oggi": return d === 0;
-            case "d5": return d >= 1 && d <= 5;
-            case "d10": return d >= 6 && d <= 10;
-            case "d15": return d >= 11 && d <= 15;
+            case "d5": return d === 5;
+            case "d10": return d === 10;
+            case "d15": return d === 15;
             case "oltre15": return d > 15;
             default: return true;
         }
@@ -216,8 +220,8 @@ export default function Avvisi() {
                                 <SelectTrigger data-testid="filter-mezzo"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">Tutti</SelectItem>
-                                    {["bonifico", "RID/SDD", "contanti", "assegno", "POS", "bollettino", "carta_credito", "compagnia"].map((m) => (
-                                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                                    {mezziPagamento.map((m) => (
+                                        <SelectItem key={m.id || m.codice} value={m.codice}>{m.label || m.codice}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -491,33 +495,58 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                         </div>
                                     </td>
                                 </tr>
-                                {isExp && g.titoli.map((t) => (
-                                    <tr key={t.id} className="bg-white text-xs" data-testid={`titolo-${t.id}`}>
-                                        <td className="text-center">
-                                            <input
-                                                type="checkbox"
-                                                checked={selTitoli.has(t.id)}
-                                                onChange={() => toggleTitolo(t.id)}
-                                                data-testid={`titolo-check-${t.id}`}
-                                            />
+                                {isExp && (
+                                    <tr className="bg-white" data-testid={`gruppo-dettaglio-${k}`}>
+                                        <td></td>
+                                        <td colSpan={8} className="p-0">
+                                            <div className="overflow-x-auto">
+                                            <table className="w-full text-xs" data-testid={`titoli-table-${k}`}>
+                                                <thead>
+                                                    <tr className="text-[10px] uppercase tracking-wide text-slate-500 bg-slate-50 border-t border-slate-200">
+                                                        <th className="w-8 text-center py-1.5"></th>
+                                                        <th className="text-left px-2 py-1.5">Contratto</th>
+                                                        <th className="text-left px-2 py-1.5">Collaboratore</th>
+                                                        <th className="text-left px-2 py-1.5">Compagnia</th>
+                                                        <th className="text-left px-2 py-1.5">Rischio</th>
+                                                        <th className="text-left px-2 py-1.5">Rata del</th>
+                                                        <th className="text-left px-2 py-1.5">Scad mora</th>
+                                                        <th className="text-left px-2 py-1.5">Copertura</th>
+                                                        <th className="text-left px-2 py-1.5">Ultimo avviso</th>
+                                                        <th className="text-right px-2 py-1.5">Rata</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {g.titoli.map((t) => (
+                                                        <tr key={t.id} className="border-t border-slate-100 hover:bg-sky-50/40" data-testid={`titolo-${t.id}`}>
+                                                            <td className="text-center py-1.5">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={selTitoli.has(t.id)}
+                                                                    onChange={() => toggleTitolo(t.id)}
+                                                                    data-testid={`titolo-check-${t.id}`}
+                                                                />
+                                                            </td>
+                                                            <td className="px-2 py-1.5">
+                                                                <Link to={`/polizze/${t.polizza_id}`} className="text-amber-700 font-medium num hover:underline">
+                                                                    {t.numero_polizza || "—"}
+                                                                </Link>
+                                                            </td>
+                                                            <td className="px-2 py-1.5 text-slate-600">{t.mandato || "—"}</td>
+                                                            <td className="px-2 py-1.5 text-slate-700">{t.compagnia_nome || "—"}</td>
+                                                            <td className="px-2 py-1.5 text-slate-700">{t.prodotto || t.ramo || "—"}</td>
+                                                            <td className="px-2 py-1.5 num whitespace-nowrap">{fmtDate(t.data_effetto || t.scadenza)}</td>
+                                                            <td className="px-2 py-1.5 num whitespace-nowrap">{t.scadenza_mora ? fmtDate(t.scadenza_mora) : "—"}</td>
+                                                            <td className="px-2 py-1.5 num whitespace-nowrap">{t.data_copertura ? fmtDate(t.data_copertura) : "—"}</td>
+                                                            <td className="px-2 py-1.5 num whitespace-nowrap text-slate-500">{t.ultimo_avviso ? fmtDate(t.ultimo_avviso) : "—"}</td>
+                                                            <td className="px-2 py-1.5 num text-right text-rose-700 font-medium whitespace-nowrap">{fmtEur(t.importo_lordo)}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                            </div>
                                         </td>
-                                        <td></td>
-                                        <td colSpan={3} className="pl-10">
-                                            <Link to={`/polizze/${t.polizza_id}`} className="text-amber-700 font-medium num hover:underline">
-                                                {t.numero_polizza || "—"}
-                                            </Link>
-                                            <span className="text-slate-500 ml-2">{t.compagnia_nome} · {t.ramo}</span>
-                                        </td>
-                                        <td className="text-slate-700">
-                                            <span className="whitespace-nowrap">eff. {fmtDate(t.data_effetto || t.scadenza)} ({Math.abs(t.giorni_alla_scadenza ?? 0) + 1}gg fa)</span>
-                                            <span className="text-slate-400 ml-2 whitespace-nowrap">scad. {t.data_scadenza ? fmtDate(t.data_scadenza) : "—"}</span>
-                                        </td>
-                                        <td></td>
-                                        <td></td>
-                                        <td className="num text-right text-rose-700 font-medium">{fmtEur(t.importo_lordo)}</td>
-                                        <td></td>
                                     </tr>
-                                ))}
+                                )}
                             </Fragment>
                         );
                     })}

@@ -1091,8 +1091,13 @@ async def rami_codici_usati(user: dict = Depends(current_user)) -> list[dict]:
     """Codici ramo realmente presenti nelle polizze (es. codici OMNIA 3N, 45, 60)
     con conteggi e flag `in_libreria`: servono per mapparli al ramo corretto."""
     rami = await db.rami.find({}, {"_id": 0, "codice": 1, "nome": 1, "attivo": 1, "unito_in_ramo_id": 1}).to_list(500)
-    noti = {(r.get("codice") or "").strip().upper() for r in rami
-            if r.get("attivo") is not False and not r.get("unito_in_ramo_id")}
+    noti = set()
+    for r in rami:
+        if r.get("attivo") is False or r.get("unito_in_ramo_id"):
+            continue
+        for v in (r.get("codice"), r.get("nome")):
+            if v and str(v).strip():
+                noti.add(str(v).strip().upper())
     out: list[dict] = []
     async for g in db.polizze.aggregate([
         {"$group": {"_id": "$ramo", "polizze": {"$sum": 1}}},
@@ -1127,16 +1132,31 @@ async def rami_riassegna_codici(body: RiassegnaCodiciBody,
     master_codice = (master.get("codice") or "").strip()
     if not master_codice:
         raise HTTPException(400, "Il ramo master non ha un codice valido")
+    # Destinazione LEGGIBILE: usa il NOME del ramo (evita doppioni tipo
+    # "RC AUTO"/"RC Auto") e coerenza con il flusso di import.
+    master_nome = (master.get("nome") or master_codice).strip()
     flt = {"ramo": {"$in": codici}}
-    upd = {"$set": {"ramo": master_codice, "updated_at": _now_iso()}}
+    upd = {"$set": {"ramo": master_nome, "updated_at": _now_iso()}}
     tot = {
         "polizze": (await db.polizze.update_many(flt, upd)).modified_count,
         "sinistri": (await db.sinistri.update_many(flt, upd)).modified_count,
         "prodotti": (await db.prodotti.update_many(flt, upd)).modified_count,
     }
+    # Persisti il mapping per-tenant: gli import OMNIA futuri convertiranno
+    # automaticamente questi codici grezzi nel ramo di destinazione.
+    for cod in codici:
+        await db.import_mappings.update_one(
+            {"tipo": "ramo", "flusso": "omnia", "valore_flusso": cod},
+            {"$setOnInsert": {"id": _uid(), "tipo": "ramo", "flusso": "omnia",
+                              "valore_flusso": cod, "created_at": _now_iso()},
+             "$set": {"entita_id": master["id"], "label_flusso": cod,
+                      "label_programma": master_nome, "updated_at": _now_iso()}},
+            upsert=True,
+        )
     await log_attivita(user, "merge", "ramo", master["id"],
                        f"{', '.join(codici)} → {master.get('nome')}")
-    return {"ok": True, "master": master_codice, "codici": codici, "riferimenti_spostati": tot}
+    return {"ok": True, "master": master_nome, "codici": codici,
+            "riferimenti_spostati": tot, "mapping_import_salvato": True}
 
 
 # --- RAMI: unione doppioni -------------------------------------------------

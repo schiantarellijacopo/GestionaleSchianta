@@ -142,15 +142,36 @@ def _format_polizza_record(p: dict, anas: dict, cmps: dict, oggi: date) -> dict:
 
 def _format_titolo_record(
     t: dict, pol_map: dict, anas: dict, cmps: dict, oggi: date,
+    users: Optional[dict] = None,
 ) -> dict:
     p = pol_map.get(t.get("polizza_id"), {})
     a = anas.get(p.get("contraente_id"), {})
     c = cmps.get(p.get("compagnia_id"), {})
+    users = users or {}
+    collab_id = p.get("collaboratore_id") or t.get("collaboratore_id")
+    collab = users.get(collab_id, {})
+    collab_nome = collab.get("name") or collab.get("email")
+    # Scadenza mora: usa quella del titolo, altrimenti effetto + giorni di mora
+    scad_mora = t.get("scadenza_mora")
+    if not scad_mora and t.get("effetto"):
+        gg = p.get("termini_mora_giorni")
+        try:
+            if gg not in (None, ""):
+                base = date.fromisoformat(str(t["effetto"])[:10])
+                scad_mora = _iso(base + timedelta(days=int(gg)))
+        except Exception:
+            scad_mora = None
     return {
         "id": t["id"],
         "polizza_id": t.get("polizza_id"),
         "numero_polizza": p.get("numero_polizza"),
         "ramo": p.get("ramo"),
+        "prodotto": p.get("prodotto"),
+        # Mandato = collaboratore/agente della polizza
+        "mandato": collab_nome,
+        "collaboratore_id": collab_id,
+        "collaboratore_nome": collab_nome,
+        "mezzo_pagamento": t.get("mezzo_pagamento"),
         # Per gli AVVISI la "scadenza" mostrata è la data di EFFETTO del titolo
         # (data in cui il premio è dovuto): il calcolo dei giorni si basa su questa.
         "scadenza": t.get("effetto"),
@@ -158,6 +179,9 @@ def _format_titolo_record(
         # Date esplicite per la visualizzazione (effetto + scadenza reale del titolo)
         "data_effetto": t.get("effetto"),
         "data_scadenza": t.get("scadenza"),
+        "scadenza_mora": scad_mora,
+        "data_copertura": t.get("data_copertura"),
+        "ultimo_avviso": None,
         "importo_lordo": t.get("importo_lordo", 0.0),
         "stato": t.get("stato"),
         "contraente_id": a.get("id"),
@@ -186,8 +210,9 @@ async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, lis
     if pol_ids:
         async for p in db.polizze.find(
             {"id": {"$in": pol_ids}},
-            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1,
-             "contraente_id": 1, "compagnia_id": 1},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+             "contraente_id": 1, "compagnia_id": 1, "collaboratore_id": 1,
+             "termini_mora_giorni": 1},
         ):
             pol_map[p["id"]] = p
 
@@ -201,8 +226,20 @@ async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, lis
     await _carica_anagrafiche(db, ana_ids, anas)
     await _carica_compagnie(db, cmp_ids, cmps)
 
+    # cache collaboratori (per colonna "Mandato" + filtro collaboratore)
+    users: dict[str, dict] = {}
+    collab_ids = [p.get("collaboratore_id") for p in pol_map.values()]
+    collab_ids += [t.get("collaboratore_id") for t in titoli]
+    collab_ids = [x for x in set(collab_ids) if x]
+    if collab_ids:
+        async for u in db.users.find(
+            {"id": {"$in": collab_ids}},
+            {"_id": 0, "id": 1, "name": 1, "email": 1},
+        ):
+            users[u["id"]] = u
+
     polizze_out = [_format_polizza_record(p, anas, cmps, oggi) for p in polizze]
-    titoli_out = [_format_titolo_record(t, pol_map, anas, cmps, oggi) for t in titoli]
+    titoli_out = [_format_titolo_record(t, pol_map, anas, cmps, oggi, users) for t in titoli]
     return {"polizze": polizze_out, "titoli": titoli_out}
 
 

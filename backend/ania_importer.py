@@ -189,20 +189,33 @@ async def _get_or_create_prodotto(db, codice: str, descr: str,
 
 
 async def _get_or_create_ramo(db, ramo_raw: str, cache: Dict[str, str]) -> Optional[str]:
-    """Crea (o riusa) un Ramo nella libreria globale Rami e ritorna il suo codice."""
+    """Crea (o riusa) un Ramo nella libreria globale Rami e ritorna il NOME di
+    destinazione (rispetta la libreria del tenant, seguendo eventuali unioni)."""
     code = (ramo_raw or "").strip().upper()
     if not code or code == "VARIE":
         return None
     if code in cache:
         return cache[code]
-    existing = await db.rami.find_one({"codice": code}, {"_id": 0, "codice": 1})
-    if existing and existing.get("codice"):
-        cache[code] = existing["codice"]
-        return existing["codice"]
+    existing = await db.rami.find_one(
+        {"codice": code},
+        {"_id": 0, "id": 1, "codice": 1, "nome": 1, "unito_in_ramo_id": 1},
+    )
+    if existing:
+        # Segui l'eventuale unione verso il ramo master
+        if existing.get("unito_in_ramo_id"):
+            master = await db.rami.find_one(
+                {"id": existing["unito_in_ramo_id"]},
+                {"_id": 0, "codice": 1, "nome": 1},
+            )
+            if master:
+                existing = master
+        val = (existing.get("nome") or existing.get("codice") or code).strip()
+        cache[code] = val
+        return val
     obj = RamoLibreria(codice=code, nome=(ramo_raw or code).strip())
     await db.rami.insert_one(obj.model_dump())
-    cache[code] = obj.codice
-    return obj.codice
+    cache[code] = obj.nome
+    return obj.nome
 
 
 async def _get_or_create_tipologia_sinistro(db, ramo: Optional[str],

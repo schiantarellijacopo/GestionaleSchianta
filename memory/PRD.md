@@ -1547,3 +1547,22 @@ File: frontend/src/pages/Titoli.jsx
 - Fix: SuperAdminPanel.jsx (AgenzieTab) — aggiunto pulsante "Correggi scadenze (tutte le agenzie)" accanto a Listino OpenAPI/Nuova Agenzia. Chiama POST /manutenzione/correggi-scadenze-titoli con dry_run=true&tutti_tenant=true (anteprima) → confirm → esecuzione tutti_tenant=true → toast report. data-testid=sa-bonifica-scadenze-btn. Import icona Wrench.
 - Endpoint backend invariato (già supportava tutti_tenant per super admin, usa raw_db su tutte le agenzie). Verificato via curl: risponde tutti_tenant:True. In preview 0/0 (già bonificato); in PRODUZIONE mostrerà i conteggi reali.
 - Flusso produzione: deploy → login super admin → click "Correggi scadenze (tutte le agenzie)" → conferma anteprima → bonifica su tutte le 7 agenzie.
+
+### Sessione fork 2026-06 (16) — Avvisi (tabella + filtri data esatta), Import ramo/collaboratori per-tenant
+**Avvisi (frontend Avvisi.jsx + backend avvisi_scadenze.py):**
+- Tabella espansa per contraente ridisegnata (come da screen utente): colonne Contratto · Collaboratore (ex "Mandato", = collaboratore/agente polizza) · Compagnia · Rischio (prodotto) · Rata del (effetto) · Scad mora (effetto + termini_mora_giorni) · Copertura (data_copertura) · Ultimo avviso · Rata (importo_lordo). data-testid: titoli-table-{k}.
+- Filtri a fascia ora a DATA ESATTA sulla data effetto ("Rata del"): oggi = d==0, 5gg = d==5, 10gg = d==10, 15gg = d==15, oltre15 = d>15 (prima erano intervalli).
+- Filtro "Tipo pagamento" ora popolato dalla libreria Mezzi di pagamento del tenant (GET /librerie/mezzi-pagamento?attivi=true), non più lista fissa.
+- Backend: _format_titolo_record arricchito (prodotto, mandato=collaboratore, collaboratore_id, mezzo_pagamento, scadenza_mora, data_copertura, ultimo_avviso). cerca_scadenze ora carica cache users + campi polizza (prodotto, collaboratore_id, termini_mora_giorni). Fix latente: i filtri collaboratore_id/mezzo_pagamento del preview ora funzionano (prima i campi mancavano nel record).
+- Verificato su tenant Axicura (264 arretrati): mandato/prodotto/scad mora popolati; chip 261/0/14/12/8/98; tabella espansa OK (screenshot).
+
+**Import ramo per-tenant (ania_importer.py + routes/librerie.py):**
+- POST /librerie/rami/riassegna-codici ora: (1) riassegna polizze/sinistri/prodotti al NOME del ramo master (elimina doppioni tipo "RC AUTO"/"RC Auto"); (2) PERSISTE un import_mapping per-tenant (tipo=ramo, flusso=omnia, valore_flusso=codice → entita_id=master) così gli import OMNIA futuri convertono in automatico i codici grezzi (3D, 3N, TUT…). Verificato: mapping creato e tenant-scoped.
+- _get_or_create_ramo ora ritorna il NOME del ramo di destinazione (seguendo unito_in_ramo_id) invece del codice grezzo.
+- /librerie/rami/codici-usati: in_libreria ora fa match su codice O nome.
+
+**Collaboratori importati (server.py merge_users):**
+- Lo strumento esistente "Unisci utenti / collaboratori" (Librerie → tab Utenti) ora, quando la sorgente è uno stub importato (auto_created_from_codice), PERSISTE un import_mapping (tipo=collaboratore, flusso=omnia, codice → collaboratore reale) + aggiorna mapping_operatori legacy. Così i prossimi import OMNIA usano il collaboratore reale invece di ricreare "Produttore - 0xx". Le referenze (polizze/titoli/movimenti/clienti) sono già riassegnate dal merge esistente e lo stub viene disattivato.
+- L'utente esegue le unificazioni (024→BS BROKER, 021, er) dal dialog scegliendo destinazione.
+
+Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente per test UI e RIPRISTINATA all'originale.
