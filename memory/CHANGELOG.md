@@ -433,3 +433,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Fix backend (incassa_titolo): il titolo credito creato dall'eccedenza a credito ora nasce con titolo_coperto=True + data_copertura=data_incasso → entra automaticamente in /titoli/sospesi.
 - Nessuna modifica frontend: il pulsante "Incassa" esistente (DialogIncasso) gestisce il titolo negativo → crea l'uscita di rimborso (Cassa/Banca -importo) via categoria incasso_coperto e chiude la partita (stato incassato) → sparisce dai sospesi.
 - Verificato E2E su dato reale (polizza 731015294): eccedenza credito → titolo -1,99 nei sospesi → "Incassa" → movimento uscita -1,99 in Cassa, sospeso azzerato, titolo rimosso. Netto cassa +143,01 (premio esatto). Dati di test ripuliti.
+
+## 2026-06-15 — Saldo cassa compagnie: escludere l'eccedenza
+- Bug: l'eccedenza a credito (importo incasso = pagato 145, quota_credito -1,99) gonfiava il "Saldo Cassa Compagnie" perché _compute_saldi_compagnie sommava solo importo + quota_sconto.
+- Fix (server.py _compute_saldi_compagnie): incassi (premio lordo) = importo + quota_sconto + quota_credito → per eccedenza 145-1,99=143,01; per residuo 143,01+1,99=145. Coerente con lordo_riga del brogliaccio.
+- Verificato con aggregazione isolata: eccedenza→143,01, residuo→145.
+- NOTA doppia riga: il codice attuale genera UNA sola riga di incasso (verificato in preview). Eventuali righe doppie viste in PRODUZIONE sono dati creati da una versione precedente → serve redeploy + rifare/eliminare la vecchia registrazione.

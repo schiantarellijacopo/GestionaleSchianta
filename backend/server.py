@@ -7683,7 +7683,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
             agg = await db.movimenti.aggregate([
                 {"$match": _inc_match},
                 {"$group": {"_id": None,
-                            "tot": {"$sum": {"$add": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$quota_sconto", 0]}]}},
+                            "tot": {"$sum": {"$add": [{"$ifNull": ["$importo", 0]}, {"$ifNull": ["$quota_sconto", 0]}, {"$ifNull": ["$quota_credito", 0]}]}},
                             "provv": {"$sum": "$provvigioni"}}},
             ]).to_list(1)
             if agg:
