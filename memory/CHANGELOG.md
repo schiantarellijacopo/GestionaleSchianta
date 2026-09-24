@@ -404,3 +404,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Fix backend (_compute_brogliaccio, server.py): la riga del brogliaccio ora espone il campo `importo` (importo reale del movimento).
 - Fix frontend (BrogliaccioTab.jsx EditMovimentoDialog): il campo Importo si inizializza da `movimento.importo` (fallback totale/lordo).
 - Verificato end-to-end via API: brogliaccio espone importo=1234.56 con totale=0; PUT update importo→999.99 OK.
+
+## 2026-06-15 — Fix conto "Pagamento Direzione" sempre a 0
+- Bug: nel Riepilogo Conti della Prima Nota il conto "Pagamento Direzione" (tipo RID) restava sempre 0.
+- Causa: i movimenti "in direzione" (mezzo RID DIREZIONE / PAGAMENTO IN DIREZIONE, is_direzione=True) hanno conto_cassa_id=None ed erano esclusi da tutte le colonne conti (nessun cash reale).
+- Fix (server.py _compute_brogliaccio): i pagamenti in direzione ora alimentano SOLO il conto dedicato tipo "rid" ("Pagamento Direzione") col LORDO — sia imp_giornata (per_conto) sia imp_precedente (aggregate su is_direzione), senza toccare le banche reali.
+- Verificato via API reale (tenant Axicura, 2026-09-15): Pagamento Direzione → imp_precedente 55,00 · giornata 386,50 · totale 441,50 (era 0/0/0).

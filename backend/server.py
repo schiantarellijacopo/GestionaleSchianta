@@ -7130,6 +7130,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     conti = await db.conti_cassa.find(
         {"attivo": True}, {"_id": 0}
     ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
+    # Conto dedicato ai pagamenti "in direzione" (tipo RID). I pagamenti in direzione
+    # non entrano nelle banche reali (cash fittizio) ma vanno tracciati come volume
+    # in questo conto dedicato ("Pagamento Direzione").
+    _rid_conto = next((c for c in conti if (c.get("tipo") or "").lower() == "rid"), None)
+    rid_conto_id = _rid_conto["id"] if _rid_conto else None
 
     # 2) Movimenti del giorno + arricchimento polizza->compagnia
     movs = await db.movimenti.find(
@@ -7369,6 +7374,12 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             cassa_signed = cash_reale if is_entrata else -cash_reale
             per_conto[m["conto_cassa_id"]] = cassa_signed
             per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + cassa_signed
+        elif is_dir and rid_conto_id:
+            # Pagamento in direzione: tracciato SOLO nel conto dedicato "Pagamento Direzione"
+            # (tipo RID), col LORDO del titolo. Non tocca le banche reali.
+            dir_signed = importo if is_entrata else -importo
+            per_conto[rid_conto_id] = dir_signed
+            per_conto_tot[rid_conto_id] = per_conto_tot.get(rid_conto_id, 0) + dir_signed
 
         riga = {
             "id": m["id"],
@@ -7433,8 +7444,14 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     # 'incasso_premio' su quel conto — il sospeso NON è mai entrato in cassa.
     conti_riepilogo = []
     for c in conti:
+        # Il conto "Pagamento Direzione" (tipo RID) raccoglie i pagamenti in direzione,
+        # che NON hanno conto_cassa_id: il saldo precedente si calcola su is_direzione.
+        _is_rid = (c["id"] == rid_conto_id)
+        _prev_match = ({"is_direzione": True, "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}}
+                       if _is_rid else
+                       {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}})
         prev = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}}},
+            {"$match": _prev_match},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}},
