@@ -398,3 +398,9 @@ Admin: `admin@assicura.it / Admin123!`
   - **Tipologie sinistri** (rec50) → create in `tipologie_sinistri` dal ramo del sinistro (dedup per nome).
 - Compagnie, garanzie, titoli, sinistri: già creati/aggiornati dall'import.
 - Test end-to-end sintetico (tenant sandbox) PASS su tutte le entità con isolamento tenant corretto: `backend/tests/test_omnia_autocreate.py`.
+
+## 2026-06-15 — Fix modifica importo Prima Nota
+- Bug: nel dialog "Modifica movimento" (Brogliaccio/Prima Nota) il campo Importo si precompilava a 0 per movimenti di costo (uscite, ritenute) perché leggeva dalla colonna `totale` (=0 per questi tipi).
+- Fix backend (_compute_brogliaccio, server.py): la riga del brogliaccio ora espone il campo `importo` (importo reale del movimento).
+- Fix frontend (BrogliaccioTab.jsx EditMovimentoDialog): il campo Importo si inizializza da `movimento.importo` (fallback totale/lordo).
+- Verificato end-to-end via API: brogliaccio espone importo=1234.56 con totale=0; PUT update importo→999.99 OK.

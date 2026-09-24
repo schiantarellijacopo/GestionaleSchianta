@@ -7367,6 +7367,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             "collaboratore": coll_map.get((polizza_riga or {}).get("collaboratore_id") or m.get("collaboratore_id")),
             "trattiene_provvigioni": (compagnia_riga or {}).get("trattiene_provvigioni"),
             "is_direzione": is_dir,
+            "importo": importo,
             "totale": c_totale,
             "provv": c_provv,
             "saldo": c_saldo,

@@ -711,7 +711,7 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
         data_movimento: movimento.data || new Date().toISOString().slice(0, 10),
         tipo: movimento.tipo === "uscita" ? "uscita" : "entrata",
         categoria: movimento.categoria || "altro",
-        importo: Math.abs(movimento.totale || 0) || Math.abs(movimento.lordo || 0) || 0,
+        importo: Math.abs(movimento.importo ?? movimento.totale ?? movimento.lordo ?? 0) || 0,
         descrizione: movimento.descrizione || movimento.contraente || "",
         conto_cassa_id: movimento.conto_cassa_id || "",
         numero_documento: movimento.numero_documento || "",
