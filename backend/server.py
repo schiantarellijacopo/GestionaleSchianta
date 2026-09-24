@@ -4916,6 +4916,12 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     gestione_ecc = (body.get("gestione_eccedenza") or "maggiorazione").lower()
     if gestione_ecc not in ("maggiorazione", "credito"):
         raise HTTPException(400, "gestione_eccedenza deve essere 'maggiorazione' o 'credito'")
+    # Eccedenza "a credito" (da restituire al cliente): registrazione UNICA.
+    # Il cash reale entrato in banca è l'intero importo_pagato; l'eccedenza viene
+    # messa come SOSPESO NEGATIVO (-eccedenza) sulla stessa riga di incasso.
+    ecc_a_credito = eccedenza > 0 and gestione_ecc == "credito"
+    if ecc_a_credito:
+        importo_incasso_premio = round(importo_pagato, 2)
     tipo_chiusura = (body.get("tipo_chiusura") or "sconto").lower()
     if tipo_chiusura not in ("sconto", "sospeso"):
         raise HTTPException(400, "tipo_chiusura deve essere 'sconto' o 'sospeso'")
@@ -5066,17 +5072,18 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     if eccedenza > 0:
         _numpol = pol["numero_polizza"] if pol else titolo["polizza_id"]
         if gestione_ecc == "credito":
-            mov_ecc = MovimentoContabile(
-                data_movimento=data_incasso, tipo="entrata", categoria="altro",
-                importo=eccedenza, quota_credito=eccedenza,
-                descrizione=f"Eccedenza incasso a CREDITO cliente €{eccedenza:.2f} - polizza {_numpol} (pagato €{importo_pagato:.2f} su premio €{lordo:.2f})",
-                polizza_id=titolo["polizza_id"], titolo_id=tid,
-                anagrafica_id=pol.get("contraente_id") if pol else None,
-                compagnia_id=pol.get("compagnia_id") if pol else None,
-                conto_cassa_id=None if is_direzione else conto_id,
-                mezzo_pagamento=mezzo,
+            # REGISTRAZIONE UNICA: nessun movimento separato. Il cash reale
+            # (importo_pagato) è già su mov_in; l'eccedenza va come SOSPESO NEGATIVO
+            # (-eccedenza) sulla STESSA riga → brogliaccio: Totale=premio, Banca=pagato,
+            # Sospesi=-eccedenza. Si crea comunque la partita a credito (titolo) per
+            # tracciare l'importo da restituire nell'elenco sospesi.
+            await db.movimenti.update_one(
+                {"id": mov_in.id},
+                {"$set": {"quota_credito": -eccedenza, "note": (
+                    f"Eccedenza €{eccedenza:.2f} da restituire al cliente "
+                    f"(pagato €{importo_pagato:.2f} su premio €{lordo:.2f}) — sospeso a credito"
+                )}},
             )
-            await db.movimenti.insert_one(mov_ecc.model_dump())
             cred = Titolo(
                 polizza_id=titolo["polizza_id"], tipo="regolazione",
                 effetto=data_incasso, scadenza=titolo.get("scadenza") or data_incasso,
@@ -7259,7 +7266,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_saldo = lordo_riga - provv_riga
             else:
                 c_saldo = -provv_riga
-            if quota_cred > 0:
+            # Sospesi: residuo positivo (cliente deve ancora) o eccedenza negativa
+            # (agenzia deve restituire al cliente). Ammessi entrambi i segni.
+            if abs(quota_cred) > 0.0001:
                 c_crediti = quota_cred
         elif is_entrata and (cat == "incasso_premio_direzione" or is_dir):
             # PAGAMENTO IN DIREZIONE — cliente paga direttamente in compagnia.

@@ -19,6 +19,8 @@ import {
     Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import useTipiPagamento from "@/hooks/useTipiPagamento";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -707,6 +709,7 @@ export default function BrogliaccioTab({ refreshKey }) {
 }
 
 function EditMovimentoDialog({ movimento, conti, onClose }) {
+    const { tipi: tipiPag } = useTipiPagamento();
     const [f, setF] = useState({
         data_movimento: movimento.data || new Date().toISOString().slice(0, 10),
         tipo: movimento.tipo === "uscita" ? "uscita" : "entrata",
@@ -714,6 +717,7 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
         importo: Math.abs(movimento.importo ?? movimento.totale ?? movimento.lordo ?? 0) || 0,
         descrizione: movimento.descrizione || movimento.contraente || "",
         conto_cassa_id: movimento.conto_cassa_id || "",
+        mezzo_pagamento: movimento.mezzo_pagamento || "",
         numero_documento: movimento.numero_documento || "",
     });
     const [saving, setSaving] = useState(false);
@@ -725,13 +729,16 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
         if (!imp || imp <= 0) { toast.error("Importo deve essere positivo"); return; }
         setSaving(true);
         try {
+            // Deriva il conto/banca dal tipo pagamento selezionato (come in Nuovo movimento).
+            const tp = tipiPag.find((t) => t.label === f.mezzo_pagamento);
             await api.put(`/contabilita/movimenti/${movimento.id}`, {
                 data_movimento: f.data_movimento,
                 tipo: f.tipo,
                 categoria: f.categoria,
                 importo: imp,
                 descrizione: f.descrizione,
-                conto_cassa_id: f.conto_cassa_id || null,
+                mezzo_pagamento: f.mezzo_pagamento || null,
+                conto_cassa_id: tp?.conto_id || (f.mezzo_pagamento ? null : (f.conto_cassa_id || null)),
                 numero_documento: f.numero_documento || null,
             });
             toast.success("Movimento aggiornato");
@@ -808,14 +815,16 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                         />
                     </div>
                     <div>
-                        <Label>Conto / Banca</Label>
-                        <Select value={f.conto_cassa_id || "__none__"} onValueChange={(v) => set("conto_cassa_id", v === "__none__" ? "" : v)}>
-                            <SelectTrigger data-testid="brog-edit-conto"><SelectValue placeholder="—" /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">— nessuno —</SelectItem>
-                                {conti.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                        <Label>Tipo pagamento</Label>
+                        <SelectTipoPagamento
+                            value={f.mezzo_pagamento}
+                            onChange={(v) => set("mezzo_pagamento", v)}
+                            testid="brog-edit-mezzo"
+                            placeholder="—"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-1">
+                            Il conto/banca viene determinato automaticamente dal tipo di pagamento.
+                        </div>
                     </div>
                     <div>
                         <Label>N. documento</Label>

@@ -415,3 +415,15 @@ Admin: `admin@assicura.it / Admin123!`
 - Bug: nel dialog "Incasso / Copertura" (DialogIncassoCopertura.jsx, usato in PolizzaDetail e Titoli) pagando PIÙ del premio non compariva la gestione dell'eccedenza (a differenza di DialogIncasso.jsx già completo).
 - Fix (DialogIncassoCopertura.jsx): aggiunta sezione "Eccedenza" (maggiorazione/credito) visibile quando importo_pagato > lordo; invia gestione_eccedenza al backend POST /titoli/{id}/incassa (già supportato). data-testid: eccedenza-section, ico-ecc-maggiorazione, ico-ecc-credito, ico-eccedenza.
 - Verificato via UI (Playwright): premio 356,50 · pagato 400 → sezione Eccedenza 43,50 € con opzioni maggiorazione/credito.
+
+## 2026-06-15 — Modifica movimento Prima Nota: selettore Tipo pagamento
+- Richiesta: nel dialog "Modifica movimento" mostrare i MEZZI di pagamento (BONIFICO/RID/ASSEGNO...) invece dell'elenco diretto dei conti.
+- Fix (BrogliaccioTab.jsx EditMovimentoDialog): sostituito il Select "Conto/Banca" con SelectTipoPagamento (useTipiPagamento). Il conto_cassa_id viene derivato dal tipo pagamento selezionato (tp.conto_id) e inviato con mezzo_pagamento alla PUT /contabilita/movimenti/{id} (backend già risolve il conto dal mezzo). data-testid: brog-edit-mezzo.
+- Verificato via UI: dropdown mostra tutti i mezzi; scegliendo BONIFICO INTESA il movimento va nel conto INTESA.
+
+## 2026-06-15 — Eccedenza a credito: registrazione UNICA con sospeso negativo
+- Richiesta (polizza 731015294 STEFANI): cliente paga 145 su premio 143,01 → banca 145, eccedenza 1,99 da restituire → partita nei Sospesi con -1,99, in UNA SOLA riga.
+- Fix backend (server.py incassa_titolo): per gestione_eccedenza="credito" niente più movimento separato. Il movimento di incasso ora usa importo=importo_pagato (cash reale in banca) e quota_credito=-eccedenza (sospeso negativo) sulla stessa riga; si crea comunque il titolo credito (-eccedenza) per l'elenco sospesi.
+- Fix brogliaccio (_compute_brogliaccio): colonna Sospesi (crediti) ora ammette valori negativi (abs>0.0001) → mostra -1,99.
+- Verificato via API sulla polizza reale: riga unica Totale 143,01 · Sospesi -1,99 · Cassa 145,00. Dati di test poi ripuliti (titolo tornato da_incassare).
+- Nota: maggiorazione invariata (entrata extra separata). Il residuo/sospeso (pagamento inferiore) invariato.
