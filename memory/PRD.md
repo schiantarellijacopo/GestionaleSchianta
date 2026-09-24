@@ -1609,3 +1609,8 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - cervello.py mini-bilancio: il riquadro DEBITI ora mostra Ritenute d'Acconto MATURATE (somma movimenti.ritenuta_acconto) − VERSATE (somma movimenti categoria=ritenute_versate) = DA VERSARE all'Erario (residuo, clamp a 0). Nuovi campi restituiti: ritenute_maturate, ritenute_versate, ritenute_erario(=residuo).
 - MiniBilancioTab.jsx: 3 righe nel pannello DEBITI (maturate, − di cui versate, = Ritenute da versare Erario in grassetto). data-testid: mb-ritenute-maturate, mb-ritenute-versate, mb-ritenute-erario.
 - Verificato via curl: versamento ritenute_versate 40 → versate 40, residuo netto.
+
+### Sessione fork 2026-06 (22b) — Correzione: ritenute versate = COLLABORATORI, non compagnia
+- L'utente ha chiarito: i movimenti "Ritenute da versare" sono ritenute d'acconto versate PER I COLLABORATORI, non verso la compagnia.
+- cervello.py: annullato il netting errato sulle ritenute compagnia. Ora ritenute_erario = solo ritenuta_acconto (compagnia, invariato) + nuovo campo separato ritenute_collaboratori = somma movimenti categoria=ritenute_versate.
+- MiniBilancioTab.jsx pannello DEBITI: due righe distinte — "Ritenute d'Acconto & Erario (compagnia)" e "Ritenute d'Acconto v/Collaboratori" (data-testid mb-ritenute-collaboratori). Verificato via curl: compagnia 0, collaboratori 55.
