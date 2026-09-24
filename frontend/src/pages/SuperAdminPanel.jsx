@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked, Coins, ListChecks, Trash2 } from "lucide-react";
+import { Building2, Users, CreditCard, Package, Headphones, Plus, Play, Pause, RotateCcw, Loader2, TrendingUp, Send, Activity, Download, Search, Pencil, Flame, AlertTriangle, Globe, ArrowRightLeft, Check, X, Copy, KeyRound, BookMarked, Coins, ListChecks, Trash2, Wrench } from "lucide-react";
 
 const TABS = [
     { id: "agenzie", label: "Agenzie Clienti", icon: Building2 },
@@ -112,6 +112,33 @@ function AgenzieTab() {
     const [dominiAgenzia, setDominiAgenzia] = useState(null);
     const [creditoAgenzia, setCreditoAgenzia] = useState(null);
     const [showListino, setShowListino] = useState(false);
+    const [bonificando, setBonificando] = useState(false);
+
+    const bonificaScadenzeGlobale = async () => {
+        setBonificando(true);
+        try {
+            const prev = await api.post("/manutenzione/correggi-scadenze-titoli?dry_run=true&tutti_tenant=true");
+            const { duplicati_eliminati = 0, scadenze_corrette = 0 } = prev.data || {};
+            if (!duplicati_eliminati && !scadenze_corrette) {
+                toast.info("Nessuna correzione necessaria: scadenze e doppioni sono già a posto su tutte le agenzie.");
+                return;
+            }
+            const ok = window.confirm(
+                "Bonifica titoli importati — TUTTE le agenzie:\n\n" +
+                `• Doppioni "da incassare" da eliminare: ${duplicati_eliminati}\n` +
+                `• Scadenze da ricalcolare (effetto + frazionamento): ${scadenze_corrette}\n\n` +
+                "I titoli già incassati/coperti NON vengono toccati. Procedere?",
+            );
+            if (!ok) return;
+            const res = await api.post("/manutenzione/correggi-scadenze-titoli?tutti_tenant=true");
+            const r = res.data || {};
+            toast.success(`Bonifica globale completata: ${r.duplicati_eliminati} doppioni eliminati, ${r.scadenze_corrette} scadenze corrette`);
+        } catch (e) {
+            toast.error(e?.response?.data?.detail || "Errore durante la bonifica");
+        } finally {
+            setBonificando(false);
+        }
+    };
 
     const load = () => {
         setLoading(true);
@@ -168,6 +195,12 @@ function AgenzieTab() {
             <div className="flex justify-between items-center mb-3">
                 <h2 className="text-sm font-semibold text-slate-700">{items.length} agenzie registrate</h2>
                 <div className="flex items-center gap-2">
+                    <button onClick={bonificaScadenzeGlobale} disabled={bonificando}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-md bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50 flex items-center gap-1"
+                        title="Corregge scadenze errate (= effetto) e rimuove i doppioni da incassare su TUTTE le agenzie"
+                        data-testid="sa-bonifica-scadenze-btn">
+                        {bonificando ? <Loader2 size={14} className="animate-spin" /> : <Wrench size={14} />} Correggi scadenze (tutte le agenzie)
+                    </button>
                     <button onClick={() => setShowListino(true)}
                         className="text-xs font-semibold px-3 py-1.5 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-1"
                         data-testid="sa-listino-openapi-btn">

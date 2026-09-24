@@ -1541,3 +1541,9 @@ File: frontend/src/pages/Titoli.jsx
 - ensure_indexes: 107 indici garantiti (idempotenti, background). Creati anche in preview.
 - Tempi misurati (tenant jacopo, dati reali): clienti 3ms, portafoglio 119ms, sinistri 2ms, prima nota 2ms, titoli storici 8ms, sospesi 6ms.
 - In PRODUZIONE gli indici vengono creati automaticamente allo startup (ensure_indexes) dopo il deploy.
+
+### Sessione fork 2026-06 (15) — Pulsante "Correggi scadenze (tutte le agenzie)" nel Pannello Super Admin
+- Problema utente: dopo login super admin non trovava la sezione "Correggi scadenze" (esisteva solo in pagina Titoli di singola agenzia, non raggiungibile dal Pannello Super Admin per vincolo GDPR).
+- Fix: SuperAdminPanel.jsx (AgenzieTab) — aggiunto pulsante "Correggi scadenze (tutte le agenzie)" accanto a Listino OpenAPI/Nuova Agenzia. Chiama POST /manutenzione/correggi-scadenze-titoli con dry_run=true&tutti_tenant=true (anteprima) → confirm → esecuzione tutti_tenant=true → toast report. data-testid=sa-bonifica-scadenze-btn. Import icona Wrench.
+- Endpoint backend invariato (già supportava tutti_tenant per super admin, usa raw_db su tutte le agenzie). Verificato via curl: risponde tutti_tenant:True. In preview 0/0 (già bonificato); in PRODUZIONE mostrerà i conteggi reali.
+- Flusso produzione: deploy → login super admin → click "Correggi scadenze (tutte le agenzie)" → conferma anteprima → bonifica su tutte le 7 agenzie.
