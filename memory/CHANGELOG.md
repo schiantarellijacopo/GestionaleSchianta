@@ -427,3 +427,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Fix brogliaccio (_compute_brogliaccio): colonna Sospesi (crediti) ora ammette valori negativi (abs>0.0001) → mostra -1,99.
 - Verificato via API sulla polizza reale: riga unica Totale 143,01 · Sospesi -1,99 · Cassa 145,00. Dati di test poi ripuliti (titolo tornato da_incassare).
 - Nota: maggiorazione invariata (entrata extra separata). Il residuo/sospeso (pagamento inferiore) invariato.
+
+## 2026-06-15 — Titolo a credito (eccedenza) nei Sospesi + rimborso in un clic
+- Richiesta: il titolo a credito da eccedenza deve comparire nella pagina Sospesi e comportarsi come un sospeso normale (stesso pulsante "Incassa"); una volta rimborsato sparisce.
+- Fix backend (incassa_titolo): il titolo credito creato dall'eccedenza a credito ora nasce con titolo_coperto=True + data_copertura=data_incasso → entra automaticamente in /titoli/sospesi.
+- Nessuna modifica frontend: il pulsante "Incassa" esistente (DialogIncasso) gestisce il titolo negativo → crea l'uscita di rimborso (Cassa/Banca -importo) via categoria incasso_coperto e chiude la partita (stato incassato) → sparisce dai sospesi.
+- Verificato E2E su dato reale (polizza 731015294): eccedenza credito → titolo -1,99 nei sospesi → "Incassa" → movimento uscita -1,99 in Cassa, sospeso azzerato, titolo rimosso. Netto cassa +143,01 (premio esatto). Dati di test ripuliti.

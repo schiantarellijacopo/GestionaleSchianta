@@ -5089,6 +5089,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
                 effetto=data_incasso, scadenza=titolo.get("scadenza") or data_incasso,
                 stato="da_incassare", importo_lordo=-eccedenza, importo_netto=0.0,
                 imposte=0.0, provvigioni=0.0,
+                titolo_coperto=True, data_copertura=data_incasso,
                 collaboratore_id=titolo.get("collaboratore_id"), fonte="manuale",
             )
             doc_c = cred.model_dump()
