@@ -3772,12 +3772,18 @@ async def list_titoli(
 
     if q:
         # ricerca generica: numero polizza, targa, contraente
-        qrx = {"$regex": q, "$options": "i"}
-        pol_q = {"$or": [{"numero_polizza": qrx}, {"targa": qrx}]}
-        # cerca anche tra anagrafiche
+        import re as _re
+        qesc = _re.escape(q.strip())
+        # Prefisso ancorato senza case-insensitive: sfrutta gli indici
+        # (numero_polizza = cifre, targa = maiuscolo) → molto più veloce.
+        num_rx = {"$regex": "^" + qesc}
+        targa_rx = {"$regex": "^" + _re.escape(q.strip().upper())}
+        # Il nome contraente resta ricerca "contiene" (case-insensitive)
+        name_rx = {"$regex": qesc, "$options": "i"}
+        pol_q = {"$or": [{"numero_polizza": num_rx}, {"targa": targa_rx}]}
         ana_ids = [a["id"] async for a in db.anagrafiche.find(
-            {"ragione_sociale": qrx}, {"_id": 0, "id": 1}
-        )]
+            {"ragione_sociale": name_rx}, {"_id": 0, "id": 1}
+        ).limit(500)]
         if ana_ids:
             pol_q["$or"].append({"contraente_id": {"$in": ana_ids}})
         if pol_filter:
@@ -3786,7 +3792,7 @@ async def list_titoli(
             pol_filter = pol_q
 
     if pol_filter:
-        pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1})]
+        pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1}).limit(5000)]
         flt["polizza_id"] = {"$in": pol_ids}
 
     if mezzo_pagamento:

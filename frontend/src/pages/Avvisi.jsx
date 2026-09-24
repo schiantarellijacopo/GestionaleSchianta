@@ -35,6 +35,7 @@ export default function Avvisi() {
     const [tab, setTab] = useState("titoli");
     const [searchParams, setSearchParams] = useSearchParams();
     const [storicoCanale, setStoricoCanale] = useState("");
+    const [bucket, setBucket] = useState("all");
     // Click su un KPI (es. "WhatsApp inviati" → /avvisi?storico=whatsapp):
     // apre lo Storico avvisi filtrato per quel canale (a chi e quando è stato inviato).
     useEffect(() => {
@@ -82,11 +83,33 @@ export default function Avvisi() {
     const resetFilters = () => setFilters({ dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all" });
     const hasActiveFilters = filters.dal || filters.al || filters.collaboratore_id !== "all" || filters.mezzo_pagamento !== "all";
 
+    // Fasce di scaduto calcolate sulla DATA EFFETTO (giorni di ritardo)
+    const inBucket = (t, b) => {
+        const d = -(t.giorni_alla_scadenza ?? 0); // giorni di ritardo (>=0 = scaduto)
+        switch (b) {
+            case "oggi": return d === 0;
+            case "d5": return d >= 1 && d <= 5;
+            case "d10": return d >= 6 && d <= 10;
+            case "d15": return d >= 11 && d <= 15;
+            case "oltre15": return d > 15;
+            default: return true;
+        }
+    };
+    const bucketCounts = useMemo(() => {
+        const c = { all: 0, oggi: 0, d5: 0, d10: 0, d15: 0, oltre15: 0 };
+        for (const t of (data?.titoli || [])) {
+            c.all += 1;
+            for (const b of ["oggi", "d5", "d10", "d15", "oltre15"]) if (inBucket(t, b)) c[b] += 1;
+        }
+        return c;
+    }, [data]);
+
     // Raggruppa titoli per contraente
     const grupTitoli = useMemo(() => {
         if (!data?.titoli) return [];
         const m = new Map();
         for (const t of data.titoli) {
+            if (!inBucket(t, bucket)) continue;
             const k = t.contraente_id || "_";
             const cur = m.get(k) || {
                 contraente_id: t.contraente_id,
@@ -112,12 +135,12 @@ export default function Avvisi() {
             ].filter(Boolean).join(" ").toLowerCase();
             return haystack.includes(q);
         });
-    }, [data, qSearch]);
+    }, [data, qSearch, bucket]);
 
     const totali = useMemo(() => ({
         polizze: data?.polizze?.length || 0,
         contraenti: grupTitoli.length,
-        titoli: data?.titoli?.length || 0,
+        titoli: grupTitoli.reduce((s, g) => s + g.titoli.length, 0),
         importi: grupTitoli.reduce((s, g) => s + g.totale, 0),
     }), [data, grupTitoli]);
 
@@ -226,6 +249,32 @@ export default function Avvisi() {
                     📋 Storico avvisi inviati
                 </TabBtn>
             </div>
+
+            {tab === "titoli" && !loading && data && (
+                <div className="flex flex-wrap gap-2 mb-3" data-testid="avvisi-fasce">
+                    {[
+                        { k: "all", label: "Tutti" },
+                        { k: "oggi", label: "Scaduti oggi" },
+                        { k: "d5", label: "Scadute da 5gg" },
+                        { k: "d10", label: "Scadute da 10gg" },
+                        { k: "d15", label: "Scadute da 15gg" },
+                        { k: "oltre15", label: "Oltre 15gg" },
+                    ].map((b) => (
+                        <button
+                            key={b.k}
+                            onClick={() => setBucket(b.k)}
+                            data-testid={`avvisi-fascia-${b.k}`}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                                bucket === b.k
+                                    ? "bg-slate-900 text-white border-slate-900"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                            }`}
+                        >
+                            {b.label} <span className="opacity-70">({bucketCounts[b.k] ?? 0})</span>
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {loading || !data ? <Loading /> : (
                 tab === "titoli"
@@ -459,7 +508,10 @@ function TitoliByContraente({ gruppi, onBulk, onEmail }) {
                                             </Link>
                                             <span className="text-slate-500 ml-2">{t.compagnia_nome} · {t.ramo}</span>
                                         </td>
-                                        <td className="text-slate-700">scad. {fmtDate(t.scadenza)} ({Math.abs(t.giorni_alla_scadenza ?? 0) + 1}gg fa)</td>
+                                        <td className="text-slate-700">
+                                            <span className="whitespace-nowrap">eff. {fmtDate(t.data_effetto || t.scadenza)} ({Math.abs(t.giorni_alla_scadenza ?? 0) + 1}gg fa)</span>
+                                            <span className="text-slate-400 ml-2 whitespace-nowrap">scad. {t.data_scadenza ? fmtDate(t.data_scadenza) : "—"}</span>
+                                        </td>
                                         <td></td>
                                         <td></td>
                                         <td className="num text-right text-rose-700 font-medium">{fmtEur(t.importo_lordo)}</td>

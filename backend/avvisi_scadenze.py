@@ -155,6 +155,9 @@ def _format_titolo_record(
         # (data in cui il premio è dovuto): il calcolo dei giorni si basa su questa.
         "scadenza": t.get("effetto"),
         "giorni_alla_scadenza": _giorni_da_oggi(t.get("effetto"), oggi),
+        # Date esplicite per la visualizzazione (effetto + scadenza reale del titolo)
+        "data_effetto": t.get("effetto"),
+        "data_scadenza": t.get("scadenza"),
         "importo_lordo": t.get("importo_lordo", 0.0),
         "stato": t.get("stato"),
         "contraente_id": a.get("id"),

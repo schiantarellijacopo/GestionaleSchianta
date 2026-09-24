@@ -1522,3 +1522,16 @@ File: frontend/src/pages/Titoli.jsx
 - Frontend Titoli.jsx: aggiunta colonna "Effetto" (t.effetto) prima di Scadenza (selezionabile via "Colonne").
 - KPI Titoli (routes/kpi.py _stats_titoli correnti): filtro anno + Scaduti ora su DATA EFFETTO (era scadenza). Verificato jacopo: da_incassare 481, incassati 4619, scaduti 199, sospesi 67, totale 5103.
 - Preset lista /titoli ora su effetto: scaduti (scaduta_effetto=true -> effetto<oggi), scadute_oggi (effetto==oggi), scad_5g/10g/15 (scaduta_giorni_esatti -> effetto==oggi-N), scad_oltre15 (scaduta_giorni_oltre -> effetto<oggi-N), scadute_da_min/max. Aggiunto param scaduta_effetto all'endpoint. Questi param /titoli sono usati SOLO dalla pagina Titoli (Polizze usa /polizze).
+
+### Sessione fork 2026-06 (12) — Avvisi: doppia data + fasce scaduto (effetto) + solo arretrati non inviati
+- avvisi_scadenze._format_titolo_record: aggiunti campi data_effetto (=effetto) e data_scadenza (=scadenza reale). Frontend riga arretrato mostra "eff. <effetto> (Ngg fa) · scad. <scadenza>".
+- Avvisi.jsx: barra di fasce (chip) su DATA EFFETTO con conteggi: Tutti / Scaduti oggi (0gg) / 5gg (1-5) / 10gg (6-10) / 15gg (11-15) / Oltre 15gg. Cliccando si filtra la lista arretrati; i pulsanti di invio esistenti (Invia avvisi + icone per riga) consentono l'invio. Card "Titoli arretrati" e conteggi ora riflettono la fascia selezionata.
+- Solo arretrati NON ancora inviati: già garantito dal preview (server.py ~11848 esclude titoli presenti in storico_avvisi). Confermato: 261 non inviati.
+- NOTA: implementate come chip interattive (non card KPI di navigazione) perché la KpiBar naviga via link e non filtra in-page; le chip mostrano conteggi tipo-KPI + filtrano + consentono invio.
+
+### Sessione fork 2026-06 (13) — Performance sezione Titoli (caricamento + ricerca)
+- Causa lentezza: mancavano indici su titoli.effetto (ora usatissimo per KPI/preset), titoli.id, e indici compositi tenant-scoped; la ricerca faceva regex case-insensitive NON ancorata su polizze/anagrafiche (full scan 26k/56k).
+- indexes.py: aggiunti indici titoli [id],[effetto],[titolo_coperto] + compositi [agenzia_tenant_id+effetto/scadenza/stato/polizza_id]; polizze [agenzia_tenant_id+numero_polizza/contraente_id]; movimenti [titolo_id],[agenzia_tenant_id+data_movimento]. Creati in DB (ensure_indexes, 64 indici).
+- server.py list_titoli ricerca: numero_polizza/targa ora regex ANCORATA a prefisso ^ SENZA case-insensitive (usa l'indice) → num polizza 1ms; ragione_sociale resta "contiene" case-insensitive (limit 500); pol_ids limit 5000.
+- Risultati (tenant jacopo, 56k titoli): count effetto anno 2ms (era full-scan), search polizza 1ms. HTTP: lista 0,36s, ricerca 0,15s, KPI 0,15s.
+- Tradeoff: ricerca numero polizza ora per PREFISSO (non frammento centrale) — coerente con l'uso reale (numero completo/iniziale).
