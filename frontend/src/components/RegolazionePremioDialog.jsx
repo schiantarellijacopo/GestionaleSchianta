@@ -41,7 +41,8 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
     // Anteprima live — il tasso può essere per cento (÷100) o per mille (÷1000)
     const tassoDivisore = tassoUnita === "permille" ? 1000 : 100;
     const differenza = (parseFloat(dichiarato) || 0) - (parseFloat(preventivo) || 0);
-    const premioLive = (differenza * (parseFloat(tasso) || 0)) / tassoDivisore;
+    // Se il consuntivo è inferiore al preventivo (differenza negativa) nulla è dovuto
+    const premioLive = differenza < 0 ? 0 : (differenza * (parseFloat(tasso) || 0)) / tassoDivisore;
     const isAddetti = baseTipo === "addetti";
 
     const calcola = async (salva = false) => {

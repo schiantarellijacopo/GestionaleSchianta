@@ -975,6 +975,15 @@ async def calcola_regolazione(
     imposta = round(premio_netto * imposta_pct / 100.0, 2)
     dovuto = round(premio_netto + imposta, 2)
 
+    # Regola: se il dato aggiornato cliente (consuntivo) è INFERIORE al dato di
+    # polizza (base preventivo), la differenza è negativa e NON è dovuto nulla
+    # dal cliente (la regolazione premio non genera rimborsi a credito).
+    if differenza is not None and differenza < 0:
+        premio_calcolato = 0.0
+        premio_netto = 0.0
+        imposta = 0.0
+        dovuto = 0.0
+
     risultato = {
         "polizza_id": pid,
         "periodo": body.periodo,

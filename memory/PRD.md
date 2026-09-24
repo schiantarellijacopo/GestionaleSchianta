@@ -1566,3 +1566,9 @@ File: frontend/src/pages/Titoli.jsx
 - L'utente esegue le unificazioni (024→BS BROKER, 021, er) dal dialog scegliendo destinazione.
 
 Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente per test UI e RIPRISTINATA all'originale.
+
+### Sessione fork 2026-06 (17) — Regolazione Premio: dovuto a 0 se consuntivo < preventivo
+- Regola richiesta: se il "Dato aggiornato cliente (consuntivo)" è INFERIORE al "Dato di polizza (base preventivo)" → differenza negativa → il Dovuto cliente = 0 (la regolazione premio non genera rimborsi a credito).
+- Backend routes/extras_p1p2.py calcola_regolazione: quando differenza < 0 (modalità differenziale) azzera premio_calcolato, premio_netto, imposta, dovuto. La differenza resta visibile (negativa, informativa).
+- Frontend RegolazionePremioDialog.jsx: anteprima live premioLive=0 quando differenza<0 (coerente con backend).
+- Verificato via curl su polizza reale: consuntivo inferiore (140000→69558) → diff -70442, premio 0, DOVUTO 0; consuntivo superiore (140000→200000) → diff +60000, DOVUTO 605,87.
