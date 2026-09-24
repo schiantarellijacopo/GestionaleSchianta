@@ -1510,3 +1510,10 @@ File: frontend/src/pages/Titoli.jsx
   * SCADUTI = titoli stato da_incassare/insoluto, NON coperti (titolo_coperto!=true), con scadenza < oggi. Verificato jacopo: 9 (€2.037,05).
   * SOSPESI = titoli titolo_coperto=true non ancora incassati (anticipati dall'agenzia). Verificato: 67 (€26.554,48). Aggiunto anche il sub in €.
 - Frontend Titoli: aggiunto preset "scaduti" ({stato:da_incassare, titolo_coperto:false, scaduta_giorni_oltre:0}) e rinominato "Sospesi (coperti)"; KPI Scaduti/Sospesi ora linkano ai preset corrispondenti. ACCEPTED_PRESETS aggiornato.
+
+### Sessione fork 2026-06 (10) — Avvisi: calcolo su EFFETTO + KPI cliccabili (chi/quando)
+- avvisi_scadenze.py: i "titoli arretrati" ora si basano sulla data EFFETTO (non scadenza):
+  * _query_titoli_arretrati: match effetto < oggi (era scadenza < oggi), stato da_incassare/insoluto.
+  * _format_titolo_record: campo "scadenza" mostrato = effetto; giorni calcolati su effetto.
+- routes/kpi.py _stats_avvisi: KPI "Titoli scaduti"/"Clienti da contattare" ora basati su effetto<oggi (prima usavano stato=="scaduto" inesistente -> 0). Distinct contraenti via $lookup polizze. Verificato jacopo: Clienti 206, Titoli scaduti 264 (€85.588,42), WhatsApp inviati 5. Preview arretrati usa date effetto.
+- Frontend Avvisi.jsx: KPI cliccabili -> /avvisi?storico=<canale> apre il tab "Storico avvisi inviati" filtrato per canale (mostra chi/destinatario + quando/sent_at). useSearchParams legge ?storico; StoricoAvvisiTab accetta initialCanale.

@@ -352,11 +352,15 @@ async def _stats_sinistri(scope_filter: dict) -> list[dict]:
 
 
 async def _stats_avvisi(scope_filter: dict) -> list[dict]:
-    """KPI Avvisi/Sospesi: Titoli scaduti raggruppati + contraenti unici."""
+    """KPI Avvisi: titoli ARRETRATI (effetto passato, non incassati) + contraenti."""
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     pipeline = [
-        {"$match": {"stato": "scaduto", **scope_filter}},
-        {"$group": {"_id": "$contraente_id", "n": {"$sum": 1},
-                    "tot": {"$sum": "$importo_lordo"}}},
+        {"$match": {"stato": {"$in": ["da_incassare", "insoluto"]},
+                    "effetto": {"$lt": today_iso, "$nin": ["", None]}, **scope_filter}},
+        {"$lookup": {"from": "polizze", "localField": "polizza_id",
+                     "foreignField": "id", "as": "_pol"}},
+        {"$group": {"_id": {"$arrayElemAt": ["$_pol.contraente_id", 0]},
+                    "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
     ]
     contraenti = await db.titoli.aggregate(pipeline).to_list(5000)
     n_clienti = len(contraenti)

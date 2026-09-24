@@ -78,13 +78,16 @@ async def _query_polizze_in_scadenza(
 async def _query_titoli_arretrati(
     db: AsyncIOMotorDatabase, oggi_iso: str,
 ) -> list[dict]:
+    # Per gli AVVISI la data di riferimento è l'EFFETTO del titolo (data in cui
+    # il premio è dovuto): un titolo è "arretrato" quando l'effetto è già passato
+    # e non è ancora stato incassato.
     cur = db.titoli.find(
         {
-            "scadenza": {"$lt": oggi_iso},
+            "effetto": {"$lt": oggi_iso},
             "stato": {"$in": ["da_incassare", "insoluto"]},
         },
         {"_id": 0},
-    ).sort("scadenza", 1)
+    ).sort("effetto", 1)
     return await cur.to_list(2000)
 
 
@@ -148,8 +151,10 @@ def _format_titolo_record(
         "polizza_id": t.get("polizza_id"),
         "numero_polizza": p.get("numero_polizza"),
         "ramo": p.get("ramo"),
-        "scadenza": t.get("scadenza"),
-        "giorni_alla_scadenza": _giorni_da_oggi(t.get("scadenza"), oggi),
+        # Per gli AVVISI la "scadenza" mostrata è la data di EFFETTO del titolo
+        # (data in cui il premio è dovuto): il calcolo dei giorni si basa su questa.
+        "scadenza": t.get("effetto"),
+        "giorni_alla_scadenza": _giorni_da_oggi(t.get("effetto"), oggi),
         "importo_lordo": t.get("importo_lordo", 0.0),
         "stato": t.get("stato"),
         "contraente_id": a.get("id"),

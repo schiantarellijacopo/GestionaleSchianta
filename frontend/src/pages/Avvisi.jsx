@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, Fragment } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, API_BASE, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
 import KpiBar from "@/components/KpiBar";
@@ -33,6 +33,17 @@ export default function Avvisi() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [tab, setTab] = useState("titoli");
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [storicoCanale, setStoricoCanale] = useState("");
+    // Click su un KPI (es. "WhatsApp inviati" → /avvisi?storico=whatsapp):
+    // apre lo Storico avvisi filtrato per quel canale (a chi e quando è stato inviato).
+    useEffect(() => {
+        const s = searchParams.get("storico");
+        if (s) {
+            setTab("storico");
+            setStoricoCanale(s === "true" ? "" : s);
+        }
+    }, [searchParams]);
     const [emailTarget, setEmailTarget] = useState(null);
     const [bulkOpen, setBulkOpen] = useState(false);
     const [storicoOpen, setStoricoOpen] = useState(false);
@@ -225,7 +236,7 @@ export default function Avvisi() {
                     />
                     : tab === "polizze"
                         ? <PolizzeTable items={data.polizze || []} onEmail={setEmailTarget} />
-                        : <StoricoAvvisiTab />
+                        : <StoricoAvvisiTab initialCanale={storicoCanale} />
             )}
 
             {emailTarget && (
@@ -918,11 +929,12 @@ function StoricoAvvisiDialog({ onClose }) {
 
 
 
-function StoricoAvvisiTab() {
+function StoricoAvvisiTab({ initialCanale = "" }) {
     const [items, setItems] = useState(null);
-    const [canale, setCanale] = useState("");
+    const [canale, setCanale] = useState(initialCanale);
     const [q, setQ] = useState("");
     const [busy, setBusy] = useState(null);
+    useEffect(() => { setCanale(initialCanale); }, [initialCanale]);
 
     const load = () => {
         const params = canale ? { canale, limit: 500 } : { limit: 500 };
