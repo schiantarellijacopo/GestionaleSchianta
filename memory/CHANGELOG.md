@@ -410,3 +410,8 @@ Admin: `admin@assicura.it / Admin123!`
 - Causa: i movimenti "in direzione" (mezzo RID DIREZIONE / PAGAMENTO IN DIREZIONE, is_direzione=True) hanno conto_cassa_id=None ed erano esclusi da tutte le colonne conti (nessun cash reale).
 - Fix (server.py _compute_brogliaccio): i pagamenti in direzione ora alimentano SOLO il conto dedicato tipo "rid" ("Pagamento Direzione") col LORDO — sia imp_giornata (per_conto) sia imp_precedente (aggregate su is_direzione), senza toccare le banche reali.
 - Verificato via API reale (tenant Axicura, 2026-09-15): Pagamento Direzione → imp_precedente 55,00 · giornata 386,50 · totale 441,50 (era 0/0/0).
+
+## 2026-06-15 — Eccedenza anche nel dialog Incasso/Copertura
+- Bug: nel dialog "Incasso / Copertura" (DialogIncassoCopertura.jsx, usato in PolizzaDetail e Titoli) pagando PIÙ del premio non compariva la gestione dell'eccedenza (a differenza di DialogIncasso.jsx già completo).
+- Fix (DialogIncassoCopertura.jsx): aggiunta sezione "Eccedenza" (maggiorazione/credito) visibile quando importo_pagato > lordo; invia gestione_eccedenza al backend POST /titoli/{id}/incassa (già supportato). data-testid: eccedenza-section, ico-ecc-maggiorazione, ico-ecc-credito, ico-eccedenza.
+- Verificato via UI (Playwright): premio 356,50 · pagato 400 → sezione Eccedenza 43,50 € con opzioni maggiorazione/credito.

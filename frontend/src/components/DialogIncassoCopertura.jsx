@@ -115,6 +115,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
         conto_cassa_id: conti?.[0]?.id || "",
         importo_pagato: lordo,
         tipo_chiusura: "sconto",
+        gestione_eccedenza: "maggiorazione",
         motivo_sconto: "",
     });
     useEffect(() => {
@@ -131,6 +132,11 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
         [lordo, inc.importo_pagato],
     );
     const hasResiduo = residuo > 0.005;
+    const eccedenza = useMemo(
+        () => Math.max(0, (parseFloat(inc.importo_pagato) || 0) - lordo),
+        [lordo, inc.importo_pagato],
+    );
+    const hasEccedenza = eccedenza > 0.005;
 
     const conferma = async () => {
         try {
@@ -180,6 +186,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     conto_cassa_id: null,
                     importo_pagato: parseFloat(inc.importo_pagato) || 0,
                     tipo_chiusura: hasResiduo ? inc.tipo_chiusura : "sconto",
+                    gestione_eccedenza: hasEccedenza ? inc.gestione_eccedenza : "maggiorazione",
                     motivo_sconto:
                         hasResiduo && inc.tipo_chiusura === "sconto"
                             ? (inc.motivo_sconto || "Sconto applicato")
@@ -211,11 +218,15 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             const msg = [
                 copertura && !giaCoperto && !incasso ? "copertura registrata" : null,
                 incasso && !giaIncassato
-                    ? (hasResiduo
-                        ? (inc.tipo_chiusura === "sospeso"
-                            ? `incassato ${fmtEur(inc.importo_pagato)} (residuo ${fmtEur(residuo)} a sospeso)`
-                            : `incassato ${fmtEur(inc.importo_pagato)} (sconto ${fmtEur(residuo)})`)
-                        : `incassato ${fmtEur(inc.importo_pagato)}`)
+                    ? (hasEccedenza
+                        ? (inc.gestione_eccedenza === "credito"
+                            ? `incassato ${fmtEur(inc.importo_pagato)} (eccedenza ${fmtEur(eccedenza)} a credito cliente)`
+                            : `incassato ${fmtEur(inc.importo_pagato)} (maggiorazione ${fmtEur(eccedenza)} in prima nota)`)
+                        : hasResiduo
+                            ? (inc.tipo_chiusura === "sospeso"
+                                ? `incassato ${fmtEur(inc.importo_pagato)} (residuo ${fmtEur(residuo)} a sospeso)`
+                                : `incassato ${fmtEur(inc.importo_pagato)} (sconto ${fmtEur(residuo)})`)
+                            : `incassato ${fmtEur(inc.importo_pagato)}`)
                     : null,
             ].filter(Boolean).join(" — ");
             toast.success(msg || "Salvato");
@@ -623,6 +634,50 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                                     data-testid="ico-motivo-sconto"
                                                 />
                                             )}
+                                        </div>
+                                    )}
+
+                                    {hasEccedenza && (
+                                        <div
+                                            className="bg-white border border-sky-300 rounded p-2 mt-2 space-y-2"
+                                            data-testid="eccedenza-section"
+                                        >
+                                            <div className="flex justify-between items-center font-semibold text-sky-800 text-sm">
+                                                <span>Eccedenza (pagato oltre il premio):</span>
+                                                <span className="num" data-testid="ico-eccedenza">{fmtEur(eccedenza)}</span>
+                                            </div>
+                                            <RadioGroup
+                                                value={inc.gestione_eccedenza}
+                                                onValueChange={(v) => setI("gestione_eccedenza", v)}
+                                                className="space-y-1"
+                                            >
+                                                <label
+                                                    htmlFor="opt-ecc-mag"
+                                                    className={`flex items-start gap-2 p-2 rounded border cursor-pointer ${
+                                                        inc.gestione_eccedenza === "maggiorazione"
+                                                            ? "border-sky-400 bg-sky-50"
+                                                            : "border-slate-200 hover:bg-slate-50"
+                                                    }`}
+                                                >
+                                                    <RadioGroupItem id="opt-ecc-mag" value="maggiorazione" data-testid="ico-ecc-maggiorazione" />
+                                                    <span className="text-xs">
+                                                        <strong>Registra come maggiorazione</strong> — {fmtEur(eccedenza)} entra in Prima Nota come entrata extra
+                                                    </span>
+                                                </label>
+                                                <label
+                                                    htmlFor="opt-ecc-cred"
+                                                    className={`flex items-start gap-2 p-2 rounded border cursor-pointer ${
+                                                        inc.gestione_eccedenza === "credito"
+                                                            ? "border-sky-400 bg-sky-50"
+                                                            : "border-slate-200 hover:bg-slate-50"
+                                                    }`}
+                                                >
+                                                    <RadioGroupItem id="opt-ecc-cred" value="credito" data-testid="ico-ecc-credito" />
+                                                    <span className="text-xs">
+                                                        <strong>Lascia a credito del cliente</strong> — nuovo titolo credito da {fmtEur(eccedenza)}
+                                                    </span>
+                                                </label>
+                                            </RadioGroup>
                                         </div>
                                     )}
                                 </div>
