@@ -194,21 +194,23 @@ export default function Titoli({ storicoMode = false } = {}) {
     const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
 
     const bonificaScadenze = async () => {
+        const globale = !!user?.is_super_admin;
+        const qs = globale ? "&tutti_tenant=true" : "";
         try {
-            const prev = await api.post("/manutenzione/correggi-scadenze-titoli?dry_run=true");
+            const prev = await api.post(`/manutenzione/correggi-scadenze-titoli?dry_run=true${qs}`);
             const { duplicati_eliminati, scadenze_corrette } = prev.data || {};
             if (!duplicati_eliminati && !scadenze_corrette) {
                 toast.info("Nessuna correzione necessaria: scadenze e doppioni sono già a posto.");
                 return;
             }
             const ok = window.confirm(
-                `Bonifica titoli importati:\n\n` +
+                `Bonifica titoli importati${globale ? " (TUTTE le agenzie)" : ""}:\n\n` +
                 `• Doppioni "da incassare" da eliminare: ${duplicati_eliminati}\n` +
                 `• Scadenze da ricalcolare (effetto + frazionamento): ${scadenze_corrette}\n\n` +
                 `I titoli già incassati/coperti NON vengono toccati. Procedere?`,
             );
             if (!ok) return;
-            const res = await api.post("/manutenzione/correggi-scadenze-titoli");
+            const res = await api.post(`/manutenzione/correggi-scadenze-titoli?${qs.replace(/^&/, "")}`);
             const r = res.data || {};
             toast.success(`Bonifica completata: ${r.duplicati_eliminati} doppioni eliminati, ${r.scadenze_corrette} scadenze corrette`);
             load();

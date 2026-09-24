@@ -3617,15 +3617,21 @@ async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
 
 
 @api.post("/manutenzione/correggi-scadenze-titoli")
-async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_user("admin"))):
-    """Bonifica una tantum (per agenzia) dei titoli importati:
+async def correggi_scadenze_titoli(dry_run: bool = False, tutti_tenant: bool = False,
+                                   user=Depends(require_user("admin"))):
+    """Bonifica una tantum dei titoli importati:
       1) Elimina i DOPPIONI 'da incassare' quando nello stesso gruppo
-         (polizza + effetto) esiste già un titolo incassato/coperto/pagato.
+         (polizza + effetto) esiste già un titolo incassato/coperto/pagato
+         (o con scadenza valida). I titoli pagati/con movimenti non si toccano.
       2) Ricalcola la SCADENZA (= effetto + frazionamento) sui titoli
          'da incassare' con scadenza mancante o non successiva all'effetto.
     Con dry_run=true restituisce solo l'anteprima senza modificare nulla.
+    tutti_tenant=true (solo super admin) esegue su TUTTE le agenzie.
     """
-    report = {"dry_run": dry_run, "duplicati_eliminati": 0, "scadenze_corrette": 0, "dettagli": []}
+    from database import raw_db as _raw_db
+    _db = _raw_db if (tutti_tenant and user.get("is_super_admin")) else db
+    report = {"dry_run": dry_run, "tutti_tenant": bool(tutti_tenant and user.get("is_super_admin")),
+              "duplicati_eliminati": 0, "scadenze_corrette": 0, "dettagli": []}
 
     # 1) MERGE dei doppioni (polizza + effetto) con un fratello già pagato/coperto
     pipeline = [
@@ -3634,8 +3640,8 @@ async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_u
                     "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
         {"$match": {"n": {"$gt": 1}}},
     ]
-    async for grp in db.titoli.aggregate(pipeline):
-        titoli_grp = await db.titoli.find({"id": {"$in": grp["ids"]}}, {"_id": 0}).to_list(100)
+    async for grp in _db.titoli.aggregate(pipeline):
+        titoli_grp = await _db.titoli.find({"id": {"$in": grp["ids"]}}, {"_id": 0}).to_list(100)
         eff = grp["_id"].get("e")
 
         def _is_pagato(t):
@@ -3663,7 +3669,7 @@ async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_u
                 continue
             if t.get("stato") not in ("da_incassare", "insoluto"):
                 continue
-            if await db.movimenti.count_documents({"titolo_id": t["id"]}):
+            if await _db.movimenti.count_documents({"titolo_id": t["id"]}):
                 continue
             report["duplicati_eliminati"] += 1
             if len(report["dettagli"]) < 100:
@@ -3672,18 +3678,18 @@ async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_u
                     "effetto": t["effetto"], "scadenza": t.get("scadenza"), "id": t["id"],
                 })
             if not dry_run:
-                await db.titoli.delete_one({"id": t["id"]})
+                await _db.titoli.delete_one({"id": t["id"]})
 
     # 2) RICALCOLO scadenza sui 'da incassare' con scadenza mancante o <= effetto
     fraz_cache: dict = {}
     flt = {"stato": {"$in": ["da_incassare", "insoluto"]}, "effetto": {"$nin": ["", None]}}
-    async for t in db.titoli.find(flt, {"_id": 0, "id": 1, "effetto": 1, "scadenza": 1, "polizza_id": 1}):
+    async for t in _db.titoli.find(flt, {"_id": 0, "id": 1, "effetto": 1, "scadenza": 1, "polizza_id": 1}):
         eff = t.get("effetto"); scad = t.get("scadenza") or ""
         if scad and scad > eff:
             continue  # già corretta
         fraz = fraz_cache.get(t["polizza_id"])
         if fraz is None:
-            pol = await db.polizze.find_one({"id": t["polizza_id"]}, {"_id": 0, "frazionamento": 1})
+            pol = await _db.polizze.find_one({"id": t["polizza_id"]}, {"_id": 0, "frazionamento": 1})
             fraz = (pol or {}).get("frazionamento") or "annuale"
             fraz_cache[t["polizza_id"]] = fraz
         nuova = _calcola_scadenza_titolo(eff, fraz)
@@ -3695,7 +3701,7 @@ async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_u
                     "effetto": eff, "da": scad or "—", "a": nuova,
                 })
             if not dry_run:
-                await db.titoli.update_one(
+                await _db.titoli.update_one(
                     {"id": t["id"]}, {"$set": {"scadenza": nuova, "updated_at": _now_iso()}})
 
     if not dry_run:
