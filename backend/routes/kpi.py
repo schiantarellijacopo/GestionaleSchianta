@@ -370,7 +370,14 @@ async def _stats_prima_nota(scope_filter: dict) -> list[dict]:
     today = datetime.now()
     first_day = today.replace(day=1).strftime("%Y-%m-%d")
     pipeline = [
-        {"$match": {"data_movimento": {"$gte": first_day}, **scope_filter}},
+        {"$match": {
+            "data_movimento": {"$gte": first_day},
+            # Escludi i movimenti di apertura/migrazione (saldi iniziali) e il pregresso:
+            # non sono operazioni del mese, gonfiavano entrate/uscite.
+            "pregresso": {"$ne": True},
+            "categoria": {"$not": {"$regex": "^(setup_iniziale|saldo_iniziale)"}},
+            **scope_filter,
+        }},
         {"$group": {
             "_id": None,
             "entrate": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},

@@ -175,6 +175,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                 const r = await api.post(`/titoli/${titolo.id}/incassa`, {
                     data_incasso: inc.data_incasso,
                     data_coge: inc.data_coge,
+                    data_copertura: (copertura && !giaCoperto) ? dataCopertura : undefined,
                     mezzo_pagamento: inc.mezzo_pagamento,
                     conto_cassa_id: null,
                     importo_pagato: parseFloat(inc.importo_pagato) || 0,

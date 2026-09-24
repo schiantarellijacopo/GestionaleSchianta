@@ -24,7 +24,7 @@ import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
-    ChevronDown, ChevronUp,
+    ChevronDown, ChevronUp, Wrench,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -192,6 +192,30 @@ export default function Titoli({ storicoMode = false } = {}) {
     const exportCsv = () => window.open(`${API_BASE}/export/titoli.csv`, "_blank");
     const exportXlsx = () => window.open(`${API_BASE}/export/titoli.xlsx`, "_blank");
     const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
+
+    const bonificaScadenze = async () => {
+        try {
+            const prev = await api.post("/manutenzione/correggi-scadenze-titoli?dry_run=true");
+            const { duplicati_eliminati, scadenze_corrette } = prev.data || {};
+            if (!duplicati_eliminati && !scadenze_corrette) {
+                toast.info("Nessuna correzione necessaria: scadenze e doppioni sono già a posto.");
+                return;
+            }
+            const ok = window.confirm(
+                `Bonifica titoli importati:\n\n` +
+                `• Doppioni "da incassare" da eliminare: ${duplicati_eliminati}\n` +
+                `• Scadenze da ricalcolare (effetto + frazionamento): ${scadenze_corrette}\n\n` +
+                `I titoli già incassati/coperti NON vengono toccati. Procedere?`,
+            );
+            if (!ok) return;
+            const res = await api.post("/manutenzione/correggi-scadenze-titoli");
+            const r = res.data || {};
+            toast.success(`Bonifica completata: ${r.duplicati_eliminati} doppioni eliminati, ${r.scadenze_corrette} scadenze corrette`);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore durante la bonifica");
+        }
+    };
 
     // Colonne tabella — selezionabili/riordinabili per utente
     const showStorico = storicoMode || ["storico", "storico_anno", "storico_mese"].includes(filters.preset);
@@ -364,6 +388,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                         <Filter size={14} className="mr-1" /> Filtri {showFilters ? <ChevronUp size={12} className="ml-1" /> : <ChevronDown size={12} className="ml-1" />}
                     </Button>
                     <div className="ml-auto flex gap-2">
+                        {user?.role === "admin" && (
+                            <Button variant="outline" onClick={bonificaScadenze} data-testid="titoli-bonifica-scadenze"
+                                title="Corregge scadenze errate (= effetto) e rimuove i doppioni da incassare">
+                                <Wrench size={14} className="mr-1" /> Correggi scadenze
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={stampaPdf} data-testid="titoli-print">
                             <Printer size={14} className="mr-1" /> Stampa PDF
                         </Button>

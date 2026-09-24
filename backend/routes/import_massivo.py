@@ -30,7 +30,7 @@ import pandas as pd
 from database import db
 import cf_calc
 from auth import require_user
-from shared import log_attivita
+from shared import log_attivita, calcola_scadenza_titolo
 from routes.import_anagrafiche import (
     _normalize_header, _sanitize_value, _parse_date_flexible,
     _similarity, _norm_piva, FIELD_ALIASES as ANAG_ALIASES,
@@ -773,6 +773,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                    "collaboratori": [], "polizze_da_titolo": []}
     geocode_queue: List[str] = []
     buffers = {"anagrafiche": [], "polizze": [], "titoli": [], "sinistri": [], "movimenti": []}
+    _fraz_cache_mig: dict = {}
 
     async def _flush(col: Optional[str] = None):
         for c in ([col] if col else list(buffers.keys())):
@@ -1139,7 +1140,19 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                         doc["titolo_coperto"] = True
                     doc["caricato_da_import"] = True
                     doc["effetto"] = doc.get("effetto") or ""
-                    doc["scadenza"] = doc.get("scadenza") or ""
+                    # Scadenza valida solo se STRETTAMENTE successiva all'effetto;
+                    # altrimenti la calcolo da effetto + frazionamento della polizza
+                    # (evita il bug scadenza == effetto).
+                    _scad_src = doc.get("scadenza") or ""
+                    if doc["effetto"] and (not _scad_src or _scad_src <= doc["effetto"]):
+                        _fraz = _fraz_cache_mig.get(pol_id)
+                        if _fraz is None:
+                            _polref = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "frazionamento": 1})
+                            _fraz = (_polref or {}).get("frazionamento") or "annuale"
+                            _fraz_cache_mig[pol_id] = _fraz
+                        doc["scadenza"] = calcola_scadenza_titolo(doc["effetto"], _fraz) or ""
+                    else:
+                        doc["scadenza"] = _scad_src
                     _coerce_enums("titolo", doc)
                     obj = Titolo(**doc)
                     buffers["titoli"].append(obj.model_dump())

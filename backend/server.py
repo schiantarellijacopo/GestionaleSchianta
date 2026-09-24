@@ -3616,6 +3616,98 @@ async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
     return {"ok": True}
 
 
+@api.post("/manutenzione/correggi-scadenze-titoli")
+async def correggi_scadenze_titoli(dry_run: bool = False, user=Depends(require_user("admin"))):
+    """Bonifica una tantum (per agenzia) dei titoli importati:
+      1) Elimina i DOPPIONI 'da incassare' quando nello stesso gruppo
+         (polizza + effetto) esiste già un titolo incassato/coperto/pagato.
+      2) Ricalcola la SCADENZA (= effetto + frazionamento) sui titoli
+         'da incassare' con scadenza mancante o non successiva all'effetto.
+    Con dry_run=true restituisce solo l'anteprima senza modificare nulla.
+    """
+    report = {"dry_run": dry_run, "duplicati_eliminati": 0, "scadenze_corrette": 0, "dettagli": []}
+
+    # 1) MERGE dei doppioni (polizza + effetto) con un fratello già pagato/coperto
+    pipeline = [
+        {"$match": {"effetto": {"$nin": ["", None]}}},
+        {"$group": {"_id": {"p": "$polizza_id", "e": "$effetto"},
+                    "n": {"$sum": 1}, "ids": {"$push": "$id"}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    async for grp in db.titoli.aggregate(pipeline):
+        titoli_grp = await db.titoli.find({"id": {"$in": grp["ids"]}}, {"_id": 0}).to_list(100)
+        eff = grp["_id"].get("e")
+
+        def _is_pagato(t):
+            return (t.get("stato") in ("incassato", "coperto", "liquidato", "pagato")
+                    or t.get("data_incasso") or t.get("titolo_coperto"))
+
+        def _scad_valida(t):
+            s = t.get("scadenza") or ""
+            return bool(s) and bool(eff) and s > eff
+
+        # Scegli il titolo da TENERE: prima un pagato/coperto, poi uno con scadenza
+        # valida (> effetto), altrimenti il primo.
+        keeper = next((t for t in titoli_grp if _is_pagato(t)), None)
+        if not keeper:
+            keeper = next((t for t in titoli_grp if _scad_valida(t)), None)
+        if not keeper:
+            keeper = titoli_grp[0]
+
+        for t in titoli_grp:
+            if t["id"] == keeper["id"]:
+                continue
+            # Elimina SOLO i doppioni 'da incassare' non pagati/coperti e senza
+            # movimenti contabili collegati (operazione sicura).
+            if _is_pagato(t):
+                continue
+            if t.get("stato") not in ("da_incassare", "insoluto"):
+                continue
+            if await db.movimenti.count_documents({"titolo_id": t["id"]}):
+                continue
+            report["duplicati_eliminati"] += 1
+            if len(report["dettagli"]) < 100:
+                report["dettagli"].append({
+                    "tipo": "duplicato_eliminato", "polizza_id": t["polizza_id"],
+                    "effetto": t["effetto"], "scadenza": t.get("scadenza"), "id": t["id"],
+                })
+            if not dry_run:
+                await db.titoli.delete_one({"id": t["id"]})
+
+    # 2) RICALCOLO scadenza sui 'da incassare' con scadenza mancante o <= effetto
+    fraz_cache: dict = {}
+    flt = {"stato": {"$in": ["da_incassare", "insoluto"]}, "effetto": {"$nin": ["", None]}}
+    async for t in db.titoli.find(flt, {"_id": 0, "id": 1, "effetto": 1, "scadenza": 1, "polizza_id": 1}):
+        eff = t.get("effetto"); scad = t.get("scadenza") or ""
+        if scad and scad > eff:
+            continue  # già corretta
+        fraz = fraz_cache.get(t["polizza_id"])
+        if fraz is None:
+            pol = await db.polizze.find_one({"id": t["polizza_id"]}, {"_id": 0, "frazionamento": 1})
+            fraz = (pol or {}).get("frazionamento") or "annuale"
+            fraz_cache[t["polizza_id"]] = fraz
+        nuova = _calcola_scadenza_titolo(eff, fraz)
+        if nuova and nuova != scad:
+            report["scadenze_corrette"] += 1
+            if len(report["dettagli"]) < 100:
+                report["dettagli"].append({
+                    "tipo": "scadenza_corretta", "id": t["id"],
+                    "effetto": eff, "da": scad or "—", "a": nuova,
+                })
+            if not dry_run:
+                await db.titoli.update_one(
+                    {"id": t["id"]}, {"$set": {"scadenza": nuova, "updated_at": _now_iso()}})
+
+    if not dry_run:
+        await log_attivita(
+            user, "manutenzione", "titoli", "batch",
+            f"Bonifica scadenze titoli: -{report['duplicati_eliminati']} doppioni, "
+            f"{report['scadenze_corrette']} scadenze corrette",
+        )
+    return report
+
+
+
 # ============================================================
 # TITOLI
 # ============================================================
@@ -4738,22 +4830,32 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     if tipo_chiusura not in ("sconto", "sospeso"):
         raise HTTPException(400, "tipo_chiusura deve essere 'sconto' o 'sospeso'")
     motivo_sconto = body.get("motivo_sconto")
+    # Copertura contestuale: data di copertura distinta dalla data di pagamento.
+    # Viene registrata sul titolo per popolare la colonna "Coperto il" senza
+    # creare una riga separata in Prima Nota (l'incasso registra già l'entrata).
+    data_copertura_in = body.get("data_copertura")
     # Quando si lascia il residuo come sospeso non si applica sconto
     sconto_applicato = residuo if (residuo > 0 and tipo_chiusura == "sconto") else 0.0
 
+    _set_incasso = {
+        "stato": "incassato",
+        "data_incasso": data_incasso,
+        "mezzo_pagamento": mezzo,
+        "conto_cassa_id": conto_id,
+        "importo_pagato": importo_pagato,
+        "sconto_applicato": sconto_applicato,
+        "motivo_sconto": motivo_sconto if sconto_applicato > 0 else None,
+        "pagamento_in_direzione": is_direzione,
+        "updated_at": _now_iso(),
+    }
+    # Registra la data di copertura solo se fornita e non già presente sul titolo
+    # (solo metadato per la colonna "Coperto il": nessun impatto contabile — l'incasso
+    # ha già registrato l'entrata completa in un'unica riga di Prima Nota).
+    if data_copertura_in and not titolo.get("data_copertura"):
+        _set_incasso["data_copertura"] = data_copertura_in
     await db.titoli.update_one(
         {"id": tid},
-        {"$set": {
-            "stato": "incassato",
-            "data_incasso": data_incasso,
-            "mezzo_pagamento": mezzo,
-            "conto_cassa_id": conto_id,
-            "importo_pagato": importo_pagato,
-            "sconto_applicato": sconto_applicato,
-            "motivo_sconto": motivo_sconto if sconto_applicato > 0 else None,
-            "pagamento_in_direzione": is_direzione,
-            "updated_at": _now_iso(),
-        }},
+        {"$set": _set_incasso},
     )
     pol = await db.polizze.find_one({"id": titolo["polizza_id"]}, {"_id": 0})
     # Aggiorna ultimo mezzo pagamento sulla polizza; se manca il preferito, impostalo.

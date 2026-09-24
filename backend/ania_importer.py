@@ -1117,7 +1117,9 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             # `data_scadenza_emesso` la data di emissione dell'avviso (precedente
             # all'effetto). In quel caso è errata → calcola effetto+frazionamento.
             _scad_emesso = _parse_date(row.get("data_scadenza_emesso", ""))
-            if _scad_emesso and eff_titolo and _scad_emesso < eff_titolo:
+            if _scad_emesso and eff_titolo and _scad_emesso <= eff_titolo:
+                # Scadenza valida solo se STRETTAMENTE successiva all'effetto.
+                # (OMNIA a volte mette la data di emissione avviso == effetto → errata)
                 _scad_emesso = None
             _scadenza_val = (_scad_emesso
                              or _scadenza_da_effetto(eff_titolo, fraz_cache[pol_id])
@@ -1126,7 +1128,9 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             # ═══ REGOLA IMPORT (richiesta utente) ═══
             # 1) Verifica se il titolo ESISTE già:
             #      - per id_titolo_exp, oppure (fallback) per chiave naturale
-            #        polizza + effetto + scadenza.
+            #        polizza + effetto (NON includere la scadenza: se una scadenza
+            #        errata è stata poi corretta, la chiave combacia comunque e si
+            #        evita di creare un DOPPIONE).
             #    Se esiste → NON fare NULLA (incasso/pagamento/copertura sono
             #    operazioni SEMPRE manuali: non vanno mai toccate dall'import).
             # 2) Se MANCA → crealo SEMPRE come "da_incassare" (mai
@@ -1136,7 +1140,6 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 existing = await db.titoli.find_one({
                     "polizza_id": pol_id,
                     "effetto": eff_titolo,
-                    "scadenza": _scadenza_val,
                 })
             if existing:
                 continue
