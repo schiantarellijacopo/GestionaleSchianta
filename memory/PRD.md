@@ -1579,3 +1579,8 @@ Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente p
 - Frontend RegolazionePremioDialog.jsx: checkbox "Consenti regolazione a credito" (init da polizza.regolazione_a_credito, data-testid reg-a-credito), anteprima live rispetta il flag, invia a_credito.
 - Verificato via curl: a_credito=true + consuntivo inferiore → dovuto -711,31; genera-titolo importo -711,31 → 201. Dati di test ripuliti; password preview di jacopo ripristinata.
 - REDEPLOY avviato (job c34290d2) per pubblicare sessioni 16/17/18.
+
+### Sessione fork 2026-06 (19) — Eliminazione singola regolazione calcolata
+- Nella tab Regolazione della polizza (RegolazionePolizzaTab.jsx), tabella "Regolazioni calcolate": aggiunte checkbox per riga + "seleziona tutte" + pulsante "Elimina selezionate (N)" per eliminare singoli calcoli dallo storico (non più solo "Elimina regolazione" che azzera tutto). data-testid: reg-calcoli-check-all, reg-calcolo-check-{i}, reg-elimina-selezionate.
+- Backend extras_p1p2.py: nuovo DELETE /polizze/{pid}/regolazione-premio/storico/{sid} (require admin/collaboratore) — elimina una singola voce di regolazione_storico. Verificato via curl (2→elimina 1→1, HTTP 200). Il pulsante "Elimina regolazione" (azzera tutta la regolazione + eventuale titolo) resta disponibile.
+- NB: richiede un nuovo deploy per andare online.

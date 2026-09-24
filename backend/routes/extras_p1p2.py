@@ -1034,6 +1034,18 @@ async def storico_regolazioni(pid: str, user=Depends(current_user)) -> list[dict
     return await db.regolazione_storico.find({"polizza_id": pid}, {"_id": 0}).sort("data_calcolo", -1).to_list(200)
 
 
+@router.delete("/polizze/{pid}/regolazione-premio/storico/{sid}")
+async def elimina_calcolo_regolazione(
+    pid: str, sid: str,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Elimina un singolo calcolo di regolazione dallo storico (non tutta la polizza)."""
+    res = await db.regolazione_storico.delete_one({"id": sid, "polizza_id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Calcolo non trovato")
+    return {"ok": True, "deleted": res.deleted_count}
+
+
 # ===========================================================
 # 4) OCR BILANCIO (Cervello)
 # ===========================================================

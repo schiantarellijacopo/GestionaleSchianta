@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Zap, Calculator, Mail, Receipt, Download, ExternalLink, CheckCircle2, MessageCircle } from "lucide-react";
+import { Zap, Calculator, Mail, Receipt, Download, ExternalLink, CheckCircle2, MessageCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const STATO_LABEL = {
@@ -19,11 +19,34 @@ const STATO_TONE = {
 export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGeneraTitolo }) {
     const [eventi, setEventi] = useState([]);
     const [calcoli, setCalcoli] = useState([]);
+    const [selCalcoli, setSelCalcoli] = useState(new Set());
     const [busy, setBusy] = useState(false);
 
     const loadEventi = () => api.get(`/regolazione-premio/${pol.id}/eventi`).then((r) => setEventi(r.data || [])).catch(() => {});
-    const loadCalcoli = () => api.get(`/polizze/${pol.id}/regolazione-premio/storico`).then((r) => setCalcoli(r.data || [])).catch(() => {});
+    const loadCalcoli = () => api.get(`/polizze/${pol.id}/regolazione-premio/storico`).then((r) => { setCalcoli(r.data || []); setSelCalcoli(new Set()); }).catch(() => {});
     useEffect(() => { loadEventi(); loadCalcoli(); /* eslint-disable-next-line */ }, [pol.id, pol.regolazione_stato, pol.regolazione_ultimo_calcolo]);
+
+    const toggleCalcolo = (id) => setSelCalcoli((prev) => {
+        const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+    });
+    const toggleAllCalcoli = () => setSelCalcoli((prev) => {
+        const ids = calcoli.map((c) => c.id).filter(Boolean);
+        return prev.size === ids.length ? new Set() : new Set(ids);
+    });
+    const eliminaCalcoliSelezionati = async () => {
+        const ids = [...selCalcoli];
+        if (ids.length === 0) return;
+        if (!window.confirm(`Eliminare ${ids.length} regolazione/i selezionata/e?`)) return;
+        setBusy(true);
+        try {
+            for (const id of ids) {
+                await api.delete(`/polizze/${pol.id}/regolazione-premio/storico/${id}`);
+            }
+            toast.success(`${ids.length} regolazione/i eliminata/e`);
+            loadCalcoli();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore eliminazione"); }
+        finally { setBusy(false); }
+    };
 
     const stato = pol.regolazione_stato || "da_richiedere";
 
@@ -157,7 +180,13 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
             <div>
                 <div className="flex items-center justify-between mb-2">
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Regolazioni calcolate</div>
-                    <span className="text-[11px] text-slate-400">Più regolazioni su parametri/periodi diversi</span>
+                    {selCalcoli.size > 0 ? (
+                        <Button size="sm" variant="ghost" className="h-7 text-rose-600 hover:bg-rose-50" onClick={eliminaCalcoliSelezionati} disabled={busy} data-testid="reg-elimina-selezionate">
+                            <Trash2 size={14} className="mr-1" /> Elimina selezionate ({selCalcoli.size})
+                        </Button>
+                    ) : (
+                        <span className="text-[11px] text-slate-400">Spunta le righe per eliminarle singolarmente</span>
+                    )}
                 </div>
                 {calcoli.length === 0 ? (
                     <div className="text-sm text-slate-400 italic" data-testid="reg-calcoli-empty">Nessuna regolazione calcolata. Usa "Calcola regolazione" per crearne una.</div>
@@ -166,6 +195,11 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
                                 <tr>
+                                    <th className="text-center px-3 py-2 w-8">
+                                        <input type="checkbox"
+                                            checked={selCalcoli.size > 0 && selCalcoli.size === calcoli.filter((c) => c.id).length}
+                                            onChange={toggleAllCalcoli} data-testid="reg-calcoli-check-all" />
+                                    </th>
                                     <th className="text-left px-3 py-2">Periodo</th>
                                     <th className="text-left px-3 py-2">Base</th>
                                     <th className="text-right px-3 py-2">Dato polizza</th>
@@ -181,7 +215,13 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
                                     const addetti = c.base_tipo === "addetti";
                                     const money = (n) => n == null ? "—" : (addetti ? n : fmtEur(n));
                                     return (
-                                        <tr key={c.id || i} data-testid={`reg-calcolo-row-${i}`}>
+                                        <tr key={c.id || i} data-testid={`reg-calcolo-row-${i}`} className={selCalcoli.has(c.id) ? "bg-rose-50/40" : ""}>
+                                            <td className="px-3 py-2 text-center">
+                                                <input type="checkbox" disabled={!c.id}
+                                                    checked={selCalcoli.has(c.id)}
+                                                    onChange={() => toggleCalcolo(c.id)}
+                                                    data-testid={`reg-calcolo-check-${i}`} />
+                                            </td>
                                             <td className="px-3 py-2 font-medium text-slate-800">{c.periodo || "—"}</td>
                                             <td className="px-3 py-2 text-slate-600 capitalize">{c.base_tipo || "—"}</td>
                                             <td className="px-3 py-2 text-right num">{money(c.base_preventivo)}</td>
