@@ -22,7 +22,7 @@ _MESI = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Lugl
          "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
 _TIPO_COD = {"quietanza": "QU", "appendice": "AP", "rinnovo": "RI", "nuova": "NU",
              "regolazione": "RE", "storno": "ST", "sostituzione": "SO", "annullo": "AN",
-             "sospensione": "SP"}
+             "sospensione": "SP", "ripresa": "RP"}
 
 
 def _to_iso(d: str | None) -> str | None:

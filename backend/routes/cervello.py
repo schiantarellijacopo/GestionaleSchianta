@@ -426,6 +426,7 @@ _MB_AUTO_COSTI = [
     ("compenso_amministratore", "Compenso Amministratore"),
     ("imposte", "Imposte"),
     ("stipendi", "Stipendi"),
+    ("ritenute_versate", "Ritenute Versate"),
 ]
 _MB_EXCLUDE = {
     "giroconto", "anticipo", "pagamento_compagnia",
@@ -463,7 +464,7 @@ def _mb_classify(m: dict, voci_map: dict) -> list[tuple[str, str, float]]:
         return [("costo", "storni_rivalse", imp)]
     if cat == "spese_amministrative":
         return [("costo", "spese_varie", imp)]
-    if cat in ("prelievo_soci", "compenso_amministratore", "imposte", "stipendi"):
+    if cat in ("prelievo_soci", "compenso_amministratore", "imposte", "stipendi", "ritenute_versate"):
         return [("costo", cat, imp)]
     # generiche
     if tipo == "entrata":
@@ -482,6 +483,8 @@ async def _mb_compute(dal: str, al: str) -> dict:
     for key, nome in _MB_AUTO_COSTI:
         righe[key] = {"key": key, "voce": nome, "sezione": "costo", "auto": True, "totale": 0.0, "mensile": {}}
     for v in voci:
+        if v.get("categoria_sistema"):
+            continue  # rappresentata dalle righe automatiche (via categoria)
         righe[v["id"]] = {"key": v["id"], "voce": v["nome"], "sezione": v["tipo"], "auto": False, "totale": 0.0, "mensile": {}}
 
     cur = db.movimenti.find(

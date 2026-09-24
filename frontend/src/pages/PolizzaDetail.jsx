@@ -974,7 +974,7 @@ export default function PolizzaDetail() {
                                             data-testid={`titolo-row-${t.id}`}
                                         >
                                             <td>
-                                                {t.tipo}
+                                                <TipoTitoloBadge tipo={t.tipo} />
                                                 {t.polizza_origine_numero && (
                                                     <div className="text-[9px] text-amber-700 italic" title="Titolo della polizza precedente (sostituita)">
                                                         polizza prec. {t.polizza_origine_numero}
@@ -2096,6 +2096,25 @@ function Hd({ label, value }) {
             <div className="text-[10px] uppercase tracking-widest text-sky-300/80">{label}</div>
             <div className="text-sm mt-0.5">{value || "—"}</div>
         </div>
+    );
+}
+
+const _TIPO_TITOLO_STYLE = {
+    sostituzione: "bg-violet-100 text-violet-700 border-violet-200",
+    sospensione: "bg-amber-100 text-amber-700 border-amber-200",
+    ripresa: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    storno: "bg-rose-100 text-rose-700 border-rose-200",
+    annullo: "bg-rose-100 text-rose-700 border-rose-200",
+    regolazione: "bg-sky-100 text-sky-700 border-sky-200",
+};
+function TipoTitoloBadge({ tipo }) {
+    if (!tipo) return <span>—</span>;
+    const cls = _TIPO_TITOLO_STYLE[tipo] || "bg-slate-100 text-slate-600 border-slate-200";
+    return (
+        <span className={`inline-block text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}
+            data-testid={`titolo-tipo-badge-${tipo}`}>
+            {tipo}
+        </span>
     );
 }
 

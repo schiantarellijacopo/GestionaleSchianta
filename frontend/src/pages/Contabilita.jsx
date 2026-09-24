@@ -333,24 +333,19 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                             }
                         }}
                     >
-                        <SelectTrigger data-testid="mov-categoria-select"><SelectValue /></SelectTrigger>
+                        <SelectTrigger data-testid="mov-categoria-select"><SelectValue placeholder="Seleziona causale..." /></SelectTrigger>
                         <SelectContent>
-                            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400">Causali standard</div>
-                            <SelectItem value="cat:incasso_premio">Incasso premio</SelectItem>
-                            <SelectItem value="cat:pagamento_compagnia">Pagamento compagnia (rimessa E/C)</SelectItem>
-                            <SelectItem value="cat:provvigioni">Provvigioni</SelectItem>
-                            <SelectItem value="cat:rimborso_cliente">Rimborso cliente</SelectItem>
-                            <SelectItem value="cat:sconto_cliente">Sconto cliente</SelectItem>
-                            <SelectItem value="cat:spese_amministrative">Spese amministrative</SelectItem>
-                            <SelectItem value="cat:prelievo_soci">Prelievo soci</SelectItem>
-                            <SelectItem value="cat:compenso_amministratore">Compenso amministratore</SelectItem>
-                            <SelectItem value="cat:imposte">Imposte</SelectItem>
-                            <SelectItem value="cat:stipendi">Stipendi</SelectItem>
-                            <SelectItem value="cat:anticipo">Anticipo / Sospeso</SelectItem>
-                            <SelectItem value="cat:altro">Altro</SelectItem>
-                            {vociBil.length > 0 && <div className="px-2 py-1 mt-1 text-[10px] uppercase tracking-wide text-slate-400 border-t border-slate-100">Voci di bilancio (mini-bilancio)</div>}
-                            {vociBil.map((v) => (
-                                <SelectItem key={v.id} value={`voce:${v.id}`}>{v.nome} {v.tipo === "ricavo" ? "· Ricavo" : "· Costo"}</SelectItem>
+                            {vociBil.filter((v) => v.tipo === "ricavo").length > 0 && (
+                                <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400">Ricavi</div>
+                            )}
+                            {vociBil.filter((v) => v.tipo === "ricavo").map((v) => (
+                                <SelectItem key={v.id} value={v.categoria_sistema ? `cat:${v.categoria_sistema}` : `voce:${v.id}`}>{v.nome}</SelectItem>
+                            ))}
+                            {vociBil.filter((v) => v.tipo === "costo").length > 0 && (
+                                <div className="px-2 py-1 mt-1 text-[10px] uppercase tracking-wide text-slate-400 border-t border-slate-100">Costi</div>
+                            )}
+                            {vociBil.filter((v) => v.tipo === "costo").map((v) => (
+                                <SelectItem key={v.id} value={v.categoria_sistema ? `cat:${v.categoria_sistema}` : `voce:${v.id}`}>{v.nome}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>

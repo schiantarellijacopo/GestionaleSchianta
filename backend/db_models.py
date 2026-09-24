@@ -535,7 +535,7 @@ class Titolo(BaseDoc):
     polizza_id: str
     numero_titolo: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
-    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione", "sospensione"] = "rinnovo"
+    tipo: Literal["nuova", "rinnovo", "appendice", "regolazione", "storno", "quietanza", "sostituzione", "annullo", "inclusione", "esclusione", "sospensione", "ripresa"] = "rinnovo"
     effetto: str
     scadenza: str
     stato: TitoloStato = "da_incassare"
@@ -630,6 +630,7 @@ MovimentoCategoria = Literal[
     "sconto_cliente", "prelievo_soci", "compenso_amministratore", "imposte", "stipendi",
     "copertura_titolo", "incasso_coperto",
     "saldo_iniziale_compagnia",
+    "ritenuta_compagnia", "ritenute_versate",
     "altro",
 ]
 
@@ -798,6 +799,8 @@ class VoceBilancio(BaseDoc):
     ordine: int = 0
     attivo: bool = True
     note: Optional[str] = None
+    categoria_sistema: Optional[str] = None  # se valorizzato = causale standard (salva su categoria)
+    is_sistema: bool = False
 
 
 class TipoPagamento(BaseDoc):

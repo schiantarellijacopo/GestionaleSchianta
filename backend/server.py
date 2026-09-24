@@ -6530,18 +6530,42 @@ async def sospendi_polizza(
 @api.post("/polizze/{pid}/riattiva")
 async def riattiva_polizza(
     pid: str,
+    body: Optional[dict] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Riattiva una polizza sospesa."""
-    res = await db.polizze.update_one(
-        {"id": pid, "stato": "sospesa"},
+    """Riattiva una polizza sospesa. Con crea_titolo=true genera un titolo di ripresa collegato."""
+    body = body or {}
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol or pol.get("stato") != "sospesa":
+        raise HTTPException(400, "Polizza non sospesa o non trovata")
+    data_sosp_prec = pol.get("data_sospensione")
+    data_ripresa = body.get("data_ripresa") or _now_iso()[:10]
+    await db.polizze.update_one(
+        {"id": pid},
         {"$set": {"stato": "attiva", "data_sospensione": None, "riattivazione_prevista": None,
                   "updated_at": _now_iso()}},
     )
-    if res.matched_count == 0:
-        raise HTTPException(400, "Polizza non sospesa o non trovata")
+    # Titolo di ripresa automatico (importo 0, data = data di ripresa)
+    titolo_creato = None
+    if body.get("crea_titolo"):
+        t = Titolo(
+            polizza_id=pid,
+            tipo="ripresa",
+            effetto=data_ripresa,
+            scadenza=data_ripresa,
+            importo_lordo=0.0,
+            importo_netto=0.0,
+            stato="incassato",
+            data_incasso=data_ripresa,
+            collaboratore_id=pol.get("collaboratore_id"),
+        )
+        doc_t = t.model_dump()
+        doc_t["nota"] = (f"Ripresa dal {data_ripresa}"
+                         + (f" (sospesa dal {data_sosp_prec})" if data_sosp_prec else ""))
+        await db.titoli.insert_one(doc_t)
+        titolo_creato = t.id
     await log_attivita(user, "riattiva", "polizza", pid)
-    return {"ok": True, "stato": "attiva"}
+    return {"ok": True, "stato": "attiva", "titolo_creato": titolo_creato}
 
 
 @api.get("/polizze/{pid}/titoli-stornati-annullamento")

@@ -669,11 +669,49 @@ async def delete_tipo_pagamento(tid: str, user: dict = Depends(require_user("adm
 
 
 # --- VOCI DI BILANCIO (mini-bilancio Cervello) ---
+# Causali "standard" di sistema: appaiono in libreria (con toggle attivo) e nel
+# dropdown del movimento contabile. Vengono salvate come `categoria` (non come
+# voce_bilancio_id) così mantengono la logica contabile dedicata.
+_CAUSALI_SISTEMA = [
+    ("incasso_premio", "Incasso premio", "ricavo"),
+    ("pagamento_compagnia", "Pagamento compagnia (rimessa E/C)", "costo"),
+    ("provvigioni", "Provvigioni", "ricavo"),
+    ("rimborso_cliente", "Rimborso cliente", "costo"),
+    ("sconto_cliente", "Sconto cliente", "costo"),
+    ("spese_amministrative", "Spese amministrative", "costo"),
+    ("prelievo_soci", "Prelievo soci", "costo"),
+    ("compenso_amministratore", "Compenso amministratore", "costo"),
+    ("imposte", "Imposte", "costo"),
+    ("stipendi", "Stipendi", "costo"),
+    ("ritenute_versate", "Ritenute da versare", "costo"),
+    ("anticipo", "Anticipo / Sospeso", "costo"),
+    ("altro", "Altro", "costo"),
+]
+
+
+async def _ensure_causali_sistema() -> None:
+    """Crea (per-tenant, idempotente) le causali standard nella libreria Voci di bilancio."""
+    n = await db.voci_bilancio.count_documents({"is_sistema": True})
+    if n >= len(_CAUSALI_SISTEMA):
+        return
+    for i, (cat, nome, tipo) in enumerate(_CAUSALI_SISTEMA):
+        seed_doc = VoceBilancio(
+            nome=nome, tipo=tipo, ordine=i,
+            categoria_sistema=cat, is_sistema=True).model_dump()
+        seed_doc.pop("agenzia_tenant_id", None)  # lascia iniettare il tenant al wrapper
+        await db.voci_bilancio.update_one(
+            {"categoria_sistema": cat},
+            {"$setOnInsert": seed_doc},
+            upsert=True,
+        )
+
+
 @router.get("/librerie/voci-bilancio")
 async def list_voci_bilancio(
     attivi: bool = False,
     user: dict = Depends(current_user),
 ) -> list[dict]:
+    await _ensure_causali_sistema()
     flt: dict = {}
     if attivi:
         flt["attivo"] = True

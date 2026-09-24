@@ -95,9 +95,16 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     };
     const doRiattiva = async () => {
         if (!window.confirm("Riattivare la polizza?")) return;
+        const creaTitolo = window.confirm(
+            "Vuoi generare un titolo di ripresa collegato?\n\n" +
+            `Data: ${fmtDate(oggi)} · Importo: 0,00 €\n\n` +
+            "OK = riattiva e crea il titolo\nAnnulla = riattiva senza titolo"
+        );
         try {
-            await api.post(`/polizze/${polizza.id}/riattiva`);
-            toast.success("Polizza riattivata");
+            const r = await api.post(`/polizze/${polizza.id}/riattiva`, { crea_titolo: creaTitolo });
+            toast.success(creaTitolo && r.data?.titolo_creato
+                ? "Polizza riattivata · titolo di ripresa creato"
+                : "Polizza riattivata");
             onChanged?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };

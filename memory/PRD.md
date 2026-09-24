@@ -1595,3 +1595,12 @@ Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente p
 - Alla sospensione il frontend chiede (window.confirm) se creare in automatico il "titolo di sospensione". Se sì passa crea_titolo=true.
 - Backend crea Titolo tipo="sospensione" (nuovo valore aggiunto al Literal in db_models.py), effetto=scadenza=data_sospensione, importo 0, stato="incassato" (fuori da avvisi/arretrati), nota "Sospensione dal {data}". Verificato via curl.
 - _TIPO_COD estratto conto: aggiunto "sospensione":"SP".
+
+### Sessione fork 2026-06 (21) — Ritenute da versare + causali standard in libreria con toggle attivo
+- Mini bilancio: nuova voce di COSTO "Ritenute Versate" (cervello.py _MB_AUTO_COSTI + _mb_classify categoria 'ritenute_versate'). Verificato: movimento categoria=ritenute_versate → mini bilancio "Ritenute Versate".
+- MovimentoContabile.categoria (db_models.py): aggiunte "ritenuta_compagnia" e "ritenute_versate" al Literal.
+- Causali STANDARD ora in libreria "Voci di bilancio": VoceBilancio ha nuovi campi categoria_sistema + is_sistema. _ensure_causali_sistema() (librerie.py) le semina lazy per-tenant alla list (idempotente, tenant-scoped; NB: NON usare model_dump con agenzia_tenant_id nel $setOnInsert, va poppato per lasciar iniettare il tenant). 13 causali di sistema.
+- Contabilita.jsx "Nuovo movimento contabile": dropdown Categoria/Voce di bilancio ora guidato dalla libreria (solo voci attive), raggruppato RICAVI/COSTI. Le causali di sistema si salvano su `categoria` (cat:{categoria_sistema}) preservando la logica contabile; le custom su voce_bilancio_id. Disattivando una voce in Librerie→Voci di bilancio sparisce dal dropdown.
+- _mb_compute: esclude le voci con categoria_sistema dalle righe custom (evita duplicati vuoti). Verificato via screenshot dropdown + curl.
+
+Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/ripresa/storno) in PolizzaDetail Titoli; riattivazione polizza chiede se creare "titolo di ripresa" (tipo=ripresa, importo 0, data ripresa). Verificati via curl.
