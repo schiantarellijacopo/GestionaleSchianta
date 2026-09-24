@@ -929,6 +929,7 @@ class RegolazioneCalcBody(BaseModel):
     imposta_pct: Optional[float] = None      # imposta di polizza % (default 22,25)
     periodo: Optional[str] = None            # es. "2025"
     note: Optional[str] = None
+    a_credito: Optional[bool] = None         # consenti importi negativi (rimborso al cliente)
     salva: bool = True
 
 
@@ -975,10 +976,13 @@ async def calcola_regolazione(
     imposta = round(premio_netto * imposta_pct / 100.0, 2)
     dovuto = round(premio_netto + imposta, 2)
 
-    # Regola: se il dato aggiornato cliente (consuntivo) è INFERIORE al dato di
-    # polizza (base preventivo), la differenza è negativa e NON è dovuto nulla
-    # dal cliente (la regolazione premio non genera rimborsi a credito).
-    if differenza is not None and differenza < 0:
+    # Flag per-polizza "regolazione a credito": se ATTIVO, gli importi negativi
+    # (consuntivo < preventivo) restano e rappresentano un rimborso al cliente.
+    a_credito = (body.a_credito if body.a_credito is not None
+                 else bool(pol.get("regolazione_a_credito")))
+    # Regola di default (flag NON attivo): se il consuntivo è INFERIORE al
+    # preventivo la differenza è negativa e NON è dovuto nulla dal cliente.
+    if differenza is not None and differenza < 0 and not a_credito:
         premio_calcolato = 0.0
         premio_netto = 0.0
         imposta = 0.0
@@ -999,6 +1003,7 @@ async def calcola_regolazione(
         "imposta_pct": imposta_pct,
         "imposta": imposta,
         "dovuto": dovuto,
+        "a_credito": a_credito,
         "data_calcolo": _now_iso()[:10],
         "operatore_id": user.get("id"),
         "note": body.note,
@@ -1009,6 +1014,7 @@ async def calcola_regolazione(
             "regolazione_ultimo_calcolo": risultato["data_calcolo"],
             "regolazione_dovuto": dovuto,
             "regolazione_stato": "calcolata",
+            "regolazione_a_credito": a_credito,
         }
         if body.base_tipo:
             upd["regolazione_base"] = body.base_tipo

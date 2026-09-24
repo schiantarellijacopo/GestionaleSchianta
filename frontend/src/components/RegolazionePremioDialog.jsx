@@ -30,6 +30,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
     const [impostaPct, setImpostaPct] = useState(polizza.regolazione_imposta_pct ?? 22.25);
     const [periodo, setPeriodo] = useState(String(new Date().getFullYear() - 1));
     const [note, setNote] = useState("");
+    const [aCredito, setACredito] = useState(!!polizza.regolazione_a_credito);
     const [storico, setStorico] = useState([]);
     const [risultato, setRisultato] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -41,8 +42,9 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
     // Anteprima live — il tasso può essere per cento (÷100) o per mille (÷1000)
     const tassoDivisore = tassoUnita === "permille" ? 1000 : 100;
     const differenza = (parseFloat(dichiarato) || 0) - (parseFloat(preventivo) || 0);
-    // Se il consuntivo è inferiore al preventivo (differenza negativa) nulla è dovuto
-    const premioLive = differenza < 0 ? 0 : (differenza * (parseFloat(tasso) || 0)) / tassoDivisore;
+    // Consuntivo < preventivo (differenza negativa): nulla dovuto, a meno che
+    // non sia attiva la "regolazione a credito" (rimborso al cliente).
+    const premioLive = (differenza < 0 && !aCredito) ? 0 : (differenza * (parseFloat(tasso) || 0)) / tassoDivisore;
     const isAddetti = baseTipo === "addetti";
 
     const calcola = async (salva = false) => {
@@ -55,6 +57,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                 base_tipo: baseTipo,
                 tasso_override: tasso ? (tassoUnita === "permille" ? parseFloat(tasso) / 10 : parseFloat(tasso)) : null,
                 imposta_pct: impostaPct === "" ? null : parseFloat(impostaPct),
+                a_credito: aCredito,
                 periodo, note, salva,
             });
             setRisultato(r.data);
@@ -135,6 +138,13 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                             <span className="text-slate-500">Premio: <b className="text-violet-700">{fmtEur(premioLive)}</b></span>
                             <span className="text-slate-500">Con imposta: <b className="text-violet-700">{fmtEur(premioLive * (1 + (parseFloat(impostaPct) || 0) / 100))}</b></span>
                         </div>
+                        <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 cursor-pointer" data-testid="reg-a-credito-wrap">
+                            <input type="checkbox" className="mt-0.5" checked={aCredito}
+                                onChange={(e) => setACredito(e.target.checked)} data-testid="reg-a-credito" />
+                            <span className="text-xs text-slate-600">
+                                <b className="text-slate-800">Consenti regolazione a credito</b> — se il consuntivo è inferiore al preventivo, il premio negativo viene mantenuto come rimborso a favore del cliente (anziché azzerato).
+                            </span>
+                        </label>
                         <div>
                             <Label className="text-xs">Note</Label>
                             <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />

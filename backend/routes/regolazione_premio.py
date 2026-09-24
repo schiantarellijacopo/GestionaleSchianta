@@ -379,8 +379,10 @@ async def genera_titolo(
     if not pol.get("regolazione_premio"):
         raise HTTPException(400, "Polizza non soggetta a regolazione premio")
     importo = body.importo if body.importo is not None else float(pol.get("regolazione_dovuto") or 0)
-    if not importo or importo <= 0:
-        raise HTTPException(400, "Nessun importo dovuto: eseguire prima il calcolo della regolazione")
+    if importo is None:
+        raise HTTPException(400, "Importo non valido")
+    if importo < 0 and not pol.get("regolazione_a_credito"):
+        raise HTTPException(400, "Importo negativo non consentito: attiva 'regolazione a credito' sulla polizza")
     oggi = _now_iso()[:10]
     netto = round(importo - (body.imposte or 0), 2)
     titolo = Titolo(

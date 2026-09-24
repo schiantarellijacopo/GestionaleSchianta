@@ -1572,3 +1572,10 @@ Nota preview DB: password di jacopo@schiantarelli.it impostata temporaneamente p
 - Backend routes/extras_p1p2.py calcola_regolazione: quando differenza < 0 (modalità differenziale) azzera premio_calcolato, premio_netto, imposta, dovuto. La differenza resta visibile (negativa, informativa).
 - Frontend RegolazionePremioDialog.jsx: anteprima live premioLive=0 quando differenza<0 (coerente con backend).
 - Verificato via curl su polizza reale: consuntivo inferiore (140000→69558) → diff -70442, premio 0, DOVUTO 0; consuntivo superiore (140000→200000) → diff +60000, DOVUTO 605,87.
+
+### Sessione fork 2026-06 (18) — Regolazione a credito (flag) + titolo a importo 0/negativo + redeploy
+- Titolo regolazione generabile anche con importo 0 (backend regolazione_premio.py genera_titolo: blocca solo importo None; negativo consentito solo se polizza.regolazione_a_credito=True). Frontend RegolazionePremio.jsx: validazione permissiva (blocca solo vuoto/NaN).
+- Nuovo flag per-polizza regolazione_a_credito: nel calcolo (extras_p1p2.py) se attivo NON azzera gli importi negativi (dovuto negativo = rimborso al cliente); se non attivo resta la regola "consuntivo<preventivo → dovuto 0". Body calcola accetta a_credito, persistito su polizza al salvataggio; risultato include a_credito.
+- Frontend RegolazionePremioDialog.jsx: checkbox "Consenti regolazione a credito" (init da polizza.regolazione_a_credito, data-testid reg-a-credito), anteprima live rispetta il flag, invia a_credito.
+- Verificato via curl: a_credito=true + consuntivo inferiore → dovuto -711,31; genera-titolo importo -711,31 → 201. Dati di test ripuliti; password preview di jacopo ripristinata.
+- REDEPLOY avviato (job c34290d2) per pubblicare sessioni 16/17/18.

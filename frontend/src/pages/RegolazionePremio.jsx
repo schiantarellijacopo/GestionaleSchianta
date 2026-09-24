@@ -358,11 +358,12 @@ function TitoloDialog({ row, onClose, onDone }) {
     }, [importo, ratio, impTouched]);
 
     const genera = async () => {
-        if (!importo || importo <= 0) { toast.error("Importo dovuto mancante: calcola prima la regolazione"); return; }
+        const imp = parseFloat(importo);
+        if (importo === "" || importo == null || isNaN(imp)) { toast.error("Inserisci un importo valido"); return; }
         setBusy(true);
         try {
             await api.post(`/regolazione-premio/${row.polizza_id}/genera-titolo`, {
-                importo: parseFloat(importo), imposte: parseFloat(imposte) || 0,
+                importo: imp, imposte: parseFloat(imposte) || 0,
             });
             toast.success("Titolo di regolazione creato");
             onDone();
