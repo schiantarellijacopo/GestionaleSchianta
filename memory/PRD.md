@@ -1638,3 +1638,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - FIX: `_provv_breakdown` ora calcola la quota collaboratore tramite `_quota_collab_da_schema` (netto × %netto per schemi sul netto; %collab × totale per schemi di ripartizione). Aggiunti parametri `premio_netto`/`premio_lordo` propagati dai 3 chiamanti (dettaglio polizza, titoli catena polizza, lista titoli). margine = tot − collab sempre. La % mostrata (provvigione_pct_collab) espone la %netto (4,5) invece di 100.
 - Verificato con l'esempio utente: netto 100, tot 10, BS 4,5% → collab 4,50, margine 5,50 ✅.
 - ATTENZIONE: sui titoli reali BS il campo `provvigioni` (totale) è ancora quello vecchio/basso (es. 6,37) < quota collab (netto×4,5%), quindi margine risulta negativo finché non si esegue il RICALCOLO titoli esistenti (endpoint `/provvigioni/riassegna`) — step dedicato già previsto.
+
+## 2026-09-28 — Tabella Polizze anagrafica: nuove colonne + ordinamento
+- Aggiunte colonne "Prodotto", "Targa" e "Oggetto assicurato" alla tabella Polizze in `AnagraficaDetail.jsx` (PolizzeTab). Targa/Oggetto in fondo dopo Premio.
+- Header cliccabili con freccetta per ordinare per qualsiasi colonna (asc/desc), niente persistenza.
+- Ricerca estesa anche a targa/oggetto. I campi arrivano già dal backend /polizze (projection non li esclude).
+- Verificato via seed temporaneo + screenshot (poi rimosso).

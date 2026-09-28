@@ -24,7 +24,7 @@ import { TaskCollegati } from "@/components/TaskCollegati";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
-    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle,
+    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -800,25 +800,66 @@ function DatiTab({ ana, canEdit, onReload }) {
 const _STATI_ATTIVI = new Set(["attiva", "in_corso", "in corso", "vigente", "in_emissione"]);
 const isPolizzaAttiva = (p) => _STATI_ATTIVI.has((p.stato || "").toLowerCase());
 
+// Colonne della tabella polizze. `accessor` = come estrarre il valore per l'ordinamento;
+// `type` = number|date|text per confronto corretto.
+const POLIZZE_COLUMNS = [
+    { key: "numero", label: "Numero", accessor: (p) => p.numero_polizza, type: "text" },
+    { key: "compagnia", label: "Compagnia", accessor: (p) => p.compagnia_nome, type: "text" },
+    { key: "ramo", label: "Ramo", accessor: (p) => p.ramo, type: "text" },
+    { key: "prodotto", label: "Prodotto", accessor: (p) => p.prodotto, type: "text" },
+    { key: "stato", label: "Stato", accessor: (p) => p.stato, type: "text" },
+    { key: "effetto", label: "Effetto", accessor: (p) => p.effetto, type: "date" },
+    { key: "scadenza", label: "Scadenza", accessor: (p) => p.scadenza, type: "date" },
+    { key: "premio", label: "Premio", accessor: (p) => p.premio_lordo, type: "number", align: "right" },
+    { key: "targa", label: "Targa", accessor: (p) => p.targa, type: "text" },
+    { key: "oggetto", label: "Oggetto assicurato", accessor: (p) => p.oggetto_assicurato, type: "text" },
+];
+
 function PolizzeTab({ polizze, filter, onClearFilter }) {
     const [soloAttive, setSoloAttive] = useState(true);
     const [qPol, setQPol] = useState("");
+    const [sort, setSort] = useState({ key: null, dir: "asc" });
+    const toggleSort = (key) => setSort((s) => s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" });
+
     // Se arriva un filtro esplicito (click da KPI) ha priorità; altrimenti applica "solo attive"
     const base = filter
         ? polizze.filter((p) => (p.stato || "").toLowerCase() === filter)
         : (soloAttive ? polizze.filter(isPolizzaAttiva) : polizze);
     const term = qPol.trim().toLowerCase();
-    const filtered = term
-        ? base.filter((p) => (`${p.numero_polizza || ""} ${p.compagnia_nome || ""} ${p.ramo || ""} ${p.prodotto || ""}`).toLowerCase().includes(term))
+    let filtered = term
+        ? base.filter((p) => (`${p.numero_polizza || ""} ${p.compagnia_nome || ""} ${p.ramo || ""} ${p.prodotto || ""} ${p.targa || ""} ${p.oggetto_assicurato || ""}`).toLowerCase().includes(term))
         : base;
+    if (sort.key) {
+        const col = POLIZZE_COLUMNS.find((c) => c.key === sort.key);
+        const mult = sort.dir === "asc" ? 1 : -1;
+        filtered = [...filtered].sort((a, b) => {
+            const va = col.accessor(a), vb = col.accessor(b);
+            const ea = va === null || va === undefined || va === "";
+            const eb = vb === null || vb === undefined || vb === "";
+            if (ea && eb) return 0;
+            if (ea) return 1;   // vuoti sempre in fondo
+            if (eb) return -1;
+            if (col.type === "number") return (Number(va) - Number(vb)) * mult;
+            if (col.type === "date") return (String(va).localeCompare(String(vb))) * mult;
+            return String(va).localeCompare(String(vb), "it", { numeric: true, sensitivity: "base" }) * mult;
+        });
+    }
     const nAttive = polizze.filter(isPolizzaAttiva).length;
+    const SortIcon = ({ colKey }) => {
+        if (sort.key !== colKey) return <ChevronsUpDown size={12} className="text-slate-300 group-hover:text-slate-400 shrink-0" />;
+        return sort.dir === "asc"
+            ? <ArrowUp size={12} className="text-sky-600 shrink-0" />
+            : <ArrowDown size={12} className="text-sky-600 shrink-0" />;
+    };
     return (
         <Card className="border-slate-200 mt-4 overflow-hidden">
             <div className="px-4 py-2 border-b border-slate-200 bg-white">
                 <Input
                     value={qPol}
                     onChange={(e) => setQPol(e.target.value)}
-                    placeholder="Cerca polizza per numero, compagnia, ramo, prodotto..."
+                    placeholder="Cerca per numero, compagnia, ramo, prodotto, targa, oggetto..."
                     className="h-8 text-sm"
                     data-testid="anag-polizze-search"
                 />
@@ -839,8 +880,23 @@ function PolizzeTab({ polizze, filter, onClearFilter }) {
             {filtered.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 text-sm">{filter ? `Nessuna polizza con stato "${filter}".` : soloAttive ? "Nessuna polizza attiva." : "Nessuna polizza intestata."}</div>
             ) : (
+                <div className="overflow-x-auto">
                 <table className="tbl w-full">
-                    <thead><tr><th>Numero</th><th>Compagnia</th><th>Ramo</th><th>Stato</th><th>Effetto</th><th>Scadenza</th><th className="text-right">Premio</th></tr></thead>
+                    <thead><tr>
+                        {POLIZZE_COLUMNS.map((c) => (
+                            <th key={c.key} className={c.align === "right" ? "text-right" : undefined}>
+                                <button
+                                    type="button"
+                                    onClick={() => toggleSort(c.key)}
+                                    className={`group inline-flex items-center gap-1 hover:text-slate-900 transition-colors ${c.align === "right" ? "flex-row-reverse" : ""}`}
+                                    data-testid={`anag-polizze-sort-${c.key}`}
+                                >
+                                    <span>{c.label}</span>
+                                    <SortIcon colKey={c.key} />
+                                </button>
+                            </th>
+                        ))}
+                    </tr></thead>
                     <tbody>
                         {filtered.map((p) => (
                             <tr key={p.id}>
@@ -852,14 +908,18 @@ function PolizzeTab({ polizze, filter, onClearFilter }) {
                                         <span>{p.ramo}</span>
                                     </div>
                                 </td>
+                                <td>{p.prodotto || <span className="text-slate-300">—</span>}</td>
                                 <td><StatusBadge stato={p.stato} /></td>
                                 <td className="num">{fmtDate(p.effetto)}</td>
                                 <td className="num">{fmtDate(p.scadenza)}</td>
                                 <td className="num text-right">{fmtEur(p.premio_lordo)}</td>
+                                <td>{p.targa || <span className="text-slate-300">—</span>}</td>
+                                <td>{p.oggetto_assicurato || <span className="text-slate-300">—</span>}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
+                </div>
             )}
         </Card>
     );
