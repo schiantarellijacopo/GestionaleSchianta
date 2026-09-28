@@ -14766,6 +14766,8 @@ from routes import marketing_pro as _mktp_router  # noqa: E402
 from routes import commerciale as _comm_router  # noqa: E402
 from routes import patrimonio as _patrim_router  # noqa: E402
 api.include_router(_patrim_router.router)
+from routes import incentivazioni as _incentiv_router  # noqa: E402
+api.include_router(_incentiv_router.router)
 from routes import agenzie as _age_router  # noqa: E402
 from routes import setup_scambio as _setup_router  # noqa: E402
 from routes import documenti_inbox as _docinbox_router  # noqa: E402

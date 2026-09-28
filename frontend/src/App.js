@@ -48,6 +48,7 @@ import Attivita from "@/pages/Attivita";
 import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
+import Incentivazioni from "@/pages/Incentivazioni";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
 import Diario from "@/pages/Diario";
@@ -128,6 +129,7 @@ function App() {
                             <Route path="/cervello" element={<Cervello />} />
                             <Route path="/libro-matricola" element={<LibroMatricolaPage />} />
                             <Route path="/regolazione-premio" element={<RegolazionePremio />} />
+                            <Route path="/incentivazioni" element={<Incentivazioni />} />
                             <Route path="/pnc" element={<Pnc />} />
                             <Route path="/corsi-ivass" element={<CorsiIvass />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />

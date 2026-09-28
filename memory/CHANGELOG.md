@@ -445,3 +445,23 @@ Admin: `admin@assicura.it / Admin123!`
 - Causa: imp_prec sottraeva prev_sosp (quota_credito degli incasso_premio) mentre imp_giornata usa direttamente `importo` (già netto del sospeso). Con l'eccedenza (quota_credito -1,99) veniva sommato 1,99 di troppo; con i residui veniva sottratto due volte.
 - Fix (_compute_brogliaccio conti_riepilogo): imp_prec = saldo_iniziale + prev_in - prev_out (niente sottrazione di quota_credito), coerente con imp_giornata. Rimossa l'aggregazione 'sosp'.
 - Verificato: incasso eccedenza su BPER SONDRIO → TOTALE(20/09)=249.230,92 = IMP.PRECEDENTE(21/09). Riconcilia.
+
+## 2026-06-15 — NUOVA SEZIONE Incentivazioni (MVP)
+- Calcolo incentivo per collaboratore sulla nuova produzione (basato Iniziative Cattolica Vita Investimento/Protezione, DNA Danni).
+- Backend: routes/incentivazioni.py — GET/PUT /incentivazioni/config (obiettivi+colonna+bonus per campagna, tenant-scoped) e GET /incentivazioni/calcola?data_inizio&data_fine.
+  - Nuova produzione = polizze con effetto nel periodo (non annullate), prodotto flaggato a una campagna; base = premio_netto ANNUALIZZATO per frazionamento (mensile x12, trimestrale x4, semestrale x2, quadrimestrale x3, annuale/unica x1).
+  - Obiettivo di Agenzia → realizzo% (arrotondato) → aliquota da fascia (tabelle PDF) → incentivo per collaboratore = produzione × aliquota × (1+bonus). Soglia minima 85%.
+  - Selettori manuali: colonna RNT (Vita Inv.), livello BASE/TOP (Vita Prot.), BASE/PERSONA (DNA), bonus/malus.
+- Modello: ProdottoLibreria.incentivazione_campagna (vita_investimento|vita_protezione|dna_danni|None).
+- Tenant: aggiunto "incentivazioni_config" a TENANT_SCOPED_COLLECTIONS (fix isolamento).
+- Frontend: pagina Incentivazioni.jsx (periodo, card per campagna, tabella collaboratore→produzione→incentivo), selettore campagna in Librerie→Prodotti (ProdottoForm), voce sidebar + route /incentivazioni.
+- Verificato E2E: ACTIVE PROTEZIONE→DNA, obiettivo 50k, realizzo 114,8% → aliquota 9% → incentivi per collaboratore corretti (es. SCHIANTARELLI 19.452,90→1.750,76). Dati di test ripuliti.
+- NON implementato nell'MVP (per scelta): APE, RNT calcolato automaticamente, garanzie embedded x5, tetti per prodotto, di-cui Persona separato, malus persistenza da quietanze. Gestiti come selettori manuali.
+
+## 2026-06-15 — Incentivazioni DNA: sotto-target "di cui Persona" (additivo)
+- Richiesta: nel DNA aggiungere il target "di cui Cura della Persona + Prot. Beni Persona Fisica" e aliquote automatiche dalle fasce.
+- Modello: ProdottoLibreria.incentivazione_persona (bool) — spunta "di cui Persona" sui prodotti DNA (visibile solo se campagna=dna_danni).
+- Backend (incentivazioni.py calcola): per DNA due basi per collaboratore (totale + Persona). Aliquote AUTOMATICHE dalle fasce: BASE dal realizzo su Obiettivo DNA totale, PERSONA dal realizzo su Obiettivo di cui Persona. Incentivo = prod_totale×aliqBASE + prod_persona×aliqPERSONA (additivo), ×(1+bonus).
+- Config DNA: due obiettivi (obiettivo, obiettivo_persona). Rimossa la scelta manuale colonna per DNA (aliquote auto).
+- Frontend: card DNA con due obiettivi, header con realizzo/aliquota BASE+PERSONA, tabella con colonna "di cui Persona"; form prodotto con spunta Persona.
+- Verificato E2E: DNA 64.364,58 (realizzo 128,7%→BASE 11%) + Persona 6.988,94 (realizzo 233%→PERSONA 20%) → incentivi per collaboratore corretti (Schiantarelli 2.425,49 = 20374,41×11% + 921,51×20%). Dati di test ripuliti.

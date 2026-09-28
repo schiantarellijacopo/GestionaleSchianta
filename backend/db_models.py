@@ -923,6 +923,8 @@ class ProdottoLibreria(BaseDoc):
     is_libro_matricola: bool = False  # se True (solo per RC_AUTO/flotte) → polizza con applicazioni veicoli
     is_cumulativa_assicurati: bool = False  # se True → polizze con elenco cumulativo assicurati (es. Ritiro Patente)
     mostra_sezione_veicolo: bool = False  # se True, mostra la sezione "Dati veicolo" nelle polizze di questo prodotto (RCAuto è sempre attivo)
+    incentivazione_campagna: Optional[str] = None  # "vita_investimento" | "vita_protezione" | "dna_danni" | None
+    incentivazione_persona: bool = False  # DNA: prodotto "di cui Cura della Persona + Prot. Beni Persona Fisica"
     attivo: bool = True
 
 

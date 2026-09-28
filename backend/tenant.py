@@ -199,6 +199,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "tasks",
     "contratti_modelli",
     "azienda_config",
+    "incentivazioni_config",
 ]
 
 

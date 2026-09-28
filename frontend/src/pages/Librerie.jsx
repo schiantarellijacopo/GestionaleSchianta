@@ -1661,7 +1661,7 @@ function ProdottoForm({ section, editing, onClose }) {
         return ["VITA", "VITA_RC", "PREVIDENZA"].includes(r) ? 30 : 15;
     };
     return <GenericForm section={section} editing={editing} onClose={onClose}
-        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, termini_disdetta_giorni: 60, tacito_rinnovo: true, is_libro_matricola: false, is_cumulativa_assicurati: false, mostra_sezione_veicolo: false, attivo: true }}
+        defaults={{ nome: "", ramo: "", compagnia_id: "", descrizione: "", termini_mora_giorni: 15, termini_disdetta_giorni: 60, tacito_rinnovo: true, is_libro_matricola: false, is_cumulativa_assicurati: false, mostra_sezione_veicolo: false, incentivazione_campagna: null, incentivazione_persona: false, attivo: true }}
         fields={(f, set) => {
             const ramoUpper = String(f.ramo || "").toUpperCase();
             const isRcAuto = ramoUpper.includes("RCA") || ramoUpper.includes("AUTO");
@@ -1765,6 +1765,34 @@ function ProdottoForm({ section, editing, onClose }) {
                     <div className="text-[10px] text-sky-700 mt-1">
                         Spunta per prodotti che gestiscono un veicolo (es. RCA, Kasko, ARD, infortuni conducente). Per ramo <b>RCAuto</b> la sezione viene mostrata sempre, anche se non spuntato.
                     </div>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded p-2">
+                    <label className="block text-sm font-medium text-amber-900 mb-1">Campagna d'incentivazione</label>
+                    <select
+                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                        value={f.incentivazione_campagna || ""}
+                        onChange={(e) => set("incentivazione_campagna", e.target.value || null)}
+                        data-testid="prodotto-incentivazione"
+                    >
+                        <option value="">— Nessuna (non incentivato) —</option>
+                        <option value="vita_investimento">Vita — Bisogno Investimento</option>
+                        <option value="vita_protezione">Vita — Bisogno Protezione</option>
+                        <option value="dna_danni">DNA — Danni</option>
+                    </select>
+                    <div className="text-[10px] text-amber-700 mt-1">
+                        Assegna il prodotto a una campagna per includerlo nel calcolo della sezione <b>Incentivazioni</b>.
+                    </div>
+                    {f.incentivazione_campagna === "dna_danni" && (
+                        <label className="flex items-center gap-2 mt-2 text-sm text-amber-900 cursor-pointer" data-testid="prodotto-incentivazione-persona-wrap">
+                            <input
+                                type="checkbox"
+                                checked={!!f.incentivazione_persona}
+                                onChange={(e) => set("incentivazione_persona", e.target.checked)}
+                                data-testid="prodotto-incentivazione-persona"
+                            />
+                            <span>di cui <b>Persona</b> (Cura della Persona + Prot. Beni Persona Fisica)</span>
+                        </label>
+                    )}
                 </div>
                 <div className="bg-teal-50 border border-teal-200 rounded p-2">
                     <label className="flex items-center gap-2 cursor-pointer">
