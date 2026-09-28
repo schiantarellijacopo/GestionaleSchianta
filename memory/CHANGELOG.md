@@ -439,3 +439,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Fix (server.py _compute_saldi_compagnie): incassi (premio lordo) = importo + quota_sconto + quota_credito → per eccedenza 145-1,99=143,01; per residuo 143,01+1,99=145. Coerente con lordo_riga del brogliaccio.
 - Verificato con aggregazione isolata: eccedenza→143,01, residuo→145.
 - NOTA doppia riga: il codice attuale genera UNA sola riga di incasso (verificato in preview). Eventuali righe doppie viste in PRODUZIONE sono dati creati da una versione precedente → serve redeploy + rifare/eliminare la vecchia registrazione.
+
+## 2026-06-15 — Riepilogo Conti: IMP. PRECEDENTE riconciliato con la chiusura
+- Bug: IMP. PRECEDENTE di un conto poteva differire dal TOTALE PERIODO con cui il giorno prima era stato chiuso (es. BPER SONDRIO +1,99).
+- Causa: imp_prec sottraeva prev_sosp (quota_credito degli incasso_premio) mentre imp_giornata usa direttamente `importo` (già netto del sospeso). Con l'eccedenza (quota_credito -1,99) veniva sommato 1,99 di troppo; con i residui veniva sottratto due volte.
+- Fix (_compute_brogliaccio conti_riepilogo): imp_prec = saldo_iniziale + prev_in - prev_out (niente sottrazione di quota_credito), coerente con imp_giornata. Rimossa l'aggregazione 'sosp'.
+- Verificato: incasso eccedenza su BPER SONDRIO → TOTALE(20/09)=249.230,92 = IMP.PRECEDENTE(21/09). Riconcilia.

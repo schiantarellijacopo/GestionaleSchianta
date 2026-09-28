@@ -7450,8 +7450,10 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                        "per_conto": {k: round(v, 2) for k, v in per_conto_tot.items()}}
 
     # 3) Riepilogo conti cassa: saldo precedente, giornata, totale periodo
-    # NB: dal saldo precedente sottraiamo la somma di 'quota_credito' dei movimenti
-    # 'incasso_premio' su quel conto — il sospeso NON è mai entrato in cassa.
+    # NB: il cash reale del giorno (imp_giornata) usa direttamente `importo` del
+    # movimento (già al netto del sospeso). Il saldo precedente DEVE usare la stessa
+    # base (somma degli `importo`), senza sottrarre di nuovo quota_credito: altrimenti
+    # l'IMP. PRECEDENTE non coincide col TOTALE PERIODO con cui il giorno è stato chiuso.
     conti_riepilogo = []
     for c in conti:
         # Il conto "Pagamento Direzione" (tipo RID) raccoglie i pagamenti in direzione,
@@ -7464,16 +7466,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             {"$match": _prev_match},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
-                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}},
-                        "sosp": {"$sum": {"$cond": [
-                            {"$and": [{"$eq": ["$tipo", "entrata"]},
-                                      {"$eq": ["$categoria", "incasso_premio"]}]},
-                            {"$ifNull": ["$quota_credito", 0]}, 0]}}}},
+                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
         ]).to_list(1)
         prev_in = prev[0]["in"] if prev else 0
         prev_out = prev[0]["out"] if prev else 0
-        prev_sosp = prev[0].get("sosp", 0) if prev else 0
-        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out - prev_sosp
+        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out
         imp_giornata = per_conto_tot.get(c["id"], 0.0)
         conti_riepilogo.append({
             "id": c["id"],
