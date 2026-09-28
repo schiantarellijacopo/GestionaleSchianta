@@ -460,6 +460,13 @@ def _mb_classify(m: dict, voci_map: dict) -> list[tuple[str, str, float]]:
     if cat in ("ritenuta_compagnia",):
         # Partita di giro col saldo compagnia: non è costo del CE
         return []
+    if cat == "pnc":
+        # Versamento PNC: la Rivalsa è un costo di storno provvigionale;
+        # gli altri tipi (cassa agenti, fondo pensione, gruppo agenti) restano
+        # tra le spese generali.
+        if (m.get("tipo_pnc") or "") == "rivalsa":
+            return [("costo", "storni_rivalse", imp)]
+        return [("costo", "spese_varie", imp)]
     if cat in ("sconto_cliente", "rimborso_cliente"):
         return [("costo", "storni_rivalse", imp)]
     if cat == "spese_amministrative":
@@ -490,7 +497,7 @@ async def _mb_compute(dal: str, al: str) -> dict:
     cur = db.movimenti.find(
         {"data_movimento": {"$gte": dal, "$lte": al}},
         {"_id": 0, "tipo": 1, "categoria": 1, "importo": 1, "provvigioni": 1,
-         "quota_sconto": 1, "voce_bilancio_id": 1, "data_movimento": 1},
+         "quota_sconto": 1, "voce_bilancio_id": 1, "data_movimento": 1, "tipo_pnc": 1},
     )
     async for m in cur:
         mese = (m.get("data_movimento") or "")[:7]
@@ -576,7 +583,7 @@ async def mini_bilancio_dettaglio(key: str, dal: str, al: str, user=Depends(curr
     cur = db.movimenti.find(
         {"data_movimento": {"$gte": dal, "$lte": al}},
         {"_id": 0, "id": 1, "data_movimento": 1, "tipo": 1, "categoria": 1, "importo": 1,
-         "provvigioni": 1, "quota_sconto": 1, "voce_bilancio_id": 1, "descrizione": 1, "mezzo_pagamento": 1},
+         "provvigioni": 1, "quota_sconto": 1, "voce_bilancio_id": 1, "descrizione": 1, "mezzo_pagamento": 1, "tipo_pnc": 1},
     ).sort("data_movimento", -1)
     async for m in cur:
         for sez, k, amount in _mb_classify(m, voci_map):

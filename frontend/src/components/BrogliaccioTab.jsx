@@ -37,7 +37,7 @@ const FIXED_COLS = [
     { key: "saldo", label: "Saldo", default: true },
     { key: "crediti", label: "Sospesi", default: true },
     { key: "ritenuta", label: "Ritenuta", default: true },
-    { key: "pnc", label: "PNC", default: true },
+    { key: "pnc", label: "PNT", default: true },
     { key: "rappel", label: "Rappel", default: true },
     { key: "rimesse", label: "Rimesse E/C", default: true },
     { key: "direzione", label: "Incassi Direzione", default: true },

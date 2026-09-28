@@ -141,12 +141,45 @@ async def auth_me(user=Depends(current_user)):
 
 @api.post("/auth/users", status_code=201)
 async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
+    from tenant import assign_tenant, user_tenant_id, TENANT_PRINCIPALE_ID
     email = payload.email.lower().strip()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email già registrata")
+    my_tid = user_tenant_id(user)
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        ex_tid = existing.get("agenzia_tenant_id")
+        # Già presente nella MIA agenzia → conflitto reale.
+        if ex_tid and my_tid and ex_tid == my_tid:
+            raise HTTPException(status_code=400, detail="Email già registrata")
+        # Account rimasto orfano (creato prima del fix multi-tenant e finito nel
+        # tenant principale/"dumping ground"): lo riassegnamo alla mia agenzia
+        # aggiornandone i dati. Non tocchiamo super_admin né account cliente.
+        adottabile = (
+            not existing.get("is_super_admin")
+            and existing.get("role") != "cliente"
+            and (not ex_tid or ex_tid == TENANT_PRINCIPALE_ID)
+        )
+        if adottabile:
+            upd = {
+                "name": payload.name,
+                "role": payload.role,
+                "agenzia_tenant_id": my_tid or TENANT_PRINCIPALE_ID,
+                "password_hash": hash_password(payload.password),
+                "updated_at": _now_iso(),
+            }
+            if payload.anagrafica_id:
+                upd["anagrafica_id"] = payload.anagrafica_id
+            await db.users.update_one({"id": existing["id"]}, {"$set": upd})
+            await log_attivita(user, "update", "user", existing["id"],
+                               f"Account {email} riassegnato all'agenzia e aggiornato")
+            u = await db.users.find_one({"id": existing["id"]}, {"_id": 0, "password_hash": 0})
+            return u
+        # Occupata da un'altra agenzia: non consentito.
+        raise HTTPException(status_code=400,
+                            detail="Email già registrata in un'altra area del sistema")
     doc = UserPublic(email=email, name=payload.name, role=payload.role,
                      anagrafica_id=payload.anagrafica_id).model_dump()
     doc["password_hash"] = hash_password(payload.password)
+    doc = assign_tenant(user, doc)
     await db.users.insert_one(doc)
     doc.pop("password_hash", None)
     doc.pop("_id", None)
@@ -7358,6 +7391,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
                 c_totale = 0.0
                 c_saldo = importo
                 c_pnc = importo
+                # La Rivalsa è anche un costo dell'agenzia → mostrala in colonna Spese.
+                if (m.get("tipo_pnc") or "") == "rivalsa":
+                    c_spese = importo
             else:
                 # Spese generali, sconti, stipendi, prelievi, altro: NON in Totale.
                 # Solo in colonna Spese + Banca uscita.

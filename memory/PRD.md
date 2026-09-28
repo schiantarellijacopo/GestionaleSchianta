@@ -1644,3 +1644,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Header cliccabili con freccetta per ordinare per qualsiasi colonna (asc/desc), niente persistenza.
 - Ricerca estesa anche a targa/oggetto. I campi arrivano già dal backend /polizze (projection non li esclude).
 - Verificato via seed temporaneo + screenshot (poi rimosso).
+
+## 2026-09-28 — Fix utenti multi-tenant + Rivalsa contabile + rename PNT
+- BUG create utenti (`server.py` create_user): ora assegna `agenzia_tenant_id` dell admin (assign_tenant) e ADOTTA nella propria agenzia un account con stessa email rimasto orfano nel tenant principale (recupero account tipo marco@schiantarelli.it). Testato via API.
+- Brogliaccio: colonna "PNC" rinominata in "PNT" (`BrogliaccioTab.jsx`, label; key resta pnc).
+- Rivalsa (movimento categoria=pnc, tipo_pnc=rivalsa): ora mostrata anche in colonna SPESE del Brogliaccio (`_compute_brogliaccio`) e riclassificata in Mini Bilancio sotto "Storni Provvigionali / Rivalse" invece di Spese Generali (`routes/cervello.py` _mb_classify + projections). Altri tipi PNC restano in Spese Generali. Testato via API.
+- NB: fix backend richiedono nuova pubblicazione per essere attivi in produzione.
