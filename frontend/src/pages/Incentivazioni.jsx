@@ -132,7 +132,7 @@ export default function Incentivazioni() {
                             )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                             <div>
                                 <Label className="text-xs">{key === "dna_danni" ? "Obiettivo DNA totale (€)" : "Obiettivo Agenzia (€)"}</Label>
                                 <Input type="number" value={st.obiettivo ?? ""} placeholder="0"
@@ -171,6 +171,13 @@ export default function Incentivazioni() {
                                     </Select>
                                 </div>
                             )}
+                            <div>
+                                <Label className="text-xs">Incentivo reale incassato (€)</Label>
+                                <Input type="number" value={st.incentivo_reale ?? ""} placeholder="0"
+                                    onChange={(e) => setCampSetting(key, "incentivo_reale", parseFloat(e.target.value) || 0)}
+                                    data-testid={`inc-reale-${key}`} />
+                                <div className="text-[10px] text-slate-500 mt-1">Ripartito tra i collaboratori per quota di produzione</div>
+                            </div>
                             <div className="flex flex-col justify-end">
                                 <div className="text-xs text-slate-500">Produzione totale{key === "dna_danni" && r ? " (di cui Persona)" : ""}</div>
                                 <div className="text-lg font-bold num">
@@ -189,6 +196,7 @@ export default function Incentivazioni() {
                                             <th className="py-2 text-right">Nuova produzione</th>
                                             {r.ha_persona && <th className="py-2 text-right">di cui Persona</th>}
                                             <th className="py-2 text-right">Incentivo spettante</th>
+                                            {r.incentivo_reale > 0 && <th className="py-2 text-right">Incentivo ripartito</th>}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -198,6 +206,7 @@ export default function Incentivazioni() {
                                                 <td className="py-2 text-right num">{fmtEur(row.produzione)}</td>
                                                 {r.ha_persona && <td className="py-2 text-right num text-slate-500">{fmtEur(row.produzione_persona)}</td>}
                                                 <td className="py-2 text-right num font-semibold text-emerald-700">{fmtEur(row.incentivo)}</td>
+                                                {r.incentivo_reale > 0 && <td className="py-2 text-right num font-semibold text-indigo-700">{fmtEur(row.incentivo_ripartito)}</td>}
                                             </tr>
                                         ))}
                                         <tr className="bg-amber-50 font-bold">
@@ -205,6 +214,7 @@ export default function Incentivazioni() {
                                             <td className="py-2 text-right num">{fmtEur(r.produzione_totale)}</td>
                                             {r.ha_persona && <td className="py-2 text-right num">{fmtEur(r.produzione_persona_totale)}</td>}
                                             <td className="py-2 text-right num text-emerald-800">{fmtEur(r.incentivo_totale)}</td>
+                                            {r.incentivo_reale > 0 && <td className="py-2 text-right num text-indigo-800">{fmtEur(r.incentivo_ripartito_totale)}</td>}
                                         </tr>
                                     </tbody>
                                 </table>
@@ -217,6 +227,66 @@ export default function Incentivazioni() {
                     </Card>
                 );
             })}
+
+            {result && (result.collaboratori || []).length > 0 && (() => {
+                const campKeys = Object.keys(campagneMeta);
+                const anyReale = (result.campagne || []).some((c) => c.incentivo_reale > 0);
+                const campName = (k) => campagneMeta[k]?.nome || k;
+                const totProd = result.produzione_grand_total || 0;
+                const totInc = (result.collaboratori || []).reduce((s, e) => s + (e.incentivo_totale || 0), 0);
+                const totRip = (result.collaboratori || []).reduce((s, e) => s + (e.incentivo_ripartito_totale || 0), 0);
+                return (
+                    <Card className="p-5 space-y-4" data-testid="inc-riepilogo-collaboratori">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h2 className="text-lg font-semibold">Riepilogo Collaboratori</h2>
+                            <span className="text-xs text-slate-500">Produzione netta e incentivo per collaboratore su tutte le campagne</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="text-left text-slate-500 border-b">
+                                        <th className="py-2">Collaboratore</th>
+                                        {campKeys.map((k) => (
+                                            <th key={k} className="py-2 text-right whitespace-nowrap">{campName(k)}</th>
+                                        ))}
+                                        <th className="py-2 text-right">Produzione netta</th>
+                                        <th className="py-2 text-right">Quota %</th>
+                                        <th className="py-2 text-right">Incentivo</th>
+                                        {anyReale && <th className="py-2 text-right">Incentivo ripartito</th>}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {result.collaboratori.map((e, i) => (
+                                        <tr key={i} className="border-b last:border-0" data-testid={`inc-riep-row-${i}`}>
+                                            <td className="py-2">{e.collaboratore}</td>
+                                            {campKeys.map((k) => (
+                                                <td key={k} className="py-2 text-right num text-slate-600">
+                                                    {fmtEur(e.per_campagna?.[k]?.produzione || 0)}
+                                                </td>
+                                            ))}
+                                            <td className="py-2 text-right num font-semibold">{fmtEur(e.produzione_totale)}</td>
+                                            <td className="py-2 text-right num">{e.quota_pct}%</td>
+                                            <td className="py-2 text-right num font-semibold text-emerald-700">{fmtEur(e.incentivo_totale)}</td>
+                                            {anyReale && <td className="py-2 text-right num font-semibold text-indigo-700">{fmtEur(e.incentivo_ripartito_totale)}</td>}
+                                        </tr>
+                                    ))}
+                                    <tr className="bg-amber-50 font-bold">
+                                        <td className="py-2">TOTALE</td>
+                                        {campKeys.map((k) => {
+                                            const s = (result.campagne || []).find((c) => c.campagna === k);
+                                            return <td key={k} className="py-2 text-right num">{fmtEur(s?.produzione_totale || 0)}</td>;
+                                        })}
+                                        <td className="py-2 text-right num">{fmtEur(totProd)}</td>
+                                        <td className="py-2 text-right num">100%</td>
+                                        <td className="py-2 text-right num text-emerald-800">{fmtEur(totInc)}</td>
+                                        {anyReale && <td className="py-2 text-right num text-indigo-800">{fmtEur(totRip)}</td>}
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </Card>
+                );
+            })()}
         </div>
     );
 }

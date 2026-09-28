@@ -1650,3 +1650,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Brogliaccio: colonna "PNC" rinominata in "PNT" (`BrogliaccioTab.jsx`, label; key resta pnc).
 - Rivalsa (movimento categoria=pnc, tipo_pnc=rivalsa): ora mostrata anche in colonna SPESE del Brogliaccio (`_compute_brogliaccio`) e riclassificata in Mini Bilancio sotto "Storni Provvigionali / Rivalse" invece di Spese Generali (`routes/cervello.py` _mb_classify + projections). Altri tipi PNC restano in Spese Generali. Testato via API.
 - NB: fix backend richiedono nuova pubblicazione per essere attivi in produzione.
+
+## 2026-09-28 — Incentivazioni: sostituzioni + Riepilogo Collaboratori
+- Sostituzioni (`incentivazioni.py` calcola): per una polizza con campo `sostituisce_polizza` la base incentivabile = premio netto nuovo annualizzato − premio netto sostituito annualizzato (delta anche negativo). Risoluzione riferimento per id o numero_polizza. Aggiunto `polizze_sostituzioni` in risposta.
+- Riepilogo Collaboratori: nuova sezione consolidata (produzione netta per campagna + totale, quota % sul totale, incentivo, incentivo ripartito) in `Incentivazioni.jsx`. Backend restituisce `collaboratori` e `produzione_grand_total`.
+- Ripartizione manuale: campo per campagna `incentivo_reale` (incentivo realmente incassato dall agenzia) ripartito tra collaboratori in proporzione alla produzione; mostrato accanto all incentivo automatico (produzione x aliquota).
+- Testato via API+screenshot: sostituzione delta 400, DNA additivo BASE+PERSONA=680, ripartizione 1000 -> 416,67/583,33, riepilogo quota 68.2%/31.8%.

@@ -152,24 +152,55 @@ async def calcola(
             if p.get("incentivazione_persona") and p["incentivazione_campagna"] == "dna_danni":
                 persona_names.add(nm)
 
-    # 2) Nuova produzione: polizze con effetto nel periodo, non annullate
+    # 2) Nuova produzione: polizze con effetto nel periodo, non annullate.
     #    Base incentivabile = premio_netto annualizzato per frazionamento.
+    #    Per le polizze SOSTITUITE conta solo la DIFFERENZA di premio netto
+    #    (nuovo − sostituito), entrambi annualizzati (può essere negativa).
+    def _annuo(pnet, fraz) -> float:
+        return round(float(pnet or 0) * FRAZ_MULT.get(fraz or "annuale", 1), 2)
+
+    candidate = []
+    refs: set[str] = set()
+    async for pol in db.polizze.find(
+        {"effetto": {"$gte": data_inizio, "$lte": data_fine}, "stato": {"$ne": "annullata"}},
+        {"_id": 0, "id": 1, "prodotto": 1, "premio_netto": 1, "frazionamento": 1,
+         "collaboratore_id": 1, "sostituisce_polizza": 1},
+    ):
+        nome = (pol.get("prodotto") or "").strip().lower()
+        if not prodmap.get(nome):
+            continue
+        candidate.append(pol)
+        if pol.get("sostituisce_polizza"):
+            refs.add(pol["sostituisce_polizza"])
+
+    # Risolvi in blocco il premio netto annualizzato delle polizze sostituite
+    # (il riferimento può essere un id OPPURE un numero polizza).
+    sost_annuo: dict[str, float] = {}
+    if refs:
+        async for sp in db.polizze.find(
+            {"$or": [{"id": {"$in": list(refs)}}, {"numero_polizza": {"$in": list(refs)}}]},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "premio_netto": 1, "frazionamento": 1},
+        ):
+            a = _annuo(sp.get("premio_netto"), sp.get("frazionamento"))
+            if sp.get("id"):
+                sost_annuo[sp["id"]] = a
+            if sp.get("numero_polizza"):
+                sost_annuo[sp["numero_polizza"]] = a
+
     #    prod[camp][collab] = base totale campagna; prod_persona[collab] = quota Persona (solo DNA).
     prod: dict[str, dict[str, float]] = {k: {} for k in CAMPAGNE}
     prod_persona: dict[str, float] = {}
     polizze_incluse = 0
-    async for pol in db.polizze.find(
-        {"effetto": {"$gte": data_inizio, "$lte": data_fine}, "stato": {"$ne": "annullata"}},
-        {"_id": 0, "prodotto": 1, "premio_netto": 1, "frazionamento": 1,
-         "collaboratore_id": 1},
-    ):
+    polizze_sostituzioni = 0
+    for pol in candidate:
         nome = (pol.get("prodotto") or "").strip().lower()
-        camp = prodmap.get(nome)
-        if not camp:
-            continue
-        mult = FRAZ_MULT.get(pol.get("frazionamento") or "annuale", 1)
-        base = round(float(pol.get("premio_netto") or 0) * mult, 2)
-        if base <= 0:
+        camp = prodmap[nome]
+        base = _annuo(pol.get("premio_netto"), pol.get("frazionamento"))
+        rif = pol.get("sostituisce_polizza")
+        if rif:
+            base = round(base - sost_annuo.get(rif, 0.0), 2)  # differenza (può essere negativa)
+            polizze_sostituzioni += 1
+        if base == 0:
             continue
         cid = pol.get("collaboratore_id") or "__nessuno__"
         prod[camp][cid] = round(prod[camp].get(cid, 0.0) + base, 2)
@@ -201,6 +232,14 @@ async def calcola(
         collab_bases = prod[camp_key]
         totale_base = round(sum(collab_bases.values()), 2)
         realizzo = round(totale_base / obiettivo * 100, 1) if obiettivo > 0 else 0.0
+        # Incentivo REALE incassato dall'agenzia (opzionale): se valorizzato viene
+        # ripartito tra i collaboratori in proporzione alla loro produzione.
+        incentivo_reale = float(st.get("incentivo_reale") or 0)
+
+        def _ripartito(base_val: float) -> float:
+            if not incentivo_reale or totale_base == 0:
+                return 0.0
+            return round(incentivo_reale * base_val / totale_base, 2)
 
         if camp_key == "dna_danni":
             # DNA: BASE su tutta la produzione + PERSONA (additivo) sulla quota "di cui Persona".
@@ -224,6 +263,7 @@ async def calcola(
                     "produzione": base,
                     "produzione_persona": bp,
                     "incentivo": incentivo,
+                    "incentivo_ripartito": _ripartito(base),
                 })
             risultato.append({
                 "campagna": camp_key, "nome": camp["nome"], "colonne": camp["colonne"],
@@ -235,6 +275,8 @@ async def calcola(
                 "realizzo_persona": realizzo_persona, "aliquota_persona": aliquota_persona,
                 "accede_persona": accede_persona,
                 "incentivo_totale": round(sum(r["incentivo"] for r in righe), 2),
+                "incentivo_reale": incentivo_reale,
+                "incentivo_ripartito_totale": round(sum(r["incentivo_ripartito"] for r in righe), 2),
                 "righe": righe,
             })
             continue
@@ -249,6 +291,7 @@ async def calcola(
                 "collaboratore": "— senza collaboratore —" if cid == "__nessuno__" else nomi.get(cid, cid),
                 "produzione": base,
                 "incentivo": incentivo,
+                "incentivo_ripartito": _ripartito(base),
             })
         risultato.append({
             "campagna": camp_key, "nome": camp["nome"], "colonna": colonna,
@@ -256,13 +299,47 @@ async def calcola(
             "obiettivo": obiettivo, "produzione_totale": totale_base,
             "realizzo": realizzo, "aliquota": aliquota, "accede": accede, "ha_persona": False,
             "incentivo_totale": round(sum(r["incentivo"] for r in righe), 2),
+            "incentivo_reale": incentivo_reale,
+            "incentivo_ripartito_totale": round(sum(r["incentivo_ripartito"] for r in righe), 2),
             "righe": righe,
         })
+
+    # 6) Riepilogo consolidato per collaboratore (produzione netta + incentivo su tutte le campagne)
+    collab_map: dict[str, dict] = {}
+    for c in risultato:
+        ck = c["campagna"]
+        for row in c["righe"]:
+            cid = row["collaboratore_id"] or "__nessuno__"
+            e = collab_map.setdefault(cid, {
+                "collaboratore_id": row["collaboratore_id"],
+                "collaboratore": row["collaboratore"],
+                "per_campagna": {},
+                "produzione_totale": 0.0,
+                "incentivo_totale": 0.0,
+                "incentivo_ripartito_totale": 0.0,
+            })
+            e["per_campagna"][ck] = {
+                "produzione": row["produzione"],
+                "incentivo": row["incentivo"],
+                "incentivo_ripartito": row.get("incentivo_ripartito", 0.0),
+            }
+            e["produzione_totale"] = round(e["produzione_totale"] + row["produzione"], 2)
+            e["incentivo_totale"] = round(e["incentivo_totale"] + row["incentivo"], 2)
+            e["incentivo_ripartito_totale"] = round(
+                e["incentivo_ripartito_totale"] + row.get("incentivo_ripartito", 0.0), 2)
+    grand_prod = round(sum(e["produzione_totale"] for e in collab_map.values()), 2)
+    collaboratori = []
+    for e in sorted(collab_map.values(), key=lambda x: -x["produzione_totale"]):
+        e["quota_pct"] = round(e["produzione_totale"] / grand_prod * 100, 1) if grand_prod else 0.0
+        collaboratori.append(e)
 
     return {
         "data_inizio": data_inizio,
         "data_fine": data_fine,
         "polizze_incluse": polizze_incluse,
+        "polizze_sostituzioni": polizze_sostituzioni,
         "prodotti_mappati": len(prodmap),
         "campagne": risultato,
+        "collaboratori": collaboratori,
+        "produzione_grand_total": grand_prod,
     }
