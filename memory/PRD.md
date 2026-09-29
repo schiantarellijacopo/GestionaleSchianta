@@ -1668,3 +1668,8 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - _compute_brogliaccio (server.py): i movimenti rappel (categoria "rappel" o flag is_rappel) ora vanno in colonna SALDO in negativo (-importo) e colonna Rappel (+importo), NON piu tra le Spese/"avere". Coerente con lincasso rappel standard.
 - KPI cumulativo: categoria "rappel" conteggiata in cum_rappel (riduce saldo cassa), non piu come spesa.
 - Testato via API: rappel 32,07 -> saldo -32,07 / rappel 32,07 / spese 0.
+
+## 2026-09-29 — Fix Saldo Cassa Compagnie: eccedenza inclusa (gap 1,99)
+- Causa: incasso con eccedenza a credito salva quota_credito NEGATIVO (-ecc). _compute_saldi_compagnie (Brogliaccio/Riepilogo) sottraeva quota_credito -> escludeva leccedenza (saldo piu basso), mentre lestratto (_compagnia_estratto_data) la includeva. Gap = eccedenza (es. 1,99).
+- Fix (server.py _compute_saldi_compagnie): la somma incassi ora usa max(quota_credito,0): i residui (quota_credito positivo) restano normalizzati al premio, le eccedenze (negativo) NON vengono piu sottratte -> incluse nel saldo cassa. Ora Brogliaccio == Estratto.
+- Testato: eccedenza inclusa (91,99), residuo invariato (90), nessuna regressione.
