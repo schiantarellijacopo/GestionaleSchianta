@@ -961,6 +961,21 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         auto_creati["collaboratori"].append(raw)
         return udoc["id"]
 
+    # Operatore di default = AGENZIA: le polizze/titoli importati SENZA operatore
+    # nel flusso vengono attribuiti all'admin dell'agenzia (Assicurazioni Schiantarelli).
+    async def _agenzia_op_id():
+        tid_a = user.get("agenzia_tenant_id")
+        q = {"role": "admin"}
+        if tid_a:
+            q["agenzia_tenant_id"] = tid_a
+        u = await db.users.find_one({**q, "email": "jacopo@schiantarelli.it"}, {"_id": 0, "id": 1})
+        if not u:
+            u = await db.users.find_one(q, {"_id": 0, "id": 1})
+        return u["id"] if u else user.get("id")
+    agenzia_op_id = await _agenzia_op_id()
+    _sost_cache: dict = {}          # pol_id -> bool (la polizza sostituisce un'altra)
+    sostituisce_refs: set = set()   # riferimenti (numero/id) delle polizze sostituite in questo import
+
     plan_sorted = sorted(plan, key=lambda p: ENTITY_ORDER.index(p["entity"]) if p.get("entity") in ENTITY_ORDER else 99)
 
     for p in plan_sorted:
@@ -1000,6 +1015,8 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     doc = {k: v for k, v in rec.items() if k in Polizza.model_fields}
                     if p_op_id:
                         doc["collaboratore_id"] = p_op_id
+                    if doc.get("sostituisce_polizza"):
+                        sostituisce_refs.add(doc["sostituisce_polizza"])
                     if rec.get("data_annullamento"):
                         doc["stato"] = "annullata"
                     elif rec.get("data_sospensione"):
@@ -1034,7 +1051,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                                 errori_dett.append({"row": int(ridx) + 2, "entity": "polizza",
                                                     "reason": f"contraente non trovato per polizza '{num}'"})
                             await _progress(); continue
-                        doc.setdefault("collaboratore_id", user.get("id"))
+                        doc.setdefault("collaboratore_id", agenzia_op_id)
                         obj = Polizza(**doc)
                         buffers["polizze"].append(obj.model_dump())
                         pol_cache[num] = obj.id
@@ -1083,7 +1100,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                             "ramo": (t_ramo or "N/D"),
                             "effetto": rec.get("effetto") or "",
                             "scadenza": rec.get("scadenza") or "",
-                            "collaboratore_id": op_id or user.get("id"),
+                            "collaboratore_id": op_id or agenzia_op_id,
                             "creata_da_import": True,
                         }
                         if t_mandato:
@@ -1122,7 +1139,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                         doc["pagamento_in_direzione"] = str(dir_raw).strip().lower() in (
                             "1", "s", "si", "sì", "x", "true", "vero", "y", "yes")
                     # Operatore già risolto sopra → assegnato anche al titolo
-                    doc["collaboratore_id"] = op_id or doc.get("collaboratore_id") or user.get("id")
+                    doc["collaboratore_id"] = op_id or doc.get("collaboratore_id") or agenzia_op_id
                     # Metodo di pagamento → codice (auto-crea se manca)
                     if rec.get("mezzo_pagamento"):
                         cod = await _mezzo_pagamento_codice(rec.get("mezzo_pagamento"))
@@ -1154,6 +1171,14 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     else:
                         doc["scadenza"] = _scad_src
                     _coerce_enums("titolo", doc)
+                    # Se la polizza sostituisce un'altra, il titolo è di tipo "sostituzione"
+                    _is_sost = _sost_cache.get(pol_id)
+                    if _is_sost is None:
+                        _pref = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "sostituisce_polizza": 1})
+                        _is_sost = bool((_pref or {}).get("sostituisce_polizza"))
+                        _sost_cache[pol_id] = _is_sost
+                    if _is_sost:
+                        doc["tipo"] = "sostituzione"
                     obj = Titolo(**doc)
                     buffers["titoli"].append(obj.model_dump())
                     if len(buffers["titoli"]) >= _FLUSH:
@@ -1260,6 +1285,23 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         await _flush()
 
     await _flush()
+    # STORNO automatico dei titoli in arretrato delle polizze SOSTITUITE in questo import.
+    titoli_stornati_sost = 0
+    for ref in sostituisce_refs:
+        old_id = await _polizza_id(ref)
+        if not old_id:
+            _op = await db.polizze.find_one({"id": ref}, {"_id": 0, "id": 1})
+            old_id = _op["id"] if _op else None
+        if not old_id:
+            continue
+        _r = await db.titoli.update_many(
+            {"polizza_id": old_id, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+            {"$set": {"stato": "stornato", "nota": "Stornato per sostituzione (import)",
+                      "updated_at": now_iso}},
+        )
+        titoli_stornati_sost += _r.modified_count
+    if titoli_stornati_sost:
+        stats["titoli_stornati_sostituzione"] = titoli_stornati_sost
     auto_creati_tot = {k: len(v) for k, v in auto_creati.items()}
     await db.import_massivo_sessioni.update_one({"id": sid}, {"$set": {
         "status": "completato",

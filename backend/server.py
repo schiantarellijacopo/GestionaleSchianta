@@ -4552,6 +4552,27 @@ async def rimetti_arretrato(tid: str, user=Depends(require_user("admin", "collab
 
 
 
+@api.post("/titoli/{tid}/storna")
+async def storna_titolo(tid: str, body: dict | None = None,
+                        user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Storno manuale di un titolo IN ARRETRATO (da_incassare / insoluto / sospeso):
+    lo porta a stato 'stornato' (escluso dagli incassi, storico conservato, nessun
+    movimento di Prima Nota). Non consentito su titoli già incassati o stornati."""
+    t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Titolo non trovato")
+    if t.get("stato") not in ("da_incassare", "insoluto", "sospeso"):
+        raise HTTPException(400, "Storno consentito solo sui titoli in arretrato (da incassare)")
+    nota = (body or {}).get("nota") or "Storno manuale"
+    await db.titoli.update_one(
+        {"id": tid},
+        {"$set": {"stato": "stornato", "nota": nota, "updated_at": _now_iso()}},
+    )
+    await log_attivita(user, "storna", "titolo", tid, nota)
+    await _aggiorna_scadenze_polizza_da_titolo(t.get("polizza_id"))
+    return {"ok": True, "stato": "stornato"}
+
+
 @api.post("/titoli/notifica-copertura")
 async def notifica_copertura(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     """Invia email di notifica copertura titolo a operatori e/o contraenti.

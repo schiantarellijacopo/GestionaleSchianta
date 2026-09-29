@@ -1656,3 +1656,10 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Riepilogo Collaboratori: nuova sezione consolidata (produzione netta per campagna + totale, quota % sul totale, incentivo, incentivo ripartito) in `Incentivazioni.jsx`. Backend restituisce `collaboratori` e `produzione_grand_total`.
 - Ripartizione manuale: campo per campagna `incentivo_reale` (incentivo realmente incassato dall agenzia) ripartito tra collaboratori in proporzione alla produzione; mostrato accanto all incentivo automatico (produzione x aliquota).
 - Testato via API+screenshot: sostituzione delta 400, DNA additivo BASE+PERSONA=680, ripartizione 1000 -> 416,67/583,33, riepilogo quota 68.2%/31.8%.
+
+## 2026-09-29 — Titoli sostituzione/storno + Import operatore agenzia
+- Import (import_massivo.py): polizze/titoli senza operatore nel flusso ora attribuiti allagenzia (admin agenzia, preferenza email jacopo@schiantarelli.it, fallback admin del tenant). Solo nuovi record in import.
+- Import: se la polizza ha sostituisce_polizza, il titolo importato diventa tipo=SOSTITUZIONE; i titoli in arretrato (da_incassare/insoluto/sospeso) della polizza sostituita vengono stornati (stato=stornato) in un pass finale. Aggiunto stat titoli_stornati_sostituzione.
+- Nuovo endpoint POST /titoli/{tid}/storna: storno manuale solo per titoli in arretrato -> stato stornato (nessun movimento Prima Nota). 400 se incassato/stornato.
+- Frontend PolizzaDetail: pulsante storno manuale (icona ⊘) accanto ai titoli in arretrato.
+- Testato: endpoint storna (arretrato ok / incassato 400), import in tenant reale c5ae2d0e (operatore=jacopo, titolo=sostituzione, arretrato precedente stornato), UI storno end-to-end.

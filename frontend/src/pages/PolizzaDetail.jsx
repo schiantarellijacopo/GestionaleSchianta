@@ -177,6 +177,12 @@ export default function PolizzaDetail() {
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
+    const stornaTitolo = async (tid) => {
+        if (!window.confirm("Stornare questo titolo in arretrato? Verrà escluso dagli incassi (stato 'stornato'), lo storico resta consultabile. Nessun movimento di Prima Nota.")) return;
+        try { await api.post(`/titoli/${tid}/storna`); toast.success("Titolo stornato"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
     const startPremiEdit = () => {
         setPremiForm({
             premio_netto: pol.premio_netto ?? 0,
@@ -1053,6 +1059,15 @@ export default function PolizzaDetail() {
                                                             data-testid={`pol-titolo-arretrato-${t.id}`}
                                                             title="Rimetti in arretrato (da incassare)"
                                                         >↩</Button>
+                                                    )}
+                                                    {["da_incassare", "insoluto", "sospeso"].includes(t.stato) && (
+                                                        <Button
+                                                            size="sm" variant="outline"
+                                                            className="h-7 px-2 text-xs text-rose-700 hover:bg-rose-50 border-rose-300"
+                                                            onClick={() => stornaTitolo(t.id)}
+                                                            data-testid={`pol-titolo-storna-${t.id}`}
+                                                            title="Storna titolo in arretrato (stato: stornato)"
+                                                        >⊘</Button>
                                                     )}
                                                     {(t.sconto_applicato || 0) > 0 && (
                                                         <Button
