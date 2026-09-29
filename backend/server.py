@@ -7293,7 +7293,14 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         contr = ana_map.get(contr_id) if contr_id else None
         contr_nome = (contr or {}).get("ragione_sociale") if contr else None
 
-        if cat == "saldo_iniziale_compagnia":
+        if m.get("is_rappel") or cat == "rappel":
+            # Rappel (sovraprovvigione): NON è cassa reale e NON è una spesa.
+            # Riduce il saldo verso la compagnia → colonna SALDO in negativo
+            # (e colonna dedicata Rappel). Mai tra le Spese / "avere".
+            c_totale = 0.0
+            c_rappel = importo
+            c_saldo = -importo
+        elif cat == "saldo_iniziale_compagnia":
             # Saldo iniziale cassa compagnia: alimenta SOLO la colonna SALDO.
             # Nessun cash reale, nessuna Entrata/Uscita. Importo firmato:
             # positivo = a debito verso compagnia, negativo = a credito.
@@ -7582,6 +7589,10 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             elif cat == "setup_iniziale_rimessa":
                 setup_rimesse += importo
             continue  # saldi di apertura: gestiti come KPI storici, non operativi
+        if cat == "rappel":
+            # Rappel: non è una spesa; riduce il saldo cassa verso la compagnia.
+            cum_rappel += importo
+            continue
         # Regola contabile dell'utente:
         # ENTRATE = SOLO premi/titoli/appendici (incasso_premio)
         # Rappel (entrata cat=provvigioni) -> in PROVVIGIONI, non in Entrate

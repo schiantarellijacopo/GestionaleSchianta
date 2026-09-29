@@ -1663,3 +1663,8 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Nuovo endpoint POST /titoli/{tid}/storna: storno manuale solo per titoli in arretrato -> stato stornato (nessun movimento Prima Nota). 400 se incassato/stornato.
 - Frontend PolizzaDetail: pulsante storno manuale (icona ⊘) accanto ai titoli in arretrato.
 - Testato: endpoint storna (arretrato ok / incassato 400), import in tenant reale c5ae2d0e (operatore=jacopo, titolo=sostituzione, arretrato precedente stornato), UI storno end-to-end.
+
+## 2026-09-29 — Brogliaccio: rappel in SALDO negativo
+- _compute_brogliaccio (server.py): i movimenti rappel (categoria "rappel" o flag is_rappel) ora vanno in colonna SALDO in negativo (-importo) e colonna Rappel (+importo), NON piu tra le Spese/"avere". Coerente con lincasso rappel standard.
+- KPI cumulativo: categoria "rappel" conteggiata in cum_rappel (riduce saldo cassa), non piu come spesa.
+- Testato via API: rappel 32,07 -> saldo -32,07 / rappel 32,07 / spese 0.
