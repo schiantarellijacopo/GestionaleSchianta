@@ -1673,3 +1673,9 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Causa: incasso con eccedenza a credito salva quota_credito NEGATIVO (-ecc). _compute_saldi_compagnie (Brogliaccio/Riepilogo) sottraeva quota_credito -> escludeva leccedenza (saldo piu basso), mentre lestratto (_compagnia_estratto_data) la includeva. Gap = eccedenza (es. 1,99).
 - Fix (server.py _compute_saldi_compagnie): la somma incassi ora usa max(quota_credito,0): i residui (quota_credito positivo) restano normalizzati al premio, le eccedenze (negativo) NON vengono piu sottratte -> incluse nel saldo cassa. Ora Brogliaccio == Estratto.
 - Testato: eccedenza inclusa (91,99), residuo invariato (90), nessuna regressione.
+
+## 2026-09-29 — Statistiche: filtro Ramo (uno/piu/tutti)
+- Aggiunto multi-select "Ramo" in Premi/Provvigioni e Per Operatore (statsShared.jsx RamoMulti; popover con checkbox + "Tutti i rami"). Rami da /librerie/rami?dedup=1&con_polizze=1.
+- Frontend passa ramo=comma-list agli endpoint /statistiche/premi-provvigioni e /statistiche/per-operatore.
+- Backend: match ramo reso case-insensitive/trim (rami_norm) in entrambi gli endpoint.
+- Testato: no ramo=1500, RC AUTO=1000, multi=1500, case-insensitive ok; UI dropdown verificata.

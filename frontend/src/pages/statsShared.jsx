@@ -1,4 +1,8 @@
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { ChevronDown } from "lucide-react";
 
 export const MESI = ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"];
 export const CUR = new Date().getFullYear();
@@ -19,6 +23,41 @@ export function FSel({ label, value, onChange, opts, tid, w = "w-40" }) {
                     {opts.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                 </SelectContent>
             </Select>
+        </div>
+    );
+}
+
+// Multi-select Ramo: sel = array di nomi ramo; array vuoto = TUTTI i rami.
+export function RamoMulti({ rami, sel, setSel, tid = "stat-ramo", w = "w-44" }) {
+    const allSelected = !sel || sel.length === 0;
+    const label = allSelected ? "Tutti i rami" : sel.length === 1 ? sel[0] : `${sel.length} rami`;
+    const toggle = (nome) => setSel((s) => s.includes(nome) ? s.filter((x) => x !== nome) : [...s, nome]);
+    return (
+        <div>
+            <div className="text-[10px] uppercase text-slate-500 mb-1">Ramo</div>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" className={`h-8 ${w} text-xs justify-between font-normal`} data-testid={tid}>
+                        <span className="truncate">{label}</span>
+                        <ChevronDown size={14} className="opacity-50 shrink-0 ml-1" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-2 max-h-72 overflow-y-auto" align="start">
+                    <button onClick={() => setSel([])} data-testid={`${tid}-tutti`}
+                        className={`w-full text-left text-xs px-2 py-1.5 rounded ${allSelected ? "bg-fuchsia-50 text-fuchsia-700 font-semibold" : "hover:bg-slate-50"}`}>
+                        Tutti i rami
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
+                    {rami.length === 0 ? (
+                        <div className="text-xs text-slate-400 px-2 py-1.5">Nessun ramo</div>
+                    ) : rami.map((r) => (
+                        <label key={r} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer">
+                            <Checkbox checked={sel.includes(r)} onCheckedChange={() => toggle(r)} data-testid={`${tid}-${r}`} />
+                            <span className="truncate">{r}</span>
+                        </label>
+                    ))}
+                </PopoverContent>
+            </Popover>
         </div>
     );
 }

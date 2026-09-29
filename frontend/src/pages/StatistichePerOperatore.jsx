@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
-import { CUR, ALL_COLS, FSel, MeseRange, YearPicker } from "@/pages/statsShared";
+import { CUR, ALL_COLS, FSel, MeseRange, YearPicker, RamoMulti } from "@/pages/statsShared";
 
 export default function StatistichePerOperatore() {
     const [sel, setSel] = useState([CUR, CUR - 1]);
@@ -13,9 +13,16 @@ export default function StatistichePerOperatore() {
     const [compagniaId, setCompagniaId] = useState("all");
     const [tipo, setTipo] = useState("all");
     const [compagnie, setCompagnie] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [ramoSel, setRamoSel] = useState([]);
     const [data, setData] = useState(null);
 
-    useEffect(() => { api.get("/compagnie").then((r) => setCompagnie(r.data || [])); }, []);
+    useEffect(() => {
+        api.get("/compagnie").then((r) => setCompagnie(r.data || []));
+        api.get("/librerie/rami", { params: { dedup: 1, con_polizze: 1 } })
+            .then((r) => setRami((r.data || []).map((x) => x.nome).filter(Boolean)))
+            .catch(() => setRami([]));
+    }, []);
 
     useEffect(() => {
         if (!sel.length) { setData({ anni: [], operatori: [] }); return; }
@@ -23,9 +30,10 @@ export default function StatistichePerOperatore() {
         const p = { anni: sel.join(","), data_field: dataField, mese_da: meseDa, mese_a: meseA };
         if (compagniaId !== "all") p.compagnia_id = compagniaId;
         if (tipo !== "all") p.tipo = tipo;
+        if (ramoSel.length) p.ramo = ramoSel.join(",");
         api.get("/statistiche/per-operatore", { params: p }).then((r) => setData(r.data));
         // eslint-disable-next-line
-    }, [sel, dataField, meseDa, meseA, compagniaId, tipo]);
+    }, [sel, dataField, meseDa, meseA, compagniaId, tipo, ramoSel]);
 
     const toggleMetrica = (k) => setMetriche((m) => m.includes(k) ? (m.length > 1 ? m.filter((x) => x !== k) : m) : [...m, k]);
     const cols = ALL_COLS.filter((c) => metriche.includes(c.key));
@@ -56,6 +64,7 @@ export default function StatistichePerOperatore() {
                 <FSel label="Filtra per data" value={dataField} onChange={setDataField} opts={[["incasso", "Data incasso"], ["rata", "Rata / decorrenza"], ["copertura", "Data copertura"]]} tid="stat-op-datafield" />
                 <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ["nuova", "Nuove"], ["sostituzione", "Sostituite"], ["regolazione", "Regolazioni"], ["rinnovo", "Rinnovi"], ["quietanza", "Quietanze"]]} tid="stat-op-tipo" />
                 <FSel label="Compagnia" value={compagniaId} onChange={setCompagniaId} opts={[["all", "Tutte"], ...compagnie.map((c) => [c.id, c.ragione_sociale])]} tid="stat-op-compagnia" />
+                <RamoMulti rami={rami} sel={ramoSel} setSel={setRamoSel} tid="stat-op-ramo" />
             </Card>
 
             {!data ? <Loading /> : anni.length === 0 ? (

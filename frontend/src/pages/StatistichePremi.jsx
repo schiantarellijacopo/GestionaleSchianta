@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
-import { MESI, CUR, ALL_COLS, YEAR_BARS, FSel, MeseRange, YearPicker } from "@/pages/statsShared";
+import { MESI, CUR, ALL_COLS, YEAR_BARS, FSel, MeseRange, YearPicker, RamoMulti } from "@/pages/statsShared";
 
 export default function StatistichePremi() {
     const { user } = useAuth();
@@ -19,10 +19,15 @@ export default function StatistichePremi() {
     const [tipo, setTipo] = useState("all");
     const [compagnie, setCompagnie] = useState([]);
     const [operatori, setOperatori] = useState([]);
+    const [rami, setRami] = useState([]);
+    const [ramoSel, setRamoSel] = useState([]);
     const [data, setData] = useState(null);
 
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data || []));
+        api.get("/librerie/rami", { params: { dedup: 1, con_polizze: 1 } })
+            .then((r) => setRami((r.data || []).map((x) => x.nome).filter(Boolean)))
+            .catch(() => setRami([]));
         if (isAdmin) api.get("/auth/users").then((r) => setOperatori((r.data || []).filter((u) => u.role !== "cliente")));
     }, [isAdmin]);
 
@@ -33,9 +38,10 @@ export default function StatistichePremi() {
         if (compagniaId !== "all") p.compagnia_id = compagniaId;
         if (isAdmin && operatoreId !== "all") p.operatore_id = operatoreId;
         if (tipo !== "all") p.tipo = tipo;
+        if (ramoSel.length) p.ramo = ramoSel.join(",");
         api.get("/statistiche/premi-provvigioni", { params: p }).then((r) => setData(r.data));
         // eslint-disable-next-line
-    }, [sel, dataField, meseDa, meseA, compagniaId, operatoreId, tipo, isAdmin]);
+    }, [sel, dataField, meseDa, meseA, compagniaId, operatoreId, tipo, ramoSel, isAdmin]);
 
     const toggleMetrica = (k) => setMetriche((m) => m.includes(k) ? (m.length > 1 ? m.filter((x) => x !== k) : m) : [...m, k]);
     const cols = ALL_COLS.filter((c) => metriche.includes(c.key));
@@ -75,6 +81,7 @@ export default function StatistichePremi() {
                 <FSel label="Filtra per data" value={dataField} onChange={setDataField} opts={[["incasso", "Data incasso"], ["rata", "Rata / decorrenza"], ["copertura", "Data copertura"]]} tid="stat-datafield" />
                 <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ["nuova", "Nuove"], ["sostituzione", "Sostituite"], ["regolazione", "Regolazioni"], ["rinnovo", "Rinnovi"], ["quietanza", "Quietanze"]]} tid="stat-tipo" />
                 <FSel label="Compagnia" value={compagniaId} onChange={setCompagniaId} opts={[["all", "Tutte"], ...compagnie.map((c) => [c.id, c.ragione_sociale])]} tid="stat-compagnia" />
+                <RamoMulti rami={rami} sel={ramoSel} setSel={setRamoSel} tid="stat-ramo" />
                 {isAdmin && (
                     <FSel label="Operatore" value={operatoreId} onChange={setOperatoreId} opts={[["all", "Tutti"], ...operatori.map((o) => [o.id, o.name])]} tid="stat-operatore" />
                 )}

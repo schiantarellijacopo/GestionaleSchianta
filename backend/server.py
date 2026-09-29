@@ -3493,6 +3493,7 @@ async def statistiche_premi_provvigioni(
         raise HTTPException(400, "Specificare almeno un anno")
     date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
+    rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
 
     # Un collaboratore vede SOLO i propri premi/provvigioni: forziamo l'operatore su di lui.
@@ -3538,7 +3539,7 @@ async def statistiche_premi_provvigioni(
             pol = pol_cache[pid]
             if compagnia_id and pol.get("compagnia_id") != compagnia_id:
                 continue
-            if rami and pol.get("ramo") not in rami:
+            if rami_norm and (pol.get("ramo") or "").strip().lower() not in rami_norm:
                 continue
         i = m - 1
         mesi[y]["netto"][i] += float(t.get("importo_netto") or 0)
@@ -3577,6 +3578,7 @@ async def statistiche_per_operatore(
         raise HTTPException(400, "Specificare almeno un anno")
     date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
+    rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
 
     # Un collaboratore vede solo se stesso
@@ -3623,7 +3625,7 @@ async def statistiche_per_operatore(
             pol = pol_cache[pid]
             if compagnia_id and pol.get("compagnia_id") != compagnia_id:
                 continue
-            if rami and pol.get("ramo") not in rami:
+            if rami_norm and (pol.get("ramo") or "").strip().lower() not in rami_norm:
                 continue
         netto = float(t.get("importo_netto") or 0)
         lordo = float(t.get("importo_lordo") or 0)
