@@ -1,6 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Sospesi: filtro date + storico + toolbar riordinata
+
+- **Filtro per date** (FATTO, testato): nella pagina /sospesi due campi "Copertura dal / al" filtrano i sospesi attivi per `data_copertura` (client-side) e alimentano lo storico (server, per `data_incasso`).
+- **Storico sospesi** (FATTO, testato): nuovo endpoint `GET /api/titoli/sospesi-storico` (`titolo_coperto=true` + `stato=incassato`, filtro `dal/al` su `data_incasso`, calcolo `giorni_anticipo` = copertura→incasso). Nuova card collassabile "Storico sospesi (anticipi già incassati)" in fondo alla pagina con totale incassato.
+- **Toolbar riordinata** (FATTO): la barra strumenti (Cerca / Filtra collaboratore / date / Stampa PDF / Incassa selezionati) è ora SOTTO la tabella "Riepilogo per collaboratore". Ordine: KPI → Riepilogo collaboratore → toolbar → tabella sospesi → storico.
+
+
 ## Sessione 30/09/2026 (fork) — Badge stato firma sulle card
 
 - **Badge stato firma** (FATTO, testato 100%): sulle card documento dell'anagrafica compare il badge "⏳ In attesa di firma" (amber) o "✓ Firmato" (verde) con la data. Backend: `esignature_it.invia_per_firma` setta `firma_stato="in_attesa"` + `firma_richiesta_at` sul dict card; `_finalizza` setta `firma_stato="firmato"` + `firma_completata_at`. Frontend `AnagraficaDetail` DocumentiTab: badge nell'header card + riga info con data; aggiornamento ottimistico dopo l'invio.

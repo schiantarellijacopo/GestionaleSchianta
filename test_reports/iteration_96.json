@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only testing su /sospesi. Verificati: (1) ordine layout (Titolo/KPI → Riepilogo collab → toolbar → tabella sospesi → card storico), (2) filtro date su copertura, (3) sezione Storico sospesi. Tutti i comportamenti attesi funzionano correttamente.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "layout_order": "PASS - riepilogo-collab top=300.5px, toolbar top=440px, storico-card top=667.5px. La toolbar è correttamente SOTTO il riepilogo per collaboratore e SOPRA la tabella sospesi.",
+    "filtro_date": "PASS - dal=2026-06-01 mantiene visibile SOSP STORICO (1 riga); dal=2026-07-01 lo fa sparire (0 righe); pulsante 'Azzera date' visibile solo quando date impostate, ripristina correttamente (dal='' al='', 1 riga di nuovo visibile).",
+    "storico_section": "PASS - Toggle sospesi-storico-toggle apre la card. Tabella mostra SOSP STORICO con Coperto il 10/01/2025, Incassato il 15/02/2025, Anticipo 36 gg, Importo 300,00 €. Totale incassato 300,00 €."
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: data-testid 'sospesi-kpi' e 'sospesi-table' menzionati nella review request non esistono nel DOM. Non impattano funzionalità ma sarebbe utile aggiungerli per testing più robusto."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (funzionanti)",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Pagina /sospesi funziona correttamente su tutti e 3 i requisiti della review: layout order, filtro date attivo con Azzera date, sezione Storico con giorni_anticipo=36 e 300€. I data-testid sospesi-kpi e sospesi-table non esistono ma gli altri (sospesi-toolbar, sospesi-riepilogo-collab, sospesi-data-dal, sospesi-data-al, sospesi-data-clear, sospesi-storico-card, sospesi-storico-toggle) funzionano."
+}
