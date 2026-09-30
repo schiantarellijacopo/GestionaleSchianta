@@ -1552,8 +1552,11 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_titoli(db, files_data, log, polizza_id_map, counts,
                            mapping_operatori=mapping_operatori,
                            tracker=tracker, import_mappings=import_mappings)
-    # Passo 1: regola stato polizza in base all'ultimo titolo pagato
-    await _applica_regola_stato_da_titoli(db, polizza_id_map, log)
+    # Passo 1 (RIMOSSO): la regola che impostava lo stato polizza in base ai titoli
+    # (annullamento automatico CATTOLICA / riattivazione da incasso >= 2025) è stata
+    # disattivata su richiesta. Gli import non modificano più lo stato della polizza
+    # in base ai titoli; resta lo stato del tracciato / quello già presente.
+    # (funzione `_applica_regola_stato_da_titoli` mantenuta ma non più invocata)
     counts["polizze_sostituite"] = await _marca_polizze_sostituite(db)
     counts["scadenze_allineate"] = await _aggiorna_scadenza_da_titoli(db)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
