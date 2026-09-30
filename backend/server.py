@@ -9317,7 +9317,55 @@ async def list_veicoli(
             {"proprietario": regex}, {"telaio": regex},
         ]
     items = await db.veicoli.find(flt, {"_id": 0}).sort("targa", 1).to_list(limit)
+    # Fallback: cerca anche le targhe presenti sulle POLIZZE (dato veicolo della
+    # polizza) che non hanno un record dedicato in `veicoli`. Così una targa già
+    # usata su un'altra polizza viene comunque trovata e i dati riutilizzati.
+    query_val = (targa or q or "").upper().strip()
+    if query_val and len(query_val) >= 2:
+        found = {(v.get("targa") or "").upper() for v in items}
+        treg = {"$regex": query_val, "$options": "i"}
+        pol_matches = await db.polizze.find(
+            {"$or": [{"targa": treg}, {"oggetto_assicurato": treg}]},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "targa": 1, "oggetto_assicurato": 1,
+             "veicolo_marca": 1, "veicolo_modello": 1, "veicolo_tipo": 1,
+             "veicolo_alimentazione": 1, "veicolo_uso": 1, "veicolo_data_immatricolazione": 1,
+             "veicolo_cv_fiscali": 1, "veicolo_kw": 1, "veicolo_quintali": 1,
+             "veicolo_cilindrata": 1, "veicolo_posti": 1, "telaio": 1, "intestatario": 1},
+        ).sort("updated_at", -1).to_list(200)
+        for p in pol_matches:
+            tg = (p.get("targa") or p.get("oggetto_assicurato") or "").upper().strip()
+            if not tg or tg in found:
+                continue
+            found.add(tg)
+            items.append(_veicolo_da_polizza(p, tg))
+            if len(items) >= limit:
+                break
     return items
+
+
+def _veicolo_da_polizza(p: dict, targa: str) -> dict:
+    """Costruisce un record veicolo 'sintetico' dai campi veicolo di una polizza,
+    per farlo comparire nella ricerca targa quando non c'è un record in `veicoli`."""
+    return {
+        "id": None,
+        "targa": targa,
+        "marca": p.get("veicolo_marca"),
+        "modello": p.get("veicolo_modello"),
+        "tipo_veicolo": p.get("veicolo_tipo"),
+        "alimentazione": p.get("veicolo_alimentazione"),
+        "uso": p.get("veicolo_uso"),
+        "data_immatricolazione": p.get("veicolo_data_immatricolazione"),
+        "cv": p.get("veicolo_cv_fiscali"),
+        "kw": p.get("veicolo_kw"),
+        "quintali": p.get("veicolo_quintali"),
+        "cilindrata": p.get("veicolo_cilindrata"),
+        "posti": p.get("veicolo_posti"),
+        "telaio": p.get("telaio"),
+        "proprietario": p.get("intestatario"),
+        "fonte": "polizza",
+        "polizza_id": p.get("id"),
+        "numero_polizza": p.get("numero_polizza"),
+    }
 
 
 @api.get("/veicoli/by-targa/{targa}")
@@ -9326,12 +9374,21 @@ async def get_veicolo_by_targa(
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Lookup rapido per pre-compilare i dati veicolo su una nuova polizza."""
-    v = await db.veicoli.find_one({"targa": targa.upper().strip()}, {"_id": 0})
+    tg = targa.upper().strip()
+    v = await db.veicoli.find_one({"targa": tg}, {"_id": 0})
     if not v:
-        raise HTTPException(404, "Veicolo non trovato")
+        # Fallback: ricostruisci il veicolo dai dati dell'ultima polizza con questa targa
+        _pl = await db.polizze.find(
+            {"$or": [{"targa": tg}, {"oggetto_assicurato": tg}]},
+            {"_id": 0},
+        ).sort("updated_at", -1).to_list(1)
+        if not _pl:
+            raise HTTPException(404, "Veicolo non trovato")
+        v = _veicolo_da_polizza(_pl[0], tg)
     # Polizze già associate a questa targa
     pol = await db.polizze.find(
-        {"$or": [{"veicoli_ids": v["id"]}, {"targa": v["targa"]}]},
+        {"$or": [{"veicoli_ids": v.get("id")}, {"targa": v["targa"]},
+                 {"oggetto_assicurato": v["targa"]}]},
         {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "stato": 1,
          "compagnia_id": 1, "effetto": 1, "scadenza_originale": 1},
     ).to_list(50)

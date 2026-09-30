@@ -127,7 +127,7 @@ export default function TargaSearchWithLentina({ value, onChange, showVehicleDat
                         </div>
                     )}
                     {!loading && results.map((v) => (
-                        <button key={v.id}
+                        <button key={v.id || v.targa}
                                 onMouseDown={(e) => { e.preventDefault(); selezionaVeicolo(v); }}
                                 className="w-full text-left px-2 py-1.5 hover:bg-sky-50 border-b border-slate-100 text-xs"
                                 data-testid={`targa-result-${v.targa}`}>
