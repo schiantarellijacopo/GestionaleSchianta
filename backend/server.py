@@ -13782,7 +13782,10 @@ async def upload_allegato(
     path = f"{os.environ.get('APP_NAME', 'assicura')}/{entita_tipo}/{entita_id}/{file_id}.{ext}"
     content_type = file.content_type or obj_storage.mime_for(file.filename or "")
     try:
-        result = obj_storage.put_object(path, data, content_type)
+        # put_object usa `requests` (sincrono): eseguilo in un thread per non
+        # bloccare l'event loop (velocizza le operazioni concorrenti).
+        from starlette.concurrency import run_in_threadpool
+        result = await run_in_threadpool(obj_storage.put_object, path, data, content_type)
     except Exception as e:
         raise HTTPException(503, f"Errore upload: {e}")
     obj = Allegato(

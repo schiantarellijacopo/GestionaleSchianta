@@ -198,21 +198,25 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             // Allega documento → salvato sulla POLIZZA in categoria "quietanza",
             // così compare nella sezione Documenti > Quietanze (sempre, sia in
             // copertura sia in incasso).
+            // Upload in BACKGROUND: l'operazione (incasso/copertura) è già salvata,
+            // quindi chiudiamo subito il dialog e carichiamo il file senza far
+            // attendere l'utente (con toast di esito a fine caricamento).
             if (allegatoFile && titolo.polizza_id) {
-                try {
-                    const fd = new FormData();
-                    fd.append("file", allegatoFile);
-                    await api.post("/allegati", fd, {
-                        params: {
-                            entita_tipo: "polizza",
-                            entita_id: titolo.polizza_id,
-                            categoria: "quietanza",
-                            visibile_cliente: true,
-                            descrizione: "Quietanza (da incasso/copertura)",
-                        },
-                        headers: { "Content-Type": "multipart/form-data" },
-                    });
-                } catch { /* non bloccante */ }
+                const fd = new FormData();
+                fd.append("file", allegatoFile);
+                const upToast = toast.loading("Caricamento allegato in corso…");
+                api.post("/allegati", fd, {
+                    params: {
+                        entita_tipo: "polizza",
+                        entita_id: titolo.polizza_id,
+                        categoria: "quietanza",
+                        visibile_cliente: true,
+                        descrizione: "Quietanza (da incasso/copertura)",
+                    },
+                    headers: { "Content-Type": "multipart/form-data" },
+                })
+                    .then(() => toast.success("Allegato caricato", { id: upToast }))
+                    .catch(() => toast.error("Allegato NON caricato — riprova dalla scheda polizza", { id: upToast }));
             }
 
             const msg = [
