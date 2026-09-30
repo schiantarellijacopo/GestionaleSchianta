@@ -1,0 +1,22 @@
+{
+  "summary": "Verified frontend fix for 'Mostra sezione Dati veicolo' product flag. On polizza VEIC-TST-1 (ramo Tutela Legale, prodotto Sicura Targa TEST with flag=true), the Veicolo tab now appears in both view mode and Modifica polizza dialog even though ramo is NOT RCAuto. Marca (edit-pol-marca) and Modello (edit-pol-modello) were filled and saved successfully - 'Polizza aggiornata' toast appeared and after reload the values FIAT / Panda are persisted and displayed. Targa field in edit dialog is a search-create component (data-testid='targa-search-input') requiring 'Crea Nuova Targa' click - existing behavior, not related to this fix.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Targa in edit dialog uses a search/create picker rather than a plain input; user must explicitly click 'Crea Nuova Targa AB123CD' to persist a new targa. Consider auto-creating on save or documenting this UX. Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "None. Used existing seed polizza 8fef2d17-fa48-4301-bccb-0223917e1f58. Test set Marca=FIAT, Modello=Panda (persisted).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fix confirmed working. In PolizzaDetail.jsx isVeicoloPol (view) and isRCA (edit) correctly include prodotto_mostra_veicolo/_selProd.mostra_sezione_veicolo. Backend GET /polizze/{id} returns prodotto_mostra_veicolo=true for the seed polizza.",
+  "rca of the issue": "Previously the Veicolo tab in polizza detail was gated only by ramo==='RCAuto'. Fix adds an OR condition on the product flag mostra_sezione_veicolo (resolved from library and exposed as prodotto_mostra_veicolo by GET /polizze/{id})."
+}

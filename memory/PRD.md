@@ -1,6 +1,12 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Sezione Dati veicolo da flag prodotto
+
+- **Fix sezione veicolo** (FATTO, testato 100%): la sezione/tab "Dati veicolo" nella scheda polizza compariva solo per ramo RCAuto. Ora compare anche quando il PRODOTTO ha il flag `mostra_sezione_veicolo=true`. Backend: `GET /polizze/{id}` risolve `doc["prodotto_mostra_veicolo"]` dal prodotto in libreria. Frontend `PolizzaDetail`: `isVeicoloPol` (view) e `isRCA` (edit) includono il flag (`_selProd.mostra_sezione_veicolo` in modifica, reattivo al cambio prodotto). Verificato: su polizza ramo "Tutela Legale" con prodotto flaggato il tab Veicolo appare e i dati (marca/modello) si salvano.
+- **APERTO**: diagnosi polizza annullata 184643490 (produzione) — endpoint diagnostico admin NON ancora aggiunto (utente ha cambiato priorità sul tema veicolo). Da riprendere se richiesto: aggiungere `GET /polizze/diagnostica-annullamento` e deploy.
+
+
 ## Sessione 30/09/2026 (fork) — Sospesi: export Excel/PDF storico + storico autonomo in alto
 
 - **Export Excel** (FATTO, testato): nuovi endpoint `GET /api/export/sospesi.xlsx` e `GET /api/export/sospesi-storico.xlsx` (openpyxl, helper `_xlsx_response`). Pulsante "Excel" nella toolbar dei sospesi attivi e nella toolbar dello storico.
