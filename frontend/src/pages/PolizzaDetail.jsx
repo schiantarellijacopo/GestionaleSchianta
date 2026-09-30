@@ -148,7 +148,7 @@ export default function PolizzaDetail() {
         .test(`${pol.ramo || ""} ${pol.prodotto || ""}`);
     // Su polizze Libro Matricola / cumulative NON si mostra la singola tab "Veicolo"
     // (si usa la tab Libro Matricola / Assicurati con applicazioni per veicolo/persona).
-    const isVeicoloPol = isVeicoloPolRaw && !pol.is_libro_matricola && !pol.is_cumulativa_assicurati;
+    const isVeicoloPol = (isVeicoloPolRaw || !!pol.prodotto_mostra_veicolo) && !pol.is_libro_matricola && !pol.is_cumulativa_assicurati;
     const defaultTab = pol.is_libro_matricola ? "libro-matricola"
         : pol.is_cumulativa_assicurati ? "assicurati"
         : isVeicoloPol ? "veicolo" : "garanzie";
@@ -1536,7 +1536,10 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
             .catch(() => setProdotti([]));
     }, [f.ramo]);
 
-    const isRCA = (((f.ramo || "") + " " + (f.prodotto || "")).toUpperCase().includes("RCA"));
+    const _selProd = prodotti.find((p) => p.nome === f.prodotto);
+    const isRCA = (((f.ramo || "") + " " + (f.prodotto || "")).toUpperCase().includes("RCA"))
+        || !!_selProd?.mostra_sezione_veicolo
+        || (!_selProd && !!pol.prodotto_mostra_veicolo);
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>

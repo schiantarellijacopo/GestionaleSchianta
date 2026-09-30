@@ -3194,6 +3194,19 @@ async def get_polizza(pid: str, user=Depends(current_user)):
                 doc["is_cumulativa_assicurati"] = True; _upd["is_cumulativa_assicurati"] = True
             if _upd:
                 await db.polizze.update_one({"id": pid}, {"$set": {**_upd, "updated_at": _now_iso()}})
+    # Flag "mostra sezione dati veicolo" dal PRODOTTO in libreria (oltre a RCAuto)
+    doc["prodotto_mostra_veicolo"] = False
+    if doc.get("prodotto"):
+        _pv = None
+        if doc.get("compagnia_id"):
+            _pv = await db.prodotti.find_one(
+                {"nome": doc.get("prodotto"), "compagnia_id": doc.get("compagnia_id")},
+                {"_id": 0, "mostra_sezione_veicolo": 1},
+            )
+        if not _pv:
+            _pv = await db.prodotti.find_one({"nome": doc.get("prodotto")}, {"_id": 0, "mostra_sezione_veicolo": 1})
+        if _pv and _pv.get("mostra_sezione_veicolo"):
+            doc["prodotto_mostra_veicolo"] = True
     # Arricchimento collaboratore (operatore)
     doc["collaboratore_nome"] = None
     if doc.get("collaboratore_id"):
