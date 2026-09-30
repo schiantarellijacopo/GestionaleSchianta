@@ -1,6 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Firmato in card dedicata + Promemoria scadenza CI + Upload multiplo
+
+- **Task 1 — Firmato nella card dedicata** (FATTO, testato backend): `documenti_genera` accetta `categoria`; se il documento è di una card anagrafica (`ANAG_DICT_CARDS`) viene mirrorato in `anagrafiche.documenti[categoria]` (helper `_mirror_anagrafica_card`). Idem in `esignature_it._finalizza`: il PDF firmato viene salvato come allegato E mirrorato nella card dedicata dell'anagrafica. `GeneraDocumentoButton` assegna `categoria="autocertificazione_stato_famiglia"` quando genera l'autocertificazione stato famiglia. Verificato: genera→allegato+card dict popolata.
+- **Task 2 — Promemoria scadenza carta d'identità** (FATTO, testato): il preset `documento_id_scaduto` ("Documento d'identità in scadenza") esisteva già nel catalogo ma mancava il resolver. Aggiunto `_res_documento_id_in_scadenza(giorni)` in `scheduler_alert.py` (match `ci_data_scadenza == oggi+soglia_giorni`) + wiring in `resolve_payloads`. L'utente crea la regola dal catalogo Avvisi (soglia default 30gg); parte dallo scheduler giornaliero. Verificato: resolver individua l'anagrafica con CI in scadenza.
+- **Task 3 — Upload multiplo per card** (FATTO): `DocumentiSezioneSplit` (card polizza/sinistro, es. quietanze) già supportava il multi-upload (input `multiple` + loop). Esteso anche l'`AllegatiTab` dell'anagrafica ("Altri documenti") al caricamento multiplo.
+
+
 ## Sessione 30/09/2026 (fork) — Documenti Inbox smistamento + Firme OpenAPI + Visibilità card
 
 **Gruppo 1 — Documenti Inbox → card corretta + OCR CI + celle anagrafica** (FATTO, testato)

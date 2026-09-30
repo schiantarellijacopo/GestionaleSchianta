@@ -40,7 +40,18 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
         setCorpo(m?.corpo || ""); setTitolo(m?.nome || "Documento");
     };
 
-    const payload = (salva) => ({ entita_tipo: sezione, entita_id: entitaId, template_id: sel, titolo, corpo, salva });
+    // Mappa il documento generato alla card dedicata dell'anagrafica (se pertinente)
+    const cardCategoria = () => {
+        const t = `${titolo || ""}`.toLowerCase();
+        if (sezione === "contraente" && /autocertific/.test(t) && /famig/.test(t)) return "autocertificazione_stato_famiglia";
+        return undefined;
+    };
+    const payload = (salva) => {
+        const p = { entita_tipo: sezione, entita_id: entitaId, template_id: sel, titolo, corpo, salva };
+        const cat = cardCategoria();
+        if (cat) p.categoria = cat;
+        return p;
+    };
 
     const anteprima = async () => {
         if (!sel) { toast.error("Seleziona un modello"); return; }

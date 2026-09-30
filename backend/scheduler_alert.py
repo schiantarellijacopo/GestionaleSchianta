@@ -173,6 +173,31 @@ async def _res_titolo_scaduto_oltre(giorni: int) -> list[dict]:
     return out
 
 
+async def _res_documento_id_in_scadenza(giorni: int) -> list[dict]:
+    """Anagrafiche la cui carta d'identità (ci_data_scadenza) scade ESATTAMENTE
+    tra `giorni` giorni (promemoria rinnovo documento)."""
+    target = (_today() + timedelta(days=max(0, giorni))).isoformat()
+    out: list[dict] = []
+    cur = db.anagrafiche.find(
+        {"ci_data_scadenza": target},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "ci_data_scadenza": 1, "numero_carta_identita": 1},
+    )
+    async for a in cur:
+        out.append({
+            "entita_tipo": "anagrafica",
+            "entita_id": a.get("id"),
+            "anagrafica_id": a.get("id"),
+            "contraente_id": a.get("id"),
+            "cliente_nome": a.get("ragione_sociale") or "",
+            "tipo_documento": "carta d'identità",
+            "numero_documento": a.get("numero_carta_identita") or "",
+            "data_scadenza": _fmt_date(a.get("ci_data_scadenza")),
+            "scadenza": _fmt_date(a.get("ci_data_scadenza")),
+            "link": f"/anagrafiche/{a.get('id')}",
+        })
+    return out
+
+
 _OFFSET_KINDS = {
     "polizza_scaduta_giorno": 0,
     "polizza_scaduta_5g": 5,
@@ -193,6 +218,8 @@ async def resolve_payloads(rule: dict) -> list[dict]:
         return await _res_compleanno()
     if kind == "titolo_scaduto_oltre":
         return await _res_titolo_scaduto_oltre(int(rule.get("soglia_giorni") or 30))
+    if kind == "documento_id_scaduto":
+        return await _res_documento_id_in_scadenza(int(rule.get("soglia_giorni") or 30))
     # schedule_kind non gestito da questo esecutore (es. digest settimanali,
     # documento_veicolo_mancante gestito da sollecito_veicoli, documento_id_scaduto)
     return []

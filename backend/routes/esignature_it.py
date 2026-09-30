@@ -223,6 +223,27 @@ async def _finalizza(rec: dict) -> Optional[str]:
         {"id": rec["id"]},
         {"$set": {"stato": "DONE", "allegato_firmato_id": al.id, "updated_at": _now_iso()}},
     )
+    # Se il documento appartiene a una card dedicata dell'anagrafica, mostra il
+    # firmato anche nella card (dict documenti).
+    _ANAG_DICT_CARDS = {
+        "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
+        "tessera_sanitaria", "visura_camerale", "mandato_sdd",
+        "autocertificazione_stato_famiglia", "privacy_firmata",
+    }
+    if rec.get("entita_tipo") == "anagrafica" and rec.get("categoria") in _ANAG_DICT_CARDS:
+        await db.anagrafiche.update_one(
+            {"id": rec["entita_id"]},
+            {"$set": {f"documenti.{rec['categoria']}": {
+                "url": f"/api/storage/{up['path']}",
+                "storage_path": up["path"],
+                "nome_file": fname,
+                "mime": "application/pdf",
+                "size_kb": round(up.get("size", len(content)) / 1024, 1),
+                "data_caricamento": _now_iso(),
+                "allegato_id": al.id,
+                "firmato": True,
+            }, "updated_at": _now_iso()}},
+        )
     return al.id
 
 

@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 
 from database import db
 from auth import current_user
-from db_models import Allegato
+from db_models import Allegato, _now_iso
 from storage_service import StorageService
 
 router = APIRouter(tags=["documenti-genera"])
@@ -339,9 +339,42 @@ async def genera_documento(body: dict, user=Depends(current_user)):
     fname = f"{titolo}.pdf"
     stored = await StorageService.put(user=user, entita_tipo=entita, entita_id=entita_id,
                                       filename=f"doc_{entita_id[:8]}.pdf", data=pdf, content_type="application/pdf")
+    categoria = body.get("categoria") or "documento_generato"
     alleg = Allegato(entita_tipo=entita, entita_id=entita_id, nome_file=fname,
                      storage_path=stored["storage_path"], storage_provider=stored["storage_provider"],
                      content_type="application/pdf", size=stored.get("size", len(pdf)),
-                     categoria="documento_generato", descrizione=f"Documento generato: {titolo}")
+                     categoria=categoria, descrizione=f"Documento generato: {titolo}")
     await db.allegati.insert_one(alleg.model_dump())
+    # Mirror nella card dedicata dell'anagrafica (dict documenti) quando pertinente
+    await _mirror_anagrafica_card(entita, entita_id, categoria, alleg, user)
     return {"ok": True, "allegato_id": alleg.id, "nome_file": fname}
+
+
+# Card documenti dell'anagrafica gestite come dict `anagrafiche.documenti[card]`
+ANAG_DICT_CARDS = {
+    "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
+    "tessera_sanitaria", "visura_camerale", "mandato_sdd",
+    "autocertificazione_stato_famiglia", "privacy_firmata",
+}
+
+
+async def _mirror_anagrafica_card(entita_tipo: str, entita_id: str, categoria: str, alleg, user: dict):
+    """Se il documento appartiene a una card dedicata dell'anagrafica, lo rende
+    visibile anche nella card (dict `documenti[categoria]`)."""
+    if entita_tipo != "anagrafica" or categoria not in ANAG_DICT_CARDS:
+        return
+    sp = getattr(alleg, "storage_path", None)
+    entry = {
+        "url": f"/api/storage/{sp}" if sp else None,
+        "storage_path": sp,
+        "nome_file": getattr(alleg, "nome_file", "documento.pdf"),
+        "mime": getattr(alleg, "content_type", "application/pdf"),
+        "size_kb": round((getattr(alleg, "size", 0) or 0) / 1024, 1),
+        "data_caricamento": _now_iso(),
+        "allegato_id": getattr(alleg, "id", None),
+        "caricato_da": (user or {}).get("id"),
+    }
+    await db.anagrafiche.update_one(
+        {"id": entita_id},
+        {"$set": {f"documenti.{categoria}": entry, "updated_at": _now_iso()}},
+    )

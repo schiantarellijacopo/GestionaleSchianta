@@ -1702,16 +1702,19 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit, embedded = false }) {
     const load = () => api.get("/allegati", { params: { entita_tipo, entita_id } }).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [entita_tipo, entita_id]);
 
-    const handleFile = async (file) => {
-        if (!file) return;
+    const handleFile = async (files) => {
+        const arr = files && files.length !== undefined ? Array.from(files) : (files ? [files] : []);
+        if (!arr.length) return;
         setUploading(true);
-        const fd = new FormData(); fd.append("file", file);
         try {
-            await api.post(
-                `/allegati?entita_tipo=${entita_tipo}&entita_id=${entita_id}`,
-                fd, { headers: { "Content-Type": "multipart/form-data" } },
-            );
-            toast.success("File caricato"); load();
+            for (const file of arr) {
+                const fd = new FormData(); fd.append("file", file);
+                await api.post(
+                    `/allegati?entita_tipo=${entita_tipo}&entita_id=${entita_id}`,
+                    fd, { headers: { "Content-Type": "multipart/form-data" } },
+                );
+            }
+            toast.success(arr.length > 1 ? `${arr.length} file caricati` : "File caricato"); load();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setUploading(false); }
     };
@@ -1746,7 +1749,7 @@ function AllegatiTab({ entita_tipo, entita_id, canEdit, embedded = false }) {
             <div className="flex items-center justify-end mb-3">
                 {canEdit && (
                     <label className="inline-flex items-center gap-2 cursor-pointer">
-                        <input type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} data-testid="allegato-upload-input" />
+                        <input type="file" multiple className="hidden" onChange={(e) => handleFile(e.target.files)} data-testid="allegato-upload-input" />
                         <Button asChild size="sm" className="bg-sky-700 hover:bg-sky-800" disabled={uploading}>
                             <span><Upload size={14} className="mr-1" /> {uploading ? "Caricamento..." : "Carica file"}</span>
                         </Button>
