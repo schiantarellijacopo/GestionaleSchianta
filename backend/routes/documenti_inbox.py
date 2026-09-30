@@ -79,21 +79,103 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
 REGOLE:
 - Restituisci null per i campi non leggibili o non pertinenti
 - Date sempre YYYY-MM-DD
+- Per la CARTA D'IDENTITÀ italiana (anche elettronica CIE): l'immagine può contenere FRONTE e RETRO impilati.
+  Cerca in TUTTO il documento (anche nella parte bassa/retro):
+  * "COMUNE DI EMISSIONE" / "COMUNE DI" / "MUNICIPALITY" → campo comune_emissione (es. TIRANO)
+  * "DATA DI EMISSIONE" / "DATA DI RILASCIO" / "EMISSIONE" / "ISSUING" → campo data_emissione
+  * "DATA DI SCADENZA" / "SCADENZA" / "EXPIRY" → campo data_scadenza
+  Le date sulla CI italiana sono in formato GG.MM.AAAA: convertile in YYYY-MM-DD.
 - foto_volto_bbox: SOLO per carta_identita/patente/passaporto/tessera_sanitaria/codice_fiscale.
-  Coordinate normalizzate 0-1 della regione rettangolare che contiene la foto del volto del titolare.
-  Restituisci null/null/null/null se il documento non ha una foto visibile.
+  Coordinate normalizzate 0-1 della regione rettangolare che contiene la foto del VOLTO del titolare
+  (il ritratto fotografico grande, NON la firma né l'impronta). Fornisci SEMPRE il bbox se il volto è visibile.
+  Restituisci null/null/null/null solo se il documento non ha una foto del volto.
 - Niente testo prima/dopo, niente markdown
 """
 
 
+def _norm_bbox(bbox):
+    """Normalizza il bbox del volto a chiavi {x,y,w,h} (float 0-1).
+    Il modello può restituire w/h oppure width/height: accetta entrambi."""
+    if not isinstance(bbox, dict):
+        return None
+    def _f(*keys):
+        for k in keys:
+            v = bbox.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+        return None
+    x, y = _f("x"), _f("y")
+    w, h = _f("w", "width"), _f("h", "height")
+    if None in (x, y, w, h):
+        return None
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _detect_face_crop(img):
+    """Rileva il volto del titolare con OpenCV (Haar cascade) e ritorna il ritaglio
+    PIL del volto più grande (con padding), oppure None se nessun volto trovato.
+    Affidabile per la foto ritratto di carte d'identità/patenti."""
+    try:
+        import cv2
+        import numpy as np
+        arr = np.array(img)  # RGB
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        cascade_path = os.path.join(os.path.dirname(cv2.__file__), "data",
+                                    "haarcascade_frontalface_default.xml")
+        cascade = cv2.CascadeClassifier(cascade_path)
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+                                         minSize=(60, 60))
+        if len(faces) == 0:
+            return None
+        # volto più grande = ritratto principale
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        W, H = img.size
+        padx, pady = int(w * 0.35), int(h * 0.45)
+        left = max(0, x - padx)
+        top = max(0, y - pady)
+        right = min(W, x + w + padx)
+        bottom = min(H, y + h + pady)
+        return img.crop((left, top, right, bottom))
+    except Exception as e:
+        logging.warning("Face detection fallita: %s", e)
+        return None
+
+
+
+
 async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
     import pdfplumber
+    from PIL import Image
     with pdfplumber.open(BytesIO(contents)) as pdf:
         if not pdf.pages:
             raise HTTPException(400, "PDF vuoto")
-        img = pdf.pages[0].to_image(resolution=200).original
+        # Renderizza fino a 3 pagine (fronte/retro dei documenti) e le impila
+        # verticalmente in un'unica immagine, così l'OCR vede TUTTO il documento
+        # (es. il retro della carta d'identità con comune e data di emissione).
+        imgs = []
+        for page in pdf.pages[:3]:
+            imgs.append(page.to_image(resolution=200).original.convert("RGB"))
+        if len(imgs) == 1:
+            combined = imgs[0]
+        else:
+            width = max(im.width for im in imgs)
+            scaled = []
+            for im in imgs:
+                if im.width != width:
+                    nh = int(im.height * (width / im.width))
+                    im = im.resize((width, nh))
+                scaled.append(im)
+            total_h = sum(im.height for im in scaled)
+            combined = Image.new("RGB", (width, total_h), (255, 255, 255))
+            yoff = 0
+            for im in scaled:
+                combined.paste(im, (0, yoff))
+                yoff += im.height
         out = BytesIO()
-        img.save(out, format="JPEG", quality=85)
+        combined.save(out, format="JPEG", quality=85)
         return out.getvalue(), "image/jpeg"
 
 
@@ -273,7 +355,7 @@ async def analizza_documento(
         "storage_path": path,
         "tipo_documento": result.get("tipo_documento"),
         "confidenza": result.get("confidenza"),
-        "foto_volto_bbox": result.get("foto_volto_bbox"),
+        "foto_volto_bbox": _norm_bbox(result.get("foto_volto_bbox")),
         "dati": dati,
         "target_anagrafica": target_anagrafica,
         "target_polizza": target_polizza,
@@ -528,13 +610,11 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
         salva_avatar
         and anagrafica_id
         and inb.get("tipo_documento") in {"carta_identita", "patente", "passaporto", "tessera_sanitaria"}
-        and inb.get("foto_volto_bbox")
         and inb.get("storage_path")
     ):
-        bbox = inb["foto_volto_bbox"] or {}
         try:
             from PIL import Image
-            # Re-fetch original file from storage and crop the face
+            # Re-fetch original file from storage
             blob, _orig_ct = obj_storage.get_object(inb["storage_path"])
             ct_orig = inb.get("content_type") or ""
             if ct_orig == "application/pdf":
@@ -543,18 +623,20 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
                 img_bytes = blob
             img = Image.open(BytesIO(img_bytes)).convert("RGB")
             W, H = img.size
-            x = float(bbox.get("x") or 0)
-            y = float(bbox.get("y") or 0)
-            w = float(bbox.get("w") or 0)
-            h = float(bbox.get("h") or 0)
-            if w > 0 and h > 0:
-                # Padding +10% e bound
-                pad = 0.05
-                left = max(0, int((x - pad) * W))
-                top = max(0, int((y - pad) * H))
-                right = min(W, int((x + w + pad) * W))
-                bottom = min(H, int((y + h + pad) * H))
-                face = img.crop((left, top, right, bottom))
+            # 1) Metodo affidabile: rilevamento volto con OpenCV (Haar cascade).
+            face = _detect_face_crop(img)
+            # 2) Fallback: bbox restituito dall'OCR (se valido).
+            if face is None:
+                bbox = _norm_bbox(inb.get("foto_volto_bbox"))
+                if bbox and bbox["w"] > 0 and bbox["h"] > 0:
+                    pad = 0.05
+                    left = max(0, int((bbox["x"] - pad) * W))
+                    top = max(0, int((bbox["y"] - pad) * H))
+                    right = min(W, int((bbox["x"] + bbox["w"] + pad) * W))
+                    bottom = min(H, int((bbox["y"] + bbox["h"] + pad) * H))
+                    if right > left and bottom > top:
+                        face = img.crop((left, top, right, bottom))
+            if face is not None:
                 # quadrato
                 side = max(face.size)
                 square = Image.new("RGB", (side, side), (240, 240, 240))

@@ -1,6 +1,12 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 30/09/2026 (fork) — Visibilità collaboratori per ruolo (dipendenti vedono tutti)
+## Sessione 30/09/2026 (fork) — OCR carta d'identità (fronte/retro) + avatar affidabile + upload allegato veloce
+
+- **OCR CI fronte/retro** (FATTO, testato): il PDF della carta d'identità ha 2 pagine (fronte + retro) ma `_convert_pdf_to_jpeg` (documenti_inbox.py) convertiva solo la pagina 0 → `data_emissione` e `comune_emissione` (sul retro) risultavano null. Ora impila fino a 3 pagine in un'unica immagine e il prompt è stato rafforzato per i campi CIE (COMUNE DI EMISSIONE, DATA DI RILASCIO/EMISSIONE, formato GG.MM.AAAA→YYYY-MM-DD). Verificato su C.I. DORMIA: comune=TIRANO, data_emissione=2026-03-12, scadenza=2036-02-16.
+- **Avatar da CI affidabile** (FATTO, testato): l'avatar non veniva inserito perché il crop leggeva solo `bbox.w/.h` mentre il modello a volte ritorna `width/height` (o bbox nullo). Ora: (1) `_norm_bbox` normalizza le chiavi; (2) l'avatar usa PRIMA il **rilevamento volto OpenCV** (Haar cascade `haarcascade_frontalface_default.xml`, sceglie il volto più grande = ritratto) con fallback sul bbox OCR. Verificato: `avatar_url` popolato dal save inbox; detection sceglie il volto 192×192.
+- **Upload allegato più veloce** (FATTO): in `DialogIncassoCopertura` l'upload dell'allegato ora avviene in BACKGROUND (l'operazione incasso/copertura si salva e il dialog si chiude subito; toast di esito a fine caricamento). Backend `upload_allegato`: `obj_storage.put_object` (requests sincrono) eseguito in `run_in_threadpool` per non bloccare l'event loop.
+
+
 
 - **Selezione collaboratori per i dipendenti** (FATTO, testato via API): `GET /auth/users` (server.py) restringeva la lista ai soli non-admin verso "se stessi", quindi un DIPENDENTE non poteva selezionare altri collaboratori nelle tendine (es. ripartizione provvigioni in TitoloDialog). Nuova regola: **admin e dipendenti** vedono tutti gli utenti del proprio tenant; i **collaboratori** vedono solo se stessi. Cambiata la condizione da `if role != "admin"` a `if role == "collaboratore"`. Vale in tutto il programma perché tutte le tendine collaboratore leggono da `/auth/users`. Verificato: admin=5, dipendente=5, collaboratore=1.
 
