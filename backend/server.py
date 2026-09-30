@@ -189,14 +189,15 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
 
 @api.get("/auth/users")
 async def list_users(user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    # Visibility: solo utenti della PROPRIA agenzia (no libreria globale / super admin);
-    # i non-admin vedono solo se stessi.
+    # Visibility: solo utenti della PROPRIA agenzia (no libreria globale / super admin).
+    # admin e dipendenti vedono TUTTI i collaboratori del tenant (per poterli selezionare
+    # in tutto il programma); i COLLABORATORI vedono solo se stessi.
     from tenant import user_tenant_id
     tid = user_tenant_id(user)
     flt: dict = {"is_super_admin": {"$ne": True}}
     if tid:
         flt["agenzia_tenant_id"] = tid
-    if user["role"] != "admin":
+    if user["role"] == "collaboratore":
         flt["id"] = user["id"]
     users = await db.users.find(flt, {"password_hash": 0, "_id": 0}).to_list(500)
     return users

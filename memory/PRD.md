@@ -1,6 +1,10 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 30/09/2026 (fork) — Ricerca targa trova anche le polizze + regola CATTOLICA rimossa
+## Sessione 30/09/2026 (fork) — Visibilità collaboratori per ruolo (dipendenti vedono tutti)
+
+- **Selezione collaboratori per i dipendenti** (FATTO, testato via API): `GET /auth/users` (server.py) restringeva la lista ai soli non-admin verso "se stessi", quindi un DIPENDENTE non poteva selezionare altri collaboratori nelle tendine (es. ripartizione provvigioni in TitoloDialog). Nuova regola: **admin e dipendenti** vedono tutti gli utenti del proprio tenant; i **collaboratori** vedono solo se stessi. Cambiata la condizione da `if role != "admin"` a `if role == "collaboratore"`. Vale in tutto il programma perché tutte le tendine collaboratore leggono da `/auth/users`. Verificato: admin=5, dipendente=5, collaboratore=1.
+
+
 
 - **Ricerca targa estesa alle polizze** (FATTO, testato via API): la ricerca targa (`TargaSearchWithLentina`) trovava solo i record della collezione `veicoli` (Libro Matricola). Ora `GET /veicoli?q=` e `GET /veicoli/by-targa/{targa}` cercano in fallback anche le POLIZZE con quella targa (`targa`/`oggetto_assicurato`) e ricostruiscono un record veicolo "sintetico" dai campi `veicolo_*` della polizza (helper `_veicolo_da_polizza`). Così una targa già usata su un'altra polizza (es. FA816HA MERCEDES CLA su una RCA) viene trovata e i dati riutilizzati anche su una nuova polizza. Verificato: q=ZZ999 → trova targa da polizza; by-targa → marca/modello/kw/cilindrata + polizze_collegate.
 - **Regola CATTOLICA import RIMOSSA** (FATTO): rimossa la chiamata a `_applica_regola_stato_da_titoli` nella pipeline import ZIP Omnia (`ania_importer.py`). Gli import non modificano più lo stato polizza in base ai titoli (né annullamento automatico CATTOLICA né riattivazione). Nessuna correzione retroattiva.
