@@ -1,4 +1,10 @@
-# Programma Assicurativo — PRD (aggiornato 09/09/2026)
+# Programma Assicurativo — PRD (aggiornato 30/09/2026)
+
+## Sessione 30/09/2026 (fork) — Diagnostica annullamento + Sezione veicolo in creazione
+
+- **Endpoint diagnostica annullamento** (FATTO, testato): nuovo `GET /api/polizze/diagnostica-annullamento?numero=<n>` (o `?pid=`), admin-only, inserito PRIMA di `/polizze/{pid}` in server.py. Cerca la polizza nel tenant e restituisce stato, data_annullamento, motivo, compagnia (flag is_cattolica), titoli incassati + ultimo_incasso, `cause_probabili` (data_annullamento→annullata, motivo, sostituzione, regola CATTOLICA senza incassi ≥2025-01-01, fallback disdetta/annul da tracciato) e `attivita_log`. Verificato via curl: path "attiva" e path "annullata" (data_annullamento + motivo Disdetta) con ripristino. Per la 184643490 (produzione) va usato dopo il deploy.
+- **Sezione Dati veicolo in CREAZIONE polizza** (FATTO, testato screenshot): in `Polizze.jsx` NuovaPolizzaDialog aggiunta la sezione "Dati veicolo" (Targa+lookup Libro Matricola/polizza precedente, Marca, Modello, Tipo, Alimentazione, Uso, Immatricolazione, CV fiscali, KW, Cilindrata, Posti). Mostrata quando `showVeicolo` = ramo/prodotto matcha regex RCA/veicoli OPPURE il prodotto scelto ha `mostra_sezione_veicolo`. La targa (onBlur/Cerca) richiama `lookupTarga` che auto-compila i dati se la targa esiste. Payload pulito dai campi veicolo vuoti (i numerici del modello Polizza non accettano stringa vuota). Verificato: selezionando ramo "RC Auto" la sezione compare con tutti i campi.
+
 
 
 ## Sessione 30/09/2026 (fork) — Sezione Dati veicolo da flag prodotto

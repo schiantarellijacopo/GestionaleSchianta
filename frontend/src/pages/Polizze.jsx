@@ -496,6 +496,9 @@ function NuovaPolizzaDialog({ onClose }) {
         premio_lordo: 0, premio_netto: 0, premio_tasse: 0, premio_ssn: 0, provvigioni: 0,
         targa: "", frazionamento: "annuale", stato: "attiva",
         prossima_quietanza: "", collaboratore_id: "", mandato: "",
+        veicolo_marca: "", veicolo_modello: "", veicolo_tipo: "", veicolo_alimentazione: "",
+        veicolo_uso: "", veicolo_data_immatricolazione: "", veicolo_cv_fiscali: "",
+        veicolo_kw: "", veicolo_cilindrata: "", veicolo_posti: "", telaio: "",
     });
     const [quietanzaTouched, setQuietanzaTouched] = useState(false);
     // Auto-calcolo Data prima quietanza = effetto + periodo del frazionamento
@@ -580,6 +583,12 @@ function NuovaPolizzaDialog({ onClose }) {
     // Lista filtrata = quanto restituito dal server (gia' filtrato per query con AND multi-token).
     const anaFiltrate = ana.slice(0, 50);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    // Sezione "Dati veicolo" in creazione: mostrata se il ramo è RCA/veicoli OPPURE
+    // il prodotto scelto ha il flag `mostra_sezione_veicolo` (coerente con la scheda polizza).
+    const _selProd = prodotti.find((p) => p.nome === f.prodotto);
+    const showVeicolo = /rca|rc\s*auto|autovettur|autocarr|motocicl|ciclomotor|\bauto\b|\bmoto\b|veicol|natant|imbarcaz/i
+        .test(`${f.ramo || ""} ${f.prodotto || ""}`) || !!_selProd?.mostra_sezione_veicolo;
 
     // Lookup targa: Libro Matricola → fallback polizze precedenti. Riusato da onBlur e dal pulsante "Cerca".
     const lookupTarga = async (raw) => {
@@ -708,6 +717,12 @@ function NuovaPolizzaDialog({ onClose }) {
             if (f.veicolo_id) {
                 payload.veicoli_ids = [f.veicolo_id];
             }
+            // Pulisci i campi veicolo vuoti (i numerici non accettano stringa vuota lato modello)
+            ["veicolo_marca", "veicolo_modello", "veicolo_tipo", "veicolo_alimentazione",
+             "veicolo_uso", "veicolo_data_immatricolazione", "veicolo_cv_fiscali",
+             "veicolo_kw", "veicolo_cilindrata", "veicolo_posti", "telaio"].forEach((k) => {
+                if (payload[k] === "" || payload[k] == null) delete payload[k];
+            });
             const created = await api.post("/polizze", payload);
             if (polizzaFile && created.data?.id) {
                 const fd = new FormData();
@@ -938,8 +953,47 @@ function NuovaPolizzaDialog({ onClose }) {
                     </Select>
                 </div>
                 <div><Label>Data prima quietanza</Label><Input type="date" value={f.prossima_quietanza || ""} onChange={(e) => { setQuietanzaTouched(true); set("prossima_quietanza", e.target.value); }} data-testid="pol-prima-quietanza" /></div>
+                {showVeicolo && (
+                    <div className="col-span-2 border border-sky-200 bg-sky-50/40 rounded-md p-3 mt-1" data-testid="pol-veicolo-sezione">
+                        <div className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold pb-2 flex items-center gap-1">
+                            <Car size={13} /> Dati veicolo
+                        </div>
+                        <div className="col-span-2 mb-3">
+                            <Label>Targa</Label>
+                            <div className="flex gap-2">
+                                <Input
+                                    value={f.targa}
+                                    placeholder="Es. AB123CD"
+                                    onChange={(e) => set("targa", e.target.value.toUpperCase())}
+                                    onBlur={(e) => { const t = e.target.value.trim(); if (t.length >= 4) lookupTarga(t); }}
+                                    data-testid="pol-targa-input"
+                                />
+                                <Button type="button" variant="outline" size="sm" onClick={() => lookupTarga()} disabled={targaLoading} data-testid="pol-targa-cerca">
+                                    <Search size={13} className="mr-1" />{targaLoading ? "Cerco..." : "Cerca"}
+                                </Button>
+                            </div>
+                            {veicoloInfo && (
+                                <div className="text-[11px] text-emerald-700 mt-1">
+                                    {veicoloInfo.fonte === "libro_matricola" ? "Dati dal Libro Matricola" : "Dati da polizza precedente"} — compilati automaticamente
+                                </div>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><Label>Marca</Label><Input value={f.veicolo_marca} onChange={(e) => set("veicolo_marca", e.target.value)} data-testid="pol-veicolo-marca" /></div>
+                            <div><Label>Modello</Label><Input value={f.veicolo_modello} onChange={(e) => set("veicolo_modello", e.target.value)} data-testid="pol-veicolo-modello" /></div>
+                            <div><Label>Tipo veicolo</Label><Input value={f.veicolo_tipo} onChange={(e) => set("veicolo_tipo", e.target.value)} /></div>
+                            <div><Label>Alimentazione</Label><Input value={f.veicolo_alimentazione} onChange={(e) => set("veicolo_alimentazione", e.target.value)} /></div>
+                            <div><Label>Tipo uso</Label><Input value={f.veicolo_uso} onChange={(e) => set("veicolo_uso", e.target.value)} /></div>
+                            <div><Label>Immatricolazione</Label><Input type="date" value={f.veicolo_data_immatricolazione} onChange={(e) => set("veicolo_data_immatricolazione", e.target.value)} /></div>
+                            <div><Label>CV fiscali</Label><Input value={f.veicolo_cv_fiscali} onChange={(e) => set("veicolo_cv_fiscali", e.target.value)} /></div>
+                            <div><Label>KW</Label><Input value={f.veicolo_kw} onChange={(e) => set("veicolo_kw", e.target.value)} /></div>
+                            <div><Label>Cilindrata</Label><Input value={f.veicolo_cilindrata} onChange={(e) => set("veicolo_cilindrata", e.target.value)} /></div>
+                            <div><Label>Numero posti</Label><Input value={f.veicolo_posti} onChange={(e) => set("veicolo_posti", e.target.value)} /></div>
+                        </div>
+                    </div>
+                )}
                 <div className="col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
-                    💡 Premi (netto/lordo/imposte/SSN), provvigioni e dati veicolo (targa) si inseriscono e si modificano nella scheda della polizza dopo la creazione.
+                    💡 Premi (netto/lordo/imposte/SSN) e provvigioni si inseriscono e si modificano nella scheda della polizza dopo la creazione.
                 </div>
             </div>
             <DialogFooter>

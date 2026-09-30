@@ -3152,6 +3152,98 @@ async def veicolo_by_targa(
     }
 
 
+@api.get("/polizze/diagnostica-annullamento")
+async def diagnostica_annullamento(
+    numero: str | None = None,
+    pid: str | None = None,
+    user=Depends(require_user("admin")),
+):
+    """Diagnostica perché una polizza risulta annullata.
+    Cerca per ?numero=... (numero polizza) o ?pid=... (id) nel tenant corrente e
+    restituisce stato, data_annullamento, motivo, compagnia (regola CATTOLICA) e le
+    voci attivita_log dell'import che possono averla annullata."""
+    if not numero and not pid:
+        raise HTTPException(400, "Fornisci ?numero=<numero_polizza> oppure ?pid=<id>")
+    flt = {"id": pid} if pid else {
+        "numero_polizza": {"$regex": f"^{re.escape(numero.strip())}$", "$options": "i"}
+    }
+    pol = await db.polizze.find_one(flt, {"_id": 0})
+    if not pol:
+        raise HTTPException(404, "Polizza non trovata in questo tenant")
+    pid = pol["id"]
+
+    comp = None
+    if pol.get("compagnia_id"):
+        comp = await db.compagnie.find_one(
+            {"id": pol["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
+    comp_nome = comp.get("ragione_sociale") if comp else None
+    is_cattolica = bool(comp_nome and "cattolica" in comp_nome.lower())
+
+    titoli = await db.titoli.find(
+        {"polizza_id": pid},
+        {"_id": 0, "stato": 1, "data_incasso": 1, "tipo": 1, "importo_lordo": 1},
+    ).to_list(None)
+    incassati = [t for t in titoli if t.get("stato") == "incassato" and t.get("data_incasso")]
+    ultimo_incasso = max((t["data_incasso"] for t in incassati), default=None)
+    SOGLIA = "2025-01-01"
+
+    logs = await db.attivita_log.find(
+        {"entita": "polizza", "entita_id": pid}, {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
+
+    cause: list[str] = []
+    if pol.get("stato") != "annullata":
+        cause.append(f"La polizza NON risulta annullata: stato attuale = '{pol.get('stato')}'.")
+    else:
+        if pol.get("data_annullamento"):
+            cause.append(
+                f"È presente 'data_annullamento' = {pol['data_annullamento']}: durante l'import "
+                "la presenza di questa data forza automaticamente lo stato a 'annullata'.")
+        if pol.get("motivo_annullamento"):
+            cause.append(f"Motivo di annullamento registrato: {pol['motivo_annullamento']}.")
+        if pol.get("sostituisce_polizza"):
+            cause.append(f"La polizza sostituisce la n° {pol['sostituisce_polizza']} (flusso di sostituzione).")
+        if pol.get("ramo_originale") or pol.get("prodotto_originale"):
+            pass
+        if is_cattolica and (not ultimo_incasso or ultimo_incasso < SOGLIA):
+            cause.append(
+                f"Regola stato import (compagnia CATTOLICA): nessun titolo incassato dal {SOGLIA} in poi "
+                f"(ultimo incasso: {ultimo_incasso or 'nessuno'}) → la polizza viene marcata 'annullata'.")
+        if not cause:
+            cause.append(
+                "Nessuna causa evidente dai campi della polizza: lo stato 'annullata' proviene "
+                "probabilmente dal tracciato originale (colonna stato del flusso contiene 'annul'/'disdetta', "
+                "che l'import mappa a 'annullata').")
+
+    return {
+        "polizza": {
+            "id": pol["id"],
+            "numero_polizza": pol.get("numero_polizza"),
+            "stato": pol.get("stato"),
+            "data_annullamento": pol.get("data_annullamento"),
+            "motivo_annullamento": pol.get("motivo_annullamento"),
+            "sostituisce_polizza": pol.get("sostituisce_polizza"),
+            "effetto": pol.get("effetto"),
+            "scadenza": pol.get("scadenza"),
+            "fonte": pol.get("fonte"),
+            "ramo": pol.get("ramo"),
+            "prodotto": pol.get("prodotto"),
+        },
+        "compagnia": comp_nome,
+        "is_cattolica": is_cattolica,
+        "titoli_totali": len(titoli),
+        "titoli_incassati": len(incassati),
+        "ultimo_incasso": ultimo_incasso,
+        "soglia_riattivazione": SOGLIA,
+        "cause_probabili": cause,
+        "suggerimento": (
+            "Per riportarla attiva: apri la scheda polizza e cambia lo stato in 'Attiva', "
+            "oppure incassa un titolo con data ≥ 2025-01-01 (per le polizze CATTOLICA la regola import la riattiva)."
+        ),
+        "attivita_log": logs,
+    }
+
+
 @api.get("/polizze/{pid}")
 async def get_polizza(pid: str, user=Depends(current_user)):
     doc = await db.polizze.find_one({"id": pid}, {"_id": 0})
