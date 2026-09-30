@@ -4776,6 +4776,61 @@ async def export_titoli_xlsx(stato: Optional[str] = None,
     )
 
 
+def _xlsx_response(headers: list, rows: list, title: str, filename: str):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = title[:31]
+    ws.append(headers)
+    hf = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    hfont = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = hf; c.font = hfont; c.alignment = Alignment(horizontal="center")
+    for r in rows:
+        ws.append(r)
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value is not None else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 34)
+    out = _io.BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api.get("/export/sospesi.xlsx")
+async def export_sospesi_xlsx(collaboratore_id: Optional[str] = None,
+                              user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    items = await titoli_sospesi(collaboratore_id=collaboratore_id, user=user)
+    headers = ["Cliente", "Cellulare", "Collaboratore", "Polizza", "Ramo", "Targa",
+               "Coperto il", "Anticipo (gg)", "Scad. polizza", "Da pagare €"]
+    rows = [[
+        t.get("contraente_nome"), t.get("cellulare"), t.get("collaboratore_nome"),
+        t.get("numero_polizza"), t.get("ramo"), t.get("targa"),
+        (t.get("data_copertura") or "")[:10], t.get("giorni_anticipo"),
+        (t.get("scadenza_polizza") or "")[:10],
+        t.get("importo_da_pagare") if t.get("importo_da_pagare") is not None else t.get("importo_lordo"),
+    ] for t in items]
+    return _xlsx_response(headers, rows, "Sospesi", "sospesi_attivi.xlsx")
+
+
+@api.get("/export/sospesi-storico.xlsx")
+async def export_sospesi_storico_xlsx(collaboratore_id: Optional[str] = None,
+                                      dal: Optional[str] = None, al: Optional[str] = None,
+                                      user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    items = await titoli_sospesi_storico(collaboratore_id=collaboratore_id, dal=dal, al=al, user=user)
+    headers = ["Cliente", "Collaboratore", "Polizza", "Ramo", "Targa",
+               "Coperto il", "Incassato il", "Anticipo (gg)", "Importo €"]
+    rows = [[
+        t.get("contraente_nome"), t.get("collaboratore_nome"), t.get("numero_polizza"),
+        t.get("ramo"), t.get("targa"),
+        (t.get("data_copertura") or "")[:10], (t.get("data_incasso") or "")[:10],
+        t.get("giorni_anticipo"),
+        t.get("importo_pagato") if t.get("importo_pagato") is not None else t.get("importo_lordo"),
+    ] for t in items]
+    return _xlsx_response(headers, rows, "Storico sospesi", "sospesi_storico.xlsx")
+
+
 def _polizze_export_filters(**kw) -> dict:
     """Pulisce i kwargs filtro dell'export polizze (rimuove None)."""
     return {k: v for k, v in kw.items() if v is not None and v != ""}
@@ -14374,6 +14429,45 @@ async def stampa_titoli_sospesi(
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "sospesi_anticipi.pdf")
+
+
+@api.get("/stampa/titoli/sospesi-storico")
+async def stampa_titoli_sospesi_storico(
+    collaboratore_id: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """PDF dello STORICO sospesi (anticipi già incassati) filtrato per periodo."""
+    from datetime import date as _date
+    items = await titoli_sospesi_storico(collaboratore_id=collaboratore_id, dal=dal, al=al, user=user)
+    rows = []
+    totale = 0.0
+    for t in items:
+        imp = float((t.get("importo_pagato") if t.get("importo_pagato") is not None else t.get("importo_lordo")) or 0)
+        totale += imp
+        gg = t.get("giorni_anticipo")
+        rows.append([
+            t.get("contraente_nome", ""),
+            t.get("collaboratore_nome") or "—",
+            t.get("numero_polizza", ""),
+            (t.get("ramo", "") or "") + (f" {t.get('targa')}" if t.get("targa") else ""),
+            (t.get("data_copertura") or "")[:10],
+            (t.get("data_incasso") or "")[:10],
+            f"{gg} gg" if gg is not None else "—",
+            imp,
+        ])
+    rows.append(["", "", "", "", "", "", "TOTALE", totale])
+    headers = ["Cliente", "Collaboratore", "Polizza", "Ramo / Targa", "Coperto il", "Incassato il", "Anticipo", "Importo €"]
+    periodo = ""
+    if dal or al:
+        periodo = f" — periodo {(dal or '…')} / {(al or '…')}"
+    sottotitolo = f"{len(rows) - 1} sospesi incassati{periodo} — Data stampa: {_date.today().strftime('%d/%m/%Y')}"
+    pdf = pdf_report.stampa_elenco(
+        "Storico Sospesi Anticipi", sottotitolo, headers, rows,
+        col_widths_mm=[42, 33, 28, 28, 22, 22, 18, 25],
+        **(await _intestazione_pdf()),
+    )
+    return _pdf_response(pdf, "sospesi_storico.pdf")
 
 
 @api.get("/stampa/sinistri")
