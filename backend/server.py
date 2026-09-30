@@ -4235,6 +4235,74 @@ async def titoli_sospesi(
     return result
 
 
+@api.get("/titoli/sospesi-storico")
+async def titoli_sospesi_storico(
+    collaboratore_id: Optional[str] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Storico dei sospesi: titoli anticipati dall'agenzia (titolo_coperto) che sono
+    poi stati INCASSATI. Filtrabile per collaboratore e per data incasso (dal/al)."""
+    flt = {"titolo_coperto": True, "stato": "incassato"}
+    if dal or al:
+        cond = {}
+        if dal:
+            cond["$gte"] = dal
+        if al:
+            cond["$lte"] = al
+        flt["data_incasso"] = cond
+    items = await db.titoli.find(flt, {"_id": 0}).sort("data_incasso", -1).to_list(5000)
+    if not items:
+        return []
+    pol_ids = list({t["polizza_id"] for t in items if t.get("polizza_id")})
+    pols = {p["id"]: p async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0})}
+    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0})}
+    collab_ids = list({(pols.get(t["polizza_id"], {}).get("collaboratore_id") or t.get("collaboratore_id"))
+                       for t in items if (pols.get(t["polizza_id"], {}).get("collaboratore_id") or t.get("collaboratore_id"))})
+    collab_map = {}
+    if collab_ids:
+        async for u in db.users.find({"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            collab_map[u["id"]] = u["name"]
+    result = []
+    for t in items:
+        p = pols.get(t["polizza_id"], {})
+        a = anas.get(p.get("contraente_id", ""), {})
+        collab_id = p.get("collaboratore_id") or t.get("collaboratore_id")
+        if collaboratore_id and collab_id != collaboratore_id:
+            continue
+        result.append({
+            "id": t["id"],
+            "polizza_id": t["polizza_id"],
+            "numero_polizza": p.get("numero_polizza"),
+            "ramo": p.get("ramo"),
+            "targa": p.get("targa"),
+            "contraente_id": a.get("id"),
+            "contraente_nome": a.get("ragione_sociale"),
+            "collaboratore_id": collab_id,
+            "collaboratore_nome": collab_map.get(collab_id) if collab_id else None,
+            "data_copertura": t.get("data_copertura"),
+            "data_incasso": t.get("data_incasso"),
+            "giorni_anticipo": _giorni_tra(t.get("data_copertura"), t.get("data_incasso")),
+            "scadenza_polizza": p.get("scadenza"),
+            "importo_lordo": t.get("importo_lordo", 0.0),
+            "importo_pagato": (t.get("importo_pagato") if t.get("importo_pagato") is not None else t.get("importo_lordo", 0.0)),
+            "mezzo_pagamento": t.get("mezzo_pagamento"),
+        })
+    return result
+
+
+def _giorni_tra(dal_iso: Optional[str], al_iso: Optional[str]) -> Optional[int]:
+    if not dal_iso or not al_iso:
+        return None
+    try:
+        from datetime import date as _date
+        return (_date.fromisoformat(al_iso[:10]) - _date.fromisoformat(dal_iso[:10])).days
+    except Exception:
+        return None
+
+
 def _giorni_da_oggi(data_iso: Optional[str]) -> Optional[int]:
     if not data_iso:
         return None

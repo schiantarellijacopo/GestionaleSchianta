@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import DialogIncasso from "@/components/DialogIncasso";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
-import { Coins, Clock, AlertTriangle, CheckCircle, Printer, Layers } from "lucide-react";
+import { Coins, Clock, AlertTriangle, CheckCircle, Printer, Layers, History } from "lucide-react";
 
 export default function TitoliSospesi() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -27,12 +27,27 @@ export default function TitoliSospesi() {
     const [selectedIds, setSelectedIds] = useState(new Set());
     const [bulkOpen, setBulkOpen] = useState(false);
     const [q, setQ] = useState("");  // ricerca testuale sui sospesi
+    const [dataDal, setDataDal] = useState("");  // filtro data copertura (da)
+    const [dataAl, setDataAl] = useState("");    // filtro data copertura (a)
+    const [storico, setStorico] = useState(null);
+    const [showStorico, setShowStorico] = useState(false);
 
     const load = useCallback(() => {
         const params = {};
         if (filtroCollab !== "all") params.collaboratore_id = filtroCollab;
         api.get("/titoli/sospesi", { params }).then((r) => setItems(r.data));
     }, [filtroCollab]);
+
+    const loadStorico = useCallback(() => {
+        const params = {};
+        if (filtroCollab !== "all") params.collaboratore_id = filtroCollab;
+        if (dataDal) params.dal = dataDal;
+        if (dataAl) params.al = dataAl;
+        setStorico(null);
+        api.get("/titoli/sospesi-storico", { params }).then((r) => setStorico(r.data));
+    }, [filtroCollab, dataDal, dataAl]);
+
+    useEffect(() => { if (showStorico) loadStorico(); }, [showStorico, loadStorico]);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollab(r.data));
@@ -44,6 +59,8 @@ export default function TitoliSospesi() {
     const visibleItems = useMemo(() => {
         if (!items) return null;
         let list = ggMin ? items.filter((t) => (t.giorni_anticipo || 0) >= ggMin) : items;
+        if (dataDal) list = list.filter((t) => (t.data_copertura || "") >= dataDal);
+        if (dataAl) list = list.filter((t) => (t.data_copertura || "") <= dataAl);
         const term = q.trim().toLowerCase();
         if (term) {
             list = list.filter((t) =>
@@ -51,7 +68,7 @@ export default function TitoliSospesi() {
                     .toLowerCase().includes(term));
         }
         return list;
-    }, [items, ggMin, q]);
+    }, [items, ggMin, q, dataDal, dataAl]);
 
     const clearGgMin = () => {
         const p = new URLSearchParams(searchParams);
@@ -136,45 +153,6 @@ export default function TitoliSospesi() {
                 />
             </div>
 
-            <Card className="border-slate-200 p-3 mb-4 flex items-end gap-3 flex-wrap">
-                <div className="flex-1 min-w-[220px] max-w-sm">
-                    <Label className="text-xs">Cerca</Label>
-                    <Input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        placeholder="Contraente, n° polizza, ramo, targa, telefono..."
-                        data-testid="sospesi-search"
-                    />
-                </div>
-                <div className="flex-1 max-w-xs">
-                    <Label className="text-xs">Filtra per collaboratore</Label>
-                    <Select value={filtroCollab} onValueChange={setFiltroCollab}>
-                        <SelectTrigger data-testid="sospesi-filter-collab"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Tutti</SelectItem>
-                            {collab.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <Button
-                    variant="outline"
-                    onClick={() => openPdf("/stampa/titoli/sospesi", filtroCollab !== "all" ? { collaboratore_id: filtroCollab } : {})}
-                    data-testid="sospesi-print-pdf"
-                    disabled={!items || items.length === 0}
-                >
-                    <Printer size={14} className="mr-1" /> Stampa PDF
-                </Button>
-                <Button
-                    className="bg-emerald-600 hover:bg-emerald-700"
-                    onClick={() => setBulkOpen(true)}
-                    disabled={selectedIds.size === 0}
-                    data-testid="sospesi-bulk-incassa"
-                >
-                    <Layers size={14} className="mr-1" />
-                    Incassa selezionati ({selectedIds.size}){selectedIds.size > 0 ? ` · ${fmtEur(selectedTotal)}` : ""}
-                </Button>
-            </Card>
-
             {riepilogoCollab.length > 0 && (
                 <Card className="border-slate-200 mb-4 overflow-hidden" data-testid="sospesi-riepilogo-collab">
                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-600 font-semibold">
@@ -207,6 +185,59 @@ export default function TitoliSospesi() {
                     </table>
                 </Card>
             )}
+
+            {/* Barra strumenti — sotto la tabella riepilogo per collaboratore */}
+            <Card className="border-slate-200 p-3 mb-4 flex items-end gap-3 flex-wrap" data-testid="sospesi-toolbar">
+                <div className="flex-1 min-w-[220px] max-w-sm">
+                    <Label className="text-xs">Cerca</Label>
+                    <Input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="Contraente, n° polizza, ramo, targa, telefono..."
+                        data-testid="sospesi-search"
+                    />
+                </div>
+                <div className="max-w-xs">
+                    <Label className="text-xs">Filtra per collaboratore</Label>
+                    <Select value={filtroCollab} onValueChange={setFiltroCollab}>
+                        <SelectTrigger data-testid="sospesi-filter-collab"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tutti</SelectItem>
+                            {collab.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label className="text-xs">Copertura dal</Label>
+                    <Input type="date" value={dataDal} onChange={(e) => setDataDal(e.target.value)} className="w-[150px]" data-testid="sospesi-data-dal" />
+                </div>
+                <div>
+                    <Label className="text-xs">al</Label>
+                    <Input type="date" value={dataAl} onChange={(e) => setDataAl(e.target.value)} className="w-[150px]" data-testid="sospesi-data-al" />
+                </div>
+                {(dataDal || dataAl) && (
+                    <Button variant="ghost" size="sm" onClick={() => { setDataDal(""); setDataAl(""); }} data-testid="sospesi-data-clear">
+                        Azzera date
+                    </Button>
+                )}
+                <Button
+                    variant="outline"
+                    onClick={() => openPdf("/stampa/titoli/sospesi", filtroCollab !== "all" ? { collaboratore_id: filtroCollab } : {})}
+                    data-testid="sospesi-print-pdf"
+                    disabled={!items || items.length === 0}
+                >
+                    <Printer size={14} className="mr-1" /> Stampa PDF
+                </Button>
+                <Button
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                    onClick={() => setBulkOpen(true)}
+                    disabled={selectedIds.size === 0}
+                    data-testid="sospesi-bulk-incassa"
+                >
+                    <Layers size={14} className="mr-1" />
+                    Incassa selezionati ({selectedIds.size}){selectedIds.size > 0 ? ` · ${fmtEur(selectedTotal)}` : ""}
+                </Button>
+            </Card>
 
             <Card className="border-slate-200 overflow-hidden">
                 {ggMin > 0 && (
@@ -312,16 +343,80 @@ export default function TitoliSospesi() {
                 )}
             </Card>
 
+            {/* STORICO SOSPESI — anticipi già incassati */}
+            <Card className="border-slate-200 overflow-hidden mt-5" data-testid="sospesi-storico-card">
+                <button type="button"
+                    onClick={() => setShowStorico((s) => !s)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200 text-left hover:bg-slate-100"
+                    data-testid="sospesi-storico-toggle">
+                    <div className="flex items-center gap-2">
+                        <History size={16} className="text-slate-600" />
+                        <span className="font-semibold text-sm text-slate-700">Storico sospesi (anticipi già incassati)</span>
+                        {(dataDal || dataAl) && <span className="text-[11px] text-slate-500">— filtro date attivo</span>}
+                    </div>
+                    <span className={`text-slate-400 transition-transform ${showStorico ? "rotate-180" : ""}`}>▾</span>
+                </button>
+                {showStorico && (
+                    storico === null ? <Loading /> : storico.length === 0 ? (
+                        <div className="text-center py-12 text-slate-500 text-sm">
+                            Nessun sospeso incassato{(dataDal || dataAl) ? " nel periodo selezionato" : ""}.
+                        </div>
+                    ) : (
+                        <table className="tbl w-full">
+                            <thead>
+                                <tr>
+                                    <th>Cliente</th>
+                                    <th>Collaboratore</th>
+                                    <th>Polizza</th>
+                                    <th>Ramo / Targa</th>
+                                    <th>Coperto il</th>
+                                    <th>Incassato il</th>
+                                    <th>Anticipo</th>
+                                    <th className="text-right">Importo €</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {storico.map((t) => (
+                                    <tr key={t.id} data-testid={`sospeso-storico-${t.id}`}>
+                                        <td className="font-medium">
+                                            <Link to={`/anagrafiche/${t.contraente_id}`} className="text-sky-700 hover:underline">{t.contraente_nome}</Link>
+                                        </td>
+                                        <td className="text-xs">{t.collaboratore_nome || <span className="text-slate-300">—</span>}</td>
+                                        <td>
+                                            <Link to={`/polizze/${t.polizza_id}`} className="font-mono text-xs text-sky-700 hover:underline">{t.numero_polizza}</Link>
+                                        </td>
+                                        <td className="text-xs">
+                                            <span className="badge badge-neutral">{t.ramo}</span>
+                                            {t.targa && <span className="ml-1 font-mono text-xs text-slate-500">{t.targa}</span>}
+                                        </td>
+                                        <td className="num text-xs">{fmtDate(t.data_copertura)}</td>
+                                        <td className="num text-xs">{fmtDate(t.data_incasso)}</td>
+                                        <td className="num text-xs text-slate-500">{t.giorni_anticipo != null ? `${t.giorni_anticipo} gg` : "—"}</td>
+                                        <td className="num text-right font-bold">{fmtEur(t.importo_pagato != null ? t.importo_pagato : t.importo_lordo)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                            <tfoot>
+                                <tr className="bg-slate-50 font-semibold">
+                                    <td colSpan="7" className="text-right">TOTALE INCASSATO</td>
+                                    <td className="num text-right">{fmtEur(storico.reduce((s, t) => s + (t.importo_pagato != null ? t.importo_pagato : (t.importo_lordo || 0)), 0))}</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    )
+                )}
+            </Card>
+
             {paying && (
                 <DialogIncasso titolo={paying} conti={conti}
-                              onClose={() => { setPaying(null); load(); }} />
+                              onClose={() => { setPaying(null); load(); if (showStorico) loadStorico(); }} />
             )}
             {bulkOpen && (
                 <BulkIncassaDialog
                     titoli={selectedItems}
                     onClose={(reload) => {
                         setBulkOpen(false);
-                        if (reload) { setSelectedIds(new Set()); load(); }
+                        if (reload) { setSelectedIds(new Set()); load(); if (showStorico) loadStorico(); }
                     }}
                 />
             )}
