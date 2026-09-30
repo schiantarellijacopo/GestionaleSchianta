@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only test delle 5 feature richieste (tutte italiano, admin login OK). GRUPPO 4 Librerie/Visibilità documenti: tab lib-tab-visibilita-doc presente, tutti e 3 i pannelli (vis-panel-anagrafica/polizza/sinistro) renderizzati, toggle vis-toggle-anagrafica-visura_camerale alterna correttamente 'Interno'↔'Visibile', vis-salva mostra toast 'Visibilità documenti salvata — applicata ai nuovi caricamenti' e lo stato persiste dopo reload. GRUPPO 1 Anagrafica CI: le 4 celle in visualizzazione ('N° Carta d'identità', 'CI · Comune emissione', 'CI · Data emissione', 'CI · Data scadenza') presenti; in Modifica compare il riquadro 'Documento d'identità (carta d'identità)' con i 4 input (anag-ci-numero/comune/emissione/scadenza); dopo salvataggio i valori 'CA12345AB' e 'ROMA' sono persistiti in visualizzazione. GRUPPO 3 Autocertificazione: card 'Autocertificazione stato di famiglia' visibile nel tab Documenti di VERDI GIUSEPPE. GRUPPO 2 Firma OpenAPI: click su 'Firma' (genera-doc-firma) NON produce più errore 'eSignAnyWhere non configurato'; si apre correttamente genera-doc-firma-invio-dialog con firma-canale-wa, firma-canale-email e genera-doc-firma-invia. GRUPPO 1 Documenti Inbox: pagina documenti-inbox-page OK, card CI_VERDI.pdf con 'Rivedi e archivia'; dialog contiene tutti i data-testid (di-entita-anagrafica/polizza/sinistro, di-card-select, di-save) e VERDI GIUSEPPE preselezionato. Il menu 'Card di destinazione' cambia dinamicamente in base all'entità: anagrafica→'Carta d'identità'; polizza→[Polizza, Condizioni, Appendici, Libretto veicolo, Atto di vendita, Quietanze, MUP, Questionario, Regolazione, Preventivi, Appunti, Documenti altri (foto)]; sinistro→[CID, Perizia, Foto, Fattura, Denuncia, Documenti altri]. Selezionando anagrafica+Carta d'identità e premendo 'Archivia nella card' compare il toast 'Archiviato in anagrafica · carta_identita', il documento passa in Salvati. Riaprendo VERDI GIUSEPPE il tab Documenti mostra la card 'Carta d'identità' compilata con CI_VERDI.pdf (badge 'caricato', 336.9 KB, scad. 2031-05-01).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Osservazione: dopo l'archivio inbox di CI_VERDI.pdf, i campi CI dell'anagrafica sono stati sovrascritti con i metadati estratti dal PDF (scadenza 2031-05-01, emissione 2026-09-30), cancellando i valori manuali 'CA12345AB'/'ROMA' che erano stati salvati poco prima. Verificare che il backend rispetti solo i checkbox 'campi da applicare' e NON sovrascriva i valori esistenti quando il campo non è flaggato; oppure documentare esplicitamente il comportamento di 'ultima estrazione vince'.",
+    "In VisibilitaDocSezione (Librerie.jsx) il toast di successo appare duplicato (2 istanze identiche mostrate in DOM contemporaneamente). Verificare che sonner non venga richiamato due volte (probabile doppio setState / doppio await con toast.success)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skip)", "frontend": "100% (5/5 gruppi)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "N/A - usati seed già presenti (VERDI GIUSEPPE + CI_VERDI.pdf inbox). Durante il test CI_VERDI.pdf è stato archiviato nella card Carta d'identità dell'anagrafica; per ritest occorre reinserire il documento in inbox.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Data-testid verificati: lib-tab-visibilita-doc, vis-panel-anagrafica/polizza/sinistro, vis-toggle-anagrafica-<key>, vis-salva; anag-ci-numero/comune/emissione/scadenza; documenti-inbox-page, di-entita-anagrafica/polizza/sinistro, di-card-select, di-save; genera-doc-firma, genera-doc-firma-invio-dialog, firma-canale-wa, firma-canale-email, genera-doc-firma-invia. Il documento inbox CI_VERDI.pdf 886934aa-993e-459f-80af-998593063587 è ora archiviato: per un ritest completo del flusso inbox rilanciare il seed o riuploadare il PDF.",
+  "rca of the issue": "Nessun bug bloccante trovato. Unica osservazione: possibile overwrite dei campi CI manuali durante l'archivio inbox (vedi critical_code_review_comments)."
+}

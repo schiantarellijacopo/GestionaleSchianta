@@ -1,6 +1,27 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Documenti Inbox smistamento + Firme OpenAPI + Visibilità card
+
+**Gruppo 1 — Documenti Inbox → card corretta + OCR CI + celle anagrafica** (FATTO, testato)
+- `Anagrafica` (db_models): nuovi campi `numero_carta_identita`, `ci_comune_emissione`, `ci_data_emissione`, `ci_data_scadenza`. Mostrati/modificabili nel tab Anagrafica (riquadro "Documento d'identità").
+- `documenti_inbox.py`: classificatore OCR esteso (CI/patente/passaporto/CF/tessera/visura/mandato_sdd/libretto/polizza/condizioni/appendice/atto/quietanza/mup/questionario/preventivo/fattura/cid/perizia/denuncia) + estrae `comune_emissione`. Nuova mappa `DOC_ROUTING` + `ANAG_CARD_KEYS`: salvataggio nella CARD corretta — anagrafica → dict `documenti[card]`; polizza/sinistro → allegato `categoria=card`. CI popola i 4 campi anagrafica. Auto-archivio solo se l'entità della card è trovata; sinistri SOLO manuali.
+- `DocumentiInbox.jsx` ReviewDialog: selettore entità (anagrafica/polizza/sinistro) + card + ricerca cliente/polizza/sinistro. Doc non abbinabili restano in "Da rivedere".
+- Verificato via curl: CI→card carta_identita + campi; quietanza→allegato polizza; cid→allegato sinistro.
+
+**Gruppo 2 — Firme unificate su OpenAPI** (FATTO, testato)
+- Rimosso eSignAnyWhere (`/api/firma`) da `GeneraDocumentoButton` e `ContrattoConsulenzaTab`: generano+archiviano PDF e inviano via `/api/esignature/invia` con popup scelta canale (WhatsApp/Email). Firmato salvato nella stessa categoria (`/esignature/stato`). MUP e Privacy già su `/esignature`.
+
+**Gruppo 3 — Card Autocertificazione stato di famiglia** (FATTO)
+- Card `autocertificazione_stato_famiglia` aggiunta (frontend `DOC_TIPI_ANAG` + backend `ANAGRAFICA_DOC_TIPI` + `ANAG_CARD_KEYS`).
+
+**Gruppo 4 — Librerie: visibilità card** (FATTO, testato)
+- `GET/PUT /api/config/card-visibilita` (azienda_config.card_visibilita). Librerie → tab "Visibilità documenti": 3 pannelli con toggle Visibile/Interno. `DocumentiSezioneSplit` usa la config come default all'upload.
+
+**Osservazioni minori aperte**: (1) archiviando CI dall'Inbox i campi CI vengono aggiornati con i dati OCR selezionati ("ultima estrazione vince"). (2) toast di conferma pannello Visibilità appare duplicato (cosmetico).
+
+
+
 ## Sessione 23/09/2026 (fork) — Fix da Code Review
 
 - **HIGH — `update_titolo` write parziale**: su titolo coperto con giornata di copertura CHIUSA, il titolo veniva salvato ma il movimento di copertura no (errore dopo la write) → titolo ed E/C compagnia disallineati. FIX: il controllo `assert_giornata_aperta` sulla data copertura ora avviene PRIMA della write del titolo; se il giorno è chiuso l'intera modifica è rifiutata (nessuna write parziale). Verificato: aperta→sincronizza, chiusa→400 e titolo invariato.
