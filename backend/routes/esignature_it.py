@@ -27,6 +27,13 @@ import esignature_openapi as esvc
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/esignature", tags=["esignature"])
 
+# Card documenti dell'anagrafica gestite come dict `anagrafiche.documenti[card]`
+_ANAG_DICT_CARDS = {
+    "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
+    "tessera_sanitaria", "visura_camerale", "mandato_sdd",
+    "autocertificazione_stato_famiglia", "privacy_firmata",
+}
+
 
 async def _resolve_signer(entita_tipo: str, entita_id: str) -> dict:
     """Ricava il firmatario (contraente) da polizza/sinistro/anagrafica."""
@@ -157,6 +164,18 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     }
     await db.firma_requests.insert_one(dict(rec))
 
+    # Se il documento è una card dedicata dell'anagrafica, segna "in attesa di firma"
+    if al["entita_tipo"] == "anagrafica" and al.get("categoria") in _ANAG_DICT_CARDS:
+        await db.anagrafiche.update_one(
+            {"id": al["entita_id"], f"documenti.{al['categoria']}": {"$exists": True}},
+            {"$set": {
+                f"documenti.{al['categoria']}.firma_stato": "in_attesa",
+                f"documenti.{al['categoria']}.firma_richiesta_at": _now_iso(),
+                f"documenti.{al['categoria']}.firma_request_id": rec["id"],
+                "updated_at": _now_iso(),
+            }},
+        )
+
     # Consegna link via WhatsApp + Email IN BACKGROUND (non blocca la risposta:
     # SMTP è sincrono/bloccante e Evolution può essere lento → eviterebbe timeout/502).
     async def _deliver():
@@ -224,12 +243,7 @@ async def _finalizza(rec: dict) -> Optional[str]:
         {"$set": {"stato": "DONE", "allegato_firmato_id": al.id, "updated_at": _now_iso()}},
     )
     # Se il documento appartiene a una card dedicata dell'anagrafica, mostra il
-    # firmato anche nella card (dict documenti).
-    _ANAG_DICT_CARDS = {
-        "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
-        "tessera_sanitaria", "visura_camerale", "mandato_sdd",
-        "autocertificazione_stato_famiglia", "privacy_firmata",
-    }
+    # firmato anche nella card (dict documenti) con stato/date firma.
     if rec.get("entita_tipo") == "anagrafica" and rec.get("categoria") in _ANAG_DICT_CARDS:
         await db.anagrafiche.update_one(
             {"id": rec["entita_id"]},
@@ -242,6 +256,9 @@ async def _finalizza(rec: dict) -> Optional[str]:
                 "data_caricamento": _now_iso(),
                 "allegato_id": al.id,
                 "firmato": True,
+                "firma_stato": "firmato",
+                "firma_completata_at": _now_iso(),
+                "firma_request_id": rec["id"],
             }, "updated_at": _now_iso()}},
         )
     return al.id

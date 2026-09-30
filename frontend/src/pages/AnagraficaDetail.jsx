@@ -2047,6 +2047,10 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
             });
             toast.success("Richiesta di firma inviata al cliente (OpenAPI · link via " +
                 [firmaCanali.wa && "WhatsApp", firmaCanali.email && "Email"].filter(Boolean).join(" + ") + ")");
+            setDocs((d) => ({
+                ...d,
+                [firmaCard.tipo]: { ...(d[firmaCard.tipo] || {}), firma_stato: "in_attesa", firma_richiesta_at: new Date().toISOString() },
+            }));
             setFirmaCard(null);
         } catch (e) {
             const detail = e.response?.data?.detail;
@@ -2155,6 +2159,16 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     {doc && <span className="badge badge-success text-[10px]">caricato</span>}
+                                    {doc?.firma_stato === "in_attesa" && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium" data-testid={`doc-firma-badge-${dt.key}`}>
+                                            ⏳ In attesa di firma
+                                        </span>
+                                    )}
+                                    {doc?.firma_stato === "firmato" && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium" data-testid={`doc-firma-badge-${dt.key}`}>
+                                            ✓ Firmato
+                                        </span>
+                                    )}
                                     <span className={`text-slate-400 transition-transform ${cOpen ? "rotate-180" : ""}`}>▾</span>
                                 </div>
                             </button>
@@ -2167,6 +2181,16 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                         {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}
                                         {doc.scadenza && <span className="ml-2 text-amber-700">scad. {doc.scadenza}</span>}
                                     </div>
+                                    {doc.firma_stato === "in_attesa" && (
+                                        <div className="text-amber-700" data-testid={`doc-firma-info-${dt.key}`}>
+                                            ⏳ In attesa di firma · inviata il {(doc.firma_richiesta_at || "").slice(0, 10)}
+                                        </div>
+                                    )}
+                                    {doc.firma_stato === "firmato" && (
+                                        <div className="text-emerald-700" data-testid={`doc-firma-info-${dt.key}`}>
+                                            ✓ Firmato il {(doc.firma_completata_at || "").slice(0, 10)}
+                                        </div>
+                                    )}
                                     {canEdit && (
                                         <div className="flex gap-2 mt-2">
                                             <label className="cursor-pointer text-[11px] px-2 py-1 bg-sky-700 text-white rounded hover:bg-sky-800" data-testid={`doc-replace-${dt.key}`}>
