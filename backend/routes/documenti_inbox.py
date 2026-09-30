@@ -196,6 +196,7 @@ async def ocr_veicolo(
 async def analizza_documento(
     file: UploadFile = File(...),
     auto_archive: bool = Form(True),  # NEW: auto-salva se confidenza alta + match
+    scope: Optional[str] = Form(None),  # NEW: cartella scelta (anagrafica|polizza|sinistro)
     user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     """Analizza un documento appena caricato: classifica + estrae dati.
@@ -279,6 +280,7 @@ async def analizza_documento(
         "stato": "pending",
         "created_at": _now_iso(),
         "created_by": user.get("id"),
+        "scope": scope if scope in ("anagrafica", "polizza", "sinistro") else None,
     }
     await db.documenti_inbox.insert_one(doc_inbox)
     doc_inbox.pop("_id", None)
@@ -297,6 +299,9 @@ async def analizza_documento(
         has_target = bool(target_polizza)
     else:
         has_target = False  # sinistro → solo manuale
+    # Se l'utente ha scelto una cartella (scope), non auto-archiviare fuori da quello scope
+    if scope in ("anagrafica", "polizza", "sinistro") and routed_entita != scope:
+        has_target = False
     if auto_archive and confidenza_ok and tipo_ok and has_target:
         try:
             # Tutti i campi disponibili vengono applicati

@@ -24,7 +24,7 @@ import { TaskCollegati } from "@/components/TaskCollegati";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
-    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown,
+    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -2026,6 +2026,32 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [docs, setDocs] = useState(ana?.documenti || {});
     const [busyTipo, setBusyTipo] = useState(null);
     const [privacyOpen, setPrivacyOpen] = useState(false);
+    const [firmaCard, setFirmaCard] = useState(null); // {tipo, nome_file}
+    const [firmaCanali, setFirmaCanali] = useState({ wa: true, email: true });
+    const [firmaBusy, setFirmaBusy] = useState(false);
+
+    const isPdfDoc = (d) => {
+        const m = (d?.mime || d?.content_type || "").toLowerCase();
+        return m.includes("pdf") || (d?.nome_file || "").toLowerCase().endsWith(".pdf");
+    };
+    const inviaFirmaCard = async () => {
+        if (!firmaCard) return;
+        if (!firmaCanali.wa && !firmaCanali.email) { toast.error("Seleziona almeno un canale"); return; }
+        setFirmaBusy(true);
+        try {
+            const prep = await api.post(`/anagrafiche/${anagrafica_id}/documenti/${firmaCard.tipo}/prepara-firma`);
+            await api.post("/esignature/invia", {
+                allegato_id: prep.data.allegato_id,
+                invia_whatsapp: firmaCanali.wa,
+                invia_email: firmaCanali.email,
+            });
+            toast.success("Richiesta di firma inviata al cliente (OpenAPI · link via " +
+                [firmaCanali.wa && "WhatsApp", firmaCanali.email && "Email"].filter(Boolean).join(" + ") + ")");
+            setFirmaCard(null);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio firma");
+        } finally { setFirmaBusy(false); }
+    };
 
     const upload = async (tipo, file, scadenza) => {
         if (!file) return;
@@ -2149,6 +2175,13 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                             <button onClick={() => elimina(dt.key)} className="text-[11px] text-red-600 hover:underline" data-testid={`doc-delete-${dt.key}`}>
                                                 Elimina
                                             </button>
+                                            {isPdfDoc(doc) && (
+                                                <button onClick={() => { setFirmaCanali({ wa: true, email: true }); setFirmaCard({ tipo: dt.key, nome_file: doc.nome_file }); }}
+                                                    className="text-[11px] px-2 py-1 rounded border border-violet-300 text-violet-700 hover:bg-violet-50 inline-flex items-center gap-1"
+                                                    data-testid={`doc-firma-${dt.key}`}>
+                                                    <PenTool size={11} /> Firma
+                                                </button>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -2172,6 +2205,35 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     </div>
                 )}
             </div>
+
+            {/* Popup invio firma OpenAPI per una card documento */}
+            <Dialog open={!!firmaCard} onOpenChange={(o) => !o && setFirmaCard(null)}>
+                <DialogContent className="max-w-md" data-testid="doc-firma-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><PenTool size={16} className="text-violet-600" /> Invia per firma</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                        <div className="text-xs text-slate-500 bg-slate-50 rounded p-2">
+                            Documento: <b>{firmaCard?.nome_file}</b><br />
+                            Firma elettronica avanzata OpenAPI · il cliente riceverà un codice OTP via SMS.
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer p-2 border rounded">
+                                <input type="checkbox" checked={firmaCanali.wa} onChange={(e) => setFirmaCanali((c) => ({ ...c, wa: e.target.checked }))} data-testid="doc-firma-wa" /> WhatsApp
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer p-2 border rounded">
+                                <input type="checkbox" checked={firmaCanali.email} onChange={(e) => setFirmaCanali((c) => ({ ...c, email: e.target.checked }))} data-testid="doc-firma-email" /> Email
+                            </label>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setFirmaCard(null)}>Annulla</Button>
+                        <Button onClick={inviaFirmaCard} disabled={firmaBusy} className="bg-violet-700 hover:bg-violet-800" data-testid="doc-firma-invia">
+                            {firmaBusy ? "Invio…" : "Invia richiesta firma"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {ana?.firma_cliente_url && (
                 <Card className="p-3 border-emerald-200 bg-emerald-50">

@@ -80,7 +80,7 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
                      n_doc_scaduti: int, n_doc_scad: int,
                      n_sospesi_old: int, n_pol_scad: int,
                      n_sin_old: int, n_provv: int,
-                     n_richieste: int = 0) -> list[dict]:
+                     n_richieste: int = 0, n_ci_scad: int = 0) -> list[dict]:
     """Compone la lista dei task per la dashboard."""
     return [
         {"key": "richieste_portale", "label": "Richieste dal Portale Cliente",
@@ -103,6 +103,10 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
          "icon": "FileClock", "color": "amber", "count": n_doc_scad,
          "url": "/anagrafiche?doc=in_scadenza",
          "descrizione": "Da aggiornare nei prossimi 30 giorni"},
+        {"key": "carta_identita_scadenza", "label": "Carte d'identità in scadenza (30gg)",
+         "icon": "IdCard", "color": "amber", "count": n_ci_scad,
+         "url": "/anagrafiche?doc=ci_in_scadenza",
+         "descrizione": "Clienti con carta d'identità prossima alla scadenza"},
         {"key": "titoli_sospesi_old", "label": "Titoli sospesi da oltre 5 giorni",
          "icon": "AlertTriangle", "color": "orange", "count": n_sospesi_old,
          "url": "/sospesi?gg_min=5",
@@ -145,6 +149,9 @@ async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaborat
         "stato": {"$in": ["attiva", "in_emissione"]},
         "scadenza": {"$gte": today_iso, "$lte": in_30},
     })
+    n_ci_scad = await db.anagrafiche.count_documents({
+        "ci_data_scadenza": {"$gte": today_iso, "$lte": in_30},
+    })
     n_provv = await db.titoli.count_documents({
         "stato": {"$in": ["incassato"]},
         "provvigione_pagata": {"$ne": True},
@@ -159,7 +166,7 @@ async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaborat
         n_doc_scaduti=n_doc_scaduti, n_doc_scad=n_doc_scad,
         n_sospesi_old=n_sospesi_old, n_pol_scad=n_pol_scad,
         n_sin_old=n_sin_old, n_provv=n_provv,
-        n_richieste=n_richieste,
+        n_richieste=n_richieste, n_ci_scad=n_ci_scad,
     )
 
 

@@ -85,13 +85,14 @@ export default function DocumentiInbox() {
     const load = () => api.get("/documenti-inbox").then((r) => setItems(r.data));
     useEffect(() => { load(); }, []);
 
-    const upload = async (files) => {
+    const upload = async (files, scope = null) => {
         if (!files?.length) return;
         setUploading(true);
         let okAuto = 0, okPending = 0;
         try {
             for (const file of files) {
                 const fd = new FormData(); fd.append("file", file);
+                if (scope) fd.append("scope", scope);
                 try {
                     const r = await api.post("/documenti-inbox/analyze", fd, { headers: { "Content-Type": "multipart/form-data" } });
                     const tipoLabel = TIPO_BADGE[r.data.tipo_documento]?.l || r.data.tipo_documento || "documento";
@@ -132,12 +133,45 @@ export default function DocumentiInbox() {
             {/* Widget OCR scan Drive/OneDrive */}
             <OcrScanWidget variant="full" onClickPending={() => { window.location.hash = "#pending"; load(); }} />
 
-            {/* DROPZONE */}
-            <Card className={`p-6 border-2 border-dashed transition-colors ${dragActive ? "border-violet-600 bg-violet-100" : "border-violet-300 bg-gradient-to-br from-violet-50/50 to-sky-50/30"}`}
-                onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                onDragLeave={() => setDragActive(false)}
+            {/* 3 CARTELLE per entità: trascina qui i documenti e l'OCR li archivia nella card corretta */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="di-cartelle">
+                {[
+                    { scope: "anagrafica", label: "Anagrafiche", icon: "👤", hint: "CI, patente, CF, tessera, visura, mandato…", color: "sky" },
+                    { scope: "polizza", label: "Polizze", icon: "📄", hint: "Polizza, condizioni, quietanze, libretto, MUP…", color: "indigo" },
+                    { scope: "sinistro", label: "Sinistri", icon: "⚠️", hint: "CID, perizia, foto, fattura, denuncia…", color: "amber" },
+                ].map((f) => (
+                    <Card key={f.scope}
+                        className={`p-4 border-2 border-dashed transition-colors ${dragActive === f.scope ? "border-violet-600 bg-violet-100" : "border-slate-300 bg-slate-50/50 hover:border-violet-300"}`}
+                        onDragOver={(e) => { e.preventDefault(); setDragActive(f.scope); }}
+                        onDragLeave={() => setDragActive(null)}
+                        onDrop={(e) => {
+                            e.preventDefault(); setDragActive(null);
+                            const files = Array.from(e.dataTransfer.files || []);
+                            if (files.length) upload(files, f.scope);
+                        }}
+                        data-testid={`di-cartella-${f.scope}`}>
+                        <div className="text-center">
+                            <div className="text-2xl mb-1">{f.icon}</div>
+                            <div className="font-semibold text-sm text-slate-800">{f.label}</div>
+                            <div className="text-[11px] text-slate-500 mb-3">{f.hint}</div>
+                            <input type="file" id={`ifup-${f.scope}`} multiple accept="image/*,application/pdf" hidden
+                                onChange={(e) => { upload(Array.from(e.target.files || []), f.scope); e.target.value = ""; }} />
+                            <Button asChild size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" disabled={uploading}>
+                                <label htmlFor={`ifup-${f.scope}`} className="cursor-pointer" data-testid={`di-upload-${f.scope}`}>
+                                    <Upload size={13} className="mr-1" /> Carica in {f.label}
+                                </label>
+                            </Button>
+                        </div>
+                    </Card>
+                ))}
+            </div>
+
+            {/* DROPZONE generica (classificazione automatica su tutte le entità) */}
+            <Card className={`p-6 border-2 border-dashed transition-colors ${dragActive === "any" ? "border-violet-600 bg-violet-100" : "border-violet-300 bg-gradient-to-br from-violet-50/50 to-sky-50/30"}`}
+                onDragOver={(e) => { e.preventDefault(); setDragActive("any"); }}
+                onDragLeave={() => setDragActive(null)}
                 onDrop={(e) => {
-                    e.preventDefault(); setDragActive(false);
+                    e.preventDefault(); setDragActive(null);
                     const files = Array.from(e.dataTransfer.files || []);
                     if (files.length) upload(files);
                 }}
@@ -145,16 +179,16 @@ export default function DocumentiInbox() {
                 <div className="text-center">
                     <Upload size={32} className="text-violet-600 mx-auto mb-2" />
                     <p className="text-sm text-slate-700 font-medium mb-1">
-                        Trascina qui o carica documenti (Carta d&apos;identità, patente, CF, libretto, polizza, fattura…)
+                        Oppure trascina qui documenti misti (classificazione automatica su tutte le entità)
                     </p>
                     <p className="text-xs text-slate-500 mb-1">
                         Accetta più file contemporaneamente · PDF, JPG, PNG, WEBP
                     </p>
                     <p className="text-[11px] text-emerald-700 font-medium mb-4 inline-flex items-center gap-1">
-                        ⚡ Auto-archiviazione: i documenti con OCR ad alta confidenza vengono spostati AUTOMATICAMENTE nella sezione corretta del cliente
+                        ⚡ Auto-archiviazione: i documenti con OCR ad alta confidenza vengono spostati AUTOMATICAMENTE nella card corretta
                     </p>
                     <input type="file" id="ifup" multiple accept="image/*,application/pdf" hidden
-                        onChange={(e) => upload(Array.from(e.target.files || []))} />
+                        onChange={(e) => { upload(Array.from(e.target.files || [])); e.target.value = ""; }} />
                     <Button asChild className="bg-violet-700 hover:bg-violet-800" disabled={uploading}>
                         <label htmlFor="ifup" className="cursor-pointer" data-testid="di-upload-btn">
                             <Upload size={14} className="mr-1" /> {uploading ? "Analisi in corso…" : "Carica documenti"}
@@ -250,8 +284,10 @@ function ReviewDialog({ item, onClose }) {
         return out;
     });
     const [route0Ent, route0Card] = ROUTING[item.tipo_documento] || ["anagrafica", "altro"];
-    const [entitaTipo, setEntitaTipo] = useState(route0Ent);
-    const [categoria, setCategoria] = useState(route0Card);
+    const [entitaTipo, setEntitaTipo] = useState(item.scope || route0Ent);
+    const [categoria, setCategoria] = useState(
+        (item.scope && item.scope !== route0Ent) ? ((CARDS_BY_ENTITA[item.scope] || [])[0] || {}).k : route0Card
+    );
     const [anagId, setAnagId] = useState(item.target_anagrafica?.id || "");
     const [polId, setPolId] = useState(item.target_polizza?.id || "");
     const [sinId, setSinId] = useState("");

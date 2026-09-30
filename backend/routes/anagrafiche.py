@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from database import db
 from db_models import (
-    Anagrafica, Intervista, _now_iso, _uid,
+    Anagrafica, Intervista, Allegato, _now_iso, _uid,
 )
 from auth import current_user, require_user
 from shared import log_attivita, log_diario_cliente, strip_mongo_id
@@ -1029,6 +1029,48 @@ async def delete_documento_anagrafica(aid: str, tipo: str,
         {"$unset": {f"documenti.{tipo}": ""}, "$set": {"updated_at": _now_iso()}},
     )
     return {"ok": True}
+
+
+@router.post("/anagrafiche/{aid}/documenti/{tipo}/prepara-firma")
+async def prepara_firma_documento(aid: str, tipo: str,
+                                   user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Prepara l'allegato firmabile per un documento della card anagrafica.
+    Se manca l'allegato, lo crea dal file salvato nel dict `documenti[tipo]`.
+    Ritorna {allegato_id} da passare a POST /esignature/invia."""
+    if tipo not in ANAGRAFICA_DOC_TIPI:
+        raise HTTPException(400, "Tipo non valido")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "documenti": 1})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    entry = (ana.get("documenti") or {}).get(tipo)
+    if not entry or not isinstance(entry, dict):
+        raise HTTPException(404, "Nessun documento caricato in questa card")
+    sp = entry.get("storage_path")
+    nome = entry.get("nome_file") or f"{tipo}.pdf"
+    mime = entry.get("mime") or entry.get("content_type") or ""
+    if "pdf" not in (mime or "").lower() and not nome.lower().endswith(".pdf"):
+        raise HTTPException(400, "La firma è disponibile solo su documenti PDF")
+    if not sp:
+        raise HTTPException(400, "File non disponibile nello storage")
+    # Riusa l'allegato esistente se presente e valido
+    alleg_id = entry.get("allegato_id")
+    if alleg_id:
+        existing = await db.allegati.find_one({"id": alleg_id, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1})
+        if existing:
+            return {"allegato_id": alleg_id}
+    # Altrimenti crea l'allegato dal file del dict card
+    alleg = Allegato(
+        entita_tipo="anagrafica", entita_id=aid, nome_file=nome,
+        storage_path=sp, content_type=(mime or "application/pdf"),
+        size=int((entry.get("size_kb") or 0) * 1024),
+        descrizione=f"Documento anagrafica ({tipo})", categoria=tipo,
+        autore_id=user.get("id"),
+    )
+    await db.allegati.insert_one(alleg.model_dump())
+    await db.anagrafiche.update_one(
+        {"id": aid}, {"$set": {f"documenti.{tipo}.allegato_id": alleg.id, "updated_at": _now_iso()}},
+    )
+    return {"allegato_id": alleg.id}
 
 
 # ============================================================
