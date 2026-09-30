@@ -1,0 +1,20 @@
+{
+  "summary": "Verified 'Badge stato firma' visualization on Documenti tab of anagrafica BADGE TEST. Both required badges and info rows render correctly with expected data-testids and Italian text.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "doc-firma-badge-autocertificazione_stato_famiglia": "PASS - '⏳ In attesa di firma' (amber)",
+    "doc-firma-info-autocertificazione_stato_famiglia": "PASS - '⏳ In attesa di firma · inviata il 2026-09-30'",
+    "doc-firma-badge-carta_identita": "PASS - '✓ Firmato' (emerald)",
+    "doc-firma-info-carta_identita": "PASS - '✓ Firmato il 2026-09-30'"
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "None - used existing seed anagrafica 6bf6bab1-46c6-4586-a18a-b7055ee08efb",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Cards in Documenti tab render expanded by default when a file is uploaded, so no manual expand is required. Both firma badges and info rows are rendered correctly via data-testid doc-firma-badge-{slug} and doc-firma-info-{slug}."
+}

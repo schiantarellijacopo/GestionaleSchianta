@@ -1,6 +1,11 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Badge stato firma sulle card
+
+- **Badge stato firma** (FATTO, testato 100%): sulle card documento dell'anagrafica compare il badge "⏳ In attesa di firma" (amber) o "✓ Firmato" (verde) con la data. Backend: `esignature_it.invia_per_firma` setta `firma_stato="in_attesa"` + `firma_richiesta_at` sul dict card; `_finalizza` setta `firma_stato="firmato"` + `firma_completata_at`. Frontend `AnagraficaDetail` DocumentiTab: badge nell'header card + riga info con data; aggiornamento ottimistico dopo l'invio.
+
+
 ## Sessione 30/09/2026 (fork) — Firma diretta su card + Contatore CI dashboard + Inbox 3 cartelle
 
 - **Firma diretta sulle card anagrafica** (FATTO, testato 4/4): nel tab Documenti dell'anagrafica, ogni card con un PDF mostra il pulsante "Firma" (`doc-firma-<tipo>`) → popup canale (WhatsApp/Email) → invia via OpenAPI. Nuovo endpoint `POST /anagrafiche/{aid}/documenti/{tipo}/prepara-firma` che crea (o riusa) l'allegato dal file del dict card e ritorna `allegato_id` per `/esignature/invia`.
