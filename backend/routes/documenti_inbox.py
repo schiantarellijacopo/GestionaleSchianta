@@ -34,7 +34,7 @@ PROMPT_CLASSIFICA = """Sei un sistema di OCR e classificazione documenti italian
 e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
 
 {
-  "tipo_documento": "carta_identita | patente | codice_fiscale | libretto | polizza | fattura | tessera_sanitaria | passaporto | altro",
+  "tipo_documento": "carta_identita | patente | passaporto | codice_fiscale | tessera_sanitaria | visura_camerale | mandato_sdd | libretto | polizza | condizioni | appendice | atto_vendita | quietanza | mup | questionario | preventivo | fattura | cid | perizia | denuncia | altro",
   "confidenza": "alta | media | bassa",
   "foto_volto_bbox": {
     "x": "numero 0-1 (sx normalizzato) o null se assente",
@@ -53,6 +53,7 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
     "numero_documento": "numero del documento o null",
     "data_emissione": "YYYY-MM-DD o null",
     "data_scadenza": "YYYY-MM-DD o null",
+    "comune_emissione": "comune/ente di emissione del documento (es. Comune di X, 'MIT-UCO' per patenti, 'Questura di X' per passaporti) o null",
     "cittadinanza": "stringa MAIUSCOLA o null",
     // SE patente:
     "categorie_patente": "lista di categorie (es. B, C+E) o null",
@@ -283,10 +284,19 @@ async def analizza_documento(
     doc_inbox.pop("_id", None)
 
     # === AUTO-ARCHIVE ===
-    # Se confidenza alta + tipo riconosciuto + target trovato → archivia automaticamente
+    # Auto-archivia SOLO se: confidenza alta + tipo riconosciuto + l'entità richiesta
+    # dalla card di destinazione è stata trovata. I documenti di sinistro NON vengono
+    # mai auto-archiviati (nessun match automatico): restano in "Da rivedere".
+    tipo_riconosciuto = result.get("tipo_documento")
+    routed_entita, _routed_card = DOC_ROUTING.get(tipo_riconosciuto or "altro", ("anagrafica", "altro"))
     confidenza_ok = (result.get("confidenza") == "alta")
-    tipo_ok = result.get("tipo_documento") and result.get("tipo_documento") != "altro"
-    has_target = bool(target_anagrafica or target_polizza)
+    tipo_ok = tipo_riconosciuto and tipo_riconosciuto != "altro"
+    if routed_entita == "anagrafica":
+        has_target = bool(target_anagrafica)
+    elif routed_entita == "polizza":
+        has_target = bool(target_polizza)
+    else:
+        has_target = False  # sinistro → solo manuale
     if auto_archive and confidenza_ok and tipo_ok and has_target:
         try:
             # Tutti i campi disponibili vengono applicati
@@ -344,18 +354,56 @@ async def salva_inbox(
     return await _do_save(iid, body, user)
 
 
-# Mappa tipo_documento → categoria documenti (per la "sezione" corretta)
-TIPO_DOC_TO_CATEGORIA = {
-    "carta_identita": "documento_identita",
-    "patente": "patente",
-    "codice_fiscale": "codice_fiscale",
-    "tessera_sanitaria": "codice_fiscale",
-    "passaporto": "documento_identita",
-    "libretto": "libretto_circolazione",
-    "polizza": "polizza",
-    "fattura": "fattura",
-    "altro": "altro",
+# Card documenti dell'anagrafica salvati nel dict `anagrafiche.documenti`
+ANAG_CARD_KEYS = {
+    "carta_identita", "patente", "passaporto", "codice_fiscale_doc",
+    "tessera_sanitaria", "visura_camerale", "mandato_sdd",
+    "autocertificazione_stato_famiglia", "privacy_firmata",
 }
+
+# Mappa tipo_documento OCR → (entità target, card/categoria key di destinazione)
+# anagrafica → card nel dict `documenti` (se card_key ∈ ANAG_CARD_KEYS) altrimenti allegato
+# polizza/sinistro → allegato con `categoria` = card_key (letto da DocumentiSezioneSplit)
+DOC_ROUTING = {
+    "carta_identita":    ("anagrafica", "carta_identita"),
+    "patente":           ("anagrafica", "patente"),
+    "passaporto":        ("anagrafica", "passaporto"),
+    "codice_fiscale":    ("anagrafica", "codice_fiscale_doc"),
+    "tessera_sanitaria": ("anagrafica", "tessera_sanitaria"),
+    "visura_camerale":   ("anagrafica", "visura_camerale"),
+    "mandato_sdd":       ("anagrafica", "mandato_sdd"),
+    "polizza":           ("polizza", "polizza"),
+    "condizioni":        ("polizza", "condizioni"),
+    "appendice":         ("polizza", "appendici"),
+    "libretto":          ("polizza", "libretto_veicolo"),
+    "atto_vendita":      ("polizza", "atto_vendita"),
+    "quietanza":         ("polizza", "quietanza"),
+    "mup":               ("polizza", "mup"),
+    "questionario":      ("polizza", "questionario"),
+    "preventivo":        ("polizza", "preventivo"),
+    "fattura":           ("polizza", "altri"),
+    "cid":               ("sinistro", "cid"),
+    "perizia":           ("sinistro", "perizia"),
+    "denuncia":          ("sinistro", "denuncia"),
+    "altro":             ("anagrafica", "altro"),
+}
+
+
+async def _default_visibile(entita_tipo: str, categoria: str) -> bool:
+    """Visibilità cliente di default per la card, configurabile in Librerie.
+    Legge da azienda_config.card_visibilita se presente, altrimenti usa i default."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "card_visibilita": 1}) or {}
+    cfg = (az.get("card_visibilita") or {}).get(entita_tipo) or {}
+    if categoria in cfg:
+        return bool(cfg[categoria])
+    # default statici (allineati alle card frontend)
+    DEFAULTS = {
+        "polizza": {"polizza", "condizioni", "appendici", "libretto_veicolo",
+                    "atto_vendita", "quietanza", "mup", "questionario"},
+        "sinistro": {"cid", "foto", "fattura", "denuncia"},
+        "anagrafica": set(),
+    }
+    return categoria in DEFAULTS.get(entita_tipo, set())
 
 
 async def _do_save(iid: str, body: dict, user: dict) -> dict:
@@ -365,48 +413,87 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
     if inb.get("stato") == "salvato":
         return inb
 
-    anagrafica_id = body.get("anagrafica_id") or (inb.get("target_anagrafica") or {}).get("id")
-    polizza_id = body.get("polizza_id") or (inb.get("target_polizza") or {}).get("id")
-    if not anagrafica_id and not polizza_id:
-        raise HTTPException(400, "Specificare almeno un'entità (anagrafica o polizza) di destinazione")
-
     dati = body.get("dati") or inb.get("dati") or {}
     campi = body.get("campi_da_applicare") or []
-
-    # 1. Crea allegato copiando dal path inbox al path definitivo
-    # Se c'è una polizza E un'anagrafica → preferisci POLIZZA come entità per allegati polizza
     tipo_doc = inb.get("tipo_documento") or "altro"
-    categoria = TIPO_DOC_TO_CATEGORIA.get(tipo_doc, "altro")
-    # Documenti d'identità vanno SEMPRE su anagrafica anche se è disponibile una polizza
-    if tipo_doc in ("carta_identita", "patente", "codice_fiscale", "tessera_sanitaria", "passaporto"):
-        entita_tipo = "anagrafica"
-        entita_id = anagrafica_id or polizza_id
+
+    # --- Routing: entità + card di destinazione ---
+    default_entita, default_card = DOC_ROUTING.get(tipo_doc, ("anagrafica", "altro"))
+    entita_tipo = body.get("entita_tipo") or default_entita
+    categoria = body.get("categoria") or default_card
+
+    anagrafica_id = body.get("anagrafica_id") or (inb.get("target_anagrafica") or {}).get("id")
+    polizza_id = body.get("polizza_id") or (inb.get("target_polizza") or {}).get("id")
+    sinistro_id = body.get("sinistro_id")
+
+    if entita_tipo == "anagrafica":
+        entita_id = anagrafica_id or body.get("entita_id")
+        anagrafica_id = entita_id
+    elif entita_tipo == "polizza":
+        entita_id = polizza_id or body.get("entita_id")
+        polizza_id = entita_id
+    elif entita_tipo == "sinistro":
+        entita_id = sinistro_id or body.get("entita_id")
+        sinistro_id = entita_id
     else:
-        entita_tipo = "polizza" if polizza_id else "anagrafica"
-        entita_id = polizza_id or anagrafica_id
+        raise HTTPException(400, "entita_tipo non valido")
+    if not entita_id:
+        raise HTTPException(400, "Specificare l'entità di destinazione")
 
-    alleg = Allegato(
-        entita_tipo=entita_tipo, entita_id=entita_id,
-        nome_file=inb.get("filename") or "documento",
-        storage_path=inb.get("storage_path"),
-        content_type=inb.get("content_type"),
-        size=inb.get("size") or 0,
-        descrizione=f"Documenti inbox ({tipo_doc})",
-        categoria=categoria,
-        autore_id=user.get("id"),
-    )
-    await db.allegati.insert_one(alleg.model_dump())
+    # 1. Salva il file nella CARD corretta
+    allegato_id = None
+    if entita_tipo == "anagrafica" and categoria in ANAG_CARD_KEYS:
+        # → card nel dict `anagrafiche.documenti[categoria]`
+        sp = inb.get("storage_path")
+        doc_entry = {
+            "url": f"/api/storage/{sp}" if sp else None,
+            "storage_path": sp,
+            "nome_file": inb.get("filename") or "documento",
+            "mime": inb.get("content_type"),
+            "size_kb": round((inb.get("size") or 0) / 1024, 1),
+            "data_caricamento": _now_iso(),
+            "scadenza": (dati.get("data_scadenza") if tipo_doc == "carta_identita" else None),
+            "caricato_da": user.get("id"),
+        }
+        await db.anagrafiche.update_one(
+            {"id": entita_id},
+            {"$set": {f"documenti.{categoria}": doc_entry, "updated_at": _now_iso()}},
+        )
+    else:
+        # → allegato con categoria = card key (polizza/sinistro o anagrafica "altro")
+        if not inb.get("storage_path"):
+            raise HTTPException(400, "File non disponibile nello storage: impossibile archiviare")
+        alleg = Allegato(
+            entita_tipo=entita_tipo, entita_id=entita_id,
+            nome_file=inb.get("filename") or "documento",
+            storage_path=inb.get("storage_path"),
+            content_type=inb.get("content_type"),
+            size=inb.get("size") or 0,
+            descrizione=f"Documenti inbox ({tipo_doc})",
+            categoria=categoria,
+            visibile_cliente=await _default_visibile(entita_tipo, categoria),
+            autore_id=user.get("id"),
+        )
+        await db.allegati.insert_one(alleg.model_dump())
+        allegato_id = alleg.id
 
-    # 2. Applica campi all'anagrafica (se presente)
+    # 2. Applica campi all'anagrafica (se disponibile un'anagrafica di riferimento)
     ana_updates = {}
     if anagrafica_id and campi:
         ana_field_map = {
             "cognome": "cognome", "nome": "nome",
             "codice_fiscale": "codice_fiscale",
             "data_nascita": "data_nascita",
-            "luogo_nascita": "luogo_nascita",
+            "luogo_nascita": "comune_nascita",
             "sesso": "sesso",
         }
+        if tipo_doc == "carta_identita":
+            ana_field_map.update({
+                "numero_documento": "numero_carta_identita",
+                "data_emissione": "ci_data_emissione",
+                "data_scadenza": "ci_data_scadenza",
+                "comune_emissione": "ci_comune_emissione",
+            })
         for k in campi:
             if k in ana_field_map and dati.get(k) not in (None, ""):
                 ana_updates[ana_field_map[k]] = dati[k]
@@ -415,7 +502,7 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
             await db.anagrafiche.update_one({"id": anagrafica_id}, {"$set": ana_updates})
 
     pol_updates = {}
-    if polizza_id and campi:
+    if polizza_id and campi and entita_tipo == "polizza":
         pol_field_map = {
             "targa": "targa", "telaio": "telaio",
             "marca": "veicolo_marca", "modello": "veicolo_modello",
@@ -486,15 +573,17 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
     await db.documenti_inbox.update_one({"id": iid}, {"$set": {
         "stato": "salvato",
         "salvato_at": _now_iso(),
-        "salvato_in": {"entita_tipo": entita_tipo, "entita_id": entita_id},
+        "salvato_in": {"entita_tipo": entita_tipo, "entita_id": entita_id, "categoria": categoria},
         "campi_applicati": list(ana_updates.keys()) + list(pol_updates.keys()),
-        "allegato_id": alleg.id,
+        "allegato_id": allegato_id,
         "avatar_url": avatar_url,
     }})
 
     return {
         "ok": True,
-        "allegato_id": alleg.id,
+        "allegato_id": allegato_id,
+        "entita_tipo": entita_tipo,
+        "categoria": categoria,
         "anagrafica_aggiornata": list(ana_updates.keys()),
         "polizza_aggiornata": list(pol_updates.keys()),
         "avatar_url": avatar_url,
@@ -527,9 +616,14 @@ async def retry_auto_archive(
         tipo = inb.get("tipo_documento")
         if not tipo or tipo == "altro":
             continue
+        routed_entita, _ = DOC_ROUTING.get(tipo, ("anagrafica", "altro"))
+        if routed_entita == "sinistro":
+            continue  # sinistro → solo manuale
         target_a = inb.get("target_anagrafica") or {}
         target_p = inb.get("target_polizza") or {}
-        if not target_a.get("id") and not target_p.get("id"):
+        if routed_entita == "anagrafica" and not target_a.get("id"):
+            continue
+        if routed_entita == "polizza" and not target_p.get("id"):
             continue
         body = {
             "anagrafica_id": target_a.get("id"),

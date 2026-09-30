@@ -25,13 +25,56 @@ const TIPO_BADGE = {
     carta_identita: { l: "Carta d'identità", c: "bg-sky-100 text-sky-700" },
     patente: { l: "Patente", c: "bg-violet-100 text-violet-700" },
     codice_fiscale: { l: "Codice fiscale", c: "bg-emerald-100 text-emerald-700" },
-    libretto: { l: "Libretto", c: "bg-amber-100 text-amber-700" },
-    polizza: { l: "Polizza", c: "bg-indigo-100 text-indigo-700" },
-    fattura: { l: "Fattura", c: "bg-rose-100 text-rose-700" },
     tessera_sanitaria: { l: "Tessera sanitaria", c: "bg-cyan-100 text-cyan-700" },
     passaporto: { l: "Passaporto", c: "bg-orange-100 text-orange-700" },
+    visura_camerale: { l: "Visura camerale", c: "bg-teal-100 text-teal-700" },
+    mandato_sdd: { l: "Mandato SDD", c: "bg-lime-100 text-lime-700" },
+    libretto: { l: "Libretto", c: "bg-amber-100 text-amber-700" },
+    polizza: { l: "Polizza", c: "bg-indigo-100 text-indigo-700" },
+    condizioni: { l: "Condizioni", c: "bg-indigo-100 text-indigo-700" },
+    appendice: { l: "Appendice", c: "bg-indigo-100 text-indigo-700" },
+    atto_vendita: { l: "Atto di vendita", c: "bg-indigo-100 text-indigo-700" },
+    quietanza: { l: "Quietanza", c: "bg-indigo-100 text-indigo-700" },
+    mup: { l: "MUP", c: "bg-indigo-100 text-indigo-700" },
+    questionario: { l: "Questionario", c: "bg-indigo-100 text-indigo-700" },
+    preventivo: { l: "Preventivo", c: "bg-indigo-100 text-indigo-700" },
+    fattura: { l: "Fattura", c: "bg-rose-100 text-rose-700" },
+    cid: { l: "CID sinistro", c: "bg-red-100 text-red-700" },
+    perizia: { l: "Perizia", c: "bg-red-100 text-red-700" },
+    denuncia: { l: "Denuncia", c: "bg-red-100 text-red-700" },
     altro: { l: "Altro", c: "bg-slate-100 text-slate-700" },
 };
+
+// Card di destinazione per ciascuna entità (allineate ai detail)
+const CARD_ANAG = [
+    { k: "carta_identita", l: "Carta d'identità" }, { k: "patente", l: "Patente di guida" },
+    { k: "passaporto", l: "Passaporto" }, { k: "codice_fiscale_doc", l: "Tessera codice fiscale" },
+    { k: "tessera_sanitaria", l: "Tessera sanitaria" }, { k: "visura_camerale", l: "Visura camerale" },
+    { k: "mandato_sdd", l: "Mandato SDD" }, { k: "autocertificazione_stato_famiglia", l: "Autocertificazione stato famiglia" },
+    { k: "altro", l: "Altri documenti" },
+];
+const CARD_POL = [
+    { k: "polizza", l: "Polizza" }, { k: "condizioni", l: "Condizioni" }, { k: "appendici", l: "Appendici" },
+    { k: "libretto_veicolo", l: "Libretto veicolo" }, { k: "atto_vendita", l: "Atto di vendita" },
+    { k: "quietanza", l: "Quietanze" }, { k: "mup", l: "MUP" }, { k: "questionario", l: "Questionario" },
+    { k: "regolazione", l: "Regolazione" }, { k: "preventivo", l: "Preventivi" }, { k: "appunti", l: "Appunti" },
+    { k: "altri", l: "Documenti altri (foto)" },
+];
+const CARD_SIN = [
+    { k: "cid", l: "CID" }, { k: "perizia", l: "Perizia" }, { k: "foto", l: "Foto" },
+    { k: "fattura", l: "Fattura" }, { k: "denuncia", l: "Denuncia" }, { k: "altri", l: "Documenti altri" },
+];
+const ROUTING = {
+    carta_identita: ["anagrafica", "carta_identita"], patente: ["anagrafica", "patente"],
+    passaporto: ["anagrafica", "passaporto"], codice_fiscale: ["anagrafica", "codice_fiscale_doc"],
+    tessera_sanitaria: ["anagrafica", "tessera_sanitaria"], visura_camerale: ["anagrafica", "visura_camerale"],
+    mandato_sdd: ["anagrafica", "mandato_sdd"], polizza: ["polizza", "polizza"], condizioni: ["polizza", "condizioni"],
+    appendice: ["polizza", "appendici"], libretto: ["polizza", "libretto_veicolo"], atto_vendita: ["polizza", "atto_vendita"],
+    quietanza: ["polizza", "quietanza"], mup: ["polizza", "mup"], questionario: ["polizza", "questionario"],
+    preventivo: ["polizza", "preventivo"], fattura: ["polizza", "altri"], cid: ["sinistro", "cid"],
+    perizia: ["sinistro", "perizia"], denuncia: ["sinistro", "denuncia"], altro: ["anagrafica", "altro"],
+};
+const CARDS_BY_ENTITA = { anagrafica: CARD_ANAG, polizza: CARD_POL, sinistro: CARD_SIN };
 
 export default function DocumentiInbox() {
     const [items, setItems] = useState(null);
@@ -200,19 +243,24 @@ export default function DocumentiInbox() {
 
 function ReviewDialog({ item, onClose }) {
     const [campi, setCampi] = useState(() => {
-        // Per default seleziona tutti i campi con valore
         const out = [];
         for (const [k, v] of Object.entries(item.dati || {})) {
             if (v !== null && v !== "" && typeof v !== "object") out.push(k);
         }
         return out;
     });
+    const [route0Ent, route0Card] = ROUTING[item.tipo_documento] || ["anagrafica", "altro"];
+    const [entitaTipo, setEntitaTipo] = useState(route0Ent);
+    const [categoria, setCategoria] = useState(route0Card);
     const [anagId, setAnagId] = useState(item.target_anagrafica?.id || "");
     const [polId, setPolId] = useState(item.target_polizza?.id || "");
+    const [sinId, setSinId] = useState("");
     const [salvaAvatar, setSalvaAvatar] = useState(true);
     const [anagSearch, setAnagSearch] = useState("");
     const [anagOptions, setAnagOptions] = useState([]);
+    const [anagLabel, setAnagLabel] = useState(item.target_anagrafica ? (item.target_anagrafica.ragione_sociale || `${item.target_anagrafica.cognome || ""} ${item.target_anagrafica.nome || ""}`) : "");
     const [polOptions, setPolOptions] = useState([]);
+    const [sinOptions, setSinOptions] = useState([]);
 
     useEffect(() => {
         if (anagSearch.length >= 2) {
@@ -222,25 +270,34 @@ function ReviewDialog({ item, onClose }) {
 
     useEffect(() => {
         if (anagId) {
-            api.get(`/polizze?contraente_id=${anagId}&limit=50`).then((r) => setPolOptions(r.data));
+            api.get(`/polizze?contraente_id=${anagId}&limit=50`).then((r) => setPolOptions(r.data)).catch(() => {});
+            api.get(`/sinistri?contraente_id=${anagId}&limit=50`).then((r) => setSinOptions(r.data)).catch(() => {});
         }
     }, [anagId]);
 
     const toggle = (k) => setCampi((p) => p.includes(k) ? p.filter((x) => x !== k) : [...p, k]);
 
     const save = async () => {
-        if (!anagId && !polId) { toast.error("Seleziona almeno un'anagrafica o polizza di destinazione"); return; }
+        if (entitaTipo === "anagrafica" && !anagId) { toast.error("Seleziona un'anagrafica"); return; }
+        if (entitaTipo === "polizza" && !polId) { toast.error("Seleziona una polizza"); return; }
+        if (entitaTipo === "sinistro" && !sinId) { toast.error("Seleziona un sinistro"); return; }
+        if (!categoria) { toast.error("Seleziona la card di destinazione"); return; }
         try {
             await api.post(`/documenti-inbox/${item.id}/save`, {
+                entita_tipo: entitaTipo,
+                categoria,
                 anagrafica_id: anagId || null,
-                polizza_id: polId || null,
+                polizza_id: entitaTipo === "polizza" ? polId : null,
+                sinistro_id: entitaTipo === "sinistro" ? sinId : null,
                 campi_da_applicare: campi,
+                salva_avatar: salvaAvatar,
             });
-            toast.success("Documento archiviato e campi applicati"); onClose();
+            toast.success(`Archiviato in ${entitaTipo} · ${categoria}`); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     const dati = item.dati || {};
+    const cards = CARDS_BY_ENTITA[entitaTipo] || [];
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -267,16 +324,37 @@ function ReviewDialog({ item, onClose }) {
                     </div>
 
                     {/* DESTINAZIONE */}
-                    <div className="space-y-2 border-t pt-3">
-                        <Label className="text-xs uppercase tracking-wider text-slate-600">Destinazione · dove salvare</Label>
+                    <div className="space-y-3 border-t pt-3">
+                        <Label className="text-xs uppercase tracking-wider text-slate-600">Destinazione · entità e card</Label>
 
+                        {/* Tipo entità */}
+                        <div className="flex gap-2">
+                            {["anagrafica", "polizza", "sinistro"].map((et) => (
+                                <button key={et} type="button" onClick={() => { setEntitaTipo(et); setCategoria((CARDS_BY_ENTITA[et][0] || {}).k); }}
+                                    className={`flex-1 text-xs py-1.5 rounded border capitalize ${entitaTipo === et ? "bg-violet-700 text-white border-violet-700" : "bg-white border-slate-200 text-slate-600"}`}
+                                    data-testid={`di-entita-${et}`}>{et}</button>
+                            ))}
+                        </div>
+
+                        {/* Card di destinazione */}
                         <div>
-                            <Label>Anagrafica</Label>
-                            {item.target_anagrafica ? (
+                            <Label>Card di destinazione</Label>
+                            <Select value={categoria} onValueChange={setCategoria}>
+                                <SelectTrigger data-testid="di-card-select"><SelectValue placeholder="Seleziona card" /></SelectTrigger>
+                                <SelectContent>
+                                    {cards.map((c) => <SelectItem key={c.k} value={c.k}>{c.l}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* Anagrafica (sempre richiesta come riferimento cliente) */}
+                        <div>
+                            <Label>Cliente / Anagrafica</Label>
+                            {anagId ? (
                                 <div className="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-300 rounded">
                                     <CheckCircle2 size={14} className="text-emerald-600" />
-                                    <span className="text-sm">{item.target_anagrafica.ragione_sociale || `${item.target_anagrafica.cognome} ${item.target_anagrafica.nome}`}</span>
-                                    <button onClick={() => setAnagId("")} className="ml-auto text-rose-600"><X size={12} /></button>
+                                    <span className="text-sm">{anagLabel || `${anagId.slice(0, 8)}…`}</span>
+                                    <button onClick={() => { setAnagId(""); setPolId(""); setSinId(""); }} className="ml-auto text-rose-600"><X size={12} /></button>
                                 </div>
                             ) : (
                                 <>
@@ -285,28 +363,41 @@ function ReviewDialog({ item, onClose }) {
                                     {anagOptions.length > 0 && (
                                         <div className="border border-slate-200 rounded mt-1 max-h-32 overflow-y-auto">
                                             {anagOptions.map((a) => (
-                                                <button key={a.id} onClick={() => { setAnagId(a.id); setAnagSearch(""); setAnagOptions([]); }}
+                                                <button key={a.id} onClick={() => { setAnagId(a.id); setAnagLabel(a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`); setAnagSearch(""); setAnagOptions([]); }}
                                                     className="w-full text-left p-2 hover:bg-slate-50 text-xs border-b border-slate-100">
                                                     {a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}
                                                 </button>
                                             ))}
                                         </div>
                                     )}
-                                    {anagId && !item.target_anagrafica && <div className="text-[10px] text-emerald-700 mt-1">✓ Selezionata: {anagId.slice(0, 8)}…</div>}
                                 </>
                             )}
                         </div>
 
-                        {anagId && polOptions.length > 0 && (
+                        {/* Polizza — richiesta se entità = polizza */}
+                        {entitaTipo === "polizza" && anagId && (
                             <div>
-                                <Label>Polizza (opzionale)</Label>
+                                <Label>Polizza</Label>
                                 <Select value={polId} onValueChange={setPolId}>
-                                    <SelectTrigger><SelectValue placeholder="Seleziona polizza" /></SelectTrigger>
+                                    <SelectTrigger data-testid="di-pol-select"><SelectValue placeholder="Seleziona polizza" /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="">— Nessuna —</SelectItem>
-                                        {polOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.numero} · {p.ramo}</SelectItem>)}
+                                        {polOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.numero || p.numero_polizza} · {p.ramo}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                        )}
+
+                        {/* Sinistro — richiesto se entità = sinistro */}
+                        {entitaTipo === "sinistro" && anagId && (
+                            <div>
+                                <Label>Sinistro</Label>
+                                <Select value={sinId} onValueChange={setSinId}>
+                                    <SelectTrigger data-testid="di-sin-select"><SelectValue placeholder="Seleziona sinistro" /></SelectTrigger>
+                                    <SelectContent>
+                                        {sinOptions.map((s) => <SelectItem key={s.id} value={s.id}>{s.numero_sinistro || s.id.slice(0, 8)} · {s.tipologia_sinistro || s.ramo || ""}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                                {sinOptions.length === 0 && <div className="text-[10px] text-amber-600 mt-1">Nessun sinistro per questo cliente</div>}
                             </div>
                         )}
 
@@ -317,9 +408,6 @@ function ReviewDialog({ item, onClose }) {
                                     <Checkbox checked={salvaAvatar} onCheckedChange={(v) => setSalvaAvatar(!!v)} data-testid="di-avatar-chk" />
                                     <span className="text-sm">📸 Salva la foto come avatar dell&apos;anagrafica</span>
                                 </label>
-                                <div className="text-[10px] text-slate-500 mt-1 ml-6">
-                                    Verrà ritagliato il volto e impostato come avatar del cliente.
-                                </div>
                             </div>
                         )}
                     </div>
@@ -327,7 +415,7 @@ function ReviewDialog({ item, onClose }) {
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
                     <Button onClick={save} className="bg-violet-700 hover:bg-violet-800" data-testid="di-save">
-                        <CheckCircle2 size={14} className="mr-1" /> Archivia + applica dati
+                        <CheckCircle2 size={14} className="mr-1" /> Archivia nella card
                     </Button>
                 </DialogFooter>
             </DialogContent>

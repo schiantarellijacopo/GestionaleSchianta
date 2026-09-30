@@ -404,6 +404,10 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Data nascita", fmtDate(ana.data_nascita)],
                         ["Sesso", ana.sesso === "M" ? "Maschio" : ana.sesso === "F" ? "Femmina" : "-"],
                         ["Comune nascita", ana.comune_nascita],
+                        ["N° Carta d'identità", ana.numero_carta_identita],
+                        ["CI · Comune emissione", ana.ci_comune_emissione],
+                        ["CI · Data emissione", fmtDate(ana.ci_data_emissione)],
+                        ["CI · Data scadenza", fmtDate(ana.ci_data_scadenza)],
                         ["Email", ana.email],
                         ["Telefono", formatPhone(ana.telefono)],
                         ["Cellulare", formatPhone(ana.cellulare)],
@@ -622,6 +626,15 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
                 <div><Label>Inizio contribuzione</Label><Input type="date" value={f.data_inizio_contribuzione || ""} onChange={(e) => set("data_inizio_contribuzione", e.target.value)} /></div>
                 <div><Label>Settimane contributive</Label><Input type="number" value={f.settimane_contributive || ""} onChange={(e) => set("settimane_contributive", parseInt(e.target.value) || null)} /></div>
+                <div className="col-span-2 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <Label className="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-2 block">Documento d&apos;identità (carta d&apos;identità)</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><Label>N° Carta d&apos;identità</Label><Input value={f.numero_carta_identita || ""} onChange={(e) => set("numero_carta_identita", e.target.value.toUpperCase())} data-testid="anag-ci-numero" /></div>
+                        <div><Label>Comune di emissione</Label><Input value={f.ci_comune_emissione || ""} onChange={(e) => set("ci_comune_emissione", e.target.value)} data-testid="anag-ci-comune" /></div>
+                        <div><Label>Data emissione</Label><Input type="date" value={f.ci_data_emissione || ""} onChange={(e) => set("ci_data_emissione", e.target.value)} data-testid="anag-ci-emissione" /></div>
+                        <div><Label>Data scadenza</Label><Input type="date" value={f.ci_data_scadenza || ""} onChange={(e) => set("ci_data_scadenza", e.target.value)} data-testid="anag-ci-scadenza" /></div>
+                    </div>
+                </div>
                 </>)}
                 <div><Label>Email</Label>
                     <Input
@@ -1964,6 +1977,7 @@ const DOC_TIPI_ANAG = [
     { key: "tessera_sanitaria", label: "Tessera sanitaria", icon: "❤️" },
     { key: "visura_camerale", label: "Visura camerale", icon: "🏢" },
     { key: "mandato_sdd", label: "Mandato SDD", icon: "🏦" },
+    { key: "autocertificazione_stato_famiglia", label: "Autocertificazione stato di famiglia", icon: "👪" },
     { key: "privacy_firmata", label: "Privacy firmata", icon: "✍️" },
 ];
 
@@ -2028,8 +2042,12 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 const updates = {};
                 if (d.codice_fiscale && !ana.codice_fiscale) updates.codice_fiscale = d.codice_fiscale;
                 if (d.data_nascita && !ana.data_nascita) updates.data_nascita = d.data_nascita;
-                if (d.numero_documento && tipo === "carta_identita") updates.numero_documento = d.numero_documento;
-                if (d.data_scadenza && tipo === "carta_identita") updates.data_scadenza = d.data_scadenza;
+                if (tipo === "carta_identita") {
+                    if (d.numero_documento) updates.numero_carta_identita = d.numero_documento;
+                    if (d.data_scadenza) updates.ci_data_scadenza = d.data_scadenza;
+                    if (d.data_rilascio || d.data_emissione) updates.ci_data_emissione = d.data_rilascio || d.data_emissione;
+                    if (d.comune_emissione) updates.ci_comune_emissione = d.comune_emissione;
+                }
                 if (Object.keys(updates).length > 0 && window.confirm(
                     `OCR ha estratto:\n${Object.entries(updates).map(([k, v]) => `• ${k}: ${v}`).join("\n")}\n\nAggiornare l'anagrafica?`)) {
                     await api.put(`/anagrafiche/${anagrafica_id}`, updates);

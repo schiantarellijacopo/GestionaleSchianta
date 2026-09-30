@@ -66,6 +66,7 @@ const SECTIONS = [
     { key: "utenti", label: "Utenti / Collaboratori", icon: <UserCog size={14} />, endpoint: "/auth/users" },
     { key: "schema-provvigionale", label: "Sistema provvigionale", icon: <Percent size={14} />, endpoint: "/librerie/schema-provvigionale" },
     { key: "voci-ricorsive", label: "Voci ricorsive collab.", icon: <RotateCw size={14} />, endpoint: "/voci-ricorsive-collab", custom: true },
+    { key: "visibilita-doc", label: "Visibilità documenti", icon: <Eye size={14} />, custom: true },
 ];
 
 // Estrae sempre una STRINGA leggibile da un errore Axios (anche dai 422 Pydantic
@@ -78,6 +79,71 @@ function errMsg(e, fallback = "Errore") {
     }
     if (d && typeof d === "object") return d.msg || JSON.stringify(d);
     return e?.message || fallback;
+}
+
+const ENTITA_LABEL = { anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri" };
+
+function VisibilitaDocSezione() {
+    const [cfg, setCfg] = useState(null);
+    const [saving, setSaving] = useState(false);
+
+    const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
+    useEffect(() => { load(); }, []);
+
+    const toggle = (entita, key) => {
+        setCfg((p) => ({
+            ...p,
+            [entita]: p[entita].map((c) => c.key === key ? { ...c, visibile_cliente: !c.visibile_cliente } : c),
+        }));
+    };
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            const body = {};
+            for (const ent of Object.keys(cfg)) {
+                body[ent] = Object.fromEntries((cfg[ent] || []).map((c) => [c.key, c.visibile_cliente]));
+            }
+            await api.put("/config/card-visibilita", body);
+            toast.success("Visibilità documenti salvata — applicata ai nuovi caricamenti");
+        } catch (e) { toast.error(errMsg(e, "Errore salvataggio")); }
+        finally { setSaving(false); }
+    };
+
+    if (!cfg) return <Loading />;
+
+    return (
+        <div className="space-y-4" data-testid="visibilita-doc-sezione">
+            <div className="bg-sky-50 border border-sky-200 rounded-md p-3 text-xs text-sky-900">
+                <strong>Visibilità documenti al cliente.</strong> Imposta, per ogni card, se i documenti caricati sono
+                visibili al cliente nel suo portale <strong>di default</strong>. Così non devi decidere manualmente ad ogni caricamento.
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {["anagrafica", "polizza", "sinistro"].map((ent) => (
+                    <Card key={ent} className="p-4" data-testid={`vis-panel-${ent}`}>
+                        <div className="font-semibold text-sm text-slate-800 mb-3">{ENTITA_LABEL[ent]}</div>
+                        <div className="space-y-1.5">
+                            {(cfg[ent] || []).map((c) => (
+                                <button key={c.key} type="button" onClick={() => toggle(ent, c.key)}
+                                    className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border border-slate-200 hover:bg-slate-50 text-left"
+                                    data-testid={`vis-toggle-${ent}-${c.key}`}>
+                                    <span className="text-sm text-slate-700">{c.label}</span>
+                                    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${c.visibile_cliente ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                                        {c.visibile_cliente ? <><Eye size={12} /> Visibile</> : <><EyeOff size={12} /> Interno</>}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </Card>
+                ))}
+            </div>
+            <div className="flex justify-end">
+                <Button onClick={salva} disabled={saving} className="bg-indigo-700 hover:bg-indigo-800" data-testid="vis-salva">
+                    {saving ? "Salvataggio…" : "Salva impostazioni"}
+                </Button>
+            </div>
+        </div>
+    );
 }
 
 export default function Librerie() {
@@ -105,6 +171,7 @@ export default function Librerie() {
                             : s.key === "modelli" ? <ModelliSezione />
                             : s.key === "mup-modelli" ? <ModelliMupSezione />
                             : s.key === "permessi" ? <PermessiSezione />
+                            : s.key === "visibilita-doc" ? <VisibilitaDocSezione />
                             : <Sezione section={s} />}
                     </TabsContent>
                 ))}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { api, sendWhatsApp } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +69,7 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
     const [importo, setImporto] = useState(0);
     const [stato, setStato] = useState("bozza");
     const [firmatoIl, setFirmatoIl] = useState(null);
+    const [esignCanali, setEsignCanali] = useState({ wa: true, email: true });
     const [allegatoId, setAllegatoId] = useState(null);
     const [canale, setCanale] = useState("whatsapp");
     const [otp, setOtp] = useState("");
@@ -163,29 +164,27 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
 
     const firmato = stato === "firmato";
 
-    const firmaEsignContratto = async (modalita) => {
+    // Firma con OpenAPI eSignature: archivia il PDF come allegato e invia il link (WhatsApp/Email)
+    const firmaEsignContratto = async (canali) => {
         setBusy(true);
         try {
             if (stato !== "firmato") await api.put(`/anagrafiche/${anagrafica_id}/contratto-consulenza`, { testo, importo: Number(importo) || 0 });
             const pdfRes = await api.get(`/anagrafiche/${anagrafica_id}/contratto-consulenza/pdf`, { responseType: "blob" });
             const fd = new FormData();
             fd.append("file", new Blob([pdfRes.data], { type: "application/pdf" }), "contratto_consulenza.pdf");
-            fd.append("modalita", modalita);
-            fd.append("firmatario_id", anagrafica_id);
-            fd.append("display_name", "Contratto di Consulenza");
-            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            const link = r.data.signing_url || r.data.viewer_link;
-            if (link && modalita === "link_whatsapp") {
-                const num = (cliente.cellulare || "").replace(/\D/g, "");
-                if (!num) { toast.error("Cellulare del cliente mancante per l'invio WhatsApp"); return; }
-                await sendWhatsApp(num, `Gentile cliente, firmi qui il contratto di consulenza: ${link}`, { anagrafica_id });
-            } else if (link) {
-                window.open(link, "_blank");
-            }
-            toast.success("Richiesta firma eSignAnyWhere creata");
+            const up = await api.post("/allegati", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+                params: { entita_tipo: "anagrafica", entita_id: anagrafica_id, categoria: "contratto_consulenza", descrizione: "Contratto di Consulenza" },
+            });
+            await api.post("/esignature/invia", {
+                allegato_id: up.data.id,
+                invia_whatsapp: !!canali.wa,
+                invia_email: !!canali.email,
+            });
+            toast.success("Richiesta di firma inviata al cliente (OpenAPI · link via " +
+                [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") + ")");
         } catch (e) {
-            const msg = e.response?.data?.detail || "Errore firma";
-            toast.error(String(msg).toLowerCase().includes("configur") ? "eSignAnyWhere non configurato — vai in Librerie → Firme" : msg);
+            toast.error(e.response?.data?.detail || "Errore invio firma");
         } finally { setBusy(false); }
     };
 
@@ -317,12 +316,20 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                         )}
                     </div>
                     <div className="border-t border-indigo-200 mt-3 pt-3">
-                        <div className="text-xs font-semibold text-indigo-900 mb-2">Oppure firma con eSignAnyWhere</div>
-                        <div className="flex flex-wrap gap-2">
-                            <Button onClick={() => firmaEsignContratto("biometric")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-grafometrica">✒️ Firma grafometrica</Button>
-                            <Button onClick={() => firmaEsignContratto("otp_sms")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-otp-sms">📱 OTP SMS</Button>
-                            <Button onClick={() => firmaEsignContratto("link_whatsapp")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-whatsapp">🟢 Link WhatsApp</Button>
-                            <Button onClick={() => firmaEsignContratto("link")} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-email">✉️ Link Email</Button>
+                        <div className="text-xs font-semibold text-indigo-900 mb-2">Oppure firma con OpenAPI (firma elettronica avanzata · OTP SMS)</div>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                <input type="checkbox" checked={esignCanali.wa} onChange={(e) => setEsignCanali((c) => ({ ...c, wa: e.target.checked }))} data-testid="contratto-esign-wa" /> WhatsApp
+                            </label>
+                            <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                <input type="checkbox" checked={esignCanali.email} onChange={(e) => setEsignCanali((c) => ({ ...c, email: e.target.checked }))} data-testid="contratto-esign-email" /> Email
+                            </label>
+                            <Button onClick={() => {
+                                if (!esignCanali.wa && !esignCanali.email) { toast.error("Seleziona almeno un canale"); return; }
+                                firmaEsignContratto(esignCanali);
+                            }} disabled={busy} variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="contratto-firma-openapi">
+                                ✒️ Invia per firma (OpenAPI)
+                            </Button>
                         </div>
                     </div>
                     {otpDebug && (

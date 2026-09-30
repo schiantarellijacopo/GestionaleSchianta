@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, PenTool } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -8,6 +8,7 @@ import {
     Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -21,6 +22,8 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
     const [titolo, setTitolo] = useState("");
     const [corpo, setCorpo] = useState("");
     const [busy, setBusy] = useState(false);
+    const [firmaAlleg, setFirmaAlleg] = useState(null); // {allegato_id, nome_file}
+    const [canali, setCanali] = useState({ wa: true, email: true });
 
     const apri = async () => {
         setOpen(true);
@@ -61,23 +64,37 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
         } catch { toast.error("Errore generazione"); } finally { setBusy(false); }
     };
 
+    // Firma con OpenAPI eSignature: genera+archivia il PDF, poi apre il popup di scelta canale
     const firma = async () => {
         if (!sel) { toast.error("Seleziona un modello"); return; }
         setBusy(true);
         try {
-            const r0 = await api.post("/documenti/genera", payload(false), { responseType: "blob" });
-            const fd = new FormData();
-            fd.append("file", new Blob([r0.data], { type: "application/pdf" }), `${titolo}.pdf`);
-            fd.append("modalita", "biometric");
-            fd.append("firmatario_id", firmatarioId || "");
-            fd.append("display_name", titolo);
-            const r = await api.post("/firma/richieste", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            const link = r.data.signing_url || r.data.viewer_link;
-            if (link) window.open(link, "_blank");
-            toast.success("Richiesta firma creata");
+            const r = await api.post("/documenti/genera", payload(true));
+            setFirmaAlleg({ allegato_id: r.data.allegato_id, nome_file: r.data.nome_file });
+            setCanali({ wa: true, email: true });
+            toast.success("Documento generato — scegli come inviarlo per la firma");
+            onSaved?.();
         } catch (e) {
-            const msg = e.response?.data?.detail || "Errore firma";
-            toast.error(String(msg).toLowerCase().includes("configur") ? "eSignAnyWhere non configurato — Librerie → Firme" : msg);
+            toast.error(e.response?.data?.detail || "Errore generazione documento");
+        } finally { setBusy(false); }
+    };
+
+    const inviaFirma = async () => {
+        if (!firmaAlleg?.allegato_id) return;
+        if (!canali.wa && !canali.email) { toast.error("Seleziona almeno un canale di invio"); return; }
+        setBusy(true);
+        try {
+            await api.post("/esignature/invia", {
+                allegato_id: firmaAlleg.allegato_id,
+                invia_whatsapp: canali.wa,
+                invia_email: canali.email,
+            });
+            toast.success("Richiesta di firma inviata al cliente (link via " +
+                [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") + ")");
+            setFirmaAlleg(null);
+            setOpen(false);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio firma");
         } finally { setBusy(false); }
     };
 
@@ -126,6 +143,40 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                             className="border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid="genera-doc-firma">Firma</Button>
                         <Button onClick={salva} disabled={busy || !sel} className="bg-indigo-700 hover:bg-indigo-800" data-testid="genera-doc-salva">
                             {busy ? "…" : "Genera e archivia"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Popup scelta canale invio firma (OpenAPI eSignature) */}
+            <Dialog open={!!firmaAlleg} onOpenChange={(o) => !o && setFirmaAlleg(null)}>
+                <DialogContent className="max-w-md" data-testid="genera-doc-firma-invio-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><PenTool size={16} className="text-violet-600" /> Invia per firma</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                        <div className="text-xs text-slate-500 bg-slate-50 rounded p-2">
+                            Documento: <b>{firmaAlleg?.nome_file}</b><br />
+                            Firma elettronica avanzata OpenAPI · il cliente riceverà un codice OTP via SMS per completare la firma.
+                        </div>
+                        <div>
+                            <Label className="text-xs uppercase tracking-wide text-slate-600 mb-1.5 block">Invia il link di firma via</Label>
+                            <div className="flex flex-col gap-2">
+                                <label className="flex items-center gap-2 cursor-pointer p-2 border rounded">
+                                    <Checkbox checked={canali.wa} onCheckedChange={(v) => setCanali((c) => ({ ...c, wa: !!v }))} data-testid="firma-canale-wa" />
+                                    <span>WhatsApp</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer p-2 border rounded">
+                                    <Checkbox checked={canali.email} onCheckedChange={(v) => setCanali((c) => ({ ...c, email: !!v }))} data-testid="firma-canale-email" />
+                                    <span>Email</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setFirmaAlleg(null)}>Annulla</Button>
+                        <Button onClick={inviaFirma} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="genera-doc-firma-invia">
+                            {busy ? "Invio…" : "Invia richiesta firma"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

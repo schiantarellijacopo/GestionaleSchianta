@@ -12679,6 +12679,80 @@ async def imap_poller_run_now(user=Depends(require_user("admin"))):
     return res
 
 
+# =============== CONFIG VISIBILITÀ CARD DOCUMENTI ===============
+# Card di ogni entità (allineate ai detail frontend) + default visibilità cliente
+CARD_DEFS = {
+    "anagrafica": [
+        {"key": "carta_identita", "label": "Carta d'identità", "default": True},
+        {"key": "patente", "label": "Patente di guida", "default": True},
+        {"key": "passaporto", "label": "Passaporto", "default": True},
+        {"key": "codice_fiscale_doc", "label": "Tessera codice fiscale", "default": True},
+        {"key": "tessera_sanitaria", "label": "Tessera sanitaria", "default": True},
+        {"key": "visura_camerale", "label": "Visura camerale", "default": False},
+        {"key": "mandato_sdd", "label": "Mandato SDD", "default": True},
+        {"key": "autocertificazione_stato_famiglia", "label": "Autocertificazione stato di famiglia", "default": True},
+        {"key": "privacy_firmata", "label": "Privacy firmata", "default": True},
+        {"key": "altro", "label": "Altri documenti", "default": False},
+    ],
+    "polizza": [
+        {"key": "polizza", "label": "Polizza", "default": True},
+        {"key": "condizioni", "label": "Condizioni", "default": True},
+        {"key": "appendici", "label": "Appendici", "default": True},
+        {"key": "libretto_veicolo", "label": "Libretto veicolo", "default": True},
+        {"key": "atto_vendita", "label": "Atto di vendita", "default": True},
+        {"key": "quietanza", "label": "Quietanze", "default": True},
+        {"key": "mup", "label": "MUP", "default": True},
+        {"key": "questionario", "label": "Questionario", "default": True},
+        {"key": "regolazione", "label": "Regolazione", "default": False},
+        {"key": "preventivo", "label": "Preventivi", "default": False},
+        {"key": "appunti", "label": "Appunti", "default": False},
+        {"key": "altri", "label": "Documenti altri (foto)", "default": False},
+    ],
+    "sinistro": [
+        {"key": "cid", "label": "CID", "default": True},
+        {"key": "perizia", "label": "Perizia", "default": False},
+        {"key": "foto", "label": "Foto", "default": True},
+        {"key": "fattura", "label": "Fattura", "default": True},
+        {"key": "denuncia", "label": "Denuncia", "default": True},
+        {"key": "altri", "label": "Documenti altri", "default": False},
+    ],
+}
+
+
+@api.get("/config/card-visibilita")
+async def get_card_visibilita(user=Depends(current_user)):
+    """Restituisce la configurazione di visibilità cliente per ogni card documento,
+    con i default statici e gli override salvati in azienda_config.card_visibilita."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "card_visibilita": 1}) or {}
+    saved = az.get("card_visibilita") or {}
+    out = {}
+    for entita, cards in CARD_DEFS.items():
+        ent_saved = saved.get(entita) or {}
+        out[entita] = [
+            {"key": c["key"], "label": c["label"],
+             "visibile_cliente": bool(ent_saved.get(c["key"], c["default"]))}
+            for c in cards
+        ]
+    return out
+
+
+@api.put("/config/card-visibilita")
+async def put_card_visibilita(body: dict, user=Depends(require_user("admin"))):
+    """Salva gli override di visibilità cliente per card. body = {anagrafica:{key:bool}, polizza:{...}, sinistro:{...}}"""
+    clean = {}
+    for entita, cards in CARD_DEFS.items():
+        valid_keys = {c["key"] for c in cards}
+        ent = body.get(entita) or {}
+        clean[entita] = {k: bool(v) for k, v in ent.items() if k in valid_keys}
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1}) or {}
+    if az.get("id"):
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_visibilita": clean}})
+    else:
+        await db.azienda_config.insert_one({"id": _uid(), "card_visibilita": clean})
+    return {"ok": True, "card_visibilita": clean}
+
+
+
 @api.post("/email/poller/retry-allegati")
 async def imap_poller_retry_allegati(limit: int = 500, user=Depends(require_user("admin"))):
     """Ri-processa gli allegati delle email GIÀ ricevute che non hanno prodotto

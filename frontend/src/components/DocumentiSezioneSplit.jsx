@@ -28,6 +28,19 @@ export default function DocumentiSezioneSplit({
     const [items, setItems] = useState(null);
     const [uploading, setUploading] = useState(null);
     const [firme, setFirme] = useState([]);
+    const [visCfg, setVisCfg] = useState(null); // {cardKey: bool} per questa entità
+
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => {
+                const list = r.data?.[entita_tipo] || [];
+                setVisCfg(Object.fromEntries(list.map((c) => [c.key, c.visibile_cliente])));
+            })
+            .catch(() => setVisCfg({}));
+    }, [entita_tipo]);
+
+    // visibilità di default per una card: config Librerie → altrimenti default della card
+    const defVis = (c) => (visCfg && c.key in visCfg) ? visCfg[c.key] : (c.default_visibile ?? false);
 
     const loadFirme = async () => {
         try {
@@ -118,7 +131,7 @@ export default function DocumentiSezioneSplit({
                             files={gruppi[c.key] || []}
                             canEdit={canEdit}
                             uploading={uploading === c.key}
-                            onUpload={(files) => upload(files, { visibile: c.default_visibile ?? false, categoria: c.key })}
+                            onUpload={(files) => upload(files, { visibile: defVis(c), categoria: c.key })}
                             onToggle={toggleVisibilita}
                             onDelete={elimina}
                             firmeByOrig={firmeByOrig}
@@ -149,7 +162,7 @@ export default function DocumentiSezioneSplit({
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {categorie.map((c) => (
                             <CategoriaUpload key={c.key} categoria={c}
-                                onPick={(files) => upload(files, { visibile: c.default_visibile ?? false, categoria: c.key })}
+                                onPick={(files) => upload(files, { visibile: defVis(c), categoria: c.key })}
                                 busy={uploading === c.key} />
                         ))}
                     </div>

@@ -277,6 +277,11 @@ class Anagrafica(BaseDoc):
     comune_nascita: Optional[str] = None
     provincia_nascita: Optional[str] = None
     sesso: Optional[Literal["M", "F"]] = None
+    # Documento identità (carta d'identità) — celle popolate anche via OCR Inbox
+    numero_carta_identita: Optional[str] = None
+    ci_comune_emissione: Optional[str] = None
+    ci_data_emissione: Optional[str] = None
+    ci_data_scadenza: Optional[str] = None
     indirizzo: Optional[str] = None
     comune: Optional[str] = None
     provincia: Optional[str] = None
