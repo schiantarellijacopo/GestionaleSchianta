@@ -2049,7 +2049,9 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 [firmaCanali.wa && "WhatsApp", firmaCanali.email && "Email"].filter(Boolean).join(" + ") + ")");
             setFirmaCard(null);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore invio firma");
+            const detail = e.response?.data?.detail;
+            const msg = (typeof detail === "string" && !detail.trim().startsWith("<")) ? detail : "Invio firma non riuscito, riprova più tardi";
+            toast.error(msg);
         } finally { setFirmaBusy(false); }
     };
 

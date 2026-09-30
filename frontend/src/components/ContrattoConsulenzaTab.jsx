@@ -184,7 +184,9 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
             toast.success("Richiesta di firma inviata al cliente (OpenAPI · link via " +
                 [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") + ")");
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore invio firma");
+            const detail = e.response?.data?.detail;
+            const msg = (typeof detail === "string" && !detail.trim().startsWith("<")) ? detail : "Invio firma non riuscito, riprova più tardi";
+            toast.error(msg);
         } finally { setBusy(false); }
     };
 

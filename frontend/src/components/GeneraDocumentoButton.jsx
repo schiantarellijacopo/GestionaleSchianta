@@ -105,7 +105,9 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
             setFirmaAlleg(null);
             setOpen(false);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore invio firma");
+            const detail = e.response?.data?.detail;
+            const msg = (typeof detail === "string" && !detail.trim().startsWith("<")) ? detail : "Invio firma non riuscito, riprova più tardi";
+            toast.error(msg);
         } finally { setBusy(false); }
     };
 

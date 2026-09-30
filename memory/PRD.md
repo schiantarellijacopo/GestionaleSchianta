@@ -1,6 +1,15 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Firma diretta su card + Contatore CI dashboard + Inbox 3 cartelle
+
+- **Firma diretta sulle card anagrafica** (FATTO, testato 4/4): nel tab Documenti dell'anagrafica, ogni card con un PDF mostra il pulsante "Firma" (`doc-firma-<tipo>`) → popup canale (WhatsApp/Email) → invia via OpenAPI. Nuovo endpoint `POST /anagrafiche/{aid}/documenti/{tipo}/prepara-firma` che crea (o riusa) l'allegato dal file del dict card e ritorna `allegato_id` per `/esignature/invia`.
+- **Contatore Carte d'identità in scadenza (Dashboard)** (FATTO, testato): nuovo task `carta_identita_scadenza` in `dashboard_tasks` che conta le anagrafiche con `ci_data_scadenza` nei prossimi 30 giorni. `_conta_documenti` invariato per i documenti dict.
+- **Inbox · 3 cartelle per entità** (FATTO, testato): la pagina Documenti Inbox ora ha 3 dropzone-cartella (Anagrafiche/Polizze/Sinistri) + la dropzone generica. Il file caricato in una cartella passa `scope` al backend (`analyze`): l'OCR classifica e archivia nella card corretta dell'entità dello scope; l'auto-archivio non esce mai dallo scope scelto. Il ReviewDialog preseleziona l'entità dallo scope.
+- **Upload multiplo per card**: confermato già attivo per le card polizza/sinistro (`DocumentiSezioneSplit`, input `multiple` + loop) e per gli "Altri documenti" dell'anagrafica (`AllegatiTab` esteso).
+- **Fix**: i toast di errore firma non mostrano più HTML grezzo del proxy (messaggio localizzato).
+
+
 ## Sessione 30/09/2026 (fork) — Firmato in card dedicata + Promemoria scadenza CI + Upload multiplo
 
 - **Task 1 — Firmato nella card dedicata** (FATTO, testato backend): `documenti_genera` accetta `categoria`; se il documento è di una card anagrafica (`ANAG_DICT_CARDS`) viene mirrorato in `anagrafiche.documenti[categoria]` (helper `_mirror_anagrafica_card`). Idem in `esignature_it._finalizza`: il PDF firmato viene salvato come allegato E mirrorato nella card dedicata dell'anagrafica. `GeneraDocumentoButton` assegna `categoria="autocertificazione_stato_famiglia"` quando genera l'autocertificazione stato famiglia. Verificato: genera→allegato+card dict popolata.

@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only verification of 4 features requested. All PASSED: (1) DocumentiInbox shows 3 cartelle-dropzone (anagrafica/polizza/sinistro) with their upload buttons and the generic dropzone; (2) Dashboard shows 'CARTE D'IDENTITÀ IN SCADENZA (30GG)' task with count = 1; (3) ROSSI ANNA Documenti tab has Firma button on 'Autocertificazione stato di famiglia' card; clicking opens dialog (doc-firma-dialog) with WhatsApp+Email checkboxes and Invia button; clicking Invia calls POST /api/anagrafiche/{id}/documenti/autocertificazione_stato_famiglia/prepara-firma returning 200 without any JS crash; (4) ROSSI ANNA Anagrafica tab shows CA555 (N° carta d'identità) and CI data scadenza.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Firma dialog", "issues": ["Radix DialogContent missing Description/aria-describedby (a11y warning, non-blocking)"]},
+      {"screen": "Firma dialog toast", "issues": ["After successful 200 response from prepara-firma, a Cloudflare 502-style HTML message appeared in a toast. Likely a secondary async call (OpenAPI live send) surfaced a 502 as raw origin HTML into the toast text — user-facing message is not human-friendly. Main flow worked (prepara-firma 200, allegato_id returned)."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_94.json"],
+  "action_items": [
+    "Optional: catch non-JSON error responses from OpenAPI send step and show a friendly Italian toast instead of raw Cloudflare HTML.",
+    "Optional: add DialogDescription to doc-firma-dialog to silence Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "prepara-firma call succeeded (200). Any follow-up live-send failure should be caught and surfaced as a localized error toast, not raw HTML from origin."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100% (4/4 feature checks passed)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "None. Used existing seed ROSSI ANNA (d1031544-a64a-4095-a334-2d3d9e2751d8).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 4 features from iteration 94 request verified via Playwright. data-testids present: documenti-inbox-page, di-cartella-{anagrafica,polizza,sinistro}, di-upload-{anagrafica,polizza,sinistro}, di-dropzone, doc-firma-autocertificazione_stato_famiglia, doc-firma-dialog, doc-firma-wa, doc-firma-email, doc-firma-invia. Toast after Invia may contain raw Cloudflare HTML if OpenAPI live-send returns 502; consider wrapping."
+}
