@@ -1,0 +1,19 @@
+{
+  "summary": "Verified Sospesi page (/sospesi) UI: Storico card is positioned at TOP (right after KPIs). Expanding via toggle reveals autonomous toolbar with all required elements (Cerca, Filtra collaboratore, Incasso dal/al, Stampa PDF, Excel). STORICO TOP row visible with 150,00€ / 19 gg. Search filter works ('STORICO' keeps row, 'zzz' clears). Attivi toolbar has Excel button (sospesi-export-xlsx). All test IDs found and functional.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": ["riepilogo-collab table only renders when there are active sospesi; since there are 0 active sospesi in seed, ordering verification was done vs KPIs+empty-state instead. Storico card is confirmed to be positioned immediately after KPIs and before the attivi toolbar/table."],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Used pre-existing seed 'STORICO TOP' - visible with importo 150,00€ and 19 gg anticipo",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All required data-testids present and functional on /sospesi: sospesi-storico-card, sospesi-storico-toggle, sospesi-storico-search, sospesi-storico-filter-collab, sospesi-storico-dal, sospesi-storico-al, sospesi-storico-print-pdf, sospesi-storico-export-xlsx, sospesi-export-xlsx."
+}

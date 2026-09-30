@@ -1,6 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 09/09/2026)
 
 
+## Sessione 30/09/2026 (fork) — Sospesi: export Excel/PDF storico + storico autonomo in alto
+
+- **Export Excel** (FATTO, testato): nuovi endpoint `GET /api/export/sospesi.xlsx` e `GET /api/export/sospesi-storico.xlsx` (openpyxl, helper `_xlsx_response`). Pulsante "Excel" nella toolbar dei sospesi attivi e nella toolbar dello storico.
+- **Stampa PDF storico** (FATTO, testato): `GET /api/stampa/titoli/sospesi-storico` (filtro collaboratore + dal/al su data_incasso). Pulsante "Stampa PDF" nello storico.
+- **Storico autonomo in alto** (FATTO, testato 100%): lo storico è ora una sezione autonoma `StoricoSospesi` collocata IN ALTO (dopo i KPI, prima del riepilogo) con toolbar propria: Cerca, Filtra per collaboratore, Incasso dal/al, Stampa PDF, Excel. Stato/filtri indipendenti dai sospesi attivi.
+
+
 ## Sessione 30/09/2026 (fork) — Sospesi: filtro date + storico + toolbar riordinata
 
 - **Filtro per date** (FATTO, testato): nella pagina /sospesi due campi "Copertura dal / al" filtrano i sospesi attivi per `data_copertura` (client-side) e alimentano lo storico (server, per `data_incasso`).
