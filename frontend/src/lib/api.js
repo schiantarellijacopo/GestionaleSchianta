@@ -52,6 +52,25 @@ export const fmtDate = (s) => {
 export const fmtNum = (n) =>
     new Intl.NumberFormat("it-IT").format(Number(n || 0));
 
+// Prompt per una data in formato italiano GG/MM/AAAA. Restituisce la data in
+// formato ISO (YYYY-MM-DD) pronta per il backend, oppure null se annullato/vuoto.
+export const promptDataIt = (messaggio) => {
+    const oggi = new Date();
+    const pad = (x) => String(x).padStart(2, "0");
+    const defIt = `${pad(oggi.getDate())}/${pad(oggi.getMonth() + 1)}/${oggi.getFullYear()}`;
+    while (true) {
+        const raw = window.prompt(`${messaggio}\nDigita la data di registrazione (GG/MM/AAAA).`, defIt);
+        if (!raw) return null;
+        const s = raw.trim();
+        let iso = null;
+        let m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+        if (m) iso = `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+        else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) iso = s;
+        if (iso && !isNaN(new Date(iso + "T00:00:00").getTime())) return iso;
+        window.alert("Data non valida. Usa il formato GG/MM/AAAA (es. 01/10/2026).");
+    }
+};
+
 // Invio WhatsApp unificato: se l'agenzia ha la WhatsApp API attiva (whatsapp_provider
 // = "evolution") invia server-side via Evolution; altrimenti apre il link wa.me.
 // Restituisce l'esito e gestisce apertura link / toast.

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, Trash2, Pencil, Gift, TrendingUp, ChevronDown, ChevronRight, Wallet, Printer, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { api, fmtEur, fmtDate, API_BASE } from "@/lib/api";
+import { api, fmtEur, fmtDate, API_BASE, promptDataIt } from "@/lib/api";
 import AllegatiCell from "@/components/AllegatiCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 
@@ -57,11 +57,7 @@ export default function RappelPage() {
     };
 
     const incassa = async (r) => {
-        const dataDefault = new Date().toISOString().slice(0, 10);
-        const dataIncasso = window.prompt(
-            `Incassare il rappel di ${fmtEur(r.importo)} (${r.compagnia_nome})?\nDigita la data di registrazione (YYYY-MM-DD).`,
-            dataDefault,
-        );
+        const dataIncasso = promptDataIt(`Incassare il rappel di ${fmtEur(r.importo)} (${r.compagnia_nome})?`);
         if (!dataIncasso) return;
         try {
             await api.post(`/rappel/${r.id}/incassa`, { data_incasso: dataIncasso });

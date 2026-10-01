@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, Trash2, Pencil, Landmark, Wallet, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { api, fmtEur, fmtDate } from "@/lib/api";
+import { api, fmtEur, fmtDate, promptDataIt } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 
@@ -57,11 +57,7 @@ export default function Pnc() {
     };
 
     const versa = async (r) => {
-        const dataDefault = new Date().toISOString().slice(0, 10);
-        const dataVers = window.prompt(
-            `Registrare il versamento di ${fmtEur(r.importo)} (${r.compagnia_nome})?\nDigita la data di registrazione (YYYY-MM-DD).`,
-            dataDefault,
-        );
+        const dataVers = promptDataIt(`Registrare il versamento di ${fmtEur(r.importo)} (${r.compagnia_nome})?`);
         if (!dataVers) return;
         try { await api.post(`/pnc/${r.id}/versa`, { data_versamento: dataVers }); toast.success("Versamento registrato in Prima Nota"); load(); }
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
