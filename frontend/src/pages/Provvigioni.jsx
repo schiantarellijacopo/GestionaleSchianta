@@ -10,6 +10,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
@@ -45,6 +46,13 @@ export default function Provvigioni() {
         });
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al, base]);
+
+    const { sorted: provSorted, sortKey: provSort, dir: provDir, toggle: provToggle } =
+        useTableSort((data?.righe || []).filter((r) => !r.gia_pagato), "data_incasso", "desc", {
+            data_incasso: (r) => r.data_incasso || r.data_copertura || "",
+            premio: (r) => Number(r.importo_lordo || 0),
+            provvigione: (r) => Number(r.provvigione || 0),
+        });
 
     const stampa = () => {
         const qs = new URLSearchParams();
@@ -176,7 +184,7 @@ export default function Provvigioni() {
 
                             {/* Tabella titoli */}
                             <Card className="border-slate-200 overflow-hidden">
-                                {(() => { const righeDaPagare = data.righe.filter((r) => !r.gia_pagato); return (<>
+                                {(() => { const righeDaPagare = provSorted; return (<>
                                 <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                                     <div className="text-sm font-medium">Provvigioni maturate ({righeDaPagare.length})</div>
                                     <div className="flex gap-2">
@@ -200,12 +208,12 @@ export default function Provvigioni() {
                                         <thead>
                                             <tr>
                                                 <th className="w-10"></th>
-                                                <th>Data</th>
-                                                <th>N. polizza</th>
-                                                <th>Contraente</th>
-                                                <th>Ramo</th>
-                                                <th className="text-right">Premio</th>
-                                                <th className="text-right">Provvigione</th>
+                                                <th><SortHeader k="data_incasso" sortKey={provSort} dir={provDir} toggle={provToggle}>Data</SortHeader></th>
+                                                <th><SortHeader k="numero_polizza" sortKey={provSort} dir={provDir} toggle={provToggle}>N. polizza</SortHeader></th>
+                                                <th><SortHeader k="contraente" sortKey={provSort} dir={provDir} toggle={provToggle}>Contraente</SortHeader></th>
+                                                <th><SortHeader k="ramo" sortKey={provSort} dir={provDir} toggle={provToggle}>Ramo</SortHeader></th>
+                                                <th className="text-right"><SortHeader k="premio" sortKey={provSort} dir={provDir} toggle={provToggle}>Premio</SortHeader></th>
+                                                <th className="text-right"><SortHeader k="provvigione" sortKey={provSort} dir={provDir} toggle={provToggle}>Provvigione</SortHeader></th>
                                             </tr>
                                         </thead>
                                         <tbody>

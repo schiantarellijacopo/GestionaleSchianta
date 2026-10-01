@@ -7,10 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye, Handshake } from "lucide-react";
+import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye, Handshake, Search } from "lucide-react";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 
 export default function EstrattoContoCompagnie() {
     const [compagnie, setCompagnie] = useState([]);
@@ -170,6 +171,20 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const righeAttive = [...daVersare, ...pagamenti, ...altreVoci].sort(
         (a, b) => (a.data || "").localeCompare(b.data || ""),
     );
+    const [ecSearch, setEcSearch] = useState("");
+    const righeAttiveFiltrate = righeAttive.filter((r) => {
+        if (!ecSearch.trim()) return true;
+        const t = ecSearch.trim().toLowerCase();
+        return [r.polizza, r.descrizione, r.contraente, r.collaboratore, r.ramo, r.tipo]
+            .some((v) => (v || "").toString().toLowerCase().includes(t));
+    });
+    const { sorted: righeView, sortKey: ecSort, dir: ecDir, toggle: ecToggle } =
+        useTableSort(righeAttiveFiltrate, "data", "asc", {
+            lordo: (r) => Number(r.lordo || 0),
+            provvigioni: (r) => Number(r.provvigioni || 0),
+            dare: (r) => Number(r.dare || 0),
+            avere: (r) => Number(r.avere || 0),
+        });
     // Righe selezionabili (versabili): titoli da versare + voci da saldare.
     const righeSelezionabili = [...daVersare, ...altreVoci];
     const righeSel = righeSelezionabili.filter((r) => selected.has(rowKey(r)));
@@ -276,6 +291,11 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         </Select>
                     </div>
                     <Button onClick={load} data-testid="ec-applica">Applica</Button>
+                    <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Input value={ecSearch} onChange={(e) => setEcSearch(e.target.value)}
+                            placeholder="Cerca descrizione…" className="pl-8 w-56" data-testid="ec-cerca" />
+                    </div>
                     {data && (
                         <div className="ml-auto flex gap-6 text-sm">
                             <div><span className="text-slate-500">Dare:</span> <span className="font-bold num">{fmtEur(data.totale_dare)}</span></div>
@@ -314,20 +334,20 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < righeSelezionabili.length; }}
                                         data-testid="ec-check-all" />
                                 </th>
-                                <th>Data</th>
-                                <th>Tipo</th>
-                                <th>Polizza</th>
-                                <th>Contraente</th>
-                                <th>Collaboratore</th>
-                                <th>Ramo</th>
-                                <th className="text-right">Lordo €</th>
-                                <th className="text-right">Provv. €</th>
-                                <th className="text-right">Saldo €</th>
-                                <th className="text-right">Avere €</th>
+                                <th><SortHeader k="data" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Data</SortHeader></th>
+                                <th><SortHeader k="tipo" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Tipo</SortHeader></th>
+                                <th><SortHeader k="polizza" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Polizza</SortHeader></th>
+                                <th><SortHeader k="contraente" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Contraente</SortHeader></th>
+                                <th><SortHeader k="collaboratore" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Collaboratore</SortHeader></th>
+                                <th><SortHeader k="ramo" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Ramo</SortHeader></th>
+                                <th className="text-right"><SortHeader k="lordo" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Lordo €</SortHeader></th>
+                                <th className="text-right"><SortHeader k="provvigioni" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Provv. €</SortHeader></th>
+                                <th className="text-right"><SortHeader k="dare" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Saldo €</SortHeader></th>
+                                <th className="text-right"><SortHeader k="avere" sortKey={ecSort} dir={ecDir} toggle={ecToggle}>Avere €</SortHeader></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {righeAttive.map((r, i) => (
+                            {righeView.map((r, i) => (
                                 <tr key={r._movimento_id || `${r.data}-${r.tipo}-${i}`}>
                                     <td className="text-center">
                                         {isSelectable(r) && (
@@ -369,8 +389,8 @@ function DettaglioEstratto({ compagnia, onBack }) {
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
                                 <td colSpan="9" className="text-right">TOTALI ATTIVI</td>
-                                <td className="num text-right">{fmtEur(righeAttive.reduce((s, r) => s + (r.dare || 0), 0))}</td>
-                                <td className="num text-right">{fmtEur(righeAttive.reduce((s, r) => s + (r.avere || 0), 0))}</td>
+                                <td className="num text-right">{fmtEur(righeView.reduce((s, r) => s + (r.dare || 0), 0))}</td>
+                                <td className="num text-right">{fmtEur(righeView.reduce((s, r) => s + (r.avere || 0), 0))}</td>
                             </tr>
                         </tfoot>
                     </table>

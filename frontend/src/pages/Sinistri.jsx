@@ -118,14 +118,29 @@ export default function Sinistri() {
         return p;
     };
 
-    const load = () => api.get("/sinistri", { params: buildParams() }).then((r) => {
-        setList(r.data);
-        // estrai tipologie uniche per dropdown
-        const tip = [...new Set((r.data || []).map((s) => s.tipologia_sinistro).filter(Boolean))];
-        setTipologie(tip);
+    const PAGE_SIZE = 50;
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [serverTotali, setServerTotali] = useState({ n: 0, stimato: 0, liquidato: 0 });
+    const [sortBy, setSortBy] = useState("data_avvenimento");
+    const [sortDir, setSortDir] = useState("desc");
+    const toggleSort = (k) => {
+        if (sortBy === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        else { setSortBy(k); setSortDir("asc"); }
+        setPage(1);
+    };
+
+    const load = () => api.get("/sinistri", { params: { ...buildParams(), paged: true, page, page_size: PAGE_SIZE, sort: sortBy, dir: sortDir } }).then((r) => {
+        setList(r.data.items || []);
+        setTotal(r.data.total || 0);
+        setPages(r.data.pages || 1);
+        setServerTotali(r.data.totali || { n: 0, stimato: 0, liquidato: 0 });
+        setTipologie(r.data.tipologie || []);
     });
 
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter, page, sortBy, sortDir]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter]);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie").catch(() => ({ data: [] })),
@@ -137,17 +152,9 @@ export default function Sinistri() {
         });
     }, []);
 
-    const { sorted, sortKey, dir, toggle } = useTableSort(list || [], "data_avvenimento", "desc");
     const { cols, picker } = useTableColumns("sinistri", SINISTRI_COLS);
 
-    const totali = useMemo(() => {
-        const src = list || [];
-        return {
-            n: src.length,
-            stimato: src.reduce((s, x) => s + (x.riserva || 0), 0),
-            liquidato: src.reduce((s, x) => s + (x.liquidazione || 0), 0),
-        };
-    }, [list]);
+    const totali = serverTotali;
 
     const stampaPdf = () => window.open(
         `${API_BASE}/stampa/sinistri${filters.stato !== "all" ? `?stato=${filters.stato}` : ""}`,
@@ -275,14 +282,14 @@ export default function Sinistri() {
                                 {cols.map((c) => (
                                     <th key={c.key} className={c.thClass}>
                                         {c.sort
-                                            ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggle}>{c.label}</SortHeader>
+                                            ? <SortHeader k={c.sort} sortKey={sortBy} dir={sortDir} toggle={toggleSort}>{c.label}</SortHeader>
                                             : c.label}
                                     </th>
                                 ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {sorted.map((s) => (
+                            {(list || []).map((s) => (
                                 <tr key={s.id} data-testid={`sinistro-row-${s.id}`}
                                     className="bg-sky-50/50 hover:bg-sky-100 transition-colors">
                                     {cols.map((c) => (
@@ -303,6 +310,13 @@ export default function Sinistri() {
                     </table>
                 )}
             </div>
+            {list && pages > 1 && (
+                <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-slate-100 bg-white" data-testid="sinistri-pager">
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="sinistri-page-prev">‹ Prec.</Button>
+                    <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} sinistri</span>
+                    <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="sinistri-page-next">Succ. ›</Button>
+                </div>
+            )}
             {/* Dialog import Excel/CSV per Sinistri */}
             <ImportExcelDialog
                 open={importOpen}

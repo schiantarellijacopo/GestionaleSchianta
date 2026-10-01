@@ -19,6 +19,8 @@ import DatiCompagnieTab from "@/components/DatiCompagnieTab";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 import ChiusuraPill from "@/components/ChiusuraPill";
 import { API_BASE } from "@/lib/api";
+import DateInputIt from "@/components/DateInputIt";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 
 export default function Contabilita() {
     const [dal, setDal] = useState("");
@@ -54,6 +56,13 @@ export default function Contabilita() {
     const exportMovXlsx = () => window.open(`${API_BASE}/stampa/prima-nota.xlsx?${buildMovQuery()}`, "_blank");
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
     useEffect(() => { api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data || [])); }, []);
+
+    const movAccessors = {
+        entrata: (m) => (m.tipo === "entrata" ? Number(m.importo || 0) : 0),
+        uscita: (m) => (m.tipo === "uscita" ? Number(m.importo || 0) : 0),
+    };
+    const { sorted: movSorted, sortKey: movSort, dir: movDir, toggle: movToggle } =
+        useTableSort(primaNota?.movimenti || [], "data_movimento", "asc", movAccessors);
 
     const caricaEstratto = (id) => {
         setEstrattoAna(id);
@@ -122,9 +131,9 @@ export default function Contabilita() {
                     <div className="flex items-center gap-3 mt-4 mb-4 flex-wrap">
                         <Calendar size={16} className="text-slate-400" />
                         <Label className="text-xs">Dal</Label>
-                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-44" data-testid="mov-dal" />
+                        <DateInputIt value={dal} onChange={setDal} className="w-32" data-testid="mov-dal" />
                         <Label className="text-xs">Al</Label>
-                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-44" data-testid="mov-al" />
+                        <DateInputIt value={al} onChange={setAl} className="w-32" data-testid="mov-al" />
                         <div className="relative">
                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             <Input
@@ -169,20 +178,20 @@ export default function Contabilita() {
                             <table className="tbl freeze-3 w-full min-w-[900px]">
                                 <thead>
                                     <tr>
-                                        <th>Data</th>
-                                        <th>Tipo</th>
-                                        <th>Categoria</th>
-                                        <th>Descrizione</th>
-                                        <th>Tipo pag.</th>
-                                        <th>Documento</th>
-                                        <th className="text-right">Entrata</th>
-                                        <th className="text-right">Uscita</th>
+                                        <th><SortHeader k="data_movimento" sortKey={movSort} dir={movDir} toggle={movToggle}>Data</SortHeader></th>
+                                        <th><SortHeader k="tipo" sortKey={movSort} dir={movDir} toggle={movToggle}>Tipo</SortHeader></th>
+                                        <th><SortHeader k="categoria" sortKey={movSort} dir={movDir} toggle={movToggle}>Categoria</SortHeader></th>
+                                        <th><SortHeader k="descrizione" sortKey={movSort} dir={movDir} toggle={movToggle}>Descrizione</SortHeader></th>
+                                        <th><SortHeader k="mezzo_pagamento" sortKey={movSort} dir={movDir} toggle={movToggle}>Tipo pag.</SortHeader></th>
+                                        <th><SortHeader k="numero_documento" sortKey={movSort} dir={movDir} toggle={movToggle}>Documento</SortHeader></th>
+                                        <th className="text-right"><SortHeader k="entrata" sortKey={movSort} dir={movDir} toggle={movToggle}>Entrata</SortHeader></th>
+                                        <th className="text-right"><SortHeader k="uscita" sortKey={movSort} dir={movDir} toggle={movToggle}>Uscita</SortHeader></th>
                                         <th className="text-right">Rimessa</th>
                                         <th className="w-12 text-center">Allegati</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {primaNota.movimenti.map((m) => {
+                                    {movSorted.map((m) => {
                                         const isRimessa = m.categoria === "pagamento_compagnia";
                                         return (
                                             <tr key={m.id}>

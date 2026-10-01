@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Landmark, Search, RotateCcw, Printer, FileSpreadsheet } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import DateInputIt from "@/components/DateInputIt";
 
 export default function Banche() {
     const [saldi, setSaldi] = useState(null);
@@ -129,11 +130,11 @@ export default function Banche() {
                     </div>
                     <div>
                         <Label className="text-xs">Dal</Label>
-                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-40 h-9" data-testid="banche-f-dal" />
+                        <DateInputIt value={dal} onChange={setDal} className="w-32 h-9" data-testid="banche-f-dal" />
                     </div>
                     <div>
                         <Label className="text-xs">Al</Label>
-                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-40 h-9" data-testid="banche-f-al" />
+                        <DateInputIt value={al} onChange={setAl} className="w-32 h-9" data-testid="banche-f-al" />
                     </div>
                     <div>
                         <Label className="text-xs">Cliente</Label>

@@ -4196,16 +4196,58 @@ async def list_titoli(
         t["provvigione_collaboratore"] = tbk["provvigione_collaboratore"]
         t["provvigione_margine"] = tbk["provvigione_margine"]
         t["provvigione_pct_collab"] = tbk["pct_collab"]
-    # arricchimento count allegati
-    tids = [t["id"] for t in items]
-    if tids:
-        pipeline = [
-            {"$match": {"entita_tipo": "titolo", "entita_id": {"$in": tids}, "is_deleted": False}},
+    async def _allegati_counts(rows):
+        tids_ = [t["id"] for t in rows]
+        if not tids_:
+            return
+        pipe = [
+            {"$match": {"entita_tipo": "titolo", "entita_id": {"$in": tids_}, "is_deleted": False}},
             {"$group": {"_id": "$entita_id", "n": {"$sum": 1}}},
         ]
-        counts = {r["_id"]: r["n"] async for r in db.allegati.aggregate(pipeline)}
-        for t in items:
-            t["allegati_count"] = counts.get(t["id"], 0)
+        counts_ = {r["_id"]: r["n"] async for r in db.allegati.aggregate(pipe)}
+        for t in rows:
+            t["allegati_count"] = counts_.get(t["id"], 0)
+
+    if paged:
+        import math as _math
+        _ps = min(max(1, page_size), 200)
+        _pg = max(1, page)
+        # Totali calcolati sull'INTERO set filtrato (non solo la pagina corrente)
+        totali = {
+            "t_lordo": sum(float(t.get("importo_lordo") or 0) for t in items),
+            "t_netto": sum(float(t.get("importo_netto") or t.get("premio_netto") or 0) for t in items),
+            "t_provv": sum(float(t.get("provvigione_totale") or 0) for t in items),
+            "t_provv_collab": sum(float(t.get("provvigione_collaboratore") or 0) for t in items),
+            "t_provv_margine": sum(float(t.get("provvigione_margine") or 0) for t in items),
+            "da_pagare": sum(float(t.get("importo_lordo") or 0) for t in items if t.get("stato") != "incassato"),
+            "incassato": sum(float(t.get("importo_pagato") if t.get("importo_pagato") is not None else (t.get("importo_lordo") or 0)) for t in items if t.get("stato") == "incassato"),
+        }
+        _SORT_MAP = {
+            "numero_polizza": lambda t: (t.get("numero_polizza") or ""),
+            "targa": lambda t: (t.get("targa") or ""),
+            "contraente_nome": lambda t: (t.get("contraente_nome") or "").lower(),
+            "compagnia_nome": lambda t: (t.get("compagnia_nome") or "").lower(),
+            "collaboratore_nome": lambda t: (t.get("collaboratore_nome") or "").lower(),
+            "importo_lordo": lambda t: float(t.get("importo_lordo") or 0),
+            "provv_totale": lambda t: float(t.get("provvigione_totale") or 0),
+            "provv_collaboratore": lambda t: float(t.get("provvigione_collaboratore") or 0),
+            "margine_agenzia": lambda t: float(t.get("provvigione_margine") or 0),
+            "effetto": lambda t: (t.get("effetto") or ""),
+            "data_scadenza": lambda t: (t.get("scadenza") or ""),
+            "data_copertura": lambda t: (t.get("data_copertura") or ""),
+        }
+        key_fn = _SORT_MAP.get(sort)
+        if key_fn:
+            items.sort(key=key_fn, reverse=(dir == "desc"))
+        total = len(items)
+        pages = max(1, _math.ceil(total / _ps))
+        page_items = items[(_pg - 1) * _ps: (_pg - 1) * _ps + _ps]
+        await _allegati_counts(page_items)
+        return {"items": page_items, "total": total, "pages": pages,
+                "page": _pg, "page_size": _ps, "totali": totali}
+
+    # Comportamento storico (non paginato)
+    await _allegati_counts(items)
     return items
 
 
@@ -5789,6 +5831,11 @@ async def list_sinistri(
     q: Optional[str] = None,
     dal: Optional[str] = None,
     al: Optional[str] = None,
+    paged: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    sort: Optional[str] = None,
+    dir: str = "desc",
     limit: int = 50000,
     user=Depends(current_user),
 ):
@@ -5852,6 +5899,41 @@ async def list_sinistri(
         if s.get("danneggiati"):
             d0 = s["danneggiati"][0]
             s["danneggiato_nome"] = d0.get("nome") or d0.get("ragione_sociale")
+
+    if paged:
+        import math as _math
+        _ps = min(max(1, page_size), 200)
+        _pg = max(1, page)
+        totali = {
+            "n": len(items),
+            "stimato": sum(float(s.get("riserva") or 0) for s in items),
+            "liquidato": sum(float(s.get("liquidazione") or 0) for s in items),
+        }
+        _SORT_MAP = {
+            "numero_interno": lambda s: (s.get("numero_interno") or ""),
+            "numero_sinistro": lambda s: (s.get("numero_sinistro") or ""),
+            "numero_polizza": lambda s: (s.get("numero_polizza") or ""),
+            "data_avvenimento": lambda s: (s.get("data_avvenimento") or ""),
+            "contraente_nome": lambda s: (s.get("contraente_nome") or "").lower(),
+            "compagnia_nome": lambda s: (s.get("compagnia_nome") or "").lower(),
+            "tipologia_sinistro": lambda s: (s.get("tipologia_sinistro") or "").lower(),
+            "danneggiato_nome": lambda s: (s.get("danneggiato_nome") or "").lower(),
+            "targa": lambda s: (s.get("targa") or ""),
+            "collaboratore_nome": lambda s: (s.get("collaboratore_nome") or "").lower(),
+            "riserva": lambda s: float(s.get("riserva") or 0),
+            "liquidazione": lambda s: float(s.get("liquidazione") or 0),
+            "stato": lambda s: (s.get("stato") or ""),
+        }
+        key_fn = _SORT_MAP.get(sort)
+        if key_fn:
+            items.sort(key=key_fn, reverse=(dir == "desc"))
+        total = len(items)
+        pages = max(1, _math.ceil(total / _ps))
+        page_items = items[(_pg - 1) * _ps: (_pg - 1) * _ps + _ps]
+        # tipologie uniche (per dropdown) sull'intero set filtrato
+        tipologie = sorted({s.get("tipologia_sinistro") for s in items if s.get("tipologia_sinistro")})
+        return {"items": page_items, "total": total, "pages": pages,
+                "page": _pg, "page_size": _ps, "totali": totali, "tipologie": tipologie}
     return items
 
 

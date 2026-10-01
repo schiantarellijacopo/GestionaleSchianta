@@ -5,8 +5,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileText, Printer, Eye, Users, Save } from "lucide-react";
+import { FileText, Printer, Eye, Users, Save, Search } from "lucide-react";
 import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { toast } from "sonner";
 
 const eur = (v) => (Number(v || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -21,6 +22,20 @@ export default function EstrattoContoContraente() {
     const [includiPagamenti, setIncludiPagamenti] = useState(true);
     const [data, setData] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [ecSearch, setEcSearch] = useState("");
+
+    const righeFiltrate = (data?.righe || []).filter((r) => {
+        if (!ecSearch.trim()) return true;
+        const t = ecSearch.trim().toLowerCase();
+        return [r.contratto, r.compagnia, r.rischio, r.tipo_cod, r.targa_oggetto]
+            .some((v) => (v || "").toString().toLowerCase().includes(t));
+    });
+    const { sorted: righeSorted, sortKey: ecSort, dir: ecDir, toggle: ecToggle } =
+        useTableSort(righeFiltrate, null, "asc", {
+            premio: (r) => Number(r.premio || 0),
+            addizionali: (r) => Number(r.addizionali || 0),
+            totale: (r) => Number(r.totale || 0),
+        });
 
     const params = () => ({
         contraente_id: contraenteId, dal, al, filtra_per: filtraPer,
@@ -142,16 +157,24 @@ export default function EstrattoContoContraente() {
                         <Empty title="Nessun titolo nel periodo" />
                     ) : (
                         <div className="overflow-x-auto">
+                            <div className="relative mb-3 max-w-xs">
+                                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <Input value={ecSearch} onChange={(e) => setEcSearch(e.target.value)}
+                                    placeholder="Cerca descrizione (contratto, compagnia, rischio…)"
+                                    className="pl-8 h-9" data-testid="ecc-cerca" />
+                            </div>
                             <table className="w-full text-xs border-collapse">
                                 <thead>
                                     <tr className="bg-slate-800 text-white text-left">
-                                        {["Contratto", "Rata del", "Scad. mora", "Data cop.", "Compagnia", "Rischio", "Premio", "Addiz.", "Totale", "Tipo"].map((h) => (
-                                            <th key={h} className={`px-2 py-1.5 ${["Premio", "Addiz.", "Totale"].includes(h) ? "text-right" : ""}`}>{h}</th>
+                                        {[["contratto", "Contratto"], ["rata_del", "Rata del"], ["scad_mora", "Scad. mora"], ["data_copertura", "Data cop."], ["compagnia", "Compagnia"], ["rischio", "Rischio"], ["premio", "Premio"], ["addizionali", "Addiz."], ["totale", "Totale"], ["tipo_cod", "Tipo"]].map(([k, h]) => (
+                                            <th key={k} className={`px-2 py-1.5 ${["premio", "addizionali", "totale"].includes(k) ? "text-right" : ""}`}>
+                                                <SortHeader k={k} sortKey={ecSort} dir={ecDir} toggle={ecToggle} className="text-white hover:text-sky-200">{h}</SortHeader>
+                                            </th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {data.righe.map((r, i) => (
+                                    {righeSorted.map((r, i) => (
                                         <Fragment key={i}>
                                             <tr className={i % 2 ? "bg-slate-50" : ""}>
                                                 <td className="px-2 py-1 border-b border-slate-100">{r.contratto}</td>

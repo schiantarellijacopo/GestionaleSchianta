@@ -131,13 +131,30 @@ export default function Titoli({ storicoMode = false } = {}) {
         return p;
     };
 
+    const PAGE_SIZE = 50;
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [serverTotali, setServerTotali] = useState({ t_lordo: 0, t_netto: 0, t_provv: 0, t_provv_collab: 0, t_provv_margine: 0, da_pagare: 0, incassato: 0 });
+    const [sortBy, setSortBy] = useState("data_scadenza");
+    const [sortDir, setSortDir] = useState("asc");
+    const toggleSort = (k) => {
+        if (sortBy === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        else { setSortBy(k); setSortDir("asc"); }
+        setPage(1);
+    };
+
     const loadSeq = useRef(0);
     const load = () => {
         setSelected(new Set());
         const seq = ++loadSeq.current;
-        api.get("/titoli", { params: buildParams() }).then((r) => {
+        api.get("/titoli", { params: { ...buildParams(), paged: true, page, page_size: PAGE_SIZE, sort: sortBy, dir: sortDir } }).then((r) => {
             // Ignora risposte fuori-ordine (evita che una ricerca precedente sovrascriva l'ultima)
-            if (seq === loadSeq.current) setList(r.data);
+            if (seq !== loadSeq.current) return;
+            setList(r.data.items || []);
+            setTotal(r.data.total || 0);
+            setPages(r.data.pages || 1);
+            setServerTotali(r.data.totali || { t_lordo: 0, t_netto: 0, t_provv: 0, t_provv_collab: 0, t_provv_margine: 0, da_pagare: 0, incassato: 0 });
         });
     };
 
@@ -146,7 +163,8 @@ export default function Titoli({ storicoMode = false } = {}) {
         const t = setTimeout(() => { load(); }, 300);
         return () => clearTimeout(t);
         // eslint-disable-next-line
-    }, [filters]);
+    }, [filters, page, sortBy, sortDir]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters]);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie"), api.get("/librerie/rami?dedup=1&con_polizze=1"),
@@ -162,21 +180,10 @@ export default function Titoli({ storicoMode = false } = {}) {
     }, []);
 
     const baseList = list || [];
-    const { sorted, sortKey, dir, toggle: toggleSort } = useTableSort(baseList, "data_scadenza", "asc");
-    const displayed = sorted;
+    const displayed = baseList;
 
-    // totali calcolati sui dati visualizzati
-    const totali = useMemo(() => {
-        const src = list || [];
-        const t_lordo = src.reduce((s, t) => s + (t.importo_lordo || 0), 0);
-        const t_netto = src.reduce((s, t) => s + (t.importo_netto || 0), 0);
-        const t_provv = src.reduce((s, t) => s + (t.provvigione_totale ?? t.provvigioni ?? 0), 0);
-        const t_provv_collab = src.reduce((s, t) => s + (t.provvigione_collaboratore || 0), 0);
-        const t_provv_margine = src.reduce((s, t) => s + (t.provvigione_margine ?? ((t.provvigione_totale ?? t.provvigioni ?? 0) - (t.provvigione_collaboratore || 0))), 0);
-        const da_pagare = src.filter((t) => t.stato !== "incassato").reduce((s, t) => s + (t.importo_lordo || 0), 0);
-        const incassato = src.filter((t) => t.stato === "incassato").reduce((s, t) => s + (t.importo_pagato ?? t.importo_lordo ?? 0), 0);
-        return { t_lordo, t_netto, t_provv, t_provv_collab, t_provv_margine, da_pagare, incassato };
-    }, [list]);
+    // totali calcolati lato server sull'intero set filtrato
+    const totali = serverTotali;
 
     const toggle = (id) => setSelected((p) => {
         const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -502,7 +509,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                                 {titoliCols.map((c) => (
                                     <th key={c.key} className={c.thClass}>
                                         {c.header ? c.header()
-                                            : c.sort ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggleSort}>{c.label}</SortHeader>
+                                            : c.sort ? <SortHeader k={c.sort} sortKey={sortBy} dir={sortDir} toggle={toggleSort}>{c.label}</SortHeader>
                                             : (c.label === "Menu ⋮" ? "" : c.label)}
                                     </th>
                                 ))}
@@ -523,9 +530,11 @@ export default function Titoli({ storicoMode = false } = {}) {
                         </tbody>
                     </table>
                 )}
-                {list && list.length >= 2000 && (
-                    <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
-                        Visualizzati tutti i {list.length} risultati
+                {list && pages > 1 && (
+                    <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-slate-100 bg-white" data-testid="titoli-pager">
+                        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="titoli-page-prev">‹ Prec.</Button>
+                        <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} titoli</span>
+                        <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="titoli-page-next">Succ. ›</Button>
                     </div>
                 )}
             </div>
