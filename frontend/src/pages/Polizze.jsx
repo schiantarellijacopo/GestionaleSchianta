@@ -121,8 +121,9 @@ export default function Polizze() {
     const [filters, setFilters] = useState(INITIAL_FILTERS);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
-    const PAGE_SIZE = 50;
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
+    const PAGE_SIZE = pageSize;
     const [total, setTotal] = useState(0);
     const [pages, setPages] = useState(1);
     const [serverTotali, setServerTotali] = useState({ t_lordo: 0, t_netto: 0, t_provv: 0 });
@@ -182,8 +183,8 @@ export default function Polizze() {
             toast.error(e.response?.data?.detail || "Errore");
         } finally { setMarcandoScadute(false); }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, page, sortBy, sortDir]);
-    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, page, sortBy, sortDir, pageSize]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, pageSize]);
     useEffect(() => { loadConteggi(); /* eslint-disable-next-line */ }, []);
 
     useEffect(() => {
@@ -425,11 +426,17 @@ export default function Polizze() {
                         </tbody>
                     </table>
                 )}
-                {list && pages > 1 && (
+                {list && total > 0 && (
                     <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-slate-100 bg-white" data-testid="pol-pager">
                         <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="pol-page-prev">‹ Prec.</Button>
                         <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} polizze</span>
                         <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="pol-page-next">Succ. ›</Button>
+                        <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+                            className="ml-2 text-xs border border-slate-200 rounded px-2 py-1 bg-white" data-testid="pol-page-size">
+                            <option value={50}>50 / pagina</option>
+                            <option value={100}>100 / pagina</option>
+                            <option value={200}>200 / pagina</option>
+                        </select>
                     </div>
                 )}
             </div>

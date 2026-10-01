@@ -119,8 +119,9 @@ export default function Sinistri() {
         return p;
     };
 
-    const PAGE_SIZE = 50;
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
+    const PAGE_SIZE = pageSize;
     const [total, setTotal] = useState(0);
     const [pages, setPages] = useState(1);
     const [serverTotali, setServerTotali] = useState({ n: 0, stimato: 0, liquidato: 0 });
@@ -140,8 +141,8 @@ export default function Sinistri() {
         setTipologie(r.data.tipologie || []);
     });
 
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter, page, sortBy, sortDir]);
-    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter, page, sortBy, sortDir, pageSize]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, polizzaIdFilter, pageSize]);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie").catch(() => ({ data: [] })),
@@ -326,11 +327,17 @@ export default function Sinistri() {
                     </table>
                 )}
             </div>
-            {list && pages > 1 && (
+            {list && total > 0 && (
                 <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-slate-100 bg-white" data-testid="sinistri-pager">
                     <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="sinistri-page-prev">‹ Prec.</Button>
                     <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} sinistri</span>
                     <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="sinistri-page-next">Succ. ›</Button>
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+                        className="ml-2 text-xs border border-slate-200 rounded px-2 py-1 bg-white" data-testid="sinistri-page-size">
+                        <option value={50}>50 / pagina</option>
+                        <option value={100}>100 / pagina</option>
+                        <option value={200}>200 / pagina</option>
+                    </select>
                 </div>
             )}
             {/* Dialog import Excel/CSV per Sinistri */}

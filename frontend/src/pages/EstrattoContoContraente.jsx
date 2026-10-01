@@ -1,11 +1,11 @@
 import { useState, Fragment } from "react";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import { PageHeader, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileText, Printer, Eye, Users, Save, Search } from "lucide-react";
+import { FileText, Printer, Eye, Users, Save, Search, FileSpreadsheet } from "lucide-react";
 import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
@@ -62,6 +62,25 @@ export default function EstrattoContoContraente() {
             if (!win) { const a = document.createElement("a"); a.href = url; a.download = "estratto_conto.pdf"; a.click(); }
             setTimeout(() => URL.revokeObjectURL(url), 60000);
         } catch { toast.error("Errore generazione PDF"); } finally { setBusy(false); }
+    };
+
+    const qsExport = () => {
+        const u = new URLSearchParams();
+        if (contraenteId) u.append("contraente_id", contraenteId);
+        if (dal) u.append("dal", dal);
+        if (al) u.append("al", al);
+        u.append("filtra_per", filtraPer);
+        u.append("includi_collegati", String(includiCollegati));
+        u.append("includi_pagamenti", String(includiPagamenti));
+        return u.toString();
+    };
+    const exportXlsx = () => {
+        if (!contraenteId) { toast.error("Seleziona un contraente"); return; }
+        window.open(`${API_BASE}/estratto-conto-contraente/export.xlsx?${qsExport()}`, "_blank");
+    };
+    const exportCsv = () => {
+        if (!contraenteId) { toast.error("Seleziona un contraente"); return; }
+        window.open(`${API_BASE}/estratto-conto-contraente/export.csv?${qsExport()}`, "_blank");
     };
 
     const salvaInAnagrafica = async () => {
@@ -131,6 +150,12 @@ export default function EstrattoContoContraente() {
                     <Button onClick={stampaPdf} disabled={busy} variant="outline"
                         className="border-indigo-300 text-indigo-700 hover:bg-indigo-50" data-testid="ecc-stampa">
                         <Printer size={14} className="mr-1" /> Apri PDF
+                    </Button>
+                    <Button onClick={exportCsv} disabled={busy} variant="outline" data-testid="ecc-csv">
+                        <FileText size={14} className="mr-1" /> CSV
+                    </Button>
+                    <Button onClick={exportXlsx} disabled={busy} variant="outline" data-testid="ecc-xlsx">
+                        <FileSpreadsheet size={14} className="mr-1" /> Excel
                     </Button>
                     <Button onClick={salvaInAnagrafica} disabled={busy}
                         className="bg-emerald-600 hover:bg-emerald-700" data-testid="ecc-salva">

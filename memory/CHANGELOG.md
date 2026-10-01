@@ -487,3 +487,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Export Sinistri: nuovi GET /api/export/sinistri.csv e .xlsx (filtri stato/compagnia/ramo/collaboratore/tipologia/q/dal/al/polizza). Pulsanti CSV/Excel aggiunti alla pagina Sinistri.
 - Export Clienti: nuovi GET /api/export/anagrafiche.csv e .xlsx (filtri q/tag/collaboratore/professione/comune). Pulsanti CSV/Excel aggiunti alla pagina Anagrafiche (/anagrafiche, menu "Clienti").
 - Verificato via curl: tutti e 4 gli export 200 con dati reali (sinistri.csv 580KB, anagrafiche.csv 879KB). Portafoglio aveva già CSV/Excel.
+
+## 2026-10-01 (4) — Righe per pagina + export Estratti Conto
+- Selettore "righe per pagina" (50/100/200) aggiunto ai pager di Portafoglio (pol-page-size), Titoli (titoli-page-size) e Sinistri (sinistri-page-size). Cambio pageSize resetta a pagina 1 e ricarica. Backend cap page_size a 200.
+- Export CSV/Excel su E/C compagnie: nuovi GET /api/compagnie/{cid}/estratto-conto/export.{csv,xlsx} (filtri dal/al/collaboratore_id), pulsanti nel dettaglio compagnia.
+- Export CSV/Excel su E/C contraente: nuovi GET /api/estratto-conto-contraente/export.{csv,xlsx} (filtri contraente_id/dal/al/filtra_per/includi_collegati/includi_pagamenti), pulsanti accanto ad "Apri PDF".
+- Verificato via curl: tutti e 4 gli export E/C 200 con dati. UI verificata: selettori pagina e pulsanti presenti e funzionanti.

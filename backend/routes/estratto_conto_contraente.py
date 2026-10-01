@@ -200,6 +200,67 @@ async def pdf(contraente_id: str, dal: str | None = None, al: str | None = None,
         headers={"Content-Disposition": f'inline; filename="estratto_conto_{contraente_id[:8]}.pdf"'})
 
 
+def _ecc_rows(data: dict):
+    headers = ["Contratto", "Rata del", "Scad. mora", "Data copertura", "Compagnia",
+               "Rischio", "Premio", "Addizionali", "Totale", "Tipo", "Oggetto/Targa", "Pagamento"]
+    rows = []
+    for r in data.get("righe", []):
+        pag = r.get("pagamento")
+        pag_txt = ""
+        if pag:
+            pag_txt = f"{pag.get('data', '')} € {pag.get('importo', '')}" + (f" {pag.get('mezzo')}" if pag.get("mezzo") else "")
+        rows.append([
+            r.get("contratto"), r.get("rata_del"), r.get("scad_mora"), r.get("data_copertura"),
+            r.get("compagnia"), r.get("rischio"), r.get("premio"), r.get("addizionali"),
+            r.get("totale"), r.get("tipo_cod"), r.get("targa_oggetto"), pag_txt,
+        ])
+    return headers, rows
+
+
+@router.get("/estratto-conto-contraente/export.xlsx")
+async def export_xlsx(contraente_id: str, dal: str | None = None, al: str | None = None,
+                      filtra_per: str = Query("rata"), includi_collegati: bool = False,
+                      includi_pagamenti: bool = True, user=Depends(current_user)):
+    data = await _build(contraente_id, dal, al, filtra_per, includi_collegati, includi_pagamenti)
+    headers, rows = _ecc_rows(data)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Estratto conto"
+    ws.append(headers)
+    hf = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    hfont = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = hf; c.font = hfont; c.alignment = Alignment(horizontal="center")
+    for r in rows:
+        ws.append(r)
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value is not None else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 34)
+    out = BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="estratto_conto_{contraente_id[:8]}.xlsx"'})
+
+
+@router.get("/estratto-conto-contraente/export.csv")
+async def export_csv(contraente_id: str, dal: str | None = None, al: str | None = None,
+                     filtra_per: str = Query("rata"), includi_collegati: bool = False,
+                     includi_pagamenti: bool = True, user=Depends(current_user)):
+    data = await _build(contraente_id, dal, al, filtra_per, includi_collegati, includi_pagamenti)
+    headers, rows = _ecc_rows(data)
+    import csv as _csv
+    from io import StringIO
+    out = StringIO()
+    w = _csv.writer(out, delimiter=";")
+    w.writerow(headers)
+    for r in rows:
+        w.writerow(r)
+    return StreamingResponse(
+        BytesIO(out.getvalue().encode("utf-8-sig")), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="estratto_conto_{contraente_id[:8]}.csv"'})
+
+
 @router.post("/estratto-conto-contraente/salva")
 async def salva(contraente_id: str, dal: str | None = None, al: str | None = None,
                 filtra_per: str = Query("rata"), includi_collegati: bool = False,

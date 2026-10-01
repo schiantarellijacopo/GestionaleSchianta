@@ -1684,6 +1684,48 @@ async def compagnia_estratto_conto(
     return await _compagnia_estratto_data(cid, dal, al, collaboratore_id)
 
 
+def _compagnia_ec_rows():
+    headers = ["Data", "Tipo", "Polizza", "Contraente", "Collaboratore", "Ramo",
+               "Lordo €", "Provv. €", "Dare €", "Avere €", "Descrizione"]
+    return headers
+
+
+@api.get("/compagnie/{cid}/estratto-conto/export.xlsx")
+async def compagnia_estratto_xlsx(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    data = await _compagnia_estratto_data(cid, dal, al, collaboratore_id)
+    rows = [[
+        r.get("data"), r.get("tipo"), r.get("polizza"), r.get("contraente"),
+        r.get("collaboratore"), r.get("ramo"), r.get("lordo"), r.get("provvigioni"),
+        r.get("dare"), r.get("avere"), r.get("descrizione"),
+    ] for r in data.get("righe", [])]
+    return _xlsx_response(_compagnia_ec_rows(), rows, "EC Compagnia", "estratto_conto_compagnia.xlsx")
+
+
+@api.get("/compagnie/{cid}/estratto-conto/export.csv")
+async def compagnia_estratto_csv(
+    cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    data = await _compagnia_estratto_data(cid, dal, al, collaboratore_id)
+    import csv as _csv
+    out = _io.StringIO()
+    w = _csv.writer(out, delimiter=";")
+    w.writerow(_compagnia_ec_rows())
+    for r in data.get("righe", []):
+        w.writerow([r.get("data"), r.get("tipo"), r.get("polizza"), r.get("contraente"),
+                    r.get("collaboratore"), r.get("ramo"), r.get("lordo"), r.get("provvigioni"),
+                    r.get("dare"), r.get("avere"), r.get("descrizione")])
+    return StreamingResponse(
+        _io.BytesIO(out.getvalue().encode("utf-8-sig")), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="estratto_conto_compagnia.csv"'},
+    )
+
+
 @api.get("/compagnie/{cid}/rimesse-storico")
 async def compagnia_rimesse_storico(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,

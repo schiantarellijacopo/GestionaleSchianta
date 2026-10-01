@@ -249,12 +249,22 @@ function DettaglioEstratto({ compagnia, onBack }) {
                 title={`Estratto conto — ${compagnia?.ragione_sociale}`}
                 subtitle={`Codice ${compagnia?.codice} · ${compagnia?.trattiene_provvigioni !== false ? "Trattiene provvigioni" : "Non trattiene provvigioni"}`}
                 actions={
-                    <a href={`${import.meta.env?.VITE_BACKEND_URL || ""}/api/stampa/compagnie/${compagnia.id}/estratto-conto${dal || al ? `?${dal ? `dal=${dal}` : ""}${dal && al ? "&" : ""}${al ? `al=${al}` : ""}` : ""}`}
-                        target="_blank" rel="noreferrer">
-                        <Button variant="outline" data-testid="ec-stampa-dettaglio">
-                            <Printer size={14} className="mr-1" /> Stampa PDF
-                        </Button>
-                    </a>
+                    <div className="flex items-center gap-2">
+                        <a href={`${import.meta.env?.VITE_BACKEND_URL || ""}/api/stampa/compagnie/${compagnia.id}/estratto-conto${dal || al ? `?${dal ? `dal=${dal}` : ""}${dal && al ? "&" : ""}${al ? `al=${al}` : ""}` : ""}`}
+                            target="_blank" rel="noreferrer">
+                            <Button variant="outline" data-testid="ec-stampa-dettaglio">
+                                <Printer size={14} className="mr-1" /> Stampa PDF
+                            </Button>
+                        </a>
+                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.csv?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collaboratoreId !== "all" ? { collaboratore_id: collaboratoreId } : {}) }).toString()}`}
+                            target="_blank" rel="noreferrer">
+                            <Button variant="outline" data-testid="ec-csv"><FileText size={14} className="mr-1" /> CSV</Button>
+                        </a>
+                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.xlsx?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collaboratoreId !== "all" ? { collaboratore_id: collaboratoreId } : {}) }).toString()}`}
+                            target="_blank" rel="noreferrer">
+                            <Button variant="outline" data-testid="ec-xlsx"><Coins size={14} className="mr-1" /> Excel</Button>
+                        </a>
+                    </div>
                 }
             />
 
