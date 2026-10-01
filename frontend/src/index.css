@@ -182,6 +182,13 @@ h1, h2, h3, h4, h5 {
 .tbl-scroll.has-footer {
     max-height: calc(100vh - 300px);
 }
+/* Variante usata dentro un wrapper flex ad altezza calcolata (useFillHeight):
+   la tabella riempie lo spazio e il footer totali resta sempre sotto, senza
+   coprire le righe. */
+.tbl-scroll.flex-fill {
+    max-height: none;
+    min-height: 0;
+}
 .tbl-scroll .tbl,
 .tbl-scroll .tbl-compact { border-collapse: separate; border-spacing: 0; }
 

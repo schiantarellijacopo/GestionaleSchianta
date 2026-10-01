@@ -7,6 +7,7 @@ import CollaboratoreCell from "@/components/CollaboratoreCell";
 import KpiBarSection from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
+import useFillHeight from "@/hooks/useFillHeight";
 import { useTableColumns } from "@/components/ColumnManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +85,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     const { mezzi: mezziPagamento } = useMezziPagamento();
     const [editing, setEditing] = useState(null);
     const [showFilters, setShowFilters] = useState(false);
+    const fill = useFillHeight([showFilters]);
 
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
@@ -503,7 +505,8 @@ export default function Titoli({ storicoMode = false } = {}) {
 
             {/* Tabella con header sticky + prime 3 colonne congelate */}
             <div className="flex justify-end mb-2">{colsPicker}</div>
-            <div className="tbl-scroll has-footer" style={{ "--c1-w": "36px", "--c2-w": "140px", "--c3-w": "100px" }}>
+            <div ref={fill.ref} style={fill.style} className="flex flex-col min-h-0">
+            <div className="tbl-scroll flex-fill flex-1" style={{ "--c1-w": "36px", "--c2-w": "140px", "--c3-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl-compact freeze-3 w-full text-xs">
                         <thead>
@@ -548,7 +551,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             </div>
 
             {/* Footer azione bulk + totali */}
-            <div className="sticky bottom-0 mt-4 bg-white border-t-2 border-slate-900 shadow-lg rounded-t-md px-4 py-3" data-testid="bulk-footer">
+            <div className="mt-2 bg-white border-t-2 border-slate-900 shadow-lg rounded-t-md px-4 py-3 flex-none" data-testid="bulk-footer">
                 <div className="flex flex-wrap items-center gap-3">
                     <button onClick={() => setSelected(new Set(displayed.map((t) => t.id)))} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded text-xs font-semibold" data-testid="select-all-btn">
                         SELEZIONA TUTTI
@@ -579,6 +582,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                         : <KpiBar label="Da pagare" value={totali.da_pagare} accent="amber" testid="kpi-dapagare" highlight />}
                     <KpiBar label="Incassato" value={totali.incassato} accent="emerald" testid="kpi-incassato" />
                 </div>
+            </div>
             </div>
 
             {bulkOpen && (() => {

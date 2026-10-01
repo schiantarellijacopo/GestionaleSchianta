@@ -493,3 +493,8 @@ Admin: `admin@assicura.it / Admin123!`
 - Export CSV/Excel su E/C compagnie: nuovi GET /api/compagnie/{cid}/estratto-conto/export.{csv,xlsx} (filtri dal/al/collaboratore_id), pulsanti nel dettaglio compagnia.
 - Export CSV/Excel su E/C contraente: nuovi GET /api/estratto-conto-contraente/export.{csv,xlsx} (filtri contraente_id/dal/al/filtra_per/includi_collegati/includi_pagamenti), pulsanti accanto ad "Apri PDF".
 - Verificato via curl: tutti e 4 gli export E/C 200 con dati. UI verificata: selettori pagina e pulsanti presenti e funzionanti.
+
+## 2026-10-01 (5) — Fix barra totali che copriva le righe (Portafoglio/Titoli)
+- Causa: il footer totali era `sticky bottom-0` e, quando il body scrollava, si sovrapponeva alle ultime righe della tabella.
+- Soluzione robusta: nuovo hook useFillHeight.js che calcola dinamicamente l'altezza del blocco (tabella scrollabile + footer) fino al fondo della viewport (ResizeObserver + ricalcoli ritardati per gestire il caricamento async delle KPI). La tabella usa `.tbl-scroll.flex-fill flex-1` dentro un wrapper flex-column; il footer è `flex-none` (non più sticky) e resta sempre sotto, sempre visibile e senza coprire le righe.
+- Applicato a Polizze.jsx e Titoli.jsx. Verificato: footer visibile (bottom ~1069/1080), overlap -62px (nessuna sovrapposizione) sia prima che dopo lo scroll interno.

@@ -8,6 +8,7 @@ import IconForRamo from "@/components/IconForRamo";
 import ContraenteFilter from "@/components/ContraenteFilter";
 import SortHeader from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
+import useFillHeight from "@/hooks/useFillHeight";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,7 @@ export default function Polizze() {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const PAGE_SIZE = pageSize;
+    const fill = useFillHeight([showFilters]);
     const [total, setTotal] = useState(0);
     const [pages, setPages] = useState(1);
     const [serverTotali, setServerTotali] = useState({ t_lordo: 0, t_netto: 0, t_provv: 0 });
@@ -401,7 +403,8 @@ export default function Polizze() {
             </div>
 
             <div className="flex justify-end mb-2">{picker}</div>
-            <div className="tbl-scroll has-footer" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
+            <div ref={fill.ref} style={fill.style} className="flex flex-col min-h-0">
+            <div className="tbl-scroll flex-fill flex-1" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
@@ -442,7 +445,7 @@ export default function Polizze() {
             </div>
 
             {/* Footer totali */}
-            <div className="sticky bottom-0 mt-4 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3" data-testid="pol-footer">
+            <div className="mt-2 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3 flex-none" data-testid="pol-footer">
                 <span className="text-xs text-slate-400">
                     {list ? `${total} polizze${filters.preset !== "tutti" ? ` · preset: ${filters.preset}` : ""}` : ""}
                 </span>
@@ -460,6 +463,7 @@ export default function Polizze() {
                         <div className="text-base font-semibold num">{fmtEur(totali.t_provv)}</div>
                     </div>
                 </div>
+            </div>
             </div>
             {/* Dialog import Excel/CSV per Polizze */}
             <ImportExcelDialog
