@@ -8,7 +8,7 @@
  *  3) Si può attivare l'"Incasso" che apre i campi importo pagato + radio
  *      sconto/sospeso (residuo)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +93,17 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const [inDirezione, setInDirezione] = useState(false);
     // Nota titolo (visibile anche nella scheda Polizza → Titoli)
     const [notaTitolo, setNotaTitolo] = useState(titolo.nota || "");
+    // Snapshot dei dati base all'apertura: il PUT verrà inviato SOLO se l'utente
+    // li modifica davvero (evita il blocco "Prima Nota chiusa" su titoli vecchi).
+    const baseIniziale = useRef(null);
+    useEffect(() => {
+        baseIniziale.current = {
+            tipo: f.tipo, data_emissione: f.data_emissione, effetto: f.effetto,
+            ora_effetto: f.ora_effetto, data_competenza: f.data_competenza,
+            scadenza_mora: f.scadenza_mora, nota: notaTitolo || "",
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // --- INCASSO
     const [incasso, setIncasso] = useState(false);
@@ -140,16 +151,30 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
 
     const conferma = async () => {
         try {
-            // 1) AGGIORNA DATI BASE (tipo + date + nota) sempre
-            await api.put(`/titoli/${titolo.id}`, {
-                tipo: f.tipo,
-                data_emissione: f.data_emissione,
-                effetto: f.effetto,
-                ora_effetto: f.ora_effetto,
-                data_competenza: f.data_competenza,
-                scadenza_mora: f.scadenza_mora,
-                nota: notaTitolo || null,
-            });
+            // 1) AGGIORNA DATI BASE (tipo + date + nota) SOLO se effettivamente cambiati.
+            //    Evita il blocco "Prima Nota chiusa" quando si vuole solo incassare/coprire
+            //    un titolo la cui data di competenza cade in un periodo già chiuso.
+            const b = baseIniziale.current || {};
+            const baseChanged = (
+                f.tipo !== b.tipo
+                || (f.data_emissione || "") !== (b.data_emissione || "")
+                || (f.effetto || "") !== (b.effetto || "")
+                || (f.ora_effetto || "") !== (b.ora_effetto || "")
+                || (f.data_competenza || "") !== (b.data_competenza || "")
+                || (f.scadenza_mora || "") !== (b.scadenza_mora || "")
+                || (notaTitolo || "") !== (b.nota || "")
+            );
+            if (baseChanged) {
+                await api.put(`/titoli/${titolo.id}`, {
+                    tipo: f.tipo,
+                    data_emissione: f.data_emissione,
+                    effetto: f.effetto,
+                    ora_effetto: f.ora_effetto,
+                    data_competenza: f.data_competenza,
+                    scadenza_mora: f.scadenza_mora,
+                    nota: notaTitolo || null,
+                });
+            }
 
             // 2) COPERTURA (solo se richiesta, non già coperto E NON si sta incassando).
             //    Se si incassa nello stesso momento, l'incasso registra già l'intera

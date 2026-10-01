@@ -1,6 +1,10 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 01/10/2026 (fork) — Performance (payload/indici/gzip), fix UI e ordinamento tabelle
+## Sessione 01/10/2026 (fork) — Fix: incasso coperto bloccato da "Prima Nota chiusa"
+
+- **Incasso titolo coperto in giornata chiusa** (FATTO): nel dialog `DialogIncassoCopertura` il passo 1 faceva SEMPRE un `PUT /titoli/{id}`; il PUT (server.py:5184) controlla `data_incasso || data_competenza` → se la competenza del titolo cade in una Prima Nota chiusa (es. 23/09), bloccava con "Prima Nota del ... chiusa — riaprire la chiusura per modificare il titolo", impedendo l'incasso (data pagamento 24/09, aperta). Ora il PUT viene inviato SOLO se l'utente modifica davvero i dati base (snapshot iniziale via useRef). L'endpoint `/incassa` controlla solo `data_incasso` (giorno aperto) → l'incasso del coperto passa.
+
+
 
 - **Payload liste ridotto** (FATTO): `/polizze` e `/titoli` usano projection a INCLUSIONE (solo campi lista) → payload da ~82/86MB a ~21/47MB (grezzo); con gzip il browser riceve ~10x meno. GZip middleware già attivo.
 - **Paginazione lato server opt-in** (FATTO backend): `/polizze` supporta `paged/page/page_size/sort/dir` → `{items,total,pages,totali}` (totali via aggregation). Titoli lasciato "carica tutto" su richiesta utente.
