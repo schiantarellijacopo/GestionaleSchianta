@@ -177,6 +177,11 @@ h1, h2, h3, h4, h5 {
     /* L'altezza è gestita dalla pagina; default: tutta la viewport meno l'header app */
     max-height: calc(100vh - 220px);
 }
+/* Variante per le pagine con footer totali "sticky": riserva spazio così il
+   footer nero non copre le ultime righe della tabella. */
+.tbl-scroll.has-footer {
+    max-height: calc(100vh - 300px);
+}
 .tbl-scroll .tbl,
 .tbl-scroll .tbl-compact { border-collapse: separate; border-spacing: 0; }
 

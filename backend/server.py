@@ -2934,6 +2934,25 @@ async def ocr_visura_camerale(
 # ============================================================
 # POLIZZE
 # ============================================================
+async def _enrich_polizze_rows(items: list[dict]) -> None:
+    """Aggiunge contraente/compagnia/collaboratore ai risultati polizze (in-place)."""
+    ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
+    comp_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
+    collab_ids = list({i.get("collaboratore_id") for i in items if i.get("collaboratore_id")})
+    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}},
+                                                          {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    comps = {c["id"]: c async for c in db.compagnie.find({"id": {"$in": comp_ids}},
+                                                         {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
+    collabs = {u["id"]: u async for u in db.users.find({"id": {"$in": collab_ids}},
+                                                       {"_id": 0, "id": 1, "name": 1, "avatar_url": 1})}
+    for it in items:
+        it["contraente_nome"] = anas.get(it.get("contraente_id"), {}).get("ragione_sociale")
+        it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
+        _c = collabs.get(it.get("collaboratore_id", ""), {})
+        it["collaboratore_nome"] = _c.get("name")
+        it["collaboratore_avatar_url"] = _c.get("avatar_url")
+
+
 @api.get("/polizze")
 async def list_polizze(
     q: Optional[str] = None,
@@ -2959,6 +2978,12 @@ async def list_polizze(
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
     escludi_annullate: bool = False,
+    # paginazione lato server (opt-in, retro-compatibile)
+    paged: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    sort: Optional[str] = None,
+    dir: str = "asc",
     limit: int = 50000,
     user=Depends(current_user),
 ):
@@ -3029,24 +3054,44 @@ async def list_polizze(
         "infortuni_conducente": 1, "tutela_legale": 1,
         "created_at": 1, "updated_at": 1,
     }
+
+    # === PAGINAZIONE LATO SERVER (carica solo la pagina richiesta) ===
+    if paged:
+        for _fl, _vl in (("catastrofale", catastrofale), ("check_up", check_up),
+                         ("inabilita_malattia", inabilita_malattia),
+                         ("tutela_legale", tutela_legale), ("infortuni_conducente", infortuni_conducente)):
+            if _vl is not None:
+                flt[_fl] = True if _vl else {"$ne": True}
+        _SORT_MAP = {"data_scadenza": "scadenza", "data_effetto": "effetto"}
+        _SORTABLE = {"numero_polizza", "targa", "ramo", "stato", "effetto", "scadenza",
+                     "premio_lordo", "premio_netto", "provvigioni", "created_at"}
+        _sf = _SORT_MAP.get(sort or "", sort or "")
+        _sf = _sf if _sf in _SORTABLE else "scadenza"
+        _sd = -1 if (dir or "asc") == "desc" else 1
+        _ps = min(max(1, page_size), 200)
+        _pg = max(1, page)
+        total = await db.polizze.count_documents(flt)
+        items = await db.polizze.find(flt, _LIST_POL_PROJ).sort(_sf, _sd) \
+            .skip((_pg - 1) * _ps).limit(_ps).to_list(_ps)
+        await _enrich_polizze_rows(items)
+        _agg = await db.polizze.aggregate([
+            {"$match": flt},
+            {"$group": {"_id": None, "l": {"$sum": "$premio_lordo"},
+                        "n": {"$sum": "$premio_netto"}, "p": {"$sum": "$provvigioni"}}},
+        ]).to_list(1)
+        _t = _agg[0] if _agg else {}
+        return {
+            "items": items, "total": total, "page": _pg, "page_size": _ps,
+            "pages": (total + _ps - 1) // _ps if _ps else 1,
+            "totali": {"t_lordo": _t.get("l") or 0, "t_netto": _t.get("n") or 0,
+                       "t_provv": _t.get("p") or 0},
+        }
+
     items = await db.polizze.find(flt, _LIST_POL_PROJ).sort("scadenza", 1).to_list(limit)
     # enrich con contraente, compagnia, collaboratore
-    ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
-    comp_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
-    collab_ids = list({i.get("collaboratore_id") for i in items if i.get("collaboratore_id")})
-    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}},
-                                                          {"_id": 0, "id": 1, "ragione_sociale": 1})}
-    comps = {c["id"]: c async for c in db.compagnie.find({"id": {"$in": comp_ids}},
-                                                         {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
-    collabs = {u["id"]: u async for u in db.users.find({"id": {"$in": collab_ids}},
-                                                       {"_id": 0, "id": 1, "name": 1, "avatar_url": 1})}
-    for it in items:
-        it["contraente_nome"] = anas.get(it.get("contraente_id"), {}).get("ragione_sociale")
-        it["compagnia_nome"] = comps.get(it.get("compagnia_id"), {}).get("ragione_sociale")
-        _c = collabs.get(it.get("collaboratore_id", ""), {})
-        it["collaboratore_nome"] = _c.get("name")
-        it["collaboratore_avatar_url"] = _c.get("avatar_url")
+    await _enrich_polizze_rows(items)
     # Filtro categoria business (post-processing — richiede tipo anagrafica)
+    ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
     if catastrofale is not None:
         items = [p for p in items if (p.get("catastrofale") is True) == catastrofale]
     if check_up is not None:
@@ -3961,6 +4006,11 @@ async def list_titoli(
     data_campo: Optional[str] = None,
     q: Optional[str] = None,
     tag: Optional[str] = None,
+    paged: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    sort: Optional[str] = None,
+    dir: str = "asc",
     limit: int = 50000,
     user=Depends(current_user),
 ):

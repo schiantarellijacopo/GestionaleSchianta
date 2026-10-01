@@ -387,7 +387,7 @@ export default function Polizze() {
             </div>
 
             <div className="flex justify-end mb-2">{picker}</div>
-            <div className="tbl-scroll" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
+            <div className="tbl-scroll has-footer" style={{ "--c1-w": "160px", "--c2-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl freeze-3 w-full min-w-[1100px]">
                         <thead>
