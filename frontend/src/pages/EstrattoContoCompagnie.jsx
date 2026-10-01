@@ -12,6 +12,7 @@ import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 
 export default function EstrattoContoCompagnie() {
     const [compagnie, setCompagnie] = useState([]);
@@ -272,11 +273,11 @@ function DettaglioEstratto({ compagnia, onBack }) {
                 <div className="flex items-end gap-3 flex-wrap">
                     <div>
                         <Label>Dal</Label>
-                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} data-testid="ec-dal" />
+                        <DateInputIt value={dal} onChange={setDal} data-testid="ec-dal" />
                     </div>
                     <div>
                         <Label>Al</Label>
-                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} data-testid="ec-al" />
+                        <DateInputIt value={al} onChange={setAl} data-testid="ec-al" />
                     </div>
                     <div>
                         <Label>Collaboratore</Label>
@@ -451,11 +452,11 @@ function StoricoRimesseCompagnia({ compagniaId }) {
                 <div className="flex items-end gap-3 flex-wrap">
                     <div>
                         <Label>Dal</Label>
-                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} data-testid="ec-stor-dal" />
+                        <DateInputIt value={dal} onChange={setDal} data-testid="ec-stor-dal" />
                     </div>
                     <div>
                         <Label>Al</Label>
-                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} data-testid="ec-stor-al" />
+                        <DateInputIt value={al} onChange={setAl} data-testid="ec-stor-al" />
                     </div>
                     <Button onClick={load} data-testid="ec-stor-applica">Applica</Button>
                     {data && (

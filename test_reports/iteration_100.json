@@ -1,0 +1,53 @@
+{
+  "summary": "Iter100: 4 nuove feature verificate - paginazione server-side Titoli/Sinistri, date italiane GG/MM/AAAA, ricerca descrizione E/C, ordinamento colonne. Backend 6/6 pytest pass. Frontend quasi tutto OK.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "E/C Contraente - verifica ecc-cerca",
+        "issue": "Non siamo riusciti ad aprire autocomplete 'Cerca cognome, nome o ragione sociale...' typing programmatico non ha triggerato il dropdown dei contraenti; quindi ecc-cerca non è stato visibile a runtime. Il data-testid='ecc-cerca' è presente nel codice (EstrattoContoContraente.jsx:164) e appare solo dopo Anteprima su contraente selezionato. Non è necessariamente un bug: va solo testato a mano con user interaction reale.",
+        "affected_selectors": ["[data-testid='ecc-cerca']"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "/contraente-estratto e /provvigioni (Estratto Conto Collaboratori)",
+        "issues": ["Campi Dal/Al e Data inizio/Data fine usano HTML date native (mm/dd/yyyy) invece del DateInputIt (GG/MM/AAAA) applicato su /banche e /contabilita. Inconsistenza UX con il resto dell'app."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter100_paged_titoli_sinistri.py",
+    "/app/test_reports/pytest/iter100.xml"
+  ],
+  "action_items": [
+    "(OPTIONAL/MINOR) Applicare DateInputIt anche su /contraente-estratto e /provvigioni per uniformità con /banche e /contabilita.",
+    "(OPTIONAL) Verifica manuale di E/C Contraente -> Anteprima -> campo ecc-cerca + ordinamento colonne (il codice è corretto ma non è stato testato live per limite dell'autocomplete programmatico)."
+  ],
+  "critical_code_review_comments": [
+    "server.py list_titoli e list_sinistri: branch 'paged' corretto, totali calcolati sull'intero set filtrato prima dello slice, ordinamento server-side funzionante.",
+    "Backend restituisce correttamente lista (array) quando paged non è settato -> regressione OK per PolizzaDetail."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (6/6)", "frontend": "~90% (6/7 feature verificate live, 1 non triggerabile per limite test)" },
+  "verified_features": {
+    "paginazione_titoli_backend": "OK - total/pages/totali/sort funzionanti, page1 vs page2 items diversi ma total/totali stabili",
+    "paginazione_sinistri_backend": "OK - total/pages/totali/sort funzionanti, tipologie presenti",
+    "regressione_no_paged_titoli": "OK - ritorna lista",
+    "regressione_no_paged_sinistri": "OK - ritorna lista",
+    "titoli_pager_frontend": "OK - titoli-pager, titoli-page-prev/next, titoli-kpi-grid presenti; 9 th-sort-* headers; cambio pagina funziona",
+    "sinistri_pager_frontend": "OK - sinistri-pager, prev/next, tfoot con totali, 13 th-sort-* headers",
+    "banche_date_italiane": "OK - typing '01102026' -> '01/10/2026' nel campo banche-f-dal",
+    "contabilita_movimenti_date_italiane": "OK - mov-dal/mov-al accettano formato italiano; 8 th-sort-* headers presenti",
+    "ec_compagnie_ricerca_descrizione": "OK - /compagnie-estratto -> Dettaglio -> Movimenti: ec-cerca presente e funzionante, 10 th-sort-* headers",
+    "provvigioni_ordinamento": "OK - th-sort-data_incasso/numero_polizza/premio/provvigione tutti presenti, click ordina",
+    "ecc_cerca_e_sort_contraente": "NON TESTATO LIVE - autocomplete contraente non triggerato in automation; codice OK"
+  },
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (tenant con dati reali)",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend titoli paged total=498 pages=10; sinistri paged total=6412 pages=129. test_iter100_paged_titoli_sinistri.py copre entrambi + regressione. Per testare ecc-cerca da E/C Contraente serve interagire manualmente con l'autocomplete 'Cerca cognome, nome o ragione sociale...' (Playwright type non apre il dropdown).",
+  "rca_of_the_issue": "N/A - nessun bug critico"
+}

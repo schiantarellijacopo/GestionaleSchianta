@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
@@ -152,11 +153,11 @@ export default function Provvigioni() {
                                         </div>
                                         <div>
                                             <Label className="text-[10px]">Dal</Label>
-                                            <Input data-testid="prov-dal" type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-36" />
+                                            <DateInputIt data-testid="prov-dal" value={dal} onChange={setDal} className="w-36" />
                                         </div>
                                         <div>
                                             <Label className="text-[10px]">Al</Label>
-                                            <Input data-testid="prov-al" type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-36" />
+                                            <DateInputIt data-testid="prov-al" value={al} onChange={setAl} className="w-36" />
                                         </div>
                                         <Button variant="outline" onClick={stampa} data-testid="prov-print">
                                             <Printer size={14} className="mr-1" /> Stampa PDF

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { FileText, Printer, Eye, Users, Save, Search } from "lucide-react";
 import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
 
 const eur = (v) => (Number(v || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -88,11 +89,11 @@ export default function EstrattoContoContraente() {
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <Label className="text-xs text-slate-500">Data inizio</Label>
-                                <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} data-testid="ecc-dal" />
+                                <DateInputIt value={dal} onChange={setDal} data-testid="ecc-dal" />
                             </div>
                             <div>
                                 <Label className="text-xs text-slate-500">Data fine</Label>
-                                <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} data-testid="ecc-al" />
+                                <DateInputIt value={al} onChange={setAl} data-testid="ecc-al" />
                             </div>
                         </div>
                     </div>

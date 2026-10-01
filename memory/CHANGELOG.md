@@ -473,3 +473,10 @@ Admin: `admin@assicura.it / Admin123!`
 - Frontend: tab Movimenti (elenco) con campo Cerca + bottoni Stampa/Excel; Banche con campo Descrizione nei filtri; Brogliaccio con bottone "Cerca" accanto a Oggi per ricaricare la giornata.
 - Prompt data italiano: promptDataIt in lib/api.js (GG/MM/AAAA con validazione, converte in ISO). Usato in Pnc.jsx, Rappel.jsx, RitenuteCompagnia.jsx.
 - Dialog compattati: TitoloDialog, DialogIncassoCopertura e creazione Polizza (altezza campi ridotta, max-height viewport, scroll corpo) per stare nello schermo.
+
+## 2026-10-01 (2) — Paginazione Titoli/Sinistri, date italiane, ricerca E/C, ordinamento
+- Paginazione server-side TITOLI e SINISTRI (50/pagina) con totali e ordinamento calcolati sul backend sull'INTERO set filtrato (non solo la pagina). Backend: list_titoli ~L3981 e list_sinistri ~L5780 con branch `paged` ({items,total,pages,page,page_size,totali[,tipologie]}); allegati contati solo sulla pagina. Frontend: pager + serverTotali in Titoli.jsx e Sinistri.jsx. Regressione: senza `paged` restituiscono ancora array (PolizzaDetail ok). Verificato: titoli 498/10 pagine, sinistri 6412/129 pagine.
+- Date italiane: nuovo componente DateInputIt.jsx (campo testo GG/MM/AAAA -> ISO, indipendente da lingua browser). Applicato a filtri Banche, Contabilità Movimenti, Provvigioni, E/C contraente, E/C compagnie (movimenti + storico).
+- Ricerca per descrizione in E/C contraente (ecc-cerca) e E/C compagnie (ec-cerca): filtro client-side su contratto/compagnia/rischio/tipo/contraente/collaboratore/ramo.
+- Frecce ordinamento (SortHeader) aggiunte a: Contabilità Movimenti (elenco), Provvigioni (maturate), E/C contraente, E/C compagnie (movimenti). Titoli e Sinistri già le avevano (ora server-side).
+- Test: iteration_100.json — backend 6/6 pass, frontend ~90% (ecc-cerca non triggerato live per limite autocomplete, codice corretto).
