@@ -12,11 +12,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Plus, Ticket, Trash2, Edit, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Voucher() {
     const [items, setItems] = useState(null);
+    const { sorted: sortedVou, sortKey: skV, dir: dirV, toggle: tgV } = useTableSort(items || [], "codice", "asc");
     const [stato, setStato] = useState("all");
     const [open, setOpen] = useState(false);
     const [bulkOpen, setBulkOpen] = useState(false);
@@ -98,12 +100,18 @@ export default function Voucher() {
                 <div className="tbl-scroll">
                     <table className="tbl-compact w-full text-xs">
                         <thead><tr>
-                            <th>Codice</th><th>Compagnia</th><th>Ramo</th>
-                            <th className="text-right">Valore</th><th>Tipo</th>
-                            <th>Validità</th><th>Assegnato a</th><th>Stato</th><th className="w-24"></th>
+                            <th><SortHeader k="codice" sortKey={skV} dir={dirV} toggle={tgV}>Codice</SortHeader></th>
+                            <th><SortHeader k="compagnia_nome" sortKey={skV} dir={dirV} toggle={tgV}>Compagnia</SortHeader></th>
+                            <th><SortHeader k="ramo" sortKey={skV} dir={dirV} toggle={tgV}>Ramo</SortHeader></th>
+                            <th className="text-right"><SortHeader k="valore" sortKey={skV} dir={dirV} toggle={tgV}>Valore</SortHeader></th>
+                            <th><SortHeader k="tipo_valore" sortKey={skV} dir={dirV} toggle={tgV}>Tipo</SortHeader></th>
+                            <th><SortHeader k="valido_dal" sortKey={skV} dir={dirV} toggle={tgV}>Validità</SortHeader></th>
+                            <th>Assegnato a</th>
+                            <th><SortHeader k="usato" sortKey={skV} dir={dirV} toggle={tgV}>Stato</SortHeader></th>
+                            <th className="w-24"></th>
                         </tr></thead>
                         <tbody>
-                            {items.map((v) => (
+                            {sortedVou.map((v) => (
                                 <tr key={v.id}>
                                     <td className="font-mono font-bold">{v.codice}</td>
                                     <td>{v.compagnia_nome || "—"}</td>

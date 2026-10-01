@@ -150,6 +150,7 @@ async def get_agenzia_info(cliente=Depends(current_cliente)):
                 "descrizione": m.get("descrizione"),
                 "telefono": m.get("telefono"),
                 "email": m.get("email"),
+                "sede_id": m.get("sede_id"),
                 "foto_url": f"/api/portale/public/team-foto/{m.get('id')}" if m.get("foto_path") else None,
             }
             for m in (az.get("portale_team") or [])

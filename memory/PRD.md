@@ -7,8 +7,8 @@
 - **/api/search parallelo + prefisso indicizzato** (FATTO): query in `asyncio.gather`; numeri/targa/CF in prefisso ancorato (usa indici). Indici DB ampliati (143).
 - **Fix barra nera totali sovrapposta** (FATTO): `.tbl-scroll.has-footer` riserva spazio; applicato a Polizze e Titoli.
 - **Fix elenco "Anagrafiche senza C.I." vuoto** (FATTO): DocumentiMancantiWidget leggeva male la lista.
-- **Ordinamento colonne (frecce) rollout** (IN CORSO): già presenti Polizze, Titoli; AGGIUNTI: Sospesi/Anticipi (tabella attivi + storico), Rappel, Ritenute. Anagrafiche già paginata server-side con sort. RIMANENTI (prossimi batch): Provvigioni, EstrattoContoContraente/Compagnie, Contabilita, CarichiMensili, Pnc, RitenuteCompagnia, SinistroDetail, PolizzaDetail, AnagraficaDetail, Banche, Voucher, Corsi, Statistiche*, pannelli admin, ecc.
-- **Team portale: "Sede di riferimento"** (FATTO): in `AppCliente.jsx` ogni membro team ha una tendina "Sede di riferimento" popolata dalle sedi configurate; salvato come `sede_id` (backend `app_cliente.py`).
+- **Ordinamento colonne (frecce) rollout** (IN CORSO): FATTE → Polizze, Titoli (già prima), Anagrafiche (paginata), Sospesi/Anticipi (attivi+storico), Rappel, Ritenute, Pnc, RitenuteCompagnia, Voucher. Banche ESCLUSA di proposito (saldo progressivo richiede ordine cronologico). RIMANENTI: Provvigioni (tabelle da-pagare + pagati), EstrattoContoContraente, EstrattoContoCompagnie, Contabilita, CarichiMensili, Corsi, CorsiIvass, Statistiche/StatisticheClienti/PerOperatore/Premi, SinistroDetail, PolizzaDetail, AnagraficaDetail (tabelle interne), pannelli admin. Nota: le frecce compaiono solo quando la tabella ha dati.
+- **Team portale: "Sede di riferimento"** (FATTO): editor `AppCliente.jsx` (tendina da sedi configurate, salvato `sede_id` in `app_cliente.py`) E visualizzazione nel **Portale Cliente pubblico** (`PortaleCliente.jsx` TeamView, badge con Building2; `portale_cliente.py` espone `sede_id`).
 - **Direttiva permanente prestazioni** in `/app/memory/performance_guidelines.md`.
 
 

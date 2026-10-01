@@ -1504,6 +1504,7 @@ function ServiziView({ agenzia }) {
 // ─── IL NOSTRO TEAM — sezione dedicata ─────────────────────
 function TeamView({ agenzia }) {
     const team = agenzia?.team || [];
+    const sedeMap = Object.fromEntries((agenzia?.sedi || []).map((s) => [s.id, s]));
     return (
         <div data-testid="team-view">
             <SectionHeader icon={Users} title="Il nostro team"
@@ -1534,6 +1535,12 @@ function TeamView({ agenzia }) {
                                             <span className="inline-block mt-0.5 bg-teal-50 text-teal-700 border border-teal-100 rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">
                                                 {m.ruolo}
                                             </span>
+                                        )}
+                                        {m.sede_id && sedeMap[m.sede_id] && (
+                                            <div className="flex items-center gap-1 mt-1 text-[11px] text-slate-500" data-testid={`team-sede-${i}`}>
+                                                <Building2 size={11} />
+                                                <span className="truncate">{sedeMap[m.sede_id].nome || sedeMap[m.sede_id].comune}</span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

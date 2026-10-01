@@ -20,6 +20,7 @@ import { Plus, Trash2, Pencil, TrendingDown, Wallet, RotateCcw } from "lucide-re
 import { toast } from "sonner";
 import { api, fmtEur, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 
 export default function RitenuteCompagnia() {
     const [items, setItems] = useState(null);
@@ -75,6 +76,7 @@ export default function RitenuteCompagnia() {
 
     const totale = useMemo(() => (items || []).reduce((s, r) => s + (r.importo || 0), 0), [items]);
     const totDaVersare = useMemo(() => (items || []).filter((r) => r.stato !== "versata").reduce((s, r) => s + (r.importo || 0), 0), [items]);
+    const { sorted, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
 
     return (
         <div className="p-6 space-y-5" data-testid="ritenute-compagnia-page">
@@ -132,12 +134,17 @@ export default function RitenuteCompagnia() {
                 <table className="tbl-compact w-full text-xs">
                     <thead>
                         <tr>
-                            <th>Data</th><th>Anno</th><th>Compagnia</th><th>Descrizione</th>
-                            <th className="text-right">Importo €</th><th>Stato</th><th className="w-32"></th>
+                            <th><SortHeader k="data" sortKey={sortKey} dir={dir} toggle={toggle}>Data</SortHeader></th>
+                            <th><SortHeader k="anno" sortKey={sortKey} dir={dir} toggle={toggle}>Anno</SortHeader></th>
+                            <th><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
+                            <th><SortHeader k="descrizione" sortKey={sortKey} dir={dir} toggle={toggle}>Descrizione</SortHeader></th>
+                            <th className="text-right"><SortHeader k="importo" sortKey={sortKey} dir={dir} toggle={toggle}>Importo €</SortHeader></th>
+                            <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                            <th className="w-32"></th>
                         </tr>
                     </thead>
                     <tbody>
-                        {items.map((r) => {
+                        {sorted.map((r) => {
                             const versata = r.stato === "versata";
                             return (
                                 <tr key={r.id} data-testid={`ritc-row-${r.id}`}>
