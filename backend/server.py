@@ -3016,9 +3016,20 @@ async def list_polizze(
     if scad_cond and "scadenza" not in flt:
         flt["scadenza"] = scad_cond
 
-    # Projection leggera: esclude array/blob pesanti non usati nella lista (velocizza payload e query)
-    _LEAN_POL_PROJ = {"_id": 0, "garanzie": 0, "addizionali": 0, "provvigioni_operatori": 0}
-    items = await db.polizze.find(flt, _LEAN_POL_PROJ).sort("scadenza", 1).to_list(limit)
+    # Projection a INCLUSIONE: SOLO i campi usati dalla lista/filtri/export.
+    # Evita di trasferire i documenti "grassi" (import ANIA, garanzie, storico, ecc.):
+    # riduce il payload di ~30x e velocizza molto la pagina, anche con molti utenti.
+    _LIST_POL_PROJ = {
+        "_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1, "stato": 1,
+        "effetto": 1, "scadenza": 1, "scadenza_originale": 1, "frazionamento": 1,
+        "targa": 1, "mandato": 1, "oggetto_assicurato": 1,
+        "premio_lordo": 1, "premio_netto": 1, "premio_tasse": 1, "premio_ssn": 1, "provvigioni": 1,
+        "contraente_id": 1, "compagnia_id": 1, "collaboratore_id": 1, "tags": 1,
+        "catastrofale": 1, "check_up": 1, "inabilita_malattia": 1,
+        "infortuni_conducente": 1, "tutela_legale": 1,
+        "created_at": 1, "updated_at": 1,
+    }
+    items = await db.polizze.find(flt, _LIST_POL_PROJ).sort("scadenza", 1).to_list(limit)
     # enrich con contraente, compagnia, collaboratore
     ana_ids = list({i["contraente_id"] for i in items if i.get("contraente_id")})
     comp_ids = list({i["compagnia_id"] for i in items if i.get("compagnia_id")})
@@ -4072,7 +4083,16 @@ async def list_titoli(
         else:
             flt[campo] = cond
 
-    items = await db.titoli.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(limit)
+    # Projection a INCLUSIONE: solo i campi usati da lista/calcolo provvigioni/export.
+    # Riduce drasticamente il payload (evita i documenti "grassi") → pagina Titoli molto più veloce.
+    _LIST_TIT_PROJ = {
+        "_id": 0, "id": 1, "polizza_id": 1, "stato": 1, "effetto": 1, "scadenza": 1,
+        "data_copertura": 1, "data_incasso": 1, "mezzo_pagamento": 1, "titolo_coperto": 1,
+        "importo_lordo": 1, "importo_netto": 1, "importo_pagato": 1, "provvigioni": 1,
+        "premio_netto": 1, "premio_lordo": 1, "numero_titolo": 1, "conto_cassa_id": 1,
+        "created_at": 1,
+    }
+    items = await db.titoli.find(flt, _LIST_TIT_PROJ).sort("scadenza", 1).to_list(limit)
     pol_ids = list({t["polizza_id"] for t in items if t.get("polizza_id")})
     pols = {p["id"]: p async for p in db.polizze.find(
         {"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1,
@@ -14074,30 +14094,37 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
     if not q or len(q.strip()) < 2:
         return {"anagrafiche": [], "polizze": [], "sinistri": [], "titoli": [], "compagnie": []}
     qclean = q.strip()
+    qUP = qclean.upper()
     qrx = {"$regex": re.escape(qclean), "$options": "i"}
     # Multi-parola: ogni token deve combaciare in almeno uno dei campi (AND di OR).
     # Così "JACOPO", "SCHIANTARELLI JACOPO" e "JACOPO SCHIANTARELLI" trovano lo stesso cliente.
     _tokens = [re.escape(t) for t in qclean.split() if len(t) >= 2][:5] or [re.escape(qclean)]
 
     def _multi_token(fields: list[str]) -> dict:
+        # contains case-insensitive (per i NOMI): necessario ma fa scansione.
         return {"$and": [
             {"$or": [{f: {"$regex": tok, "$options": "i"}} for f in fields]}
             for tok in _tokens
         ]}
+
+    def _prefix(fields: list[str]) -> dict:
+        # ricerca per PREFISSO su campi indicizzati (ancorata, MAIUSCOLO, senza 'i')
+        # → usa gli indici: velocissima anche su collezioni enormi (polizze/titoli/sinistri).
+        return {"$or": [{f: {"$regex": "^" + re.escape(qUP)}} for f in fields]}
+
     is_client = user["role"] == "cliente"
     import asyncio as _aio
-    # === ANAGRAFICHE: cerca su molti campi ===
+    # === ANAGRAFICHE: ricerca testuale sui nomi (contains) ===
     ana_filter = {"id": user.get("anagrafica_id")} if is_client else _multi_token([
         "ragione_sociale", "nome", "cognome", "codice_fiscale", "partita_iva",
         "email", "telefono", "cellulare", "comune", "indirizzo", "professione", "tags",
     ])
-    pol_filter = _multi_token([
-        "numero_polizza", "targa", "ramo", "prodotto",
-        "oggetto_assicurato", "veicolo_marca", "veicolo_modello",
-    ])
+    # === POLIZZE: per numero/targa via INDICE (prefisso). Il match per nome contraente
+    # è gestito sotto tramite le anagrafiche trovate (extra_pol). ===
+    pol_filter = _prefix(["numero_polizza", "targa"])
     if is_client:
         pol_filter = {"$and": [pol_filter, {"contraente_id": user.get("anagrafica_id")}]}
-    sin_filter = _multi_token(["numero_sinistro", "luogo", "descrizione"])
+    sin_filter = _prefix(["numero_sinistro", "numero_interno"])
     if is_client:
         sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
 
@@ -14116,7 +14143,7 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
             "polizza_id": 1, "stato": 1, "data_avvenimento": 1},
         ).limit(limit).to_list(limit),
         _empty() if is_client else db.titoli.find(
-            _multi_token(["numero_titolo", "numero_polizza", "contraente_nome"]),
+            _prefix(["numero_titolo", "numero_polizza"]),
             {"_id": 0, "id": 1, "numero_titolo": 1, "numero_polizza": 1, "polizza_id": 1,
              "contraente_nome": 1, "importo_lordo": 1, "stato": 1, "data_scadenza": 1},
         ).limit(limit).to_list(limit),
