@@ -465,3 +465,11 @@ Admin: `admin@assicura.it / Admin123!`
 - Config DNA: due obiettivi (obiettivo, obiettivo_persona). Rimossa la scelta manuale colonna per DNA (aliquote auto).
 - Frontend: card DNA con due obiettivi, header con realizzo/aliquota BASE+PERSONA, tabella con colonna "di cui Persona"; form prodotto con spunta Persona.
 - Verificato E2E: DNA 64.364,58 (realizzo 128,7%→BASE 11%) + Persona 6.988,94 (realizzo 233%→PERSONA 20%) → incentivi per collaboratore corretti (Schiantarelli 2.425,49 = 20374,41×11% + 921,51×20%). Dati di test ripuliti.
+
+## 2026-10-01 — Ricerca descrizione contabilità, fix incasso giornata chiusa, UX date/dialog
+- FIX CRITICO incasso: update_titolo (server.py ~L5178) ora blocca la giornata chiusa SOLO se il titolo è realmente contabilizzato (incassato→data_incasso, coperto→data movimento copertura_titolo). I titoli non incassati/non coperti con data_competenza in giornata chiusa sono di nuovo incassabili. Regressione verificata (incassato in giorno chiuso resta bloccato). Test: /app/backend/tests/test_iter99_titoli_unlock_search.py (9/9 ok).
+- Ricerca per descrizione: GET /api/contabilita/prima-nota?q= e GET /api/contabilita/banche/movimenti?descrizione= (regex case-insensitive su descrizione/numero_documento/mezzo_pagamento/categoria). banche progressivo disattivato quando descrizione valorizzata.
+- Export Prima Nota: nuovo GET /api/stampa/prima-nota.xlsx (+ q); /api/stampa/prima-nota ora accetta q. Banche stampa/export.xlsx accettano descrizione.
+- Frontend: tab Movimenti (elenco) con campo Cerca + bottoni Stampa/Excel; Banche con campo Descrizione nei filtri; Brogliaccio con bottone "Cerca" accanto a Oggi per ricaricare la giornata.
+- Prompt data italiano: promptDataIt in lib/api.js (GG/MM/AAAA con validazione, converte in ISO). Usato in Pnc.jsx, Rappel.jsx, RitenuteCompagnia.jsx.
+- Dialog compattati: TitoloDialog, DialogIncassoCopertura e creazione Polizza (altezza campi ridotta, max-height viewport, scroll corpo) per stare nello schermo.

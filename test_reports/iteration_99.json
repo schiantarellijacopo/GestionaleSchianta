@@ -1,0 +1,25 @@
+{
+  "summary": "Testato il fix PUT /api/titoli (sblocco su giornata chiusa quando titolo non incassato/coperto), ricerca Prima Nota (q), ricerca Banche (descrizione), export PDF/XLSX e verifiche frontend dei data-testid richiesti. Tutti i 9 test pytest passano. UI Movimenti/Banche/Brogliaccio renderizzano tutti i selettori attesi e la ricerca filtra correttamente.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter99_titoli_unlock_search.py",
+    "/app/test_reports/pytest/iter99.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py >16k righe: considerare lo split in moduli per aree (contabilita, titoli, auth, import) — manutenibilità al limite.",
+    "update_titolo: logica guard_date + sync copertura ben isolata; buona scelta usare assert_giornata_aperta prima di scrivere il titolo per evitare write parziali.",
+    "/api/titoli con stato=incassato ha un cap (limit=500) e non espone un filtro per data_incasso: nei test è stato più semplice risalire ai titoli chiusi via brogliaccio. Valutare l'aggiunta di query param data_incasso_from/to."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter99_titoli_unlock_search.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (selettori e flusso di ricerca verificati)"},
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (tenant jacopo con dati reali). admin@assicura.it / Admin123! disponibile ma non necessario (tenant vuoto).",
+  "seed_data_creation": "Nessuna. Il test di regressione sfrutta la chiusura esistente del 2026-09-14; il test unlock usa un titolo da_incassare esistente modificando solo la nota (ripristinata).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Il fix su update_titolo (server.py ~L5178) è verificato: PUT consentito su titolo non incassato/coperto anche con giornate chiuse; PUT bloccato (HTTP 400 con 'chius'/'riapr') su titolo incassato in giornata chiusa (test estrae titolo_id dal brogliaccio della chiusura 2026-09-14). Ricerca q su /api/contabilita/prima-nota, descrizione su /api/contabilita/banche/movimenti, e tutti gli export (PDF/XLSX) rispondono 200 con content-type corretto. Frontend data-testid presenti: tab-prima-nota, mov-cerca, mov-cerca-btn, mov-stampa, mov-excel, banche-f-descrizione, banche-applica, brogliaccio-cerca.",
+  "rca of the issue": "Il bug era in update_titolo che chiamava assert_giornata_aperta su (data_incasso OR data_competenza) incondizionatamente. Risolto introducendo guard_date derivata dallo stato reale: data_incasso se incassato, data del movimento 'copertura_titolo' se coperto, altrimenti nessun guard. Inoltre la modifica di copertura allinea anche il movimento in prima nota, verificando prima la giornata per evitare write parziali."
+}
