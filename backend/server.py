@@ -5177,11 +5177,26 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
 
 @api.put("/titoli/{tid}")
 async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    # Blocco se prima nota chiusa per la data di incasso/competenza del titolo
+    # Blocco se prima nota chiusa SOLO quando il titolo ha un reale impatto contabile
+    # già registrato in una giornata chiusa:
+    #  - incassato  → la giornata dell'incasso
+    #  - coperto    → la giornata del movimento di copertura
+    # Un titolo non ancora incassato/coperto NON ha righe in Prima Nota, quindi
+    # modificarne i dati base (date/tipo/nota) o incassarlo in un giorno aperto
+    # non deve essere bloccato dalla sola data_competenza in un periodo chiuso.
     cur = await db.titoli.find_one({"id": tid}, {"_id": 0})
     if not cur:
         raise HTTPException(404, "Non trovato")
-    await assert_giornata_aperta(cur.get("data_incasso") or cur.get("data_competenza"), azione="modificare il titolo")
+    guard_date = None
+    if cur.get("data_incasso"):
+        guard_date = cur.get("data_incasso")
+    elif cur.get("titolo_coperto"):
+        _cop = await db.movimenti.find_one(
+            {"titolo_id": tid, "categoria": "copertura_titolo"},
+            {"_id": 0, "data_movimento": 1})
+        guard_date = _cop.get("data_movimento") if _cop else None
+    if guard_date:
+        await assert_giornata_aperta(guard_date, azione="modificare il titolo")
     # Se il body cambia la data_incasso, controlla anche la nuova data
     if body.get("data_incasso"):
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
@@ -6073,6 +6088,7 @@ async def banche_movimenti(
     cliente: Optional[str] = None,
     numero_polizza: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
+    descrizione: Optional[str] = None,
     limit: int = 5000,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
@@ -6090,6 +6106,13 @@ async def banche_movimenti(
             cond["$lte"] = al
         flt["data_movimento"] = cond
     and_clauses: list = []
+    if descrizione and descrizione.strip():
+        rgx = _re.escape(descrizione.strip())
+        and_clauses.append({"$or": [
+            {"descrizione": {"$regex": rgx, "$options": "i"}},
+            {"numero_documento": {"$regex": rgx, "$options": "i"}},
+            {"categoria": {"$regex": rgx, "$options": "i"}},
+        ]})
     if numero_polizza:
         rgx = _re.escape(numero_polizza)
         pol_ids = [p["id"] async for p in db.polizze.find(
@@ -6116,7 +6139,7 @@ async def banche_movimenti(
     movs = await db.movimenti.find(flt, {"_id": 0}).sort([("data_movimento", 1), ("created_at", 1)]).to_list(limit)
 
     # Saldo progressivo solo se banca singola e nessun filtro entità
-    progressivo = bool(conto_cassa_id) and not (cliente or numero_polizza or collaboratore_id)
+    progressivo = bool(conto_cassa_id) and not (cliente or numero_polizza or collaboratore_id or (descrizione and descrizione.strip()))
     opening = 0.0
     if progressivo:
         c = await db.conti_cassa.find_one({"id": conto_cassa_id}, {"_id": 0})
@@ -6220,11 +6243,11 @@ def _banche_pdf_rows(data: dict):
 async def banche_movimenti_stampa(
     conto_cassa_id: Optional[str] = None, dal: Optional[str] = None, al: Optional[str] = None,
     cliente: Optional[str] = None, numero_polizza: Optional[str] = None,
-    collaboratore_id: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, descrizione: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Stampa PDF della movimentazione bancaria filtrata."""
-    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, 20000, user)
+    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, descrizione, 20000, user)
     headers, rows = _banche_pdf_rows(data)
     sub = (f"Movimenti: {data['n_movimenti']} · Entrate € {data['totale_entrate']:,.2f} · "
            f"Uscite € {data['totale_uscite']:,.2f}")
@@ -6243,11 +6266,11 @@ async def banche_movimenti_stampa(
 async def banche_movimenti_xlsx(
     conto_cassa_id: Optional[str] = None, dal: Optional[str] = None, al: Optional[str] = None,
     cliente: Optional[str] = None, numero_polizza: Optional[str] = None,
-    collaboratore_id: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, descrizione: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Export Excel della movimentazione bancaria filtrata."""
-    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, 20000, user)
+    data = await banche_movimenti(conto_cassa_id, dal, al, cliente, numero_polizza, collaboratore_id, descrizione, 20000, user)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     wb = Workbook(); ws = wb.active; ws.title = "Banche"
@@ -7436,7 +7459,7 @@ async def estratto_conto(anagrafica_id: str, user=Depends(current_user)):
 
 @api.get("/contabilita/prima-nota")
 async def prima_nota(
-    dal: Optional[str] = None, al: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None, q: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     flt: dict = {}
@@ -7447,6 +7470,12 @@ async def prima_nota(
         if al:
             cond["$lte"] = al
         flt["data_movimento"] = cond
+    if q and q.strip():
+        rx = {"$regex": re.escape(q.strip()), "$options": "i"}
+        flt["$or"] = [
+            {"descrizione": rx}, {"numero_documento": rx},
+            {"mezzo_pagamento": rx}, {"categoria": rx},
+        ]
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(2000)
     # arricchimento count allegati
     ids = [m["id"] for m in items]
@@ -15003,7 +15032,7 @@ async def stampa_cid(sid: str, user=Depends(current_user)):
 
 
 @api.get("/stampa/prima-nota")
-async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
+async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None, q: Optional[str] = None,
                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     flt: dict = {}
     if dal or al:
@@ -15011,6 +15040,10 @@ async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
         if dal: cond["$gte"] = dal
         if al: cond["$lte"] = al
         flt["data_movimento"] = cond
+    if q and q.strip():
+        rx = {"$regex": re.escape(q.strip()), "$options": "i"}
+        flt["$or"] = [{"descrizione": rx}, {"numero_documento": rx},
+                      {"mezzo_pagamento": rx}, {"categoria": rx}]
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(5000)
     headers = ["Data", "Tipo", "Categoria", "Descrizione", "Mezzo", "Entrata €", "Uscita €"]
     rows = []
@@ -15019,13 +15052,55 @@ async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
                      (m.get("descrizione") or "")[:60], m.get("mezzo_pagamento") or "",
                      m["importo"] if m["tipo"] == "entrata" else "",
                      m["importo"] if m["tipo"] == "uscita" else ""])
-    sub = f"Periodo: {dal or '—'} -> {al or '—'}"
+    sub = f"Periodo: {dal or '—'} -> {al or '—'}" + (f" · Ricerca: \"{q.strip()}\"" if q and q.strip() else "")
     pdf = pdf_report.stampa_elenco(
         "Prima Nota", sub, headers, rows,
         col_widths_mm=[25, 18, 35, 90, 35, 28, 28],
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "prima_nota.pdf")
+
+
+@api.get("/stampa/prima-nota.xlsx")
+async def export_prima_nota_xlsx(dal: Optional[str] = None, al: Optional[str] = None, q: Optional[str] = None,
+                                 user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    flt: dict = {}
+    if dal or al:
+        cond = {}
+        if dal: cond["$gte"] = dal
+        if al: cond["$lte"] = al
+        flt["data_movimento"] = cond
+    if q and q.strip():
+        rx = {"$regex": re.escape(q.strip()), "$options": "i"}
+        flt["$or"] = [{"descrizione": rx}, {"numero_documento": rx},
+                      {"mezzo_pagamento": rx}, {"categoria": rx}]
+    items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(20000)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Prima Nota"
+    headers = ["Data", "Tipo", "Categoria", "Descrizione", "Mezzo pag.", "Documento", "Entrata €", "Uscita €"]
+    ws.append(headers)
+    head_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    head_font = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = head_fill; c.font = head_font; c.alignment = Alignment(horizontal="center")
+    for m in items:
+        ws.append([
+            m.get("data_movimento", ""), m.get("tipo", ""), m.get("categoria", ""),
+            m.get("descrizione") or "", m.get("mezzo_pagamento") or "", m.get("numero_documento") or "",
+            m["importo"] if m.get("tipo") == "entrata" else None,
+            m["importo"] if m.get("tipo") == "uscita" else None,
+        ])
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value is not None else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 50)
+    out = _io.BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="prima_nota.xlsx"'},
+    )
+
 
 
 @api.get("/stampa/brogliaccio")

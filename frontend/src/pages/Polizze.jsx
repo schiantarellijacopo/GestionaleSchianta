@@ -755,8 +755,8 @@ function NuovaPolizzaDialog({ onClose }) {
     };
 
     return (
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>Nuova polizza</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto gap-3 [&_input]:h-8 [&_[role=combobox]]:h-8 [&_label]:text-xs">
+            <DialogHeader className="space-y-0"><DialogTitle className="text-base">Nuova polizza</DialogTitle></DialogHeader>
 
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="pol-ocr-toolbar">
                 <div className="text-xs text-sky-900 flex-1">

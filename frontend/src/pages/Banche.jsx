@@ -16,6 +16,7 @@ export default function Banche() {
     const [al, setAl] = useState("");
     const [cliente, setCliente] = useState("");
     const [numeroPolizza, setNumeroPolizza] = useState("");
+    const [descrizione, setDescrizione] = useState("");
     const [collab, setCollab] = useState("all");
     const [collaboratori, setCollaboratori] = useState([]);
     const [mov, setMov] = useState(null);
@@ -35,14 +36,15 @@ export default function Banche() {
         if (al) params.al = al;
         if (cliente.trim()) params.cliente = cliente.trim();
         if (numeroPolizza.trim()) params.numero_polizza = numeroPolizza.trim();
+        if (descrizione.trim()) params.descrizione = descrizione.trim();
         if (collab !== "all") params.collaboratore_id = collab;
         api.get("/contabilita/banche/movimenti", { params }).then((r) => setMov(r.data)).catch(() => setMov({ movimenti: [] }));
-    }, [conto, dal, al, cliente, numeroPolizza, collab]);
+    }, [conto, dal, al, cliente, numeroPolizza, descrizione, collab]);
 
     useEffect(() => { loadMov(); /* eslint-disable-next-line */ }, [conto]);
 
     const reset = () => {
-        setConto("all"); setDal(""); setAl(""); setCliente(""); setNumeroPolizza(""); setCollab("all");
+        setConto("all"); setDal(""); setAl(""); setCliente(""); setNumeroPolizza(""); setDescrizione(""); setCollab("all");
         setTimeout(loadMov, 0);
     };
 
@@ -56,6 +58,7 @@ export default function Banche() {
         if (al) p.set("al", al);
         if (cliente.trim()) p.set("cliente", cliente.trim());
         if (numeroPolizza.trim()) p.set("numero_polizza", numeroPolizza.trim());
+        if (descrizione.trim()) p.set("descrizione", descrizione.trim());
         if (collab !== "all") p.set("collaboratore_id", collab);
         return p.toString();
     };
@@ -139,6 +142,10 @@ export default function Banche() {
                     <div>
                         <Label className="text-xs">N. polizza</Label>
                         <Input value={numeroPolizza} onChange={(e) => setNumeroPolizza(e.target.value)} placeholder="Numero…" className="w-40 h-9" data-testid="banche-f-polizza" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Descrizione</Label>
+                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") loadMov(); }} placeholder="Es. Hera, bonifico…" className="w-48 h-9" data-testid="banche-f-descrizione" />
                     </div>
                     <div>
                         <Label className="text-xs">Collaboratore</Label>

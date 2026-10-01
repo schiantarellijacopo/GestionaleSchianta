@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Calendar, ArrowLeftRight, Printer, Trash2, Search, Wallet } from "lucide-react";
+import { Plus, Calendar, ArrowLeftRight, Printer, Trash2, Search, Wallet, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import BrogliaccioTab from "@/components/BrogliaccioTab";
@@ -23,6 +23,7 @@ import { API_BASE } from "@/lib/api";
 export default function Contabilita() {
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
+    const [q, setQ] = useState("");
     const [primaNota, setPrimaNota] = useState(null);
     const [estrattoAna, setEstrattoAna] = useState("");
     const [estratto, setEstratto] = useState(null);
@@ -37,9 +38,20 @@ export default function Contabilita() {
         const params = {};
         if (dal) params.dal = dal;
         if (al) params.al = al;
+        if (q.trim()) params.q = q.trim();
         api.get("/contabilita/prima-nota", { params }).then((r) => setPrimaNota(r.data));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al]);
+
+    const buildMovQuery = () => {
+        const p = new URLSearchParams();
+        if (dal) p.set("dal", dal);
+        if (al) p.set("al", al);
+        if (q.trim()) p.set("q", q.trim());
+        return p.toString();
+    };
+    const stampaMov = () => window.open(`${API_BASE}/stampa/prima-nota?${buildMovQuery()}`, "_blank");
+    const exportMovXlsx = () => window.open(`${API_BASE}/stampa/prima-nota.xlsx?${buildMovQuery()}`, "_blank");
     useEffect(() => { api.get("/anagrafiche").then((r) => setAnagrafiche(r.data)); }, []);
     useEffect(() => { api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setConti(r.data || [])); }, []);
 
@@ -107,12 +119,32 @@ export default function Contabilita() {
                 </TabsContent>
 
                 <TabsContent value="prima-nota">
-                    <div className="flex items-center gap-3 mt-4 mb-4">
+                    <div className="flex items-center gap-3 mt-4 mb-4 flex-wrap">
                         <Calendar size={16} className="text-slate-400" />
                         <Label className="text-xs">Dal</Label>
-                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-44" />
+                        <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-44" data-testid="mov-dal" />
                         <Label className="text-xs">Al</Label>
-                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-44" />
+                        <Input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-44" data-testid="mov-al" />
+                        <div className="relative">
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                value={q}
+                                onChange={(e) => setQ(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter") load(); }}
+                                placeholder="Cerca descrizione (es. Hera)…"
+                                className="w-64 pl-8"
+                                data-testid="mov-cerca"
+                            />
+                        </div>
+                        <Button onClick={load} className="bg-sky-700 hover:bg-sky-800" data-testid="mov-cerca-btn">
+                            <Search size={14} className="mr-1.5" /> Cerca
+                        </Button>
+                        <Button variant="outline" onClick={stampaMov} data-testid="mov-stampa">
+                            <Printer size={14} className="mr-1.5" /> Stampa
+                        </Button>
+                        <Button variant="outline" onClick={exportMovXlsx} data-testid="mov-excel">
+                            <FileSpreadsheet size={14} className="mr-1.5" /> Excel
+                        </Button>
                     </div>
 
                     {primaNota && (

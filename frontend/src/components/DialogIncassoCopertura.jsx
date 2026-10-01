@@ -304,7 +304,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                     </button>
                 </DialogHeader>
 
-                <div className="px-6 py-4 max-h-[78vh] overflow-y-auto">
+                <div className="px-6 py-3 max-h-[82vh] overflow-y-auto [&_input]:h-8 [&_[role=combobox]]:h-8">
                     {/* ---- Tabella anagrafica ---- */}
                     <table className="w-full border-collapse text-sm">
                         <tbody>
