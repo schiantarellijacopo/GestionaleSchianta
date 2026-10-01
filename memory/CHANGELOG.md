@@ -480,3 +480,10 @@ Admin: `admin@assicura.it / Admin123!`
 - Ricerca per descrizione in E/C contraente (ecc-cerca) e E/C compagnie (ec-cerca): filtro client-side su contratto/compagnia/rischio/tipo/contraente/collaboratore/ramo.
 - Frecce ordinamento (SortHeader) aggiunte a: Contabilità Movimenti (elenco), Provvigioni (maturate), E/C contraente, E/C compagnie (movimenti). Titoli e Sinistri già le avevano (ora server-side).
 - Test: iteration_100.json — backend 6/6 pass, frontend ~90% (ecc-cerca non triggerato live per limite autocomplete, codice corretto).
+
+## 2026-10-01 (3) — Totale filtrato, date italiane ovunque, export Sinistri/Clienti
+- Totale filtrato: in Banche (chip quando è attiva la ricerca Descrizione: N movimenti + Entrate/Uscite/Netto) e in Contabilità Movimenti (chip quando è attiva la ricerca testuale q). I totali riflettono l'intero set filtrato (backend già filtrava).
+- Date italiane GG/MM/AAAA estese ai filtri di Portafoglio (pol-f-dal/al), Titoli (f-dal/al), Sinistri (sin-f-dal/al) via DateInputIt, oltre a Banche/Movimenti/Provvigioni/E-C già fatti.
+- Export Sinistri: nuovi GET /api/export/sinistri.csv e .xlsx (filtri stato/compagnia/ramo/collaboratore/tipologia/q/dal/al/polizza). Pulsanti CSV/Excel aggiunti alla pagina Sinistri.
+- Export Clienti: nuovi GET /api/export/anagrafiche.csv e .xlsx (filtri q/tag/collaboratore/professione/comune). Pulsanti CSV/Excel aggiunti alla pagina Anagrafiche (/anagrafiche, menu "Clienti").
+- Verificato via curl: tutti e 4 gli export 200 con dati reali (sinistri.csv 580KB, anagrafiche.csv 879KB). Portafoglio aveva già CSV/Excel.

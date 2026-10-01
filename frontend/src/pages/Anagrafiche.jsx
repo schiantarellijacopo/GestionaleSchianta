@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, fmtDate, fmtEur } from "@/lib/api";
+import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
@@ -13,7 +13,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload, Send, GitMerge, Loader2 } from "lucide-react";
+import { Plus, Search, ScanLine, Calculator, MapPin, X, Mail, Phone, Contact, ChevronRight, Users, Home, Church, Briefcase, Settings, Trash2, Star, Heart, Flag, Award, Target, Bookmark, Tag as TagIcon, Zap, Upload, Send, GitMerge, Loader2, FileText, FileSpreadsheet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddressAutocomplete from "@/components/AddressAutocomplete";
@@ -251,6 +251,18 @@ export default function Anagrafiche() {
 
     const counts = { con: catCounts.con_polizze, senza: catCounts.senza_polizze, cond: catCounts.condominio };
 
+    const qsExportAnag = () => {
+        const u = new URLSearchParams();
+        if (qDeb) u.append("q", qDeb);
+        if (tagFilter) u.append("tag", tagFilter);
+        if (collabFilter) u.append("collaboratore_id", collabFilter);
+        if (profFilter) u.append("professione", profFilter);
+        if (comuneFilter) u.append("comune", comuneFilter);
+        return u.toString();
+    };
+    const exportAnagCsv = () => window.open(`${API_BASE}/export/anagrafiche.csv?${qsExportAnag()}`, "_blank");
+    const exportAnagXlsx = () => window.open(`${API_BASE}/export/anagrafiche.xlsx?${qsExportAnag()}`, "_blank");
+
     return (
         <div data-testid="anagrafiche-page">
             <PageHeader
@@ -259,6 +271,12 @@ export default function Anagrafiche() {
                 actions={
                     canCreate && (
                         <div className="flex items-center gap-2">
+                            <Button variant="outline" onClick={exportAnagCsv} data-testid="anagrafica-csv">
+                                <FileText size={16} className="mr-1" /> CSV
+                            </Button>
+                            <Button variant="outline" onClick={exportAnagXlsx} data-testid="anagrafica-xlsx">
+                                <FileSpreadsheet size={16} className="mr-1" /> Excel
+                            </Button>
                             <Button variant="outline"
                                     onClick={() => setDedupOpen(true)}
                                     data-testid="anagrafica-unisci-doppioni-btn"

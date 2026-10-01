@@ -156,6 +156,18 @@ export default function Contabilita() {
                         </Button>
                     </div>
 
+                    {q.trim() && primaNota && (
+                        <div className="mb-4 flex flex-wrap items-center gap-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-2.5" data-testid="mov-totale-filtrato">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-sky-800">
+                                Totale filtrato «{q.trim()}»
+                            </span>
+                            <span className="text-sm text-slate-700">{primaNota.movimenti.length} movimenti</span>
+                            <span className="text-sm">Entrate: <span className="num font-semibold text-emerald-700">{fmtEur(primaNota.totale_entrate)}</span></span>
+                            <span className="text-sm">Uscite: <span className="num font-semibold text-rose-700">{fmtEur(primaNota.totale_uscite)}</span></span>
+                            <span className="text-sm">Saldo: <span className="num font-semibold">{fmtEur(primaNota.saldo)}</span></span>
+                        </div>
+                    )}
+
                     {primaNota && (
                         <div className="grid grid-cols-3 gap-4 mb-5">
                             <Card className="p-5 border-slate-200 border-l-4 border-l-emerald-500">

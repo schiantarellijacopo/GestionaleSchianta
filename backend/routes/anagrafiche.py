@@ -354,6 +354,78 @@ async def list_anagrafiche(
     return items
 
 
+@router.get("/export/anagrafiche.csv")
+async def export_anagrafiche_csv(
+    q: Optional[str] = None, tag: Optional[str] = None, collaboratore_id: Optional[str] = None,
+    professione: Optional[str] = None, comune: Optional[str] = None,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_anagrafiche(
+        q=q, tag=tag, collaboratore_id=collaboratore_id, professione=professione,
+        comune=comune, limit=20000, user=user)
+    import csv as _csv
+    out = _io.StringIO()
+    w = _csv.writer(out, delimiter=";")
+    w.writerow(["Ragione sociale / Nome", "Tipo", "Codice fiscale", "Partita IVA",
+                "Email", "Telefono", "Cellulare", "Indirizzo", "CAP", "Comune", "Provincia",
+                "Collaboratore", "Polizze attive", "Tag"])
+    for a in items:
+        w.writerow([
+            a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip(),
+            a.get("tipo"), a.get("codice_fiscale"), a.get("partita_iva"),
+            a.get("email"), a.get("telefono"), a.get("cellulare"), a.get("indirizzo"),
+            a.get("cap"), a.get("comune"), a.get("provincia"),
+            a.get("collaboratore_nome"), a.get("polizze_attive_count"),
+            ", ".join(a.get("tags") or []),
+        ])
+    csv_bytes = out.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        _io.BytesIO(csv_bytes), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="clienti.csv"'},
+    )
+
+
+@router.get("/export/anagrafiche.xlsx")
+async def export_anagrafiche_xlsx(
+    q: Optional[str] = None, tag: Optional[str] = None, collaboratore_id: Optional[str] = None,
+    professione: Optional[str] = None, comune: Optional[str] = None,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_anagrafiche(
+        q=q, tag=tag, collaboratore_id=collaboratore_id, professione=professione,
+        comune=comune, limit=20000, user=user)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Clienti"
+    headers = ["Ragione sociale / Nome", "Tipo", "Codice fiscale", "Partita IVA",
+               "Email", "Telefono", "Cellulare", "Indirizzo", "CAP", "Comune", "Provincia",
+               "Collaboratore", "Polizze attive", "Tag"]
+    ws.append(headers)
+    hf = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    hfont = Font(bold=True, color="FFFFFF")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.fill = hf; c.font = hfont; c.alignment = Alignment(horizontal="center")
+    for a in items:
+        ws.append([
+            a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip(),
+            a.get("tipo"), a.get("codice_fiscale"), a.get("partita_iva"),
+            a.get("email"), a.get("telefono"), a.get("cellulare"), a.get("indirizzo"),
+            a.get("cap"), a.get("comune"), a.get("provincia"),
+            a.get("collaboratore_nome"), a.get("polizze_attive_count"),
+            ", ".join(a.get("tags") or []),
+        ])
+    for col in ws.columns:
+        ml = max((len(str(c.value)) if c.value is not None else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 34)
+    out = _io.BytesIO(); wb.save(out); out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="clienti.xlsx"'},
+    )
+
+
+
 # Proiezione "leggera" per la lista paginata: esclude documenti/allegati e blob pesanti
 _ANAG_LEAN_PROJ = {
     "_id": 0, "id": 1, "ragione_sociale": 1, "tipo": 1, "nome": 1, "cognome": 1,

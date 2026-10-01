@@ -12,6 +12,7 @@ import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import KpiBar from "@/components/KpiBar";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 import { useTableColumns } from "@/components/ColumnManager";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -156,6 +157,15 @@ export default function Sinistri() {
 
     const totali = serverTotali;
 
+    const qsExport = () => {
+        const u = new URLSearchParams();
+        Object.entries(buildParams()).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== "") u.append(k, String(v));
+        });
+        return u.toString();
+    };
+    const exportCsv = () => window.open(`${API_BASE}/export/sinistri.csv?${qsExport()}`, "_blank");
+    const exportXlsx = () => window.open(`${API_BASE}/export/sinistri.xlsx?${qsExport()}`, "_blank");
     const stampaPdf = () => window.open(
         `${API_BASE}/stampa/sinistri${filters.stato !== "all" ? `?stato=${filters.stato}` : ""}`,
         "_blank",
@@ -207,6 +217,12 @@ export default function Sinistri() {
                         <Button variant="outline" onClick={stampaPdf} data-testid="sin-print-list">
                             <Printer size={14} className="mr-1" /> Stampa PDF
                         </Button>
+                        <Button variant="outline" onClick={exportCsv} data-testid="sin-csv">
+                            <FileText size={14} className="mr-1" /> CSV
+                        </Button>
+                        <Button variant="outline" onClick={exportXlsx} data-testid="sin-xlsx">
+                            <FileSpreadsheet size={14} className="mr-1" /> Excel
+                        </Button>
                     </div>
                 </div>
 
@@ -249,11 +265,11 @@ export default function Sinistri() {
                         </Select>
                         <div>
                             <Label className="text-[10px] text-slate-500">Avvenimento dal</Label>
-                            <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="sin-f-dal" />
+                            <DateInputIt value={filters.dal} onChange={(v) => setF("dal", v)} data-testid="sin-f-dal" />
                         </div>
                         <div>
                             <Label className="text-[10px] text-slate-500">al</Label>
-                            <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="sin-f-al" />
+                            <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="sin-f-al" />
                         </div>
                         <button onClick={() => setFilters({
                             q: "", stato: "all", compagnia_id: "all", ramo: "all",

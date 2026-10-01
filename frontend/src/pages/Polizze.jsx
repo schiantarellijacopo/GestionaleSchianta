@@ -7,6 +7,7 @@ import CollaboratoreCell from "@/components/CollaboratoreCell";
 import IconForRamo from "@/components/IconForRamo";
 import ContraenteFilter from "@/components/ContraenteFilter";
 import SortHeader from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -381,11 +382,11 @@ export default function Polizze() {
                         <ContraenteFilter value={filters.contraente_id} onChange={(v) => setF("contraente_id", v)} />
                         <div>
                             <Label className="text-[10px] text-slate-500">Scadenza dal</Label>
-                            <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="pol-f-dal" />
+                            <DateInputIt value={filters.dal} onChange={(v) => setF("dal", v)} data-testid="pol-f-dal" />
                         </div>
                         <div>
                             <Label className="text-[10px] text-slate-500">Scadenza al</Label>
-                            <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="pol-f-al" />
+                            <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="pol-f-al" />
                         </div>
                         <button
                             onClick={() => setFilters(INITIAL_FILTERS)}

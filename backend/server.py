@@ -5049,6 +5049,56 @@ async def export_sospesi_storico_xlsx(collaboratore_id: Optional[str] = None,
     return _xlsx_response(headers, rows, "Storico sospesi", "sospesi_storico.xlsx")
 
 
+@api.get("/export/sinistri.csv")
+async def export_sinistri_csv(
+    stato: Optional[str] = None, compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, tipologia: Optional[str] = None, q: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None, polizza_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_sinistri(
+        stato=stato, polizza_id=polizza_id, compagnia_id=compagnia_id, collaboratore_id=collaboratore_id,
+        ramo=ramo, tipologia=tipologia, q=q, dal=dal, al=al, limit=20000, user=user)
+    import csv as _csv
+    out = _io.StringIO()
+    w = _csv.writer(out, delimiter=";")
+    w.writerow(["Num. interno", "N. sinistro", "N. polizza", "Data avvenimento", "Contraente",
+                "Compagnia", "Tipologia", "Danneggiato", "Targa", "Collaboratore",
+                "Riserva", "Liquidato", "Stato"])
+    for s in items:
+        w.writerow([s.get("numero_interno"), s.get("numero_sinistro"), s.get("numero_polizza"),
+                    s.get("data_avvenimento"), s.get("contraente_nome"), s.get("compagnia_nome"),
+                    s.get("tipologia_sinistro"), s.get("danneggiato_nome"), s.get("targa"),
+                    s.get("collaboratore_nome"), s.get("riserva"), s.get("liquidazione"), s.get("stato")])
+    csv_bytes = out.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        _io.BytesIO(csv_bytes), media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="sinistri.csv"'},
+    )
+
+
+@api.get("/export/sinistri.xlsx")
+async def export_sinistri_xlsx(
+    stato: Optional[str] = None, compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, tipologia: Optional[str] = None, q: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None, polizza_id: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_sinistri(
+        stato=stato, polizza_id=polizza_id, compagnia_id=compagnia_id, collaboratore_id=collaboratore_id,
+        ramo=ramo, tipologia=tipologia, q=q, dal=dal, al=al, limit=20000, user=user)
+    headers = ["Num. interno", "N. sinistro", "N. polizza", "Data avvenimento", "Contraente",
+               "Compagnia", "Tipologia", "Danneggiato", "Targa", "Collaboratore",
+               "Riserva €", "Liquidato €", "Stato"]
+    rows = [[
+        s.get("numero_interno"), s.get("numero_sinistro"), s.get("numero_polizza"),
+        s.get("data_avvenimento"), s.get("contraente_nome"), s.get("compagnia_nome"),
+        s.get("tipologia_sinistro"), s.get("danneggiato_nome"), s.get("targa"),
+        s.get("collaboratore_nome"), s.get("riserva"), s.get("liquidazione"), s.get("stato"),
+    ] for s in items]
+    return _xlsx_response(headers, rows, "Sinistri", "sinistri.xlsx")
+
+
 def _polizze_export_filters(**kw) -> dict:
     """Pulisce i kwargs filtro dell'export polizze (rimuove None)."""
     return {k: v for k, v in kw.items() if v is not None and v != ""}

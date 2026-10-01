@@ -6,6 +6,7 @@ import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import KpiBarSection from "@/components/KpiBar";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import DateInputIt from "@/components/DateInputIt";
 import { useTableColumns } from "@/components/ColumnManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -482,11 +483,11 @@ export default function Titoli({ storicoMode = false } = {}) {
                         </div>
                         <div>
                             <Label className="text-[10px] text-slate-500">Dal</Label>
-                            <Input type="date" value={filters.dal} onChange={(e) => setF("dal", e.target.value)} data-testid="f-dal" />
+                            <DateInputIt value={filters.dal} onChange={(v) => setF("dal", v)} data-testid="f-dal" />
                         </div>
                         <div>
                             <Label className="text-[10px] text-slate-500">Al</Label>
-                            <Input type="date" value={filters.al} onChange={(e) => setF("al", e.target.value)} data-testid="f-al" />
+                            <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="f-al" />
                         </div>
                         <button onClick={() => setFilters({
                             preset: "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",

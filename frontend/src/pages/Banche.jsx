@@ -168,6 +168,7 @@ export default function Banche() {
                     </Button>
                     {mov && (
                         <div className="ml-auto flex gap-5 text-sm">
+                            <div><span className="text-slate-500">Mov.:</span> <span className="num font-bold">{mov.n_movimenti ?? (mov.movimenti || []).length}</span></div>
                             <div><span className="text-slate-500">Entrate:</span> <span className="num font-bold text-emerald-700">{fmtEur(mov.totale_entrate)}</span></div>
                             <div><span className="text-slate-500">Uscite:</span> <span className="num font-bold text-rose-700">{fmtEur(mov.totale_uscite)}</span></div>
                             {mov.progressivo && (
@@ -176,6 +177,17 @@ export default function Banche() {
                         </div>
                     )}
                 </div>
+                {descrizione.trim() && mov && (
+                    <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-2.5" data-testid="banche-totale-filtrato">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-sky-800">
+                            Totale filtrato «{descrizione.trim()}»
+                        </span>
+                        <span className="text-sm text-slate-700">{mov.n_movimenti ?? (mov.movimenti || []).length} movimenti</span>
+                        <span className="text-sm">Entrate: <span className="num font-semibold text-emerald-700">{fmtEur(mov.totale_entrate)}</span></span>
+                        <span className="text-sm">Uscite: <span className="num font-semibold text-rose-700">{fmtEur(mov.totale_uscite)}</span></span>
+                        <span className="text-sm">Netto: <span className="num font-semibold">{fmtEur((mov.totale_entrate || 0) - (mov.totale_uscite || 0))}</span></span>
+                    </div>
+                )}
             </Card>
 
             {/* Tabella movimenti */}
