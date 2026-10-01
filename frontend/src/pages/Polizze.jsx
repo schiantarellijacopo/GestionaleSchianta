@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
@@ -6,7 +6,7 @@ import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import IconForRamo from "@/components/IconForRamo";
 import ContraenteFilter from "@/components/ContraenteFilter";
-import SortHeader, { useTableSort } from "@/components/SortHeader";
+import SortHeader from "@/components/SortHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -120,6 +120,18 @@ export default function Polizze() {
     const [filters, setFilters] = useState(INITIAL_FILTERS);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
     const canCreate = ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const PAGE_SIZE = 50;
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [pages, setPages] = useState(1);
+    const [serverTotali, setServerTotali] = useState({ t_lordo: 0, t_netto: 0, t_provv: 0 });
+    const [sortBy, setSortBy] = useState("data_scadenza");
+    const [sortDir, setSortDir] = useState("asc");
+    const toggleSort = (k) => {
+        if (sortBy === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        else { setSortBy(k); setSortDir("asc"); }
+        setPage(1);
+    };
 
     const buildParams = () => {
         const p = { ...presetParams(filters.preset) };
@@ -140,7 +152,13 @@ export default function Polizze() {
     };
 
     const load = () => {
-        api.get("/polizze", { params: buildParams() }).then((r) => setList(r.data));
+        api.get("/polizze", { params: { ...buildParams(), paged: true, page, page_size: PAGE_SIZE, sort: sortBy, dir: sortDir } })
+            .then((r) => {
+                setList(r.data.items || []);
+                setTotal(r.data.total || 0);
+                setPages(r.data.pages || 1);
+                setServerTotali(r.data.totali || { t_lordo: 0, t_netto: 0, t_provv: 0 });
+            });
     };
     const [conteggi, setConteggi] = useState({});
     const [marcandoScadute, setMarcandoScadute] = useState(false);
@@ -163,7 +181,8 @@ export default function Polizze() {
             toast.error(e.response?.data?.detail || "Errore");
         } finally { setMarcandoScadute(false); }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, page, sortBy, sortDir]);
+    useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters]);
     useEffect(() => { loadConteggi(); /* eslint-disable-next-line */ }, []);
 
     useEffect(() => {
@@ -178,17 +197,10 @@ export default function Polizze() {
     }, []);
 
     const baseList = list || [];
-    const { sorted, sortKey, dir, toggle } = useTableSort(baseList, "data_scadenza", "asc");
     const { cols, picker } = useTableColumns("polizze", POLIZZE_COLS);
-    const displayed = sorted;
+    const displayed = baseList;
 
-    const totali = useMemo(() => {
-        const src = list || [];
-        const t_lordo = src.reduce((s, p) => s + (p.premio_lordo || 0), 0);
-        const t_netto = src.reduce((s, p) => s + (p.premio_netto || 0), 0);
-        const t_provv = src.reduce((s, p) => s + (p.provvigioni || 0), 0);
-        return { t_lordo, t_netto, t_provv };
-    }, [list]);
+    const totali = serverTotali;
 
     const qs = (params) => {
         const u = new URLSearchParams();
@@ -395,7 +407,7 @@ export default function Polizze() {
                                 {cols.map((c) => (
                                     <th key={c.key} className={c.thClass}>
                                         {c.sort
-                                            ? <SortHeader k={c.sort} sortKey={sortKey} dir={dir} toggle={toggle}>{c.label}</SortHeader>
+                                            ? <SortHeader k={c.sort} sortKey={sortBy} dir={sortDir} toggle={toggleSort}>{c.label}</SortHeader>
                                             : c.label}
                                     </th>
                                 ))}
@@ -412,9 +424,11 @@ export default function Polizze() {
                         </tbody>
                     </table>
                 )}
-                {list && list.length >= 2000 && (
-                    <div className="px-4 py-2 text-xs text-slate-500 text-center border-t border-slate-100">
-                        Visualizzate tutte le {list.length} polizze
+                {list && pages > 1 && (
+                    <div className="flex items-center justify-center gap-3 px-4 py-2.5 border-t border-slate-100 bg-white" data-testid="pol-pager">
+                        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="pol-page-prev">‹ Prec.</Button>
+                        <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} polizze</span>
+                        <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="pol-page-next">Succ. ›</Button>
                     </div>
                 )}
             </div>
@@ -422,7 +436,7 @@ export default function Polizze() {
             {/* Footer totali */}
             <div className="sticky bottom-0 mt-4 bg-slate-900 text-slate-100 rounded-t-md px-4 py-3 flex flex-wrap items-center gap-3" data-testid="pol-footer">
                 <span className="text-xs text-slate-400">
-                    {list ? `${list.length} polizze${filters.preset !== "tutti" ? ` · preset: ${filters.preset}` : ""}` : ""}
+                    {list ? `${total} polizze${filters.preset !== "tutti" ? ` · preset: ${filters.preset}` : ""}` : ""}
                 </span>
                 <div className="ml-auto flex gap-6">
                     <div className="text-right">

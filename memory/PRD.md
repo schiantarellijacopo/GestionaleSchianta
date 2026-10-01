@@ -1,6 +1,12 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 01/10/2026 (fork) — Fix: incasso coperto bloccato da "Prima Nota chiusa"
+## Sessione 01/10/2026 (fork) — Paginazione Polizze + direttiva "ottimizza tutto in automatico"
+
+- **Polizze: paginazione lato server attiva** (FATTO, testato): `Polizze.jsx` ora carica 50 polizze/pagina (`paged/page/page_size/sort/dir`), con pager UI, ordinamento server (campi nativi) e **totali da aggregation server** (su tutti i record filtrati, non solo la pagina). Export/stampa restano su tutti i record. Verificato in preview con dati reali (jacopo): "Pagina 1 di 101 · 5048 attive", totali corretti, cambio pagina ok.
+- **Statistiche/report già veloci**: `/statistiche/overview|premi-provvigioni|per-operatore`, `/cervello/*` = 0,12–0,24s (aggregazioni + nuovi indici). Nessun intervento necessario.
+- **DIRETTIVA PERMANENTE rafforzata** (`/app/memory/performance_guidelines.md`): ottimizzare TUTTO in automatico (indici/projection/parallelo/paginazione) senza chiedere. Da applicare a ogni nuova funzione.
+
+
 
 - **Incasso titolo coperto in giornata chiusa** (FATTO): nel dialog `DialogIncassoCopertura` il passo 1 faceva SEMPRE un `PUT /titoli/{id}`; il PUT (server.py:5184) controlla `data_incasso || data_competenza` → se la competenza del titolo cade in una Prima Nota chiusa (es. 23/09), bloccava con "Prima Nota del ... chiusa — riaprire la chiusura per modificare il titolo", impedendo l'incasso (data pagamento 24/09, aperta). Ora il PUT viene inviato SOLO se l'utente modifica davvero i dati base (snapshot iniziale via useRef). L'endpoint `/incassa` controlla solo `data_incasso` (giorno aperto) → l'incasso del coperto passa.
 

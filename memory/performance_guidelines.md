@@ -32,6 +32,22 @@ implementazione.
 5. **Proiezioni**: nelle find usare sempre la projection (`{"_id":0, campo:1,...}`)
    per ridurre il payload; evitare `to_list(None)` su collezioni enormi senza filtro.
 
-## Stato indici
+## AGGIORNAMENTO 01/10/2026 — DIRETTIVA RAFFORZATA
+
+L'utente richiede esplicitamente: **ottimizzare TUTTO il programma in automatico** (indici o altri mezzi),
+senza chiedere ogni volta quali sezioni. Regola operativa per OGNI nuova funzione/endpoint/pagina:
+- Aggiungere SEMPRE gli indici necessari in `backend/indexes.py` per i campi di ricerca/filtro/sort/join.
+- Usare projection a INCLUSIONE nelle liste (mai documenti "grassi").
+- Query indipendenti in parallelo (`asyncio.gather`).
+- Liste grandi → paginazione lato server (pattern Anagrafiche/Polizze: `paged/page/page_size/sort/dir` → `{items,total,pages,totali}`).
+- Non chiedere conferma per ottimizzare: farlo di default.
+
+### Stato 01/10/2026
+- Polizze: paginazione server attiva (50/pagina, totali via aggregation, pager UI). Verificato: pagina 1 di 101, 5048 attive, totali server corretti.
+- Titoli: "carica tutto" su richiesta utente, alleggerito con projection + gzip.
+- Statistiche/report (`/statistiche/*`, `/cervello/*`): già veloci (0,12–0,24s) con aggregazioni + indici.
+- GZip attivo (risposte ~10x più leggere nel browser).
+
+
 - `ensure_indexes()` garantisce ~143 indici (log: "Indici DB garantiti: N").
 - Warning innocuo: `users.email` (indice unique già esistente con stesso nome).
