@@ -119,7 +119,7 @@ export default function AppCliente() {
                 {(cfg.team || []).length === 0 && <EmptyHint testo="Aggiungi i membri del team: foto, ruolo, di cosa si occupano, email e numero interno." />}
                 <div className="space-y-3">
                     {(cfg.team || []).map((r, i) => (
-                        <TeamMemberRow key={r.id || i} r={r} i={i}
+                        <TeamMemberRow key={r.id || i} r={r} i={i} sedi={cfg.sedi || []}
                             onChange={(patch) => set("team", cfg.team.map((x, j) => j === i ? { ...x, ...patch } : x))}
                             onRemove={() => set("team", cfg.team.filter((_, j) => j !== i))} />
                     ))}
@@ -297,7 +297,7 @@ function SedeRow({ s, i, onChange, onRemove }) {
     );
 }
 
-function TeamMemberRow({ r, i, onChange, onRemove }) {
+function TeamMemberRow({ r, i, onChange, onRemove, sedi = [] }) {
     const fotoRef = useRef(null);
     const [uploading, setUploading] = useState(false);
     const fotoUrl = r.foto_path
@@ -345,6 +345,17 @@ function TeamMemberRow({ r, i, onChange, onRemove }) {
                            onChange={(e) => onChange({ telefono: e.target.value })} data-testid={`team-telefono-${i}`} />
                     <Input value={r.email || ""} placeholder="Email" className="h-8 text-xs bg-white"
                            onChange={(e) => onChange({ email: e.target.value })} data-testid={`team-email-${i}`} />
+                    <select
+                        value={r.sede_id || ""}
+                        onChange={(e) => onChange({ sede_id: e.target.value })}
+                        className="h-8 text-xs bg-white border border-slate-200 rounded-md px-2 md:col-span-2"
+                        data-testid={`team-sede-${i}`}
+                    >
+                        <option value="">Sede di riferimento…</option>
+                        {sedi.map((s, j) => (
+                            <option key={s.id || j} value={s.id}>{s.nome || `Sede ${j + 1}`}</option>
+                        ))}
+                    </select>
                     <Textarea value={r.descrizione || ""} placeholder="Di cosa si occupa (es. gestione sinistri auto, preventivi vita, contabilità...)"
                               className="md:col-span-2 text-xs bg-white min-h-[44px]" rows={2}
                               onChange={(e) => onChange({ descrizione: e.target.value })}

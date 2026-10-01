@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import DialogIncasso from "@/components/DialogIncasso";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Coins, Clock, AlertTriangle, CheckCircle, Printer, Layers, History, FileSpreadsheet } from "lucide-react";
 
 export default function TitoliSospesi() {
@@ -56,6 +57,11 @@ export default function TitoliSospesi() {
         }
         return list;
     }, [items, ggMin, q, dataDal, dataAl]);
+
+    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(
+        visibleItems || [], null, "asc",
+        { da_pagare: (t) => (t.importo_da_pagare != null ? t.importo_da_pagare : t.importo_lordo) },
+    );
 
     const clearGgMin = () => {
         const p = new URLSearchParams(searchParams);
@@ -268,20 +274,20 @@ export default function TitoliSospesi() {
                                         data-testid="sospesi-toggle-all"
                                     />
                                 </th>
-                                <th>Cliente</th>
-                                <th>Cellulare</th>
-                                <th>Collaboratore</th>
-                                <th>Polizza</th>
-                                <th>Ramo / Targa</th>
-                                <th>Coperto il</th>
-                                <th>Anticipo</th>
-                                <th>Scad. polizza</th>
-                                <th className="text-right">Da Pagare €</th>
+                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Cliente</SortHeader></th>
+                                <th><SortHeader k="cellulare" sortKey={sortKey} dir={dir} toggle={toggle}>Cellulare</SortHeader></th>
+                                <th><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                                <th><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Polizza</SortHeader></th>
+                                <th><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo / Targa</SortHeader></th>
+                                <th><SortHeader k="data_copertura" sortKey={sortKey} dir={dir} toggle={toggle}>Coperto il</SortHeader></th>
+                                <th><SortHeader k="giorni_anticipo" sortKey={sortKey} dir={dir} toggle={toggle}>Anticipo</SortHeader></th>
+                                <th><SortHeader k="scadenza_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Scad. polizza</SortHeader></th>
+                                <th className="text-right"><SortHeader k="da_pagare" sortKey={sortKey} dir={dir} toggle={toggle}>Da Pagare €</SortHeader></th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {visibleItems.map((t) => {
+                            {sortedItems.map((t) => {
                                 const old = (t.giorni_anticipo || 0) > 30;
                                 const isChecked = selectedIds.has(t.id);
                                 return (
@@ -547,6 +553,10 @@ function StoricoSospesi({ collab }) {
         () => (visible || []).reduce((s, t) => s + (t.importo_pagato != null ? t.importo_pagato : (t.importo_lordo || 0)), 0),
         [visible],
     );
+    const { sorted: sortedStorico, sortKey: skS, dir: dirS, toggle: tgS } = useTableSort(
+        visible || [], null, "asc",
+        { importo: (t) => (t.importo_pagato != null ? t.importo_pagato : t.importo_lordo) },
+    );
     const pdfParams = {
         ...(filtroCollab !== "all" ? { collaboratore_id: filtroCollab } : {}),
         ...(dal ? { dal } : {}), ...(al ? { al } : {}),
@@ -610,18 +620,18 @@ function StoricoSospesi({ collab }) {
                         <table className="tbl w-full">
                             <thead>
                                 <tr>
-                                    <th>Cliente</th>
-                                    <th>Collaboratore</th>
-                                    <th>Polizza</th>
-                                    <th>Ramo / Targa</th>
-                                    <th>Coperto il</th>
-                                    <th>Incassato il</th>
-                                    <th>Anticipo</th>
-                                    <th className="text-right">Importo €</th>
+                                    <th><SortHeader k="contraente_nome" sortKey={skS} dir={dirS} toggle={tgS}>Cliente</SortHeader></th>
+                                    <th><SortHeader k="collaboratore_nome" sortKey={skS} dir={dirS} toggle={tgS}>Collaboratore</SortHeader></th>
+                                    <th><SortHeader k="numero_polizza" sortKey={skS} dir={dirS} toggle={tgS}>Polizza</SortHeader></th>
+                                    <th><SortHeader k="ramo" sortKey={skS} dir={dirS} toggle={tgS}>Ramo / Targa</SortHeader></th>
+                                    <th><SortHeader k="data_copertura" sortKey={skS} dir={dirS} toggle={tgS}>Coperto il</SortHeader></th>
+                                    <th><SortHeader k="data_incasso" sortKey={skS} dir={dirS} toggle={tgS}>Incassato il</SortHeader></th>
+                                    <th><SortHeader k="giorni_anticipo" sortKey={skS} dir={dirS} toggle={tgS}>Anticipo</SortHeader></th>
+                                    <th className="text-right"><SortHeader k="importo" sortKey={skS} dir={dirS} toggle={tgS}>Importo €</SortHeader></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {visible.map((t) => (
+                                {sortedStorico.map((t) => (
                                     <tr key={t.id} data-testid={`sospeso-storico-${t.id}`}>
                                         <td className="font-medium">
                                             <Link to={`/anagrafiche/${t.contraente_id}`} className="text-sky-700 hover:underline">{t.contraente_nome}</Link>

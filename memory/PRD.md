@@ -1,6 +1,16 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 01/10/2026 (fork) — PRESTAZIONI (prerogativa sempre) + fix elenco C.I. dashboard
+## Sessione 01/10/2026 (fork) — Performance (payload/indici/gzip), fix UI e ordinamento tabelle
+
+- **Payload liste ridotto** (FATTO): `/polizze` e `/titoli` usano projection a INCLUSIONE (solo campi lista) → payload da ~82/86MB a ~21/47MB (grezzo); con gzip il browser riceve ~10x meno. GZip middleware già attivo.
+- **Paginazione lato server opt-in** (FATTO backend): `/polizze` supporta `paged/page/page_size/sort/dir` → `{items,total,pages,totali}` (totali via aggregation). Titoli lasciato "carica tutto" su richiesta utente.
+- **/api/search parallelo + prefisso indicizzato** (FATTO): query in `asyncio.gather`; numeri/targa/CF in prefisso ancorato (usa indici). Indici DB ampliati (143).
+- **Fix barra nera totali sovrapposta** (FATTO): `.tbl-scroll.has-footer` riserva spazio; applicato a Polizze e Titoli.
+- **Fix elenco "Anagrafiche senza C.I." vuoto** (FATTO): DocumentiMancantiWidget leggeva male la lista.
+- **Ordinamento colonne (frecce) rollout** (IN CORSO): già presenti Polizze, Titoli; AGGIUNTI: Sospesi/Anticipi (tabella attivi + storico), Rappel, Ritenute. Anagrafiche già paginata server-side con sort. RIMANENTI (prossimi batch): Provvigioni, EstrattoContoContraente/Compagnie, Contabilita, CarichiMensili, Pnc, RitenuteCompagnia, SinistroDetail, PolizzaDetail, AnagraficaDetail, Banche, Voucher, Corsi, Statistiche*, pannelli admin, ecc.
+- **Team portale: "Sede di riferimento"** (FATTO): in `AppCliente.jsx` ogni membro team ha una tendina "Sede di riferimento" popolata dalle sedi configurate; salvato come `sede_id` (backend `app_cliente.py`).
+- **Direttiva permanente prestazioni** in `/app/memory/performance_guidelines.md`.
+
 
 - **DIRETTIVA PERMANENTE**: velocità/fluidità sono priorità per TUTTE le sezioni, ricerche, filtri, caricamenti e per ogni implementazione futura. Regole operative in `/app/memory/performance_guidelines.md` (indici auto in `backend/indexes.py`, query in parallelo, upload non bloccanti, ricerche server-side+debounce, proiezioni).
 - **Indici DB ampliati** (FATTO, attivi): `backend/indexes.py` esteso — anagrafiche (cognome/nome/cellulare/telefono/comune/CF/PIVA + composti tenant), polizze (prodotto/oggetto_assicurato/veicoli_ids/targa tenant), titoli (numero_polizza/contraente_id/data_scadenza/data_copertura + composti), allegati (categoria/applicazione_matricola_id), firma_requests, applicazioni, documenti_inbox, users(role). Startup: "Indici DB garantiti: 143". Creazione idempotente ad ogni avvio.

@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ export default function Ritenute() {
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const [collabs, setCollabs] = useState([]);
+    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
 
     const load = () => {
         api.get("/ritenute", { params: { anno } }).then((r) => setItems(r.data));
@@ -135,15 +137,19 @@ export default function Ritenute() {
                 {items === null ? <Loading /> : items.length === 0 ? <Empty /> : (
                     <table className="tbl-compact w-full text-xs">
                         <thead><tr>
-                            <th>Data</th><th>Collaboratore</th><th>Descrizione</th>
-                            <th>Causale</th>
-                            <th className="text-right">Imponibile</th>
-                            <th className="text-right">Aliq.</th>
-                            <th className="text-right">Ritenuta</th>
-                            <th>Versata</th><th>Data Vers.</th><th className="w-16"></th>
+                            <th><SortHeader k="data" sortKey={sortKey} dir={dir} toggle={toggle}>Data</SortHeader></th>
+                            <th><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                            <th><SortHeader k="descrizione" sortKey={sortKey} dir={dir} toggle={toggle}>Descrizione</SortHeader></th>
+                            <th><SortHeader k="causale" sortKey={sortKey} dir={dir} toggle={toggle}>Causale</SortHeader></th>
+                            <th className="text-right"><SortHeader k="imponibile" sortKey={sortKey} dir={dir} toggle={toggle}>Imponibile</SortHeader></th>
+                            <th className="text-right"><SortHeader k="aliquota" sortKey={sortKey} dir={dir} toggle={toggle}>Aliq.</SortHeader></th>
+                            <th className="text-right"><SortHeader k="importo_ritenuta" sortKey={sortKey} dir={dir} toggle={toggle}>Ritenuta</SortHeader></th>
+                            <th><SortHeader k="versata" sortKey={sortKey} dir={dir} toggle={toggle}>Versata</SortHeader></th>
+                            <th><SortHeader k="data_versamento" sortKey={sortKey} dir={dir} toggle={toggle}>Data Vers.</SortHeader></th>
+                            <th className="w-16"></th>
                         </tr></thead>
                         <tbody>
-                            {items.map((r) => (
+                            {sortedItems.map((r) => (
                                 <tr key={r.id} data-testid={`rit-row-${r.id}`}>
                                     <td>{r.data || "—"}</td>
                                     <td className="font-medium">{r.collaboratore_nome || "—"}</td>

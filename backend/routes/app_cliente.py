@@ -102,6 +102,7 @@ async def update_config(body: dict, user=Depends(require_user("admin", "collabor
                 "descrizione": (r.get("descrizione") or "").strip(),
                 "telefono": (r.get("telefono") or "").strip(),
                 "email": (r.get("email") or "").strip(),
+                "sede_id": (r.get("sede_id") or "").strip() or None,
                 "foto_path": r.get("foto_path") or None,
             }
             for r in (body.get("team") or []) if (r.get("nome") or "").strip()

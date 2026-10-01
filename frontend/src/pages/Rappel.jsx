@@ -13,6 +13,7 @@ import { Plus, Trash2, Pencil, Gift, TrendingUp, ChevronDown, ChevronRight, Wall
 import { toast } from "sonner";
 import { api, fmtEur, fmtDate, API_BASE } from "@/lib/api";
 import AllegatiCell from "@/components/AllegatiCell";
+import SortHeader, { useTableSort } from "@/components/SortHeader";
 
 const Loading = () => <div className="p-6 text-sm text-slate-400">Caricamento…</div>;
 const Empty = ({ message = "Nessun risultato" }) => (
@@ -86,6 +87,7 @@ export default function RappelPage() {
         () => (archivio || []).map((a) => a.anno),
         [archivio],
     );
+    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
     const totaleAnno = useMemo(() => {
         if (!archivio || filtroAnno === "__all__") {
             return (archivio || []).reduce((s, a) => s + a.totale, 0);
@@ -175,19 +177,19 @@ export default function RappelPage() {
                     <table className="tbl w-full">
                         <thead>
                             <tr>
-                                <th>Data</th>
-                                <th>Anno</th>
-                                <th>Compagnia</th>
-                                <th>Descrizione</th>
-                                <th className="text-right">Importo €</th>
-                                <th>Stato</th>
+                                <th><SortHeader k="data" sortKey={sortKey} dir={dir} toggle={toggle}>Data</SortHeader></th>
+                                <th><SortHeader k="anno" sortKey={sortKey} dir={dir} toggle={toggle}>Anno</SortHeader></th>
+                                <th><SortHeader k="compagnia_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Compagnia</SortHeader></th>
+                                <th><SortHeader k="descrizione" sortKey={sortKey} dir={dir} toggle={toggle}>Descrizione</SortHeader></th>
+                                <th className="text-right"><SortHeader k="importo" sortKey={sortKey} dir={dir} toggle={toggle}>Importo €</SortHeader></th>
+                                <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
                                 <th className="text-center">Allegati</th>
                                 <th className="text-center">Stampa</th>
                                 <th className="w-32"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {items.map((r) => {
+                            {sortedItems.map((r) => {
                                 const incassato = r.stato === "incassato";
                                 return (
                                     <tr key={r.id} data-testid={`rappel-row-${r.id}`}>
