@@ -327,6 +327,8 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
             </div>
         );
     } else {
+        items = data.anagrafiche_senza_ci || [];
+        title = "Anagrafiche senza Carta d'Identità";
         colonneCSV = [
             ["Cognome/Ragione", (a) => a.cognome || a.ragione_sociale || ""],
             ["Nome", (a) => a.nome || ""],

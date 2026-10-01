@@ -14085,28 +14085,48 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
             for tok in _tokens
         ]}
     is_client = user["role"] == "cliente"
+    import asyncio as _aio
     # === ANAGRAFICHE: cerca su molti campi ===
     ana_filter = {"id": user.get("anagrafica_id")} if is_client else _multi_token([
         "ragione_sociale", "nome", "cognome", "codice_fiscale", "partita_iva",
         "email", "telefono", "cellulare", "comune", "indirizzo", "professione", "tags",
     ])
-    anas = await db.anagrafiche.find(
-        ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice_fiscale": 1,
-                     "comune": 1, "email": 1, "cellulare": 1, "telefono": 1},
-    ).limit(limit).to_list(limit)
-
-    # === POLIZZE: numero, targa, ramo, prodotto, oggetto assicurato, note ===
     pol_filter = _multi_token([
         "numero_polizza", "targa", "ramo", "prodotto",
         "oggetto_assicurato", "veicolo_marca", "veicolo_modello",
     ])
     if is_client:
         pol_filter = {"$and": [pol_filter, {"contraente_id": user.get("anagrafica_id")}]}
-    polizze = await db.polizze.find(
-        pol_filter, {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
-                     "stato": 1, "targa": 1, "contraente_id": 1},
-    ).limit(limit).to_list(limit)
-    # arricchisci con contraente
+    sin_filter = _multi_token(["numero_sinistro", "luogo", "descrizione"])
+    if is_client:
+        sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
+
+    async def _empty():
+        return []
+
+    # Esegue in PARALLELO tutte le query base (invece che in sequenza) → molto più veloce
+    anas, polizze, sinistri, titoli, compagnie = await _aio.gather(
+        db.anagrafiche.find(ana_filter, {"_id": 0, "id": 1, "ragione_sociale": 1,
+            "codice_fiscale": 1, "comune": 1, "email": 1, "cellulare": 1, "telefono": 1},
+        ).limit(limit).to_list(limit),
+        db.polizze.find(pol_filter, {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1,
+            "prodotto": 1, "stato": 1, "targa": 1, "contraente_id": 1},
+        ).limit(limit).to_list(limit),
+        db.sinistri.find(sin_filter, {"_id": 0, "id": 1, "numero_sinistro": 1,
+            "polizza_id": 1, "stato": 1, "data_avvenimento": 1},
+        ).limit(limit).to_list(limit),
+        _empty() if is_client else db.titoli.find(
+            _multi_token(["numero_titolo", "numero_polizza", "contraente_nome"]),
+            {"_id": 0, "id": 1, "numero_titolo": 1, "numero_polizza": 1, "polizza_id": 1,
+             "contraente_nome": 1, "importo_lordo": 1, "stato": 1, "data_scadenza": 1},
+        ).limit(limit).to_list(limit),
+        _empty() if is_client else db.compagnie.find(
+            _multi_token(["ragione_sociale", "codice"]),
+            {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
+        ).limit(limit).to_list(limit),
+    )
+
+    # arricchisci le polizze con il nome contraente
     ana_ids = [p.get("contraente_id") for p in polizze if p.get("contraente_id")]
     ana_map = {a["id"]: a["ragione_sociale"] async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
@@ -14127,31 +14147,6 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
                     (a["ragione_sociale"] for a in anas if a["id"] == ep.get("contraente_id")), None)
                 polizze.append(ep)
         polizze = polizze[:limit * 2]
-
-    # === SINISTRI ===
-    sin_filter = _multi_token(["numero_sinistro", "luogo", "descrizione"])
-    if is_client:
-        sin_filter = {"$and": [sin_filter, {"contraente_id": user.get("anagrafica_id")}]}
-    sinistri = await db.sinistri.find(
-        sin_filter, {"_id": 0, "id": 1, "numero_sinistro": 1, "polizza_id": 1, "stato": 1, "data_avvenimento": 1},
-    ).limit(limit).to_list(limit)
-
-    # === TITOLI ===
-    titoli = []
-    if not is_client:
-        titoli = await db.titoli.find(
-            _multi_token(["numero_titolo", "numero_polizza", "contraente_nome"]),
-            {"_id": 0, "id": 1, "numero_titolo": 1, "numero_polizza": 1, "polizza_id": 1,
-             "contraente_nome": 1, "importo_lordo": 1, "stato": 1, "data_scadenza": 1},
-        ).limit(limit).to_list(limit)
-
-    # === COMPAGNIE ===
-    compagnie = []
-    if not is_client:
-        compagnie = await db.compagnie.find(
-            _multi_token(["ragione_sociale", "codice"]),
-            {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1},
-        ).limit(limit).to_list(limit)
 
     return {
         "anagrafiche": anas, "polizze": polizze, "sinistri": sinistri,

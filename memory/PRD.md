@@ -1,6 +1,14 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
-## Sessione 30/09/2026 (fork) — OCR carta d'identità (fronte/retro) + avatar affidabile + upload allegato veloce
+## Sessione 01/10/2026 (fork) — PRESTAZIONI (prerogativa sempre) + fix elenco C.I. dashboard
+
+- **DIRETTIVA PERMANENTE**: velocità/fluidità sono priorità per TUTTE le sezioni, ricerche, filtri, caricamenti e per ogni implementazione futura. Regole operative in `/app/memory/performance_guidelines.md` (indici auto in `backend/indexes.py`, query in parallelo, upload non bloccanti, ricerche server-side+debounce, proiezioni).
+- **Indici DB ampliati** (FATTO, attivi): `backend/indexes.py` esteso — anagrafiche (cognome/nome/cellulare/telefono/comune/CF/PIVA + composti tenant), polizze (prodotto/oggetto_assicurato/veicoli_ids/targa tenant), titoli (numero_polizza/contraente_id/data_scadenza/data_copertura + composti), allegati (categoria/applicazione_matricola_id), firma_requests, applicazioni, documenti_inbox, users(role). Startup: "Indici DB garantiti: 143". Creazione idempotente ad ogni avvio.
+- **/api/search parallelizzato** (FATTO): le 5 query base (anagrafiche/polizze/sinistri/titoli/compagnie) ora in `asyncio.gather` invece che in sequenza → latenza molto minore.
+- **Upload allegati più veloci** (FATTO): `upload_allegato` usa `run_in_threadpool` per `put_object` (non blocca l'event loop); `DialogIncassoCopertura` carica l'allegato in background.
+- **🔴 FIX elenco "Anagrafiche senza C.I." vuoto** (FATTO, testato): in `DocumentiMancantiWidget.jsx` il branch `else` (tipo="anagrafiche") non assegnava `items` → dialog "Nessun risultato" nonostante il conteggio (es. 4609). Ora `items = data.anagrafiche_senza_ci`. Backend verificato: ritorna la lista correttamente.
+
+
 
 - **OCR CI fronte/retro** (FATTO, testato): il PDF della carta d'identità ha 2 pagine (fronte + retro) ma `_convert_pdf_to_jpeg` (documenti_inbox.py) convertiva solo la pagina 0 → `data_emissione` e `comune_emissione` (sul retro) risultavano null. Ora impila fino a 3 pagine in un'unica immagine e il prompt è stato rafforzato per i campi CIE (COMUNE DI EMISSIONE, DATA DI RILASCIO/EMISSIONE, formato GG.MM.AAAA→YYYY-MM-DD). Verificato su C.I. DORMIA: comune=TIRANO, data_emissione=2026-03-12, scadenza=2036-02-16.
 - **Avatar da CI affidabile** (FATTO, testato): l'avatar non veniva inserito perché il crop leggeva solo `bbox.w/.h` mentre il modello a volte ritorna `width/height` (o bbox nullo). Ora: (1) `_norm_bbox` normalizza le chiavi; (2) l'avatar usa PRIMA il **rilevamento volto OpenCV** (Haar cascade `haarcascade_frontalface_default.xml`, sceglie il volto più grande = ritratto) con fallback sul bbox OCR. Verificato: `avatar_url` popolato dal save inbox; detection sceglie il volto 192×192.
