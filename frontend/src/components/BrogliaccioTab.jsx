@@ -9,7 +9,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Loading } from "@/components/Shared";
-import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle, Pencil, Trash2, Settings2, Eye, EyeOff } from "lucide-react";
+import { Printer, Lock, Mail, Calendar as CalIcon, History, Unlock, AlertCircle, Pencil, Trash2, Settings2, Eye, EyeOff, Search } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import {
@@ -225,6 +225,9 @@ export default function BrogliaccioTab({ refreshKey }) {
                         />
                     </div>
                     <Button variant="outline" size="sm" onClick={() => setData(today())} data-testid="brogliaccio-oggi">Oggi</Button>
+                    <Button size="sm" onClick={load} className="bg-sky-700 hover:bg-sky-800" data-testid="brogliaccio-cerca">
+                        <Search size={14} className="mr-1.5" /> Cerca
+                    </Button>
 
                     <div>
                         <Label className="text-[10px] text-slate-500">Collaboratore</Label>

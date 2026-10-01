@@ -280,17 +280,17 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-xl" data-testid="titolo-edit-dialog">
-                <DialogHeader>
-                    <DialogTitle>
+            <DialogContent className="max-w-xl p-4 gap-2 max-h-[96vh] overflow-y-auto [&_input]:h-8 [&_[role=combobox]]:h-8 [&_label]:text-xs" data-testid="titolo-edit-dialog">
+                <DialogHeader className="space-y-0">
+                    <DialogTitle className="text-base">
                         {titolo._new ? "Nuovo titolo" : "Modifica titolo"} {titolo.numero_polizza ? `– Polizza ${titolo.numero_polizza}` : ""}
                     </DialogTitle>
-                    <p className="text-[11px] text-slate-500 mt-1">
+                    <p className="text-[11px] text-slate-500">
                         Lo stato del titolo si aggiorna automaticamente con incasso / copertura / storno.
                     </p>
                 </DialogHeader>
                 <ChiusuraGiornoBanner data={f.data_incasso} />
-                <div className="grid grid-cols-2 gap-3 py-2">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                     <div>
                         <Label>Tipo (riferimento)</Label>
                         <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
