@@ -503,3 +503,6 @@ Admin: `admin@assicura.it / Admin123!`
 - FIX: la banca "Pagamento Direzione" (conto tipo RID) non mostrava movimenti né saldo. I pagamenti in direzione sono fittizi (conto_cassa_id=None, is_direzione=True, categoria incasso_premio_direzione). Ora banche_saldi e banche_movimenti riconoscono il conto RID e filtrano per is_direzione/categoria. Il conto RID resta ESCLUSO dal "Totale liquidità" (volume fittizio). Verificato: card 441,50 €, 5 movimenti con saldo progressivo e nome conto corretto.
 - UI: pulsante Contabilità rinominato da "Saldo Cassa Compagnie" a "Movimenti manuali saldo cassa".
 - Verifica footer totali altre pagine: solo Portafoglio e Titoli usavano il pattern sticky che copriva le righe (già corretto con useFillHeight). Sinistri usa un tfoot sticky DENTRO lo scroll (comportamento corretto, nessuna sovrapposizione).
+
+## 2026-10-02 (2) — Provvigioni: selezione titoli coperti non incassati
+- Estratto Conto Collaboratori: rimossa la disabilitazione del checkbox sulle righe "coperta · non incassata". Ora sono selezionabili e pagabili (pagamento anticipato), e incluse in "Seleziona tutto da pagare". Il backend paga-provvigioni già gestiva i titoli indipendentemente dall'incasso. Verificato via UI: tutte le righe selezionabili, "Paga selezionati" si incrementa.

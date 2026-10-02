@@ -77,7 +77,7 @@ export default function Provvigioni() {
     };
     const selectAllUnpaid = () => {
         if (!data) return;
-        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato && r.incassato !== false).map((r) => r.titolo_id)));
+        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato).map((r) => r.titolo_id)));
         setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id)));
     };
 
@@ -224,8 +224,7 @@ export default function Provvigioni() {
                                                         <input
                                                             type="checkbox"
                                                             checked={selectedTitoli.has(r.titolo_id)}
-                                                            disabled={r.incassato === false}
-                                                            title={r.incassato === false ? "Coperta ma non ancora incassata: matura all'incasso" : ""}
+                                                            title={r.incassato === false ? "Coperta ma non ancora incassata — selezionabile per il pagamento anticipato" : ""}
                                                             onChange={() => toggleTitolo(r.titolo_id)}
                                                             data-testid={`select-titolo-${r.titolo_id}`}
                                                         />
