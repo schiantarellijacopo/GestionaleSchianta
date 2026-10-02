@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { api, fmtEur, fmtDate, promptDataIt } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
 
 const TIPI = [
     { key: "rivalsa", label: "Rivalsa" },
@@ -32,6 +33,9 @@ export default function Pnc() {
     const [items, setItems] = useState(null);
     const [compagnie, setCompagnie] = useState([]);
     const [fTipo, setFTipo] = useState("");
+    const [q, setQ] = useState("");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
     const [editing, setEditing] = useState(null);
     const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -69,9 +73,10 @@ export default function Pnc() {
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
-    const totale = useMemo(() => (items || []).reduce((s, r) => s + (r.importo || 0), 0), [items]);
-    const totDaVersare = useMemo(() => (items || []).filter((r) => r.stato !== "versata").reduce((s, r) => s + (r.importo || 0), 0), [items]);
-    const { sorted, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
+    const filtered = useMemo(() => applyRicercaData(items || [], { q, dal, al }), [items, q, dal, al]);
+    const totale = useMemo(() => filtered.reduce((s, r) => s + (r.importo || 0), 0), [filtered]);
+    const totDaVersare = useMemo(() => filtered.filter((r) => r.stato !== "versata").reduce((s, r) => s + (r.importo || 0), 0), [filtered]);
+    const { sorted, sortKey, dir, toggle } = useTableSort(filtered, "data", "desc");
 
     return (
         <div className="p-6 space-y-5" data-testid="pnc-page">
@@ -112,6 +117,10 @@ export default function Pnc() {
                         data-testid={`pnc-filter-${t.key}`}>{t.label}</button>
                 ))}
             </div>
+
+            <Card className="p-3">
+                <RicercaDateBar q={q} setQ={setQ} dal={dal} setDal={setDal} al={al} setAl={setAl} testid="pnc" />
+            </Card>
 
             {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessuna partita PNT registrata" /> : (
                 <table className="tbl-compact w-full text-xs">

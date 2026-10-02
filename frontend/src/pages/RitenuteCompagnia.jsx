@@ -21,11 +21,15 @@ import { toast } from "sonner";
 import { api, fmtEur, fmtDate, promptDataIt } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
 
 export default function RitenuteCompagnia() {
     const [items, setItems] = useState(null);
     const [compagnie, setCompagnie] = useState([]);
     const [fComp, setFComp] = useState("__all__");
+    const [q, setQ] = useState("");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
     const [editing, setEditing] = useState(null);
     const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -70,9 +74,10 @@ export default function RitenuteCompagnia() {
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
-    const totale = useMemo(() => (items || []).reduce((s, r) => s + (r.importo || 0), 0), [items]);
-    const totDaVersare = useMemo(() => (items || []).filter((r) => r.stato !== "versata").reduce((s, r) => s + (r.importo || 0), 0), [items]);
-    const { sorted, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
+    const filtered = useMemo(() => applyRicercaData(items || [], { q, dal, al }), [items, q, dal, al]);
+    const totale = useMemo(() => filtered.reduce((s, r) => s + (r.importo || 0), 0), [filtered]);
+    const totDaVersare = useMemo(() => filtered.filter((r) => r.stato !== "versata").reduce((s, r) => s + (r.importo || 0), 0), [filtered]);
+    const { sorted, sortKey, dir, toggle } = useTableSort(filtered, "data", "desc");
 
     return (
         <div className="p-6 space-y-5" data-testid="ritenute-compagnia-page">
@@ -123,6 +128,9 @@ export default function RitenuteCompagnia() {
                             {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                         </SelectContent>
                     </Select>
+                </div>
+                <div className="flex-1 min-w-[260px]">
+                    <RicercaDateBar q={q} setQ={setQ} dal={dal} setDal={setDal} al={al} setAl={setAl} testid="ritc" />
                 </div>
             </Card>
 

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { api, fmtEur, fmtDate, API_BASE, promptDataIt } from "@/lib/api";
 import AllegatiCell from "@/components/AllegatiCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
 
 const Loading = () => <div className="p-6 text-sm text-slate-400">Caricamento…</div>;
 const Empty = ({ message = "Nessun risultato" }) => (
@@ -26,6 +27,9 @@ export default function RappelPage() {
     const [compagnie, setCompagnie] = useState([]);
     const [filtroCompagnia, setFiltroCompagnia] = useState("__all__");
     const [filtroAnno, setFiltroAnno] = useState("__all__");
+    const [q, setQ] = useState("");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
     const [editing, setEditing] = useState(null);
     const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -83,7 +87,8 @@ export default function RappelPage() {
         () => (archivio || []).map((a) => a.anno),
         [archivio],
     );
-    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
+    const filtered = useMemo(() => applyRicercaData(items || [], { q, dal, al }), [items, q, dal, al]);
+    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(filtered, "data", "desc");
     const totaleAnno = useMemo(() => {
         if (!archivio || filtroAnno === "__all__") {
             return (archivio || []).reduce((s, a) => s + a.totale, 0);
@@ -165,6 +170,10 @@ export default function RappelPage() {
                         <span className="text-slate-500">Totale {filtroAnno !== "__all__" ? filtroAnno : "complessivo"}:</span>{" "}
                         <span className="font-bold text-fuchsia-700 num">{fmtEur(totaleAnno)}</span>
                     </div>
+                </div>
+
+                <div className="p-4 border-b border-slate-200">
+                    <RicercaDateBar q={q} setQ={setQ} dal={dal} setDal={setDal} al={al} setAl={setAl} testid="rappel" />
                 </div>
 
                 {items === null ? <Loading /> : items.length === 0 ? (
