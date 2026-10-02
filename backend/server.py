@@ -14447,10 +14447,13 @@ async def chat_utenti(user=Depends(current_user)):
     """Restituisce gli utenti con cui posso chattare (isolati per tenant)."""
     from tenant import tenant_filter
     tf = tenant_filter(user) or {}
+    # Escludi gli account NON attivi: include gli stub "Produttore - XXX" auto-creati
+    # dall'import (attivo=False), che non devono comparire tra i contatti chat.
+    attivo_flt = {"attivo": {"$ne": False}}
     if user["role"] == "cliente":
-        flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, **tf}
+        flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, **attivo_flt, **tf}
     else:
-        flt = {"id": {"$ne": user["id"]}, **tf}
+        flt = {"id": {"$ne": user["id"]}, **attivo_flt, **tf}
     users = await db.users.find(flt, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(500)
     # arricchisci con count non letti e ultimo messaggio
     for u in users:

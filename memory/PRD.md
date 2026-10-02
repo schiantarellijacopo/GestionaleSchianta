@@ -1836,3 +1836,8 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - EditPolizzaDialog (PolizzaDetail.jsx) tab Anagrafica: aggiunto campo "Contraente" con IntestatarioAutocomplete (cerca anagrafiche, collega/scollega, crea al volo). Al salvataggio invia contraente_id (contraente_nome escluso dal payload perché è un campo display derivato).
 - Backend: nessuna modifica necessaria — update_polizza fa $set di contraente_id; contraente/contraente_nome sono sempre derivati a runtime da contraente_id (join anagrafiche) in tutte le viste (polizza, titoli, estratto conto), quindi il cambio si propaga ovunque senza denormalizzazione.
 - Verificato: PUT contraente_id → GET riflette nuovo contraente; UI dialog mostra campo con badge "collegato". Testato su tenant jacopo.
+
+## 2026-06 — Chat interna: nascondere stub "Produttore" inattivi (FATTO)
+- PROBLEMA: in Centro Comunicazioni → Chat interna comparivano i "Produttore - XXX - ..." (utenti stub auto-creati all'import, attivo=False, auto_created=True, email @import-auto.local), anche dopo averli associati/mappati a un collaboratore reale. Lo stub resta in db.users dopo la mappatura.
+- FIX (server.py, GET /chat/utenti): aggiunto filtro `attivo: {$ne: False}` a entrambi i rami (cliente e staff) → esclude stub import e qualunque account disattivato dai contatti chat (utenti senza campo attivo o attivo=True restano visibili).
+- Verificato via curl (tenant jacopo): 0 stub Produttore e 0 inattivi nella lista chat (18 contatti reali). Backend-only, nessuna modifica frontend.
