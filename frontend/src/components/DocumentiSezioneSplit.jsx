@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { api, API_BASE } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles, PenTool } from "lucide-react";
+import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles, PenTool, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -41,15 +41,29 @@ export default function DocumentiSezioneSplit({
             .catch(() => { setApiCards([]); setVisCfg({}); });
     }, [entita_tipo]);
 
-    // Card effettive = quelle passate dal dettaglio + eventuali card personalizzate
-    // create in Librerie (non già presenti), così compaiono qui automaticamente.
+    // Card effettive: l'ordine, l'icona e l'obbligatorietà sono guidati dalla
+    // config (Librerie → Visibilità documenti). Da `categorie` (passate dal
+    // dettaglio) recuperiamo descrizione/multiple per chiave.
+    const hardByKey = Object.fromEntries(categorie.map((c) => [c.key, c]));
     const presentKeys = new Set(categorie.map((c) => c.key));
-    const mergedCategorie = [
-        ...categorie,
-        ...apiCards
-            .filter((c) => c.custom && !presentKeys.has(c.key))
-            .map((c) => ({ key: c.key, label: c.label, icon: "🗂️", default_visibile: c.default_visibile })),
-    ];
+    const mergedCategorie = apiCards.length > 0
+        ? apiCards.map((c) => {
+            const h = hardByKey[c.key] || {};
+            return {
+                key: c.key, label: c.label || h.label,
+                icon: c.icon || h.icon || "📄",
+                descrizione: h.descrizione,
+                multiple: h.multiple,
+                default_visibile: c.default_visibile ?? h.default_visibile ?? false,
+                obbligatoria: !!c.obbligatoria,
+            };
+        })
+        : [
+            ...categorie,
+            ...apiCards
+                .filter((c) => c.custom && !presentKeys.has(c.key))
+                .map((c) => ({ key: c.key, label: c.label, icon: c.icon || "🗂️", default_visibile: c.default_visibile, obbligatoria: !!c.obbligatoria })),
+        ];
 
     // visibilità di default per una card: config Librerie → altrimenti default della card
     const defVis = (c) => (visCfg && c.key in visCfg) ? visCfg[c.key] : (c.default_visibile ?? false);
@@ -286,18 +300,29 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
 function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
     const [open, setOpen] = useState(true);
     const c = categoria;
+    const manca = !!c.obbligatoria && files.length === 0;
     return (
-        <Card className="p-0 overflow-hidden border-slate-200" data-testid={`quadrotto-${c.key}`}>
+        <Card className={`p-0 overflow-hidden ${manca ? "border-2 border-rose-400" : "border-slate-200"}`} data-testid={`quadrotto-${c.key}`}>
             <button type="button" onClick={() => setOpen((o) => !o)}
-                className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left ${manca ? "bg-rose-50 hover:bg-rose-100" : "bg-slate-50 hover:bg-slate-100"}`}
                 data-testid={`quadrotto-toggle-${c.key}`}>
                 <span className="text-lg">{c.icon || "📄"}</span>
-                <span className="font-medium text-sm text-slate-800 flex-1">{c.label}</span>
+                <span className={`font-medium text-sm flex-1 ${manca ? "text-rose-800" : "text-slate-800"}`}>{c.label}</span>
+                {c.obbligatoria && (
+                    <span className="inline-flex items-center gap-0.5 text-rose-600 shrink-0" title="Documento obbligatorio">
+                        <AlertTriangle size={12} />
+                    </span>
+                )}
                 {c.default_visibile ? <Eye size={12} className="text-emerald-600" title="Di default visibile al cliente" />
                     : <Lock size={12} className="text-slate-400" title="Di default interno" />}
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">{files.length}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full ${manca ? "bg-rose-200 text-rose-700" : "bg-slate-200 text-slate-600"}`}>{files.length}</span>
                 <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
             </button>
+            {manca && (
+                <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-200 text-[11px] text-rose-700 font-medium flex items-center gap-1" data-testid={`quadrotto-manca-${c.key}`}>
+                    <AlertTriangle size={11} /> Documento obbligatorio mancante
+                </div>
+            )}
             {open && (
                 <div className="p-2.5 space-y-2">
                     {c.descrizione && <div className="text-[10px] text-slate-400 -mt-0.5 mb-1">{c.descrizione}</div>}

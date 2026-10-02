@@ -13323,83 +13323,119 @@ async def imap_poller_run_now(user=Depends(require_user("admin"))):
 # Card di ogni entità (allineate ai detail frontend) + default visibilità cliente
 CARD_DEFS = {
     "anagrafica": [
-        {"key": "carta_identita", "label": "Carta d'identità", "default": True},
-        {"key": "patente", "label": "Patente di guida", "default": True},
-        {"key": "passaporto", "label": "Passaporto", "default": True},
-        {"key": "codice_fiscale_doc", "label": "Tessera codice fiscale", "default": True},
-        {"key": "tessera_sanitaria", "label": "Tessera sanitaria", "default": True},
-        {"key": "visura_camerale", "label": "Visura camerale", "default": False},
-        {"key": "mandato_sdd", "label": "Mandato SDD", "default": True},
-        {"key": "autocertificazione_stato_famiglia", "label": "Autocertificazione stato di famiglia", "default": True},
-        {"key": "privacy_firmata", "label": "Privacy firmata", "default": True},
-        {"key": "altro", "label": "Altri documenti", "default": False},
+        {"key": "carta_identita", "label": "Carta d'identità", "default": True, "icon": "🪪"},
+        {"key": "patente", "label": "Patente di guida", "default": True, "icon": "🚗"},
+        {"key": "passaporto", "label": "Passaporto", "default": True, "icon": "📘"},
+        {"key": "codice_fiscale_doc", "label": "Tessera codice fiscale", "default": True, "icon": "🧾"},
+        {"key": "tessera_sanitaria", "label": "Tessera sanitaria", "default": True, "icon": "❤️"},
+        {"key": "visura_camerale", "label": "Visura camerale", "default": False, "icon": "🏢"},
+        {"key": "mandato_sdd", "label": "Mandato SDD", "default": True, "icon": "🏦"},
+        {"key": "autocertificazione_stato_famiglia", "label": "Autocertificazione stato di famiglia", "default": True, "icon": "👪"},
+        {"key": "privacy_firmata", "label": "Privacy firmata", "default": True, "icon": "✍️"},
+        {"key": "altro", "label": "Altri documenti", "default": False, "icon": "📎"},
     ],
     "polizza": [
-        {"key": "polizza", "label": "Polizza", "default": True},
-        {"key": "condizioni", "label": "Condizioni", "default": True},
-        {"key": "appendici", "label": "Appendici", "default": True},
-        {"key": "libretto_veicolo", "label": "Libretto veicolo", "default": True},
-        {"key": "atto_vendita", "label": "Atto di vendita", "default": True},
-        {"key": "quietanza", "label": "Quietanze", "default": True},
-        {"key": "mup", "label": "MUP", "default": True},
-        {"key": "questionario", "label": "Questionario", "default": True},
-        {"key": "regolazione", "label": "Regolazione", "default": False},
-        {"key": "preventivo", "label": "Preventivi", "default": False},
-        {"key": "appunti", "label": "Appunti", "default": False},
-        {"key": "altri", "label": "Documenti altri (foto)", "default": False},
+        {"key": "polizza", "label": "Polizza", "default": True, "icon": "📄"},
+        {"key": "condizioni", "label": "Condizioni", "default": True, "icon": "📜"},
+        {"key": "appendici", "label": "Appendici", "default": True, "icon": "➕"},
+        {"key": "libretto_veicolo", "label": "Libretto veicolo", "default": True, "icon": "📕"},
+        {"key": "atto_vendita", "label": "Atto di vendita", "default": True, "icon": "🖊️"},
+        {"key": "quietanza", "label": "Quietanze", "default": True, "icon": "🧾"},
+        {"key": "mup", "label": "MUP", "default": True, "icon": "📋"},
+        {"key": "questionario", "label": "Questionario", "default": True, "icon": "🗒️"},
+        {"key": "regolazione", "label": "Regolazione", "default": False, "icon": "🧮"},
+        {"key": "preventivo", "label": "Preventivi", "default": False, "icon": "📋"},
+        {"key": "appunti", "label": "Appunti", "default": False, "icon": "📝"},
+        {"key": "altri", "label": "Documenti altri (foto)", "default": False, "icon": "🖼️"},
     ],
     "sinistro": [
-        {"key": "cid", "label": "CID", "default": True},
-        {"key": "perizia", "label": "Perizia", "default": False},
-        {"key": "foto", "label": "Foto", "default": True},
-        {"key": "fattura", "label": "Fattura", "default": True},
-        {"key": "denuncia", "label": "Denuncia", "default": True},
-        {"key": "altri", "label": "Documenti altri", "default": False},
+        {"key": "cid", "label": "CID", "default": True, "icon": "📝"},
+        {"key": "perizia", "label": "Perizia", "default": False, "icon": "🔎"},
+        {"key": "foto", "label": "Foto", "default": True, "icon": "📸"},
+        {"key": "fattura", "label": "Fattura", "default": True, "icon": "🧾"},
+        {"key": "denuncia", "label": "Denuncia", "default": True, "icon": "📋"},
+        {"key": "altri", "label": "Documenti altri", "default": False, "icon": "📎"},
     ],
 }
 
 
+def _build_card_list(entita, az):
+    """Costruisce la lista ordinata di card per una sezione, applicando
+    override di visibilità, icona, obbligatorietà e ordine salvati in azienda_config."""
+    saved = (az.get("card_visibilita") or {}).get(entita) or {}
+    custom = (az.get("card_custom") or {}).get(entita) or []
+    meta = (az.get("card_meta") or {}).get(entita) or {}
+    ordine = (az.get("card_ordine") or {}).get(entita) or []
+    row = []
+    for c in CARD_DEFS.get(entita, []):
+        m = meta.get(c["key"]) or {}
+        row.append({
+            "key": c["key"], "label": c["label"], "custom": False,
+            "default_visibile": c["default"],
+            "visibile_cliente": bool(saved.get(c["key"], c["default"])),
+            "icon": m.get("icon") or c.get("icon") or "📄",
+            "obbligatoria": bool(m.get("obbligatoria", False)),
+        })
+    for c in custom:
+        m = meta.get(c["key"]) or {}
+        row.append({
+            "key": c["key"], "label": c["label"], "custom": True,
+            "default_visibile": bool(c.get("default", False)),
+            "visibile_cliente": bool(saved.get(c["key"], c.get("default", False))),
+            "icon": m.get("icon") or c.get("icon") or "🗂️",
+            "obbligatoria": bool(m.get("obbligatoria", c.get("obbligatoria", False))),
+        })
+    if ordine:
+        pos = {k: i for i, k in enumerate(ordine)}
+        row.sort(key=lambda r: pos.get(r["key"], len(ordine) + 1))
+    return row
+
+
 @api.get("/config/card-visibilita")
 async def get_card_visibilita(user=Depends(current_user)):
-    """Restituisce la configurazione di visibilità cliente per ogni card documento,
-    con i default statici, le card personalizzate e gli override salvati."""
-    az = await db.azienda_config.find_one({}, {"_id": 0, "card_visibilita": 1, "card_custom": 1}) or {}
-    saved = az.get("card_visibilita") or {}
-    custom = az.get("card_custom") or {}
-    out = {}
-    for entita, cards in CARD_DEFS.items():
-        ent_saved = saved.get(entita) or {}
-        row = [
-            {"key": c["key"], "label": c["label"], "custom": False,
-             "default_visibile": c["default"],
-             "visibile_cliente": bool(ent_saved.get(c["key"], c["default"]))}
-            for c in cards
-        ]
-        for c in (custom.get(entita) or []):
-            row.append({
-                "key": c["key"], "label": c["label"], "custom": True,
-                "default_visibile": bool(c.get("default", False)),
-                "visibile_cliente": bool(ent_saved.get(c["key"], c.get("default", False))),
-            })
-        out[entita] = row
-    return out
+    """Restituisce la configurazione di ogni card documento (visibilità cliente,
+    icona, obbligatorietà, ordine) con default statici, card personalizzate e override salvati."""
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "card_visibilita": 1, "card_custom": 1, "card_meta": 1, "card_ordine": 1}) or {}
+    return {entita: _build_card_list(entita, az) for entita in CARD_DEFS}
 
 
 @api.put("/config/card-visibilita")
 async def put_card_visibilita(body: dict, user=Depends(require_user("admin"))):
-    """Salva gli override di visibilità cliente per card (incluse le custom)."""
+    """Salva in un colpo solo gli override di visibilità, icona, obbligatorietà e ordine
+    per card (incluse le custom). Il body può contenere, per ogni entità, i campi:
+    { <entita>: {key: bool} } per la visibilità e, opzionalmente, le chiavi speciali
+    `_meta` {key: {icon, obbligatoria}} e `_ordine` [keys]."""
     az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "card_custom": 1}) or {}
     custom = az.get("card_custom") or {}
-    clean = {}
+    clean_vis, clean_meta, clean_ord = {}, {}, {}
     for entita, cards in CARD_DEFS.items():
         valid_keys = {c["key"] for c in cards} | {c["key"] for c in (custom.get(entita) or [])}
         ent = body.get(entita) or {}
-        clean[entita] = {k: bool(v) for k, v in ent.items() if k in valid_keys}
+        meta_in = ent.get("_meta") or {}
+        ord_in = ent.get("_ordine") or []
+        clean_vis[entita] = {k: bool(v) for k, v in ent.items()
+                             if k in valid_keys and k not in ("_meta", "_ordine")}
+        m = {}
+        for k, mv in meta_in.items():
+            if k not in valid_keys or not isinstance(mv, dict):
+                continue
+            entry = {}
+            if mv.get("icon"):
+                entry["icon"] = str(mv["icon"])[:8]
+            if "obbligatoria" in mv:
+                entry["obbligatoria"] = bool(mv["obbligatoria"])
+            if entry:
+                m[k] = entry
+        if m:
+            clean_meta[entita] = m
+        clean_ord[entita] = [k for k in ord_in if k in valid_keys]
+    upd = {"card_visibilita": clean_vis, "card_meta": clean_meta, "card_ordine": clean_ord}
     if az.get("id"):
-        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_visibilita": clean}})
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
     else:
-        await db.azienda_config.insert_one({"id": _uid(), "card_visibilita": clean})
-    return {"ok": True, "card_visibilita": clean}
+        await db.azienda_config.insert_one({"id": _uid(), **upd})
+    return {"ok": True, **upd}
 
 
 @api.post("/config/card-custom", status_code=201)
@@ -13422,7 +13458,8 @@ async def add_card_custom(body: dict, user=Depends(require_user("admin"))):
     i = 2
     while uk in existing:
         uk = f"{key}_{i}"; i += 1
-    card = {"key": uk, "label": label, "default": bool(body.get("visibile_cliente", False))}
+    card = {"key": uk, "label": label, "default": bool(body.get("visibile_cliente", False)),
+            "icon": str(body.get("icon") or "🗂️")[:8], "obbligatoria": bool(body.get("obbligatoria", False))}
     ent_list.append(card)
     custom[entita] = ent_list
     if az.get("id"):
@@ -13436,15 +13473,24 @@ async def add_card_custom(body: dict, user=Depends(require_user("admin"))):
 async def del_card_custom(entita: str, key: str, user=Depends(require_user("admin"))):
     if entita not in CARD_DEFS:
         raise HTTPException(400, "Sezione non valida")
-    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "card_custom": 1, "card_visibilita": 1}) or {}
+    az = await db.azienda_config.find_one(
+        {}, {"_id": 0, "id": 1, "card_custom": 1, "card_visibilita": 1, "card_meta": 1, "card_ordine": 1}) or {}
     custom = az.get("card_custom") or {}
     ent_list = [c for c in (custom.get(entita) or []) if c["key"] != key]
     custom[entita] = ent_list
     vis = az.get("card_visibilita") or {}
     if vis.get(entita):
         vis[entita].pop(key, None)
+    meta = az.get("card_meta") or {}
+    if meta.get(entita):
+        meta[entita].pop(key, None)
+    ordine = az.get("card_ordine") or {}
+    if ordine.get(entita):
+        ordine[entita] = [k for k in ordine[entita] if k != key]
     if az.get("id"):
-        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_custom": custom, "card_visibilita": vis}})
+        await db.azienda_config.update_one(
+            {"id": az["id"]},
+            {"$set": {"card_custom": custom, "card_visibilita": vis, "card_meta": meta, "card_ordine": ordine}})
     return {"ok": True}
 
 

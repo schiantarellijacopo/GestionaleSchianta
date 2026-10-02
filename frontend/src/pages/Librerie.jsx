@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2 } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical } from "lucide-react";
+import { Reorder, useDragControls } from "framer-motion";
+import EmojiPicker from "@/components/EmojiPicker";
 import { toast } from "sonner";
 
 function RiassegnaProvvigioniButton({ schema }) {
@@ -83,27 +85,77 @@ function errMsg(e, fallback = "Errore") {
 
 const ENTITA_LABEL = { anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri" };
 
+function VisibilitaDocCard({ ent, c, onToggleVis, onToggleObbl, onIcon, onDel }) {
+    const dragControls = useDragControls();
+    return (
+        <Reorder.Item
+            value={c}
+            dragListener={false}
+            dragControls={dragControls}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border bg-white ${c.obbligatoria ? "border-rose-300 bg-rose-50/40" : "border-slate-200"}`}
+            data-testid={`vis-card-${ent}-${c.key}`}
+        >
+            <button type="button" onPointerDown={(e) => dragControls.start(e)}
+                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 touch-none shrink-0"
+                title="Trascina per riordinare" data-testid={`vis-drag-${ent}-${c.key}`}>
+                <GripVertical size={16} />
+            </button>
+            <EmojiPicker value={c.icon} onChange={(ic) => onIcon(ent, c.key, ic)} size="sm" />
+            <span className="flex-1 text-sm text-slate-700 truncate">
+                {c.label}{c.custom && <span className="ml-1.5 text-[10px] text-indigo-600">(custom)</span>}
+            </span>
+            <button type="button" onClick={() => onToggleObbl(ent, c.key)}
+                title={c.obbligatoria ? "Obbligatoria: evidenziata se manca" : "Rendi obbligatoria"}
+                className={`p-1.5 rounded-md shrink-0 ${c.obbligatoria ? "text-rose-600 bg-rose-100" : "text-slate-300 hover:text-rose-500 hover:bg-rose-50"}`}
+                data-testid={`vis-obbl-${ent}-${c.key}`}>
+                <AlertTriangle size={14} />
+            </button>
+            <button type="button" onClick={() => onToggleVis(ent, c.key)}
+                className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${c.visibile_cliente ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
+                data-testid={`vis-toggle-${ent}-${c.key}`}>
+                {c.visibile_cliente ? <><Eye size={12} /> Visibile</> : <><EyeOff size={12} /> Interno</>}
+            </button>
+            {c.custom && (
+                <button type="button" onClick={() => onDel(ent, c.key)}
+                    className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50 shrink-0"
+                    title="Elimina card" data-testid={`vis-del-${ent}-${c.key}`}>
+                    <Trash2 size={14} />
+                </button>
+            )}
+        </Reorder.Item>
+    );
+}
+
 function VisibilitaDocSezione() {
     const [cfg, setCfg] = useState(null);
     const [saving, setSaving] = useState(false);
-    const [newLabel, setNewLabel] = useState({ anagrafica: "", polizza: "", sinistro: "" });
+    const [newCard, setNewCard] = useState({
+        anagrafica: { label: "", icon: "🗂️", obbligatoria: false },
+        polizza: { label: "", icon: "🗂️", obbligatoria: false },
+        sinistro: { label: "", icon: "🗂️", obbligatoria: false },
+    });
 
     const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
     useEffect(() => { load(); }, []);
 
-    const toggle = (entita, key) => {
-        setCfg((p) => ({
-            ...p,
-            [entita]: p[entita].map((c) => c.key === key ? { ...c, visibile_cliente: !c.visibile_cliente } : c),
-        }));
-    };
+    const toggleVis = (entita, key) => setCfg((p) => ({
+        ...p, [entita]: p[entita].map((c) => c.key === key ? { ...c, visibile_cliente: !c.visibile_cliente } : c),
+    }));
+    const toggleObbl = (entita, key) => setCfg((p) => ({
+        ...p, [entita]: p[entita].map((c) => c.key === key ? { ...c, obbligatoria: !c.obbligatoria } : c),
+    }));
+    const setIcon = (entita, key, icon) => setCfg((p) => ({
+        ...p, [entita]: p[entita].map((c) => c.key === key ? { ...c, icon } : c),
+    }));
+    const reorder = (entita, list) => setCfg((p) => ({ ...p, [entita]: list }));
 
     const addCard = async (entita) => {
-        const label = (newLabel[entita] || "").trim();
+        const nc = newCard[entita];
+        const label = (nc.label || "").trim();
         if (!label) return;
         try {
-            await api.post("/config/card-custom", { entita, label, visibile_cliente: false });
-            setNewLabel((p) => ({ ...p, [entita]: "" }));
+            await api.post("/config/card-custom", { entita, label, visibile_cliente: false, icon: nc.icon, obbligatoria: nc.obbligatoria });
+            setNewCard((p) => ({ ...p, [entita]: { label: "", icon: "🗂️", obbligatoria: false } }));
             toast.success("Card creata — ora è disponibile anche nei dettagli");
             load();
         } catch (e) { toast.error(errMsg(e, "Errore creazione card")); }
@@ -121,10 +173,15 @@ function VisibilitaDocSezione() {
         try {
             const body = {};
             for (const ent of Object.keys(cfg)) {
-                body[ent] = Object.fromEntries((cfg[ent] || []).map((c) => [c.key, c.visibile_cliente]));
+                const row = cfg[ent] || [];
+                body[ent] = {
+                    ...Object.fromEntries(row.map((c) => [c.key, c.visibile_cliente])),
+                    _ordine: row.map((c) => c.key),
+                    _meta: Object.fromEntries(row.map((c) => [c.key, { icon: c.icon, obbligatoria: !!c.obbligatoria }])),
+                };
             }
             await api.put("/config/card-visibilita", body);
-            toast.success("Visibilità documenti salvata — applicata ai nuovi caricamenti");
+            toast.success("Impostazioni card salvate — applicate ai dettagli");
         } catch (e) { toast.error(errMsg(e, "Errore salvataggio")); }
         finally { setSaving(false); }
     };
@@ -134,46 +191,39 @@ function VisibilitaDocSezione() {
     return (
         <div className="space-y-4" data-testid="visibilita-doc-sezione">
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 text-xs text-sky-900">
-                <strong>Visibilità documenti al cliente.</strong> Imposta, per ogni card, se i documenti caricati sono
-                visibili al cliente nel suo portale <strong>di default</strong>. Puoi anche <strong>creare card personalizzate</strong>:
-                compariranno automaticamente nei dettagli di Anagrafiche, Polizze e Sinistri.
+                <strong>Card documenti.</strong> Per ogni card scegli <strong>icona</strong>, se è <strong>visibile al cliente</strong> di default,
+                e se è <strong>obbligatoria</strong> (<AlertTriangle size={11} className="inline text-rose-600" />): le card obbligatorie senza documenti vengono
+                evidenziate in rosso nei dettagli. Trascina (<GripVertical size={11} className="inline" />) per riordinarle. Le card personalizzate compaiono
+                automaticamente nei dettagli di Anagrafiche, Polizze e Sinistri.
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {["anagrafica", "polizza", "sinistro"].map((ent) => (
                     <Card key={ent} className="p-4" data-testid={`vis-panel-${ent}`}>
                         <div className="font-semibold text-sm text-slate-800 mb-3">{ENTITA_LABEL[ent]}</div>
-                        <div className="space-y-1.5">
+                        <Reorder.Group axis="y" values={cfg[ent] || []} onReorder={(l) => reorder(ent, l)} className="space-y-1.5">
                             {(cfg[ent] || []).map((c) => (
-                                <div key={c.key} className="flex items-center gap-1.5">
-                                    <button type="button" onClick={() => toggle(ent, c.key)}
-                                        className="flex-1 flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border border-slate-200 hover:bg-slate-50 text-left"
-                                        data-testid={`vis-toggle-${ent}-${c.key}`}>
-                                        <span className="text-sm text-slate-700 truncate">
-                                            {c.label}{c.custom && <span className="ml-1.5 text-[10px] text-indigo-600">(custom)</span>}
-                                        </span>
-                                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${c.visibile_cliente ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                                            {c.visibile_cliente ? <><Eye size={12} /> Visibile</> : <><EyeOff size={12} /> Interno</>}
-                                        </span>
-                                    </button>
-                                    {c.custom && (
-                                        <button type="button" onClick={() => delCard(ent, c.key)}
-                                            className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50 shrink-0"
-                                            title="Elimina card" data-testid={`vis-del-${ent}-${c.key}`}>
-                                            <Trash2 size={14} />
-                                        </button>
-                                    )}
-                                </div>
+                                <VisibilitaDocCard key={c.key} ent={ent} c={c}
+                                    onToggleVis={toggleVis} onToggleObbl={toggleObbl} onIcon={setIcon} onDel={delCard} />
                             ))}
-                        </div>
+                        </Reorder.Group>
                         <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
+                            <EmojiPicker value={newCard[ent].icon}
+                                onChange={(ic) => setNewCard((p) => ({ ...p, [ent]: { ...p[ent], icon: ic } }))} size="sm" />
                             <input
-                                value={newLabel[ent]}
-                                onChange={(e) => setNewLabel((p) => ({ ...p, [ent]: e.target.value }))}
+                                value={newCard[ent].label}
+                                onChange={(e) => setNewCard((p) => ({ ...p, [ent]: { ...p[ent], label: e.target.value } }))}
                                 onKeyDown={(e) => { if (e.key === "Enter") addCard(ent); }}
                                 placeholder="Nuova card (es. Bonus Malus)…"
-                                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md"
+                                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md min-w-0"
                                 data-testid={`vis-new-${ent}`}
                             />
+                            <button type="button"
+                                onClick={() => setNewCard((p) => ({ ...p, [ent]: { ...p[ent], obbligatoria: !p[ent].obbligatoria } }))}
+                                title="Obbligatoria"
+                                className={`p-1.5 rounded-md shrink-0 ${newCard[ent].obbligatoria ? "text-rose-600 bg-rose-100" : "text-slate-300 hover:text-rose-500 hover:bg-rose-50"}`}
+                                data-testid={`vis-new-obbl-${ent}`}>
+                                <AlertTriangle size={14} />
+                            </button>
                             <Button size="sm" variant="outline" onClick={() => addCard(ent)} data-testid={`vis-add-${ent}`}>
                                 <Plus size={14} />
                             </Button>

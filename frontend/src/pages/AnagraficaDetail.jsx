@@ -24,7 +24,7 @@ import { TaskCollegati } from "@/components/TaskCollegati";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
-    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool,
+    Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -2024,11 +2024,29 @@ function PiramideAziendaTab({ anagrafica_id, ana, canEdit }) {
 
 function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [docs, setDocs] = useState(ana?.documenti || {});
+    const [cardCfg, setCardCfg] = useState(null);
     const [busyTipo, setBusyTipo] = useState(null);
     const [privacyOpen, setPrivacyOpen] = useState(false);
     const [firmaCard, setFirmaCard] = useState(null); // {tipo, nome_file}
     const [firmaCanali, setFirmaCanali] = useState({ wa: true, email: true });
     const [firmaBusy, setFirmaBusy] = useState(false);
+
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => setCardCfg(r.data?.anagrafica || null))
+            .catch(() => setCardCfg(null));
+    }, []);
+
+    // Lista card ordinata da config (icona/ordine/obbligatorietà), limitata alle
+    // card a storage fisso dell'anagrafica (DOC_TIPI_ANAG).
+    const anagByKey = Object.fromEntries(DOC_TIPI_ANAG.map((d) => [d.key, d]));
+    const docTipi = (cardCfg && cardCfg.length)
+        ? cardCfg.filter((c) => anagByKey[c.key]).map((c) => ({
+            ...anagByKey[c.key],
+            icon: c.icon || anagByKey[c.key].icon,
+            obbligatoria: !!c.obbligatoria,
+        }))
+        : DOC_TIPI_ANAG;
 
     const isPdfDoc = (d) => {
         const m = (d?.mime || d?.content_type || "").toLowerCase();
@@ -2117,7 +2135,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const scaricaPrivacy = () => setPrivacyOpen(true);
     const [docsOpen, setDocsOpen] = useState(true);
     const [cardOpen, setCardOpen] = useState({});
-    const nCaricati = DOC_TIPI_ANAG.filter((dt) => docs?.[dt.key]).length;
+    const nCaricati = docTipi.filter((dt) => docs?.[dt.key]).length;
 
     return (
         <div className="space-y-4 mt-4" data-testid="documenti-tab">
@@ -2140,24 +2158,27 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     data-testid="doc-cards-toggle">
                     <span className="text-lg">🗂️</span>
                     <span className="font-medium text-sm text-slate-800 flex-1">Documenti</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">{nCaricati}/{DOC_TIPI_ANAG.length}</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">{nCaricati}/{docTipi.length}</span>
                     <span className={`text-slate-400 transition-transform ${docsOpen ? "rotate-180" : ""}`}>▾</span>
                 </button>
                 {docsOpen && (
                     <div className="p-3 space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {DOC_TIPI_ANAG.map((dt) => {
+                        {docTipi.map((dt) => {
                     const doc = docs?.[dt.key];
                     const cOpen = cardOpen[dt.key] !== false;
+                    const manca = dt.obbligatoria && !doc;
                     return (
-                        <Card key={dt.key} className="p-3 border-slate-200">
+                        <Card key={dt.key} className={`p-3 ${manca ? "border-2 border-rose-400 bg-rose-50/40" : "border-slate-200"}`}>
                             <button type="button" onClick={() => setCardOpen((s) => ({ ...s, [dt.key]: !cOpen }))}
                                 className="w-full flex items-center justify-between mb-2 text-left"
                                 data-testid={`doc-card-toggle-${dt.key}`}>
-                                <div className="font-medium text-sm flex items-center gap-2">
+                                <div className={`font-medium text-sm flex items-center gap-2 ${manca ? "text-rose-800" : ""}`}>
                                     <span className="text-lg">{dt.icon}</span> {dt.label}
+                                    {dt.obbligatoria && <AlertTriangle size={12} className="text-rose-600" title="Documento obbligatorio" />}
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    {manca && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-200 text-rose-700 font-medium" data-testid={`doc-manca-${dt.key}`}>obbligatorio mancante</span>}
                                     {doc && <span className="badge badge-success text-[10px]">caricato</span>}
                                     {doc?.firma_stato === "in_attesa" && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium" data-testid={`doc-firma-badge-${dt.key}`}>
