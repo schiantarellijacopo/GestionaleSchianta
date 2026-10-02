@@ -13362,34 +13362,90 @@ CARD_DEFS = {
 @api.get("/config/card-visibilita")
 async def get_card_visibilita(user=Depends(current_user)):
     """Restituisce la configurazione di visibilità cliente per ogni card documento,
-    con i default statici e gli override salvati in azienda_config.card_visibilita."""
-    az = await db.azienda_config.find_one({}, {"_id": 0, "card_visibilita": 1}) or {}
+    con i default statici, le card personalizzate e gli override salvati."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "card_visibilita": 1, "card_custom": 1}) or {}
     saved = az.get("card_visibilita") or {}
+    custom = az.get("card_custom") or {}
     out = {}
     for entita, cards in CARD_DEFS.items():
         ent_saved = saved.get(entita) or {}
-        out[entita] = [
-            {"key": c["key"], "label": c["label"],
+        row = [
+            {"key": c["key"], "label": c["label"], "custom": False,
+             "default_visibile": c["default"],
              "visibile_cliente": bool(ent_saved.get(c["key"], c["default"]))}
             for c in cards
         ]
+        for c in (custom.get(entita) or []):
+            row.append({
+                "key": c["key"], "label": c["label"], "custom": True,
+                "default_visibile": bool(c.get("default", False)),
+                "visibile_cliente": bool(ent_saved.get(c["key"], c.get("default", False))),
+            })
+        out[entita] = row
     return out
 
 
 @api.put("/config/card-visibilita")
 async def put_card_visibilita(body: dict, user=Depends(require_user("admin"))):
-    """Salva gli override di visibilità cliente per card. body = {anagrafica:{key:bool}, polizza:{...}, sinistro:{...}}"""
+    """Salva gli override di visibilità cliente per card (incluse le custom)."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "card_custom": 1}) or {}
+    custom = az.get("card_custom") or {}
     clean = {}
     for entita, cards in CARD_DEFS.items():
-        valid_keys = {c["key"] for c in cards}
+        valid_keys = {c["key"] for c in cards} | {c["key"] for c in (custom.get(entita) or [])}
         ent = body.get(entita) or {}
         clean[entita] = {k: bool(v) for k, v in ent.items() if k in valid_keys}
-    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1}) or {}
     if az.get("id"):
         await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_visibilita": clean}})
     else:
         await db.azienda_config.insert_one({"id": _uid(), "card_visibilita": clean})
     return {"ok": True, "card_visibilita": clean}
+
+
+@api.post("/config/card-custom", status_code=201)
+async def add_card_custom(body: dict, user=Depends(require_user("admin"))):
+    """Crea una card documento personalizzata per una sezione (anagrafica/polizza/sinistro),
+    visibile anche nei relativi dettagli."""
+    entita = (body.get("entita") or "").strip()
+    label = (body.get("label") or "").strip()
+    if entita not in CARD_DEFS:
+        raise HTTPException(400, "Sezione non valida")
+    if not label:
+        raise HTTPException(400, "Nome card obbligatorio")
+    base = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "card"
+    key = f"custom_{base}"
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "card_custom": 1}) or {}
+    custom = az.get("card_custom") or {}
+    ent_list = custom.get(entita) or []
+    existing = {c["key"] for c in ent_list} | {c["key"] for c in CARD_DEFS[entita]}
+    uk = key
+    i = 2
+    while uk in existing:
+        uk = f"{key}_{i}"; i += 1
+    card = {"key": uk, "label": label, "default": bool(body.get("visibile_cliente", False))}
+    ent_list.append(card)
+    custom[entita] = ent_list
+    if az.get("id"):
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_custom": custom}})
+    else:
+        await db.azienda_config.insert_one({"id": _uid(), "card_custom": custom})
+    return {"ok": True, "card": {**card, "entita": entita, "custom": True}}
+
+
+@api.delete("/config/card-custom/{entita}/{key}")
+async def del_card_custom(entita: str, key: str, user=Depends(require_user("admin"))):
+    if entita not in CARD_DEFS:
+        raise HTTPException(400, "Sezione non valida")
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "card_custom": 1, "card_visibilita": 1}) or {}
+    custom = az.get("card_custom") or {}
+    ent_list = [c for c in (custom.get(entita) or []) if c["key"] != key]
+    custom[entita] = ent_list
+    vis = az.get("card_visibilita") or {}
+    if vis.get(entita):
+        vis[entita].pop(key, None)
+    if az.get("id"):
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"card_custom": custom, "card_visibilita": vis}})
+    return {"ok": True}
 
 
 

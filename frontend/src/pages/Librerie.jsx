@@ -86,6 +86,7 @@ const ENTITA_LABEL = { anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", 
 function VisibilitaDocSezione() {
     const [cfg, setCfg] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [newLabel, setNewLabel] = useState({ anagrafica: "", polizza: "", sinistro: "" });
 
     const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
     useEffect(() => { load(); }, []);
@@ -95,6 +96,24 @@ function VisibilitaDocSezione() {
             ...p,
             [entita]: p[entita].map((c) => c.key === key ? { ...c, visibile_cliente: !c.visibile_cliente } : c),
         }));
+    };
+
+    const addCard = async (entita) => {
+        const label = (newLabel[entita] || "").trim();
+        if (!label) return;
+        try {
+            await api.post("/config/card-custom", { entita, label, visibile_cliente: false });
+            setNewLabel((p) => ({ ...p, [entita]: "" }));
+            toast.success("Card creata — ora è disponibile anche nei dettagli");
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore creazione card")); }
+    };
+    const delCard = async (entita, key) => {
+        if (!window.confirm("Eliminare questa card personalizzata?")) return;
+        try {
+            await api.delete(`/config/card-custom/${entita}/${key}`);
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     const salva = async () => {
@@ -116,7 +135,8 @@ function VisibilitaDocSezione() {
         <div className="space-y-4" data-testid="visibilita-doc-sezione">
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 text-xs text-sky-900">
                 <strong>Visibilità documenti al cliente.</strong> Imposta, per ogni card, se i documenti caricati sono
-                visibili al cliente nel suo portale <strong>di default</strong>. Così non devi decidere manualmente ad ogni caricamento.
+                visibili al cliente nel suo portale <strong>di default</strong>. Puoi anche <strong>creare card personalizzate</strong>:
+                compariranno automaticamente nei dettagli di Anagrafiche, Polizze e Sinistri.
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {["anagrafica", "polizza", "sinistro"].map((ent) => (
@@ -124,15 +144,39 @@ function VisibilitaDocSezione() {
                         <div className="font-semibold text-sm text-slate-800 mb-3">{ENTITA_LABEL[ent]}</div>
                         <div className="space-y-1.5">
                             {(cfg[ent] || []).map((c) => (
-                                <button key={c.key} type="button" onClick={() => toggle(ent, c.key)}
-                                    className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border border-slate-200 hover:bg-slate-50 text-left"
-                                    data-testid={`vis-toggle-${ent}-${c.key}`}>
-                                    <span className="text-sm text-slate-700">{c.label}</span>
-                                    <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${c.visibile_cliente ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-                                        {c.visibile_cliente ? <><Eye size={12} /> Visibile</> : <><EyeOff size={12} /> Interno</>}
-                                    </span>
-                                </button>
+                                <div key={c.key} className="flex items-center gap-1.5">
+                                    <button type="button" onClick={() => toggle(ent, c.key)}
+                                        className="flex-1 flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border border-slate-200 hover:bg-slate-50 text-left"
+                                        data-testid={`vis-toggle-${ent}-${c.key}`}>
+                                        <span className="text-sm text-slate-700 truncate">
+                                            {c.label}{c.custom && <span className="ml-1.5 text-[10px] text-indigo-600">(custom)</span>}
+                                        </span>
+                                        <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${c.visibile_cliente ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                                            {c.visibile_cliente ? <><Eye size={12} /> Visibile</> : <><EyeOff size={12} /> Interno</>}
+                                        </span>
+                                    </button>
+                                    {c.custom && (
+                                        <button type="button" onClick={() => delCard(ent, c.key)}
+                                            className="p-1.5 rounded-md text-rose-500 hover:bg-rose-50 shrink-0"
+                                            title="Elimina card" data-testid={`vis-del-${ent}-${c.key}`}>
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
+                                </div>
                             ))}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
+                            <input
+                                value={newLabel[ent]}
+                                onChange={(e) => setNewLabel((p) => ({ ...p, [ent]: e.target.value }))}
+                                onKeyDown={(e) => { if (e.key === "Enter") addCard(ent); }}
+                                placeholder="Nuova card (es. Bonus Malus)…"
+                                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md"
+                                data-testid={`vis-new-${ent}`}
+                            />
+                            <Button size="sm" variant="outline" onClick={() => addCard(ent)} data-testid={`vis-add-${ent}`}>
+                                <Plus size={14} />
+                            </Button>
                         </div>
                     </Card>
                 ))}

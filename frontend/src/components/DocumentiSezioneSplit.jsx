@@ -29,15 +29,27 @@ export default function DocumentiSezioneSplit({
     const [uploading, setUploading] = useState(null);
     const [firme, setFirme] = useState([]);
     const [visCfg, setVisCfg] = useState(null); // {cardKey: bool} per questa entità
+    const [apiCards, setApiCards] = useState([]); // card dalla config (incluse custom)
 
     useEffect(() => {
         api.get("/config/card-visibilita")
             .then((r) => {
                 const list = r.data?.[entita_tipo] || [];
+                setApiCards(list);
                 setVisCfg(Object.fromEntries(list.map((c) => [c.key, c.visibile_cliente])));
             })
-            .catch(() => setVisCfg({}));
+            .catch(() => { setApiCards([]); setVisCfg({}); });
     }, [entita_tipo]);
+
+    // Card effettive = quelle passate dal dettaglio + eventuali card personalizzate
+    // create in Librerie (non già presenti), così compaiono qui automaticamente.
+    const presentKeys = new Set(categorie.map((c) => c.key));
+    const mergedCategorie = [
+        ...categorie,
+        ...apiCards
+            .filter((c) => c.custom && !presentKeys.has(c.key))
+            .map((c) => ({ key: c.key, label: c.label, icon: "🗂️", default_visibile: c.default_visibile })),
+    ];
 
     // visibilità di default per una card: config Librerie → altrimenti default della card
     const defVis = (c) => (visCfg && c.key in visCfg) ? visCfg[c.key] : (c.default_visibile ?? false);
@@ -110,8 +122,8 @@ export default function DocumentiSezioneSplit({
     if (!items) return <div className="text-sm text-slate-400 py-4">Caricamento…</div>;
 
     // === Layout QUADROTTI: una card per categoria (come scheda Anagrafica) ===
-    if (layout === "quadrotti" && categorie.length > 0) {
-        const catKeys = categorie.map((c) => c.key);
+    if (layout === "quadrotti" && mergedCategorie.length > 0) {
+        const catKeys = mergedCategorie.map((c) => c.key);
         const hasAltri = catKeys.includes("altri");
         const gruppi = {};
         items.forEach((a) => {
@@ -124,7 +136,7 @@ export default function DocumentiSezioneSplit({
                     <strong>{titolo}</strong> — {sottotitolo || "Documenti organizzati per categoria. Ogni riquadro mostra i file e ne indica la visibilità al cliente."}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {categorie.map((c) => (
+                    {mergedCategorie.map((c) => (
                         <QuadrottoCategoria
                             key={c.key}
                             categoria={c}
@@ -154,13 +166,13 @@ export default function DocumentiSezioneSplit({
             </div>
 
             {/* Categorie caricamento rapido (se previste) */}
-            {canEdit && categorie.length > 0 && (
+            {canEdit && mergedCategorie.length > 0 && (
                 <Card className="p-3">
                     <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
                         Carica documento per categoria
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {categorie.map((c) => (
+                        {mergedCategorie.map((c) => (
                             <CategoriaUpload key={c.key} categoria={c}
                                 onPick={(files) => upload(files, { visibile: defVis(c), categoria: c.key })}
                                 busy={uploading === c.key} />

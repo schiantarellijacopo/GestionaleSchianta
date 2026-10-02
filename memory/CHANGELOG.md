@@ -511,3 +511,9 @@ Admin: `admin@assicura.it / Admin123!`
 - FIX ISOLAMENTO: /chat/utenti ora applica tenant_filter(user) → la chat interna mostra solo utenti dello stesso tenant (prima mostrava utenti di altri tenant). Verificato: jacopo vede 22 utenti, tutti del tenant Schiantarelli.
 - E/C compagnie: filtro Collaboratore ora MULTI-selezione (checkbox + Tutti); _compagnia_estratto_data accetta collaboratore_id come lista CSV ($in).
 - E/C compagnie: "Salva lista da pagare" salva i titoli/voci selezionati come BOZZA di distinta (collezione distinte_bozze, tenant-scoped, nessun movimento). Nuova sezione "Liste da pagare (bozze)" con Versa (apre dialog versamento precompilato → su conferma crea movimento e elimina la bozza) ed Elimina. Endpoint: GET/POST/DELETE /api/compagnie/{cid}/distinte-bozze. Verificato backend (CRUD, importo) e UI.
+
+## 2026-10-02 (4) — Card documento personalizzate
+- Librerie → Visibilità documenti: ora si possono CREARE card documento personalizzate per sezione (Anagrafiche/Polizze/Sinistri) con campo "Nuova card" + pulsante; ogni card custom ha toggle visibilità e cestino per eliminarla.
+- Backend: card custom salvate in azienda_config.card_custom[entita]. GET /config/card-visibilita ora include le custom (flag custom, default_visibile). PUT accetta anche le chiavi custom. Nuovi endpoint POST /config/card-custom (slug auto custom_*) e DELETE /config/card-custom/{entita}/{key}.
+- Consumo: DocumentiSezioneSplit.jsx fa merge delle card custom (dalla config) con quelle passate dal dettaglio, così compaiono automaticamente come riquadri/upload in Polizze, Anagrafiche e Sinistri.
+- Verificato: CRUD via curl (crea/lista/delete) e UI (creazione in Librerie, badge custom, eliminazione).
