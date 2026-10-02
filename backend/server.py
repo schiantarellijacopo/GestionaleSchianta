@@ -348,6 +348,71 @@ async def merge_users(body: dict, user=Depends(require_user("admin"))):
     return {"ok": True, "target_id": target_id, "uniti": len(source_ids), "spostati": spostati}
 
 
+@api.post("/librerie/stub-operatori/pulisci")
+async def pulisci_stub_operatori(body: dict = None, user=Depends(require_user("admin"))):
+    """Elimina DEFINITIVAMENTE gli stub "Produttore" importati che sono GIÀ MAPPATI
+    a un collaboratore reale. Prima di eliminare, ri-punta eventuali riferimenti
+    residui (collaboratore_id, provvigioni_operatori annidati, rete) sul collaboratore
+    mappato — così nessun titolo/polizza resta orfano.
+
+    body: { "dry_run": bool }  → con dry_run=True non elimina, restituisce solo l'anteprima.
+    """
+    body = body or {}
+    dry_run = bool(body.get("dry_run"))
+    stubs = await db.users.find(
+        {"auto_created": True, "role": {"$ne": "cliente"}}, {"_id": 0}).to_list(5000)
+    rep = {"totale_stub": len(stubs), "eliminabili": 0, "eliminati": 0,
+           "saltati_non_mappati": 0, "riferimenti_ripuntati": 0, "dettaglio": []}
+    for s in stubs:
+        sid = s["id"]
+        # Target: utente in cui è stato fuso, oppure il collaboratore mappato per codice ANIA.
+        target_id = s.get("merged_into")
+        if not target_id:
+            codice = (s.get("auto_created_from_codice") or "").strip()
+            if codice:
+                m = await db.mapping_operatori.find_one(
+                    {"$or": [{"codice_ania": codice}, {"codice": codice}]}, {"_id": 0})
+                target_id = (m or {}).get("user_id") or (m or {}).get("collaboratore_id")
+        if not target_id or target_id == sid:
+            rep["saltati_non_mappati"] += 1
+            continue
+        # Verifica che il target esista e sia un utente reale (non un altro stub)
+        tgt = await db.users.find_one({"id": target_id}, {"_id": 0, "id": 1, "name": 1, "auto_created": 1})
+        if not tgt or tgt.get("auto_created"):
+            rep["saltati_non_mappati"] += 1
+            continue
+        rep["eliminabili"] += 1
+        rep["dettaglio"].append({"stub_id": sid, "stub_nome": s.get("name"),
+                                 "target_id": target_id, "target_nome": tgt.get("name")})
+        if dry_run:
+            continue
+        # Ri-punta i riferimenti residui dallo stub al collaboratore reale
+        n = 0
+        for col in _MERGE_USER_COLLECTIONS:
+            r = await db[col].update_many(
+                {"collaboratore_id": sid},
+                {"$set": {"collaboratore_id": target_id, "merged_from_user_id": sid, "updated_at": _now_iso()}})
+            n += r.modified_count
+        for col in ("polizze", "titoli"):
+            r = await db[col].update_many(
+                {"provvigioni_operatori.operatore_id": sid},
+                {"$set": {"provvigioni_operatori.$[e].operatore_id": target_id,
+                          "provvigioni_operatori.$[e].merged_from_operatore_id": sid}},
+                array_filters=[{"e.operatore_id": sid}])
+            n += r.modified_count
+        await db.users.update_many(
+            {"parent_collaboratore_id": sid},
+            {"$set": {"parent_collaboratore_id": target_id, "merged_parent_from": sid}})
+        rep["riferimenti_ripuntati"] += n
+        await db.users.delete_one({"id": sid})
+        rep["eliminati"] += 1
+    if not dry_run:
+        await log_attivita(user, "cleanup", "stub_operatori", "",
+                           f"Eliminati {rep['eliminati']} stub Produttore mappati")
+    return rep
+
+
+
 @api.post("/auth/users/{uid}/unmerge")
 async def unmerge_user(uid: str, user=Depends(require_user("admin"))):
     """Ripristina un utente unito per errore: riattiva l'utente e gli riporta

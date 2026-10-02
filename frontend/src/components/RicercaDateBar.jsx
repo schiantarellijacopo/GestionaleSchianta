@@ -12,7 +12,7 @@ export function applyRicercaData(items, { q, dal, al } = {}) {
         const asNum = parseFloat(numTerm);
         const isNum = /^[0-9.,]+$/.test(term) && !isNaN(asNum);
         list = list.filter((r) => {
-            const hay = `${r.compagnia_nome || ""} ${r.compagnia_codice || ""} ${r.descrizione || ""} ${r.note || ""} ${r.collaboratore_nome || ""} ${r.tipo || ""} ${r.anno || ""}`.toLowerCase();
+            const hay = `${r.compagnia_nome || ""} ${r.compagnia_codice || ""} ${r.descrizione || ""} ${r.note || ""} ${r.collaboratore_nome || ""} ${r.agenzia_partner_nome || ""} ${r.fornitore_nome || ""} ${r.partner_nome || ""} ${r.ragione_sociale || ""} ${r.causale || ""} ${r.numero || ""} ${r.numero_fattura || ""} ${r.tipo || ""} ${r.anno || ""}`.toLowerCase();
             if (hay.includes(term)) return true;
             const imp = r.importo;
             if (imp != null) {

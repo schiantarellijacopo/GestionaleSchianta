@@ -18,6 +18,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Handshake, Plus, FileSpreadsheet, Wallet, Trash2 } from "lucide-react";
+import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
 import { toast } from "sonner";
 
 export default function FattureAgenziaPartner() {
@@ -27,6 +28,10 @@ export default function FattureAgenziaPartner() {
     const [agenzie, setAgenzie] = useState([]);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [precompila, setPrecompila] = useState(null);
+    const [q, setQ] = useState("");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
+    const fattureFiltered = useMemo(() => applyRicercaData(fatture || [], { q, dal, al }), [fatture, q, dal, al]);
 
     const load = () => {
         api.get("/partite-agenzia-partner").then((r) => setPartite(r.data));
@@ -149,6 +154,9 @@ export default function FattureAgenziaPartner() {
                 <h2 className="text-sm font-semibold text-slate-800 uppercase tracking-wider mb-3">
                     Fatture provvigioni partner
                 </h2>
+                <div className="mb-3">
+                    <RicercaDateBar q={q} setQ={setQ} dal={dal} setDal={setDal} al={al} setAl={setAl} testid="fat-part" placeholder="Cerca agenzia, compagnia, n. fattura, importo..." />
+                </div>
                 {fatture === null ? <Loading /> : fatture.length === 0 ? <Empty message="Nessuna fattura registrata" /> : (
                     <table className="tbl-compact w-full text-xs">
                         <thead><tr>
@@ -159,7 +167,7 @@ export default function FattureAgenziaPartner() {
                             <th className="w-28"></th>
                         </tr></thead>
                         <tbody>
-                            {fatture.map((f) => (
+                            {fattureFiltered.map((f) => (
                                 <tr key={f.id} data-testid={`fat-row-${f.id}`}>
                                     <td className="num">{fmtDate(f.data)}</td>
                                     <td className="font-mono">{f.numero_fattura || "—"}</td>

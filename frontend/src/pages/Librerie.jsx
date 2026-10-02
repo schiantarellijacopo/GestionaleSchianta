@@ -341,6 +341,17 @@ function Sezione({ section }) {
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
+    const pulisciStub = async () => {
+        try {
+            const prev = await api.post("/librerie/stub-operatori/pulisci", { dry_run: true });
+            const d = prev.data;
+            if (!d.eliminabili) { toast.info("Nessuno stub \u201cProduttore\u201d gi\u00e0 mappato da eliminare"); return; }
+            if (!window.confirm(`Eliminare definitivamente ${d.eliminabili} stub \u201cProduttore\u201d gi\u00e0 mappati a un collaboratore reale?\n\nEventuali riferimenti residui (titoli/polizze) verranno prima spostati sul collaboratore mappato. Operazione non reversibile.`)) return;
+            const r = await api.post("/librerie/stub-operatori/pulisci", { dry_run: false });
+            toast.success(`${r.data.eliminati} stub eliminati \u00b7 ${r.data.riferimenti_ripuntati} riferimenti ricollegati`);
+        } catch (e) { toast.error(errMsg(e, "Errore pulizia stub")); }
+    };
+
     const showApplica = section.key === "mapping-garanzie" || section.key === "mapping-operatori";
     const showBulkRename = section.key === "prodotti";
     const showMerge = section.key === "rami";
@@ -367,6 +378,12 @@ function Sezione({ section }) {
                     {showApplica && (
                         <Button variant="outline" size="sm" onClick={applicaMapping} data-testid={`lib-apply-${section.key}`}>
                             Applica a polizze esistenti
+                        </Button>
+                    )}
+                    {section.key === "mapping-operatori" && (
+                        <Button variant="outline" size="sm" onClick={pulisciStub}
+                            className="text-rose-600 border-rose-200 hover:bg-rose-50" data-testid="lib-pulisci-stub">
+                            <Trash2 size={13} className="mr-1" /> Pulizia stub Produttore
                         </Button>
                     )}
                     {showBulkRename && list && list.length > 0 && (

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
+import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,11 @@ export default function Ritenute() {
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const [collabs, setCollabs] = useState([]);
-    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(items || [], "data", "desc");
+    const [q, setQ] = useState("");
+    const [dal, setDal] = useState("");
+    const [al, setAl] = useState("");
+    const filtered = useMemo(() => applyRicercaData(items || [], { q, dal, al }), [items, q, dal, al]);
+    const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(filtered, "data", "desc");
 
     const load = () => {
         api.get("/ritenute", { params: { anno } }).then((r) => setItems(r.data));
@@ -133,6 +138,9 @@ export default function Ritenute() {
             )}
 
             {/* Tabella dettaglio */}
+            <Card className="p-3 mb-3">
+                <RicercaDateBar q={q} setQ={setQ} dal={dal} setDal={setDal} al={al} setAl={setAl} testid="rit-collab" placeholder="Cerca collaboratore, descrizione, causale, importo..." />
+            </Card>
             <div className="tbl-scroll">
                 {items === null ? <Loading /> : items.length === 0 ? <Empty /> : (
                     <table className="tbl-compact w-full text-xs">
