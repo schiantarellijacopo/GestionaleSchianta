@@ -1,0 +1,20 @@
+{
+  "summary": "Frontend-only testing of 4 items for Assicura CRM (tenant Schiantarelli). All 4 features/bug fixes verified end-to-end on preview URL: (1) 5-date cascade in DialogIncassoCopertura works perfectly, (2) Riepilogo documenti obbligatori mancanti banner appears correctly on polizza Documenti tab with count+list, (3) Sospesi search filters correctly by importo in both '1559' and '1559,00' formats while retaining textual search (contraente/targa/polizza), (4) TitoloDialog opens without JS errors and provvigioni are calculated correctly, no errors from /api/provvigioni/quota-collaboratore.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100%"},
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (admin, agenzia Schiantarelli)",
+  "seed_data_creation": "Temporarily toggled polizza-preventivo and anagrafica-passaporto to obbligatoria to verify banner; then disabled and saved to restore original state.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 4 items verified. Date cascade test: open Titoli menu → Incasso/Copertura on a 'da incassare' row → both Copertura and Incasso checkboxes become checked when editing a non-coperto titolo, giving all 5 date fields. Changing ico-data-copertura cascades to ico-comunicazione-incasso, ico-data-contabile, ico-data-incasso, ico-data-coge; individual edits to the 4 do NOT ripple back. Banner test: in Librerie→Visibilità documenti, toggles have data-testid pattern vis-obbl-polizza-<key> and vis-obbl-anagrafica-<key>; after save, polizza Documenti tab shows [data-testid=riepilogo-mancanti] with [riepilogo-mancanti-count] and per-item [riepilogo-mancante-<key>]. Sospesi search handles importo both '1559' and '1559,00' formats. TitoloDialog loads clean (no JS/API errors) and shows Ripartizione provvigioni correctly.",
+  "rca of the issue": "n/a - no issues found"
+}
