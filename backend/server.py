@@ -14215,11 +14215,13 @@ async def serve_storage(full_path: str, user=Depends(current_user)):
 # ============================================================
 @api.get("/chat/utenti")
 async def chat_utenti(user=Depends(current_user)):
-    """Restituisce gli utenti con cui posso chattare."""
+    """Restituisce gli utenti con cui posso chattare (isolati per tenant)."""
+    from tenant import tenant_filter
+    tf = tenant_filter(user) or {}
     if user["role"] == "cliente":
-        flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}}
+        flt = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}, **tf}
     else:
-        flt = {"id": {"$ne": user["id"]}}
+        flt = {"id": {"$ne": user["id"]}, **tf}
     users = await db.users.find(flt, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(500)
     # arricchisci con count non letti e ultimo messaggio
     for u in users:
