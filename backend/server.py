@@ -6234,8 +6234,11 @@ async def banche_saldi(user=Depends(require_user("admin", "collaboratore", "dipe
     out = []
     tot = 0.0
     for c in conti:
+        _is_rid = (c.get("tipo") or "").lower() == "rid"
+        _match = ({"$or": [{"is_direzione": True}, {"categoria": "incasso_premio_direzione"}]}
+                  if _is_rid else {"conto_cassa_id": c["id"]})
         agg = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"]}},
+            {"$match": _match},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
@@ -6243,7 +6246,8 @@ async def banche_saldi(user=Depends(require_user("admin", "collaboratore", "dipe
         in_tot = agg[0]["in"] if agg else 0
         out_tot = agg[0]["out"] if agg else 0
         saldo = float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
-        if c.get("attivo", True):
+        # Il conto RID "Pagamento Direzione" è volume fittizio: non va nella liquidità reale.
+        if c.get("attivo", True) and not _is_rid:
             tot += saldo
         out.append({
             "id": c["id"], "nome": c["nome"], "attivo": c.get("attivo", True),
@@ -6269,9 +6273,20 @@ async def banche_movimenti(
     """Movimentazione bancaria filtrata. Con banca singola (senza filtri cliente/polizza/
     collaboratore) calcola il saldo progressivo partendo dal saldo di apertura del periodo."""
     import re as _re
-    flt: dict = {"conto_cassa_id": {"$ne": None}}
+    _sel_conto = None
     if conto_cassa_id:
-        flt["conto_cassa_id"] = conto_cassa_id
+        _sel_conto = await db.conti_cassa.find_one(
+            {"id": conto_cassa_id}, {"_id": 0, "id": 1, "tipo": 1, "nome": 1})
+    # Il conto "Pagamento Direzione" (tipo RID) non ha movimenti con conto_cassa_id:
+    # i pagamenti in direzione sono fittizi (conto_cassa_id=None, is_direzione=True).
+    _is_rid = bool(_sel_conto) and (_sel_conto.get("tipo") or "").lower() == "rid"
+    _dir_match = {"$or": [{"is_direzione": True}, {"categoria": "incasso_premio_direzione"}]}
+    if _is_rid:
+        flt: dict = dict(_dir_match)
+    elif conto_cassa_id:
+        flt = {"conto_cassa_id": conto_cassa_id}
+    else:
+        flt = {"conto_cassa_id": {"$ne": None}}
     if dal or al:
         cond = {}
         if dal:
@@ -6319,8 +6334,11 @@ async def banche_movimenti(
         c = await db.conti_cassa.find_one({"id": conto_cassa_id}, {"_id": 0})
         opening = float(c.get("saldo_iniziale", 0)) if c else 0.0
         if dal:
+            _prior = (dict(_dir_match, **{"data_movimento": {"$lt": dal}})
+                      if _is_rid else
+                      {"conto_cassa_id": conto_cassa_id, "data_movimento": {"$lt": dal}})
             agg = await db.movimenti.aggregate([
-                {"$match": {"conto_cassa_id": conto_cassa_id, "data_movimento": {"$lt": dal}}},
+                {"$match": _prior},
                 {"$group": {"_id": None,
                             "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                             "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
@@ -6374,7 +6392,7 @@ async def banche_movimenti(
             "numero_polizza": pol.get("numero_polizza"),
             "collaboratore": coll_map.get(collab_id),
             "conto_id": m.get("conto_cassa_id"),
-            "conto_nome": conti_map.get(m.get("conto_cassa_id")),
+            "conto_nome": conti_map.get(m.get("conto_cassa_id")) or (_sel_conto.get("nome") if _is_rid else None),
             "importo": round(imp, 2),
             "saldo_progressivo": round(saldo, 2) if progressivo else None,
         })

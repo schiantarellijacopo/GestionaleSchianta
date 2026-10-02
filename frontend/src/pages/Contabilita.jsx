@@ -88,7 +88,7 @@ export default function Contabilita() {
                         <Dialog open={saldoCassaOpen} onOpenChange={setSaldoCassaOpen}>
                             <DialogTrigger asChild>
                                 <Button variant="outline" data-testid="saldo-cassa-button" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-                                    <Wallet size={16} className="mr-1" /> Saldo Cassa Compagnie
+                                    <Wallet size={16} className="mr-1" /> Movimenti manuali saldo cassa
                                 </Button>
                             </DialogTrigger>
                             <SaldoCassaCompagnieDialog onClose={() => { setSaldoCassaOpen(false); load(); setRefreshTick((t) => t + 1); }} />

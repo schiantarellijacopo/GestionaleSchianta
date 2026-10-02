@@ -498,3 +498,8 @@ Admin: `admin@assicura.it / Admin123!`
 - Causa: il footer totali era `sticky bottom-0` e, quando il body scrollava, si sovrapponeva alle ultime righe della tabella.
 - Soluzione robusta: nuovo hook useFillHeight.js che calcola dinamicamente l'altezza del blocco (tabella scrollabile + footer) fino al fondo della viewport (ResizeObserver + ricalcoli ritardati per gestire il caricamento async delle KPI). La tabella usa `.tbl-scroll.flex-fill flex-1` dentro un wrapper flex-column; il footer è `flex-none` (non più sticky) e resta sempre sotto, sempre visibile e senza coprire le righe.
 - Applicato a Polizze.jsx e Titoli.jsx. Verificato: footer visibile (bottom ~1069/1080), overlap -62px (nessuna sovrapposizione) sia prima che dopo lo scroll interno.
+
+## 2026-10-02 — Fix Banca "Pagamento Direzione" + rinomina pulsante
+- FIX: la banca "Pagamento Direzione" (conto tipo RID) non mostrava movimenti né saldo. I pagamenti in direzione sono fittizi (conto_cassa_id=None, is_direzione=True, categoria incasso_premio_direzione). Ora banche_saldi e banche_movimenti riconoscono il conto RID e filtrano per is_direzione/categoria. Il conto RID resta ESCLUSO dal "Totale liquidità" (volume fittizio). Verificato: card 441,50 €, 5 movimenti con saldo progressivo e nome conto corretto.
+- UI: pulsante Contabilità rinominato da "Saldo Cassa Compagnie" a "Movimenti manuali saldo cassa".
+- Verifica footer totali altre pagine: solo Portafoglio e Titoli usavano il pattern sticky che copriva le righe (già corretto con useFillHeight). Sinistri usa un tfoot sticky DENTRO lo scroll (comportamento corretto, nessuna sovrapposizione).
