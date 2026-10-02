@@ -1831,3 +1831,8 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - PROBLEMA: nelle Statistiche (tab Per Operatore e Premi/Provvigioni) il filtro data "Rata / decorrenza" (data_field="rata") usava il campo titolo `scadenza`, che nei dati reali è quasi sempre VUOTO → i titoli venivano scartati e i totali risultavano incompleti.
 - FIX (server.py, endpoint /statistiche/per-operatore e /statistiche/premi-provvigioni): mapping "rata" ora → `effetto` (la decorrenza del titolo), che è il campo valorizzato e corretto. ("incasso"→data_incasso, "copertura"→data_copertura invariati.)
 - Verificato via curl (tenant jacopo, 2025): data_field=rata ora dà tot_netto≈3.783.841 / provv≈202.885, coerente con incasso/copertura (prima ~0). Backend-only, nessuna modifica frontend.
+
+## 2026-06 — Cambio contraente della polizza (FATTO)
+- EditPolizzaDialog (PolizzaDetail.jsx) tab Anagrafica: aggiunto campo "Contraente" con IntestatarioAutocomplete (cerca anagrafiche, collega/scollega, crea al volo). Al salvataggio invia contraente_id (contraente_nome escluso dal payload perché è un campo display derivato).
+- Backend: nessuna modifica necessaria — update_polizza fa $set di contraente_id; contraente/contraente_nome sono sempre derivati a runtime da contraente_id (join anagrafiche) in tutte le viste (polizza, titoli, estratto conto), quindi il cambio si propaga ovunque senza denormalizzazione.
+- Verificato: PUT contraente_id → GET riflette nuovo contraente; UI dialog mostra campo con badge "collegato". Testato su tenant jacopo.

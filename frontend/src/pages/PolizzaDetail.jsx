@@ -27,6 +27,7 @@ import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import TitoloDialog from "@/components/TitoloDialog";
+import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
@@ -1407,6 +1408,8 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     }, []);
     const [f, setF] = useState({
         numero_polizza: pol.numero_polizza || "",
+        contraente_id: pol.contraente_id || pol.contraente?.id || "",
+        contraente_nome: pol.contraente?.ragione_sociale || pol.contraente?.cognome_nome || "",
         stato: pol.stato || "attiva",
         ramo: pol.ramo || "",
         prodotto: pol.prodotto || "",
@@ -1499,6 +1502,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     const save = async () => {
         try {
             const payload = { ...f };
+            delete payload.contraente_nome;  // campo display, non persistito (si deriva da contraente_id)
             ["premio_netto", "premio_tasse", "premio_imposte", "premio_ssn", "premio_accessori", "premio_addizionale", "premio_lordo",
              "provvigioni", "termini_mora_giorni", "termini_disdetta_giorni",
              "pejus", "franchigia", "valore_veicolo", "valore_residuo_veicolo", "valore_accessori"].forEach((k) => {
@@ -1564,6 +1568,15 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                         {["attiva", "sospesa", "in_emissione", "scaduta", "annullata", "sostituita"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                            <div className="col-span-2">
+                                <Label>Contraente</Label>
+                                <IntestatarioAutocomplete
+                                    value={f.contraente_nome}
+                                    anagraficaId={f.contraente_id}
+                                    onChange={(name, aid) => setF((p) => ({ ...p, contraente_nome: name, contraente_id: aid || "" }))}
+                                />
+                                <div className="text-[10px] text-slate-400 mt-0.5">Cerca e collega un'altra anagrafica per cambiare il contraente della polizza</div>
                             </div>
                             <div>
                                 <Label>Ramo</Label>
