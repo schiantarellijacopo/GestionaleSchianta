@@ -80,6 +80,15 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const [dataCopertura, setDataCopertura] = useState(today);
     const [comunicazioneIncasso, setComunicazioneIncasso] = useState(today);
     const [dataContabile, setDataContabile] = useState(today);
+    // "Data Copertura" è la data GUIDA: modificandola si aggiornano a cascata
+    // anche Comunicazione incasso, Data Contabile e le date di incasso (Pagamento/Co.Ge.).
+    // Le singole date restano comunque modificabili individualmente dopo.
+    const onChangeDataCopertura = (v) => {
+        setDataCopertura(v);
+        setComunicazioneIncasso(v);
+        setDataContabile(v);
+        setInc((p) => ({ ...p, data_incasso: v, data_coge: v }));
+    };
     // Allega documento + firma
     const [allegatoFile, setAllegatoFile] = useState(null);
     // Toggle email/stampa copertura
@@ -430,7 +439,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                             <td className={cellLabel}>Data Copertura</td>
                                             <td className={cellValueEdit} colSpan={3}>
                                                 <Input type="date" value={dataCopertura}
-                                                    onChange={(e) => setDataCopertura(e.target.value)}
+                                                    onChange={(e) => onChangeDataCopertura(e.target.value)}
                                                     className="bg-white" data-testid="ico-data-copertura" />
                                             </td>
                                         </tr>

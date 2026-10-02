@@ -2136,6 +2136,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [docsOpen, setDocsOpen] = useState(true);
     const [cardOpen, setCardOpen] = useState({});
     const nCaricati = docTipi.filter((dt) => docs?.[dt.key]).length;
+    const mancantiObbl = docTipi.filter((dt) => dt.obbligatoria && !docs?.[dt.key]);
 
     return (
         <div className="space-y-4 mt-4" data-testid="documenti-tab">
@@ -2151,6 +2152,24 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     </Button>
                 </div>
             </div>
+
+            {mancantiObbl.length > 0 && (
+                <div className="rounded-md border-2 border-rose-300 bg-rose-50 p-3" data-testid="riepilogo-mancanti">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-rose-800">
+                        <AlertTriangle size={15} />
+                        Documenti obbligatori mancanti
+                        <span className="ml-1 text-[11px] bg-rose-200 text-rose-800 px-2 py-0.5 rounded-full font-mono" data-testid="riepilogo-mancanti-count">{mancantiObbl.length}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        {mancantiObbl.map((dt) => (
+                            <span key={dt.key} className="inline-flex items-center gap-1 text-xs bg-white border border-rose-200 text-rose-700 px-2 py-1 rounded-md"
+                                data-testid={`riepilogo-mancante-${dt.key}`}>
+                                <span>{dt.icon}</span> {dt.label}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <button onClick={() => setDocsOpen((o) => !o)}

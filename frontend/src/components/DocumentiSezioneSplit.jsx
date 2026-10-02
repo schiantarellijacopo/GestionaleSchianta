@@ -149,6 +149,7 @@ export default function DocumentiSezioneSplit({
                 <div className="bg-sky-50 border border-sky-200 rounded p-3 text-xs text-sky-900">
                     <strong>{titolo}</strong> — {sottotitolo || "Documenti organizzati per categoria. Ogni riquadro mostra i file e ne indica la visibilità al cliente."}
                 </div>
+                <RiepilogoMancanti categorie={mergedCategorie} gruppi={gruppi} />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {mergedCategorie.map((c) => (
                         <QuadrottoCategoria
@@ -237,6 +238,28 @@ const COL = {
     emerald: { ring: "border-emerald-300", bg: "bg-emerald-50/30", header: "text-emerald-800 bg-emerald-50", ic: "text-emerald-600" },
     slate: { ring: "border-slate-300", bg: "bg-slate-50/30", header: "text-slate-800 bg-slate-100", ic: "text-slate-600" },
 };
+
+export function RiepilogoMancanti({ categorie, gruppi }) {
+    const mancanti = categorie.filter((c) => c.obbligatoria && (gruppi[c.key] || []).length === 0);
+    if (mancanti.length === 0) return null;
+    return (
+        <div className="rounded-md border-2 border-rose-300 bg-rose-50 p-3" data-testid="riepilogo-mancanti">
+            <div className="flex items-center gap-2 text-sm font-semibold text-rose-800">
+                <AlertTriangle size={15} />
+                Documenti obbligatori mancanti
+                <span className="ml-1 text-[11px] bg-rose-200 text-rose-800 px-2 py-0.5 rounded-full font-mono" data-testid="riepilogo-mancanti-count">{mancanti.length}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+                {mancanti.map((c) => (
+                    <span key={c.key} className="inline-flex items-center gap-1 text-xs bg-white border border-rose-200 text-rose-700 px-2 py-1 rounded-md"
+                        data-testid={`riepilogo-mancante-${c.key}`}>
+                        <span>{c.icon || "📄"}</span> {c.label}
+                    </span>
+                ))}
+            </div>
+        </div>
+    );
+}
 
 function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle, onDelete, uploading, testid, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
     const c = COL[color];

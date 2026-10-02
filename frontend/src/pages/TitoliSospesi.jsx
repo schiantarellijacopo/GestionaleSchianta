@@ -51,9 +51,20 @@ export default function TitoliSospesi() {
         if (dataAl) list = list.filter((t) => (t.data_copertura || "") <= dataAl);
         const term = q.trim().toLowerCase();
         if (term) {
-            list = list.filter((t) =>
-                (`${t.contraente_nome || ""} ${t.numero_polizza || ""} ${t.collaboratore_nome || ""} ${t.ramo || ""} ${t.targa || ""} ${t.cellulare || ""}`)
-                    .toLowerCase().includes(term));
+            const numTerm = term.replace(/\./g, "").replace(",", ".");
+            const asNum = parseFloat(numTerm);
+            const isNum = /^[0-9.,]+$/.test(term) && !isNaN(asNum);
+            list = list.filter((t) => {
+                const hay = `${t.contraente_nome || ""} ${t.numero_polizza || ""} ${t.collaboratore_nome || ""} ${t.ramo || ""} ${t.targa || ""} ${t.cellulare || ""}`.toLowerCase();
+                if (hay.includes(term)) return true;
+                const imp = t.importo_da_pagare != null ? t.importo_da_pagare : t.importo_lordo;
+                if (imp != null) {
+                    const impIt = Number(imp).toFixed(2).replace(".", ",");
+                    if (String(imp).includes(term) || impIt.includes(term)) return true;
+                    if (isNum && Math.abs(Number(imp) - asNum) < 0.005) return true;
+                }
+                return false;
+            });
         }
         return list;
     }, [items, ggMin, q, dataDal, dataAl]);
@@ -189,7 +200,7 @@ export default function TitoliSospesi() {
                     <Input
                         value={q}
                         onChange={(e) => setQ(e.target.value)}
-                        placeholder="Contraente, n° polizza, ramo, targa, telefono..."
+                        placeholder="Contraente, n° polizza, ramo, targa, telefono, importo..."
                         data-testid="sospesi-search"
                     />
                 </div>

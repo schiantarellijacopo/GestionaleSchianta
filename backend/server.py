@@ -6758,6 +6758,32 @@ async def calcola_provvigione_endpoint(
     return await _calcola_provvigione(premio_lordo, collaboratore_id, compagnia_id, ramo, premio_netto=premio_netto)
 
 
+@api.get("/provvigioni/quota-collaboratore")
+async def quota_collaboratore_endpoint(
+    collaboratore_id: str,
+    provvigione_totale: float = 0,
+    compagnia_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    premio_netto: Optional[float] = None,
+    premio_lordo: Optional[float] = None,
+    user=Depends(current_user),
+):
+    """Quota spettante al SINGOLO collaboratore secondo lo schema provvigionale
+    PIÙ SPECIFICO per (collaboratore + compagnia + ramo). Usa la stessa logica di
+    `_provv_breakdown` (schema sul netto → netto×%, schema a ripartizione → %collab
+    della provvigione totale già presente sul titolo)."""
+    bk = await _provv_breakdown(
+        provvigione_totale, collaboratore_id, compagnia_id, ramo,
+        premio_netto=premio_netto, premio_lordo=premio_lordo,
+    )
+    return {
+        "provvigione_collaboratore": bk["provvigione_collaboratore"],
+        "pct_collab": bk["pct_collab"],
+        "schema_id": bk["schema_id"],
+        "schema_nome": bk["schema_nome"],
+    }
+
+
 @api.post("/provvigioni/riassegna")
 async def riassegna_provvigioni(body: dict, user=Depends(require_user("admin"))):
     """Ricalcola e riassegna le provvigioni sui titoli esistenti usando gli schemi

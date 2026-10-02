@@ -45,6 +45,10 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         return [];
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    // Compagnia/ramo per risolvere lo schema provvigionale CORRETTO (la compagnia
+    // sta sulla POLIZZA, non sul titolo): senza questo la ripartizione usava sempre
+    // il primo schema del collaboratore ignorando la compagnia.
+    const [provvCtx, setProvvCtx] = useState({ compagnia_id: titolo.compagnia_id || null, ramo: titolo.ramo || null });
 
     // Frazionamento polizza → calcolo automatico scadenza da effetto
     const MESI_FRAZ = { annuale: 12, semestrale: 6, quadrimestrale: 4, trimestrale: 3, bimestrale: 2, mensile: 1, unica: 12 };
@@ -81,6 +85,11 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         const haGiaSuoi = Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0;
         if (!titolo.polizza_id) return;
         api.get(`/polizze/${titolo.polizza_id}`).then((r) => {
+            // Compagnia/ramo della polizza → schema provvigionale corretto per compagnia
+            setProvvCtx({
+                compagnia_id: r.data?.compagnia_id || titolo.compagnia_id || null,
+                ramo: titolo.ramo || r.data?.ramo || null,
+            });
             // Frazionamento: calcolo automatico scadenza da effetto
             const fraz = (r.data?.frazionamento || "annuale").toLowerCase();
             setPolFraz(fraz);
@@ -102,7 +111,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                 setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || o.collaboratore_id || "", provvigione: o.provvigione ?? 0 })));
             } else if (r.data?.collaboratore_id && !titolo.collaboratore_id) {
                 const base = titolo.provvigioni ?? r.data?.provvigioni ?? 0;
-                quotaCollaboratore(r.data.collaboratore_id, base).then((q) => {
+                const ctx = { compagnia_id: r.data?.compagnia_id || titolo.compagnia_id || null, ramo: titolo.ramo || r.data?.ramo || null };
+                quotaCollaboratore(r.data.collaboratore_id, base, ctx).then((q) => {
                     setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: (q ?? 0) }]);
                 });
             }
@@ -111,25 +121,24 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     }, [titolo.id]);
 
     const totOperatori = operatori.reduce((s, o) => s + (parseFloat(o.provvigione) || 0), 0);
-    // Quota spettante al collaboratore = totale provvigioni titolo × % collaboratore (dallo schema)
-    const quotaCollaboratore = async (collabId, baseTotale) => {
+    // Quota spettante al collaboratore secondo lo schema PIÙ SPECIFICO per
+    // (collaboratore + compagnia + ramo). Risolto lato server per coerenza con la
+    // ripartizione salvata (evita di usare il primo schema ignorando la compagnia).
+    const quotaCollaboratore = async (collabId, baseTotale, ctx = null) => {
         try {
-            const r = await api.get("/librerie/schema-provvigionale", { params: { collaboratore_id: collabId } });
-            const schemi = r.data || [];
-            const schema = schemi.find((s) => s.attivo !== false) || schemi[0];
-            if (!schema) return null;
-            const pctColl = parseFloat(schema.percentuale_collaboratore) || 0;
-            const pctNet = parseFloat(schema.percentuale_su_premio_netto) || 0;
-            // Schema a % del compenso provvigionale
-            if (pctColl > 0) {
-                return Math.round((parseFloat(baseTotale) || 0) * pctColl / 100 * 100) / 100;
-            }
-            // Schema a % del premio netto (es. BS BROKER: 4,5% del netto)
-            if (pctNet > 0) {
-                const netto = parseFloat(f.importo_netto) || 0;
-                return Math.round(netto * pctNet / 100 * 100) / 100;
-            }
-            return null;
+            const c = ctx || provvCtx;
+            const r = await api.get("/provvigioni/quota-collaboratore", {
+                params: {
+                    collaboratore_id: collabId,
+                    provvigione_totale: parseFloat(baseTotale) || 0,
+                    compagnia_id: c.compagnia_id || undefined,
+                    ramo: c.ramo || undefined,
+                    premio_netto: parseFloat(f.importo_netto) || 0,
+                    premio_lordo: parseFloat(f.importo_lordo) || 0,
+                },
+            });
+            const q = r.data?.provvigione_collaboratore;
+            return (q != null && q > 0) ? q : null;
         } catch { return null; }
     };
     const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
@@ -179,8 +188,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     premio_lordo: f.importo_lordo || 0,
                     premio_netto: f.importo_netto || 0,
                     collaboratore_id: operatori[0]?.operatore_id || f.collaboratore_id || undefined,
-                    compagnia_id: titolo.compagnia_id || undefined,
-                    ramo: titolo.ramo || undefined,
+                    compagnia_id: provvCtx.compagnia_id || undefined,
+                    ramo: provvCtx.ramo || undefined,
                 },
             });
             if (r.data.provvigione_totale > 0) {
