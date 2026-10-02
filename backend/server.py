@@ -8326,6 +8326,25 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     # 6) Chiusura?
     chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
+    chiusa = bool(chiusura and not chiusura.get("riaperta_at"))
+
+    # Giornata CHIUSA → i riepiloghi (KPI, conti, liquidità, saldo cassa compagnie)
+    # sono CONGELATI allo snapshot salvato alla chiusura: le viste di giorni passati
+    # non cambiano più al variare dello stato attuale (sospesi, saldo cassa, ecc.).
+    snap = (chiusura or {}).get("riepilogo") or {}
+    snapshot_applicato = False
+    if chiusa and snap:
+        if snap.get("riepilogo_kpi"):
+            riepilogo_kpi = snap["riepilogo_kpi"]
+        if snap.get("conti_riepilogo"):
+            conti_riepilogo = snap["conti_riepilogo"]
+        if snap.get("totali_giornata"):
+            totali_giornata = snap["totali_giornata"]
+        if snap.get("liquidita"):
+            liquidita_box = snap["liquidita"]
+        if snap.get("saldi_compagnie") is not None:
+            saldi_compagnie = snap["saldi_compagnie"]
+        snapshot_applicato = True
 
     return {
         "data": data_giorno,
@@ -8337,7 +8356,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         "riepilogo_kpi": riepilogo_kpi,
         "liquidita": liquidita_box,
         "chiusura": chiusura,
-        "chiusa": bool(chiusura and not chiusura.get("riaperta_at")),
+        "chiusa": chiusa,
+        "snapshot": snapshot_applicato,
     }
 
 
@@ -8809,6 +8829,8 @@ async def chiudi_giorno(
             "totali_giornata": payload["totali_giornata"],
             "riepilogo_kpi": payload["riepilogo_kpi"],
             "conti_riepilogo": payload["conti_riepilogo"],
+            "liquidita": payload["liquidita"],
+            "saldi_compagnie": payload["saldi_compagnie"],
             "n_movimenti": len(payload["righe"]),
         },
     )
