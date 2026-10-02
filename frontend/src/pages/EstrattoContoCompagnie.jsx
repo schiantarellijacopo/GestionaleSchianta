@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye, Handshake, Search } from "lucide-react";
+import { Coins, FileText, Printer, ArrowLeft, History, ChevronRight, ChevronDown, Paperclip, Eye, Handshake, Search, Save, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
@@ -133,13 +134,20 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const [tab, setTab] = useState("movimenti");
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
-    const [collaboratoreId, setCollaboratoreId] = useState("all");
+    const [collabSel, setCollabSel] = useState(new Set()); // vuoto = Tutti
+    const [showCollab, setShowCollab] = useState(false);
     const [collaboratori, setCollaboratori] = useState([]);
     const [conti, setConti] = useState([]);
     const [data, setData] = useState(null);
     const [selected, setSelected] = useState(new Set());
-    const [payOpen, setPayOpen] = useState(false);
+    const [payCtx, setPayCtx] = useState(null); // {payload, nRighe, totale, bozzaId?}
     const [voceOpen, setVoceOpen] = useState(false);
+    const [bozze, setBozze] = useState([]);
+    const collabKey = Array.from(collabSel).sort().join(",");
+
+    const loadBozze = useCallback(() => {
+        api.get(`/compagnie/${compagnia.id}/distinte-bozze`).then((r) => setBozze(r.data || [])).catch(() => setBozze([]));
+    }, [compagnia.id]);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollaboratori(
@@ -150,11 +158,12 @@ function DettaglioEstratto({ compagnia, onBack }) {
 
     const load = useCallback(() => {
         const params = { dal: dal || undefined, al: al || undefined };
-        if (collaboratoreId !== "all") params.collaboratore_id = collaboratoreId;
+        if (collabKey) params.collaboratore_id = collabKey;
         api.get(`/compagnie/${compagnia.id}/estratto-conto`, { params })
             .then((r) => { setData(r.data); setSelected(new Set()); });
-    }, [compagnia.id, dal, al, collaboratoreId]);
+    }, [compagnia.id, dal, al, collabKey]);
     useEffect(() => { load(); }, [load]);
+    useEffect(() => { loadBozze(); }, [loadBozze]);
 
     const VOCE_TIPI = ["rappel", "ritenuta_compagnia", "pnc", "fattura_partner", "voce_manuale"];
     const rowKey = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione") ? r.titolo_id : r._movimento_id);
@@ -225,6 +234,32 @@ function DettaglioEstratto({ compagnia, onBack }) {
         const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
     });
 
+    const salvaBozza = async () => {
+        const nome = window.prompt("Nome della lista da pagare (bozza):", `Distinta ${new Date().toLocaleDateString("it-IT")}`);
+        if (nome === null) return;
+        try {
+            await api.post(`/compagnie/${compagnia.id}/distinte-bozze`, {
+                nome, ...buildPayload(), collaboratore_ids: Array.from(collabSel),
+            });
+            toast.success("Lista salvata in «Liste da pagare (bozze)»");
+            setSelected(new Set());
+            loadBozze();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio lista"); }
+    };
+    const versaBozza = (b) => {
+        setPayCtx({
+            payload: { titoli_ids: b.titoli_ids || [], voci: b.voci || [] },
+            nRighe: b.n_righe, totale: b.importo, bozzaId: b.id,
+        });
+    };
+    const eliminaBozza = async (b) => {
+        if (!window.confirm(`Eliminare la lista «${b.nome}»?`)) return;
+        try {
+            await api.delete(`/compagnie/${compagnia.id}/distinte-bozze/${b.id}`);
+            loadBozze();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
     const deleteVoce = async (vid) => {
         if (!window.confirm("Rimuovere questa voce manuale?")) return;
         try {
@@ -256,11 +291,11 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                 <Printer size={14} className="mr-1" /> Stampa PDF
                             </Button>
                         </a>
-                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.csv?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collaboratoreId !== "all" ? { collaboratore_id: collaboratoreId } : {}) }).toString()}`}
+                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.csv?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collabKey ? { collaboratore_id: collabKey } : {}) }).toString()}`}
                             target="_blank" rel="noreferrer">
                             <Button variant="outline" data-testid="ec-csv"><FileText size={14} className="mr-1" /> CSV</Button>
                         </a>
-                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.xlsx?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collaboratoreId !== "all" ? { collaboratore_id: collaboratoreId } : {}) }).toString()}`}
+                        <a href={`${API_BASE}/compagnie/${compagnia.id}/estratto-conto/export.xlsx?${new URLSearchParams({ ...(dal ? { dal } : {}), ...(al ? { al } : {}), ...(collabKey ? { collaboratore_id: collabKey } : {}) }).toString()}`}
                             target="_blank" rel="noreferrer">
                             <Button variant="outline" data-testid="ec-xlsx"><Coins size={14} className="mr-1" /> Excel</Button>
                         </a>
@@ -291,15 +326,36 @@ function DettaglioEstratto({ compagnia, onBack }) {
                     </div>
                     <div>
                         <Label>Collaboratore</Label>
-                        <Select value={collaboratoreId} onValueChange={setCollaboratoreId}>
-                            <SelectTrigger className="w-56" data-testid="ec-collab"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Tutti</SelectItem>
-                                {collaboratori.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <div className="relative">
+                            <button type="button" onClick={() => setShowCollab((v) => !v)}
+                                className="w-56 h-9 px-3 rounded-md border border-slate-200 bg-white text-left text-sm flex items-center justify-between"
+                                data-testid="ec-collab">
+                                <span className="truncate">{collabSel.size === 0 ? "Tutti" : `${collabSel.size} selezionati`}</span>
+                                <ChevronDown size={14} className="text-slate-400 shrink-0" />
+                            </button>
+                            {showCollab && (
+                                <>
+                                    <div className="fixed inset-0 z-10" onClick={() => setShowCollab(false)} />
+                                    <div className="absolute z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg py-1" data-testid="ec-collab-menu">
+                                        <button type="button" onClick={() => setCollabSel(new Set())}
+                                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2">
+                                            <input type="checkbox" readOnly checked={collabSel.size === 0} /> Tutti
+                                        </button>
+                                        {collaboratori.map((c) => {
+                                            const on = collabSel.has(c.id);
+                                            return (
+                                                <button key={c.id} type="button"
+                                                    onClick={() => setCollabSel((p) => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n; })}
+                                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2"
+                                                    data-testid={`ec-collab-opt-${c.id}`}>
+                                                    <input type="checkbox" readOnly checked={on} /> <span className="truncate">{c.name || c.email}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                     <Button onClick={load} data-testid="ec-applica">Applica</Button>
                     <div className="relative">
@@ -325,8 +381,12 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                 onClick={stampaSelezionati} data-testid="ec-stampa-selezionati">
                                 <Printer size={13} className="mr-1" />Stampa selezionati
                             </Button>
+                            <Button size="sm" variant="outline" className="border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                                onClick={salvaBozza} data-testid="ec-salva-lista">
+                                <Save size={13} className="mr-1" />Salva lista da pagare
+                            </Button>
                             <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800"
-                                onClick={() => setPayOpen(true)} data-testid="ec-paga-btn">
+                                onClick={() => setPayCtx({ payload: buildPayload(), nRighe: selected.size, totale: importoSel })} data-testid="ec-paga-btn">
                                 <Coins size={13} className="mr-1" />Paga compagnia
                             </Button>
                         </div>
@@ -408,16 +468,50 @@ function DettaglioEstratto({ compagnia, onBack }) {
                 )}
             </div>
 
-            {payOpen && (
+            {bozze.length > 0 && (
+                <Card className="mt-4 border-indigo-200" data-testid="ec-bozze-section">
+                    <div className="px-4 py-3 border-b border-slate-100 bg-indigo-50/60 rounded-t-xl flex items-center gap-2">
+                        <Save size={15} className="text-indigo-700" />
+                        <span className="font-semibold text-sm text-slate-800">Liste da pagare (bozze)</span>
+                        <span className="text-xs text-slate-500">{bozze.length} salvate — nessun movimento registrato finché non confermi il versamento</span>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                        {bozze.map((b) => (
+                            <div key={b.id} className="px-4 py-2.5 flex items-center gap-3" data-testid={`ec-bozza-${b.id}`}>
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-medium text-slate-800 truncate">{b.nome}</div>
+                                    <div className="text-xs text-slate-500">{b.n_righe} voci · {new Date(b.created_at).toLocaleDateString("it-IT")}</div>
+                                </div>
+                                <div className="num text-sm font-semibold text-amber-700 whitespace-nowrap">{fmtEur(b.importo)}</div>
+                                <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800" onClick={() => versaBozza(b)} data-testid={`ec-bozza-versa-${b.id}`}>
+                                    <Coins size={13} className="mr-1" />Versa
+                                </Button>
+                                <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50" onClick={() => eliminaBozza(b)} data-testid={`ec-bozza-del-${b.id}`}>
+                                    <Trash2 size={14} />
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
+
+            {payCtx && (
                 <PagamentoDialog
                     compagnia={compagnia}
-                    payload={buildPayload()}
-                    nRighe={selected.size}
-                    totale={importoSel}
+                    payload={payCtx.payload}
+                    nRighe={payCtx.nRighe}
+                    totale={payCtx.totale}
                     conti={conti}
-                    onClose={(refresh) => {
-                        setPayOpen(false);
-                        if (refresh) load();
+                    onClose={async (refresh) => {
+                        const ctx = payCtx;
+                        setPayCtx(null);
+                        if (refresh) {
+                            if (ctx?.bozzaId) {
+                                try { await api.delete(`/compagnie/${compagnia.id}/distinte-bozze/${ctx.bozzaId}`); } catch { /* ignore */ }
+                                loadBozze();
+                            }
+                            load();
+                        }
                     }}
                 />
             )}

@@ -1330,7 +1330,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 
     pol_flt: dict = {"compagnia_id": compagnia_id}
     if collaboratore_id:
-        pol_flt["collaboratore_id"] = collaboratore_id
+        _cids = [c for c in str(collaboratore_id).split(",") if c and c != "all"]
+        if len(_cids) == 1:
+            pol_flt["collaboratore_id"] = _cids[0]
+        elif len(_cids) > 1:
+            pol_flt["collaboratore_id"] = {"$in": _cids}
     polizze = await db.polizze.find(
         pol_flt,
         {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1, "collaboratore_id": 1},
@@ -1838,6 +1842,65 @@ async def compagnia_rimesse_storico(
         "totale_pagato": totale_pagato,
         "n_rimesse": len(out),
     }
+
+
+@api.get("/compagnie/{cid}/distinte-bozze")
+async def compagnia_distinte_bozze_list(cid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Liste 'da pagare' salvate (bozze di versamento) per una compagnia."""
+    from tenant import tenant_filter
+    flt = {"compagnia_id": cid, **(tenant_filter(user) or {})}
+    items = await db.distinte_bozze.find(flt, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@api.post("/compagnie/{cid}/distinte-bozze", status_code=201)
+async def compagnia_distinta_bozza_crea(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Salva una bozza di distinta/versamento (nessun movimento contabile)."""
+    from tenant import assign_tenant
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    titoli_ids = body.get("titoli_ids") or []
+    voci = body.get("voci") or []
+    if not titoli_ids and not voci:
+        raise HTTPException(400, "Selezionare almeno un titolo o una voce")
+    # Importo indicativo (stesso calcolo dell'estratto conto)
+    ec = await _compagnia_estratto_data(cid, None, None)
+    sel_t = set(titoli_ids)
+    sel_v = {(v.get("tipo"), v.get("id")) for v in voci}
+    _VOCE_TIPI = ("ritenuta_compagnia", "rappel", "pnc", "fattura_partner", "voce_manuale")
+    importo = 0.0
+    for r in ec.get("righe", []):
+        net = float(r.get("dare") or 0) - float(r.get("avere") or 0)
+        if r.get("tipo") in ("incasso", "incasso_direzione") and r.get("titolo_id") in sel_t:
+            importo += net
+        elif r.get("tipo") in _VOCE_TIPI and (r.get("tipo"), r.get("_movimento_id")) in sel_v:
+            importo += net
+    doc = assign_tenant(user, {
+        "id": str(uuid.uuid4()),
+        "compagnia_id": cid,
+        "nome": (body.get("nome") or "").strip() or f"Distinta {_now_iso()[:10]}",
+        "titoli_ids": titoli_ids,
+        "voci": voci,
+        "note": body.get("note"),
+        "collaboratore_ids": body.get("collaboratore_ids") or [],
+        "importo": round(importo, 2),
+        "n_righe": len(titoli_ids) + len(voci),
+        "created_at": _now_iso(),
+        "creato_da": user.get("id"),
+    })
+    await db.distinte_bozze.insert_one(doc)
+    doc.pop("_id", None)
+    return {"ok": True, "distinta": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@api.delete("/compagnie/{cid}/distinte-bozze/{bid}")
+async def compagnia_distinta_bozza_elimina(cid: str, bid: str, user=Depends(require_user("admin", "collaboratore"))):
+    from tenant import tenant_filter
+    res = await db.distinte_bozze.delete_one({"id": bid, "compagnia_id": cid, **(tenant_filter(user) or {})})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Bozza non trovata")
+    return {"ok": True}
 
 
 @api.post("/compagnie/{cid}/paga-titoli")

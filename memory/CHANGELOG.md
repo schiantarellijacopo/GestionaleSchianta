@@ -506,3 +506,8 @@ Admin: `admin@assicura.it / Admin123!`
 
 ## 2026-10-02 (2) — Provvigioni: selezione titoli coperti non incassati
 - Estratto Conto Collaboratori: rimossa la disabilitazione del checkbox sulle righe "coperta · non incassata". Ora sono selezionabili e pagabili (pagamento anticipato), e incluse in "Seleziona tutto da pagare". Il backend paga-provvigioni già gestiva i titoli indipendentemente dall'incasso. Verificato via UI: tutte le righe selezionabili, "Paga selezionati" si incrementa.
+
+## 2026-10-02 (3) — Chat tenant isolation + Liste da pagare compagnia
+- FIX ISOLAMENTO: /chat/utenti ora applica tenant_filter(user) → la chat interna mostra solo utenti dello stesso tenant (prima mostrava utenti di altri tenant). Verificato: jacopo vede 22 utenti, tutti del tenant Schiantarelli.
+- E/C compagnie: filtro Collaboratore ora MULTI-selezione (checkbox + Tutti); _compagnia_estratto_data accetta collaboratore_id come lista CSV ($in).
+- E/C compagnie: "Salva lista da pagare" salva i titoli/voci selezionati come BOZZA di distinta (collezione distinte_bozze, tenant-scoped, nessun movimento). Nuova sezione "Liste da pagare (bozze)" con Versa (apre dialog versamento precompilato → su conferma crea movimento e elimina la bozza) ed Elimina. Endpoint: GET/POST/DELETE /api/compagnie/{cid}/distinte-bozze. Verificato backend (CRUD, importo) e UI.
