@@ -3774,7 +3774,7 @@ async def statistiche_premi_provvigioni(
     years = sorted({int(a) for a in anni.split(",") if a.strip()}, reverse=True)
     if not years:
         raise HTTPException(400, "Specificare almeno un anno")
-    date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
+    date_key = {"incasso": "data_incasso", "rata": "effetto", "copertura": "data_copertura"}.get(data_field, "data_incasso")
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
     rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
@@ -3859,7 +3859,7 @@ async def statistiche_per_operatore(
     years = sorted({int(a) for a in anni.split(",") if a.strip()}, reverse=True)
     if not years:
         raise HTTPException(400, "Specificare almeno un anno")
-    date_key = {"incasso": "data_incasso", "rata": "scadenza", "copertura": "data_copertura"}.get(data_field, "data_incasso")
+    date_key = {"incasso": "data_incasso", "rata": "effetto", "copertura": "data_copertura"}.get(data_field, "data_incasso")
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
     rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
