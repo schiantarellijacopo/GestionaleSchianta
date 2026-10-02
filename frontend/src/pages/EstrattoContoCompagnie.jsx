@@ -434,7 +434,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         {r.tipo === "pagamento" && <span className="badge badge-success">pagamento</span>}
                                         {r.tipo === "rappel" && <span className="badge bg-fuchsia-100 text-fuchsia-700">rappel</span>}
                                         {r.tipo === "ritenuta_compagnia" && <span className="badge bg-rose-100 text-rose-700">ritenuta</span>}
-                                        {r.tipo === "pnc" && <span className="badge bg-violet-100 text-violet-700">PNC{r.tipo_pnc ? ` · ${({rivalsa:"Rivalsa",cassa_agenti:"Cassa Agenti",fondo_pensione:"Fondo Pensione",gruppo_agenti:"Gruppo Agenti"})[r.tipo_pnc] || r.tipo_pnc}` : ""}</span>}
+                                        {r.tipo === "pnc" && <span className="badge bg-violet-100 text-violet-700">PNT{r.tipo_pnc ? ` · ${({rivalsa:"Rivalsa",cassa_agenti:"Cassa Agenti",fondo_pensione:"Fondo Pensione",gruppo_agenti:"Gruppo Agenti"})[r.tipo_pnc] || r.tipo_pnc}` : ""}</span>}
                                         {r.tipo === "fattura_partner" && <span className="badge bg-amber-100 text-amber-700">fattura partner</span>}
                                         {r.tipo === "voce_manuale" && <span className="badge bg-sky-100 text-sky-700">voce manuale</span>}
                                     </td>

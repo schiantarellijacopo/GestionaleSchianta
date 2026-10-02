@@ -87,7 +87,7 @@ const SECTION_LABELS = {
     anagrafiche: "Anagrafiche",
     assicurazione: "Assicurazione",
     contabilita: "Contabilità",
-    partite_pnc: "Partite PNC",
+    partite_pnc: "Partite PNT",
     marketing: "Marketing",
     strumenti: "Strumenti",
     amministrazione: "Amministrazione",

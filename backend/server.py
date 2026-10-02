@@ -1554,7 +1554,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "ramo": None,
                 "dare": imp if imp >= 0 else 0.0,
                 "avere": -imp if imp < 0 else 0.0,
-                "descrizione": f"PNC {tlabel} {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
+                "descrizione": f"PNT {tlabel} {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
                 "_movimento_id": r.get("id"),
                 "is_pnc": True,
                 "tipo_pnc": r.get("tipo"),
@@ -1783,7 +1783,7 @@ async def compagnia_rimesse_storico(
         "ritenuta_compagnia": "ritenute_compagnia", "rappel": "rappel", "pnc": "pnc",
         "fattura_partner": "fatture_agenzia_partner", "voce_manuale": "voci_manuali_compagnia",
     }
-    _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+    _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNT",
                  "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
 
     def _voce_net_descr(tipo, doc):
@@ -1793,7 +1793,7 @@ async def compagnia_rimesse_storico(
         elif tipo == "rappel":
             net = -imp; descr = f"Rappel {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
         elif tipo == "pnc":
-            net = imp; descr = f"PNC {doc.get('tipo') or ''} {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
+            net = imp; descr = f"PNT {doc.get('tipo') or ''} {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
         elif tipo == "fattura_partner":
             net = -imp; descr = f"Fattura partner n. {doc.get('numero_fattura') or '—'}: {doc.get('descrizione') or ''}".strip()
         else:  # voce_manuale
@@ -2397,7 +2397,7 @@ async def stampa_compagnia_titoli_selezionati(
 
     # Voci selezionate (ritenute/rappel/PNC/voci manuali): importo = Dare − Avere dall'E/C
     if body.voci:
-        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNT",
                      "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
         ec = await _compagnia_estratto_data(cid, None, None)
         sel_voci = {(v.get("tipo"), v.get("id")) for v in body.voci}
@@ -2477,7 +2477,7 @@ async def stampa_rimessa_compagnia(
     if voci_ver:
         _COLL_VOCE = {"ritenuta_compagnia": "ritenute_compagnia", "rappel": "rappel", "pnc": "pnc",
                       "fattura_partner": "fatture_agenzia_partner", "voce_manuale": "voci_manuali_compagnia"}
-        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNC",
+        _VOCE_LBL = {"ritenuta_compagnia": "Ritenuta", "rappel": "Rappel", "pnc": "PNT",
                      "fattura_partner": "Fattura partner", "voce_manuale": "Voce manuale"}
         rows.append(["", "", "", "", "", ""])
         rows.append(["ALTRE VOCI", "", "", "", "", ""])
@@ -2494,7 +2494,7 @@ async def stampa_rimessa_compagnia(
             elif v["tipo"] == "rappel":
                 net = -imp; descr = f"Rappel {doc.get('anno') or ''}: {doc.get('descrizione') or ''}".strip()
             elif v["tipo"] == "pnc":
-                net = imp; descr = f"PNC {doc.get('tipo') or ''} {doc.get('anno') or ''}".strip()
+                net = imp; descr = f"PNT {doc.get('tipo') or ''} {doc.get('anno') or ''}".strip()
             elif v["tipo"] == "fattura_partner":
                 net = -imp; descr = f"Fattura partner n. {doc.get('numero_fattura') or '—'}".strip()
             else:

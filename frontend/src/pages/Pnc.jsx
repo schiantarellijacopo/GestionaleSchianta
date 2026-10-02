@@ -1,7 +1,7 @@
 /**
- * PNC — Partite PNC (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti).
+ * PNT — Partite PNT (Rivalsa / Cassa Agenti / Fondo Pensione / Gruppo Agenti).
  * Identica alle Ritenute Compagnia (compagnia + segno + importo + Versa in Prima Nota),
- * con in più la tendina "Tipo PNC".
+ * con in più la tendina "Tipo PNT".
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
@@ -51,8 +51,8 @@ export default function Pnc() {
     const apriEdit = (r) => { setEditing(r); setDialogOpen(true); };
 
     const elimina = async (r) => {
-        if (!window.confirm(`Eliminare la partita PNC di ${fmtEur(r.importo)}?${r.stato === "versata" ? "\n(Verrà rimosso anche il movimento in Prima Nota)" : ""}`)) return;
-        try { await api.delete(`/pnc/${r.id}`); toast.success("PNC eliminata"); load(); }
+        if (!window.confirm(`Eliminare la partita PNT di ${fmtEur(r.importo)}?${r.stato === "versata" ? "\n(Verrà rimosso anche il movimento in Prima Nota)" : ""}`)) return;
+        try { await api.delete(`/pnc/${r.id}`); toast.success("PNT eliminata"); load(); }
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
@@ -76,11 +76,11 @@ export default function Pnc() {
     return (
         <div className="p-6 space-y-5" data-testid="pnc-page">
             <PageHeader
-                title={<span className="flex items-center gap-2"><Landmark className="text-fuchsia-600" size={24} /> Partite PNC</span>}
+                title={<span className="flex items-center gap-2"><Landmark className="text-fuchsia-600" size={24} /> Partite PNT</span>}
                 subtitle="Rivalsa · Cassa Agenti · Fondo Pensione · Gruppo Agenti — come le Ritenute Compagnia, con versamento in Prima Nota"
                 actions={
                     <Button onClick={apriNuovo} className="bg-fuchsia-700 hover:bg-fuchsia-800" data-testid="pnc-new">
-                        <Plus size={16} className="mr-2" /> Nuova PNC
+                        <Plus size={16} className="mr-2" /> Nuova PNT
                     </Button>
                 }
             />
@@ -88,7 +88,7 @@ export default function Pnc() {
             {/* KPI */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <Card className="p-3 border-l-4 border-fuchsia-400 bg-white">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-500">Totale PNC</div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500">Totale PNT</div>
                     <div className="text-2xl font-bold font-mono text-fuchsia-700">{fmtEur(totale)}</div>
                 </Card>
                 <Card className="p-3 border-l-4 border-amber-400 bg-white">
@@ -113,7 +113,7 @@ export default function Pnc() {
                 ))}
             </div>
 
-            {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessuna partita PNC registrata" /> : (
+            {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessuna partita PNT registrata" /> : (
                 <table className="tbl-compact w-full text-xs">
                     <thead>
                         <tr>
@@ -200,7 +200,7 @@ function PncDialog({ item, compagnie, filtroTipo, onClose }) {
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
     const save = async () => {
-        if (!f.tipo) { toast.error("Seleziona il tipo PNC"); return; }
+        if (!f.tipo) { toast.error("Seleziona il tipo PNT"); return; }
         if (!f.compagnia_id) { toast.error("Seleziona la compagnia"); return; }
         if (!f.data) { toast.error("Inserisci la data"); return; }
         const imp = Math.abs(parseFloat(f.importo));
@@ -215,7 +215,7 @@ function PncDialog({ item, compagnie, filtroTipo, onClose }) {
             };
             if (item) await api.put(`/pnc/${item.id}`, body);
             else await api.post("/pnc", body);
-            toast.success(item ? "PNC aggiornata" : "PNC creata"); onClose(true);
+            toast.success(item ? "PNT aggiornata" : "PNT creata"); onClose(true);
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setSaving(false); }
     };
@@ -224,11 +224,11 @@ function PncDialog({ item, compagnie, filtroTipo, onClose }) {
         <Dialog open onOpenChange={(o) => !o && onClose(false)}>
             <DialogContent className="max-w-md" data-testid="pnc-dialog">
                 <DialogHeader>
-                    <DialogTitle>{item ? "Modifica PNC" : "Nuova PNC"}</DialogTitle>
+                    <DialogTitle>{item ? "Modifica PNT" : "Nuova PNT"}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-3 py-2">
                     <div>
-                        <Label>Tipo PNC *</Label>
+                        <Label>Tipo PNT *</Label>
                         <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
                             <SelectTrigger data-testid="pnc-tipo"><SelectValue placeholder="Seleziona tipo" /></SelectTrigger>
                             <SelectContent>
@@ -274,14 +274,14 @@ function PncDialog({ item, compagnie, filtroTipo, onClose }) {
                         <Input value={f.note} onChange={(e) => set("note", e.target.value)} />
                     </div>
                     <div className="text-[11px] text-fuchsia-700 bg-fuchsia-50 border border-fuchsia-200 rounded p-2">
-                        La partita PNC viene registrata come <strong>dare</strong> verso la compagnia
+                        La partita PNT viene registrata come <strong>dare</strong> verso la compagnia
                         (aumenta il saldo da versare). Premi "Versa" per registrare il pagamento in Prima Nota.
                     </div>
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
                     <Button onClick={save} disabled={saving} className="bg-fuchsia-700 hover:bg-fuchsia-800" data-testid="pnc-save">
-                        {saving ? "Salvataggio…" : (item ? "Aggiorna" : "Crea PNC")}
+                        {saving ? "Salvataggio…" : (item ? "Aggiorna" : "Crea PNT")}
                     </Button>
                 </DialogFooter>
             </DialogContent>

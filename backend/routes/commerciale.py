@@ -328,7 +328,7 @@ async def totali_pnc(
 @router.post("/pnc", status_code=201)
 async def create_pnc(body: PncBody, user=Depends(require_user("admin"))) -> dict:
     if body.tipo not in PNC_TIPI:
-        raise HTTPException(400, f"Tipo PNC non valido. Ammessi: {sorted(PNC_TIPI)}")
+        raise HTTPException(400, f"Tipo PNT non valido. Ammessi: {sorted(PNC_TIPI)}")
     if not body.compagnia_id:
         raise HTTPException(400, "Compagnia obbligatoria")
     doc = {"id": str(uuid.uuid4()), **body.model_dump(),
@@ -342,12 +342,12 @@ async def create_pnc(body: PncBody, user=Depends(require_user("admin"))) -> dict
 @router.put("/pnc/{pid}")
 async def update_pnc(pid: str, body: PncBody, user=Depends(require_user("admin"))) -> dict:
     if body.tipo not in PNC_TIPI:
-        raise HTTPException(400, f"Tipo PNC non valido. Ammessi: {sorted(PNC_TIPI)}")
+        raise HTTPException(400, f"Tipo PNT non valido. Ammessi: {sorted(PNC_TIPI)}")
     data = body.model_dump()
     data["updated_at"] = _now_iso()
     res = await db.pnc.update_one({"id": pid}, {"$set": data})
     if res.matched_count == 0:
-        raise HTTPException(404, "PNC non trovata")
+        raise HTTPException(404, "PNT non trovata")
     doc = await db.pnc.find_one({"id": pid}, {"_id": 0})
     return await _enrich_pnc(doc)
 
@@ -356,7 +356,7 @@ async def update_pnc(pid: str, body: PncBody, user=Depends(require_user("admin")
 async def delete_pnc(pid: str, user=Depends(require_user("admin"))) -> dict:
     cur = await db.pnc.find_one({"id": pid}, {"_id": 0, "movimento_id": 1})
     if not cur:
-        raise HTTPException(404, "PNC non trovata")
+        raise HTTPException(404, "PNT non trovata")
     if cur.get("movimento_id"):
         await db.movimenti.delete_one({"id": cur["movimento_id"]})
     await db.pnc.delete_one({"id": pid})
@@ -370,7 +370,7 @@ async def versa_pnc(pid: str, body: dict | None = None,
     lo stato come 'versata'. Come la Ritenuta compagnia: non è cassa reale."""
     r = await db.pnc.find_one({"id": pid}, {"_id": 0})
     if not r:
-        raise HTTPException(404, "PNC non trovata")
+        raise HTTPException(404, "PNT non trovata")
     if r.get("stato") == "versata":
         return await _enrich_pnc(r)
     body = body or {}
@@ -383,7 +383,7 @@ async def versa_pnc(pid: str, body: dict | None = None,
         "categoria": "pnc",
         "data_movimento": data_vers,
         "importo": round(float(r.get("importo") or 0), 2),
-        "descrizione": f"PNC {PNC_TIPO_LABEL.get(r.get('tipo'), r.get('tipo'))} · {comp.get('ragione_sociale','')}: {r.get('descrizione') or ''}".strip(),
+        "descrizione": f"PNT {PNC_TIPO_LABEL.get(r.get('tipo'), r.get('tipo'))} · {comp.get('ragione_sociale','')}: {r.get('descrizione') or ''}".strip(),
         "compagnia_id": r.get("compagnia_id"),
         "pnc_id": pid,
         "tipo_pnc": r.get("tipo"),
@@ -401,7 +401,7 @@ async def versa_pnc(pid: str, body: dict | None = None,
 async def storna_pnc(pid: str, user=Depends(require_user("admin"))) -> dict:
     r = await db.pnc.find_one({"id": pid}, {"_id": 0})
     if not r:
-        raise HTTPException(404, "PNC non trovata")
+        raise HTTPException(404, "PNT non trovata")
     if r.get("movimento_id"):
         await db.movimenti.delete_one({"id": r["movimento_id"]})
     await db.pnc.update_one({"id": pid}, {"$set": {
