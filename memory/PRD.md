@@ -1790,3 +1790,10 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - Frontend passa ramo=comma-list agli endpoint /statistiche/premi-provvigioni e /statistiche/per-operatore.
 - Backend: match ramo reso case-insensitive/trim (rami_norm) in entrambi gli endpoint.
 - Testato: no ramo=1500, RC AUTO=1000, multi=1500, case-insensitive ok; UI dropdown verificata.
+
+## 2026-06 — Card documenti: icona, riordino drag&drop, obbligatorietà
+- Librerie → tab "Visibilità documenti" (VisibilitaDocSezione): per ogni card documento (default + custom) ora si può: scegliere un'ICONA emoji (EmojiPicker: griglia + carattere libero), contrassegnarla OBBLIGATORIA (toggle AlertTriangle), e RIORDINARE le card via drag&drop (framer-motion Reorder.Group/Item + dragControls/GripVertical). Vale per tutte e 3 le sezioni: anagrafica, polizza, sinistro.
+- Backend (server.py): CARD_DEFS arricchito con `icon`; nuovo helper `_build_card_list` (merge default+custom, applica override icon/obbligatoria/ordine, ordina). GET /api/config/card-visibilita ritorna icon/obbligatoria in ordine. PUT /api/config/card-visibilita accetta per entità {key:bool} + chiavi speciali `_meta`:{key:{icon,obbligatoria}} e `_ordine`:[keys] → salva card_meta e card_ordine in azienda_config (tenant-scoped). POST /api/config/card-custom accetta icon+obbligatoria. DELETE pulisce anche meta/ordine.
+- Dettagli: DocumentiSezioneSplit (Polizza/Sinistro, layout quadrotti) ora guidato dalla config per ordine/icona/obbligatorietà; QuadrottoCategoria evidenzia in ROSSO (bordo + banner "Documento obbligatorio mancante", data-testid quadrotto-manca-<key>) le card obbligatorie senza file. AnagraficaDetail DocumentiTab applica config a DOC_TIPI_ANAG (icona/ordine) ed evidenzia red + badge "obbligatorio mancante" (doc-manca-<key>).
+- Fix UX: addCard non ricarica più tutta la cfg (perdita modifiche non salvate) ma fa merge locale del nuovo item dalla risposta POST; delCard rimuove localmente.
+- Testato (iteration_101): tutti i flussi UI OK su admin (polizza) e jacopo@schiantarelli.it (sinistro/anagrafica); icona/obbligatoria/ordine persistono; evidenziazione rossa nei 3 dettagli verificata.

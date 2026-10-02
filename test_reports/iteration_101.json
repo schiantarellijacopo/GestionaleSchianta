@@ -1,0 +1,39 @@
+{
+  "summary": "Verificate end-to-end le 3 nuove funzionalità sulle card documento in Librerie → tab 'Visibilità documenti' (lib-tab-visibilita-doc): (1) scelta icona emoji per card, (2) riordino drag&drop, (3) toggle obbligatoria con evidenziazione rossa nei dettagli. Testato con admin@assicura.it per librerie/polizza detail e con jacopo@schiantarelli.it per sinistro/anagrafica detail (il tenant admin è quasi vuoto: 0 anagrafiche, 1 polizza, 0 sinistri). Tutti i data-testid attesi presenti e flussi funzionanti. Trovato 1 bug UX minore.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Librerie VisibilitaDocSezione (addCard)",
+        "issue": "addCard() chiama load() dopo POST /config/card-custom, ricaricando cfg dal server e sovrascrivendo le modifiche locali NON ancora salvate (riordino drag&drop e toggle obbligatoria/icona). Se l'utente fa reorder + toggle, poi aggiunge una card personalizzata, le modifiche precedenti vengono perse e il successivo 'Salva impostazioni' non le persiste. Riprodotto: toggle obbligatoria su polizza-preventivo + drag sinistro → poi vis-add-polizza → vis-salva → ricarica: toggle e reorder persi; solo la card custom resta.",
+        "selector": "vis-add-<entita> / vis-salva",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/.screenshots/polizza_doc.png",
+    "/app/.screenshots/jacopo_sinistro_doc.png",
+    "/app/.screenshots/jacopo_anagrafica_doc.png"
+  ],
+  "action_items": [
+    "In Librerie.jsx addCard(): dopo api.post /config/card-custom NON chiamare load() (che wipea le modifiche locali); invece fare un merge del nuovo item nella cfg esistente, oppure prima persistere con un salvataggio implicito, oppure mostrare un warning se cfg ha modifiche pendenti.",
+    "(Nota PM) La credenziale admin@assicura.it/Admin123! punta a un tenant 'Schiantarelli (admin)' con dati minimali (1 polizza, 0 sinistri, 0 anagrafiche), non ha realmente i dati reali indicati nel problem statement. Il tenant con dati reali è jacopo@schiantarelli.it. Allineare la documentazione per futuri test."
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx addCard: load() dopo POST sovrascrive stato locale non salvato — bug UX.",
+    "VisibilitaDocCard: ottima gestione drag con dragControls + onPointerDown per non interferire con click/scroll.",
+    "server.py: CARD_DEFS + _build_card_list ben strutturato; contratto _meta+_ordine nella PUT è chiaro.",
+    "Dettagli: DocumentiSezioneSplit espone quadrotto-manca-<key>; AnagraficaDetail espone doc-manca-<key> — selettori consistenti e testabili."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped su richiesta)", "frontend": "~95% (tutti i flussi UI OK, 1 bug UX minore)"},
+  "test_credentials": "admin@assicura.it / Admin123! (tenant admin, 1 polizza TTEST-001). jacopo@schiantarelli.it / NtdZs5ilxTSP (tenant con dati reali: 50+ sinistri, 2580 anagrafiche, 5048 polizze — usato per sinistro/anagrafica detail).",
+  "seed_data_creation": "Nessun seed persistente. Card custom 'TEST_Bonus' su polizza (🛡️, obbligatoria) creata e poi ELIMINATA via UI (vis-del). Toggle obbligatoria temporanei (perizia, passaporto, preventivo) RIPRISTINATI (disattivati) a fine test su entrambi i tenant. Icona sinistro-cid riportata al default 📝. Ordine sinistro ripristinato approssimativamente al default.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Verificato su URL pubblico: Librerie tab visibilita-doc OK; polizza /polizze/TTEST-POL-05ea5b → tab Documenti mostra quadrotto-manca-preventivo + quadrotto-manca-custom_test_bonus con red border; sinistro /sinistri/<uuid> (jacopo) → tab Documenti mostra quadrotto-manca-perizia con banner 'Documento obbligatorio mancante'; anagrafica /anagrafiche/<uuid> (jacopo) → documenti-tab mostra doc-manca-passaporto con badge 'obbligatorio mancante'. EmojiPicker (emoji-picker-trigger/content/opt-<e>/custom-input) funziona. Reorder Reorder.Group + framer-motion funziona e persiste via _ordine nella PUT. Bug UX: addCard() ricarica cfg scartando modifiche locali non salvate.",
+  "rca of the issue": "Librerie.jsx ~L160 addCard: dopo api.post /config/card-custom chiama load() → setCfg(r.data) sovrascrivendo le modifiche locali (reorder/toggle/icon) non ancora inviate con vis-salva. Fix suggerito: sostituire load() con merge locale del nuovo item (es. setCfg(p => ({...p, [entita]: [...(p[entita]||[]), newItemFromResponse]}))) utilizzando i dati di risposta del POST (se il BE li restituisce) oppure costruire l'item lato client con la key appena creata."
+}

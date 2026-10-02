@@ -154,17 +154,25 @@ function VisibilitaDocSezione() {
         const label = (nc.label || "").trim();
         if (!label) return;
         try {
-            await api.post("/config/card-custom", { entita, label, visibile_cliente: false, icon: nc.icon, obbligatoria: nc.obbligatoria });
+            const r = await api.post("/config/card-custom", { entita, label, visibile_cliente: false, icon: nc.icon, obbligatoria: nc.obbligatoria });
+            const card = r.data?.card || {};
+            const item = {
+                key: card.key, label: card.label || label, custom: true,
+                default_visibile: !!card.default, visibile_cliente: !!card.default,
+                icon: card.icon || nc.icon || "🗂️", obbligatoria: !!card.obbligatoria,
+            };
+            // Merge locale per NON perdere eventuali modifiche non ancora salvate
+            // (riordino, icone, obbligatorietà) presenti nello stato corrente.
+            setCfg((p) => ({ ...p, [entita]: [...(p[entita] || []), item] }));
             setNewCard((p) => ({ ...p, [entita]: { label: "", icon: "🗂️", obbligatoria: false } }));
-            toast.success("Card creata — ora è disponibile anche nei dettagli");
-            load();
+            toast.success("Card creata — ricorda di premere «Salva impostazioni» per confermare ordine e opzioni");
         } catch (e) { toast.error(errMsg(e, "Errore creazione card")); }
     };
     const delCard = async (entita, key) => {
         if (!window.confirm("Eliminare questa card personalizzata?")) return;
         try {
             await api.delete(`/config/card-custom/${entita}/${key}`);
-            load();
+            setCfg((p) => ({ ...p, [entita]: (p[entita] || []).filter((c) => c.key !== key) }));
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
