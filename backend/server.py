@@ -1469,6 +1469,16 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 
     righe.sort(key=lambda r: r["data"] or "")
     saldo = totale_dare - totale_avere
+
+    # Una partita (rappel/ritenuta/pnc) incide sul saldo SOLO quando è VERSATA.
+    # Finché è "in arretrato" resta visibile/selezionabile in E/C ma non tocca il saldo:
+    # l'effetto arriva al momento del versamento (movimento di pagamento).
+    def _voce_versata(x):
+        return (bool(x.get("saldata_compagnia"))
+                or x.get("stato") in ("versata", "versato", "incassato", "saldato", "pagato")
+                or bool(x.get("movimento_pagamento_id"))
+                or bool(x.get("movimento_id")))
+
     # ----- Rappel (sovraprovvigioni): accreditate fittiziamente, riducono saldo -----
     rap_flt: dict = {"compagnia_id": compagnia_id, "pregresso": {"$ne": True}}
     if dal or al:
@@ -1480,6 +1490,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     totale_rappel = 0.0
     for r in rappel:
         imp = float(r.get("importo") or 0)
+        vers = _voce_versata(r)
         righe.append({
             "data": r.get("data"),
             "tipo": "rappel",
@@ -1491,10 +1502,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
             "descrizione": f"Rappel {r.get('anno')}: {r.get('descrizione') or ''}".strip(),
             "_movimento_id": r.get("id"),
             "is_rappel": True,
-            "saldata": bool(r.get("saldata_compagnia")),
+            "saldata": vers,
             "movimento_pagamento_id": r.get("movimento_pagamento_id"),
         })
-        totale_rappel += imp
+        if vers:
+            totale_rappel += imp
     totale_avere += totale_rappel
     saldo -= totale_rappel
 
@@ -1511,6 +1523,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         ritenute_c = await db.ritenute_compagnia.find(rit_flt, {"_id": 0}).sort("data", 1).to_list(5000)
         for r in ritenute_c:
             imp = float(r.get("importo") or 0)
+            vers = _voce_versata(r)
             righe.append({
                 "data": r.get("data"),
                 "tipo": "ritenuta_compagnia",
@@ -1523,10 +1536,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "_movimento_id": r.get("id"),
                 "is_ritenuta_compagnia": True,
                 "stato_ritenuta": r.get("stato"),
-                "saldata": bool(r.get("saldata_compagnia")),
+                "saldata": vers,
                 "movimento_pagamento_id": r.get("movimento_pagamento_id"),
             })
-            totale_ritenute_comp += imp
+            if vers:
+                totale_ritenute_comp += imp
         totale_dare += totale_ritenute_comp
         saldo += totale_ritenute_comp
 
@@ -1546,6 +1560,7 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
         for r in pnc_rows:
             imp = float(r.get("importo") or 0)
             tlabel = _PNC_LBL.get(r.get("tipo"), r.get("tipo"))
+            vers = _voce_versata(r)
             righe.append({
                 "data": r.get("data"),
                 "tipo": "pnc",
@@ -1559,10 +1574,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
                 "is_pnc": True,
                 "tipo_pnc": r.get("tipo"),
                 "stato_pnc": r.get("stato"),
-                "saldata": bool(r.get("saldata_compagnia")),
+                "saldata": vers,
                 "movimento_pagamento_id": r.get("movimento_pagamento_id"),
             })
-            totale_pnc += imp
+            if vers:
+                totale_pnc += imp
         if totale_pnc >= 0:
             totale_dare += totale_pnc
         else:
