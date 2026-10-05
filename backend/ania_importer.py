@@ -1105,11 +1105,25 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             # Ricalcoliamo il netto come lordo - imposte per garantire coerenza al display
             # (netto + imposte = lordo). Le imposte sono le "tasse assicurative" del flusso.
             lordo = _parse_float(row.get("lordo_totale", ""))
-            tasse = _parse_float(row.get("tasse_totale") or "")
-            imposte_eff = tasse if tasse > 0 else _parse_float(row.get("imposte", ""))
-            netto_calc = round(lordo - imposte_eff, 2) if lordo > 0 else 0.0
+            # ═══ Tracciato OMNIA rec40 (posizionale, 0-based) ═══
+            #   AU(46)=accessori · AV(47)=Imponibile · AX(49)=SSN · AY(50)=tasse
+            #   BD(55)=provvigione TOTALE di agenzia
+            imponibile = _parse_float(_col_at(row, 47))
+            ssn_eff = _parse_float(_col_at(row, 49))
+            tasse_eff = _parse_float(_col_at(row, 50))
+            provv_agenzia = _parse_float(_col_at(row, 55))
+            # Fallback ai vecchi header se le posizioni non sono valorizzate
+            if tasse_eff <= 0:
+                tasse_eff = _parse_float(row.get("tasse_totale") or row.get("imposte", ""))
+            imposte_eff = tasse_eff
+            if imponibile > 0:
+                netto_calc = imponibile
+            else:
+                netto_calc = round(lordo - imposte_eff - ssn_eff, 2) if lordo > 0 else 0.0
+            if provv_agenzia <= 0:
+                provv_agenzia = _parse_float(row.get("provvigioni_totale", ""))
             # Accessori titolo: rec40 col AU = accessori_totale
-            accessori_titolo = _parse_float(row.get("accessori_totale", ""))
+            accessori_titolo = _parse_float(row.get("accessori_totale", "")) or _parse_float(_col_at(row, 46))
             # 🆕 Collaboratore/operatore del titolo: leggi da rec40 (collaboratore_1)
             # o eredita dalla polizza (fallback).
             _op_codice, coll_id_titolo = await _resolve_operatore_codice(
@@ -1165,8 +1179,9 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 "importo_lordo": lordo,
                 "importo_netto": netto_calc,
                 "imposte": round(imposte_eff, 2),
+                "ssn": round(ssn_eff, 2),
                 "accessori": round(accessori_titolo, 2),
-                "provvigioni": _parse_float(row.get("provvigioni_totale", "")),
+                "provvigioni": round(provv_agenzia, 2),
                 "id_titolo_exp": id_t,
                 "fonte": "import_ania",
                 "updated_at": _now_iso(),
