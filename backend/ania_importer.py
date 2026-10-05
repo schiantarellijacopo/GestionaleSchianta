@@ -750,6 +750,7 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                             import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     rami_cache: Dict[str, str] = {}
+    nome_cache_pol: Dict[str, str] = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec20":
             continue
@@ -826,6 +827,14 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
             )
             if collaboratore_id:
                 data["collaboratore_id"] = collaboratore_id
+                # Provv. COLLABORATORE calcolata con lo SCHEMA (libreria Sistema provvigionale)
+                prov_ops = await _ripartizione_collaboratore(
+                    db, collaboratore_id, round(float(data.get("provvigioni") or 0), 2),
+                    comp_id, data.get("ramo"),
+                    data.get("premio_netto"), data.get("premio_lordo"), nome_cache_pol,
+                )
+                if prov_ops:
+                    data["provvigioni_operatori"] = prov_ops
             await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
             # 🆕 Se l'anagrafica del contraente non ha un collaboratore
             # responsabile, ereditalo dalla polizza appena importata.
@@ -1080,6 +1089,39 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
 
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Helper: ripartizione provvigione collaboratore via libreria "Sistema provvigionale"
+# ---------------------------------------------------------------------------
+async def _ripartizione_collaboratore(db, coll_id, provv_totale, compagnia_id,
+                                      ramo, premio_netto, premio_lordo, nome_cache):
+    """Calcola la quota del collaboratore applicando lo SCHEMA provvigionale della
+    libreria (stessa logica usata dal display) e ritorna la lista
+    `provvigioni_operatori`. Ritorna [] se nessuna quota applicabile."""
+    if not coll_id or provv_totale <= 0:
+        return []
+    try:
+        import server as _srv  # lazy: evita import circolare (server importa ania_importer)
+        bk = await _srv._provv_breakdown(
+            provv_totale, coll_id, compagnia_id, ramo,
+            premio_netto=premio_netto, premio_lordo=premio_lordo,
+        )
+        quota = round(float(bk.get("provvigione_collaboratore") or 0), 2)
+    except Exception:
+        return []
+    if quota <= 0:
+        return []
+    nome = nome_cache.get(coll_id)
+    if nome is None:
+        u = await db.users.find_one(
+            {"id": coll_id}, {"_id": 0, "name": 1, "nome": 1, "cognome": 1}) or {}
+        nome = (u.get("name")
+                or f"{u.get('cognome', '')} {u.get('nome', '')}".strip()
+                or "")
+        nome_cache[coll_id] = nome
+    return [{"operatore_id": coll_id, "operatore_nome": nome, "provvigione": quota}]
+
+
 # Processor: rec40 (titoli)
 # ---------------------------------------------------------------------------
 async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
@@ -1089,6 +1131,8 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                            tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                            import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
     fraz_cache: Dict[str, str] = {}
+    pol_meta_cache: Dict[str, dict] = {}
+    nome_cache: Dict[str, str] = {}
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -1128,6 +1172,12 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                     {"id": pol_id}, {"_id": 0, "collaboratore_id": 1},
                 )
                 coll_id_titolo = (pol_ref or {}).get("collaboratore_id") or None
+            # Meta polizza (compagnia/ramo) per il calcolo provvigionale da libreria
+            if pol_id not in pol_meta_cache:
+                pol_meta_cache[pol_id] = await db.polizze.find_one(
+                    {"id": pol_id}, {"_id": 0, "compagnia_id": 1, "ramo": 1},
+                ) or {}
+            _pmeta = pol_meta_cache[pol_id]
             eff_titolo = _parse_date(row.get("effetto_titolo", "")) or _now_iso()[:10]
             if pol_id not in fraz_cache:
                 _p = await db.polizze.find_one({"id": pol_id}, {"_id": 0, "frazionamento": 1})
@@ -1180,6 +1230,16 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             }
             if coll_id_titolo:
                 data["collaboratore_id"] = coll_id_titolo
+                # ═══ Provv. COLLABORATORE calcolata con lo SCHEMA (libreria Sistema provvigionale) ═══
+                # La provvigione totale (BD) va in `provvigioni` (agenzia); la quota del
+                # collaboratore è derivata dallo schema applicabile e salvata nella ripartizione.
+                prov_ops = await _ripartizione_collaboratore(
+                    db, coll_id_titolo, round(provv_agenzia, 2),
+                    _pmeta.get("compagnia_id"), _pmeta.get("ramo"),
+                    netto_calc, lordo, nome_cache,
+                )
+                if prov_ops:
+                    data["provvigioni_operatori"] = prov_ops
             obj = Titolo(**data)
             await db.titoli.insert_one(obj.model_dump())
             log.titoli_creati += 1

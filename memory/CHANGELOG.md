@@ -8,6 +8,11 @@
 - **Dialog Incasso/Copertura**: rimosso campo "Data Co.Ge." (resta solo "Data Pagamento"); sostituito "Data Contabile" con "Dalle ore" nella sezione Copertura.
 
 
+## 2026-06 — Import Omnia: provvigioni agenzia (BD) + quota collaboratore via schema libreria ✅
+- `ania_importer.py` rec40 (titoli): lettura POSIZIONALE del tracciato OMNIA → AU(46)=accessori, AV(47)=imponibile→importo_netto, AX(49)=SSN→ssn, AY(50)=tasse→imposte, BD(55)=provvigioni_totali→`provvigioni` (agenzia). Lordo calcolato automaticamente = imponibile+tasse+SSN (non più da lordo_totale).
+- Quota COLLABORATORE: in import (rec40 titolo e rec20 polizza), se presente il collaboratore, la quota viene calcolata con lo schema della libreria Sistema Provvigionale (helper `_ripartizione_collaboratore` → `server._provv_breakdown`, lazy import) e salvata in `provvigioni_operatori`. Verificato: MOIOLA 70% su 14,23→9,96; BS BROKER/CATTOLICA 4,5% su netto 217,89→9,81.
+- Nota: l'import salta i record già esistenti (non li modifica). I titoli manuali pregressi (es. TOGNO 6,37) restano invariati.
+
 ## 2026-06 — Incasso multiplo senza sdoppiamento + colonna Data incasso + rimozione Data Co.Ge. ✅
 - **Incasso MULTIPLO unificato (no sdoppiamento)**: `POST /api/titoli/{tid}/incassa` accetta ora il flag body `merge_copertura` (inviato dal dialog bulk in `TitoliSospesi.jsx`). Quando `true` e il titolo è coperto con la riga di copertura su una giornata di Prima Nota ANCORA APERTA, la riga `copertura_titolo` viene eliminata e l'incasso registra una singola riga `incasso_premio` (con provvigioni valorizzate). Risultato: UNA sola riga nel brogliaccio (Totale/Provvigioni/Saldo + Banca, Sospesi=0) invece delle due storiche (copertura_titolo + incasso_coperto). Vale SOLO per l'incasso multiplo; l'incasso singolo resta invariato; coperture su giornate CHIUSE restano a due righe (immutabili). Variabili chiave: `merge_multiplo`, `cop_movs_merge`, `do_merge`, `effective_coperto` in `server.py` ~5553. Testato (iter103, 3/3 PASS).
 - **Colonna "Data incasso"** aggiunta nelle liste: Partite PNT (`Pnc.jsx`, sorgente `data_versamento`), Ritenute Compagnia (`RitenuteCompagnia.jsx`, `data_versamento`), Rappel (`Rappel.jsx`, `data_incasso`).
