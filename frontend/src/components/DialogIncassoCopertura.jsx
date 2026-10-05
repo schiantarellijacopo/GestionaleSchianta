@@ -214,7 +214,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
             if (incasso && !giaIncassato) {
                 const r = await api.post(`/titoli/${titolo.id}/incassa`, {
                     data_incasso: inc.data_incasso,
-                    data_coge: inc.data_coge,
+                    data_coge: inc.data_incasso,
                     data_copertura: (copertura && !giaCoperto) ? dataCopertura : undefined,
                     mezzo_pagamento: inc.mezzo_pagamento,
                     conto_cassa_id: null,
@@ -575,19 +575,11 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                     <tbody>
                                         <tr>
                                             <td className={cellLabel}>Data Pagamento</td>
-                                            <td className={cellValueEdit}>
+                                            <td className={cellValueEdit} colSpan={3}>
                                                 <Input
                                                     type="date" value={inc.data_incasso}
                                                     onChange={(e) => setI("data_incasso", e.target.value)}
                                                     className="bg-white" data-testid="ico-data-incasso"
-                                                />
-                                            </td>
-                                            <td className={cellLabel}>Data Co.Ge.</td>
-                                            <td className={cellValueEdit}>
-                                                <Input
-                                                    type="date" value={inc.data_coge}
-                                                    onChange={(e) => setI("data_coge", e.target.value)}
-                                                    className="bg-white" data-testid="ico-data-coge"
                                                 />
                                             </td>
                                         </tr>

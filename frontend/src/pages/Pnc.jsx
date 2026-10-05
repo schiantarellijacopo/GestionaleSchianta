@@ -132,6 +132,7 @@ export default function Pnc() {
                             <th><SortHeader k="descrizione" sortKey={sortKey} dir={dir} toggle={toggle}>Descrizione</SortHeader></th>
                             <th className="text-right"><SortHeader k="importo" sortKey={sortKey} dir={dir} toggle={toggle}>Importo €</SortHeader></th>
                             <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                            <th><SortHeader k="data_versamento" sortKey={sortKey} dir={dir} toggle={toggle}>Data incasso</SortHeader></th>
                             <th className="w-32"></th>
                         </tr>
                     </thead>
@@ -149,6 +150,7 @@ export default function Pnc() {
                                     <td className="text-slate-600">{r.descrizione || "—"}</td>
                                     <td className="num text-right font-semibold text-fuchsia-700">{(r.importo || 0) < 0 ? "- " : "+ "}{fmtEur(Math.abs(r.importo))}</td>
                                     <td>{versata ? <span className="badge badge-success">versata</span> : <span className="badge badge-warning">da versare</span>}</td>
+                                    <td className="num">{versata ? fmtDate(r.data_versamento) : "—"}</td>
                                     <td className="text-right whitespace-nowrap">
                                         {versata ? (
                                             <button onClick={() => storna(r)}

@@ -5551,6 +5551,28 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     # Titolo già coperto (anticipato dall'agenzia): l'incasso sposta solo da sospeso a banca,
     # senza riregistrare entrate/provvigioni/saldo (già contabilizzati alla copertura).
     is_coperto = bool(titolo.get("titolo_coperto")) and not is_direzione
+    # INCASSO MULTIPLO — niente sdoppiamento: la copertura (entrate/provv/saldo/sospeso) e
+    # l'incasso (banca) confluiscono in UN'UNICA riga. Vale solo se richiesto
+    # (merge_copertura=True, inviato dal dialog bulk) e solo per coperture su giornate
+    # ANCORA APERTE (le chiuse restano invariate -> comportamento storico a due righe).
+    merge_multiplo = bool(body.get("merge_copertura")) and is_coperto
+    cop_movs_merge = []
+    if merge_multiplo:
+        async for _cm in db.movimenti.find(
+            {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
+            {"_id": 0, "id": 1, "data_movimento": 1},
+        ):
+            _ch = await db.chiusure_giorno.find_one(
+                {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
+            if _ch and not _ch.get("riaperta_at"):
+                # giornata chiusa: immutabile -> non si può unificare questa copertura
+                cop_movs_merge = []
+                break
+            cop_movs_merge.append(_cm["id"])
+    do_merge = bool(merge_multiplo and cop_movs_merge)
+    # Per il movimento d'incasso: se unifichiamo, lo trattiamo come incasso premio
+    # normale (entrate+provv+saldo+banca su una riga) invece che "incasso_coperto".
+    effective_coperto = is_coperto and not do_merge
     conto_id = body.get("conto_cassa_id")
     if not conto_id:
         conto_id = await _resolve_conto_cassa(mezzo)
@@ -5631,7 +5653,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     mov_in = MovimentoContabile(
         data_movimento=data_incasso,
         tipo="entrata",
-        categoria="incasso_premio_direzione" if is_direzione else ("incasso_coperto" if is_coperto else "incasso_premio"),
+        categoria="incasso_premio_direzione" if is_direzione else ("incasso_coperto" if effective_coperto else "incasso_premio"),
         # In direzione: importo=LORDO (entrata fittizia). L'esclusione da banche
         # avviene via is_direzione=True nel _compute_brogliaccio.
         importo=importo_incasso_premio,
@@ -5646,7 +5668,7 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         compagnia_id=pol.get("compagnia_id") if pol else None,
         conto_cassa_id=None if is_direzione else conto_id,
         mezzo_pagamento=mezzo,
-        provvigioni=0.0 if is_coperto else titolo.get("provvigioni", 0.0),
+        provvigioni=0.0 if effective_coperto else titolo.get("provvigioni", 0.0),
         quota_sconto=0.0 if is_direzione else sconto_applicato,
         is_direzione=is_direzione,
         note=(
@@ -5669,6 +5691,11 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         if _ch and not _ch.get("riaperta_at"):
             continue
         await db.movimenti.delete_one({"id": _om["id"]})
+
+    # INCASSO MULTIPLO unificato: rimuovi la riga di COPERTURA (solo giornate aperte)
+    # così entrate/provvigioni/saldo + banca compaiono in UN'UNICA riga, con Sospesi azzerati.
+    if do_merge and cop_movs_merge:
+        await db.movimenti.delete_many({"id": {"$in": cop_movs_merge}})
 
     # aggiorna anagrafica con ultimo mezzo di pagamento usato
     if pol and pol.get("contraente_id"):

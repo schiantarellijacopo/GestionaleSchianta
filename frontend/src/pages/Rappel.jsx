@@ -188,6 +188,7 @@ export default function RappelPage() {
                                 <th><SortHeader k="descrizione" sortKey={sortKey} dir={dir} toggle={toggle}>Descrizione</SortHeader></th>
                                 <th className="text-right"><SortHeader k="importo" sortKey={sortKey} dir={dir} toggle={toggle}>Importo €</SortHeader></th>
                                 <th><SortHeader k="stato" sortKey={sortKey} dir={dir} toggle={toggle}>Stato</SortHeader></th>
+                                <th><SortHeader k="data_incasso" sortKey={sortKey} dir={dir} toggle={toggle}>Data incasso</SortHeader></th>
                                 <th className="text-center">Allegati</th>
                                 <th className="text-center">Stampa</th>
                                 <th className="w-32"></th>
@@ -213,6 +214,7 @@ export default function RappelPage() {
                                                 ? <span className="badge badge-success" title={`Incassato il ${fmtDate(r.data_incasso)}`}>incassato</span>
                                                 : <span className="badge badge-warning">da incassare</span>}
                                         </td>
+                                        <td className="num">{incassato ? fmtDate(r.data_incasso) : "—"}</td>
                                         <td className="text-center">
                                             <AllegatiCell
                                                 entita_tipo="rappel"
