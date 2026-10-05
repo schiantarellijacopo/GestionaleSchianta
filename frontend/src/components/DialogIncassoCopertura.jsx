@@ -450,10 +450,10 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
                                                     onChange={(e) => setComunicazioneIncasso(e.target.value)}
                                                     className="bg-white" data-testid="ico-comunicazione-incasso" />
                                             </td>
-                                            <td className={cellLabel}>Data Contabile</td>
+                                            <td className={cellLabel}>Dalle ore</td>
                                             <td className={cellValueEdit}>
-                                                <Input type="date" value={dataContabile}
-                                                    onChange={(e) => setDataContabile(e.target.value)}
+                                                <Input type="time" value={f.ora_effetto}
+                                                    onChange={(e) => set("ora_effetto", e.target.value)}
                                                     className="bg-white" data-testid="ico-data-contabile" />
                                             </td>
                                         </tr>
