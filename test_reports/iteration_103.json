@@ -1,0 +1,31 @@
+{
+  "summary": "Backend testing per iter103: INCASSO MULTIPLO merge, incasso singolo invariato, campi data_versamento/data_incasso. Tutti e 3 i test automatici PASS. Verifica manuale brogliaccio conferma: con merge_copertura=true si ha UNA sola riga 'incasso_premio' (totale=158.50, provv=34.05, saldo=124.45, crediti=0, banca=158.50); senza merge restano le due righe storiche copertura_titolo + incasso_coperto.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter103_incasso_merge.py",
+    "/app/test_reports/pytest/iter103.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Logica merge in /app/backend/server.py (riga 5558-5698) corretta: controlla merge_copertura flag + is_coperto, verifica che le giornate siano aperte (chiusure_giorno con riaperta_at), poi elimina i movimenti copertura_titolo/anticipo con delete_many. Il flag effective_coperto garantisce che la riga di incasso prodotta sia 'incasso_premio' con provvigioni valorizzate invece di 'incasso_coperto' con provvigioni=0.",
+    "Nessun impatto sul flusso storico: se merge_copertura non è passato (default), il comportamento è identico al pre-feature (test_2 lo conferma)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter103_incasso_merge.py (nuovo file)"
+  ],
+  "success_rate": {"backend": "100% (3/3 test)", "frontend": "n/a (skipped per richiesta)"},
+  "test_credentials": "admin@assicura.it / Admin123!",
+  "seed_data_creation": "Creata anagrafica TESTMERGE Iter103 (CF TSTMRG80A01H501Z) + 2 polizze TESTMERGE-<data>-M1/S1 con un titolo ciascuna. Non ripulito automaticamente — i dati rimangono visibili come 'TESTMERGE' per debug. Main agent può eliminarli se necessario.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il test file test_iter103_incasso_merge.py è riutilizzabile come regression. Nota: campi Polizza/Titolo richiedono 'effetto' e 'scadenza' (non data_decorrenza/scadenza). Movimenti si leggono via /api/contabilita/movimenti?titolo_id=... Il flusso merge produce UNA riga incasso_premio sul brogliaccio: colonne totale/provv/saldo valorizzate, crediti=0, banca=importo.",
+  "rca of the issue": "N/A — nessun bug trovato. Feature #1 (merge incasso multiplo) funziona come da specifica utente; feature #2 (data_versamento/data_incasso sui list) verificata presente; feature #3 (rimozione Data Co.Ge.) è solo frontend e già verificata dal main agent."
+}

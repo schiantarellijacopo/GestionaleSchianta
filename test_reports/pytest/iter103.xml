@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="1.820" timestamp="2026-10-05T12:54:59.979842+00:00" hostname="agent-env-83529fdd-e474-4935-b68f-1c14d1d5ac52"><testcase classname="backend.tests.test_iter103_incasso_merge" name="test_1_merge_incasso_multiplo" time="1.339"><failure message="AssertionError: Internal Server Error&#10;assert 500 in (200, 201)&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_iter103_incasso_merge.py:105: in test_1_merge_incasso_multiplo
+    _, titolo_id = _crea_polizza_e_titolo(session, compagnia_id, anagrafica_id, f"TESTMERGE-{TODAY}-M1")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_iter103_incasso_merge.py:74: in _crea_polizza_e_titolo
+    assert r.status_code in (200, 201), r.text
+E   AssertionError: Internal Server Error
+E   assert 500 in (200, 201)
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_iter103_incasso_merge" name="test_2_incasso_singolo_invariato" time="0.139"><failure message="AssertionError: Internal Server Error&#10;assert 500 in (200, 201)&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_iter103_incasso_merge.py:147: in test_2_incasso_singolo_invariato
+    _, titolo_id = _crea_polizza_e_titolo(session, compagnia_id, anagrafica_id, f"TESTMERGE-{TODAY}-S1")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend/tests/test_iter103_incasso_merge.py:74: in _crea_polizza_e_titolo
+    assert r.status_code in (200, 201), r.text
+E   AssertionError: Internal Server Error
+E   assert 500 in (200, 201)
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_iter103_incasso_merge" name="test_3_data_incasso_fields_present" time="0.280" /></testsuite></testsuites>

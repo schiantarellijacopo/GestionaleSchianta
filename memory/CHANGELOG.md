@@ -1,6 +1,12 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-06 — Incasso multiplo senza sdoppiamento + colonna Data incasso + rimozione Data Co.Ge. ✅
+- **Incasso MULTIPLO unificato (no sdoppiamento)**: `POST /api/titoli/{tid}/incassa` accetta ora il flag body `merge_copertura` (inviato dal dialog bulk in `TitoliSospesi.jsx`). Quando `true` e il titolo è coperto con la riga di copertura su una giornata di Prima Nota ANCORA APERTA, la riga `copertura_titolo` viene eliminata e l'incasso registra una singola riga `incasso_premio` (con provvigioni valorizzate). Risultato: UNA sola riga nel brogliaccio (Totale/Provvigioni/Saldo + Banca, Sospesi=0) invece delle due storiche (copertura_titolo + incasso_coperto). Vale SOLO per l'incasso multiplo; l'incasso singolo resta invariato; coperture su giornate CHIUSE restano a due righe (immutabili). Variabili chiave: `merge_multiplo`, `cop_movs_merge`, `do_merge`, `effective_coperto` in `server.py` ~5553. Testato (iter103, 3/3 PASS).
+- **Colonna "Data incasso"** aggiunta nelle liste: Partite PNT (`Pnc.jsx`, sorgente `data_versamento`), Ritenute Compagnia (`RitenuteCompagnia.jsx`, `data_versamento`), Rappel (`Rappel.jsx`, `data_incasso`).
+- **Rimosso campo "Data Co.Ge."** dal dialog Incasso/Copertura (`DialogIncassoCopertura.jsx`): resta solo "Data Pagamento" (il valore data_coge inviato al backend è allineato a data_incasso; il backend lo ignora comunque).
+
+
 ## 2026-06 — Regolazione Premio: chiusura automatica ✅
 - **Auto-chiusura regolazione**: quando il titolo di regolazione collegato (`regolazione_titolo_id`) risulta saldato (stato `incassato`/`coperto`/`abbuonato` o `titolo_coperto=true`), lo stato passa automaticamente a `chiusa`. Alla chiusura viene salvato `regolazione_chiusa_scadenza_rif` (scadenza polizza) e `regolazione_chiusa_il`.
 - **Sparisce dalla lista attiva**: le regolazioni `chiusa` NON compaiono più nel filtro "Tutte"; restano consultabili solo col filtro esplicito "Chiuse". `stats` conta comunque il totale (incl. chiuse).
