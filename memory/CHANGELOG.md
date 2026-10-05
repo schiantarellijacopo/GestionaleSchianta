@@ -1,6 +1,13 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-06 — Fix liquidità (esclusione direzione) + riattivazione polizza + validazione tipo pagamento ✅
+- **Liquidità disponibile/postera coerente**: `_compute_brogliaccio` escludeva i movimenti `is_direzione` (fittizi, conto RID "Pagamento Direzione") dalle colonne banche (`per_conto`) ma li INCLUDEVA nel totale `sum_conti` della liquidità e nell'`imp_precedente` dei conti → scarto pari all'importo in direzione (es. 20,13 €). Aggiunto `is_direzione: {$ne: True}` sia all'aggregato `sum_conti` sia al match `imp_precedente` non-RID. Ora `conti liquidità = somma banche mostrate` e `liquidità disponibile = conti − debito compagnie` senza scarti. (server.py ~8247 e ~8400).
+- **Riattivazione polizza annullata**: coprire o incassare un titolo di una polizza `annullata` la riporta automaticamente ad `attiva` (pulendo data/motivo annullamento). Le polizze `sostituita`/`sospesa` NON vengono toccate. Helper `_riattiva_polizza_se_annullata` richiamato in `incassa_titolo`, `bulk_copertura`, `bulk_incassa`. Testato e8e con revert.
+- **Validazione Tipo pagamento (Incasso/Copertura)**: nel dialog `DialogIncassoCopertura`, con Incasso attivo il tipo di pagamento è ora OBBLIGATORIO. Rimosso il fallback silenzioso a "contanti" (ora default vuoto se non c'è preferenza) + alert "Seleziona il tipo di pagamento" che blocca la registrazione. Testato a video.
+- **Dialog Incasso/Copertura**: rimosso campo "Data Co.Ge." (resta solo "Data Pagamento"); sostituito "Data Contabile" con "Dalle ore" nella sezione Copertura.
+
+
 ## 2026-06 — Incasso multiplo senza sdoppiamento + colonna Data incasso + rimozione Data Co.Ge. ✅
 - **Incasso MULTIPLO unificato (no sdoppiamento)**: `POST /api/titoli/{tid}/incassa` accetta ora il flag body `merge_copertura` (inviato dal dialog bulk in `TitoliSospesi.jsx`). Quando `true` e il titolo è coperto con la riga di copertura su una giornata di Prima Nota ANCORA APERTA, la riga `copertura_titolo` viene eliminata e l'incasso registra una singola riga `incasso_premio` (con provvigioni valorizzate). Risultato: UNA sola riga nel brogliaccio (Totale/Provvigioni/Saldo + Banca, Sospesi=0) invece delle due storiche (copertura_titolo + incasso_coperto). Vale SOLO per l'incasso multiplo; l'incasso singolo resta invariato; coperture su giornate CHIUSE restano a due righe (immutabili). Variabili chiave: `merge_multiplo`, `cop_movs_merge`, `do_merge`, `effective_coperto` in `server.py` ~5553. Testato (iter103, 3/3 PASS).
 - **Colonna "Data incasso"** aggiunta nelle liste: Partite PNT (`Pnc.jsx`, sorgente `data_versamento`), Ritenute Compagnia (`RitenuteCompagnia.jsx`, `data_versamento`), Rappel (`Rappel.jsx`, `data_incasso`).

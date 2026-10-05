@@ -4780,10 +4780,34 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
             provvigioni=titolo.get("provvigioni", 0.0),
         )
         await db.movimenti.insert_one(mov.model_dump())
+        # Incasso su polizza ANNULLATA → riportala 'attiva' (sostituita/sospesa invariate).
+        await _riattiva_polizza_se_annullata(titolo["polizza_id"], user)
         n_incassati += 1
         tot += titolo.get("importo_lordo", 0.0)
     await log_attivita(user, "bulk_incasso", "titolo", None, f"{n_incassati} titoli incassati per €{tot:.2f}")
     return {"incassati": n_incassati, "totale": round(tot, 2)}
+
+
+
+async def _riattiva_polizza_se_annullata(polizza_id: str, user=None):
+    """Se la polizza è ANNULLATA, coprire o incassare un suo titolo la riporta
+    'attiva' (pulendo data/motivo annullamento). Le polizze SOSTITUITA/SOSPESA
+    non vengono toccate.
+    """
+    if not polizza_id:
+        return
+    pol = await db.polizze.find_one({"id": polizza_id}, {"_id": 0, "stato": 1})
+    if not pol or pol.get("stato") != "annullata":
+        return
+    await db.polizze.update_one({"id": polizza_id}, {"$set": {
+        "stato": "attiva",
+        "data_annullamento": None,
+        "motivo_annullamento": None,
+        "updated_at": _now_iso(),
+    }})
+    if user:
+        await log_attivita(user, "riattiva_auto", "polizza", polizza_id,
+                           "Polizza riportata ad 'attiva' da copertura/incasso titolo")
 
 
 
@@ -4895,6 +4919,8 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
     _pol_ids = await db.titoli.distinct("polizza_id", {"id": {"$in": ids}})
     for _pid in _pol_ids:
         await _aggiorna_scadenze_polizza_da_titolo(_pid)
+        # Copertura su polizza ANNULLATA → riportala 'attiva' (sostituita/sospesa invariate).
+        await _riattiva_polizza_se_annullata(_pid, user)
     return {
         "aggiornati": res.modified_count,
         "data_copertura": data_copertura,
@@ -5810,6 +5836,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
                        f"€{importo_pagato:.2f}{extra_label}".strip())
     # Allinea le date della polizza (prossima quietanza, scad. copertura, scad. contratto)
     await _aggiorna_scadenze_polizza_da_titolo(titolo.get("polizza_id"))
+    # Se la polizza era ANNULLATA, l'incasso la riporta 'attiva' (sostituita/sospesa invariate).
+    await _riattiva_polizza_se_annullata(titolo.get("polizza_id"), user)
     # Auto-genera Lettera di Abbuono se è stato applicato uno sconto
     lettera_id = None
     if sconto_applicato > 0:
@@ -8244,7 +8272,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         _is_rid = (c["id"] == rid_conto_id)
         _prev_match = ({"is_direzione": True, "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}}
                        if _is_rid else
-                       {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}})
+                       {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno},
+                        "is_direzione": {"$ne": True}, "pregresso": {"$ne": True}})
         prev = await db.movimenti.aggregate([
             {"$match": _prev_match},
             {"$group": {"_id": None,
@@ -8397,7 +8426,8 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     sum_conti = 0.0
     for c in conti_attivi:
         agg = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno}, "pregresso": {"$ne": True}}},
+            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno},
+                        "is_direzione": {"$ne": True}, "pregresso": {"$ne": True}}},
             {"$group": {"_id": None,
                         "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
                         "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},

@@ -126,7 +126,7 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const defaultMezzoPol = polizzaPreferito
         || pref?.preferenza_pagamento
         || pref?.ultimo_mezzo_pagamento
-        || "contanti";
+        || "";
 
     const [inc, setInc] = useState({
         data_incasso: today,
@@ -159,6 +159,11 @@ export default function DialogIncassoCopertura({ titolo, conti, onClose, onDone 
     const hasEccedenza = eccedenza > 0.005;
 
     const conferma = async () => {
+        // Se si sta incassando, il tipo di pagamento è obbligatorio.
+        if (incasso && !giaIncassato && !inc.mezzo_pagamento) {
+            toast.error("Seleziona il tipo di pagamento");
+            return;
+        }
         try {
             // 1) AGGIORNA DATI BASE (tipo + date + nota) SOLO se effettivamente cambiati.
             //    Evita il blocco "Prima Nota chiusa" quando si vuole solo incassare/coprire
