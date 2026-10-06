@@ -8,6 +8,9 @@
 - **Dialog Incasso/Copertura**: rimosso campo "Data Co.Ge." (resta solo "Data Pagamento"); sostituito "Data Contabile" con "Dalle ore" nella sezione Copertura.
 
 
+## 2026-06 — EC Compagnie: ritenute/rappel/PNT visibili e selezionabili per versamento ✅
+- `EstrattoContoCompagnie.jsx`: le voci rappel/ritenuta_compagnia/pnc ora sono SEMPRE mostrate (prima filtrate con `!r.saldata`). Selezionabili per il versamento finché non hanno un pagamento reale collegato (`!r.movimento_pagamento_id`); quelle già versate dall'EC mostrano badge "versata" e non sono riselezionabili. Lo stato "versata" del modulo Ritenute da solo non le considera più saldate ai fini EC (serve il movimento di pagamento reale).
+
 ## 2026-06 — Import Omnia: provvigioni agenzia (BD) + quota collaboratore via schema libreria ✅
 - `ania_importer.py` rec40 (titoli): lettura POSIZIONALE del tracciato OMNIA → AU(46)=accessori, AV(47)=imponibile→importo_netto, AX(49)=SSN→ssn, AY(50)=tasse→imposte, BD(55)=provvigioni_totali→`provvigioni` (agenzia). Lordo calcolato automaticamente = imponibile+tasse+SSN (non più da lordo_totale).
 - Quota COLLABORATORE: in import (rec40 titolo e rec20 polizza), se presente il collaboratore, la quota viene calcolata con lo schema della libreria Sistema Provvigionale (helper `_ripartizione_collaboratore` → `server._provv_breakdown`, lazy import) e salvata in `provvigioni_operatori`. Verificato: MOIOLA 70% su 14,23→9,96; BS BROKER/CATTOLICA 4,5% su netto 217,89→9,81.

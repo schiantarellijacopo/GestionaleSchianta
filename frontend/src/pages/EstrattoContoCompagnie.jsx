@@ -167,14 +167,14 @@ function DettaglioEstratto({ compagnia, onBack }) {
 
     const VOCE_TIPI = ["rappel", "ritenuta_compagnia", "pnc", "fattura_partner", "voce_manuale"];
     const rowKey = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione") ? r.titolo_id : r._movimento_id);
-    const isSelectable = (r) => (r.tipo === "incasso" || r.tipo === "incasso_direzione" || VOCE_TIPI.includes(r.tipo));
+    const isSelectable = (r) => (((r.tipo === "incasso" || r.tipo === "incasso_direzione") && r.stato_pagamento !== "pagato") || (VOCE_TIPI.includes(r.tipo) && !r.movimento_pagamento_id));
 
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione");
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
     // Voci di rettifica ancora da saldare (le saldate finiscono nello Storico rimesse)
     const altreVoci = (data?.righe || []).filter(
-        (r) => VOCE_TIPI.includes(r.tipo) && !r.saldata,
+        (r) => VOCE_TIPI.includes(r.tipo),
     );
     // Titoli non pagati + voci non saldate + pagamenti nella tab "Movimenti & versamenti".
     // Titoli pagati e voci saldate sono visibili solo nello "Storico rimesse".
@@ -196,7 +196,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
             avere: (r) => Number(r.avere || 0),
         });
     // Righe selezionabili (versabili): titoli da versare + voci da saldare.
-    const righeSelezionabili = [...daVersare, ...altreVoci];
+    const righeSelezionabili = [...daVersare, ...altreVoci.filter((r) => !r.movimento_pagamento_id)];
     const righeSel = righeSelezionabili.filter((r) => selected.has(rowKey(r)));
     const importoSel = righeSel.reduce((s, r) => s + (r.dare || 0) - (r.avere || 0), 0);
 
@@ -437,6 +437,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         {r.tipo === "pnc" && <span className="badge bg-violet-100 text-violet-700">PNT{r.tipo_pnc ? ` · ${({rivalsa:"Rivalsa",cassa_agenti:"Cassa Agenti",fondo_pensione:"Fondo Pensione",gruppo_agenti:"Gruppo Agenti"})[r.tipo_pnc] || r.tipo_pnc}` : ""}</span>}
                                         {r.tipo === "fattura_partner" && <span className="badge bg-amber-100 text-amber-700">fattura partner</span>}
                                         {r.tipo === "voce_manuale" && <span className="badge bg-sky-100 text-sky-700">voce manuale</span>}
+                                        {VOCE_TIPI.includes(r.tipo) && r.movimento_pagamento_id && <span className="badge bg-emerald-100 text-emerald-700 ml-1" data-testid="ec-badge-versata">versata</span>}
                                     </td>
                                     <td className="font-mono text-xs">
                                         {r.polizza || (r.descrizione ? <span className="text-slate-600">{r.descrizione}</span> : "-")}
