@@ -109,6 +109,10 @@ export default function Titoli({ storicoMode = false } = {}) {
         }
     }, [urlPreset]);
     const setF = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
+    // Testo mostrato nella casella di ricerca titolo: disaccoppiato da filters.q così,
+    // dopo una copertura/incasso, possiamo svuotare la casella MANTENENDO i risultati.
+    const [qInput, setQInput] = useState(filters.q || "");
+    const onQChange = (v) => { setQInput(v); setF("q", v); };
 
     const [selected, setSelected] = useState(new Set());
     const [bulkOpen, setBulkOpen] = useState(null); // "incassa" | "copertura"
@@ -395,8 +399,8 @@ export default function Titoli({ storicoMode = false } = {}) {
                         <Input
                             data-testid="titoli-search"
                             placeholder="Cerca per polizza, targa, contraente..."
-                            value={filters.q}
-                            onChange={(e) => setF("q", e.target.value)}
+                            value={qInput}
+                            onChange={(e) => onQChange(e.target.value)}
                             className="pl-9"
                         />
                     </div>
@@ -492,11 +496,11 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <Label className="text-[10px] text-slate-500">Al</Label>
                             <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="f-al" />
                         </div>
-                        <button onClick={() => setFilters({
+                        <button onClick={() => { setQInput(""); setFilters({
                             preset: "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
                             prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
                             conto_cassa_id: "all", dal: "", al: "", data_campo: "scadenza",
-                        })} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
+                        }); }} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
                             <X size={12} /> Azzera filtri
                         </button>
                     </div>
@@ -592,7 +596,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                         <DialogIncassoCopertura
                             titolo={sel[0]}
                             conti={conti}
-                            onClose={() => { setBulkOpen(null); setSelected(new Set()); load(); }}
+                            onClose={() => { setBulkOpen(null); setSelected(new Set()); setQInput(""); load(); }}
                         />
                     );
                 }
@@ -602,7 +606,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                         ids={Array.from(selected)}
                         titoli={sel}
                         conti={conti}
-                        onClose={() => { setBulkOpen(null); load(); }}
+                        onClose={() => { setBulkOpen(null); setQInput(""); load(); }}
                     />
                 );
             })()}
@@ -620,7 +624,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                 <DialogIncassoCopertura
                     titolo={paying}
                     conti={conti}
-                    onClose={() => { setPaying(null); load(); }}
+                    onClose={() => { setPaying(null); setQInput(""); load(); }}
                 />
             )}
         </div>
