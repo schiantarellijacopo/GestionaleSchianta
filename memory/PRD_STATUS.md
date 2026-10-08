@@ -1,5 +1,13 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-08)
 
+## FIX chiusure Prima Nota (2026-10-08) — DA DEPLOYARE
+- Sintomo utente: giornata con tasto verde "Chiudi giornata" (sembra aperta) ma alla chiusura dice "Giornata già chiusa"; manca il tasto "Riapri".
+- Root cause: `_compute_brogliaccio` (server.py ~riga 8587) faceva `db.chiusure_giorno.find_one({"data": data})` SENZA filtro `riaperta_at`. Con record DUPLICATI per lo stesso giorno (una riaperta + una richiusa, es. 2026-09-30 su prod) la find_one poteva restituire quella RIAPERTA → `chiusa=False` → pulsante verde, ma `chiudi_giorno` trovava la chiusura ATTIVA → errore "già chiusa".
+- FIX: ora cerca prima la chiusura ATTIVA `{"data": data, "riaperta_at": None}`, fallback alla riaperta solo per display. Verificato su preview: brogliaccio ritorna `chiusa=True` → compaiono "Invia commercialista" + "Riapri".
+- NB: `shared.giornata_chiusa`, `/giornate-chiuse`, `/giornata-stato` erano già corretti (filtravano riaperta_at=None).
+- RICHIEDE REDEPLOY su whatsapp-crm-146 (l'utente testa in produzione) + hard refresh.
+- Data fix preview: richiuse 11/09, 15/09, 24/09 del tenant c5ae2d0e (prod ha DB separato: lì la correzione è automatica col fix del codice, nessun intervento dati necessario grazie alla query corretta).
+
 ## Completati e in produzione
 - Import Omnia: controllo duplicati anagrafiche anche su Partita IVA.
 - Geocoding Nominatim vincolato all'Italia + fallback a cascata.

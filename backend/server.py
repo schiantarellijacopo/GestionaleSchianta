@@ -8584,7 +8584,15 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     }
 
     # 6) Chiusura?
-    chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
+    # Preferisci la chiusura ATTIVA (riaperta_at == None). Se per la stessa data
+    # esistono record duplicati (es. una riaperta + una richiusa successiva), una
+    # find_one senza filtro potrebbe restituire quella riaperta e segnare la
+    # giornata come "aperta" (pulsante verde) anche se in realtà è chiusa.
+    chiusura = await db.chiusure_giorno.find_one(
+        {"data": data_giorno, "riaperta_at": None}, {"_id": 0}
+    )
+    if not chiusura:
+        chiusura = await db.chiusure_giorno.find_one({"data": data_giorno}, {"_id": 0})
     chiusa = bool(chiusura and not chiusura.get("riaperta_at"))
 
     # Giornata CHIUSA → i riepiloghi (KPI, conti, liquidità, saldo cassa compagnie)
