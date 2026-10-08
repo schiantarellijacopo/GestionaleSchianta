@@ -742,6 +742,14 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
 
     # Tag età automatici (gen_anni_XX / fascia età) da data_nascita
     body["tags"] = _apply_age_tags(body.get("tags"), body.get("data_nascita"))
+    # Ragione sociale obbligatoria: deriva da nome/cognome se mancante, altrimenti
+    # errore CHIARO (400) invece di un 500 di validazione Pydantic.
+    if not (body.get("ragione_sociale") or "").strip():
+        _rs = f"{(body.get('cognome') or '')} {(body.get('nome') or '')}".strip()
+        if _rs:
+            body["ragione_sociale"] = _rs
+        else:
+            raise HTTPException(400, "Ragione sociale (o Nome/Cognome) obbligatoria")
     obj = Anagrafica(**body)
     await db.anagrafiche.insert_one(obj.model_dump())
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")

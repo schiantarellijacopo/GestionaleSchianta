@@ -1364,6 +1364,11 @@ function NuovaAnagraficaDialog({ onClose }) {
         if (isPF && !payload.ragione_sociale) {
             payload.ragione_sociale = `${form.cognome || ""} ${form.nome || ""}`.trim();
         }
+        // Guardia finale: mai inviare senza ragione sociale (evita 500 lato server)
+        if (!(payload.ragione_sociale || "").trim()) {
+            toast.error("Inserisci la ragione sociale (o Nome/Cognome)");
+            return;
+        }
         // attacca note dalla visura (forma giuridica, REA, capitale, oggetto sociale)
         if (_dati_extra_visura) {
             const extra = Object.entries(_dati_extra_visura).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" · ");
