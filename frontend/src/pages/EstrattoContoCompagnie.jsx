@@ -801,25 +801,33 @@ function PagamentoDialog({ compagnia, payload, nRighe, totale, conti, onClose })
     const [mezzo, setMezzo] = useState("");
     const [saving, setSaving] = useState(false);
     const totaleRound = Math.round((totale || 0) * 100) / 100;
+    // Il pagamento parziale ha senso solo se c'è un importo POSITIVO da versare.
+    // Se il totale è <= 0 (es. solo un rappel/credito: la compagnia versa a noi)
+    // non si applica la logica parziale e la conferma è sempre abilitata.
+    const canPartial = totaleRound > 0;
     const [importoStr, setImportoStr] = useState(totaleRound.toFixed(2));
     const importoNum = Number((importoStr || "").toString().replace(",", "."));
-    const importoValido = Number.isFinite(importoNum) && importoNum > 0 && importoNum <= totaleRound + 0.005;
-    const residuo = importoValido ? Math.round((totaleRound - importoNum) * 100) / 100 : 0;
-    const isParziale = totaleRound > 0 && importoValido && residuo > 0.005;
+    const importoValido = !canPartial
+        ? true
+        : (Number.isFinite(importoNum) && importoNum > 0 && importoNum <= totaleRound + 0.005);
+    const residuo = (canPartial && importoValido) ? Math.round((totaleRound - importoNum) * 100) / 100 : 0;
+    const isParziale = canPartial && importoValido && residuo > 0.005;
 
     const conferma = async () => {
         if (!importoValido) { alert("Importo da versare non valido"); return; }
         setSaving(true);
         try {
-            await api.post(`/compagnie/${compagnia.id}/paga-titoli`, {
+            const body = {
                 titoli_ids: payload.titoli_ids,
                 voci: payload.voci,
                 residui: payload.residui || [],
                 mezzo_pagamento: mezzo,
                 data_movimento: data,
                 descrizione: descr,
-                importo_versato: Math.round(importoNum * 100) / 100,
-            });
+            };
+            // Invia importo_versato solo per pagamenti parziali su totali positivi.
+            if (canPartial) body.importo_versato = Math.round(importoNum * 100) / 100;
+            await api.post(`/compagnie/${compagnia.id}/paga-titoli`, body);
             onClose(true);
         } catch (e) {
             alert(e.response?.data?.detail || "Errore");
