@@ -541,3 +541,7 @@ Admin: `admin@assicura.it / Admin123!`
 
 ## 2026-10-08
 - Import Omnia (rec10): aggiunta Partita IVA al controllo duplicati anagrafiche. Se P.IVA o Codice Fiscale esistono gia, aggiorna il record esistente invece di creare un doppione (merge-protection su email/PEC/telefono/cellulare/collaboratore gia attiva).
+
+## 2026-10-08 - Geocoding Nominatim fix
+- `geocoder.geocoda_indirizzo`: ricerca ora vincolata all Italia (countrycodes=it, accept-language=it) con strategia a cascata (indirizzo completo -> senza civico -> solo comune). Risolve il bug delle coordinate errate (es. Aprica/SO finiva in Sardegna). Verificato con Aprica, Sondrio, Milano.
+- Creazione anagrafica azienda: flusso verificato OK nel preview (modale duplicato + sovrascrivi, nessun errore). Errore in produzione dovuto a codice non ancora ridistribuito.
