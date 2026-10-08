@@ -1168,6 +1168,24 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     voci_ids = body.get("voci_manuali_ids") or []
     if not titoli_ids and not voci_ids:
         raise HTTPException(400, "Seleziona almeno un titolo o una voce manuale")
+    # Idempotenza: rifiuta titoli/voci già inclusi in un pagamento esistente
+    # (protegge dal doppio pagamento, es. liste salvate ripagate o doppio click).
+    _prev_pag = await db.pagamenti_provvigioni.find(
+        {"collaboratore_id": cid}, {"_id": 0, "titoli_ids": 1, "voci_manuali_ids": 1}
+    ).to_list(2000)
+    _paid_tit: set = set()
+    _paid_voci: set = set()
+    for _p in _prev_pag:
+        _paid_tit.update(_p.get("titoli_ids") or [])
+        _paid_voci.update(_p.get("voci_manuali_ids") or [])
+    _dup_tit = [t for t in titoli_ids if t in _paid_tit]
+    _dup_voci = [v for v in voci_ids if v in _paid_voci]
+    if _dup_tit or _dup_voci:
+        raise HTTPException(
+            400,
+            f"Alcune voci risultano già pagate ({len(_dup_tit)} titoli, "
+            f"{len(_dup_voci)} voci manuali). Ricarica la pagina e riprova.",
+        )
     conto_id = body.get("conto_cassa_id")
     mezzo_pag = body.get("mezzo_pagamento", "bonifico")
     if not conto_id:

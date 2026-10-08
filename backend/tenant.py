@@ -108,6 +108,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "voci_manuali_compagnia",
     "residui_compagnia",
     "voci_ricorsive_collab",
+    "provvigioni_bozze",
     "chiusure_giorno",
     "email_inbox",
     "email_messaggi",

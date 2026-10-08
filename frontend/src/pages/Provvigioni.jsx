@@ -109,7 +109,15 @@ export default function Provvigioni() {
         try { await api.delete(`/collaboratori/${sel.id}/liste-bozze/${bid}`); toast.success("Lista eliminata"); load(); }
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
-    const pagaLista = (b) => setPayBozza(b);
+    const pagaLista = (b) => {
+        const validTit = (b.titoli_ids || []).filter((id) => (data?.righe || []).some((r) => r.titolo_id === id && !r.gia_pagato));
+        const validVoci = (b.voci_ids || []).filter((id) => (data?.voci_manuali || []).some((v) => v.id === id && !v.pagata));
+        if (validTit.length === 0 && validVoci.length === 0) {
+            toast.error("Tutte le voci di questa lista risultano già pagate");
+            return;
+        }
+        setPayBozza(b);
+    };
 
     const rimuoviVoce = async (vid) => {
         if (!window.confirm("Rimuovere questa voce manuale?")) return;
@@ -416,18 +424,22 @@ export default function Provvigioni() {
                 />
             )}
 
-            {payBozza && sel && data && (
-                <PagaDialog
-                    collab={sel}
-                    titoli_ids={(payBozza.titoli_ids || [])}
-                    voci_ids={(payBozza.voci_ids || [])}
-                    rows={(data.righe || []).filter((r) => (payBozza.titoli_ids || []).includes(r.titolo_id))}
-                    voci_sel={(data.voci_manuali || []).filter((v) => (payBozza.voci_ids || []).includes(v.id))}
-                    conti={conti}
-                    bozzaId={payBozza.id}
-                    onClose={() => { setPayBozza(null); setStoricoKey((k) => k + 1); load(); }}
-                />
-            )}
+            {payBozza && sel && data && (() => {
+                const validTitIds = (payBozza.titoli_ids || []).filter((id) => (data.righe || []).some((r) => r.titolo_id === id && !r.gia_pagato));
+                const validVociIds = (payBozza.voci_ids || []).filter((id) => (data.voci_manuali || []).some((v) => v.id === id && !v.pagata));
+                return (
+                    <PagaDialog
+                        collab={sel}
+                        titoli_ids={validTitIds}
+                        voci_ids={validVociIds}
+                        rows={(data.righe || []).filter((r) => validTitIds.includes(r.titolo_id))}
+                        voci_sel={(data.voci_manuali || []).filter((v) => validVociIds.includes(v.id))}
+                        conti={conti}
+                        bozzaId={payBozza.id}
+                        onClose={() => { setPayBozza(null); setStoricoKey((k) => k + 1); load(); }}
+                    />
+                );
+            })()}
         </div>
     );
 }
@@ -533,11 +545,14 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
     const [data_pag, setDataPag] = useState(today);
     const [mezzo, setMezzo] = useState("bonifico");
     const [note, setNote] = useState("");
+    const [saving, setSaving] = useState(false);
 
     const rit = Math.round((lordo + totVoci) * (parseFloat(percRit) || 0)) / 100;
     const netto = lordo - rit - parseFloat(contr || 0) + totVoci;
 
     const submit = async () => {
+        if (saving) return;
+        setSaving(true);
         try {
             const r = await api.post(`/collaboratori/${collab.id}/paga-provvigioni`, {
                 titoli_ids, voci_manuali_ids: voci_ids,
@@ -551,7 +566,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                 try { await api.delete(`/collaboratori/${collab.id}/liste-bozze/${bozzaId}`); } catch { /* lista già rimossa */ }
             }
             onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); setSaving(false); }
     };
 
     return (
@@ -623,8 +638,8 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <Button onClick={submit} className="bg-emerald-600 hover:bg-emerald-700" data-testid="pay-confirm">
-                        Registra pagamento
+                    <Button onClick={submit} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700" data-testid="pay-confirm">
+                        {saving ? "Registrazione…" : "Registra pagamento"}
                     </Button>
                 </DialogFooter>
             </DialogContent>

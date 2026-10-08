@@ -6,6 +6,7 @@ Tre richieste utente, tutte implementate e testate (testing agent 100%):
 2. **Paga lista salvata**: nella card "Liste salvate da pagare" ogni bozza ha ora un pulsante verde **Paga** (oltre a Carica/elimina). Apre il PagaDialog precompilato coi titoli/voci della lista; a pagamento riuscito la bozza viene **eliminata** automaticamente (Provvigioni.jsx `pagaLista`/`payBozza`/PagaDialog `bozzaId`).
 3. **Nascondi righe in bozza**: salvando una lista, i titoli/voci che ne fanno parte spariscono dalle tabelle "Provvigioni maturate" e "Voci manuali" (flag `in_bozza`/`bozza_id` aggiunti da `estratto_provvigioni` in server.py; frontend filtra `!r.in_bozza`/`!v.in_bozza`). Eliminando la lista ricompaiono.
 - Extra: lo Storico pagamenti ora si aggiorna subito dopo "Paga lista" (prop `refreshKey`).
+- HARDENING post code-review: (a) `paga_provvigioni` ora rifiuta titoli/voci già pagati (HTTPException 400) → niente doppi pagamenti; (b) il "Paga lista" passa SOLO i titoli/voci validi e non pagati (anteprima == importo addebitato anche con filtro date attivo); (c) `provvigioni_bozze` aggiunta a TENANT_SCOPED_COLLECTIONS (isolamento multi-tenant); (d) bottone "Registra pagamento" con guardia anti doppio-click. Tutto verificato via API.
 - Credenziali test preview: qa.tester@schiantarelli.it / QaTest123! (tenant c5ae2d0e, dati reali collaboratori).
 - RICHIEDE REDEPLOY su whatsapp-crm-146 + hard refresh.
 
