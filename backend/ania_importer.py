@@ -496,7 +496,14 @@ async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
             existing = await db.anagrafiche.find_one({"$or": query})
 
             if existing:
-                await db.anagrafiche.update_one({"id": existing["id"]}, {"$set": data})
+                # Import OMNIA: NON sovrascrivere contatti e collaboratore già presenti
+                # (email, PEC, telefono, cellulare, collaboratore). Vengono inseriti solo se mancanti.
+                upd = dict(data)
+                for _k in ("email", "pec", "telefono", "cellulare", "telefono2", "collaboratore_id"):
+                    _ev = existing.get(_k)
+                    if (_ev.strip() if isinstance(_ev, str) else _ev):
+                        upd.pop(_k, None)
+                await db.anagrafiche.update_one({"id": existing["id"]}, {"$set": upd})
                 ana_id_map[id_exp] = existing["id"]
                 log.anagrafiche_aggiornate += 1
             else:
