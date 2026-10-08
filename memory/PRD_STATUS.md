@@ -1,6 +1,15 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-08)
 
-## FIX chiusure Prima Nota (2026-10-08) — DA DEPLOYARE
+## Estratto conto collaboratori + Brogliaccio (2026-10-08) — DA DEPLOYARE
+Tre richieste utente, tutte implementate e testate (testing agent 100%):
+1. **Brogliaccio pagamento provvigioni**: la riga "Pagamento provvigioni a ..." ora valorizza SOLO colonne SPESE e BANCA (uscita); colonna RITENUTA VUOTA. Fix in `_compute_brogliaccio` ramo `cat=="provvigioni"` uscita: `c_ritenuta=0.0`, `c_spese=importo` (server.py ~8282). La banca si valorizza via per_conto (conto risolto da tipo pagamento).
+2. **Paga lista salvata**: nella card "Liste salvate da pagare" ogni bozza ha ora un pulsante verde **Paga** (oltre a Carica/elimina). Apre il PagaDialog precompilato coi titoli/voci della lista; a pagamento riuscito la bozza viene **eliminata** automaticamente (Provvigioni.jsx `pagaLista`/`payBozza`/PagaDialog `bozzaId`).
+3. **Nascondi righe in bozza**: salvando una lista, i titoli/voci che ne fanno parte spariscono dalle tabelle "Provvigioni maturate" e "Voci manuali" (flag `in_bozza`/`bozza_id` aggiunti da `estratto_provvigioni` in server.py; frontend filtra `!r.in_bozza`/`!v.in_bozza`). Eliminando la lista ricompaiono.
+- Extra: lo Storico pagamenti ora si aggiorna subito dopo "Paga lista" (prop `refreshKey`).
+- Credenziali test preview: qa.tester@schiantarelli.it / QaTest123! (tenant c5ae2d0e, dati reali collaboratori).
+- RICHIEDE REDEPLOY su whatsapp-crm-146 + hard refresh.
+
+## FIX chiusure Prima Nota (2026-10-08) — DEPLOY IN CORSO
 - Sintomo utente: giornata con tasto verde "Chiudi giornata" (sembra aperta) ma alla chiusura dice "Giornata già chiusa"; manca il tasto "Riapri".
 - Root cause: `_compute_brogliaccio` (server.py ~riga 8587) faceva `db.chiusure_giorno.find_one({"data": data})` SENZA filtro `riaperta_at`. Con record DUPLICATI per lo stesso giorno (una riaperta + una richiusa, es. 2026-09-30 su prod) la find_one poteva restituire quella RIAPERTA → `chiusa=False` → pulsante verde, ma `chiudi_giorno` trovava la chiusura ATTIVA → errore "già chiusa".
 - FIX: ora cerca prima la chiusura ATTIVA `{"data": data, "riaperta_at": None}`, fallback alla riaperta solo per display. Verificato su preview: brogliaccio ritorna `chiusa=True` → compaiono "Invia commercialista" + "Riapri".

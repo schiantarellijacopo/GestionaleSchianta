@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend-only testing of /provvigioni list-save/pay flow and /contabilita brogliaccio for Axicura/Schiantarelli CRM. All 5 flows passed: (1) salva lista hides selected titoli, (2) card 'Liste salvate da pagare' shows new bozza with Paga/Carica/elimina controls, (3) paga lista opens pre-populated dialog, payment registered with auto-saved ritenuta, bozza deleted after payment, (4) brogliaccio row for 'Pagamento provvigioni' shows RITENUTA column EMPTY, SPESE=49,98€, banca CREDIT AGRICOLE=-49,98€ as required, (5) elimina bozza restores titoli to main table.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Storico pagamenti after paga lista", "issue": "Immediately after 'Registra pagamento' the Storico pagamenti card shows '0 pagamenti registrati / Nessun pagamento' until the collaboratore is reselected/refreshed. Data persists correctly (verified via brogliaccio), so it is a client-side refresh issue only.", "affected_selectors": ["Storico pagamenti card"]}
+    ],
+    "design_issues": [
+      {"screen": "PagaDialog", "issues": ["Console warning: 'Missing Description or aria-describedby for DialogContent' - add DialogDescription for a11y compliance."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: refresh/refetch Storico pagamenti list in the Provvigioni page immediately after a payment is registered via 'Paga lista' (currently the Storico stays empty until a re-selection of the collaboratore).",
+    "Optional a11y: add DialogDescription or aria-describedby to the Paga collaboratore DialogContent to remove Radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "Backend logic (verified via brogliaccio UI output): _compute_brogliaccio correctly maps provvigioni-uscita with c_ritenuta=0 and c_spese=importo; banca uscita is correctly resolved from tipo_pagamento. No regression observed.",
+    "Frontend: Provvigioni.jsx correctly filters out r.in_bozza / v.in_bozza entries from the main tables and renders the Liste salvate card with paga/carica/elimina controls."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100%"},
+  "test_credentials": "qa.tester@schiantarelli.it / QaTest123!",
+  "seed_data_creation": "Created a TEST_LISTA_<ts> bozza (consumed by payment, then deleted) and a TEST_DEL_LIST bozza (deleted during elimina test). No residual test data remains in liste salvate.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 3 user-requested behaviors (ritenuta vuota nel brogliaccio, paga lista salvata, titoli nascosti durante bozza) sono funzionanti end-to-end. Collaboratore di test con molti titoli: 'BS BROKER SAS DI VANOLI LUCIA E C.' su tenant c5ae2d0e-... Login QA tester attivo.",
+  "rca of the issue": "n/a - no blocking issues"
+}

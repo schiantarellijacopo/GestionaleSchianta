@@ -31,6 +31,7 @@ export default function Provvigioni() {
     const [base, setBase] = useState("incasso");
     const [bozze, setBozze] = useState([]);
     const [payBozza, setPayBozza] = useState(null);
+    const [storicoKey, setStoricoKey] = useState(0);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
@@ -390,7 +391,7 @@ export default function Provvigioni() {
                             </Card>
 
                             {/* Storico pagamenti */}
-                            <StoricoPagamentiCollab collab={sel} />
+                            <StoricoPagamentiCollab collab={sel} refreshKey={storicoKey} />
                         </>
                     )}
                 </div>
@@ -411,7 +412,7 @@ export default function Provvigioni() {
                     rows={data.righe.filter((r) => selectedTitoli.has(r.titolo_id))}
                     voci_sel={(data.voci_manuali || []).filter((v) => selectedVoci.has(v.id))}
                     conti={conti}
-                    onClose={() => { setPayOpen(false); setSelectedTitoli(new Set()); setSelectedVoci(new Set()); load(); }}
+                    onClose={() => { setPayOpen(false); setSelectedTitoli(new Set()); setSelectedVoci(new Set()); setStoricoKey((k) => k + 1); load(); }}
                 />
             )}
 
@@ -424,7 +425,7 @@ export default function Provvigioni() {
                     voci_sel={(data.voci_manuali || []).filter((v) => (payBozza.voci_ids || []).includes(v.id))}
                     conti={conti}
                     bozzaId={payBozza.id}
-                    onClose={() => { setPayBozza(null); load(); }}
+                    onClose={() => { setPayBozza(null); setStoricoKey((k) => k + 1); load(); }}
                 />
             )}
         </div>
@@ -632,7 +633,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
 }
 
 
-function StoricoPagamentiCollab({ collab }) {
+function StoricoPagamentiCollab({ collab, refreshKey }) {
     const [items, setItems] = useState(null);
     const [expanded, setExpanded] = useState({});
     const [details, setDetails] = useState({});
@@ -644,7 +645,7 @@ function StoricoPagamentiCollab({ collab }) {
         setItems(null); setExpanded({}); setDetails({});
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [collab.id]);
+    }, [collab.id, refreshKey]);
 
     const toggle = async (pid) => {
         const isOpen = !!expanded[pid];
