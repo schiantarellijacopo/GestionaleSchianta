@@ -489,10 +489,13 @@ async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
             data["ragione_sociale"] = data["ragione_sociale"] or f"Anagrafica {id_exp}"
             data["id_anagrafica_exp"] = id_exp
             cf = data["codice_fiscale"]
+            piva = (data.get("partita_iva") or "").strip() or None
 
             query = [{"id_anagrafica_exp": id_exp}]
             if cf:
                 query.append({"codice_fiscale": cf})
+            if piva:
+                query.append({"partita_iva": piva})
             existing = await db.anagrafiche.find_one({"$or": query})
 
             if existing:

@@ -538,3 +538,6 @@ Admin: `admin@assicura.it / Admin123!`
 - Backend: card custom salvate in azienda_config.card_custom[entita]. GET /config/card-visibilita ora include le custom (flag custom, default_visibile). PUT accetta anche le chiavi custom. Nuovi endpoint POST /config/card-custom (slug auto custom_*) e DELETE /config/card-custom/{entita}/{key}.
 - Consumo: DocumentiSezioneSplit.jsx fa merge delle card custom (dalla config) con quelle passate dal dettaglio, così compaiono automaticamente come riquadri/upload in Polizze, Anagrafiche e Sinistri.
 - Verificato: CRUD via curl (crea/lista/delete) e UI (creazione in Librerie, badge custom, eliminazione).
+
+## 2026-10-08
+- Import Omnia (rec10): aggiunta Partita IVA al controllo duplicati anagrafiche. Se P.IVA o Codice Fiscale esistono gia, aggiorna il record esistente invece di creare un doppione (merge-protection su email/PEC/telefono/cellulare/collaboratore gia attiva).
