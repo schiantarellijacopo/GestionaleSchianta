@@ -182,14 +182,14 @@ function DettaglioEstratto({ compagnia, onBack }) {
         ? bozzaTitoliIds.has(r.titolo_id)
         : bozzaVoci.has(`${r.tipo}:${r._movimento_id}`));
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato" && !inBozza(r));
-    const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
-    // Voci di rettifica ancora da saldare (le saldate finiscono nello Storico rimesse)
+    // Voci ancora DA VERSARE. Quelle già versate in un estratto conto precedente
+    // (movimento_pagamento_id presente) NON si mostrano qui: stanno solo nello Storico.
     const altreVoci = (data?.righe || []).filter(
-        (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r),
+        (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r) && !r.movimento_pagamento_id,
     );
-    // Titoli non pagati + voci non saldate + pagamenti nella tab "Movimenti & versamenti".
-    // Titoli pagati e voci saldate sono visibili solo nello "Storico rimesse".
-    const righeAttive = [...daVersare, ...pagamenti, ...altreVoci].sort(
+    // Tab "Movimenti & versamenti": SOLO ciò che è ancora da versare (fleggabile).
+    // Titoli pagati, voci già versate e i versamenti effettuati sono nello "Storico rimesse".
+    const righeAttive = [...daVersare, ...altreVoci].sort(
         (a, b) => (a.data || "").localeCompare(b.data || ""),
     );
     const [ecSearch, setEcSearch] = useState("");
