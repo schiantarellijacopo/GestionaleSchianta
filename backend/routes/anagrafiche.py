@@ -751,7 +751,11 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
         else:
             raise HTTPException(400, "Ragione sociale (o Nome/Cognome) obbligatoria")
     obj = Anagrafica(**body)
-    await db.anagrafiche.insert_one(obj.model_dump())
+    from pymongo.errors import DuplicateKeyError
+    try:
+        await db.anagrafiche.insert_one(obj.model_dump())
+    except DuplicateKeyError:
+        raise HTTPException(400, "Esiste già un'anagrafica con questa Partita IVA o Codice Fiscale")
     await log_attivita(user, "create", "anagrafica", obj.id, f"Creata anagrafica {obj.ragione_sociale}")
     _google_sync(user, obj.id)
     return obj.model_dump()
