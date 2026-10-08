@@ -1720,6 +1720,33 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
     totale_avere += totale_voci_manuali_avere
     saldo += totale_voci_manuali_dare - totale_voci_manuali_avere
 
+    # ----- Residui di versamento (pagamenti parziali dell'estratto conto) -----
+    # Quando si versa alla compagnia un importo INFERIORE al totale selezionato,
+    # i titoli/voci vengono chiusi ma resta una "partita" residua da versare più
+    # tardi. Il residuo è SOLO una riga selezionabile di tracciamento: NON entra
+    # in dare/avere del saldo (che è già corretto perché i titoli restano a dare
+    # e la rimessa parziale è a avere). Viene saldato creando una nuova rimessa.
+    res_flt: dict = {"compagnia_id": compagnia_id, "saldata_compagnia": {"$ne": True}}
+    residui = await db.residui_compagnia.find(res_flt, {"_id": 0}).sort("data", 1).to_list(2000)
+    for rsd in residui:
+        imp = round(float(rsd.get("importo_residuo") or 0), 2)
+        if imp <= 0:
+            continue
+        righe.append({
+            "data": rsd.get("data"),
+            "tipo": "residuo",
+            "polizza": None,
+            "contraente": None,
+            "ramo": None,
+            "dare": imp,          # mostrato/selezionabile, NON sommato a totale_dare
+            "avere": 0.0,
+            "descrizione": rsd.get("descrizione") or "Residuo versamento parziale",
+            "_movimento_id": rsd.get("id"),
+            "residuo_id": rsd.get("id"),
+            "is_residuo": True,
+            "movimento_pagamento_id": None,
+        })
+
     righe.sort(key=lambda r: r["data"] or "")
     return {
         "compagnia": comp,
@@ -2004,7 +2031,8 @@ async def compagnia_paga_titoli(
     """
     titoli_ids = body.get("titoli_ids") or []
     voci_sel = body.get("voci") or []
-    if not titoli_ids and not voci_sel:
+    residui_sel_ids = body.get("residui") or []
+    if not titoli_ids and not voci_sel and not residui_sel_ids:
         raise HTTPException(400, "Selezionare almeno un titolo o una voce")
     conto_cassa_id = body.get("conto_cassa_id")
     if not conto_cassa_id:
@@ -2023,11 +2051,13 @@ async def compagnia_paga_titoli(
     righe = ec.get("righe", [])
     sel_titoli = set(titoli_ids)
     sel_voci = {(v.get("tipo"), v.get("id")) for v in voci_sel}
+    sel_residui = set(residui_sel_ids)
     _VOCE_TIPI = ("ritenuta_compagnia", "rappel", "pnc", "fattura_partner", "voce_manuale")
 
     totale = 0.0
     titoli_versati: list[str] = []
     voci_versate: list[dict] = []
+    residui_versati: list[str] = []
     for r in righe:
         net = float(r.get("dare") or 0) - float(r.get("avere") or 0)
         if r.get("tipo") in ("incasso", "incasso_direzione") and r.get("titolo_id") in sel_titoli:
@@ -2036,15 +2066,34 @@ async def compagnia_paga_titoli(
         elif r.get("tipo") in _VOCE_TIPI and (r.get("tipo"), r.get("_movimento_id")) in sel_voci:
             totale += net
             voci_versate.append({"tipo": r.get("tipo"), "id": r.get("_movimento_id")})
+        elif r.get("tipo") == "residuo" and r.get("_movimento_id") in sel_residui:
+            totale += net
+            residui_versati.append(r.get("_movimento_id"))
 
-    if not titoli_versati and not voci_versate:
+    if not titoli_versati and not voci_versate and not residui_versati:
         raise HTTPException(404, "Nessuna riga selezionata trovata nell'estratto conto")
 
-    n_righe = len(titoli_versati) + len(voci_versate)
+    n_righe = len(titoli_versati) + len(voci_versate) + len(residui_versati)
     data_mov = body.get("data_movimento") or _now_iso()[:10]
     # Lock: pagare la compagnia crea un movimento in Prima Nota.
     await assert_giornata_aperta(data_mov, azione="pagare la compagnia nel giorno (Prima Nota chiusa)")
     descrizione = body.get("descrizione") or f"Versamento {comp.get('ragione_sociale')} — {n_righe} voci"
+
+    # Pagamento PARZIALE: se l'utente indica un importo versato inferiore al totale
+    # selezionato (e positivo), si registra solo quanto versato e si genera una
+    # partita residua da saldare in seguito. Il saldo resta coerente (titoli a dare,
+    # rimessa a avere) e il KPI Rimesse usa l'importo effettivamente versato.
+    totale_round = round(totale, 2)
+    importo_versato_in = body.get("importo_versato")
+    try:
+        importo_versato_in = float(importo_versato_in) if importo_versato_in not in (None, "") else None
+    except (TypeError, ValueError):
+        importo_versato_in = None
+    effettivo = totale_round
+    if (importo_versato_in is not None and totale_round > 0
+            and 0 < importo_versato_in < totale_round - 0.005):
+        effettivo = round(importo_versato_in, 2)
+    residuo_importo = round(totale_round - effettivo, 2)
 
     mov = {
         "id": str(uuid.uuid4()),
@@ -2053,10 +2102,13 @@ async def compagnia_paga_titoli(
         "categoria": "pagamento_compagnia",
         "compagnia_id": cid,
         "conto_cassa_id": conto_cassa_id,
-        "importo": round(totale, 2),
+        "importo": round(effettivo, 2),
         "descrizione": descrizione,
         "titoli_ids_versati": titoli_versati,
         "voci_versate": voci_versate,
+        "residui_versati": residui_versati,
+        "importo_totale_selezionato": totale_round,
+        "residuo_generato": residuo_importo if residuo_importo > 0.005 else 0.0,
         "created_at": _now_iso(),
         "creato_da": user.get("id"),
     }
@@ -2093,10 +2145,41 @@ async def compagnia_paga_titoli(
                     "updated_at": _now_iso(),
                 }},
             )
+    # Marca i residui selezionati come saldati (chiusi da questa rimessa)
+    if residui_versati:
+        await db.residui_compagnia.update_many(
+            {"id": {"$in": residui_versati}},
+            {"$set": {
+                "saldata_compagnia": True,
+                "movimento_pagamento_id": mov["id"],
+                "data_pagamento_compagnia": data_mov,
+                "updated_at": _now_iso(),
+            }},
+        )
+    # Pagamento parziale → genera una nuova partita residua da versare in seguito
+    if residuo_importo > 0.005:
+        await db.residui_compagnia.insert_one({
+            "id": str(uuid.uuid4()),
+            "compagnia_id": cid,
+            "data": data_mov,
+            "importo_residuo": residuo_importo,
+            "importo_originale": totale_round,
+            "importo_versato": round(effettivo, 2),
+            "movimento_origine_id": mov["id"],
+            "descrizione": f"Residuo versamento {comp.get('ragione_sociale')} del {data_mov} "
+                           f"(versati {effettivo:.2f} su {totale_round:.2f})",
+            "saldata_compagnia": False,
+            "created_at": _now_iso(),
+            "creato_da": user.get("id"),
+        })
     await log_attivita(user, "paga_compagnia", "movimento", mov["id"],
-                       f"Compagnia {comp.get('ragione_sociale')} · {n_righe} voci · {round(totale, 2)}€")
-    return {"ok": True, "movimento_id": mov["id"], "totale": round(totale, 2),
-            "titoli_pagati": len(titoli_versati), "voci_pagate": len(voci_versate)}
+                       f"Compagnia {comp.get('ragione_sociale')} · {n_righe} voci · versati {round(effettivo, 2)}€"
+                       + (f" · residuo {residuo_importo:.2f}€" if residuo_importo > 0.005 else ""))
+    return {"ok": True, "movimento_id": mov["id"],
+            "totale_selezionato": totale_round, "versato": round(effettivo, 2),
+            "residuo_generato": residuo_importo if residuo_importo > 0.005 else 0.0,
+            "titoli_pagati": len(titoli_versati), "voci_pagate": len(voci_versate),
+            "residui_pagati": len(residui_versati)}
 
 
 @api.get("/compagnie/saldi-cassa")

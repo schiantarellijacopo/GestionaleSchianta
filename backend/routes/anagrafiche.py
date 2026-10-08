@@ -70,6 +70,16 @@ def _normalize_upper(body: dict) -> dict:
     for k, v in list(out.items()):
         if k in UPPER_FIELDS and isinstance(v, str):
             out[k] = v.strip().upper()
+    # Campi enum (Optional[Literal]) e date: una stringa vuota NON è un valore
+    # valido per Pydantic (es. sesso="") e genererebbe un 500. La convertiamo a
+    # None così il campo resta semplicemente non valorizzato.
+    _ENUM_NULLABLE = (
+        "sesso", "tipo_lavoratore", "tipologia_lavoratore",
+        "preferenza_pagamento", "sotto_tipo",
+    )
+    for k in _ENUM_NULLABLE:
+        if isinstance(out.get(k), str) and not out[k].strip():
+            out[k] = None
     # auto-composizione ragione_sociale per persone fisiche
     if out.get("tipo") == "persona_fisica":
         nome = (out.get("nome") or "").strip().upper()

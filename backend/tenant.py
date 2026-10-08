@@ -106,6 +106,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "pagamenti_provvigioni",
     "voci_manuali_collab",
     "voci_manuali_compagnia",
+    "residui_compagnia",
     "voci_ricorsive_collab",
     "chiusure_giorno",
     "email_inbox",

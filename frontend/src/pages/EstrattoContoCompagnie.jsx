@@ -167,7 +167,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
 
     const VOCE_TIPI = ["rappel", "ritenuta_compagnia", "pnc", "fattura_partner", "voce_manuale"];
     const rowKey = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione") ? r.titolo_id : r._movimento_id);
-    const isSelectable = (r) => (((r.tipo === "incasso" || r.tipo === "incasso_direzione") && r.stato_pagamento !== "pagato") || (VOCE_TIPI.includes(r.tipo) && !r.movimento_pagamento_id));
+    const isSelectable = (r) => (((r.tipo === "incasso" || r.tipo === "incasso_direzione") && r.stato_pagamento !== "pagato") || (VOCE_TIPI.includes(r.tipo) && !r.movimento_pagamento_id) || (r.tipo === "residuo" && !r.movimento_pagamento_id));
 
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione");
     // Titoli/voci già inseriti in una "lista da pagare" (bozza): nascosti dalla lista
@@ -187,9 +187,13 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const altreVoci = (data?.righe || []).filter(
         (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r) && !r.movimento_pagamento_id,
     );
+    // Residui di pagamenti parziali ancora da versare (sempre selezionabili)
+    const residuiRows = (data?.righe || []).filter(
+        (r) => r.tipo === "residuo" && !r.movimento_pagamento_id,
+    );
     // Tab "Movimenti & versamenti": SOLO ciò che è ancora da versare (fleggabile).
     // Titoli pagati, voci già versate e i versamenti effettuati sono nello "Storico rimesse".
-    const righeAttive = [...daVersare, ...altreVoci].sort(
+    const righeAttive = [...daVersare, ...altreVoci, ...residuiRows].sort(
         (a, b) => (a.data || "").localeCompare(b.data || ""),
     );
     const [ecSearch, setEcSearch] = useState("");
@@ -207,7 +211,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
             avere: (r) => Number(r.avere || 0),
         });
     // Righe selezionabili (versabili): titoli da versare + voci da saldare.
-    const righeSelezionabili = [...daVersare, ...altreVoci.filter((r) => !r.movimento_pagamento_id)];
+    const righeSelezionabili = [...daVersare, ...altreVoci.filter((r) => !r.movimento_pagamento_id), ...residuiRows];
     const righeSel = righeSelezionabili.filter((r) => selected.has(rowKey(r)));
     const importoSel = righeSel.reduce((s, r) => s + (r.dare || 0) - (r.avere || 0), 0);
 
@@ -218,7 +222,10 @@ function DettaglioEstratto({ compagnia, onBack }) {
         const voci = righeSel
             .filter((r) => VOCE_TIPI.includes(r.tipo))
             .map((r) => ({ tipo: r.tipo, id: r._movimento_id }));
-        return { titoli_ids, voci };
+        const residui = righeSel
+            .filter((r) => r.tipo === "residuo")
+            .map((r) => r._movimento_id);
+        return { titoli_ids, voci, residui };
     };
 
     const stampaSelezionati = async () => {
@@ -448,6 +455,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
                                         {r.tipo === "pnc" && <span className="badge bg-violet-100 text-violet-700">PNT{r.tipo_pnc ? ` · ${({rivalsa:"Rivalsa",cassa_agenti:"Cassa Agenti",fondo_pensione:"Fondo Pensione",gruppo_agenti:"Gruppo Agenti"})[r.tipo_pnc] || r.tipo_pnc}` : ""}</span>}
                                         {r.tipo === "fattura_partner" && <span className="badge bg-amber-100 text-amber-700">fattura partner</span>}
                                         {r.tipo === "voce_manuale" && <span className="badge bg-sky-100 text-sky-700">voce manuale</span>}
+                                        {r.tipo === "residuo" && <span className="badge bg-orange-100 text-orange-700" data-testid="ec-badge-residuo">residuo parziale</span>}
                                         {VOCE_TIPI.includes(r.tipo) && r.movimento_pagamento_id && <span className="badge bg-emerald-100 text-emerald-700 ml-1" data-testid="ec-badge-versata">versata</span>}
                                     </td>
                                     <td className="font-mono text-xs">
@@ -792,16 +800,25 @@ function PagamentoDialog({ compagnia, payload, nRighe, totale, conti, onClose })
     const [descr, setDescr] = useState(`Versamento ${compagnia.ragione_sociale} — ${nRighe} voci`);
     const [mezzo, setMezzo] = useState("");
     const [saving, setSaving] = useState(false);
+    const totaleRound = Math.round((totale || 0) * 100) / 100;
+    const [importoStr, setImportoStr] = useState(totaleRound.toFixed(2));
+    const importoNum = Number((importoStr || "").toString().replace(",", "."));
+    const importoValido = Number.isFinite(importoNum) && importoNum > 0 && importoNum <= totaleRound + 0.005;
+    const residuo = importoValido ? Math.round((totaleRound - importoNum) * 100) / 100 : 0;
+    const isParziale = totaleRound > 0 && importoValido && residuo > 0.005;
 
     const conferma = async () => {
+        if (!importoValido) { alert("Importo da versare non valido"); return; }
         setSaving(true);
         try {
             await api.post(`/compagnie/${compagnia.id}/paga-titoli`, {
                 titoli_ids: payload.titoli_ids,
                 voci: payload.voci,
+                residui: payload.residui || [],
                 mezzo_pagamento: mezzo,
                 data_movimento: data,
                 descrizione: descr,
+                importo_versato: Math.round(importoNum * 100) / 100,
             });
             onClose(true);
         } catch (e) {
@@ -834,6 +851,30 @@ function PagamentoDialog({ compagnia, payload, nRighe, totale, conti, onClose })
                             Il conto/banca da cui esce il pagamento è derivato dal tipo selezionato.
                         </div>
                     </div>
+                    {totaleRound > 0 && (
+                        <div>
+                            <Label>Importo da versare</Label>
+                            <Input
+                                type="number" step="0.01" min="0" max={totaleRound}
+                                value={importoStr}
+                                onChange={(e) => setImportoStr(e.target.value)}
+                                data-testid="ec-pay-importo"
+                            />
+                            <div className="flex items-center justify-between mt-1 text-xs">
+                                <span className="text-slate-500">Totale selezionato: <span className="num">{fmtEur(totaleRound)}</span></span>
+                                {isParziale && (
+                                    <span className="text-orange-700 font-medium" data-testid="ec-pay-residuo">
+                                        Residuo da versare: <span className="num">{fmtEur(residuo)}</span>
+                                    </span>
+                                )}
+                            </div>
+                            {isParziale && (
+                                <div className="mt-1 text-[11px] text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                                    Verrà registrato un versamento di {fmtEur(importoNum)} e creata una partita residua di {fmtEur(residuo)} da versare in seguito.
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div>
                         <Label>Descrizione</Label>
                         <Input value={descr} onChange={(e) => setDescr(e.target.value)} />
@@ -841,8 +882,8 @@ function PagamentoDialog({ compagnia, payload, nRighe, totale, conti, onClose })
                 </div>
                 <div className="flex gap-2 justify-end mt-5">
                     <Button variant="outline" onClick={() => onClose(false)}>Annulla</Button>
-                    <Button onClick={conferma} disabled={saving} className="bg-emerald-700 hover:bg-emerald-800" data-testid="ec-pay-confirm">
-                        {saving ? "Salvataggio…" : "Conferma versamento"}
+                    <Button onClick={conferma} disabled={saving || !importoValido} className="bg-emerald-700 hover:bg-emerald-800" data-testid="ec-pay-confirm">
+                        {saving ? "Salvataggio…" : (isParziale ? "Versa parziale" : "Conferma versamento")}
                     </Button>
                 </div>
             </Card>

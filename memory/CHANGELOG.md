@@ -545,3 +545,8 @@ Admin: `admin@assicura.it / Admin123!`
 ## 2026-10-08 - Geocoding Nominatim fix
 - `geocoder.geocoda_indirizzo`: ricerca ora vincolata all Italia (countrycodes=it, accept-language=it) con strategia a cascata (indirizzo completo -> senza civico -> solo comune). Risolve il bug delle coordinate errate (es. Aprica/SO finiva in Sardegna). Verificato con Aprica, Sondrio, Milano.
 - Creazione anagrafica azienda: flusso verificato OK nel preview (modale duplicato + sovrascrivi, nessun errore). Errore in produzione dovuto a codice non ancora ridistribuito.
+
+## 2026-10-08 - Fix 500 creazione anagrafica + pagamento parziale estratto conto
+- routes/anagrafiche.py `_normalize_upper`: campi enum (sesso, tipo_lavoratore, tipologia_lavoratore, preferenza_pagamento, sotto_tipo) con stringa vuota ora convertiti a None. Risolve il 500 (ValidationError sesso="") che bloccava la creazione aziende/condomini dalla UI.
+- Estratto Conto Compagnie: pagamento PARZIALE. paga-titoli accetta importo_versato; la rimessa registra solo il versato (KPI Rimesse corretto) e genera una partita RESIDUA (collezione residui_compagnia) selezionabile e pagabile in seguito (ricorsivo). Verificato: 568.43 -> 300+100+168.43, saldo finale 0.00.
+- geocoding: gia in produzione (fix Italia).
