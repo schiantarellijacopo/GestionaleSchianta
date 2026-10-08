@@ -1081,6 +1081,57 @@ async def materializza_voce_ricorsiva(rid: str, user=Depends(require_user("admin
 
 
 
+@api.get("/collaboratori/{cid}/liste-bozze")
+async def collaboratore_liste_bozze_list(cid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Liste 'da pagare' salvate (bozze) per un collaboratore."""
+    from tenant import tenant_filter
+    flt = {"collaboratore_id": cid, **(tenant_filter(user) or {})}
+    return await db.provvigioni_bozze.find(flt, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api.post("/collaboratori/{cid}/liste-bozze", status_code=201)
+async def collaboratore_lista_bozza_crea(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Salva una bozza di lista provvigioni da pagare (nessun movimento contabile)."""
+    from tenant import assign_tenant
+    collab = await db.users.find_one({"id": cid}, {"_id": 0, "id": 1, "name": 1,
+                                                   "perc_ritenuta_acconto": 1})
+    if not collab:
+        raise HTTPException(404, "Collaboratore non trovato")
+    titoli_ids = body.get("titoli_ids") or []
+    voci_ids = body.get("voci_ids") or []
+    if not titoli_ids and not voci_ids:
+        raise HTTPException(400, "Selezionare almeno un titolo o una voce")
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0, "provvigioni": 1}).to_list(5000) if titoli_ids else []
+    lordo = sum(float(t.get("provvigioni") or 0.0) for t in titoli)
+    voci = await db.voci_manuali_collab.find({"id": {"$in": voci_ids}, "collaboratore_id": cid}, {"_id": 0, "importo": 1}).to_list(500) if voci_ids else []
+    tot_voci = sum(float(v.get("importo") or 0.0) for v in voci)
+    doc = assign_tenant(user, {
+        "id": str(uuid.uuid4()),
+        "collaboratore_id": cid,
+        "nome": (body.get("nome") or "").strip() or f"Lista {_now_iso()[:10]}",
+        "titoli_ids": titoli_ids,
+        "voci_ids": voci_ids,
+        "note": body.get("note"),
+        "lordo": round(lordo, 2),
+        "voci_totale": round(tot_voci, 2),
+        "n_righe": len(titoli_ids) + len(voci_ids),
+        "created_at": _now_iso(),
+        "creato_da": user.get("id"),
+    })
+    await db.provvigioni_bozze.insert_one(doc)
+    return {"ok": True, "bozza": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@api.delete("/collaboratori/{cid}/liste-bozze/{bid}")
+async def collaboratore_lista_bozza_elimina(cid: str, bid: str, user=Depends(require_user("admin", "collaboratore"))):
+    from tenant import tenant_filter
+    res = await db.provvigioni_bozze.delete_one({"id": bid, "collaboratore_id": cid, **(tenant_filter(user) or {})})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Bozza non trovata")
+    return {"ok": True}
+
+
+
 @api.post("/collaboratori/{cid}/paga-provvigioni")
 async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
     """Esegue pagamento provvigioni: crea PagamentoProvvigioni + movimento contabile uscita.
@@ -1112,12 +1163,15 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
 
     rit_perc = collab.get("perc_ritenuta_acconto", 0.0) or 0.0
     inps_perc = collab.get("perc_inps_inarcassa", 0.0) or 0.0
-    ritenuta = float(body.get("override_ritenuta")) if body.get("override_ritenuta") is not None else round(lordo * rit_perc / 100.0, 2)
-    contributi = float(body.get("override_contributi")) if body.get("override_contributi") is not None else round(lordo * inps_perc / 100.0, 2)
 
-    # Voci manuali (somma algebrica)
+    # Voci manuali (somma algebrica) — calcolate PRIMA perché la ritenuta
+    # d'acconto va applicata su TUTTO l'imponibile (titoli + voci manuali).
     voci = await db.voci_manuali_collab.find({"id": {"$in": voci_ids}, "collaboratore_id": cid}, {"_id": 0}).to_list(500) if voci_ids else []
     tot_voci = round(sum(float(v.get("importo") or 0.0) for v in voci), 2)
+
+    base_ritenuta = round(lordo + tot_voci, 2)
+    ritenuta = float(body.get("override_ritenuta")) if body.get("override_ritenuta") is not None else round(base_ritenuta * rit_perc / 100.0, 2)
+    contributi = float(body.get("override_contributi")) if body.get("override_contributi") is not None else round(lordo * inps_perc / 100.0, 2)
 
     netto = round(lordo - ritenuta - contributi + tot_voci, 2)
 

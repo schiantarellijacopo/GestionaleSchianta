@@ -29,6 +29,7 @@ export default function Provvigioni() {
     const [selectedVoci, setSelectedVoci] = useState(new Set());
     const [voceOpen, setVoceOpen] = useState(false);
     const [base, setBase] = useState("incasso");
+    const [bozze, setBozze] = useState([]);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
@@ -45,6 +46,7 @@ export default function Provvigioni() {
             setSelectedTitoli(new Set());
             setSelectedVoci(new Set());
         });
+        api.get(`/collaboratori/${sel.id}/liste-bozze`).then((r) => setBozze(r.data || [])).catch(() => setBozze([]));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al, base]);
 
@@ -79,6 +81,31 @@ export default function Provvigioni() {
         if (!data) return;
         setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato).map((r) => r.titolo_id)));
         setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id)));
+    };
+    const salvaLista = async () => {
+        if (selectedTitoli.size === 0 && selectedVoci.size === 0) { toast.error("Seleziona almeno una riga"); return; }
+        const nome = window.prompt("Nome della lista da pagare:", `Lista ${new Date().toLocaleDateString("it-IT")}`);
+        if (nome === null) return;
+        try {
+            await api.post(`/collaboratori/${sel.id}/liste-bozze`, {
+                titoli_ids: Array.from(selectedTitoli),
+                voci_ids: Array.from(selectedVoci),
+                nome,
+            });
+            toast.success("Lista salvata"); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const caricaLista = (b) => {
+        const validTit = new Set((data?.righe || []).filter((r) => !r.gia_pagato).map((r) => r.titolo_id));
+        const validVoci = new Set((data?.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id));
+        setSelectedTitoli(new Set((b.titoli_ids || []).filter((id) => validTit.has(id))));
+        setSelectedVoci(new Set((b.voci_ids || []).filter((id) => validVoci.has(id))));
+        toast.success(`Lista "${b.nome}" caricata: ora puoi pagarla`);
+    };
+    const eliminaLista = async (bid) => {
+        if (!window.confirm("Eliminare questa lista salvata?")) return;
+        try { await api.delete(`/collaboratori/${sel.id}/liste-bozze/${bid}`); toast.success("Lista eliminata"); load(); }
+        catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     const rimuoviVoce = async (vid) => {
@@ -166,22 +193,58 @@ export default function Provvigioni() {
                                 </div>
                             </Card>
 
-                            {/* Totali */}
+                            {/* Totali (basati sulla SELEZIONE: titoli + voci manuali) */}
+                            {(() => {
+                                const selL = (data.righe || [])
+                                    .filter((r) => selectedTitoli.has(r.titolo_id))
+                                    .reduce((s, r) => s + (r.provvigione || 0), 0);
+                                const selV = (data.voci_manuali || [])
+                                    .filter((v) => selectedVoci.has(v.id))
+                                    .reduce((s, v) => s + (v.importo || 0), 0);
+                                const ritP = data.collaboratore?.perc_ritenuta_acconto || 0;
+                                const inpsP = data.collaboratore?.perc_inps_inarcassa || 0;
+                                const selRit = Math.round((selL + selV) * ritP) / 100;   // ritenuta su TUTTO
+                                const selContr = Math.round(selL * inpsP) / 100;
+                                const selNetto = Math.round((selL + selV - selRit - selContr) * 100) / 100;
+                                return (
                             <div className={`grid ${base === "copertura" ? "grid-cols-7" : "grid-cols-6"} gap-3`}>
                                 <Stat label="Provv. lorde periodo" value={fmtEur(data.totali.provvigioni_lorde_periodo)} />
-                                <Stat label="Da pagare" value={fmtEur(data.totali.provvigioni_da_pagare)} accent="amber" />
+                                <Stat label="Da pagare (sel.)" value={fmtEur(selL)} accent="amber" />
                                 {base === "copertura" && (
                                     <Stat label="Maturande (coperte)" value={fmtEur(data.totali.provvigioni_maturande || 0)} accent="amber" />
                                 )}
-                                <Stat label="Ritenuta acconto" value={`- ${fmtEur(data.totali.ritenuta_acconto_calcolata)}`} accent="rose" />
-                                <Stat label="Contributi" value={`- ${fmtEur(data.totali.contributi_calcolati)}`} accent="rose" />
+                                <Stat label="Ritenuta acconto (sel.)" value={`- ${fmtEur(selRit)}`} accent="rose" />
+                                <Stat label="Contributi (sel.)" value={`- ${fmtEur(selContr)}`} accent="rose" />
                                 <Stat
-                                    label="Voci manuali"
-                                    value={`${(data.totali.voci_manuali_da_pagare || 0) >= 0 ? "+" : ""} ${fmtEur(data.totali.voci_manuali_da_pagare || 0)}`}
-                                    accent={(data.totali.voci_manuali_da_pagare || 0) >= 0 ? "emerald" : "rose"}
+                                    label="Voci manuali (sel.)"
+                                    value={`${selV >= 0 ? "+" : ""} ${fmtEur(selV)}`}
+                                    accent={selV >= 0 ? "emerald" : "rose"}
                                 />
-                                <Stat label="Netto da pagare" value={fmtEur(data.totali.netto_da_pagare)} accent="emerald" />
+                                <Stat label="Netto da pagare (sel.)" value={fmtEur(selNetto)} accent="emerald" />
                             </div>
+                                );
+                            })()}
+
+                            {/* Liste salvate da pagare */}
+                            {bozze.length > 0 && (
+                                <Card className="border-amber-200 bg-amber-50/40 p-3" data-testid="liste-salvate">
+                                    <div className="text-sm font-medium text-amber-900 mb-2">Liste salvate da pagare ({bozze.length})</div>
+                                    <div className="space-y-1">
+                                        {bozze.map((b) => (
+                                            <div key={b.id} className="flex items-center justify-between bg-white rounded border border-amber-200 px-3 py-1.5 text-sm">
+                                                <div>
+                                                    <span className="font-medium">{b.nome}</span>
+                                                    <span className="text-slate-500 ml-2 text-xs">{b.n_righe} righe · lordo {fmtEur(b.lordo || 0)}{b.voci_totale ? ` · voci ${fmtEur(b.voci_totale)}` : ""}</span>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <Button size="sm" variant="outline" onClick={() => caricaLista(b)} data-testid={`carica-lista-${b.id}`}>Carica</Button>
+                                                    <button onClick={() => eliminaLista(b.id)} className="text-rose-600 hover:text-rose-700" data-testid={`elimina-lista-${b.id}`}><Trash2 size={16} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                            )}
 
                             {/* Tabella titoli */}
                             <Card className="border-slate-200 overflow-hidden">
@@ -192,6 +255,15 @@ export default function Provvigioni() {
                                         <button onClick={selectAllUnpaid} className="text-xs text-sky-700 hover:underline" data-testid="select-unpaid">
                                             Seleziona tutto da pagare
                                         </button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={selectedTitoli.size === 0 && selectedVoci.size === 0}
+                                            onClick={salvaLista}
+                                            data-testid="salva-lista-button"
+                                        >
+                                            Salva lista
+                                        </Button>
                                         <Button
                                             size="sm"
                                             disabled={selectedTitoli.size === 0 && selectedVoci.size === 0}
@@ -443,7 +515,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
     const [mezzo, setMezzo] = useState("bonifico");
     const [note, setNote] = useState("");
 
-    const rit = Math.round(lordo * (parseFloat(percRit) || 0)) / 100;
+    const rit = Math.round((lordo + totVoci) * (parseFloat(percRit) || 0)) / 100;
     const netto = lordo - rit - parseFloat(contr || 0) + totVoci;
 
     const submit = async () => {
@@ -452,6 +524,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                 titoli_ids, voci_manuali_ids: voci_ids,
                 data_pagamento: data_pag, mezzo_pagamento: mezzo, note,
                 perc_ritenuta: parseFloat(percRit) || 0,
+                override_ritenuta: rit,
                 override_contributi: parseFloat(contr) || 0,
             });
             toast.success(`Pagamento di ${fmtEur(r.data.pagamento.netto_pagato)} registrato (ritenuta ${fmtEur(rit)} auto-salvata)`);
