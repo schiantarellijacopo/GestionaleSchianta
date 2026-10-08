@@ -359,7 +359,7 @@ function RappelDialog({ rappel, compagnie, onClose }) {
         if (!f.compagnia_id) { toast.error("Seleziona la compagnia"); return; }
         if (!f.data) { toast.error("Inserisci la data"); return; }
         const imp = parseFloat(f.importo);
-        if (!imp || imp <= 0) { toast.error("Importo deve essere positivo"); return; }
+        if (!imp || imp === 0) { toast.error("Importo non può essere zero (positivo = a favore, negativo = trattenuta)"); return; }
         setSaving(true);
         try {
             const body = {
@@ -411,9 +411,9 @@ function RappelDialog({ rappel, compagnie, onClose }) {
                             />
                         </div>
                         <div>
-                            <Label>Importo € *</Label>
+                            <Label>Importo € * <span className="text-[10px] text-slate-400">(negativo = trattenuta)</span></Label>
                             <Input
-                                type="number" step="0.01" min="0"
+                                type="number" step="0.01"
                                 value={f.importo}
                                 onChange={(e) => set("importo", e.target.value)}
                                 data-testid="rappel-dlg-importo"

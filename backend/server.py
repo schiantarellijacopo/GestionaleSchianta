@@ -2325,8 +2325,8 @@ async def create_rappel(
     comp = await db.compagnie.find_one({"id": body.compagnia_id}, {"_id": 0, "id": 1})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
-    if body.importo <= 0:
-        raise HTTPException(400, "Importo deve essere positivo")
+    if not body.importo or round(body.importo, 2) == 0:
+        raise HTTPException(400, "Importo non può essere zero (positivo = a favore, negativo = trattenuta)")
     anno = body.anno or int(body.data[:4])
     r = Rappel(
         compagnia_id=body.compagnia_id,
@@ -2350,8 +2350,8 @@ async def update_rappel(
     # blocco se incassato in giornata chiusa
     if r.get("stato") == "incassato":
         await assert_giornata_aperta(r.get("data_incasso") or r.get("data"), azione="modificare il rappel")
-    if body.importo <= 0:
-        raise HTTPException(400, "Importo deve essere positivo")
+    if not body.importo or round(body.importo, 2) == 0:
+        raise HTTPException(400, "Importo non può essere zero (positivo = a favore, negativo = trattenuta)")
     anno = body.anno or int(body.data[:4])
     update = {
         "compagnia_id": body.compagnia_id,
