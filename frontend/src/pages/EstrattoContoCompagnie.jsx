@@ -170,11 +170,22 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const isSelectable = (r) => (((r.tipo === "incasso" || r.tipo === "incasso_direzione") && r.stato_pagamento !== "pagato") || (VOCE_TIPI.includes(r.tipo) && !r.movimento_pagamento_id));
 
     const incassi = (data?.righe || []).filter((r) => r.tipo === "incasso" || r.tipo === "incasso_direzione");
-    const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato");
+    // Titoli/voci già inseriti in una "lista da pagare" (bozza): nascosti dalla lista
+    // sopra finché la bozza esiste; alla cancellazione della bozza riappaiono.
+    const bozzaTitoliIds = new Set();
+    const bozzaVoci = new Set();
+    (bozze || []).forEach((b) => {
+        (b.titoli_ids || []).forEach((id) => bozzaTitoliIds.add(id));
+        (b.voci || []).forEach((v) => bozzaVoci.add(`${v.tipo}:${v.id}`));
+    });
+    const inBozza = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione")
+        ? bozzaTitoliIds.has(r.titolo_id)
+        : bozzaVoci.has(`${r.tipo}:${r._movimento_id}`));
+    const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato" && !inBozza(r));
     const pagamenti = (data?.righe || []).filter((r) => r.tipo === "pagamento");
     // Voci di rettifica ancora da saldare (le saldate finiscono nello Storico rimesse)
     const altreVoci = (data?.righe || []).filter(
-        (r) => VOCE_TIPI.includes(r.tipo),
+        (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r),
     );
     // Titoli non pagati + voci non saldate + pagamenti nella tab "Movimenti & versamenti".
     // Titoli pagati e voci saldate sono visibili solo nello "Storico rimesse".
