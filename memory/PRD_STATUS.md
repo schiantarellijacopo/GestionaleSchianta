@@ -1,16 +1,20 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-08)
 
-## Fix/feature completati in questa sessione (in PREVIEW, redeploy in corso)
-- Import Omnia: controllo duplicati anagrafiche anche su Partita IVA (no doppioni aziende).
-- Geocoding Nominatim vincolato all'Italia + fallback a cascata (GIÀ in produzione).
-- FIX CRITICO creazione anagrafica: 500 da `sesso=""` → ora enum vuoti coerciti a None (routes/anagrafiche.py `_normalize_upper`).
-- Feature pagamento PARZIALE estratto conto compagnie: `importo_versato` + partita residua (collezione `residui_compagnia`), ricorsivo. Backend verificato E2E (568.43 → 300+100+168.43, saldo 0).
+## Completati e in produzione
+- Import Omnia: controllo duplicati anagrafiche anche su Partita IVA.
+- Geocoding Nominatim vincolato all'Italia + fallback a cascata.
+- FIX creazione anagrafica: 500 da `sesso=""` → enum vuoti coerciti a None (routes/anagrafiche.py `_normalize_upper`).
+- Feature pagamento PARZIALE estratto conto compagnie: `importo_versato` + partita residua (collezione `residui_compagnia`), ricorsivo.
+- FIX regression: bottone "Conferma versamento" bloccato quando il totale è <= 0 (es. versamento rappel/credito negativo). Ora la logica parziale si applica solo a totali positivi (EstrattoContoCompagnie.jsx PagamentoDialog). [redeploy 2026-10-08]
 
-## TODO prioritario (approvato dall'utente)
-- FIX RAPPEL doppio conteggio saldo cassa:
-  - Decisione utente: il rappel si chiude SOLO tramite l'estratto conto (incluso nella rimessa). L'azione "Incassa rappel" NON deve creare un secondo movimento in Prima Nota.
-  - Correggere i dati tenant jacopo@schiantarelli.it: rappel CATTOLICA settembre 2026 registrati 2 volte (hanno sia `movimento_id` da incassa sia `movimento_pagamento_id` da rimessa). Rimuovere il movimento duplicato (quello da incassa) mantenendo la rimessa come fonte unica.
-  - Rappel esempio: id bcf1700c-... 32,07€ del 17/09, compagnia CATTOLICA (95f7d1fa-...).
+## Caso rappel 32,07 CATTOLICA (tenant jacopo@schiantarelli.it)
+- Diagnosi: il +32,07 su BPER SONDRIO e SALDO CASSA CMP derivava dalla rimessa del 01/10 dove il rappel era scalato dal versamento (Scenario B). Scenario A corretto = rappel credito, banca paga pieno (212.513,53 / 40.949,81).
+- Verificato empiricamente: riaprire+richiudere tutte le 14 giornate chiuse NON cambia i saldi (brogliaccio ricalcola live). Il problema NON erano gli snapshot congelati.
+- RISOLTO DALL'UTENTE: ha corretto lui la rimessa. Nessun intervento richiesto.
 
-## Verifiche da fare
-- Smoke test UI del dialog pagamento parziale (finora verificato solo backend via curl; webpack compila senza errori).
+## TODO futuri (approvati ma non ancora fatti)
+- Logica rappel: idealmente il rappel non dovrebbe mai essere scalato dal versamento (deve restare credito). Valutare fix in paga-titoli se il caso si ripresenta.
+- "Incassa rappel" non dovrebbe creare un secondo movimento in Prima Nota (decisione utente precedente) — da implementare se riemerge il doppio conteggio.
+
+## Verifiche ancora utili
+- Smoke test UI del dialog pagamento parziale (finora verificato backend via curl + logica frontend).
