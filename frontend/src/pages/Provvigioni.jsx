@@ -30,6 +30,7 @@ export default function Provvigioni() {
     const [voceOpen, setVoceOpen] = useState(false);
     const [base, setBase] = useState("incasso");
     const [bozze, setBozze] = useState([]);
+    const [payBozza, setPayBozza] = useState(null);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
@@ -51,7 +52,7 @@ export default function Provvigioni() {
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al, base]);
 
     const { sorted: provSorted, sortKey: provSort, dir: provDir, toggle: provToggle } =
-        useTableSort((data?.righe || []).filter((r) => !r.gia_pagato), "data_incasso", "desc", {
+        useTableSort((data?.righe || []).filter((r) => !r.gia_pagato && !r.in_bozza), "data_incasso", "desc", {
             data_incasso: (r) => r.data_incasso || r.data_copertura || "",
             premio: (r) => Number(r.importo_lordo || 0),
             provvigione: (r) => Number(r.provvigione || 0),
@@ -79,8 +80,8 @@ export default function Provvigioni() {
     };
     const selectAllUnpaid = () => {
         if (!data) return;
-        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato).map((r) => r.titolo_id)));
-        setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata).map((v) => v.id)));
+        setSelectedTitoli(new Set(data.righe.filter((r) => !r.gia_pagato && !r.in_bozza).map((r) => r.titolo_id)));
+        setSelectedVoci(new Set((data.voci_manuali || []).filter((v) => !v.pagata && !v.in_bozza).map((v) => v.id)));
     };
     const salvaLista = async () => {
         if (selectedTitoli.size === 0 && selectedVoci.size === 0) { toast.error("Seleziona almeno una riga"); return; }
@@ -107,6 +108,7 @@ export default function Provvigioni() {
         try { await api.delete(`/collaboratori/${sel.id}/liste-bozze/${bid}`); toast.success("Lista eliminata"); load(); }
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
+    const pagaLista = (b) => setPayBozza(b);
 
     const rimuoviVoce = async (vid) => {
         if (!window.confirm("Rimuovere questa voce manuale?")) return;
@@ -237,6 +239,9 @@ export default function Provvigioni() {
                                                     <span className="text-slate-500 ml-2 text-xs">{b.n_righe} righe · lordo {fmtEur(b.lordo || 0)}{b.voci_totale ? ` · voci ${fmtEur(b.voci_totale)}` : ""}</span>
                                                 </div>
                                                 <div className="flex gap-2">
+                                                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => pagaLista(b)} data-testid={`paga-lista-${b.id}`}>
+                                                        <Wallet size={13} className="mr-1" /> Paga
+                                                    </Button>
                                                     <Button size="sm" variant="outline" onClick={() => caricaLista(b)} data-testid={`carica-lista-${b.id}`}>Carica</Button>
                                                     <button onClick={() => eliminaLista(b.id)} className="text-rose-600 hover:text-rose-700" data-testid={`elimina-lista-${b.id}`}><Trash2 size={16} /></button>
                                                 </div>
@@ -319,7 +324,7 @@ export default function Provvigioni() {
 
                             {/* Voci manuali */}
                             <Card className="border-slate-200 overflow-hidden">
-                                {(() => { const vociDaPagare = (data.voci_manuali || []).filter((v) => !v.pagata); return (<>
+                                {(() => { const vociDaPagare = (data.voci_manuali || []).filter((v) => !v.pagata && !v.in_bozza); return (<>
                                 <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
                                     <div className="text-sm font-medium text-amber-900">
                                         Voci manuali ({vociDaPagare.length})
@@ -407,6 +412,19 @@ export default function Provvigioni() {
                     voci_sel={(data.voci_manuali || []).filter((v) => selectedVoci.has(v.id))}
                     conti={conti}
                     onClose={() => { setPayOpen(false); setSelectedTitoli(new Set()); setSelectedVoci(new Set()); load(); }}
+                />
+            )}
+
+            {payBozza && sel && data && (
+                <PagaDialog
+                    collab={sel}
+                    titoli_ids={(payBozza.titoli_ids || [])}
+                    voci_ids={(payBozza.voci_ids || [])}
+                    rows={(data.righe || []).filter((r) => (payBozza.titoli_ids || []).includes(r.titolo_id))}
+                    voci_sel={(data.voci_manuali || []).filter((v) => (payBozza.voci_ids || []).includes(v.id))}
+                    conti={conti}
+                    bozzaId={payBozza.id}
+                    onClose={() => { setPayBozza(null); load(); }}
                 />
             )}
         </div>
@@ -502,7 +520,7 @@ function NuovaVoceDialog({ collab, onClose }) {
     );
 }
 
-function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClose }) {
+function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozzaId, onClose }) {
     const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const lordo = rows.reduce((s, r) => s + (r.provvigione || 0), 0);
@@ -528,6 +546,9 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, onClo
                 override_contributi: parseFloat(contr) || 0,
             });
             toast.success(`Pagamento di ${fmtEur(r.data.pagamento.netto_pagato)} registrato (ritenuta ${fmtEur(rit)} auto-salvata)`);
+            if (bozzaId) {
+                try { await api.delete(`/collaboratori/${collab.id}/liste-bozze/${bozzaId}`); } catch { /* lista già rimossa */ }
+            }
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };

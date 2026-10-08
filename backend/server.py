@@ -598,6 +598,21 @@ async def estratto_provvigioni(
         for vid in p.get("voci_manuali_ids", []):
             voci_gia_pagate.add(vid)
 
+    # Liste salvate (bozze "da pagare"): i titoli/voci che ne fanno parte vengono
+    # "riservati" alla lista → vanno nascosti dalla videata principale finché la
+    # lista non viene pagata o eliminata.
+    bozze = await db.provvigioni_bozze.find(
+        {"collaboratore_id": cid},
+        {"_id": 0, "id": 1, "titoli_ids": 1, "voci_ids": 1},
+    ).to_list(500)
+    titolo_bozza: dict[str, str] = {}
+    voce_bozza: dict[str, str] = {}
+    for bz in bozze:
+        for tid in bz.get("titoli_ids", []):
+            titolo_bozza[tid] = bz["id"]
+        for vid in bz.get("voci_ids", []):
+            voce_bozza[vid] = bz["id"]
+
     rows = []
     tot_lordo = 0.0
     tot_da_pagare = 0.0
@@ -621,6 +636,8 @@ async def estratto_provvigioni(
             "importo_lordo": t.get("importo_lordo", 0.0),
             "provvigione": provv,
             "gia_pagato": gia_pagato,
+            "in_bozza": t["id"] in titolo_bozza,
+            "bozza_id": titolo_bozza.get(t["id"]),
         })
         if incassato:
             tot_lordo += provv
@@ -653,6 +670,9 @@ async def estratto_provvigioni(
         # marca pagata se è in un pagamento
         if v["id"] in voci_gia_pagate:
             v["pagata"] = True
+        # marca se riservata a una lista salvata (bozza)
+        v["in_bozza"] = v["id"] in voce_bozza
+        v["bozza_id"] = voce_bozza.get(v["id"])
 
     netto_calc = round(tot_da_pagare - ritenuta_calc - contributi_calc + tot_voci_da_pagare, 2)
 
@@ -8282,10 +8302,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
             elif cat == "provvigioni":
                 # Pagamento provvigioni a collaboratore:
                 # importo = NETTO pagato (già al netto di ritenuta+contributi).
-                # ritenuta_acconto → colonna Ritenuta separata (NON in Spese).
-                # Il netto residuo in Spese.
+                # REGOLA UTENTE: il movimento deve popolare SOLO le colonne SPESE
+                # e BANCA (uscita). La colonna RITENUTA NON va valorizzata
+                # (è riservata alle ritenute/PNC verso compagnia).
                 c_totale = 0.0
-                c_ritenuta = ritenuta_riga
+                c_ritenuta = 0.0
                 c_spese = importo  # netto banca uscita
             elif cat == "ritenuta_compagnia":
                 # Ritenuta compagnia: NON è una spesa reale, nessun cash flow.
