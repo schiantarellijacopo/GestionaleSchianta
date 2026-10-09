@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import StatistichePremi from "@/pages/StatistichePremi";
+import StatistichePortafoglio from "@/pages/StatistichePortafoglio";
 import StatistichePerOperatore from "@/pages/StatistichePerOperatore";
 import { TopClientiModulo, SegmentazioneModulo } from "@/pages/StatisticheClienti";
 import {
@@ -53,6 +54,9 @@ export default function Statistiche() {
                     <TabsTrigger value="segmentazione" data-testid="stat-tab-segmentazione">
                         <PieChart size={14} className="mr-1" /> Segmentazione
                     </TabsTrigger>
+                    <TabsTrigger value="portafoglio" data-testid="stat-tab-portafoglio">
+                        <PieChart size={14} className="mr-1" /> Portafoglio
+                    </TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview" className="space-y-4 mt-4"><OverviewModulo /></TabsContent>
                 <TabsContent value="isa" className="space-y-4 mt-4"><IsaModulo /></TabsContent>
@@ -60,6 +64,7 @@ export default function Statistiche() {
                 <TabsContent value="operatore" className="space-y-4 mt-4"><StatistichePerOperatore /></TabsContent>
                 <TabsContent value="topclienti" className="space-y-4 mt-4"><TopClientiModulo /></TabsContent>
                 <TabsContent value="segmentazione" className="space-y-4 mt-4"><SegmentazioneModulo /></TabsContent>
+                <TabsContent value="portafoglio" className="space-y-4 mt-4"><StatistichePortafoglio /></TabsContent>
             </Tabs>
         </div>
     );

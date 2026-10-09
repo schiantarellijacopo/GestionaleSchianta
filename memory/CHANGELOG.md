@@ -599,3 +599,11 @@ Admin: `admin@assicura.it / Admin123!`
 - La regola NON vale per le polizze SOSTITUITE (né sospese): restano invariate.
 - Testato con endpoint reale /titoli/{id}/incassa: annullata→attiva; sostituita→resta sostituita.
 - Restano attive: sostituzione (priorità su annullo), annullo da AG, sospensione da AH + titolo a 0.
+
+## 2026-06 — Statistiche: riquadro "Portafoglio: consistenza e distribuzione"
+- Nuovo tab "Portafoglio" in Statistiche (StatistichePortafoglio.jsx).
+- Backend GET /api/statistiche/portafoglio: KPI (contratti attivi, premio medio, portafoglio per operatore, premio totale), confronto anno su anno (anno/anno_confronto con Var.%), ciambelle per compagnia / macro-ramo (ramo) / operatore.
+- Barra filtri comune: collaboratore + rata/effetto (periodo) + data incasso (periodo) + data copertura (periodo). I filtri data incasso/copertura agiscono via titoli.
+- Senza confronto → contratti attivi = intero portafoglio; con anno_confronto → confronto per anno di decorrenza.
+- Testato: 2026 vs 2025, filtro collaboratore (BS BROKER 1639), ciambelle con nomi compagnie/operatori; screenshot UI OK.
+- PROSSIMI riquadri da fare (uno per volta): Incassi, Clientela, Produzione, + grafici Nuovi contratti/Incassi per mese e Controllo clienti.

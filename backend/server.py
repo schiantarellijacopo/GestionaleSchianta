@@ -6276,6 +6276,114 @@ async def get_lettera_abbuono_pdf(lid: str, user=Depends(current_user)):
 
 
 # ============================================================
+# STATISTICHE — Portafoglio: consistenza e distribuzione
+# Filtri: collaboratore + data incasso + data copertura + rata/effetto
+# ============================================================
+@api.get("/statistiche/portafoglio")
+async def statistiche_portafoglio(
+    anno: Optional[int] = None, anno_confronto: Optional[int] = None,
+    collaboratore_id: Optional[str] = None,
+    incasso_da: Optional[str] = None, incasso_a: Optional[str] = None,
+    copertura_da: Optional[str] = None, copertura_a: Optional[str] = None,
+    effetto_da: Optional[str] = None, effetto_a: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    only_op = user["id"] if user.get("role") == "collaboratore" else collaboratore_id
+    # Set di polizza_id dai filtri su titoli (data incasso / copertura)
+    tflt = None
+    if incasso_da or incasso_a:
+        r = {}
+        if incasso_da: r["$gte"] = incasso_da
+        if incasso_a: r["$lte"] = incasso_a
+        tflt = {"data_incasso": r}
+    if copertura_da or copertura_a:
+        r = {}
+        if copertura_da: r["$gte"] = copertura_da
+        if copertura_a: r["$lte"] = copertura_a
+        tflt = {**(tflt or {}), "data_copertura": r}
+    pol_ids_titoli = None
+    if tflt is not None:
+        pol_ids_titoli = await db.titoli.distinct("polizza_id", tflt)
+
+    def _base_flt(eff_da, eff_a):
+        f: dict = {"stato": "attiva"}
+        if only_op:
+            f["$or"] = [{"collaboratore_id": only_op},
+                        {"provvigioni_operatori.operatore_id": only_op}]
+        if eff_da or eff_a:
+            rng = {}
+            if eff_da: rng["$gte"] = eff_da
+            if eff_a: rng["$lte"] = eff_a
+            f["effetto"] = rng
+        if pol_ids_titoli is not None:
+            f["id"] = {"$in": pol_ids_titoli}
+        return f
+
+    async def _kpi(eff_da, eff_a):
+        agg = await db.polizze.aggregate([
+            {"$match": _base_flt(eff_da, eff_a)},
+            {"$group": {"_id": None, "num": {"$sum": 1},
+                        "premio": {"$sum": {"$ifNull": ["$premio_lordo", 0]}},
+                        "operatori": {"$addToSet": "$collaboratore_id"}}},
+        ]).to_list(1)
+        b = agg[0] if agg else {"num": 0, "premio": 0.0, "operatori": []}
+        n_op = len([o for o in (b.get("operatori") or []) if o]) or 1
+        num = b.get("num", 0); tot = round(b.get("premio", 0.0), 2)
+        return {"contratti_attivi": num, "premio_totale": tot,
+                "premio_medio": round(tot / num, 2) if num else 0.0,
+                "portafoglio_per_operatore": round(tot / n_op, 2), "num_operatori": n_op}
+
+    # Range effetto del PRIMARIO: esplicito, oppure per-anno solo in modalità confronto.
+    if effetto_da or effetto_a:
+        eff_da, eff_a = effetto_da, effetto_a
+    elif anno_confronto:
+        eff_da, eff_a = (f"{anno}-01-01" if anno else None), (f"{anno}-12-31" if anno else None)
+    else:
+        eff_da, eff_a = None, None
+    kpi = await _kpi(eff_da, eff_a)
+    kpi_conf = None
+    if anno_confronto:
+        kpi_conf = await _kpi(f"{anno_confronto}-01-01", f"{anno_confronto}-12-31")
+
+    flt = _base_flt(eff_da, eff_a)
+
+    async def _group(field):
+        return await db.polizze.aggregate([
+            {"$match": flt},
+            {"$group": {"_id": f"${field}", "num": {"$sum": 1},
+                        "premio": {"$sum": {"$ifNull": ["$premio_lordo", 0]}}}},
+            {"$sort": {"premio": -1}},
+        ]).to_list(200)
+
+    per_comp = await _group("compagnia_id")
+    per_ramo = await _group("ramo")
+    per_op = await _group("collaboratore_id")
+
+    comp_ids = [r["_id"] for r in per_comp if r["_id"]]
+    comp_map = {c["id"]: (c.get("ragione_sociale") or c.get("codice") or "—")
+                async for c in db.compagnie.find({"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "codice": 1})}
+    op_ids = [r["_id"] for r in per_op if r["_id"]]
+    op_map = {u["id"]: u.get("name", "—")
+              async for u in db.users.find({"id": {"$in": op_ids}}, {"_id": 0, "id": 1, "name": 1})}
+
+    def _fmt(rows, name_map=None):
+        out = []
+        for r in rows:
+            k = r["_id"]
+            label = (name_map.get(k, "—") if name_map else (k or "—")) if k else "Non assegnato"
+            out.append({"label": label, "num": r["num"], "premio": round(r.get("premio", 0.0), 2)})
+        return out
+
+    return {
+        "anno": anno, "anno_confronto": anno_confronto,
+        "kpi": kpi, "kpi_confronto": kpi_conf,
+        "per_compagnia": _fmt(per_comp, comp_map),
+        "per_ramo": _fmt(per_ramo),
+        "per_operatore": _fmt(per_op, op_map),
+    }
+
+
+# ============================================================
 # QUESTIONARI (Librerie) — domande/risposte, visibili in
 # Anagrafica / Polizza / Sinistri, export PDF + stampa
 # ============================================================
