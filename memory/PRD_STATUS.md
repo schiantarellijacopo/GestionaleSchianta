@@ -1,4 +1,22 @@
-# Axicura CRM — Stato lavori (aggiornato 2026-10-08)
+# Axicura CRM — Stato lavori (aggiornato 2026-10-09)
+
+## REGOLA IMPORT OMNIA — importi SOLO dal rec42 (2026-10-09) — DA DEPLOYARE
+Richiesta utente (definitiva, SOSTITUISCE le regole precedenti rec20/rec40): gli importi dei titoli (Netto, Tasse/Imposte, SSN, Lordo, Provvigioni) si prendono ESCLUSIVAMENTE dal rec42, sommando le righe-garanzia del titolo (collegate per id_titolo_exp, col C/idx 2). Nessun altro rec per questi 5 parametri.
+Formula (ania_importer.py `_processa_titoli`, blocco `rec42_by_titolo`):
+- PROVVIGIONI = Σ AF (idx 31, provvigioni_totali)
+- SSN         = Σ AC (idx 28, ssn)
+- LORDO       = Σ AB (idx 27, lordo)
+- NETTO       = Σ Y (idx 24, imponibile) − Σ(Y della garanzia 'CIA')
+- TASSE/IMP   = Σ AA (idx 26, tasse) − Σ AC (idx 28, ssn) + Σ(Y 'CIA')
+- La garanzia 'CIA' (col P/idx 15 = cod_garanzia_cmp = "Contributo Imposte Ramo"): il suo imponibile va spostato dal Netto alle Imposte.
+TITOLI SENZA rec42: tutti gli importi a 0 (scelta utente). Verranno popolati da un re-import successivo quando il rec42 avrà i dati (il re-import aggiorna gli importi SOLO sui titoli `stato=="da_incassare"`, quindi non tocca incassi/pagamenti/prime note chiuse).
+Rimosso: `premi_rec20` e il fallback rec40 per i 5 parametri. `accessori` resta dal rec40 (idx 46), non è tra i 5.
+VERIFICA E2E (vero codice importer, tenant temporaneo isolato poi ripulito, ZIP 112):
+- 184643537 (PS, con rec42) → netto 276,14 / imposte 34,86 / ssn 19,00 / lordo 330,00 / provv 34,86 ✓ (== rec20 di riferimento)
+- 180024200 (QZ, senza rec42) → tutti 0 ✓
+- 141 titoli importati, 39 senza rec42 nati a 0.
+
+## Axicura CRM — Stato lavori (precedente: 2026-10-08)
 
 ## Colonna "Provvigione" = quota collaboratore (2026-10-08) — DA DEPLOYARE
 - Richiesta: nell'Estratto conto collaboratori la colonna "Provvigione" (e tutti i totali/pagamenti) deve mostrare la quota SPETTANTE AL COLLABORATORE, non la provvigione totale di agenzia.

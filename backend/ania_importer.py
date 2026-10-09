@@ -1149,30 +1149,36 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
     fraz_cache: Dict[str, str] = {}
     pol_meta_cache: Dict[str, dict] = {}
     nome_cache: Dict[str, str] = {}
-    # ═══ REGOLA UTENTE (import OMNIA) ═══
-    # Gli importi del PREMIO del titolo vanno presi dalla POLIZZA (rec20), colonne:
-    #   CP (idx 93) = imponibile_totale  -> netto
-    #   CR (idx 95) = ssn_totale         -> ssn
-    #   CS (idx 96) = tasse_totale (include SSN) -> imposte = CS - CR
-    #   CT (idx 97) = lordo_totale        -> lordo
-    # La PROVVIGIONE agenzia resta dalla riga rec40 (col BD, idx 55).
-    premi_rec20: Dict[str, dict] = {}
+    # ═══ REGOLA UTENTE (import OMNIA) — IMPORTI SOLO DAL rec42 ═══
+    # Netto/Tasse/SSN/Lordo/Provvigioni derivano ESCLUSIVAMENTE dal rec42
+    # (somma delle righe-garanzia del titolo, collegate per id_titolo_exp, col C/idx 2):
+    #   PROVVIGIONI = Σ AF (idx 31, provvigioni_totali)
+    #   SSN         = Σ AC (idx 28, ssn)
+    #   LORDO       = Σ AB (idx 27, lordo)
+    #   NETTO       = Σ Y  (idx 24, imponibile) − Σ(Y della garanzia 'CIA')
+    #   TASSE/IMP   = Σ AA (idx 26, tasse) − Σ AC (idx 28, ssn) + Σ(Y 'CIA')
+    # La garanzia 'CIA' (col P/idx 15 = cod_garanzia_cmp = "Contributo Imposte Ramo"):
+    # il suo imponibile va spostato dal Netto alle Imposte.
+    # Se un titolo NON ha righe rec42 → tutti gli importi a 0 (verranno popolati da
+    # un re-import successivo quando il rec42 avrà i dati). NESSUN altro rec usato.
+    rec42_by_titolo: Dict[str, dict] = {}
     for _fn, _ct in files_data.items():
-        if _detect_record_type(_fn) != "rec20":
+        if _detect_record_type(_fn) != "rec42":
             continue
-        for _r in _read_csv_text(_ct):
-            _exp = (_r.get("id_polizza_exp") or "").strip()
-            if not _exp:
+        for _g in _read_csv_text(_ct):
+            _tid = (_col_at(_g, 2) or "").strip()
+            if not _tid:
                 continue
-            _net = _parse_float(_col_at(_r, 93))
-            _ssn20 = _parse_float(_col_at(_r, 95))
-            _cs = _parse_float(_col_at(_r, 96))
-            premi_rec20[_exp] = {
-                "netto": _net,
-                "ssn": _ssn20,
-                "imposte": round(_cs - _ssn20, 2),
-                "lordo": _parse_float(_col_at(_r, 97)),
-            }
+            _acc = rec42_by_titolo.setdefault(
+                _tid, {"netto": 0.0, "tasse": 0.0, "ssn": 0.0,
+                       "lordo": 0.0, "provv": 0.0, "cia": 0.0})
+            _acc["netto"] += _parse_float(_col_at(_g, 24))   # Y  imponibile
+            _acc["tasse"] += _parse_float(_col_at(_g, 26))   # AA tasse
+            _acc["ssn"]   += _parse_float(_col_at(_g, 28))   # AC ssn
+            _acc["lordo"] += _parse_float(_col_at(_g, 27))   # AB lordo
+            _acc["provv"] += _parse_float(_col_at(_g, 31))   # AF provvigioni_totali
+            if (_col_at(_g, 15) or "").strip().upper() == "CIA":
+                _acc["cia"] += _parse_float(_col_at(_g, 24))  # Y della riga 'CIA'
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -1184,24 +1190,24 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             if not pol_id:
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
-            # ═══ Importi PREMIO dalla polizza (rec20) — vedi regola sopra ═══
-            # La provvigione agenzia resta dal rec40 col BD (idx 55).
+            # ═══ Importi SOLO dal rec42 (vedi regola in testa alla funzione) ═══
+            # Accessori: campo separato, non tra i 5 parametri → resta dal rec40.
             accessori_titolo = _parse_float(_col_at(row, 46))
-            provv_agenzia = _parse_float(_col_at(row, 55))
-            _premio = premi_rec20.get((pol_exp or "").strip())
-            if _premio:
-                netto_calc = _premio["netto"]
-                ssn_eff = _premio["ssn"]
-                imposte_eff = _premio["imposte"]
-                lordo = _premio["lordo"]
+            _r42 = rec42_by_titolo.get((id_t or "").strip())
+            if _r42:
+                netto_calc = round(_r42["netto"] - _r42["cia"], 2)
+                imposte_eff = round(_r42["tasse"] - _r42["ssn"] + _r42["cia"], 2)
+                ssn_eff = round(_r42["ssn"], 2)
+                lordo = round(_r42["lordo"], 2)
+                provv_agenzia = round(_r42["provv"], 2)
             else:
-                # Fallback (titolo senza polizza nel rec20): usa i dati rec40.
-                #   AV(47)=imponibile · AX(49)=SSN · AY(50)=tasse
-                imponibile = _parse_float(_col_at(row, 47))
-                ssn_eff = _parse_float(_col_at(row, 49))
-                imposte_eff = _parse_float(_col_at(row, 50))
-                netto_calc = imponibile
-                lordo = round(imponibile + imposte_eff + ssn_eff, 2)
+                # Nessuna riga rec42 per questo titolo → importi a 0.
+                # Un re-import successivo li popolerà (titolo resta "da_incassare").
+                netto_calc = 0.0
+                imposte_eff = 0.0
+                ssn_eff = 0.0
+                lordo = 0.0
+                provv_agenzia = 0.0
             # 🆕 Collaboratore/operatore del titolo: leggi da rec40 (collaboratore_1)
             # o eredita dalla polizza (fallback).
             _op_codice, coll_id_titolo = await _resolve_operatore_codice(
