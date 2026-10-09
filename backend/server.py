@@ -577,7 +577,7 @@ async def estratto_provvigioni(
     titoli = await db.titoli.find(titolo_filter, {"_id": 0}).to_list(5000)
     # arricchimento polizza/contraente
     pol_map = {p["id"]: p async for p in db.polizze.find(
-        {"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1})}
+        {"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1, "ramo": 1, "compagnia_id": 1})}
     ana_ids = list({p.get("contraente_id") for p in pol_map.values() if p.get("contraente_id")})
     ana_map = {a["id"]: a async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
@@ -617,10 +617,23 @@ async def estratto_provvigioni(
     tot_lordo = 0.0
     tot_da_pagare = 0.0
     tot_maturande = 0.0
+    _schema_cache: dict = {}
     for t in titoli:
         pol = pol_map.get(t["polizza_id"], {})
         ana = ana_map.get(pol.get("contraente_id", ""), {})
-        provv = t.get("provvigioni", 0.0) or 0.0
+        # La colonna "Provvigione" dell'estratto collaboratore è la QUOTA SPETTANTE
+        # AL COLLABORATORE (da schema provvigionale), NON la provvigione totale di
+        # agenzia. Usa lo stesso motore degli altri elenchi (_provv_breakdown).
+        _bk = await _provv_breakdown(
+            float(t.get("provvigioni") or 0),
+            cid,
+            pol.get("compagnia_id"),
+            pol.get("ramo"),
+            schema_cache=_schema_cache,
+            premio_netto=t.get("importo_netto") or t.get("premio_netto"),
+            premio_lordo=t.get("importo_lordo") or t.get("premio_lordo"),
+        )
+        provv = _bk["provvigione_collaboratore"] or 0.0
         incassato = t.get("stato") == "incassato"
         gia_pagato = t["id"] in titoli_gia_pagati
         rows.append({
@@ -635,6 +648,8 @@ async def estratto_provvigioni(
             "incassato": incassato,
             "importo_lordo": t.get("importo_lordo", 0.0),
             "provvigione": provv,
+            "provvigione_totale": _bk["provvigione_totale"],
+            "provvigione_pct_collab": _bk["pct_collab"],
             "gia_pagato": gia_pagato,
             "in_bozza": t["id"] in titolo_bozza,
             "bozza_id": titolo_bozza.get(t["id"]),
@@ -1195,7 +1210,23 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     await assert_giornata_aperta(data_pag, azione="pagare provvigioni nel giorno (Prima Nota chiusa)")
 
     titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0}).to_list(5000) if titoli_ids else []
-    lordo = sum((t.get("provvigioni") or 0.0) for t in titoli)
+    # Il LORDO da pagare è la somma delle QUOTE SPETTANTI AL COLLABORATORE
+    # (da schema provvigionale), NON la provvigione totale di agenzia.
+    _pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
+    _pol_map = {p["id"]: p async for p in db.polizze.find(
+        {"id": {"$in": _pol_ids}}, {"_id": 0, "id": 1, "compagnia_id": 1, "ramo": 1})} if _pol_ids else {}
+    _sc: dict = {}
+    lordo = 0.0
+    for t in titoli:
+        _p = _pol_map.get(t.get("polizza_id"), {})
+        _bk = await _provv_breakdown(
+            float(t.get("provvigioni") or 0), cid, _p.get("compagnia_id"), _p.get("ramo"),
+            schema_cache=_sc,
+            premio_netto=t.get("importo_netto") or t.get("premio_netto"),
+            premio_lordo=t.get("importo_lordo") or t.get("premio_lordo"),
+        )
+        lordo += _bk["provvigione_collaboratore"] or 0.0
+    lordo = round(lordo, 2)
     if body.get("override_provvigioni_lorde") is not None:
         lordo = float(body["override_provvigioni_lorde"])
 

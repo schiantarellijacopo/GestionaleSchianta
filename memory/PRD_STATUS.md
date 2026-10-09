@@ -1,5 +1,13 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-08)
 
+## Colonna "Provvigione" = quota collaboratore (2026-10-08) — DA DEPLOYARE
+- Richiesta: nell'Estratto conto collaboratori la colonna "Provvigione" (e tutti i totali/pagamenti) deve mostrare la quota SPETTANTE AL COLLABORATORE, non la provvigione totale di agenzia.
+- Fix backend `estratto_provvigioni`: ogni riga calcola la quota collaboratore con `_provv_breakdown` (stesso motore schema provvigionale usato negli altri elenchi), usando compagnia_id/ramo/premio netto-lordo del titolo. `provvigione` = quota collab; aggiunti `provvigione_totale` e `provvigione_pct_collab` per riferimento. Totali (lorde/da pagare/netto) ora sul collab.
+- Fix backend `paga_provvigioni` (riga ~1197): `lordo` = somma delle quote collaboratore (non più `sum(t.provvigioni)` totale agenzia). Verificato: pagamento registra 59,30 (=70% di 84,71), non 84,71.
+- Il PDF stampa provvigioni eredita automaticamente (usa estratto). Frontend invariato (legge `r.provvigione`).
+- Nota: collaboratori senza schema provvigionale applicabile → quota 0 (coerente col motore usato ovunque).
+- RICHIEDE REDEPLOY + hard refresh.
+
 ## Estratto conto collaboratori + Brogliaccio (2026-10-08) — DA DEPLOYARE
 Tre richieste utente, tutte implementate e testate (testing agent 100%):
 1. **Brogliaccio pagamento provvigioni**: la riga "Pagamento provvigioni a ..." ora valorizza SOLO colonne SPESE e BANCA (uscita); colonna RITENUTA VUOTA. Fix in `_compute_brogliaccio` ramo `cat=="provvigioni"` uscita: `c_ritenuta=0.0`, `c_spese=importo` (server.py ~8282). La banca si valorizza via per_conto (conto risolto da tipo pagamento).
