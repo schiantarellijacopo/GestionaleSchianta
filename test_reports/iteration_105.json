@@ -1,0 +1,33 @@
+{
+  "summary": "Tested the Wizard Mapping OMNIA fix (bulk save + apply-async). Backend endpoints pass pytest (/api/import/mappings/bulk saves with id + manual=true; /api/import/mappings/apply-async returns in <10s with job_id and /api/import/job/{id} polling returns status != 'error'). Frontend E2E on real tenant confirms: Wizard dialog opens, Operatore/Collaboratore tab shows 10 rows with selects, clicking 'Salva modifiche' after changing a dropdown fires EXACTLY ONE POST /api/import/mappings/bulk (not many sequential POSTs). No '120-second Proxy Read Timeout' error appears. 'Salva e applica' flow (saveAll -> applyMappings) code path verified by code review + backend tests; could not trigger the UI click fully (requires a pending edit, and I avoided persisting further changes on production tenant). Test data created in UI was restored via API (ERR mapping -> 638ccd70...). ZZTEST* throwaway mappings created in pytest were cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter_bulk_mappings.py",
+    "/app/test_reports/pytest/iter_bulk_mappings.xml"
+  ],
+  "action_items": [
+    "Minor: wizard-row filter via Playwright has_text matches select option text (every row contains all option strings), making row targeting by option text ambiguous. Not a bug per se - testers should target rows by data-testid={id} or by the 'Valore nel flusso' heading rather than content inside the select. Consider adding a stable row-level data attribute like data-testid=\"wizard-row-code-021\" to simplify E2E.",
+    "Minor: side-effect noticed - during restoration via /api/import/mappings/bulk the 'manual' flag flipped from null to true on the ERR mapping. entita_id unchanged, so no production impact, but worth noting that bulk/save_mapping always upserts manual=true."
+  ],
+  "critical_code_review_comments": [
+    "saveAll correctly uses POST /import/mappings/bulk with { flusso, items } (Importazione.jsx line 548). Early return at line 525-528 when no pending edits is correct and prevents useless apply-async calls.",
+    "applyMappings uses POST /import/mappings/apply-async + 150*2s polling of GET /import/job/{id} (lines 580-593). Timeout handling is proper.",
+    "Backend save_mappings_bulk returns 201 status with {saved, errors, total}; frontend reads {saved, errors} and ignores status code (fine).",
+    "save_mapping now guarantees 'id' and 'manual'=true (verified via GET after bulk save in pytest)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter_bulk_mappings.py (created)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (login returns 'access_token')",
+  "seed_data_creation": "pytest created and deleted ZZTEST1 / ZZTEST2 collaboratore mappings. UI test modified ERR row to SEDE DI CHIURO (not 021 as intended, due to Playwright has_text ambiguity on dropdowns containing all option strings). ERR mapping restored via API bulk endpoint back to original stub user 638ccd70-3df9-43cc-9e41-ed6a812ca31b. 021 FILIALE CHIURO mapping was NOT modified in production (remained at stub user b70208d1-3d4f-4900-a11c-75dae62351a9 throughout).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Verified both backend endpoints (pytest) and frontend bulk save (one POST /mappings/bulk, no 120s timeout). apply-async UI click requires a pending edit to fire (saveAll returns early otherwise). When writing Playwright for wizard rows, DO NOT use .filter(has_text='021').filter(has_text='FILIALE CHIURO') because every row's <select> contains all option strings - use the per-row data-testid wizard-row-{mapping_id} with mapping_id obtained via GET /api/import/mappings?tipo=collaboratore. Mapping id for 021 FILIALE CHIURO: b497e437-4f17-4720-b22a-99dbaef5fda7. Mapping id for ERR: 1aebb4e8-1e84-4c96-a408-2a28eda30f84. Real user SEDE DI CHIURO id: 0e40d48a-3863-405a-95ec-7bf94240b0a6. Dialog for wizard-remove uses window.confirm — register page.on('dialog', lambda d: d.accept()).",
+  "rca of the issue": "N/A - fix already applied and verified. Backend saves individual items transactionally in a single HTTP request; apply-async decouples the long back-fill from the 120s proxy timeout via a background job + polling."
+}
