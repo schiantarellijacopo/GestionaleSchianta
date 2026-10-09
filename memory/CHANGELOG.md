@@ -564,3 +564,12 @@ Admin: `admin@assicura.it / Admin123!`
 - Formato importi: convertiti i display grezzi .toFixed() in fmtEur (it-IT) in CarichiMensili, Tasks, PortaleCliente.
 - Flag "Accesso al software" (users): se spuntato email+password obbligatori e login abilitato; se no → profilo senza login, email facoltativa (auto-generata). Login bloccato se accesso_software=False. Stub import creati con accesso_software=False.
 - Questionari (Librerie): nuova collezione tenant-scoped `questionari`. CRUD + PDF (reportlab) + stampa. Builder in Librerie (tipi: testo, si_no, scelta_multipla, numero, data) con flag visibilità Anagrafica/Polizza/Sinistri. QuestionariViewer (sola lettura + PDF/stampa) aggiunto come tab in PolizzaDetail, SinistroDetail, AnagraficaDetail.
+
+## 2026-06 — Questionari: compilazione per-entità
+- Nuova collezione tenant-scoped `questionari_compilati` (risposte per singolo record).
+- GET /api/questionari/compilati?entita_tipo=&entita_id= → template visibili con risposte del record.
+- POST /api/questionari/compilati → upsert risposte {domanda_id: valore} per (questionario, entita_tipo, entita_id).
+- GET /api/questionari/{id}/pdf?entita_tipo=&entita_id= → PDF con le risposte del record.
+- QuestionariViewer ora editabile: input per tipo (Sì/No, scelta multipla, numero, data, testo), "Salva risposte", PDF/Stampa compilati. Integrato in Polizza/Sinistro/Anagrafica con entitaId.
+- delete_questionario rimuove anche i compilati orfani.
+- Verificato: salvataggio, isolamento tra record diversi, PDF compilato, UI screenshot su polizza reale.

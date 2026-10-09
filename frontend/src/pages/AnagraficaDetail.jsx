@@ -246,7 +246,7 @@ export default function AnagraficaDetail() {
 
                 <TabsContent value="questionari">
                     <Card className="p-6 mt-4 space-y-3">
-                        <QuestionariViewer entita="anagrafica" />
+                        <QuestionariViewer entita="anagrafica" entitaId={id} />
                     </Card>
                 </TabsContent>
 

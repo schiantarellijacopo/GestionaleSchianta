@@ -56,49 +56,96 @@ function escapeHtml(s) {
 }
 
 // ============================================================
-// VIEWER — read-only, usato in Anagrafica / Polizza / Sinistri
+// VIEWER — compilabile per-entità (Anagrafica / Polizza / Sinistri)
+// Le risposte vengono salvate per QUEL record specifico.
 // ============================================================
-export function QuestionariViewer({ entita }) {
+export function QuestionariViewer({ entita, entitaId }) {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
-    useEffect(() => {
-        api.get(`/questionari?entita=${entita}`)
-            .then((r) => setItems(r.data || []))
+    const [answers, setAnswers] = useState({}); // {questionarioId: {domandaId: valore}}
+    const [saving, setSaving] = useState(null);
+
+    const load = useCallback(() => {
+        if (!entitaId) { setLoading(false); return; }
+        setLoading(true);
+        api.get(`/questionari/compilati?entita_tipo=${entita}&entita_id=${entitaId}`)
+            .then((r) => {
+                const list = r.data || [];
+                setItems(list);
+                const init = {};
+                list.forEach((q) => {
+                    init[q.id] = {};
+                    (q.domande || []).forEach((d) => { init[q.id][d.id] = d.risposta ?? ""; });
+                });
+                setAnswers(init);
+            })
             .catch(() => setItems([]))
             .finally(() => setLoading(false));
-    }, [entita]);
+    }, [entita, entitaId]);
+    useEffect(() => { load(); }, [load]);
 
-    if (loading) return null;
-    if (!items.length) return null;
+    const setAns = (qid, did, v) => setAnswers((p) => ({ ...p, [qid]: { ...(p[qid] || {}), [did]: v } }));
+
+    const salva = async (q) => {
+        setSaving(q.id);
+        try {
+            await api.post("/questionari/compilati", {
+                questionario_id: q.id, entita_tipo: entita, entita_id: entitaId,
+                risposte: answers[q.id] || {},
+            });
+            toast.success("Risposte salvate");
+            load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio"); }
+        finally { setSaving(null); }
+    };
+
+    if (loading) return <p className="text-sm text-slate-400 py-3">Caricamento questionari…</p>;
+    if (!items.length) return <p className="text-sm text-slate-400 py-3">Nessun questionario disponibile per questa sezione. Creane uno in Librerie → Questionari.</p>;
+
+    const pdfParams = `?entita_tipo=${entita}&entita_id=${entitaId}`;
 
     return (
         <div className="space-y-4" data-testid="questionari-viewer">
             {items.map((q) => (
                 <div key={q.id} className="border border-slate-200 rounded-lg p-4 bg-white" data-testid={`questionario-view-${q.id}`}>
-                    <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex items-start justify-between gap-3 mb-3">
                         <div>
                             <div className="font-semibold text-slate-800 flex items-center gap-2">
                                 <ClipboardList size={15} className="text-sky-600" /> {q.titolo}
+                                {q.compilato && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-semibold">Compilato</span>}
                             </div>
                             {q.descrizione && <div className="text-xs text-slate-500 mt-0.5">{q.descrizione}</div>}
                         </div>
                         <div className="flex gap-1.5 shrink-0">
-                            <Button size="sm" variant="outline" className="h-8" onClick={() => openPdf(`/questionari/${q.id}/pdf`)} data-testid={`questionario-pdf-${q.id}`}>
+                            <Button size="sm" variant="outline" className="h-8" onClick={() => openPdf(`/questionari/${q.id}/pdf${pdfParams}`)} data-testid={`questionario-pdf-${q.id}`}>
                                 <FileDown size={13} className="mr-1" /> PDF
                             </Button>
-                            <Button size="sm" variant="outline" className="h-8" onClick={() => stampaQuestionario(q)} data-testid={`questionario-print-${q.id}`}>
+                            <Button size="sm" variant="outline" className="h-8" onClick={() => stampaQuestionario({ ...q, domande: (q.domande || []).map((d) => ({ ...d, risposta: (answers[q.id] || {})[d.id] ?? d.risposta })) })} data-testid={`questionario-print-${q.id}`}>
                                 <Printer size={13} className="mr-1" /> Stampa
                             </Button>
                         </div>
                     </div>
-                    <div className="divide-y divide-slate-100">
+                    <div className="space-y-2.5">
                         {(q.domande || []).map((d, i) => (
-                            <div key={d.id || i} className="py-1.5 text-sm flex gap-2">
-                                <span className="text-slate-500 w-5 shrink-0">{i + 1}.</span>
-                                <span className="flex-1 text-slate-700">{d.testo}</span>
-                                <span className="font-medium text-slate-900">{rispostaFmt(d)}</span>
+                            <div key={d.id || i} className="flex gap-2 items-center" data-testid={`questionario-field-${q.id}-${i}`}>
+                                <span className="text-slate-500 text-sm w-5 shrink-0">{i + 1}.</span>
+                                <span className="flex-1 text-sm text-slate-700">
+                                    {d.testo}
+                                    {d.tipo === "scelta_multipla" && (d.opzioni || []).length
+                                        ? <span className="text-[10px] text-slate-400 ml-1">({(d.opzioni || []).join(", ")})</span> : null}
+                                </span>
+                                <div className="w-56">
+                                    <RispostaInput d={{ ...d, risposta: (answers[q.id] || {})[d.id] ?? "" }}
+                                        onChange={(v) => setAns(q.id, d.id, v)} />
+                                </div>
                             </div>
                         ))}
+                        {!(q.domande || []).length && <p className="text-sm text-slate-400">Questionario senza domande.</p>}
+                    </div>
+                    <div className="flex justify-end mt-3">
+                        <Button size="sm" onClick={() => salva(q)} disabled={saving === q.id} className="bg-sky-700 hover:bg-sky-800" data-testid={`questionario-salva-risposte-${q.id}`}>
+                            {saving === q.id ? "Salvataggio…" : "Salva risposte"}
+                        </Button>
                     </div>
                 </div>
             ))}

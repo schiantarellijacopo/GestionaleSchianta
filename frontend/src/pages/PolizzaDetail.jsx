@@ -1306,7 +1306,7 @@ export default function PolizzaDetail() {
                 <TabsContent value="questionari">
                     <Card className="p-6 border-slate-200 mt-4 space-y-3">
                         <SezioneTitolo titolo="Questionari" />
-                        <QuestionariViewer entita="polizza" />
+                        <QuestionariViewer entita="polizza" entitaId={pol.id} />
                     </Card>
                 </TabsContent>
             </Tabs>

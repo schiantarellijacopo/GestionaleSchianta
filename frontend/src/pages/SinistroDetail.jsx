@@ -284,7 +284,7 @@ export default function SinistroDetail() {
 
                 <TabsContent value="questionari">
                     <Card className="p-4 space-y-3">
-                        <QuestionariViewer entita="sinistri" />
+                        <QuestionariViewer entita="sinistri" entitaId={id} />
                     </Card>
                 </TabsContent>
             </Tabs>

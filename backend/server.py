@@ -6362,8 +6362,77 @@ async def delete_questionario(qid: str, user=Depends(require_user("admin", "coll
     res = await db.questionari.delete_one({"id": qid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Questionario non trovato")
+    await db.questionari_compilati.delete_many({"questionario_id": qid})
     await log_attivita(user, "delete", "questionario", qid)
     return {"ok": True}
+
+
+_ENTITA_VIS = {"anagrafica": "visibile_anagrafica", "polizza": "visibile_polizza", "sinistri": "visibile_sinistri"}
+
+
+@api.get("/questionari/compilati")
+async def list_questionari_compilati(entita_tipo: str, entita_id: str, user=Depends(current_user)):
+    """Ritorna i questionari visibili per l'entità, ciascuno arricchito con le
+    risposte salvate per QUEL record specifico (compilazione per-entità)."""
+    vis = _ENTITA_VIS.get(entita_tipo)
+    if not vis:
+        raise HTTPException(400, "entita_tipo non valido")
+    templates = await db.questionari.find({vis: True}, {"_id": 0}).sort("titolo", 1).to_list(1000)
+    out = []
+    for t in templates:
+        comp = await db.questionari_compilati.find_one(
+            {"questionario_id": t["id"], "entita_tipo": entita_tipo, "entita_id": entita_id},
+            {"_id": 0},
+        )
+        risposte = (comp or {}).get("risposte") or {}
+        domande = []
+        for d in (t.get("domande") or []):
+            dd = dict(d)
+            if d.get("id") in risposte:
+                dd["risposta"] = risposte[d["id"]]
+            domande.append(dd)
+        out.append({
+            **t,
+            "domande": domande,
+            "compilato": bool(comp),
+            "compilato_il": (comp or {}).get("updated_at"),
+        })
+    return out
+
+
+@api.post("/questionari/compilati", status_code=201)
+async def save_questionario_compilato(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Salva (upsert) le risposte di un questionario per uno specifico record."""
+    qid = body.get("questionario_id")
+    entita_tipo = body.get("entita_tipo")
+    entita_id = body.get("entita_id")
+    if not (qid and entita_tipo in _ENTITA_VIS and entita_id):
+        raise HTTPException(400, "questionario_id, entita_tipo ed entita_id richiesti")
+    tmpl = await db.questionari.find_one({"id": qid}, {"_id": 0, "id": 1})
+    if not tmpl:
+        raise HTTPException(404, "Questionario non trovato")
+    risposte = body.get("risposte") or {}
+    if not isinstance(risposte, dict):
+        raise HTTPException(400, "risposte deve essere un oggetto {domanda_id: valore}")
+    existing = await db.questionari_compilati.find_one(
+        {"questionario_id": qid, "entita_tipo": entita_tipo, "entita_id": entita_id}, {"_id": 0, "id": 1},
+    )
+    if existing:
+        await db.questionari_compilati.update_one(
+            {"id": existing["id"]},
+            {"$set": {"risposte": risposte, "compilato_da": user.get("id"), "updated_at": _now_iso()}},
+        )
+        cid = existing["id"]
+    else:
+        doc = {
+            "id": _uid(), "questionario_id": qid, "entita_tipo": entita_tipo, "entita_id": entita_id,
+            "risposte": risposte, "compilato_da": user.get("id"),
+            "created_at": _now_iso(), "updated_at": _now_iso(),
+        }
+        await db.questionari_compilati.insert_one(doc)
+        cid = doc["id"]
+    return {"ok": True, "id": cid}
+
 
 
 def _build_questionario_pdf(q: dict, azienda: dict) -> bytes:
@@ -6415,10 +6484,19 @@ def _build_questionario_pdf(q: dict, azienda: dict) -> bytes:
 
 
 @api.get("/questionari/{qid}/pdf")
-async def get_questionario_pdf(qid: str, user=Depends(current_user)):
+async def get_questionario_pdf(qid: str, entita_tipo: Optional[str] = None,
+                               entita_id: Optional[str] = None, user=Depends(current_user)):
     q = await db.questionari.find_one({"id": qid}, {"_id": 0})
     if not q:
         raise HTTPException(404, "Questionario non trovato")
+    # Compilazione per-entità: sovrapponi le risposte salvate per quel record
+    if entita_tipo and entita_id:
+        comp = await db.questionari_compilati.find_one(
+            {"questionario_id": qid, "entita_tipo": entita_tipo, "entita_id": entita_id}, {"_id": 0},
+        )
+        risposte = (comp or {}).get("risposte") or {}
+        q["domande"] = [{**d, "risposta": risposte.get(d.get("id"), d.get("risposta"))}
+                        for d in (q.get("domande") or [])]
     azienda = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     pdf = _build_questionario_pdf(q, azienda)
     fname = f"questionario_{(q.get('titolo') or qid)[:30].replace(' ', '_')}.pdf"

@@ -203,6 +203,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "azienda_config",
     "incentivazioni_config",
     "questionari",
+    "questionari_compilati",
 ]
 
 
