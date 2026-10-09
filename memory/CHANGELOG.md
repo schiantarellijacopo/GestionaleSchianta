@@ -586,3 +586,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Se la polizza è SOSTITUITA (numero_polizza_sostituente valorizzato o cod_stato_share="SO") → stato 'sostituita' e la data di annullo viene IGNORATA (anche per polizze già importate erroneamente come annullata: lo stato viene forzato e la data annullo azzerata).
 - _parse_date ora gestisce anche l'anno a 2 cifre (DD/MM/YY).
 - Verificato sul file reale: 180992095→annullata(04/09/2026); 184643003 e 183628997→sostituita (annullo ignorato); 184643530→attiva.
+
+## 2026-06 — Import OMNIA: annullata senza data AG → riportata attiva
+- Regola richiesta: se in import una polizza risulta 'annullata' ma NON ha data di annullo in rec20 col AG → viene riportata 'attiva' (e data_annullamento azzerata).
+- Vale sia per nuovi insert (build: cod_stato 'annullata' senza AG → attiva) sia per polizze già in DB (update autoritativo nel loop filtrato su stato='annullata').
+- Precedenza mantenuta: sostituita > annullo(AG) > sospensione(AH) > revert-attiva.
+- Testato: annullata senza AG→attiva; annullata con AG→resta annullata; annullata+sostituita→sostituita; attiva→invariata.
