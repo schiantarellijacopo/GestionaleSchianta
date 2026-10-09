@@ -550,3 +550,10 @@ Admin: `admin@assicura.it / Admin123!`
 - routes/anagrafiche.py `_normalize_upper`: campi enum (sesso, tipo_lavoratore, tipologia_lavoratore, preferenza_pagamento, sotto_tipo) con stringa vuota ora convertiti a None. Risolve il 500 (ValidationError sesso="") che bloccava la creazione aziende/condomini dalla UI.
 - Estratto Conto Compagnie: pagamento PARZIALE. paga-titoli accetta importo_versato; la rimessa registra solo il versato (KPI Rimesse corretto) e genera una partita RESIDUA (collezione residui_compagnia) selezionabile e pagabile in seguito (ricorsivo). Verificato: 568.43 -> 300+100+168.43, saldo finale 0.00.
 - geocoding: gia in produzione (fix Italia).
+
+##  — Audit isolamento multi-tenant (collaboratori/utenti)
+- Verificato e rafforzato l isolamento della collezione `users` (NON auto-scoped dal wrapper DB).
+- Aggiunti helper `_users_tenant_flt(user)` e `_assert_user_same_tenant()` in server.py.
+- Corretti leak cross-tenant: update_user, delete_user, merge_users(_preview), unmerge_user, pulisci_stub_operatori, voci-ricorsive __all__, estratto/paga/voci-manuali/liste-bozze per collaboratore.
+- alert_dispatcher: destinatari ruolo "admin" ora filtrati per tenant della regola (niente avvisi cross-agenzia).
+- Test: admin principale NON vede/modifica/elimina utenti di Axicura (404); ogni tenant vede solo i propri collaboratori (principale=5, Axicura=24). Wizard import candidati collaboratore isolati.

@@ -94,6 +94,31 @@ api = APIRouter(prefix="/api")
 
 # ---------- Helpers (extracted to shared.py) ----------
 
+def _users_tenant_flt(user: dict) -> dict:
+    """Filtro di isolamento per la collezione `users` (che NON è tenant-scoped
+    dal wrapper DB). Garantisce che ogni agenzia veda/gestisca SOLO i propri
+    utenti/collaboratori. Il super_admin non è filtrato (gestione piattaforma)."""
+    from tenant import is_super_admin, user_tenant_id, TENANT_PRINCIPALE_ID
+    if is_super_admin(user):
+        return {}
+    tid = user_tenant_id(user)
+    if tid == TENANT_PRINCIPALE_ID:
+        return {"$or": [{"agenzia_tenant_id": tid},
+                        {"agenzia_tenant_id": {"$exists": False}},
+                        {"agenzia_tenant_id": None}]}
+    return {"agenzia_tenant_id": tid}
+
+
+async def _assert_user_same_tenant(user: dict, uid: str, proj: dict | None = None) -> dict:
+    """Verifica che l'utente `uid` appartenga alla stessa agenzia del richiedente.
+    Solleva 404 se non trovato / di un altro tenant. Ritorna il documento."""
+    flt = {"id": uid, **_users_tenant_flt(user)}
+    target = await db.users.find_one(flt, proj if proj is not None else {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    return target
+
+
 # ============================================================
 # AUTH
 # ============================================================
@@ -205,8 +230,10 @@ async def list_users(user=Depends(require_user("admin", "collaboratore", "dipend
 
 @api.put("/auth/users/{uid}")
 async def update_user(uid: str, body: dict, user=Depends(require_user("admin"))):
+    await _assert_user_same_tenant(user, uid, {"_id": 0, "id": 1})
     body.pop("password_hash", None)
     body.pop("id", None)
+    body.pop("agenzia_tenant_id", None)  # non consentire lo spostamento di tenant
     if body.get("password"):
         body["password_hash"] = hash_password(body.pop("password"))
     body["updated_at"] = _now_iso()
@@ -222,6 +249,7 @@ async def update_user(uid: str, body: dict, user=Depends(require_user("admin")))
 async def delete_user(uid: str, user=Depends(require_user("admin"))):
     if uid == user["id"]:
         raise HTTPException(400, "Non puoi eliminare te stesso")
+    await _assert_user_same_tenant(user, uid, {"_id": 0, "id": 1})
     res = await db.users.delete_one({"id": uid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Utente non trovato")
@@ -246,7 +274,7 @@ async def merge_users_preview(body: dict, user=Depends(require_user("admin"))):
         raise HTTPException(400, "Nessun utente da unire selezionato")
     sources = []
     for sid in source_ids:
-        u = await db.users.find_one({"id": sid}, {"_id": 0, "name": 1, "email": 1})
+        u = await db.users.find_one({"id": sid, **_users_tenant_flt(user)}, {"_id": 0, "name": 1, "email": 1})
         row = {"id": sid, "name": (u or {}).get("name") or "?", "email": (u or {}).get("email")}
         row["polizze"] = await db.polizze.count_documents({"collaboratore_id": sid})
         row["titoli"] = await db.titoli.count_documents({"collaboratore_id": sid})
@@ -254,7 +282,7 @@ async def merge_users_preview(body: dict, user=Depends(require_user("admin"))):
         row["trattative"] = await db.trattative.count_documents({"collaboratore_id": sid})
         sources.append(row)
     totali = {k: sum(r[k] for r in sources) for k in ("polizze", "titoli", "anagrafiche", "trattative")}
-    target = await db.users.find_one({"id": target_id}, {"_id": 0, "name": 1, "email": 1})
+    target = await db.users.find_one({"id": target_id, **_users_tenant_flt(user)}, {"_id": 0, "name": 1, "email": 1})
     return {"target": target, "sources": sources, "totali": totali}
 
 
@@ -272,12 +300,12 @@ async def merge_users(body: dict, user=Depends(require_user("admin"))):
         raise HTTPException(400, "Seleziona la destinazione e almeno un utente da unire")
     if user["id"] in source_ids:
         raise HTTPException(400, "Non puoi unire il tuo stesso account")
-    target = await db.users.find_one({"id": target_id}, {"_id": 0})
+    target = await db.users.find_one({"id": target_id, **_users_tenant_flt(user)}, {"_id": 0})
     if not target:
         raise HTTPException(404, "Utente destinazione non trovato")
     if target.get("role") == "cliente":
         raise HTTPException(400, "La destinazione non può essere un cliente")
-    sources = await db.users.find({"id": {"$in": source_ids}}, {"_id": 0}).to_list(500)
+    sources = await db.users.find({"id": {"$in": source_ids}, **_users_tenant_flt(user)}, {"_id": 0}).to_list(500)
     if len(sources) != len(set(source_ids)):
         raise HTTPException(404, "Alcuni utenti da unire non sono stati trovati")
     if any(s.get("role") == "cliente" for s in sources):
@@ -360,7 +388,7 @@ async def pulisci_stub_operatori(body: dict = None, user=Depends(require_user("a
     body = body or {}
     dry_run = bool(body.get("dry_run"))
     stubs = await db.users.find(
-        {"auto_created": True, "role": {"$ne": "cliente"}}, {"_id": 0}).to_list(5000)
+        {"auto_created": True, "role": {"$ne": "cliente"}, **_users_tenant_flt(user)}, {"_id": 0}).to_list(5000)
     rep = {"totale_stub": len(stubs), "eliminabili": 0, "eliminati": 0,
            "saltati_non_mappati": 0, "riferimenti_ripuntati": 0, "dettaglio": []}
     for s in stubs:
@@ -420,7 +448,7 @@ async def unmerge_user(uid: str, user=Depends(require_user("admin"))):
     `merged_from_user_id`). Le unioni fatte prima del tracciamento riattivano
     l'utente ma non ripristinano i dati.
     """
-    src = await db.users.find_one({"id": uid}, {"_id": 0})
+    src = await db.users.find_one({"id": uid, **_users_tenant_flt(user)}, {"_id": 0})
     if not src:
         raise HTTPException(404, "Utente non trovato")
     if not src.get("merged_into"):
@@ -531,7 +559,7 @@ async def estratto_provvigioni(
     """
     if user.get("role") == "collaboratore" and cid != user.get("id"):
         raise HTTPException(403, "Non autorizzato a vedere l'estratto conto di altri collaboratori")
-    collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
+    collab = await db.users.find_one({"id": cid, **_users_tenant_flt(user)}, {"_id": 0, "password_hash": 0})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
     # Mostra la % del Sistema Provvigionale se il profilo utente è a 0
@@ -731,7 +759,7 @@ async def list_voci_manuali_collab(
 async def create_voce_manuale_collab(
     cid: str, body: dict, user=Depends(require_user("admin")),
 ):
-    collab = await db.users.find_one({"id": cid}, {"_id": 0, "id": 1})
+    collab = await db.users.find_one({"id": cid, **_users_tenant_flt(user)}, {"_id": 0, "id": 1})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
     if not body.get("causale"):
@@ -1038,7 +1066,7 @@ async def list_voci_ricorsive(
 @api.post("/voci-ricorsive-collab", status_code=201)
 async def create_voce_ricorsiva(body: VoceRicorsivaBody, user=Depends(require_user("admin"))):
     if body.collaboratore_id != "__all__":
-        u = await db.users.find_one({"id": body.collaboratore_id}, {"_id": 0, "id": 1})
+        u = await db.users.find_one({"id": body.collaboratore_id, **_users_tenant_flt(user)}, {"_id": 0, "id": 1})
         if not u:
             raise HTTPException(404, "Collaboratore non trovato")
     obj = VoceRicorsivaCollab(**body.model_dump(), created_by=user.get("id"))
@@ -1048,7 +1076,8 @@ async def create_voce_ricorsiva(body: VoceRicorsivaBody, user=Depends(require_us
     targets = []
     if body.collaboratore_id == "__all__":
         async for u in db.users.find(
-            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
+            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False},
+             **_users_tenant_flt(user)},
             {"_id": 0, "id": 1},
         ):
             targets.append(u["id"])
@@ -1103,7 +1132,8 @@ async def materializza_voce_ricorsiva(rid: str, user=Depends(require_user("admin
     targets: list[str] = []
     if r["collaboratore_id"] == "__all__":
         async for u in db.users.find(
-            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False}},
+            {"role": {"$in": ["collaboratore", "dipendente"]}, "attivo": {"$ne": False},
+             **_users_tenant_flt(user)},
             {"_id": 0, "id": 1},
         ):
             targets.append(u["id"])
@@ -1128,7 +1158,7 @@ async def collaboratore_liste_bozze_list(cid: str, user=Depends(require_user("ad
 async def collaboratore_lista_bozza_crea(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
     """Salva una bozza di lista provvigioni da pagare (nessun movimento contabile)."""
     from tenant import assign_tenant
-    collab = await db.users.find_one({"id": cid}, {"_id": 0, "id": 1, "name": 1,
+    collab = await db.users.find_one({"id": cid, **_users_tenant_flt(user)}, {"_id": 0, "id": 1, "name": 1,
                                                    "perc_ritenuta_acconto": 1})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
@@ -1174,7 +1204,7 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     body: { titoli_ids: [...], conto_cassa_id, data_pagamento, mezzo_pagamento, note,
             override_provvigioni_lorde?, override_ritenuta?, override_contributi? }
     """
-    collab = await db.users.find_one({"id": cid}, {"_id": 0, "password_hash": 0})
+    collab = await db.users.find_one({"id": cid, **_users_tenant_flt(user)}, {"_id": 0, "password_hash": 0})
     if not collab:
         raise HTTPException(404, "Collaboratore non trovato")
     if user.get("role") == "collaboratore" and cid != user.get("id"):

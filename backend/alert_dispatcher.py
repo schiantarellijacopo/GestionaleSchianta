@@ -188,7 +188,11 @@ async def resolve_destinatari(rule: dict, payload: dict) -> list[dict]:
             # "collaboratore_sinistri" mantenuto per backward-compat (legacy data)
             out.extend(await _dest_altri_collaboratori(rule))
         elif dt == "admin":
-            out.extend(await _dest_users_by_query({"role": "admin"}, "admin"))
+            _tid = rule.get("agenzia_tenant_id")
+            _q = {"role": "admin", "is_super_admin": {"$ne": True}}
+            if _tid:
+                _q["agenzia_tenant_id"] = _tid
+            out.extend(await _dest_users_by_query(_q, "admin"))
         elif dt == "utente_specifico":
             out.extend(await _dest_utenti_specifici(rule.get("destinatari_user_ids") or []))
     return _dedupe_destinatari(out)
