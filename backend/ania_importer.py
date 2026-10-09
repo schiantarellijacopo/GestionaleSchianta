@@ -650,6 +650,17 @@ async def _resolve_operatore_codice(db, row: dict,
     if not collaboratore_id:
         collaboratore_id = mapping_operatori.get(operatore_codice)
     if not collaboratore_id:
+        # 🔒 Non toccare mapping BLOCCATI (manuali o verso utente reale):
+        # riusa l'entità già collegata invece di ricreare/ri-puntare uno stub.
+        if await _mapping_is_locked(db, "collaboratore", operatore_codice):
+            locked = await db.import_mappings.find_one(
+                {"tipo": "collaboratore", "flusso": "omnia", "valore_flusso": operatore_codice},
+                {"_id": 0, "entita_id": 1})
+            if locked and locked.get("entita_id"):
+                cid = locked["entita_id"]
+                if import_mappings is not None:
+                    import_mappings.setdefault("collaboratore", {})[operatore_codice] = cid
+                return operatore_codice, cid
         # 🆕 Auto-crea stub user (invece di lasciare la scelta manuale)
         new_user_id = await _auto_create_stub_user(db, operatore_codice, label)
         if new_user_id:
@@ -1776,6 +1787,16 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
             if cf:
                 label_parts.append(f"CF: {cf}")
             label = " · ".join(label_parts)
+            # 🔒 Se il codice è già BLOCCATO (mapping manuale oppure puntato a un
+            # utente REALE), NON creare stub né ri-mappare: rispetta la scelta
+            # dell'admin e tieni in cache l'entità reale per i record rec20/rec40.
+            if await _mapping_is_locked(db, "collaboratore", codice):
+                locked = await db.import_mappings.find_one(
+                    {"tipo": "collaboratore", "flusso": "omnia", "valore_flusso": codice},
+                    {"_id": 0, "entita_id": 1})
+                if locked and locked.get("entita_id") and import_mappings is not None:
+                    import_mappings.setdefault("collaboratore", {})[codice] = locked["entita_id"]
+                continue
             # Nessun match con utenti esistenti → CREA il collaboratore (utente
             # stub, ruolo collaboratore, non attivo) e mappalo al codice flusso.
             new_uid = await _auto_create_stub_user(db, codice, descr or codice)

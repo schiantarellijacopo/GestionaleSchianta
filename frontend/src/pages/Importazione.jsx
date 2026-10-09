@@ -528,12 +528,11 @@ function MappingWizardDialog({ open, onClose }) {
         }
         setSaving(true);
         try {
-            for (const [mid, entita_id] of updates) {
+            const payloadItems = updates.map(([mid, entita_id]) => {
                 const it = byId[mid];
-                if (!it) continue;
                 const tipo = ["compagnia", "ramo", "collaboratore", "prodotto"]
                     .find((t) => (data[t] || []).some((x) => x.id === mid));
-                await api.post("/import/mappings", {
+                return {
                     tipo,
                     flusso: "omnia",
                     valore_flusso: it.valore_flusso,
@@ -541,11 +540,20 @@ function MappingWizardDialog({ open, onClose }) {
                     label_programma: entita_id
                         ? ((data.candidates[tipo] || []).find((c) => c.id === entita_id)?.label || null)
                         : null,
-                });
+                };
+            });
+            // 🔧 Salvataggio in BULK: una sola richiesta (evita centinaia di
+            // round-trip sequenziali che potevano fallire a metà lasciando i
+            // collaboratori non salvati).
+            const res = await api.post("/import/mappings/bulk", { flusso: "omnia", items: payloadItems });
+            const { saved = 0, errors = [] } = res.data || {};
+            if (errors.length) {
+                toast.warning(`Salvate ${saved}/${payloadItems.length} modifiche · ${errors.length} non riuscite`);
+            } else {
+                toast.success(`Salvate ${saved} modifiche`);
             }
-            toast.success(`Salvate ${updates.length} modifiche`);
             if (applyAfter) {
-                await applyMappings(false);
+                await applyMappings(true);
             }
             await load();
         } catch (e) {
@@ -569,21 +577,36 @@ function MappingWizardDialog({ open, onClose }) {
     const applyMappings = async (showToast = true) => {
         setApplying(true);
         try {
-            const res = await api.post("/import/mappings/apply");
-            const s = res.data;
-            const total = (s.polizze_collaboratore || 0)
-                + (s.polizze_prodotto || 0)
-                + (s.polizze_garanzia || 0)
-                + (s.polizze_compagnia || 0)
-                + (s.polizze_ramo || 0);
-            const ana = s.anagrafiche_collaboratore || 0;
-            const tit = s.titoli_collaboratore || 0;
+            const start = await api.post("/import/mappings/apply-async");
+            const jobId = start.data?.job_id;
+            if (!jobId) throw new Error("Back-fill non avviato");
+            // Poll fino a completamento: il back-fill scorre tutte le polizze/
+            // titoli/anagrafiche e può durare oltre il timeout proxy di 120s.
+            let done = null;
+            for (let i = 0; i < 150; i++) {     // ~5 min max (2s * 150)
+                await new Promise((r) => setTimeout(r, 2000));
+                const st = await api.get(`/import/job/${jobId}`);
+                if (st.data?.status === "done") { done = st.data; break; }
+                if (st.data?.status === "error") {
+                    throw new Error(st.data?.error || "back-fill fallito");
+                }
+            }
             if (showToast) {
-                const extra = [];
-                if (ana) extra.push(`${ana} anagrafiche`);
-                if (tit) extra.push(`${tit} titoli`);
-                const suffix = extra.length ? ` · ${extra.join(", ")} col collaboratore` : "";
-                toast.success(`Back-fill completato: ${total} polizze aggiornate${suffix}`);
+                if (done) {
+                    const s = done.result || {};
+                    const total = (s.polizze_collaboratore || 0)
+                        + (s.polizze_prodotto || 0)
+                        + (s.polizze_garanzia || 0)
+                        + (s.polizze_compagnia || 0)
+                        + (s.polizze_ramo || 0);
+                    const extra = [];
+                    if (s.anagrafiche_collaboratore) extra.push(`${s.anagrafiche_collaboratore} anagrafiche`);
+                    if (s.titoli_collaboratore) extra.push(`${s.titoli_collaboratore} titoli`);
+                    const suffix = extra.length ? ` · ${extra.join(", ")} col collaboratore` : "";
+                    toast.success(`Back-fill completato: ${total} polizze aggiornate${suffix}`);
+                } else {
+                    toast.info("Back-fill in corso in background: può richiedere qualche minuto.");
+                }
             }
         } catch (e) {
             toast.error("Errore back-fill: " + (e.response?.data?.detail || e.message));

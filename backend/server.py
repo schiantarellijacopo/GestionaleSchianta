@@ -10325,18 +10325,46 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
         {"_id": 0, "id": 1},
     ).to_list(50)
     if len(existing_docs) > 1:
-        keep_id = existing_docs[0]["id"]
-        extra_ids = [d["id"] for d in existing_docs[1:]]
-        await db.import_mappings.delete_many({"id": {"$in": extra_ids}})
-        # Aggiorna esplicitamente il record che teniamo
-        await db.import_mappings.update_one({"id": keep_id}, {"$set": upd})
-        return upd
+        # Mantieni il primo (garantendo un id) e cancella gli extra duplicati.
+        keep_id = existing_docs[0].get("id") or str(uuid.uuid4())
+        extra_ids = [d.get("id") for d in existing_docs[1:] if d.get("id")]
+        if extra_ids:
+            await db.import_mappings.delete_many({"id": {"$in": extra_ids}})
+        await db.import_mappings.update_one(
+            {"tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso},
+            {"$set": {**upd, "id": keep_id}, "$setOnInsert": {"created_at": _now_iso()}},
+            upsert=True,
+        )
+        return {**upd, "id": keep_id}
+    # 🔧 FIX: garantisci sempre un `id` sul documento (necessario per key React,
+    # rimozione mapping e tracciamento). In passato l'upsert creava doc senza id.
     await db.import_mappings.update_one(
         {"tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso},
-        {"$set": upd, "$setOnInsert": {"created_at": _now_iso()}},
+        {"$set": upd, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": _now_iso()}},
         upsert=True,
     )
     return upd
+
+
+@api.post("/import/mappings/bulk", status_code=201)
+async def save_mappings_bulk(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Salva PIÙ mappature in UNA sola richiesta (evita centinaia di round-trip
+    sequenziali dal client che possono fallire a metà lasciando i collaboratori
+    non salvati). Resiliente: un errore su un item non blocca gli altri."""
+    items = body.get("items") or []
+    flusso = body.get("flusso", "omnia")
+    saved = 0
+    errors: list[dict] = []
+    for it in items:
+        try:
+            payload = {**it, "flusso": it.get("flusso") or flusso}
+            await save_mapping(payload, user)
+            saved += 1
+        except HTTPException as e:
+            errors.append({"valore_flusso": it.get("valore_flusso"), "detail": str(e.detail)})
+        except Exception as e:  # noqa: BLE001 - resiliente per item
+            errors.append({"valore_flusso": it.get("valore_flusso"), "detail": str(e)[:200]})
+    return {"saved": saved, "errors": errors, "total": len(items)}
 
 
 @api.delete("/import/mappings/{mid}")
@@ -10512,6 +10540,38 @@ async def apply_import_mappings(
     await log_attivita(user, "apply", "import_mappings", None,
                        f"Applicate {len(mappings)} mappature", payload=summary)
     return summary
+
+
+async def _run_apply_mappings_job(job_id: str, flusso: str, user: dict):
+    """Esegue il back-fill dei mapping in BACKGROUND (il back-fill scorre tutte
+    le polizze/titoli/anagrafiche e può superare il timeout proxy di 120s)."""
+    try:
+        summary = await apply_import_mappings(flusso, user)
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "done", "result": summary, "finished_at": _now_iso()}})
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        logging.error("Apply-mappings job %s fallito: %s", job_id, traceback.format_exc())
+        await db.import_jobs.update_one({"id": job_id}, {"$set": {
+            "status": "error", "error": str(e)[:800], "finished_at": _now_iso()}})
+
+
+@api.post("/import/mappings/apply-async")
+async def apply_import_mappings_async(
+    flusso: str = "omnia",
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Avvia il back-fill in BACKGROUND e ritorna subito un job_id.
+    Lo stato si controlla con GET /import/job/{job_id}."""
+    import asyncio as _asyncio
+    job_id = str(uuid.uuid4())
+    await db.import_jobs.insert_one({
+        "id": job_id, "tipo": "apply_mappings", "status": "running",
+        "created_at": _now_iso()})
+    task = _asyncio.create_task(_run_apply_mappings_job(job_id, flusso, user))
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return {"job_id": job_id, "status": "running"}
 
 
 # Report dettagliato di un singolo import
