@@ -1,6 +1,10 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-09)
 
-## FIX PROVVIGIONI + SOSTITUZIONI (2026-10-09) — DEPLOY LANCIATO
+## EREDITÀ OPERATORE + ORDINAMENTO TITOLI (2026-10-09) — DEPLOY LANCIATO
+1) `_riattiva_titoli_sostituenti` (ania_importer.py, pre-titoli): la polizza sostituente EREDITA collaboratore_id dalla polizza sostituita se ne è priva → niente più "polizza senza operatore"; i titoli ricevono la provvigione collaboratore. Verificato: 184643537 eredita operatore da 183629466, titolo 330/276,14 → provv collab netto×%.
+2) get_polizza (server.py): titoli ordinati con la POLIZZA CORRENTE in cima, poi le sostituite (a parità, effetto desc) — stable sort su `0 if polizza_id==pid else 1`.
+
+## FIX PROVVIGIONI + SOSTITUZIONI (2026-10-09) — DEPLOYATO
 1) PROVVIGIONI COLLABORATORE: `_ripartizione_collaboratore` (ania_importer.py) usava `_provv_breakdown` che azzera la quota se la provvigione d'agenzia (ΣAF rec42)=0. Per schemi "sul netto" (BS BROKER 4,5% netto) la quota=netto×% ed è INDIPENDENTE dalla provvigione d'agenzia. Ora usa `_quota_collab_da_schema` (come /provvigioni/riassegna). Verificato: 396,69×4,5%=17,85 (sia provv 47,9 sia 0); schema 70%→33,53. NB: per i titoli esistenti sbagliati si può usare il bottone "Riassegna arretrati" sullo schema in Librerie (dry-run proved: 112/116 titoli corretti).
 2) SOSTITUZIONI: nuova `_riattiva_titoli_sostituenti` (PRIMA dei titoli) riattiva a "da_incassare" i titoli stornati (fonte=import_ania) delle polizze TESTA della catena; `_marca_polizze_sostituite` ora STORNA i titoli "da_incassare" delle polizze sostituite e ritorna (n, stornati). Risultato: polizza nuova→da incassare col premio rec42, polizza sostituita→stornato. Verificato su 184643537 (→330 da incassare) e 183629466 (→stornato), import fresco e caso produzione (titolo nuovo pre-stornato a 349→riattivato 330).
 

@@ -1705,24 +1705,42 @@ def _norm_num(s: str) -> str:
 
 
 async def _riattiva_titoli_sostituenti(db) -> int:
-    """PRIMA del processamento titoli: le polizze che SOSTITUISCONO un'altra e che
-    NON sono a loro volta sostituite (la "testa" della catena = polizza attuale)
-    devono avere il proprio titolo ATTIVO. Se un loro titolo di origine import
-    risulta 'stornato', lo riporta a 'da_incassare' così il passo rec42 lo
-    rivalorizza con il premio corretto. (La polizza sostituita verrà stornata dopo.)"""
+    """PRIMA del processamento titoli, per le catene di sostituzione:
+    1) EREDITÀ OPERATORE: se la polizza sostituente non ha collaboratore/operatore,
+       lo eredita dalla polizza che sostituisce (così i titoli ricevono la provvigione).
+    2) RIATTIVAZIONE: le polizze "testa" della catena (che sostituiscono un'altra e
+       non sono a loro volta sostituite) devono avere il proprio titolo ATTIVO: se un
+       loro titolo di origine import è 'stornato', lo riporta a 'da_incassare' così il
+       passo rec42 lo rivalorizza. (La polizza sostituita verrà stornata dopo.)"""
     docs = []
     sostituiti: set[str] = set()
+    num2doc: Dict[str, dict] = {}
     async for p in db.polizze.find(
-        {}, {"_id": 0, "id": 1, "numero_polizza": 1, "sostituisce_polizza": 1}):
+        {}, {"_id": 0, "id": 1, "numero_polizza": 1, "sostituisce_polizza": 1,
+             "collaboratore_id": 1}):
         docs.append(p)
+        for k in {(p.get("numero_polizza") or "").strip(), _norm_num(p.get("numero_polizza"))}:
+            if k:
+                num2doc.setdefault(k, p)
         sp = (p.get("sostituisce_polizza") or "").strip()
         if sp:
             sostituiti.add(sp)
             sostituiti.add(_norm_num(sp))
     n = 0
     for p in docs:
-        if not (p.get("sostituisce_polizza") or "").strip():
-            continue  # non sostituisce nessuno
+        sp = (p.get("sostituisce_polizza") or "").strip()
+        if not sp:
+            continue
+        # 1) Eredità operatore dalla polizza sostituita (solo se manca)
+        if not (p.get("collaboratore_id") or "").strip():
+            a = num2doc.get(sp) or num2doc.get(_norm_num(sp))
+            if a and (a.get("collaboratore_id") or "").strip():
+                await db.polizze.update_one(
+                    {"id": p["id"]},
+                    {"$set": {"collaboratore_id": a["collaboratore_id"],
+                              "updated_at": _now_iso()}})
+                p["collaboratore_id"] = a["collaboratore_id"]
+        # 2) Riattivazione titoli stornati se è la testa della catena
         numero = (p.get("numero_polizza") or "").strip()
         if numero in sostituiti or _norm_num(numero) in sostituiti:
             continue  # è a sua volta sostituita → NON è la testa della catena

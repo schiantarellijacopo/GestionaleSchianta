@@ -3826,6 +3826,9 @@ async def get_polizza(pid: str, user=Depends(current_user)):
     doc["titoli"] = await db.titoli.find(
         {"polizza_id": {"$in": polizza_ids_catena}}, {"_id": 0},
     ).sort("effetto", -1).to_list(500)
+    # Ordine: i titoli della polizza CORRENTE per primi (in cima), poi quelli delle
+    # polizze sostituite; a parità, per effetto decrescente (stable sort preserva l'ordine).
+    doc["titoli"].sort(key=lambda t: 0 if t.get("polizza_id") == pid else 1)
     # Mappa numeri polizza per arricchire i titoli storici
     if len(polizza_ids_catena) > 1:
         pmap = {p["id"]: p async for p in db.polizze.find(
