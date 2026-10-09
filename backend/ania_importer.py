@@ -1030,14 +1030,19 @@ def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[st
     cap_2 = _parse_float(row.get("valore_ass_2", ""))
     cap_3 = _parse_float(row.get("valore_ass_3", ""))
     capitale = max(cap_1, cap_2, cap_3)
+    # ═══ REGOLA UTENTE (import OMNIA) ═══
+    # Il flusso OMNIA mette l'SSN DENTRO le imposte della garanzia. L'imposta
+    # corretta da mostrare è quindi: imposte_flusso - SSN (es. 41,61 - 19 = 22,61).
+    _imp_raw = _parse_float(row.get("imposte") or row.get("tasse", ""))
+    _ssn = _parse_float(row.get("ssn", ""))
     return {
         "garanzia": nome_finale,
         "garanzia_originale": descr,
         "codice_ania": codice,
         "netto": _parse_float(row.get("netto_garanzia") or row.get("netto", "")),
         "accessori": _parse_float(row.get("accessori", "")),
-        "imposte": _parse_float(row.get("imposte") or row.get("tasse", "")),
-        "ssn": _parse_float(row.get("ssn", "")),
+        "imposte": round(_imp_raw - _ssn, 2),
+        "ssn": _ssn,
         "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
         "diritti": _parse_float(row.get("diritti", "")),
         "provvigione": _parse_float(row.get("provvigione_garanzia")
@@ -1089,7 +1094,8 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
             diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
             # Capitale assicurato di polizza = max dei capitali per garanzia
             capitale_pol = max((g.get("capitale_assicurato", 0.0) for g in garanzie), default=0.0)
-            update_fields = {"garanzie": garanzie, "diritti": diritti_tot, "updated_at": _now_iso()}
+            update_fields = {"garanzie": garanzie, "diritti": diritti_tot,
+                             "garanzie_imposte_scorporate": True, "updated_at": _now_iso()}
             if capitale_pol > 0:
                 update_fields["capitale_assicurato"] = capitale_pol
             await db.polizze.update_one(
@@ -1143,6 +1149,30 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
     fraz_cache: Dict[str, str] = {}
     pol_meta_cache: Dict[str, dict] = {}
     nome_cache: Dict[str, str] = {}
+    # ═══ REGOLA UTENTE (import OMNIA) ═══
+    # Gli importi del PREMIO del titolo vanno presi dalla POLIZZA (rec20), colonne:
+    #   CP (idx 93) = imponibile_totale  -> netto
+    #   CR (idx 95) = ssn_totale         -> ssn
+    #   CS (idx 96) = tasse_totale (include SSN) -> imposte = CS - CR
+    #   CT (idx 97) = lordo_totale        -> lordo
+    # La PROVVIGIONE agenzia resta dalla riga rec40 (col BD, idx 55).
+    premi_rec20: Dict[str, dict] = {}
+    for _fn, _ct in files_data.items():
+        if _detect_record_type(_fn) != "rec20":
+            continue
+        for _r in _read_csv_text(_ct):
+            _exp = (_r.get("id_polizza_exp") or "").strip()
+            if not _exp:
+                continue
+            _net = _parse_float(_col_at(_r, 93))
+            _ssn20 = _parse_float(_col_at(_r, 95))
+            _cs = _parse_float(_col_at(_r, 96))
+            premi_rec20[_exp] = {
+                "netto": _net,
+                "ssn": _ssn20,
+                "imposte": round(_cs - _ssn20, 2),
+                "lordo": _parse_float(_col_at(_r, 97)),
+            }
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec40":
             continue
@@ -1154,22 +1184,24 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             if not pol_id:
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
-            # 🔧 FIX titoli import ANIA:
-            # Il flusso fornisce netto_totale (netto tecnico) + tasse_totale + accessori.
-            # Ricalcoliamo il netto come lordo - imposte per garantire coerenza al display
-            # (netto + imposte = lordo). Le imposte sono le "tasse assicurative" del flusso.
-            # ═══ Tracciato OMNIA rec40 (posizionale, 0-based) ═══
-            #   AU(46)=accessori · AV(47)=imponibile · AX(49)=SSN · AY(50)=tasse
-            #   BD(55)=provvigione TOTALE di agenzia
-            imponibile = _parse_float(_col_at(row, 47))
-            ssn_eff = _parse_float(_col_at(row, 49))
-            tasse_eff = _parse_float(_col_at(row, 50))
+            # ═══ Importi PREMIO dalla polizza (rec20) — vedi regola sopra ═══
+            # La provvigione agenzia resta dal rec40 col BD (idx 55).
             accessori_titolo = _parse_float(_col_at(row, 46))
             provv_agenzia = _parse_float(_col_at(row, 55))
-            imposte_eff = tasse_eff
-            netto_calc = imponibile
-            # Il LORDO del titolo è calcolato in automatico: imponibile + tasse + SSN
-            lordo = round(imponibile + tasse_eff + ssn_eff, 2)
+            _premio = premi_rec20.get((pol_exp or "").strip())
+            if _premio:
+                netto_calc = _premio["netto"]
+                ssn_eff = _premio["ssn"]
+                imposte_eff = _premio["imposte"]
+                lordo = _premio["lordo"]
+            else:
+                # Fallback (titolo senza polizza nel rec20): usa i dati rec40.
+                #   AV(47)=imponibile · AX(49)=SSN · AY(50)=tasse
+                imponibile = _parse_float(_col_at(row, 47))
+                ssn_eff = _parse_float(_col_at(row, 49))
+                imposte_eff = _parse_float(_col_at(row, 50))
+                netto_calc = imponibile
+                lordo = round(imponibile + imposte_eff + ssn_eff, 2)
             # 🆕 Collaboratore/operatore del titolo: leggi da rec40 (collaboratore_1)
             # o eredita dalla polizza (fallback).
             _op_codice, coll_id_titolo = await _resolve_operatore_codice(
@@ -1221,6 +1253,30 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                     "effetto": eff_titolo,
                 })
             if existing:
+                # Titolo già presente. Per NON toccare incassi/pagamenti/versamenti
+                # né prime note chiuse o estratti pagati: aggiorna gli IMPORTI solo
+                # se il titolo è ancora "da_incassare". Negli altri stati → salta.
+                if existing.get("stato") == "da_incassare":
+                    upd = {
+                        "importo_lordo": lordo,
+                        "importo_netto": netto_calc,
+                        "imposte": round(imposte_eff, 2),
+                        "ssn": round(ssn_eff, 2),
+                        "accessori": round(accessori_titolo, 2),
+                        "provvigioni": round(provv_agenzia, 2),
+                        "updated_at": _now_iso(),
+                    }
+                    if coll_id_titolo:
+                        upd["collaboratore_id"] = coll_id_titolo
+                        prov_ops = await _ripartizione_collaboratore(
+                            db, coll_id_titolo, round(provv_agenzia, 2),
+                            _pmeta.get("compagnia_id"), _pmeta.get("ramo"),
+                            netto_calc, lordo, nome_cache,
+                        )
+                        if prov_ops:
+                            upd["provvigioni_operatori"] = prov_ops
+                    await db.titoli.update_one({"id": existing["id"]}, {"$set": upd})
+                    counts["titoli_aggiornati"] = counts.get("titoli_aggiornati", 0) + 1
                 continue
 
             data = {

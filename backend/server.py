@@ -9505,6 +9505,57 @@ async def import_job_status(job_id: str,
     return j
 
 
+@api.post("/import/fix-garanzie-imposte")
+async def fix_garanzie_imposte(dry_run: bool = True,
+                               user=Depends(require_user("admin"))):
+    """Correzione massiva: nelle garanzie di polizza l'imposta del flusso OMNIA
+    include l'SSN. Scorpora l'SSN (imposte = imposte - ssn) una sola volta per
+    polizza (guard: `garanzie_imposte_scorporate`). Con dry_run=True riporta solo
+    il conteggio senza scrivere. Non tocca prima nota/estratti (dato di polizza)."""
+    tot_pol = 0
+    tot_gar = 0
+    esempi = []
+    cursor = db.polizze.find(
+        {"garanzie": {"$exists": True, "$not": {"$size": 0}},
+         "garanzie_imposte_scorporate": {"$ne": True}},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "garanzie": 1},
+    )
+    async for p in cursor:
+        changed = False
+        new_gar = []
+        for g in (p.get("garanzie") or []):
+            ssn = float(g.get("ssn") or 0)
+            imp = float(g.get("imposte") or 0)
+            if ssn > 0:
+                g = dict(g)
+                g["imposte"] = round(imp - ssn, 2)
+                changed = True
+                tot_gar += 1
+            new_gar.append(g)
+        if changed:
+            tot_pol += 1
+            if len(esempi) < 25:
+                esempi.append({"numero_polizza": p.get("numero_polizza")})
+            if not dry_run:
+                await db.polizze.update_one(
+                    {"id": p["id"]},
+                    {"$set": {"garanzie": new_gar, "garanzie_imposte_scorporate": True}},
+                )
+        elif not dry_run:
+            # Nessuna garanzia con SSN: marca comunque come processata (idempotenza)
+            await db.polizze.update_one(
+                {"id": p["id"]},
+                {"$set": {"garanzie_imposte_scorporate": True}},
+            )
+    return {
+        "dry_run": dry_run,
+        "polizze_con_scorporo": tot_pol,
+        "garanzie_scorporate": tot_gar,
+        "esempi": esempi,
+    }
+
+
+
 # Mapping per flussi (compagnia/ramo/collaboratore/prodotto)
 @api.get("/import/mappings")
 async def list_mappings(

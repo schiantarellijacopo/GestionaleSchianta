@@ -8,6 +8,21 @@
 - Nota: collaboratori senza schema provvigionale applicabile → quota 0 (coerente col motore usato ovunque).
 - RICHIEDE REDEPLOY + hard refresh.
 
+## Regole import OMNIA + correzioni massive (2026-10-09) — DA DEPLOYARE
+NUOVE REGOLE IMPORT (ania_importer.py), tutte verificate sul file reale:
+- Titoli: premio dalla POLIZZA rec20 → netto=CP(93, imponibile_totale), ssn=CR(95), imposte=CS(96)-CR, lordo=CT(97); provvigioni agenzia da rec40 BD(55). Fallback a rec40 se la polizza non è nel rec20.
+- Garanzie (rec30): imposte scorporate dall'SSN → imposte = imposte_flusso - ssn (es. 41,61-19=22,61). Marker polizza `garanzie_imposte_scorporate=True`.
+- Re-import: un titolo GIÀ esistente viene aggiornato negli IMPORTI solo se stato=="da_incassare" (altrimenti saltato) → protegge incassi/versamenti/pagamenti/prime note chiuse/estratti pagati. Counter counts["titoli_aggiornati"].
+VERIFICA (184643537): netto 276,14 / imposte 34,86 / ssn 19 / lordo 330 / provv 34,86. (732958169): 778,16/172,34/0/950,50/178,97. Garanzie RC AUTOVETTURE imposte 22,61. ✓
+
+ENDPOINT CORREZIONE MASSIVA GARANZIE: POST /api/import/fix-garanzie-imposte?dry_run=true|false (admin). Scorpora SSN dalle garanzie di TUTTE le polizze del tenant, una sola volta (guard marker). Dry-run testato su preview: ~15.979 polizze / 16.696 garanzie.
+
+PIANO PRODUZIONE (confermato dall'utente):
+1. DEPLOY di queste modifiche.
+2. GARANZIE: eseguo dry-run su produzione → mostro numeri → applico (dry_run=false).
+3. TITOLI: l'utente ricarica gli ZIP OMNIA precedenti uno alla volta; il re-import corregge gli importi dei soli titoli "da_incassare".
+Nota: produzione (whatsapp-crm-146.emergent.host) ha DB separato dal preview; accesso API possibile con token admin (stesso JWT_SECRET).
+
 ## Estratto conto collaboratori + Brogliaccio (2026-10-08) — DA DEPLOYARE
 Tre richieste utente, tutte implementate e testate (testing agent 100%):
 1. **Brogliaccio pagamento provvigioni**: la riga "Pagamento provvigioni a ..." ora valorizza SOLO colonne SPESE e BANCA (uscita); colonna RITENUTA VUOTA. Fix in `_compute_brogliaccio` ramo `cat=="provvigioni"` uscita: `c_ritenuta=0.0`, `c_spese=importo` (server.py ~8282). La banca si valorizza via per_conto (conto risolto da tipo pagamento).
