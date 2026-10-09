@@ -719,10 +719,6 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         stato = "annullata"
     elif data_sospensione:
         stato = "sospesa"
-    elif stato == "annullata":
-        # 'annullata' (dal cod_stato tracciato) MA senza data di annullo in AG →
-        # non è un vero annullo: la polizza va riportata ATTIVA.
-        stato = "attiva"
     # rec20 col DK (115ª, index 114) = data emissione
     data_emissione = _parse_date(row.get("data_emissione") or _col_at(row, 114))
     effetto = (_parse_date(row.get("effetto", "")) or data_emissione or _now_iso()[:10])
@@ -952,16 +948,6 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                         {"id": _pid, "stato": {"$ne": "sostituita"}},
                         {"$set": {"stato": "sostituita", "data_annullamento": None,
                                   "data_sospensione": None, "updated_at": _now_iso()}},
-                    )
-            # Nessuna data di annullo in AG, non sostituita, non sospesa:
-            # se la polizza risulta 'annullata' la riportiamo ATTIVA.
-            elif not _data_ann:
-                _pid = polizza_id_map.get(id_exp)
-                if _pid:
-                    await db.polizze.update_one(
-                        {"id": _pid, "stato": "annullata"},
-                        {"$set": {"stato": "attiva", "data_annullamento": None,
-                                  "updated_at": _now_iso()}},
                     )
             # 🆕 Se l'anagrafica del contraente non ha un collaboratore
             # responsabile, ereditalo dalla polizza appena importata.

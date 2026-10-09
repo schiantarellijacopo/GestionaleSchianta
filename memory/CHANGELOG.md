@@ -592,3 +592,10 @@ Admin: `admin@assicura.it / Admin123!`
 - Vale sia per nuovi insert (build: cod_stato 'annullata' senza AG → attiva) sia per polizze già in DB (update autoritativo nel loop filtrato su stato='annullata').
 - Precedenza mantenuta: sostituita > annullo(AG) > sospensione(AH) > revert-attiva.
 - Testato: annullata senza AG→attiva; annullata con AG→resta annullata; annullata+sostituita→sostituita; attiva→invariata.
+
+## 2026-06 — Riattivazione polizza SOLO su incasso (rollback regola import)
+- RIMOSSA la regola di import "annullata senza data AG → attiva" (sia nel build sia nell'update del loop rec20).
+- MANTENUTA/confermata l'unica regola voluta: incassando (o coprendo) un titolo di una polizza ANNULLATA, la polizza torna 'attiva' (data/motivo annullo azzerati). Funzione `_riattiva_polizza_se_annullata`, attiva su incasso singolo, incasso massivo e copertura.
+- La regola NON vale per le polizze SOSTITUITE (né sospese): restano invariate.
+- Testato con endpoint reale /titoli/{id}/incassa: annullata→attiva; sostituita→resta sostituita.
+- Restano attive: sostituzione (priorità su annullo), annullo da AG, sospensione da AH + titolo a 0.
