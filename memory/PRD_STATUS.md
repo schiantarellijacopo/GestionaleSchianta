@@ -1,6 +1,17 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-09)
 
-## REGOLA IMPORT OMNIA — importi SOLO dal rec42 (2026-10-09) — DA DEPLOYARE
+## MAPPA GARANZIE dal rec42 (2026-10-09) — DEPLOY LANCIATO
+Richiesta utente: garanzie e titolo devono aggiornarsi "di pari passo". Prima la mappa Garanzie veniva dal rec30 (per-polizza, premio vecchio) mentre il titolo dal rec42 (per-titolo, rinnovo) → divergevano (es. 183629455: garanzie 690 vs titolo 714,50).
+Fix in ania_importer.py `_processa_garanzie` (riscritta) + nuovo helper `_row_rec42_a_garanzia`:
+- `polizza.garanzie` ora costruita dal rec42, prendendo le righe del TITOLO PIÙ RECENTE della polizza (max effetto_titolo idx12). Per garanzia: netto=Y(24), imposte=AA(26)-AC(28), ssn=AC(28), lordo=AB(27), provv=AF(31); garanzia 'CIA' → netto=0, imposte=(AA-AC)+Y (come nel titolo).
+- Aggiorna anche premio_netto/premio_imposte/premio_ssn/premio_tasse/premio_lordo/provvigioni della polizza col totale del titolo corrente (così la riga TOTALE Lordo, che legge pol.premio_lordo, mostra il valore giusto).
+- rec30 resta per massimali/capitali (merge per codice garanzia), diritti, e come FALLBACK per polizze senza rec42 in quel flusso.
+- Cache numero_polizza->pol_id (il rec42 non ha id_polizza_exp) per performance.
+VERIFICA E2E (vero importer, tenant temp, ZIP reali):
+- 183629455 (rinnovo): garanzie TOT = titolo = premio = netto 581,67 / imposte 72,80 / ssn 60,03 / lordo 714,50 / provv 46,14 ✓
+- 184643537 (con CIA): garanzie TOT = titolo = premio = 276,14 / 34,86 / 19,00 / 330,00 / 34,86 ✓ (riga CIA: netto 0, imposte -0,38)
+
+## REGOLA IMPORT OMNIA — importi SOLO dal rec42 (2026-10-09) — DEPLOY LANCIATO
 Richiesta utente (definitiva, SOSTITUISCE le regole precedenti rec20/rec40): gli importi dei titoli (Netto, Tasse/Imposte, SSN, Lordo, Provvigioni) si prendono ESCLUSIVAMENTE dal rec42, sommando le righe-garanzia del titolo (collegate per id_titolo_exp, col C/idx 2). Nessun altro rec per questi 5 parametri.
 Formula (ania_importer.py `_processa_titoli`, blocco `rec42_by_titolo`):
 - PROVVIGIONI = Σ AF (idx 31, provvigioni_totali)

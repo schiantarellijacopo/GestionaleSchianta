@@ -1052,56 +1052,160 @@ def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[st
     }
 
 
+def _row_rec42_a_garanzia(g: dict, codice: str, descr: str,
+                          nome_finale: Optional[str]) -> dict:
+    """Mappa una riga-garanzia rec42 in un dict garanzia, con la STESSA formula
+    del titolo:  netto=Y(24), imposte=AA(26)-AC(28), ssn=AC(28), lordo=AB(27),
+    provvigione=AF(31). La garanzia 'CIA' (Contributo Imposte Ramo) sposta il suo
+    imponibile dal netto alle imposte (come nel calcolo del titolo)."""
+    Y = _parse_float(_col_at(g, 24))   # imponibile
+    AA = _parse_float(_col_at(g, 26))  # tasse
+    AC = _parse_float(_col_at(g, 28))  # ssn
+    AB = _parse_float(_col_at(g, 27))  # lordo
+    AF = _parse_float(_col_at(g, 31))  # provvigioni_totali
+    if (codice or "").strip().upper() == "CIA":
+        netto = 0.0
+        imposte = round((AA - AC) + Y, 2)
+    else:
+        netto = round(Y, 2)
+        imposte = round(AA - AC, 2)
+    return {
+        "garanzia": nome_finale,
+        "garanzia_originale": descr,
+        "codice_ania": codice,
+        "netto": netto,
+        "accessori": 0.0,
+        "imposte": imposte,
+        "ssn": round(AC, 2),
+        "lordo": round(AB, 2),
+        "diritti": 0.0,
+        "provvigione": round(AF, 2),
+        "capitale_assicurato": 0.0,
+    }
+
+
 async def _processa_garanzie(db, files_data: Dict[str, str],
                              polizza_id_map: Dict[str, str],
                              mapping_garanzie: dict,
                              counts: Dict[str, int],
                              tracker: Optional[Dict[str, Dict[str, dict]]] = None,
                              import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
-    """Processa rec30 (garanzie di polizza). Per ogni riga:
-      - traccia compagnia se non mappata
-      - risolve la polizza (id_polizza_exp -> map; fallback numero_polizza_cmp)
-      - traccia la garanzia non mappata
-      - appende al gar_per_pol per la polizza, poi update bulk
+    """Mappa delle garanzie di polizza — REGOLA UTENTE:
+    gli IMPORTI (netto/imposte/ssn/lordo/provvigione) vengono costruiti dal rec42
+    (stessa fonte del titolo), prendendo le righe del TITOLO PIÙ RECENTE della
+    polizza (annualità corrente). Così il totale garanzie == totale titolo sempre.
+    Il rec30 resta usato solo per: massimali/capitali (per codice garanzia),
+    diritti, e come FALLBACK per le polizze che in questo flusso non hanno rec42.
     """
     from collections import defaultdict as _dd
+
+    # cache numero_polizza -> pol_id (il rec42 non ha id_polizza_exp)
+    num_cache: Dict[str, Optional[str]] = {}
+
+    async def _pol_for(row: dict) -> Optional[str]:
+        num = (row.get("numero_polizza_cmp") or "").strip()
+        if num in num_cache:
+            return num_cache[num]
+        pid = await _resolve_polizza_id(db, row, polizza_id_map)
+        num_cache[num] = pid
+        return pid
+
+    async def _traccia(row: dict):
+        """Tracking compagnia + garanzia non mappata; ritorna nome_finale/codice."""
+        if tracker is not None and import_mappings is not None:
+            await _track_compagnia_da_riga(db, row, tracker, import_mappings)
+        codice, descr, key = _estrai_codici_garanzia(row)
+        nome_finale = _risolvi_nome_garanzia(key, descr, import_mappings, mapping_garanzie)
+        already_mapped = (import_mappings or {}).get("garanzia", {}).get(key)
+        if key and key not in mapping_garanzie and not already_mapped:
+            await _ensure_stub_mapping(db, "mapping_garanzie", codice or key, descr)
+            if tracker is not None:
+                await _track_unmapped(db, tracker, "garanzia", key,
+                                      label=descr or key, import_mappings=import_mappings)
+        return codice, descr, nome_finale
+
+    # ── 1) rec30: capitali/massimali per (pol, codice) + diritti + garanzie fallback ──
+    rec30_cap: dict[str, dict[str, float]] = _dd(dict)
+    rec30_diritti: dict[str, float] = _dd(float)
+    rec30_garanzie: dict[str, list[dict]] = _dd(list)
     for fname, content in files_data.items():
         if _detect_record_type(fname) != "rec30":
             continue
         rows = _read_csv_text(content)
         counts["rec30"] = counts.get("rec30", 0) + len(rows)
-        gar_per_pol: dict[str, list[dict]] = _dd(list)
-
         for row in rows:
-            if tracker is not None and import_mappings is not None:
-                await _track_compagnia_da_riga(db, row, tracker, import_mappings)
-            pol_id = await _resolve_polizza_id(db, row, polizza_id_map)
+            pol_id = await _pol_for(row)
             if not pol_id:
                 continue
-            codice, descr, key = _estrai_codici_garanzia(row)
-            nome_finale = _risolvi_nome_garanzia(key, descr, import_mappings, mapping_garanzie)
-            # Stub + tracking se la garanzia non è ancora mappata
-            already_mapped = (import_mappings or {}).get("garanzia", {}).get(key)
-            if key and key not in mapping_garanzie and not already_mapped:
-                await _ensure_stub_mapping(db, "mapping_garanzie", codice or key, descr)
-                if tracker is not None:
-                    await _track_unmapped(db, tracker, "garanzia", key,
-                                          label=descr or key, import_mappings=import_mappings)
-            gar_per_pol[pol_id].append(_row_a_garanzia(row, codice, descr, nome_finale))
+            codice, descr, nome_finale = await _traccia(row)
+            g30 = _row_a_garanzia(row, codice, descr, nome_finale)
+            rec30_garanzie[pol_id].append(g30)
+            rec30_diritti[pol_id] += g30.get("diritti", 0.0) or 0.0
+            cap = g30.get("capitale_assicurato", 0.0) or 0.0
+            if codice and cap:
+                rec30_cap[pol_id][codice.strip().upper()] = cap
 
-        # Bulk update per polizza
-        for pol_id, garanzie in gar_per_pol.items():
-            diritti_tot = sum(g.get("diritti", 0.0) for g in garanzie)
-            # Capitale assicurato di polizza = max dei capitali per garanzia
-            capitale_pol = max((g.get("capitale_assicurato", 0.0) for g in garanzie), default=0.0)
-            update_fields = {"garanzie": garanzie, "diritti": diritti_tot,
-                             "garanzie_imposte_scorporate": True, "updated_at": _now_iso()}
-            if capitale_pol > 0:
-                update_fields["capitale_assicurato"] = capitale_pol
-            await db.polizze.update_one(
-                {"id": pol_id},
-                {"$set": update_fields},
-            )
+    # ── 2) rec42: righe-garanzia raggruppate per polizza e per titolo ──
+    # pol_id -> { id_titolo -> {"eff": "YYYY-MM-DD", "rows": [(g, codice, descr, nome)]} }
+    rec42_tit: dict[str, dict[str, dict]] = _dd(dict)
+    for fname, content in files_data.items():
+        if _detect_record_type(fname) != "rec42":
+            continue
+        rows = _read_csv_text(content)
+        counts["rec42"] = counts.get("rec42", 0) + len(rows)
+        for g in rows:
+            pol_id = await _pol_for(g)
+            if not pol_id:
+                continue
+            tid = (_col_at(g, 2) or "").strip()        # id_titolo_exp (col C)
+            eff = _parse_date(_col_at(g, 12)) or ""     # effetto_titolo (col M)
+            codice, descr, nome_finale = await _traccia(g)
+            slot = rec42_tit[pol_id].setdefault(tid, {"eff": "", "rows": []})
+            if eff > slot["eff"]:
+                slot["eff"] = eff
+            slot["rows"].append((g, codice, descr, nome_finale))
+
+    # ── 3) aggiorna le polizze con garanzie del TITOLO PIÙ RECENTE (rec42) ──
+    pols_con_rec42: set[str] = set()
+    for pol_id, titoli in rec42_tit.items():
+        best_tid = max(titoli.keys(), key=lambda t: (titoli[t]["eff"], t))
+        garanzie: list[dict] = []
+        for g, codice, descr, nome_finale in titoli[best_tid]["rows"]:
+            gd = _row_rec42_a_garanzia(g, codice, descr, nome_finale)
+            cap = rec30_cap.get(pol_id, {}).get((codice or "").strip().upper(), 0.0)
+            if cap:
+                gd["capitale_assicurato"] = cap
+            garanzie.append(gd)
+        netto = round(sum(x["netto"] for x in garanzie), 2)
+        imposte = round(sum(x["imposte"] for x in garanzie), 2)
+        ssn = round(sum(x["ssn"] for x in garanzie), 2)
+        lordo = round(sum(x["lordo"] for x in garanzie), 2)
+        provv = round(sum(x["provvigione"] for x in garanzie), 2)
+        diritti_tot = rec30_diritti.get(pol_id, 0.0)
+        capitale_pol = max((x.get("capitale_assicurato", 0.0) for x in garanzie), default=0.0)
+        upd = {
+            "garanzie": garanzie,
+            "premio_netto": netto, "premio_imposte": imposte, "premio_ssn": ssn,
+            "premio_tasse": round(imposte + ssn, 2), "premio_lordo": lordo,
+            "provvigioni": provv, "diritti": diritti_tot,
+            "garanzie_imposte_scorporate": True, "updated_at": _now_iso(),
+        }
+        if capitale_pol > 0:
+            upd["capitale_assicurato"] = capitale_pol
+        await db.polizze.update_one({"id": pol_id}, {"$set": upd})
+        pols_con_rec42.add(pol_id)
+
+    # ── 4) FALLBACK rec30 per polizze SENZA rec42 (non perdere garanzie/massimali) ──
+    for pol_id, garanzie in rec30_garanzie.items():
+        if pol_id in pols_con_rec42:
+            continue
+        diritti_tot = rec30_diritti.get(pol_id, 0.0)
+        capitale_pol = max((g.get("capitale_assicurato", 0.0) for g in garanzie), default=0.0)
+        upd = {"garanzie": garanzie, "diritti": diritti_tot,
+               "garanzie_imposte_scorporate": True, "updated_at": _now_iso()}
+        if capitale_pol > 0:
+            upd["capitale_assicurato"] = capitale_pol
+        await db.polizze.update_one({"id": pol_id}, {"$set": upd})
 
 
 # ---------------------------------------------------------------------------
