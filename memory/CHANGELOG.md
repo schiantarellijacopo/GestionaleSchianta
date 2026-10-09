@@ -580,3 +580,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Idempotente: se la polizza è GIÀ sospesa non fa nulla; se annullata l'annullo prevale.
 - Helper `_applica_sospensione_import` in ania_importer.py, richiamato nel loop rec20 dopo upsert.
 - Verificato con script: attiva→sospesa+titolo, re-run senza duplicati, annullata intatta.
+
+## 2026-06 — Import OMNIA: annullo vs sostituzione + date anno a 2 cifre
+- rec20 col AG = data annullo → 'annullata' SOLO se la polizza NON è stata sostituita.
+- Se la polizza è SOSTITUITA (numero_polizza_sostituente valorizzato o cod_stato_share="SO") → stato 'sostituita' e la data di annullo viene IGNORATA (anche per polizze già importate erroneamente come annullata: lo stato viene forzato e la data annullo azzerata).
+- _parse_date ora gestisce anche l'anno a 2 cifre (DD/MM/YY).
+- Verificato sul file reale: 180992095→annullata(04/09/2026); 184643003 e 183628997→sostituita (annullo ignorato); 184643530→attiva.

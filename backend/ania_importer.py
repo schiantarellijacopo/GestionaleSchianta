@@ -282,8 +282,9 @@ def _parse_date(value: str) -> str | None:
     value = value.strip()
     if not value:
         return None
-    # formato ANIA: DD/MM/YYYY HH:MM:SS o DD/MM/YYYY
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%Y-%m-%d"):
+    # formato ANIA: DD/MM/YYYY HH:MM:SS o DD/MM/YYYY (anche anno a 2 cifre: DD/MM/YY)
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%Y-%m-%d",
+                "%d/%m/%y %H:%M:%S", "%d/%m/%y"):
         try:
             return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -706,7 +707,15 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     # rec20 col BP (68ª, index 67) = numero polizza sostituita
     sostituisce = (row.get("numero_polizza_sostituita_1") or row.get("polizza_sostituita")
                    or _col_at(row, 67) or "").strip() or None
-    if data_annullo:
+    # rec20 col (index 73) = numero_polizza_sostituente: se valorizzato significa
+    # che QUESTA polizza è stata SOSTITUITA da un'altra. Anche cod_stato_share="SO".
+    sostituente = (row.get("numero_polizza_sostituente") or _col_at(row, 73) or "").strip() or None
+    e_sostituita = bool(sostituente) or (row.get("cod_stato_share") or "").strip().lower() == "so"
+    # PRIORITÀ STATO: se la polizza è stata sostituita NON si considera la data di
+    # annullo (resta "sostituita"); altrimenti annullo → annullata; poi sospensione.
+    if e_sostituita:
+        stato = "sostituita"
+    elif data_annullo:
         stato = "annullata"
     elif data_sospensione:
         stato = "sospesa"
@@ -746,9 +755,9 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "fonte": "import_ania",
         "updated_at": _now_iso(),
     }
-    if data_annullo:
+    if data_annullo and not e_sostituita:
         payload["data_annullamento"] = data_annullo
-    if data_sospensione and not data_annullo:
+    if data_sospensione and not data_annullo and not e_sostituita:
         payload["data_sospensione"] = data_sospensione
     if sostituisce:
         payload["sostituisce_polizza"] = sostituisce
@@ -766,8 +775,8 @@ async def _applica_sospensione_import(db, pid: str, data_sosp: str) -> None:
     if not pol:
         return
     stato = pol.get("stato")
-    if stato == "sospesa" or stato == "annullata":
-        return  # già sospesa (non fare nulla) oppure annullata (l'annullo prevale)
+    if stato in ("sospesa", "annullata", "sostituita", "disdettata", "scaduta"):
+        return  # già sospesa/chiusa → non fare nulla
     await db.polizze.update_one(
         {"id": pid},
         {"$set": {"stato": "sospesa", "data_sospensione": data_sosp, "updated_at": _now_iso()}},
@@ -921,13 +930,25 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                     data["provvigioni_operatori"] = prov_ops
             await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
             # rec20 col AH = data sospensione → metti la polizza 'sospesa' + titolo a 0
-            # (idempotente: se è già sospesa/annullata non fa nulla)
+            # (idempotente: se è già sospesa/annullata/sostituita non fa nulla)
             _data_sosp = _parse_date(_col_at(row, 33))
             _data_ann = _parse_date(row.get("data_annullamento") or row.get("data_annullo") or _col_at(row, 32))
-            if _data_sosp and not _data_ann:
+            _sostituente = (row.get("numero_polizza_sostituente") or _col_at(row, 73) or "").strip()
+            _e_sost = bool(_sostituente) or (row.get("cod_stato_share") or "").strip().lower() == "so"
+            if _data_sosp and not _data_ann and not _e_sost:
                 _pid = polizza_id_map.get(id_exp)
                 if _pid:
                     await _applica_sospensione_import(db, _pid, _data_sosp)
+            # Polizza SOSTITUITA: forza stato 'sostituita' e IGNORA la data di annullo
+            # (anche per polizze già importate erroneamente come 'annullata').
+            elif _e_sost:
+                _pid = polizza_id_map.get(id_exp)
+                if _pid:
+                    await db.polizze.update_one(
+                        {"id": _pid, "stato": {"$ne": "sostituita"}},
+                        {"$set": {"stato": "sostituita", "data_annullamento": None,
+                                  "data_sospensione": None, "updated_at": _now_iso()}},
+                    )
             # 🆕 Se l'anagrafica del contraente non ha un collaboratore
             # responsabile, ereditalo dalla polizza appena importata.
             if collaboratore_id and contraente_id:
