@@ -701,11 +701,15 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     # rec20 col AG (33ª, index 32) = data annullo → polizza annullata
     data_annullo = _parse_date(row.get("data_annullamento") or row.get("data_annullo")
                                or _col_at(row, 32))
+    # rec20 col AH (34ª, index 33) = data sospensione → polizza sospesa
+    data_sospensione = _parse_date(_col_at(row, 33))
     # rec20 col BP (68ª, index 67) = numero polizza sostituita
     sostituisce = (row.get("numero_polizza_sostituita_1") or row.get("polizza_sostituita")
                    or _col_at(row, 67) or "").strip() or None
     if data_annullo:
         stato = "annullata"
+    elif data_sospensione:
+        stato = "sospesa"
     # rec20 col DK (115ª, index 114) = data emissione
     data_emissione = _parse_date(row.get("data_emissione") or _col_at(row, 114))
     effetto = (_parse_date(row.get("effetto", "")) or data_emissione or _now_iso()[:10])
@@ -744,9 +748,43 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     }
     if data_annullo:
         payload["data_annullamento"] = data_annullo
+    if data_sospensione and not data_annullo:
+        payload["data_sospensione"] = data_sospensione
     if sostituisce:
         payload["sostituisce_polizza"] = sostituisce
     return payload
+
+
+async def _applica_sospensione_import(db, pid: str, data_sosp: str) -> None:
+    """Applica la sospensione da import (rec20 col AH) in modo IDEMPOTENTE:
+      - se la polizza è GIÀ sospesa → non fa nulla;
+      - se è annullata → non tocca (l'annullo prevale);
+      - altrimenti la mette 'sospesa' con la data e genera il titolo a 0
+        (una sola volta per quella data di sospensione)."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "id": 1, "stato": 1,
+                                                  "collaboratore_id": 1})
+    if not pol:
+        return
+    stato = pol.get("stato")
+    if stato == "sospesa" or stato == "annullata":
+        return  # già sospesa (non fare nulla) oppure annullata (l'annullo prevale)
+    await db.polizze.update_one(
+        {"id": pid},
+        {"$set": {"stato": "sospesa", "data_sospensione": data_sosp, "updated_at": _now_iso()}},
+    )
+    # Titolo di sospensione automatico (importo 0) — una sola volta per data
+    gia = await db.titoli.find_one(
+        {"polizza_id": pid, "tipo": "sospensione", "effetto": data_sosp}, {"_id": 0, "id": 1})
+    if not gia:
+        t = Titolo(
+            polizza_id=pid, tipo="sospensione", effetto=data_sosp, scadenza=data_sosp,
+            importo_lordo=0.0, importo_netto=0.0, stato="da_incassare",
+            collaboratore_id=pol.get("collaboratore_id"),
+        )
+        doc_t = t.model_dump()
+        doc_t["nota"] = f"Sospensione dal {data_sosp} (da import OMNIA)"
+        await db.titoli.insert_one(doc_t)
+
 
 
 async def _upsert_polizza(db, data: dict, log: ImportLog,
@@ -804,6 +842,7 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
         if rows:
             _k = list(rows[0].keys())
             print(f"[OMNIA rec20] col AG (33ª) = '{_k[32] if len(_k) > 32 else '?'}' · "
+                  f"col AH (34ª) = '{_k[33] if len(_k) > 33 else '?'}' · "
                   f"col BP (68ª) = '{_k[67] if len(_k) > 67 else '?'}' · tot colonne {len(_k)}", flush=True)
         for row in rows:
             id_exp = row.get("id_polizza_exp") or _uid()
@@ -881,6 +920,14 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                 if prov_ops:
                     data["provvigioni_operatori"] = prov_ops
             await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
+            # rec20 col AH = data sospensione → metti la polizza 'sospesa' + titolo a 0
+            # (idempotente: se è già sospesa/annullata non fa nulla)
+            _data_sosp = _parse_date(_col_at(row, 33))
+            _data_ann = _parse_date(row.get("data_annullamento") or row.get("data_annullo") or _col_at(row, 32))
+            if _data_sosp and not _data_ann:
+                _pid = polizza_id_map.get(id_exp)
+                if _pid:
+                    await _applica_sospensione_import(db, _pid, _data_sosp)
             # 🆕 Se l'anagrafica del contraente non ha un collaboratore
             # responsabile, ereditalo dalla polizza appena importata.
             if collaboratore_id and contraente_id:

@@ -573,3 +573,10 @@ Admin: `admin@assicura.it / Admin123!`
 - QuestionariViewer ora editabile: input per tipo (Sì/No, scelta multipla, numero, data, testo), "Salva risposte", PDF/Stampa compilati. Integrato in Polizza/Sinistro/Anagrafica con entitaId.
 - delete_questionario rimuove anche i compilati orfani.
 - Verificato: salvataggio, isolamento tra record diversi, PDF compilato, UI screenshot su polizza reale.
+
+## 2026-06 — Import OMNIA: sospensione automatica da rec20 col AH
+- rec20 col AH (index 33) = data_sospensione: in import la polizza viene messa 'sospesa' con la data.
+- Mantenuta la generazione del titolo a 0 (tipo="sospensione", importo 0, da_incassare, nota).
+- Idempotente: se la polizza è GIÀ sospesa non fa nulla; se annullata l'annullo prevale.
+- Helper `_applica_sospensione_import` in ania_importer.py, richiamato nel loop rec20 dopo upsert.
+- Verificato con script: attiva→sospesa+titolo, re-run senza duplicati, annullata intatta.
