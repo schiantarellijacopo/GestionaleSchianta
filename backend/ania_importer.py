@@ -1216,17 +1216,25 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
 async def _ripartizione_collaboratore(db, coll_id, provv_totale, compagnia_id,
                                       ramo, premio_netto, premio_lordo, nome_cache):
     """Calcola la quota del collaboratore applicando lo SCHEMA provvigionale della
-    libreria (stessa logica usata dal display) e ritorna la lista
-    `provvigioni_operatori`. Ritorna [] se nessuna quota applicabile."""
-    if not coll_id or provv_totale <= 0:
+    libreria (STESSA logica di /provvigioni/riassegna: `_quota_collab_da_schema`).
+
+    IMPORTANTE: per gli schemi "sul premio netto" (es. BS BROKER 4,5% sul netto)
+    la quota = netto × % ed è INDIPENDENTE dalla provvigione di agenzia (ΣAF del
+    rec42): va calcolata anche quando la provvigione di agenzia è 0.
+    Per gli schemi di sola ripartizione (%collaboratore) la quota = % della
+    provvigione totale già presente sul titolo.
+    Ritorna [] se nessuna quota applicabile."""
+    if not coll_id:
         return []
     try:
         import server as _srv  # lazy: evita import circolare (server importa ania_importer)
-        bk = await _srv._provv_breakdown(
-            provv_totale, coll_id, compagnia_id, ramo,
-            premio_netto=premio_netto, premio_lordo=premio_lordo,
-        )
-        quota = round(float(bk.get("provvigione_collaboratore") or 0), 2)
+        schema = await _srv._risolvi_schema_provvigionale(coll_id, compagnia_id, ramo)
+        if not schema:
+            return []
+        quota = _srv._quota_collab_da_schema(
+            schema, round(float(provv_totale or 0), 2),
+            float(premio_netto or 0), float(premio_lordo or 0))
+        quota = round(float(quota or 0), 2)
     except Exception:
         return []
     if quota <= 0:
@@ -1691,9 +1699,47 @@ async def _aggiorna_scadenza_da_titoli(db) -> int:
     return n
 
 
-async def _marca_polizze_sostituite(db) -> int:
+def _norm_num(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\D", "", (s or "").strip()).lstrip("0")
+
+
+async def _riattiva_titoli_sostituenti(db) -> int:
+    """PRIMA del processamento titoli: le polizze che SOSTITUISCONO un'altra e che
+    NON sono a loro volta sostituite (la "testa" della catena = polizza attuale)
+    devono avere il proprio titolo ATTIVO. Se un loro titolo di origine import
+    risulta 'stornato', lo riporta a 'da_incassare' così il passo rec42 lo
+    rivalorizza con il premio corretto. (La polizza sostituita verrà stornata dopo.)"""
+    docs = []
+    sostituiti: set[str] = set()
+    async for p in db.polizze.find(
+        {}, {"_id": 0, "id": 1, "numero_polizza": 1, "sostituisce_polizza": 1}):
+        docs.append(p)
+        sp = (p.get("sostituisce_polizza") or "").strip()
+        if sp:
+            sostituiti.add(sp)
+            sostituiti.add(_norm_num(sp))
+    n = 0
+    for p in docs:
+        if not (p.get("sostituisce_polizza") or "").strip():
+            continue  # non sostituisce nessuno
+        numero = (p.get("numero_polizza") or "").strip()
+        if numero in sostituiti or _norm_num(numero) in sostituiti:
+            continue  # è a sua volta sostituita → NON è la testa della catena
+        res = await db.titoli.update_many(
+            {"polizza_id": p["id"], "stato": "stornato", "fonte": "import_ania"},
+            {"$set": {"stato": "da_incassare", "updated_at": _now_iso()},
+             "$unset": {"nota_storno": ""}})
+        n += res.modified_count
+    return n
+
+
+async def _marca_polizze_sostituite(db) -> tuple[int, int]:
     """Le polizze citate nel campo `sostituisce_polizza` passano a stato
-    'sostituita', con backlink alla polizza che le ha rimpiazzate."""
+    'sostituita', con backlink alla polizza che le ha rimpiazzate. Inoltre i loro
+    titoli ancora 'da_incassare' vengono STORNATI (il premio della nuova polizza li
+    sostituisce). I titoli già incassati/coperti/pagati NON vengono toccati.
+    Ritorna (polizze_sostituite, titoli_stornati)."""
     import re as _re
     idx: Dict[str, str] = {}
     async for p in db.polizze.find({}, {"_id": 0, "id": 1, "numero_polizza": 1}):
@@ -1702,8 +1748,10 @@ async def _marca_polizze_sostituite(db) -> int:
             if k:
                 idx.setdefault(k, p["id"])
     n = 0
+    stornati = 0
     async for p in db.polizze.find({"sostituisce_polizza": {"$nin": [None, ""]}},
-                                   {"_id": 0, "id": 1, "sostituisce_polizza": 1}):
+                                   {"_id": 0, "id": 1, "sostituisce_polizza": 1,
+                                    "numero_polizza": 1}):
         num = (p.get("sostituisce_polizza") or "").strip()
         old_id = idx.get(num) or idx.get(_re.sub(r"\D", "", num).lstrip("0"))
         if not old_id or old_id == p["id"]:
@@ -1713,7 +1761,14 @@ async def _marca_polizze_sostituite(db) -> int:
             {"$set": {"stato": "sostituita", "sostituita_da_polizza_id": p["id"],
                       "updated_at": _now_iso()}})
         n += res.modified_count
-    return n
+        nuovo_num = (p.get("numero_polizza") or "").strip()
+        res_t = await db.titoli.update_many(
+            {"polizza_id": old_id, "stato": "da_incassare"},
+            {"$set": {"stato": "stornato",
+                      "nota_storno": f"Stornato automaticamente: polizza sostituita da N. {nuovo_num}".strip(),
+                      "updated_at": _now_iso()}})
+        stornati += res_t.modified_count
+    return n, stornati
 
 
 
@@ -1792,6 +1847,9 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
     await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
                              tracker=tracker, import_mappings=import_mappings)
+    # Sostituzioni (PRIMA dei titoli): riattiva i titoli stornati delle polizze
+    # "testa" della catena di sostituzione, così il passo rec42 li rivalorizza.
+    counts["titoli_riattivati_sostituzione"] = await _riattiva_titoli_sostituenti(db)
     await _processa_titoli(db, files_data, log, polizza_id_map, counts,
                            mapping_operatori=mapping_operatori,
                            tracker=tracker, import_mappings=import_mappings)
@@ -1800,7 +1858,9 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     # disattivata su richiesta. Gli import non modificano più lo stato della polizza
     # in base ai titoli; resta lo stato del tracciato / quello già presente.
     # (funzione `_applica_regola_stato_da_titoli` mantenuta ma non più invocata)
-    counts["polizze_sostituite"] = await _marca_polizze_sostituite(db)
+    _sost_n, _sost_st = await _marca_polizze_sostituite(db)
+    counts["polizze_sostituite"] = _sost_n
+    counts["titoli_stornati_sostituzione"] = _sost_st
     counts["scadenze_allineate"] = await _aggiorna_scadenza_da_titoli(db)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,

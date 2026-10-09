@@ -1,6 +1,10 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-09)
 
-## MAPPA GARANZIE dal rec42 (2026-10-09) — DEPLOY LANCIATO
+## FIX PROVVIGIONI + SOSTITUZIONI (2026-10-09) — DEPLOY LANCIATO
+1) PROVVIGIONI COLLABORATORE: `_ripartizione_collaboratore` (ania_importer.py) usava `_provv_breakdown` che azzera la quota se la provvigione d'agenzia (ΣAF rec42)=0. Per schemi "sul netto" (BS BROKER 4,5% netto) la quota=netto×% ed è INDIPENDENTE dalla provvigione d'agenzia. Ora usa `_quota_collab_da_schema` (come /provvigioni/riassegna). Verificato: 396,69×4,5%=17,85 (sia provv 47,9 sia 0); schema 70%→33,53. NB: per i titoli esistenti sbagliati si può usare il bottone "Riassegna arretrati" sullo schema in Librerie (dry-run proved: 112/116 titoli corretti).
+2) SOSTITUZIONI: nuova `_riattiva_titoli_sostituenti` (PRIMA dei titoli) riattiva a "da_incassare" i titoli stornati (fonte=import_ania) delle polizze TESTA della catena; `_marca_polizze_sostituite` ora STORNA i titoli "da_incassare" delle polizze sostituite e ritorna (n, stornati). Risultato: polizza nuova→da incassare col premio rec42, polizza sostituita→stornato. Verificato su 184643537 (→330 da incassare) e 183629466 (→stornato), import fresco e caso produzione (titolo nuovo pre-stornato a 349→riattivato 330).
+
+## MAPPA GARANZIE dal rec42 (2026-10-09) — DEPLOYATA
 Richiesta utente: garanzie e titolo devono aggiornarsi "di pari passo". Prima la mappa Garanzie veniva dal rec30 (per-polizza, premio vecchio) mentre il titolo dal rec42 (per-titolo, rinnovo) → divergevano (es. 183629455: garanzie 690 vs titolo 714,50).
 Fix in ania_importer.py `_processa_garanzie` (riscritta) + nuovo helper `_row_rec42_a_garanzia`:
 - `polizza.garanzie` ora costruita dal rec42, prendendo le righe del TITOLO PIÙ RECENTE della polizza (max effetto_titolo idx12). Per garanzia: netto=Y(24), imposte=AA(26)-AC(28), ssn=AC(28), lordo=AB(27), provv=AF(31); garanzia 'CIA' → netto=0, imposte=(AA-AC)+Y (come nel titolo).
