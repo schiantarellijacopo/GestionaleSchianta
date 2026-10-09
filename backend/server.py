@@ -9618,19 +9618,41 @@ async def list_unmapped_entities(
                         return r["id"]
         return None
 
+    def _coll_users_flt(u: dict) -> dict:
+        """Filtro utenti candidati operatore: SOLO l'agenzia corrente (la collezione
+        `users` non è tenant-scoped dal wrapper → va filtrata esplicitamente, così il
+        wizard non mostra collaboratori di altre agenzie)."""
+        f = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}}
+        tid = u.get("agenzia_tenant_id")
+        if tid:
+            f["agenzia_tenant_id"] = tid
+        return f
+
     async def _auto_create_stub_operatore(codice: str, label: str) -> Optional[str]:
-        """Crea (o riusa) un utente stub 'collaboratore' inattivo per l'operatore
-        importato. L'admin poi lo completa in Librerie → Utenti / Collaboratori."""
+        """Crea (o RIUSA) un utente stub 'collaboratore' inattivo per l'operatore
+        importato. Dedup per (codice, agenzia) ed email con tenant, IDENTICI alla
+        logica dell'import (`_auto_create_stub_user`), per non creare doppioni."""
         if not codice:
             return None
-        slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
-        email = f"operatore.{slug}@import-auto.local"
-        existing = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+        codice = codice.strip()
+        tid = user.get("agenzia_tenant_id")
+        # Dedup robusto per tenant: prima per codice, poi per email legacy.
+        existing = await db.users.find_one(
+            {"auto_created_from_codice": codice,
+             **({"agenzia_tenant_id": tid} if tid else {})},
+            {"_id": 0, "id": 1},
+        )
         if existing:
             return existing["id"]
+        slug = "".join(ch if ch.isalnum() else "-" for ch in codice.lower()).strip("-") or "op"
+        tid_slug = (tid or "notenant").replace("-", "")[:12]
+        email = f"operatore.{slug}.{tid_slug}@import-auto.local"
+        existing_mail = await db.users.find_one({"email": email}, {"_id": 0, "id": 1})
+        if existing_mail:
+            return existing_mail["id"]
         nome_display = (label or "").strip() or f"Operatore {codice}"
         user_id = str(uuid.uuid4())
-        await db.users.insert_one({
+        doc = {
             "id": user_id,
             "email": email,
             "name": nome_display,
@@ -9641,7 +9663,10 @@ async def list_unmapped_entities(
             "password_hash": "!DISABLED-IMPORT-AUTO",
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
-        })
+        }
+        if tid:
+            doc["agenzia_tenant_id"] = tid
+        await db.users.insert_one(doc)
         return user_id
 
     # NB: garanzia è stata rimossa dal wizard - le garanzie vengono create
@@ -9686,7 +9711,7 @@ async def list_unmapped_entities(
                      + (" (da completare)" if u.get("auto_created") else ""),
         }
         async for u in db.users.find(
-            {"role": {"$in": ["admin", "collaboratore", "dipendente"]}},
+            _coll_users_flt(user),
             {"_id": 0, "id": 1, "name": 1, "email": 1, "auto_created": 1},
         ).sort("name", 1)
     ]

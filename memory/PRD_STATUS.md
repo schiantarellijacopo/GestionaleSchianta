@@ -1,6 +1,10 @@
 # Axicura CRM — Stato lavori (aggiornato 2026-10-09)
 
-## EREDITÀ OPERATORE + ORDINAMENTO TITOLI (2026-10-09) — DEPLOY LANCIATO
+## FIX WIZARD OPERATORI: fuga multi-tenant + stub duplicati (2026-10-09) — DEPLOY LANCIATO
+server.py GET /import/unmapped: (1) la lista candidati collaboratore leggeva db.users senza filtro agenzia (users NON è tenant-scoped) → mostrava operatori di altri tenant. Aggiunto helper `_coll_users_flt(user)` che filtra per agenzia_tenant_id (preview: 32→24). (2) `_auto_create_stub_operatore` (wizard) usava email senza tenant e dedup diverso da `_auto_create_stub_user` (import) → stub "(da completare)" duplicati. Ora dedup per (auto_created_from_codice, agenzia_tenant_id), email con tenant_slug, setta agenzia_tenant_id.
+AZIONE UTENTE: nel Wizard rimappare codice 024 (BS BROKER) dall'attuale stub all'utente reale "BS BROKER SAS DI VANOLI LUCIA E C." + Salva e applica, poi re-import/riassegna.
+
+## EREDITÀ OPERATORE + ORDINAMENTO TITOLI (2026-10-09) — DEPLOYATO
 1) `_riattiva_titoli_sostituenti` (ania_importer.py, pre-titoli): la polizza sostituente EREDITA collaboratore_id dalla polizza sostituita se ne è priva → niente più "polizza senza operatore"; i titoli ricevono la provvigione collaboratore. Verificato: 184643537 eredita operatore da 183629466, titolo 330/276,14 → provv collab netto×%.
 2) get_polizza (server.py): titoli ordinati con la POLIZZA CORRENTE in cima, poi le sostituite (a parità, effetto desc) — stable sort su `0 if polizza_id==pid else 1`.
 
