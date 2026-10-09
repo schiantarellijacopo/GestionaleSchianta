@@ -151,9 +151,15 @@ async def _register_import_mapping(db, import_mappings, tipo: str, codice: str,
                                    entita_id: str, label: str = "",
                                    flusso: str = "omnia") -> None:
     """Segna un valore di flusso come MAPPATO a un'entità creata dall'import
-    (aggiorna la cache in-memory + persiste in import_mappings)."""
+    (aggiorna la cache in-memory + persiste in import_mappings).
+
+    NB: rispetta i mapping BLOCCATI (impostati manualmente dall'admin o già
+    collegati a un'entità reale): non li sovrascrive mai (vedi `_mapping_is_locked`).
+    """
     codice = (codice or "").strip()
     if not codice or not entita_id:
+        return
+    if await _mapping_is_locked(db, tipo, codice, flusso):
         return
     if import_mappings is not None:
         import_mappings.setdefault(tipo, {})[codice] = entita_id
@@ -166,6 +172,34 @@ async def _register_import_mapping(db, import_mappings, tipo: str, codice: str,
          "$inc": {"occorrenze": 1}},
         upsert=True,
     )
+
+
+async def _mapping_is_locked(db, tipo: str, codice: str, flusso: str = "omnia") -> bool:
+    """Un mapping è BLOCCATO (intoccabile dall'import) quando:
+      - è stato impostato manualmente dall'admin (`manual=True`), OPPURE
+      - il suo `entita_id` punta a un'entità REALE (per i collaboratori: un
+        utente NON auto-creato).
+    In tal caso l'import non deve più cambiarlo: "una volta impostato resta".
+    """
+    codice = (codice or "").strip()
+    if not codice:
+        return False
+    m = await db.import_mappings.find_one(
+        {"tipo": tipo, "flusso": flusso, "valore_flusso": codice},
+        {"_id": 0, "entita_id": 1, "manual": 1},
+    )
+    if not m:
+        return False
+    if m.get("manual"):
+        return True
+    eid = m.get("entita_id")
+    if not eid:
+        return False
+    if tipo == "collaboratore":
+        u = await db.users.find_one({"id": eid}, {"_id": 0, "auto_created": 1})
+        return bool(u and not u.get("auto_created"))
+    # Altri tipi: la sola presenza di un entita_id valido è sufficiente a bloccarlo
+    return True
 
 
 async def _get_or_create_prodotto(db, codice: str, descr: str,
@@ -576,6 +610,7 @@ async def _auto_create_stub_user(db, operatore_codice: str, label: str) -> Optio
         "attivo": False,
         "auto_created": True,
         "auto_created_from_codice": codice,
+        "accesso_software": False,
         "password_hash": "!DISABLED-IMPORT-AUTO",  # bcrypt-invalid → login impossibile
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
@@ -913,15 +948,25 @@ def _campi_tariffa_bm(row: dict) -> dict:
 
 
 def _campi_valori(row: dict) -> dict:
-    """Campi valori economici del veicolo + massimale."""
-    massimale = (_parse_float(row.get("massimale_unico", ""))
-                 or _parse_float(row.get("massimale_sinistro", ""))
-                 or _parse_float(row.get("massimale_persone", ""))
-                 or _parse_float(row.get("massimale_cose", "")))
+    """Campi valori economici del veicolo + massimali.
+
+    Massimali dal rec21: col AO = massimale_cose, col AP = massimale_persone.
+    Vengono salvati in due campi separati e sovrascritti ad ogni re-import.
+    """
+    mass_cose = _parse_float(row.get("massimale_cose", ""))
+    mass_persone = _parse_float(row.get("massimale_persone", ""))
+    # `massimali` (campo legacy usato come fallback per i massimali di garanzia):
+    # manteniamo il valore più alto tra cose/persone, con fallback sui massimali
+    # unico/sinistro quando i due specifici non sono valorizzati.
+    massimale = (max(mass_cose, mass_persone)
+                 or _parse_float(row.get("massimale_unico", ""))
+                 or _parse_float(row.get("massimale_sinistro", "")))
     return {
         "valore_veicolo": _parse_float(row.get("valore_veicolo", "")),
         "valore_residuo_veicolo": _parse_float(row.get("valore_residuo", "")),
         "valore_accessori": _parse_float(row.get("valore_accessori", "")),
+        "massimale_cose": mass_cose or None,
+        "massimale_persone": mass_persone or None,
         "massimali": str(massimale) if massimale else (row.get("massimali") or None),
     }
 
@@ -1642,6 +1687,10 @@ async def _processa_collaboratori(db, files_data: Dict[str, str],
             # aggancia il codice a quell'utente (niente doppione, niente stub unmapped).
             uid = await _match_collaboratore(descr)
             if uid:
+                # Rispetta i mapping bloccati manualmente: l'import non deve
+                # sovrascrivere la scelta dell'admin ad ogni re-import.
+                if await _mapping_is_locked(db, "collaboratore", codice):
+                    continue
                 if import_mappings is not None:
                     import_mappings.setdefault("collaboratore", {})[codice] = uid
                 await db.import_mappings.update_one(

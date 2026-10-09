@@ -21,6 +21,7 @@ import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { Card } from "@/components/ui/card";
 import { Loading } from "@/components/Shared";
+import { QuestionariViewer } from "@/components/Questionari";
 import {
     Save, Trash2, Printer, FileText, ArrowLeft, Plus, X, CheckCircle, Upload, FileDown,
 } from "lucide-react";
@@ -209,6 +210,7 @@ export default function SinistroDetail() {
                     <TabsTrigger value="liquidazione" data-testid="tab-liquidazione">Liquidazione</TabsTrigger>
                     <TabsTrigger value="documenti" data-testid="tab-documenti">Documenti</TabsTrigger>
                     {isRcAuto && <TabsTrigger value="cid" data-testid="tab-cid">Costatazione Amichevole</TabsTrigger>}
+                    <TabsTrigger value="questionari" data-testid="tab-questionari">Questionari</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="dati">
@@ -279,6 +281,12 @@ export default function SinistroDetail() {
                             contraente={s.contraente || {}} onSaved={load} />
                     </TabsContent>
                 )}
+
+                <TabsContent value="questionari">
+                    <Card className="p-4 space-y-3">
+                        <QuestionariViewer entita="sinistri" />
+                    </Card>
+                </TabsContent>
             </Tabs>
         </div>
     );

@@ -128,6 +128,8 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Credenziali non valide")
+    if user.get("accesso_software") is False:
+        raise HTTPException(status_code=403, detail="Questo profilo non ha accesso al software. Contatta l'amministratore.")
     tid = user.get("agenzia_tenant_id")
     is_su = bool(user.get("is_super_admin"))
     access = create_access_token(user["id"], user["email"], user["role"],
@@ -167,8 +169,22 @@ async def auth_me(user=Depends(current_user)):
 @api.post("/auth/users", status_code=201)
 async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
     from tenant import assign_tenant, user_tenant_id, TENANT_PRINCIPALE_ID
-    email = payload.email.lower().strip()
+    accesso = payload.accesso_software is not False
+    email = (payload.email or "").lower().strip()
+    if accesso:
+        # Accesso al software → email + password OBBLIGATORI
+        if not email:
+            raise HTTPException(status_code=400, detail="Email obbligatoria per gli utenti con accesso al software")
+        if not (payload.password or "").strip():
+            raise HTTPException(status_code=400, detail="Password obbligatoria per gli utenti con accesso al software")
     my_tid = user_tenant_id(user)
+    # Profilo senza accesso e senza email → genera un identificativo interno
+    if not email:
+        _slug = "".join(ch if ch.isalnum() else "-" for ch in (payload.name or "collab").lower()).strip("-") or "collab"
+        _tslug = (my_tid or "notenant").replace("-", "")[:10]
+        email = f"profilo.{_slug}.{uuid.uuid4().hex[:6]}.{_tslug}@no-login.assicurapro.it"
+    # Password: usabile solo se c'è accesso; altrimenti hash disabilitato
+    pwd_hash = hash_password(payload.password) if (accesso and payload.password) else "!DISABLED-NO-LOGIN"
     existing = await db.users.find_one({"email": email})
     if existing:
         ex_tid = existing.get("agenzia_tenant_id")
@@ -188,7 +204,8 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
                 "name": payload.name,
                 "role": payload.role,
                 "agenzia_tenant_id": my_tid or TENANT_PRINCIPALE_ID,
-                "password_hash": hash_password(payload.password),
+                "password_hash": pwd_hash,
+                "accesso_software": accesso,
                 "updated_at": _now_iso(),
             }
             if payload.anagrafica_id:
@@ -202,8 +219,8 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
         raise HTTPException(status_code=400,
                             detail="Email già registrata in un'altra area del sistema")
     doc = UserPublic(email=email, name=payload.name, role=payload.role,
-                     anagrafica_id=payload.anagrafica_id).model_dump()
-    doc["password_hash"] = hash_password(payload.password)
+                     anagrafica_id=payload.anagrafica_id, accesso_software=accesso).model_dump()
+    doc["password_hash"] = pwd_hash
     doc = assign_tenant(user, doc)
     await db.users.insert_one(doc)
     doc.pop("password_hash", None)
@@ -6258,6 +6275,161 @@ async def get_lettera_abbuono_pdf(lid: str, user=Depends(current_user)):
     )
 
 
+# ============================================================
+# QUESTIONARI (Librerie) — domande/risposte, visibili in
+# Anagrafica / Polizza / Sinistri, export PDF + stampa
+# ============================================================
+_QUEST_TIPI = {"testo", "si_no", "scelta_multipla", "numero", "data"}
+
+
+def _normalizza_domande(domande) -> list:
+    out = []
+    for d in (domande or []):
+        if not isinstance(d, dict):
+            continue
+        testo = (d.get("testo") or "").strip()
+        if not testo:
+            continue
+        tipo = d.get("tipo") if d.get("tipo") in _QUEST_TIPI else "testo"
+        opzioni = [str(o).strip() for o in (d.get("opzioni") or []) if str(o).strip()]
+        out.append({
+            "id": d.get("id") or _uid(),
+            "testo": testo,
+            "tipo": tipo,
+            "opzioni": opzioni,
+            "risposta": d.get("risposta") if d.get("risposta") is not None else "",
+        })
+    return out
+
+
+@api.get("/questionari")
+async def list_questionari(entita: Optional[str] = None, user=Depends(current_user)):
+    """Lista questionari dell'agenzia. `entita` opzionale (anagrafica|polizza|sinistri)
+    filtra solo quelli resi visibili in quella sezione."""
+    flt: dict = {}
+    if entita in ("anagrafica", "polizza", "sinistri"):
+        flt[f"visibile_{entita}"] = True
+    items = await db.questionari.find(flt, {"_id": 0}).sort("titolo", 1).to_list(1000)
+    return items
+
+
+@api.post("/questionari", status_code=201)
+async def create_questionario(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    titolo = (body.get("titolo") or "").strip()
+    if not titolo:
+        raise HTTPException(400, "Titolo obbligatorio")
+    doc = {
+        "id": _uid(),
+        "titolo": titolo,
+        "descrizione": (body.get("descrizione") or "").strip(),
+        "domande": _normalizza_domande(body.get("domande")),
+        "visibile_anagrafica": bool(body.get("visibile_anagrafica")),
+        "visibile_polizza": bool(body.get("visibile_polizza")),
+        "visibile_sinistri": bool(body.get("visibile_sinistri")),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    }
+    await db.questionari.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "create", "questionario", doc["id"], f"Questionario '{titolo}'")
+    return doc
+
+
+@api.put("/questionari/{qid}")
+async def update_questionario(qid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    upd = {"updated_at": _now_iso()}
+    if "titolo" in body:
+        t = (body.get("titolo") or "").strip()
+        if not t:
+            raise HTTPException(400, "Titolo obbligatorio")
+        upd["titolo"] = t
+    if "descrizione" in body:
+        upd["descrizione"] = (body.get("descrizione") or "").strip()
+    if "domande" in body:
+        upd["domande"] = _normalizza_domande(body.get("domande"))
+    for k in ("visibile_anagrafica", "visibile_polizza", "visibile_sinistri"):
+        if k in body:
+            upd[k] = bool(body.get(k))
+    res = await db.questionari.update_one({"id": qid}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Questionario non trovato")
+    await log_attivita(user, "update", "questionario", qid)
+    return await db.questionari.find_one({"id": qid}, {"_id": 0})
+
+
+@api.delete("/questionari/{qid}")
+async def delete_questionario(qid: str, user=Depends(require_user("admin", "collaboratore"))):
+    res = await db.questionari.delete_one({"id": qid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Questionario non trovato")
+    await log_attivita(user, "delete", "questionario", qid)
+    return {"ok": True}
+
+
+def _build_questionario_pdf(q: dict, azienda: dict) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle)
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.8 * cm, bottomMargin=1.8 * cm,
+                            leftMargin=2 * cm, rightMargin=2 * cm)
+    styles = getSampleStyleSheet()
+    h_style = ParagraphStyle("qh", parent=styles["Title"], fontSize=16, spaceAfter=6)
+    sub_style = ParagraphStyle("qs", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#64748b"))
+    q_style = ParagraphStyle("qq", parent=styles["Normal"], fontSize=11, spaceBefore=10, spaceAfter=2, leading=15)
+    a_style = ParagraphStyle("qa", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#0f172a"), leftIndent=12, spaceAfter=4)
+    label_style = ParagraphStyle("ql", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#94a3b8"))
+
+    story = []
+    rag = azienda.get("ragione_sociale") or azienda.get("nome") or ""
+    if rag:
+        story.append(Paragraph(rag, sub_style))
+    story.append(Paragraph(q.get("titolo") or "Questionario", h_style))
+    if q.get("descrizione"):
+        story.append(Paragraph(q["descrizione"], sub_style))
+    story.append(Spacer(1, 0.4 * cm))
+
+    def _risposta_fmt(d):
+        tipo = d.get("tipo")
+        r = d.get("risposta")
+        if tipo == "si_no":
+            return "SÌ" if str(r).lower() in ("si", "sì", "true", "1", "yes") else ("NO" if str(r).lower() in ("no", "false", "0") else "—")
+        if r is None or str(r).strip() == "":
+            return "—"
+        return str(r)
+
+    for i, d in enumerate(q.get("domande") or [], 1):
+        story.append(Paragraph(f"<b>{i}. {d.get('testo')}</b>", q_style))
+        if d.get("tipo") == "scelta_multipla" and d.get("opzioni"):
+            story.append(Paragraph("Opzioni: " + ", ".join(d["opzioni"]), label_style))
+        story.append(Paragraph("Risposta: " + _risposta_fmt(d), a_style))
+
+    if not (q.get("domande")):
+        story.append(Paragraph("Nessuna domanda inserita.", sub_style))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@api.get("/questionari/{qid}/pdf")
+async def get_questionario_pdf(qid: str, user=Depends(current_user)):
+    q = await db.questionari.find_one({"id": qid}, {"_id": 0})
+    if not q:
+        raise HTTPException(404, "Questionario non trovato")
+    azienda = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    pdf = _build_questionario_pdf(q, azienda)
+    fname = f"questionario_{(q.get('titolo') or qid)[:30].replace(' ', '_')}.pdf"
+    return StreamingResponse(
+        _io.BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
+
+
+
 @api.post("/lettere-abbuono/{lid}/firma")
 async def firma_lettera_abbuono(
     lid: str, body: dict,
@@ -9690,6 +9862,7 @@ async def list_unmapped_entities(
             "attivo": False,
             "auto_created": True,
             "auto_created_from_codice": codice,
+            "accesso_software": False,
             "password_hash": "!DISABLED-IMPORT-AUTO",
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
@@ -9903,11 +10076,58 @@ async def save_mapping(body: dict, user=Depends(require_user("admin", "collabora
         entita_id = prod_id
         label_programma = nome_prod
 
+    # 🔒 Collaboratore: se stiamo collegando il codice a un UTENTE REALE,
+    # elimina lo stub "(da completare)" rimasto orfano per quel codice (ri-punta
+    # eventuali riferimenti sul nuovo utente) così non ricompare più nel wizard.
+    if tipo == "collaboratore" and entita_id:
+        try:
+            nuovo = await db.users.find_one({"id": entita_id, **_users_tenant_flt(user)},
+                                            {"_id": 0, "id": 1, "auto_created": 1})
+            if nuovo and not nuovo.get("auto_created"):
+                prev = await db.import_mappings.find_one(
+                    {"tipo": "collaboratore", "flusso": flusso, "valore_flusso": valore_flusso},
+                    {"_id": 0, "entita_id": 1},
+                ) or {}
+                old_id = prev.get("entita_id")
+                # Candidati stub: quello collegato prima + quelli auto-creati per questo codice
+                stub_ids: set[str] = set()
+                async for st in db.users.find(
+                    {"auto_created": True, "auto_created_from_codice": valore_flusso,
+                     **_users_tenant_flt(user)}, {"_id": 0, "id": 1},
+                ):
+                    stub_ids.add(st["id"])
+                if old_id and old_id != entita_id:
+                    osu = await db.users.find_one({"id": old_id, **_users_tenant_flt(user)},
+                                                  {"_id": 0, "id": 1, "auto_created": 1})
+                    if osu and osu.get("auto_created"):
+                        stub_ids.add(old_id)
+                stub_ids.discard(entita_id)
+                for sid in stub_ids:
+                    for col in _MERGE_USER_COLLECTIONS:
+                        await db[col].update_many(
+                            {"collaboratore_id": sid},
+                            {"$set": {"collaboratore_id": entita_id,
+                                      "merged_from_user_id": sid, "updated_at": _now_iso()}},
+                        )
+                    for col in ("polizze", "titoli"):
+                        await db[col].update_many(
+                            {"provvigioni_operatori.operatore_id": sid},
+                            {"$set": {"provvigioni_operatori.$[e].operatore_id": entita_id,
+                                      "provvigioni_operatori.$[e].merged_from_operatore_id": sid}},
+                            array_filters=[{"e.operatore_id": sid}],
+                        )
+                    await db.users.delete_one({"id": sid, **_users_tenant_flt(user)})
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Pulizia stub collaboratore fallita (non bloccante)")
+
     upd = {
         "tipo": tipo, "flusso": flusso, "valore_flusso": valore_flusso,
         "entita_id": entita_id,
         "label_programma": label_programma,
         "note": body.get("note"),
+        "manual": True,        # 🔒 impostato manualmente: l'import non lo sovrascrive più
+        "auto_created": False,
         "updated_at": _now_iso(),
     }
     # 🔧 FIX duplicati: se ci sono più righe con la stessa chiave (dovuto a

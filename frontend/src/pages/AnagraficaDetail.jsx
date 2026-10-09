@@ -6,6 +6,7 @@ import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
 import IconForRamo from "@/components/IconForRamo";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
 import { Card } from "@/components/ui/card";
+import { QuestionariViewer } from "@/components/Questionari";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -240,7 +241,14 @@ export default function AnagraficaDetail() {
                     {ana.tipo !== "persona_giuridica" && (
                         <TabsTrigger value="pensione" data-testid="tab-pensione"><Calculator size={13} className="mr-1" />Pensione INPS</TabsTrigger>
                     )}
+                    <TabsTrigger value="questionari" data-testid="tab-questionari"><ClipboardList size={13} className="mr-1" />Questionari</TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="questionari">
+                    <Card className="p-6 mt-4 space-y-3">
+                        <QuestionariViewer entita="anagrafica" />
+                    </Card>
+                </TabsContent>
 
                 <TabsContent value="dati">
                     <CustomerInsightsWidget anagrafica_id={id} onTabChange={handleTabChange} />

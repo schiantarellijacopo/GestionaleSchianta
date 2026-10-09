@@ -455,12 +455,12 @@ const CELL_RENDERERS = {
     scadenza: (r) => <span className="font-mono">{fmtIt(r.scadenza)}</span>,
     premio_precedente: (r) => (
         <span className="font-mono text-[11px] text-slate-600">
-            {r.premio_precedente != null ? `€${Number(r.premio_precedente).toFixed(2)}` : "-"}
+            {r.premio_precedente != null ? fmtEur(r.premio_precedente) : "-"}
         </span>
     ),
     importo_lordo: (r) => (
         <span className="font-mono text-[11px] font-semibold">
-            €{Number(r.importo_lordo || 0).toFixed(2)}
+            {fmtEur(r.importo_lordo)}
         </span>
     ),
     tipo_rinnovo: (r) => (
@@ -520,23 +520,23 @@ const CELL_RENDERERS = {
     ),
     provvigioni: (r) => (
         <span className="font-mono text-violet-700 text-[11px]">
-            {Number(r.provvigioni || 0).toFixed(2)}
+            {fmtEur(r.provvigioni)}
         </span>
     ),
     provvigioni_collab: (r) => (
         <span className="font-mono text-fuchsia-700 text-[11px]">
-            {r.provvigioni_collab != null ? Number(r.provvigioni_collab).toFixed(2) : "-"}
+            {r.provvigioni_collab != null ? fmtEur(r.provvigioni_collab) : "-"}
         </span>
     ),
     importo_netto: (r) => (
-        <span className="font-mono text-[11px]">{Number(r.importo_netto || 0).toFixed(2)}</span>
+        <span className="font-mono text-[11px]">{fmtEur(r.importo_netto)}</span>
     ),
     imposte: (r) => (
-        <span className="font-mono text-[11px]">{Number(r.imposte || 0).toFixed(2)}</span>
+        <span className="font-mono text-[11px]">{fmtEur(r.imposte)}</span>
     ),
     servizio_sanitario: (r) => (
         <span className="font-mono text-[11px]">
-            {r.servizio_sanitario != null ? Number(r.servizio_sanitario).toFixed(2) : "-"}
+            {r.servizio_sanitario != null ? fmtEur(r.servizio_sanitario) : "-"}
         </span>
     ),
     polizza_targa: (r) => <span className="font-mono">{r.polizza_targa || "-"}</span>,
@@ -549,8 +549,8 @@ const CELL_RENDERERS = {
         const deltaPct = prevPrem > 0 ? (deltaEuro / prevPrem) * 100 : null;
         return (
             <div className="flex items-center gap-1 text-[11px]">
-                <span className="text-slate-500 line-through">€{Number(prevPrem).toFixed(2)}</span>
-                <span className="font-semibold">→ €{currPrem.toFixed(2)}</span>
+                <span className="text-slate-500 line-through">{fmtEur(prevPrem)}</span>
+                <span className="font-semibold">→ {fmtEur(currPrem)}</span>
                 {deltaPct != null && (
                     <span className={`text-[10px] font-bold flex items-center gap-0.5 ${
                         deltaEuro > 0 ? "text-rose-700" : deltaEuro < 0 ? "text-emerald-700" : "text-slate-500"
@@ -910,7 +910,7 @@ function ImportExcelDialog({ onClose }) {
                                             <span className="font-mono font-bold">{u.polizza_numero_file}</span>
                                             {u.cliente_file && <span className="text-slate-600 ml-2">· {u.cliente_file}</span>}
                                             <span className="text-slate-400 ml-2">
-                                                scad. {u.scadenza ? fmtIt(u.scadenza) : "-"} · € {(u.importo_lordo || 0).toFixed(2)}
+                                                scad. {u.scadenza ? fmtIt(u.scadenza) : "-"} · {fmtEur(u.importo_lordo)}
                                             </span>
                                         </div>
                                         <span className="text-[10px] text-slate-500">riga {u.riga}</span>

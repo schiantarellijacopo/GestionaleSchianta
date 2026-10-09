@@ -3,7 +3,7 @@
  * Colonne per operatore, condivisione multi-operatore, allegati, stampa.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, fmtEur } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -331,7 +331,7 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
     };
     const scegliTitolo = (t) => {
         const scad = t.scadenza || t.effetto || t.data_incasso || "";
-        const lbl = `Pol. ${titoloPol?.numero_polizza || "?"} · rata ${scad ? scad.slice(0, 10) : "?"} · € ${Number(t.importo_lordo || 0).toFixed(2)} (${t.stato || t.tipo || ""})`;
+        const lbl = `Pol. ${titoloPol?.numero_polizza || "?"} · rata ${scad ? scad.slice(0, 10) : "?"} · ${fmtEur(t.importo_lordo)} (${t.stato || t.tipo || ""})`;
         set("collegamento_id", t.id);
         set("collegamento_label", lbl);
         setTitoliOpts([]);
@@ -401,7 +401,7 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                                                     className="w-full text-left px-3 py-1.5 hover:bg-sky-50 text-xs border-b border-slate-100 last:border-0"
                                                     onClick={() => scegliTitolo(t)}
                                                     data-testid={`task-titolo-opt-${t.id}`}>
-                                                    rata {(t.scadenza || t.effetto || t.data_incasso || "?").slice(0, 10)} · € {Number(t.importo_lordo || 0).toFixed(2)} · {t.stato || t.tipo || ""}
+                                                    rata {(t.scadenza || t.effetto || t.data_incasso || "?").slice(0, 10)} · {fmtEur(t.importo_lordo)} · {t.stato || t.tipo || ""}
                                                 </button>
                                             ))}
                                         </div>

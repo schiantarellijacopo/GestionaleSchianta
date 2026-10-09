@@ -123,6 +123,8 @@ class UserPublic(BaseDoc):
     name: str
     role: Role
     anagrafica_id: Optional[str] = None
+    # Accesso al software: se False l'utente è un profilo senza login.
+    accesso_software: Optional[bool] = None
     # Super admin (Owner): ignora il filtro tenant, può vedere tutte le agenzie.
     is_super_admin: bool = False
     # Dati collaboratore (per ruoli collaboratore/dipendente)
@@ -218,13 +220,16 @@ class VoceRicorsivaCollab(BaseDoc):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
+    email: Optional[str] = None
+    password: Optional[str] = None
     name: str
     role: Role = "dipendente"
     anagrafica_id: Optional[str] = None
     agenzia_tenant_id: Optional[str] = None
     is_super_admin: bool = False
+    # Se True l'utente può accedere al software (email+password obbligatori).
+    # Se False è un profilo-solo (collaboratore senza login).
+    accesso_software: bool = True
 
 
 class LoginRequest(BaseModel):

@@ -16,6 +16,7 @@ import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
 import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
+import { QuestionariManager } from "@/components/Questionari";
 import { toast } from "sonner";
 
 function RiassegnaProvvigioniButton({ schema }) {
@@ -60,6 +61,7 @@ const SECTIONS = [
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "mup-modelli", label: "Modelli MUP (precontrattuale)", icon: <ClipboardList size={14} />, endpoint: "/librerie/mup-modelli", custom: true },
+    { key: "questionari", label: "Questionari", icon: <ClipboardList size={14} />, custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
     { key: "rami", label: "Rami", icon: <Tags size={14} />, endpoint: "/librerie/rami" },
@@ -272,6 +274,7 @@ export default function Librerie() {
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
                             : s.key === "mup-modelli" ? <ModelliMupSezione />
+                            : s.key === "questionari" ? <QuestionariManager />
                             : s.key === "permessi" ? <PermessiSezione />
                             : s.key === "visibilita-doc" ? <VisibilitaDocSezione />
                             : <Sezione section={s} />}
@@ -2168,7 +2171,7 @@ function UtenteForm({ section, editing, onClose }) {
             perc_provvigione_default: 0, perc_ritenuta_acconto: 0, perc_inps_inarcassa: 0,
             parent_collaboratore_id: null, parent_provvigione_pct: 0,
             note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
-            profilo_permessi_id: null, avatar_url: null,
+            profilo_permessi_id: null, avatar_url: null, accesso_software: true,
         }}
         fields={(f, set) => (
             <Tabs defaultValue="anagrafica" className="w-full">
@@ -2185,15 +2188,25 @@ function UtenteForm({ section, editing, onClose }) {
                     )}
                     <div className="grid grid-cols-2 gap-3">
                         <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
-                        <div><Label>Email *</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} /></div>
+                        <div><Label>Email {f.accesso_software !== false ? "*" : "(facoltativa)"}</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} data-testid="utente-email" /></div>
                     </div>
+                    {f.role !== "cliente" && (
+                        <label className="flex items-center gap-2 text-sm cursor-pointer bg-sky-50 border border-sky-200 rounded-md px-3 py-2"
+                               data-testid="utente-accesso-software-label">
+                            <input type="checkbox" checked={f.accesso_software !== false}
+                                   onChange={(e) => set("accesso_software", e.target.checked)}
+                                   data-testid="utente-accesso-software" />
+                            <span><strong>Accesso al software</strong> — se attivo, l'utente può effettuare il login (email e password obbligatorie). Se disattivato è solo un profilo (collaboratore senza login).</span>
+                        </label>
+                    )}
                     <div>
-                        <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : "Password *"}</Label>
+                        <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : (f.accesso_software !== false ? "Password *" : "Password (facoltativa)")}</Label>
                         <Input
                             type="password"
                             value={f.password || ""}
                             onChange={(e) => set("password", e.target.value)}
                             placeholder={editing ? "•••••••• (invariata)" : ""}
+                            data-testid="utente-password"
                         />
                     </div>
                     <div>

@@ -557,3 +557,10 @@ Admin: `admin@assicura.it / Admin123!`
 - Corretti leak cross-tenant: update_user, delete_user, merge_users(_preview), unmerge_user, pulisci_stub_operatori, voci-ricorsive __all__, estratto/paga/voci-manuali/liste-bozze per collaboratore.
 - alert_dispatcher: destinatari ruolo "admin" ora filtrati per tenant della regola (niente avvisi cross-agenzia).
 - Test: admin principale NON vede/modifica/elimina utenti di Axicura (404); ogni tenant vede solo i propri collaboratori (principale=5, Axicura=24). Wizard import candidati collaboratore isolati.
+
+## 2026-06 — Fix stub import + Massimali Rec21 + Formato importi + Flag accesso + Questionari
+- Fix stub "(da completare)" ricorrenti: le mappature operatore impostate manualmente (o collegate a utenti reali) ora sono BLOCCATE (`_mapping_is_locked` in ania_importer.py) e non vengono più sovrascritte dai re-import. In save_mapping lo stub orfano viene rimosso e i riferimenti ri-puntati sull'utente reale (manual=True).
+- Massimali Rec21: _campi_valori legge massimale_cose (col AO) e massimale_persone (col AP); UI PolizzaDetail mostra due campi separati formattati, sovrascritti ad ogni import.
+- Formato importi: convertiti i display grezzi .toFixed() in fmtEur (it-IT) in CarichiMensili, Tasks, PortaleCliente.
+- Flag "Accesso al software" (users): se spuntato email+password obbligatori e login abilitato; se no → profilo senza login, email facoltativa (auto-generata). Login bloccato se accesso_software=False. Stub import creati con accesso_software=False.
+- Questionari (Librerie): nuova collezione tenant-scoped `questionari`. CRUD + PDF (reportlab) + stampa. Builder in Librerie (tipi: testo, si_no, scelta_multipla, numero, data) con flag visibilità Anagrafica/Polizza/Sinistri. QuestionariViewer (sola lettura + PDF/stampa) aggiunto come tab in PolizzaDetail, SinistroDetail, AnagraficaDetail.

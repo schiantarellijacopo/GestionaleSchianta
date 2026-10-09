@@ -29,6 +29,11 @@ clientApi.interceptors.request.use((cfg) => {
     return cfg;
 });
 
+// Formato importi in Euro con separatore delle migliaia (it-IT): 1.234,56 €
+const fmtEur = (n) =>
+    new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 })
+        .format(Number(n || 0));
+
 const SEZIONI = [
     { key: "profilo",  label: "Il mio profilo", icon: User },
     { key: "piramide", label: "La mia protezione", icon: Shield },
@@ -747,7 +752,7 @@ function PolizzaCard({ p, oggi }) {
                             ) : (
                                 <div className="font-semibold text-amber-700">
                                     Prossima quietanza il {fmtDate(p.stats_titoli.prossima_scadenza)}
-                                    {p.stats_titoli.prossimo_importo && ` — € ${Number(p.stats_titoli.prossimo_importo).toFixed(2)}`}
+                                    {p.stats_titoli.prossimo_importo && ` — ${fmtEur(p.stats_titoli.prossimo_importo)}`}
                                 </div>
                             )}
                         </div>
@@ -855,7 +860,7 @@ function TitoloMini({ t, oggi }) {
                     </span>
                 )}
                 <span className="ml-auto text-sm font-bold text-emerald-700">
-                    € {Number(t.importo_lordo || 0).toFixed(2)}
+                    {fmtEur(t.importo_lordo)}
                 </span>
                 {t.n_allegati_cliente > 0 && (
                     <button onClick={() => setOpenQuiet(!openQuiet)}
@@ -1084,7 +1089,7 @@ function TitoloCard({ t, oggi }) {
                             {t.polizza_numero || t.numero_titolo || "—"}
                         </span>
                         <span className="text-2xl font-bold text-emerald-700">
-                            € {Number(t.importo_lordo || 0).toFixed(2)}
+                            {fmtEur(t.importo_lordo)}
                         </span>
                     </div>
 

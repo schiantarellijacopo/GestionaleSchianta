@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap } from "lucide-react";
+import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { useAuth } from "@/contexts/AuthContext";
@@ -22,6 +22,7 @@ import DialogLetteraAbbuono from "@/components/DialogLetteraAbbuono";
 import LibroMatricolaTab from "@/components/LibroMatricolaTab";
 import AssicuratiTab from "@/components/AssicuratiTab";
 import RegolazionePolizzaTab from "@/components/RegolazionePolizzaTab";
+import { QuestionariViewer } from "@/components/Questionari";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
 import TargaConflictWidget from "@/components/TargaConflictWidget";
 import TargaSearchWithLentina from "@/components/TargaSearchWithLentina";
@@ -274,6 +275,8 @@ export default function PolizzaDetail() {
             intestatario: pol.intestatario || "",
             provincia_intestatario: pol.provincia_intestatario || "",
             massimali: pol.massimali || "",
+            massimale_cose: pol.massimale_cose != null ? Number(pol.massimale_cose).toLocaleString("it-IT") : "",
+            massimale_persone: pol.massimale_persone != null ? Number(pol.massimale_persone).toLocaleString("it-IT") : "",
         });
         setVeicoloEdit(true);
     };
@@ -286,6 +289,10 @@ export default function PolizzaDetail() {
                 payload[k] = (payload[k] === "" || payload[k] === null || payload[k] === undefined)
                     ? (k === "veicolo_quintali" ? null : 0) : parseFloat(payload[k]) || 0;
             });
+            // Massimali: convertono la stringa formattata (es. "15.000.000") in numero
+            const _mnum = (s) => { const d = String(s ?? "").replace(/\D/g, ""); return d ? Number(d) : null; };
+            payload.massimale_cose = _mnum(veicoloForm.massimale_cose);
+            payload.massimale_persone = _mnum(veicoloForm.massimale_persone);
             await api.put(`/polizze/${pol.id}`, payload);
             const tg = (veicoloForm.targa || "").trim();
             if (tg) {
@@ -544,6 +551,7 @@ export default function PolizzaDetail() {
                         </TabsTrigger>
                     )}
                     <TabsTrigger value="altri"><Info size={13} className="mr-1" />Altri dati</TabsTrigger>
+                    <TabsTrigger value="questionari" data-testid="tab-questionari"><ClipboardList size={13} className="mr-1" />Questionari</TabsTrigger>
                     <TabsTrigger value="azioni" data-testid="tab-azioni" className="text-rose-700 data-[state=active]:bg-rose-50">
                         <Zap size={13} className="mr-1" />Azioni
                     </TabsTrigger>
@@ -610,7 +618,8 @@ export default function PolizzaDetail() {
                                         ["Rinuncia rivalsa", pol.rinuncia_rivalsa ? "SÌ" : "NO"],
                                         ["Intestatario", pol.intestatario],
                                         ["Prov. intestatario", pol.provincia_intestatario],
-                                        ["Massimali", pol.massimali],
+                                        ["Massimale cose", pol.massimale_cose != null ? fmtEur(pol.massimale_cose) : null],
+                                        ["Massimale persone", pol.massimale_persone != null ? fmtEur(pol.massimale_persone) : null],
                                     ]} />
                                 </>
                             ) : (
@@ -699,12 +708,20 @@ export default function PolizzaDetail() {
                                             </div>
                                         ))}
                                         <div>
-                                            <Label className="text-xs text-slate-500">Massimali</Label>
+                                            <Label className="text-xs text-slate-500">Massimale cose</Label>
                                             <Input type="text" inputMode="numeric"
-                                                value={(() => { const d = String(veicoloForm.massimali ?? "").replace(/\D/g, ""); return d ? Number(d).toLocaleString("it-IT") : ""; })()}
-                                                onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setVeic("massimali", d ? Number(d).toLocaleString("it-IT") : ""); }}
+                                                value={(() => { const d = String(veicoloForm.massimale_cose ?? "").replace(/\D/g, ""); return d ? Number(d).toLocaleString("it-IT") : ""; })()}
+                                                onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setVeic("massimale_cose", d ? Number(d).toLocaleString("it-IT") : ""); }}
                                                 placeholder="es. 6.000.000"
-                                                data-testid="veicolo-input-massimali" />
+                                                data-testid="veicolo-input-massimale-cose" />
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs text-slate-500">Massimale persone</Label>
+                                            <Input type="text" inputMode="numeric"
+                                                value={(() => { const d = String(veicoloForm.massimale_persone ?? "").replace(/\D/g, ""); return d ? Number(d).toLocaleString("it-IT") : ""; })()}
+                                                onChange={(e) => { const d = e.target.value.replace(/\D/g, ""); setVeic("massimale_persone", d ? Number(d).toLocaleString("it-IT") : ""); }}
+                                                placeholder="es. 6.000.000"
+                                                data-testid="veicolo-input-massimale-persone" />
                                         </div>
                                         {[
                                             ["guida_esperta", "Guida esperta"],
@@ -1284,6 +1301,13 @@ export default function PolizzaDetail() {
 
                 <TabsContent value="azioni">
                     <AzioniPolizzaTab polizza={pol} onChanged={load} canEdit={canEdit} />
+                </TabsContent>
+
+                <TabsContent value="questionari">
+                    <Card className="p-6 border-slate-200 mt-4 space-y-3">
+                        <SezioneTitolo titolo="Questionari" />
+                        <QuestionariViewer entita="polizza" />
+                    </Card>
                 </TabsContent>
             </Tabs>
             {editOpen && (
