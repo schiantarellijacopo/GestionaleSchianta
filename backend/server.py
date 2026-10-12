@@ -5961,18 +5961,21 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     # ANCORA APERTE (le chiuse restano invariate -> comportamento storico a due righe).
     merge_multiplo = bool(body.get("merge_copertura")) and is_coperto
     cop_movs_merge = []
+    cop_docs_merge = []
     if merge_multiplo:
         async for _cm in db.movimenti.find(
             {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
-            {"_id": 0, "id": 1, "data_movimento": 1},
+            {"_id": 0},
         ):
             _ch = await db.chiusure_giorno.find_one(
                 {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
             if _ch and not _ch.get("riaperta_at"):
                 # giornata chiusa: immutabile -> non si può unificare questa copertura
                 cop_movs_merge = []
+                cop_docs_merge = []
                 break
             cop_movs_merge.append(_cm["id"])
+            cop_docs_merge.append(_cm)
     do_merge = bool(merge_multiplo and cop_movs_merge)
     # Per il movimento d'incasso: se unifichiamo, lo trattiamo come incasso premio
     # normale (entrate+provv+saldo+banca su una riga) invece che "incasso_coperto".
@@ -6098,7 +6101,14 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
 
     # INCASSO MULTIPLO unificato: rimuovi la riga di COPERTURA (solo giornate aperte)
     # così entrate/provvigioni/saldo + banca compaiono in UN'UNICA riga, con Sospesi azzerati.
+    # Prima salva uno SNAPSHOT delle coperture assorbite SUL movimento d'incasso: se la riga
+    # verrà eliminata dalla Prima Nota, il titolo tornerà a SOSPESO e le coperture verranno
+    # ripristinate (regola: eliminando l'incasso di un titolo coperto si torna a sospeso).
     if do_merge and cop_movs_merge:
+        await db.movimenti.update_one(
+            {"id": mov_in.id},
+            {"$set": {"coperture_assorbite": cop_docs_merge}},
+        )
         await db.movimenti.delete_many({"id": {"$in": cop_movs_merge}})
 
     # aggiorna anagrafica con ultimo mezzo di pagamento usato
@@ -8485,12 +8495,58 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
                 })
                 azione = "titolo ripristinato a coperto"
             elif cat in ("incasso_premio", "incasso_premio_direzione"):
-                # Il titolo era ARRETRATO/da incassare → torna arretrato
-                await db.titoli.update_one({"id": tid}, {
-                    "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
-                    "$unset": _unset_incasso,
-                })
-                azione = "titolo ripristinato ad arretrato"
+                # REGOLA: eliminando un incasso, il titolo torna allo stato PRECEDENTE.
+                #  - se era COPERTO (sospeso) prima dell'incasso → torna a SOSPESO e la
+                #    copertura viene ripristinata in Prima Nota;
+                #  - altrimenti (era arretrato/da incassare) → torna ARRETRATO.
+                # Un incasso UNIFICATO (merge) ha assorbito la copertura salvandone lo
+                # snapshot in `coperture_assorbite`; per i dati legacy si usa come indizio
+                # il flag `titolo_coperto` ancora presente sul titolo.
+                cop_assorbite = mov.get("coperture_assorbite") or []
+                was_coperto = (cat != "incasso_premio_direzione") and (
+                    bool(cop_assorbite) or bool(t.get("titolo_coperto")))
+                if was_coperto:
+                    await db.titoli.update_one({"id": tid}, {
+                        "$set": {"stato": "da_incassare", "titolo_coperto": True,
+                                 "updated_at": _now_iso()},
+                        "$unset": _unset_incasso,
+                    })
+                    if cop_assorbite:
+                        for _c in cop_assorbite:
+                            _doc = {k: v for k, v in _c.items() if k != "_id"}
+                            _doc["chiusura_id"] = None
+                            _doc["updated_at"] = _now_iso()
+                            await db.movimenti.replace_one(
+                                {"id": _doc.get("id")}, _doc, upsert=True)
+                        azione = "titolo ripristinato a sospeso (copertura ripristinata in Prima Nota)"
+                    else:
+                        # Legacy/merge senza snapshot: ricostruisci la copertura dai dati
+                        # del titolo. Rimuove eventuali coperture residue per evitare doppioni.
+                        await db.movimenti.delete_many(
+                            {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}})
+                        pol = await db.polizze.find_one(
+                            {"id": t.get("polizza_id")}, {"_id": 0}) if t.get("polizza_id") else None
+                        cop = MovimentoContabile(
+                            data_movimento=(t.get("data_copertura") or mov.get("data_movimento")),
+                            tipo="entrata", categoria="copertura_titolo",
+                            importo=float(t.get("importo_lordo") or 0),
+                            descrizione=(f"Copertura anticipata polizza "
+                                         f"{(pol or {}).get('numero_polizza') or t.get('polizza_id')}"),
+                            polizza_id=t.get("polizza_id"), titolo_id=tid,
+                            anagrafica_id=(pol or {}).get("contraente_id"),
+                            compagnia_id=(pol or {}).get("compagnia_id"),
+                            provvigioni=float(t.get("provvigioni") or 0),
+                        )
+                        await db.movimenti.insert_one(cop.model_dump())
+                        azione = "titolo ripristinato a sospeso (copertura ricostruita in Prima Nota)"
+                else:
+                    # Il titolo era ARRETRATO/da incassare → torna arretrato
+                    await db.titoli.update_one({"id": tid}, {
+                        "$set": {"stato": "da_incassare", "titolo_coperto": False,
+                                 "updated_at": _now_iso()},
+                        "$unset": _unset_incasso,
+                    })
+                    azione = "titolo ripristinato ad arretrato"
             elif cat == "copertura_titolo":
                 # La copertura viene annullata → torna arretrato
                 await db.titoli.update_one({"id": tid}, {
