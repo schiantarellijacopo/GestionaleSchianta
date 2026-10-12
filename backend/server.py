@@ -4953,6 +4953,36 @@ async def titoli_sospesi_storico(
     return result
 
 
+@api.get("/titoli/{tid}")
+async def get_titolo(tid: str, user=Depends(current_user)):
+    """Ritorna il DOCUMENTO COMPLETO di un singolo titolo (tutti i campi).
+    La lista /titoli usa una projection ridotta per performance: il dialog di
+    modifica deve invece avere tutti i campi (tipo, imposte, ssn, diritti,
+    accessori, provvigioni_operatori, tag, descrizione...)."""
+    t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Titolo non trovato")
+    p = None
+    if t.get("polizza_id"):
+        p = await db.polizze.find_one(
+            {"id": t["polizza_id"]},
+            {"_id": 0, "numero_polizza": 1, "compagnia_id": 1, "ramo": 1,
+             "prodotto": 1, "frazionamento": 1, "collaboratore_id": 1,
+             "contraente_id": 1},
+        )
+    # Guardia multi-ruolo: un cliente può vedere solo i titoli delle proprie polizze
+    if user.get("role") == "cliente":
+        if not p or p.get("contraente_id") != user.get("anagrafica_id"):
+            raise HTTPException(404, "Titolo non trovato")
+    if p:
+        for k in ("numero_polizza", "compagnia_id", "ramo", "prodotto", "frazionamento"):
+            if t.get(k) in (None, ""):
+                t[k] = p.get(k)
+        if t.get("collaboratore_id") in (None, ""):
+            t["collaboratore_id"] = p.get("collaboratore_id")
+    return t
+
+
 def _giorni_tra(dal_iso: Optional[str], al_iso: Optional[str]) -> Optional[int]:
     if not dal_iso or not al_iso:
         return None

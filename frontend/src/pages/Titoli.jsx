@@ -206,6 +206,19 @@ export default function Titoli({ storicoMode = false } = {}) {
         catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
+    // Carica il titolo COMPLETO prima di aprire il dialog: la lista usa una
+    // projection ridotta (senza tipo/imposte/ssn/diritti/accessori/tag...) per
+    // performance, quindi senza questa fetch il dialog mostrerebbe 0/vuoto.
+    const openEdit = async (t) => {
+        if (!t?.id) { setEditing(t); return; }
+        try {
+            const r = await api.get(`/titoli/${t.id}`);
+            setEditing({ ...t, ...r.data });
+        } catch {
+            setEditing(t);
+        }
+    };
+
     const exportCsv = () => window.open(`${API_BASE}/export/titoli.csv`, "_blank");
     const exportXlsx = () => window.open(`${API_BASE}/export/titoli.xlsx`, "_blank");
     const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
@@ -256,7 +269,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             render: (t) => (
                 <>
                     <button type="button"
-                        onClick={() => (canEdit ? setEditing(t) : null)}
+                        onClick={() => (canEdit ? openEdit(t) : null)}
                         className="text-amber-600 hover:underline font-medium block text-left"
                         title="Apri dettaglio titolo"
                         data-testid={`titolo-link-${t.id}`}>
@@ -352,7 +365,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             key: "menu", label: "Menu ⋮", locked: true, thClass: "w-[36px]", tdClass: "text-right",
             render: (t) => (
                 <RowActions testid={`titolo-actions-${t.id}`}
-                            onEdit={canEdit ? () => setEditing(t) : null}
+                            onEdit={canEdit ? () => openEdit(t) : null}
                             onDelete={() => elimina(t.id)}
                             canDelete={canDelete}
                             label="titolo" />
