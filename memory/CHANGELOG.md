@@ -1,6 +1,15 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10 — Import OMNIA azzerava titoli COPERTI (Prima Nota) + strumento ripristino ✅
+- **BUG (produzione, tenant jacopo@schiantarelli.it)**: titoli COPERTI/registrati in Prima Nota (es. polizza 117255437 PANELLA → 200€) venivano azzerati a premio 0 da un re-import OMNIA.
+- **RCA (confermata da deployer su dati prod)**: il flusso di copertura (`server.py` marca-sospeso ~5247) imposta `titolo_coperto=true`/`data_copertura` ma LASCIA `stato='da_incassare'`; la vecchia guardia dell'importer (`ania_importer.py:1501`, `stato=='da_incassare'`) non li proteggeva → sovrascritti con importi ANIA = 0.
+- **FIX importer (ania_importer.py ~1501)**: la guardia ora salta l'update se il titolo è registrato in Prima Nota (`titolo_coperto`, `data_copertura`, `data_incasso`, `importo_pagato`, `chiusura_id`) E non azzera importi se manca il rec42 (`_r42`). I titoli in Prima Nota NON vengono MAI riscritti dagli import.
+- **STRUMENTO RIPRISTINO**: nuovo `GET /api/titoli/coperti-azzerati` (anteprima) + `POST /api/titoli/ripristina-coperti-azzerati` (applica), e pulsante admin "Ripristina coperti" nella pagina Titoli. Ripristina `importo_lordo` dei coperti azzerati usando lo snapshot `importo_da_pagare` salvato alla copertura (non tocca incassi/movimenti). Routing collocato PRIMA di `/titoli/{tid}` per evitare shadowing.
+- **NOTA SSN (182259789)**: in PRODUZIONE i dati sono già corretti (Imposte 51,99 / SSN 43,08); la pagina /titoli mostrava 0 solo per la projection ridotta → risolto dal fix "Modifica titolo" (GET /titoli/{id}). Si allinea alla vista Polizza dopo il deploy. (In preview il dato era una copia diversa, combinata.)
+- Da fare lato utente dopo il deploy: eseguire "Ripristina coperti" e verificare i titoli coperti toccati dagli import del 09/10 e 12/10.
+
+
 ## 2026-10 — Fix "Modifica titolo" dalla sezione Titoli (dati a 0/vuoto) ✅
 - **BUG**: aprendo lo STESSO titolo dalla pagina /titoli il dialog mostrava Imposte=0, SSN=0, Tipo vuoto e Lordo ricalcolato errato (solo netto), mentre dal dettaglio Polizza i valori erano corretti.
 - **RCA**: `GET /api/titoli` (lista) usa la projection ridotta `_LIST_TIT_PROJ` (per performance) che NON include `tipo/imposte/ssn/diritti/accessori`. La pagina Titoli passava la riga "leggera" a `TitoloDialog`, che quindi inizializzava imposte/tipo a 0/vuoto e ricalcolava il lordo sbagliato.

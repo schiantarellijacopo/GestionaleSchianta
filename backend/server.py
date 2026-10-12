@@ -4953,6 +4953,76 @@ async def titoli_sospesi_storico(
     return result
 
 
+@api.get("/titoli/coperti-azzerati")
+async def titoli_coperti_azzerati(user=Depends(require_user("admin"))):
+    """ANTEPRIMA (dry-run): titoli COPERTI (registrati in Prima Nota) il cui
+    importo è stato ERRONEAMENTE azzerato da un import, ma di cui conserviamo
+    l'importo di copertura in `importo_da_pagare`. Ripristinabili con l'endpoint
+    POST /titoli/ripristina-coperti-azzerati."""
+    flt = {
+        "$and": [
+            {"$or": [{"titolo_coperto": True}, {"data_copertura": {"$nin": [None, ""]}}]},
+            {"$or": [{"importo_lordo": {"$in": [0, 0.0, None]}}]},
+            {"importo_da_pagare": {"$nin": [None, 0, 0.0]}},
+        ]
+    }
+    items = []
+    async for t in db.titoli.find(flt, {"_id": 0}):
+        pol = await db.polizze.find_one(
+            {"id": t.get("polizza_id")},
+            {"_id": 0, "numero_polizza": 1, "contraente_id": 1},
+        ) or {}
+        ana = await db.anagrafiche.find_one(
+            {"id": pol.get("contraente_id")}, {"_id": 0, "ragione_sociale": 1}
+        ) if pol.get("contraente_id") else None
+        items.append({
+            "id": t.get("id"),
+            "numero_polizza": pol.get("numero_polizza"),
+            "contraente": (ana or {}).get("ragione_sociale"),
+            "effetto": t.get("effetto"),
+            "scadenza": t.get("scadenza"),
+            "stato": t.get("stato"),
+            "importo_attuale": t.get("importo_lordo") or 0,
+            "importo_da_ripristinare": t.get("importo_da_pagare"),
+            "provvigioni": t.get("provvigioni") or 0,
+        })
+    items.sort(key=lambda x: (x.get("effetto") or ""))
+    return {"count": len(items), "items": items}
+
+
+@api.post("/titoli/ripristina-coperti-azzerati")
+async def ripristina_coperti_azzerati(user=Depends(require_user("admin"))):
+    """Ripristina l'importo dei titoli coperti azzerati usando lo snapshot di
+    copertura `importo_da_pagare`. Non tocca incassi/movimenti: riallinea solo
+    l'importo del titolo a quello già contabilizzato in Prima Nota."""
+    flt = {
+        "$and": [
+            {"$or": [{"titolo_coperto": True}, {"data_copertura": {"$nin": [None, ""]}}]},
+            {"$or": [{"importo_lordo": {"$in": [0, 0.0, None]}}]},
+            {"importo_da_pagare": {"$nin": [None, 0, 0.0]}},
+        ]
+    }
+    ripristinati = 0
+    async for t in db.titoli.find(flt, {"_id": 0, "id": 1, "importo_da_pagare": 1, "importo_netto": 1, "nota": 1}):
+        imp = float(t.get("importo_da_pagare") or 0)
+        if imp <= 0:
+            continue
+        upd = {"importo_lordo": imp, "updated_at": _now_iso()}
+        # Se anche il netto era azzerato, usa il lordo come fallback (il dettaglio
+        # imposte/SSN originale non è nello snapshot e verrà riallineato dai nuovi import).
+        if t.get("importo_netto") in (None, 0, 0.0):
+            upd["importo_netto"] = imp
+        nota = (t.get("nota") or "").strip()
+        marker = "Importo ripristinato da copertura (azzerato da import)"
+        if marker not in nota:
+            upd["nota"] = (nota + (" · " if nota else "") + marker)
+        await db.titoli.update_one({"id": t["id"]}, {"$set": upd})
+        ripristinati += 1
+    await log_attivita(user, "ripristina", "titoli", None,
+                       f"Ripristinati {ripristinati} titoli coperti azzerati")
+    return {"ripristinati": ripristinati}
+
+
 @api.get("/titoli/{tid}")
 async def get_titolo(tid: str, user=Depends(current_user)):
     """Ritorna il DOCUMENTO COMPLETO di un singolo titolo (tutti i campi).

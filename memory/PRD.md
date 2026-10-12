@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
+## Sessione 12/10/2026 (fork) — Fix titoli: vista /titoli, protezione Prima Nota, ripristino coperti
+- Wizard Mapping OMNIA: salvataggio collaboratori reso affidabile (endpoint BULK) + back-fill in background (no timeout 120s). Verificato.
+- "Modifica titolo" dalla pagina /titoli ora carica il titolo COMPLETO (GET /api/titoli/{id}) → mostra imposte/SSN/tipo/lordo come la vista Polizza (prima erano a 0 per la projection ridotta). Verificato.
+- BUG PRODUZIONE risolto: l'import OMNIA azzerava i titoli COPERTI (registrati in Prima Nota) perché la copertura lascia stato='da_incassare'. Ora l'importer salta ogni titolo in Prima Nota (titolo_coperto/data_copertura/data_incasso/importo_pagato/chiusura_id) e non azzera importi senza rec42.
+- Nuovo strumento admin "Ripristina coperti" (GET/POST /api/titoli/(coperti-azzerati|ripristina-coperti-azzerati)) per riportare gli importi dei coperti azzerati al valore salvato in copertura (importo_da_pagare).
+- Dettagli completi in CHANGELOG.md. Deploy in produzione lanciato il 12/10/2026.
+
+
 ## Sessione 01/10/2026 (fork) — Paginazione Polizze + direttiva "ottimizza tutto in automatico"
 
 - **Polizze: paginazione lato server attiva** (FATTO, testato): `Polizze.jsx` ora carica 50 polizze/pagina (`paged/page/page_size/sort/dir`), con pager UI, ordinamento server (campi nativi) e **totali da aggregation server** (su tutti i record filtrati, non solo la pagina). Export/stampa restano su tutti i record. Verificato in preview con dati reali (jacopo): "Pagina 1 di 101 · 5048 attive", totali corretti, cambio pagina ok.

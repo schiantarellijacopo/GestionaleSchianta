@@ -26,7 +26,7 @@ import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Search, Filter, X, Printer, FileSpreadsheet, FileText, Wallet, Shield,
-    ChevronDown, ChevronUp, Wrench,
+    ChevronDown, ChevronUp, Wrench, RotateCcw,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -249,6 +249,32 @@ export default function Titoli({ storicoMode = false } = {}) {
         }
     };
 
+    const ripristinaCoperti = async () => {
+        try {
+            const prev = await api.get("/titoli/coperti-azzerati");
+            const { count, items } = prev.data || {};
+            if (!count) {
+                toast.info("Nessun titolo coperto azzerato da ripristinare.");
+                return;
+            }
+            const esempi = (items || []).slice(0, 8)
+                .map((x) => `• Pol. ${x.numero_polizza || "?"} ${x.contraente || ""} → ${fmtEur(x.importo_da_ripristinare)}`)
+                .join("\n");
+            const ok = window.confirm(
+                `Ripristino titoli COPERTI azzerati dagli import: ${count} titoli.\n\n` +
+                `L'importo verrà riportato al valore di copertura già registrato in Prima Nota ` +
+                `(incassi e movimenti NON vengono toccati).\n\n` +
+                `${esempi}${count > 8 ? `\n…e altri ${count - 8}` : ""}\n\nProcedere?`,
+            );
+            if (!ok) return;
+            const res = await api.post("/titoli/ripristina-coperti-azzerati");
+            toast.success(`Ripristinati ${res.data?.ripristinati ?? 0} titoli coperti`);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore durante il ripristino");
+        }
+    };
+
     // Colonne tabella — selezionabili/riordinabili per utente
     const showStorico = storicoMode || ["storico", "storico_anno", "storico_mese"].includes(filters.preset);
     const titoliColsDefault = [
@@ -425,6 +451,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <Button variant="outline" onClick={bonificaScadenze} data-testid="titoli-bonifica-scadenze"
                                 title="Corregge scadenze errate (= effetto) e rimuove i doppioni da incassare">
                                 <Wrench size={14} className="mr-1" /> Correggi scadenze
+                            </Button>
+                        )}
+                        {user?.role === "admin" && (
+                            <Button variant="outline" onClick={ripristinaCoperti} data-testid="titoli-ripristina-coperti"
+                                title="Ripristina l'importo dei titoli coperti azzerati per errore dagli import">
+                                <RotateCcw size={14} className="mr-1" /> Ripristina coperti
                             </Button>
                         )}
                         <Button variant="outline" onClick={stampaPdf} data-testid="titoli-print">
@@ -822,7 +854,7 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                     <Input
                                         type="date"
                                         value={dataCopertura}
-                                        onChange={(e) => setDataCopertura(e.target.value)}
+                                        onChange={(e) => { setDataCopertura(e.target.value); setDataIncasso(e.target.value); }}
                                         className="max-w-[200px]"
                                         data-testid="bulk-data-copertura"
                                     />
