@@ -1,0 +1,22 @@
+{
+  "summary": "Verified new business rule: DELETE /api/contabilita/movimenti/{id} reverts linked titolo to its previous state across all 5 scenarios. 5/5 pytest tests passed on live backend (admin@assicura.it) using today's open accounting day.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter107_revert_movimento_titolo.py",
+    "/app/test_reports/pytest/iter107.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_revert_entita_da_movimento (server.py ~L8476) correctly branches on coperture_assorbite snapshot vs titolo.titolo_coperto for legacy fallback. Fallback path deletes any residual copertura/anticipo for the titolo before reinserting a reconstructed copertura_titolo, preventing duplicates — good.",
+    "Minor: in legacy fallback the reconstructed copertura uses data_copertura from titolo OR mov.data_movimento; good defensive fallback. Consider also copying anagrafica_id/compagnia_id from the deleted movimento as a secondary fallback if polizza was deleted."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "admin@assicura.it / Admin123! (ok)",
+  "seed_data_creation": "Each test creates its own anagrafica/polizza/titolo via API with TEST prefixes (TESTREVERT, numero_polizza TESTREV-<date>-<scen>-<hex>). Not cleaned up — safe since clearly tagged.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter107 covers DELETE movimento revert rules A/B/B2/C/Regression. Test file: /app/backend/tests/test_iter107_revert_movimento_titolo.py. B2 (legacy fallback) relies on PUT /api/contabilita/movimenti/{id} with coperture_assorbite=[] which currently is accepted and clears the snapshot — enabling the fallback branch to be exercised. All 5 tests green.",
+  "rca of the issue": "N/A — feature verification, no bug found. Previously (before this iteration's dev work) deleting an incasso of a COVERED title wrongly set titolo_coperto=false; now the snapshot coperture_assorbite is written on merge-incasso creation and consumed on delete to recreate the exact copertura movimento; a legacy fallback reconstructs one from titolo fields when no snapshot exists."
+}
