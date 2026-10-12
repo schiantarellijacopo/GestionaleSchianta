@@ -1,0 +1,23 @@
+{
+  "summary": "Verificato fix bug 'Modifica titolo' aperto dalla sezione /titoli. Backend GET /api/titoli/{id} ritorna il documento completo con imposte/ssn/tipo/importo_lordo/importo_netto corretti; GET /api/titoli/sospesi e /sospesi-storico restano 200 (nessun shadowing della nuova route). E2E UI confermato: aprendo il titolo 17d0e185-dae4-4bfc-bfc9-2f806ca09d13 sia dalla pagina Titoli sia dal dettaglio Polizza, il dialog mostra gli STESSI valori corretti (netto=415.43, imposte=95.07, lordo=510.5, SSN=0, tipo=Rinnovo). Il bug precedente (imposte=0, lordo ricalcolato 415.43, tipo vuoto) non si riproduce più.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "I campi Netto e Imposte in TitoloDialog.jsx non avevano data-testid (titolo-netto, titolo-imposte). Aggiunti dal testing agent per abilitare future verifiche automatizzate.",
+    "Attenzione all'ordine delle rotte FastAPI: le route letterali /titoli/sospesi e /titoli/sospesi-storico devono restare registrate PRIMA della route con path parameter /titoli/{tid}. Verificato OK in questa iterazione."
+  ],
+  "updated_files": ["/app/frontend/src/components/TitoloDialog.jsx (added data-testid titolo-netto, titolo-imposte)"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (ok)",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fix bug 'Modifica titolo da /titoli' verificato E2E. Dialog mostra valori identici sia aperto da /titoli sia da /polizze/{id}. data-testid aggiunti su campi netto/imposte.",
+  "rca of the issue": "RCA: GET /api/titoli (lista) usa projection _LIST_TIT_PROJ ridotta che non include tipo/imposte/ssn/diritti/accessori; il dialog Titoli apriva con dati parziali. FIX implementato: endpoint GET /api/titoli/{tid} (documento completo) e helper openEdit nella pagina Titoli che fa fetch del titolo completo prima di aprire il dialog. Verificato: valori nel dialog ora coerenti tra sezione Titoli e dettaglio Polizza."
+}

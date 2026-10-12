@@ -333,8 +333,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     <div><Label>Effetto</Label><Input type="date" value={f.effetto || ""} onChange={(e) => setEffetto(e.target.value)} data-testid="titolo-effetto" /></div>
                     <div><Label>Scadenza</Label><Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} data-testid="titolo-scadenza" /><div className="text-[10px] text-slate-400 mt-0.5">Da effetto + frazionamento{polFraz ? ` (${polFraz})` : ""}</div></div>
                     <div><Label>Lordo €</Label><Input type="number" step="0.01" value={f.importo_lordo || 0} readOnly disabled className="bg-slate-100" data-testid="titolo-lordo" /><div className="text-[10px] text-slate-400 mt-0.5">Calcolato: netto+imposte+SSN+diritti+accessori</div></div>
-                    <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} /></div>
-                    <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} /></div>
+                    <div><Label>Netto €</Label><Input type="number" step="0.01" value={f.importo_netto || 0} onChange={(e) => set("importo_netto", e.target.value)} data-testid="titolo-netto" /></div>
+                    <div><Label>Imposte €</Label><Input type="number" step="0.01" value={f.imposte || 0} onChange={(e) => set("imposte", e.target.value)} data-testid="titolo-imposte" /></div>
                     <div><Label>SSN €</Label><Input type="number" step="0.01" value={f.ssn || 0} onChange={(e) => set("ssn", e.target.value)} data-testid="titolo-ssn" /></div>
                     <div><Label>Diritti €</Label><Input type="number" step="0.01" value={f.diritti || 0} onChange={(e) => set("diritti", e.target.value)} data-testid="titolo-diritti" /></div>
                     <div><Label>Accessori €</Label><Input type="number" step="0.01" value={f.accessori || 0} onChange={(e) => set("accessori", e.target.value)} data-testid="titolo-accessori" /></div>

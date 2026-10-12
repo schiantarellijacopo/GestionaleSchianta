@@ -1,6 +1,15 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10 — Fix "Modifica titolo" dalla sezione Titoli (dati a 0/vuoto) ✅
+- **BUG**: aprendo lo STESSO titolo dalla pagina /titoli il dialog mostrava Imposte=0, SSN=0, Tipo vuoto e Lordo ricalcolato errato (solo netto), mentre dal dettaglio Polizza i valori erano corretti.
+- **RCA**: `GET /api/titoli` (lista) usa la projection ridotta `_LIST_TIT_PROJ` (per performance) che NON include `tipo/imposte/ssn/diritti/accessori`. La pagina Titoli passava la riga "leggera" a `TitoloDialog`, che quindi inizializzava imposte/tipo a 0/vuoto e ricalcolava il lordo sbagliato.
+- **FIX backend (server.py)**: nuovo endpoint `GET /api/titoli/{tid}` (documento completo + arricchimento numero_polizza/compagnia/ramo/frazionamento/collaboratore dalla polizza, guardia ruolo cliente). Inserito DOPO `/titoli/sospesi` e `/titoli/sospesi-storico` per non oscurare le rotte letterali.
+- **FIX frontend (Titoli.jsx)**: nuovo helper `openEdit(t)` che fa `GET /titoli/{id}` e apre il dialog con il titolo completo; sostituite le 2 chiamate `setEditing(t)` (link contratto + RowActions). La lista resta leggera.
+- **Verifica**: testing_agent 100% backend+frontend. Dialog ora mostra valori IDENTICI da /titoli e da /polizze/{id}: netto 415,43 · imposte 95,07 · lordo 510,5 · tipo Rinnovo.
+- **NOTA aperta (SSN)**: il titolo importato memorizza l'imposta COMBINATA in `imposte` (95,07) con `ssn=null`; lo split Imposte 51,99 + SSN 43,08 visto in un vecchio screenshot NON è nei dati attuali. Eventuale ripristino dello split SSN è un intervento separato su import/dati (da confermare con l'utente).
+
+
 ## 2026-10 — Wizard Mapping OMNIA: salvataggio affidabile collaboratori + back-fill in background ✅
 - **RCA (bug ricorrente "stub (da completare) riappare dopo import")**: NON era un revert lato import. Dimostrato (repro in-process + HTTP) che il backend preserva SEMPRE i mapping verso utenti reali/manuali (`_mapping_is_locked` copre sia `manual=True` sia `entita_id`→utente non-auto). I codici 021/024/er del tenant c5ae2d0e avevano `manual=None`/`label_programma=None`: non erano MAI stati salvati. Causa reale: il wizard salvava con N POST sequenziali (incl. ~320 prodotti pre-selezionati) e poteva fallire a metà lasciando i collaboratori non salvati; inoltre "Salva e applica" lanciava un back-fill SINCRONO che superava il timeout proxy di 120s (errore "120-second Proxy Read Timeout"). Bonus bug: `save_mapping` creava documenti senza campo `id`.
 - **FIX backend (server.py)**: nuovo `POST /api/import/mappings/bulk` (salva tutti i mapping in UNA richiesta, resiliente per-item, ritorna {saved,errors,total}); `save_mapping` ora garantisce sempre `id` + `manual=true`; back-fill reso asincrono con `POST /api/import/mappings/apply-async` (+ `_run_apply_mappings_job`) e polling via `GET /api/import/job/{job_id}` → niente più timeout 120s.
