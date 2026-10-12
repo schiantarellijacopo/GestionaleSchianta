@@ -4953,21 +4953,41 @@ async def titoli_sospesi_storico(
     return result
 
 
+async def _importo_recupero_copertura(t: dict) -> tuple:
+    """Determina l'importo con cui ripristinare un titolo coperto azzerato.
+    Fonti, in ordine: (1) snapshot `importo_da_pagare`; (2) movimento di
+    copertura in Prima Nota (`copertura_titolo`/`anticipo`), che cattura il
+    LORDO e le provvigioni al momento della copertura. Ritorna (lordo, provvigioni)."""
+    imp = t.get("importo_da_pagare")
+    if imp not in (None, 0, 0.0):
+        return float(imp), None
+    mv = await db.movimenti.find_one(
+        {"titolo_id": t.get("id"), "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
+        {"_id": 0, "importo": 1, "provvigioni": 1},
+        sort=[("importo", -1)],
+    )
+    if mv and float(mv.get("importo") or 0) > 0:
+        return float(mv["importo"]), (float(mv.get("provvigioni") or 0) or None)
+    return 0.0, None
+
+
 @api.get("/titoli/coperti-azzerati")
 async def titoli_coperti_azzerati(user=Depends(require_user("admin"))):
     """ANTEPRIMA (dry-run): titoli COPERTI (registrati in Prima Nota) il cui
-    importo è stato ERRONEAMENTE azzerato da un import, ma di cui conserviamo
-    l'importo di copertura in `importo_da_pagare`. Ripristinabili con l'endpoint
-    POST /titoli/ripristina-coperti-azzerati."""
+    importo è stato ERRONEAMENTE azzerato da un import. Il valore da ripristinare
+    si recupera dallo snapshot `importo_da_pagare` oppure dal movimento di
+    copertura in Prima Nota. Applicabile con POST /titoli/ripristina-coperti-azzerati."""
     flt = {
         "$and": [
             {"$or": [{"titolo_coperto": True}, {"data_copertura": {"$nin": [None, ""]}}]},
-            {"$or": [{"importo_lordo": {"$in": [0, 0.0, None]}}]},
-            {"importo_da_pagare": {"$nin": [None, 0, 0.0]}},
+            {"importo_lordo": {"$in": [0, 0.0, None]}},
         ]
     }
     items = []
     async for t in db.titoli.find(flt, {"_id": 0}):
+        amount, _ = await _importo_recupero_copertura(t)
+        if amount <= 0:
+            continue  # non recuperabile (nessuno snapshot né movimento)
         pol = await db.polizze.find_one(
             {"id": t.get("polizza_id")},
             {"_id": 0, "numero_polizza": 1, "contraente_id": 1},
@@ -4983,7 +5003,7 @@ async def titoli_coperti_azzerati(user=Depends(require_user("admin"))):
             "scadenza": t.get("scadenza"),
             "stato": t.get("stato"),
             "importo_attuale": t.get("importo_lordo") or 0,
-            "importo_da_ripristinare": t.get("importo_da_pagare"),
+            "importo_da_ripristinare": round(amount, 2),
             "provvigioni": t.get("provvigioni") or 0,
         })
     items.sort(key=lambda x: (x.get("effetto") or ""))
@@ -4993,25 +5013,27 @@ async def titoli_coperti_azzerati(user=Depends(require_user("admin"))):
 @api.post("/titoli/ripristina-coperti-azzerati")
 async def ripristina_coperti_azzerati(user=Depends(require_user("admin"))):
     """Ripristina l'importo dei titoli coperti azzerati usando lo snapshot di
-    copertura `importo_da_pagare`. Non tocca incassi/movimenti: riallinea solo
-    l'importo del titolo a quello già contabilizzato in Prima Nota."""
+    copertura (`importo_da_pagare`) o, in mancanza, il movimento di copertura in
+    Prima Nota. Non tocca incassi/movimenti: riallinea solo l'importo del titolo."""
     flt = {
         "$and": [
             {"$or": [{"titolo_coperto": True}, {"data_copertura": {"$nin": [None, ""]}}]},
-            {"$or": [{"importo_lordo": {"$in": [0, 0.0, None]}}]},
-            {"importo_da_pagare": {"$nin": [None, 0, 0.0]}},
+            {"importo_lordo": {"$in": [0, 0.0, None]}},
         ]
     }
     ripristinati = 0
-    async for t in db.titoli.find(flt, {"_id": 0, "id": 1, "importo_da_pagare": 1, "importo_netto": 1, "nota": 1}):
-        imp = float(t.get("importo_da_pagare") or 0)
-        if imp <= 0:
+    async for t in db.titoli.find(flt, {"_id": 0}):
+        amount, provv_mov = await _importo_recupero_copertura(t)
+        if amount <= 0:
             continue
-        upd = {"importo_lordo": imp, "updated_at": _now_iso()}
+        upd = {"importo_lordo": round(amount, 2), "updated_at": _now_iso()}
         # Se anche il netto era azzerato, usa il lordo come fallback (il dettaglio
         # imposte/SSN originale non è nello snapshot e verrà riallineato dai nuovi import).
         if t.get("importo_netto") in (None, 0, 0.0):
-            upd["importo_netto"] = imp
+            upd["importo_netto"] = round(amount, 2)
+        # Ripristina le provvigioni dal movimento se sul titolo risultano azzerate.
+        if provv_mov and t.get("provvigioni") in (None, 0, 0.0):
+            upd["provvigioni"] = round(provv_mov, 2)
         nota = (t.get("nota") or "").strip()
         marker = "Importo ripristinato da copertura (azzerato da import)"
         if marker not in nota:

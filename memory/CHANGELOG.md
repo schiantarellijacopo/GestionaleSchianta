@@ -8,6 +8,7 @@
 - **STRUMENTO RIPRISTINO**: nuovo `GET /api/titoli/coperti-azzerati` (anteprima) + `POST /api/titoli/ripristina-coperti-azzerati` (applica), e pulsante admin "Ripristina coperti" nella pagina Titoli. Ripristina `importo_lordo` dei coperti azzerati usando lo snapshot `importo_da_pagare` salvato alla copertura (non tocca incassi/movimenti). Routing collocato PRIMA di `/titoli/{tid}` per evitare shadowing.
 - **NOTA SSN (182259789)**: in PRODUZIONE i dati sono già corretti (Imposte 51,99 / SSN 43,08); la pagina /titoli mostrava 0 solo per la projection ridotta → risolto dal fix "Modifica titolo" (GET /titoli/{id}). Si allinea alla vista Polizza dopo il deploy. (In preview il dato era una copia diversa, combinata.)
 - Da fare lato utente dopo il deploy: eseguire "Ripristina coperti" e verificare i titoli coperti toccati dagli import del 09/10 e 12/10.
+- **Fix ripristino (12/10)**: `bulk_copertura` NON salva `importo_da_pagare`, quindi lo strumento recupera l'importo anche dal MOVIMENTO di copertura in Prima Nota (copertura_titolo/anticipo). Ripristina anche le provvigioni dal movimento se azzerate.
 
 
 ## 2026-10 — Fix "Modifica titolo" dalla sezione Titoli (dati a 0/vuoto) ✅
