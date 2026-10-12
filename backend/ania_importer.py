@@ -1930,8 +1930,16 @@ async def _marca_polizze_sostituite(db) -> tuple[int, int]:
                       "updated_at": _now_iso()}})
         n += res.modified_count
         nuovo_num = (p.get("numero_polizza") or "").strip()
+        # STORNO SOLO dei titoli davvero liberi: MAI toccare i titoli COPERTI/in
+        # Prima Nota (coperti, incassati, pagati, in giornata chiusa). Un titolo
+        # coperto ha stato="da_incassare" ma titolo_coperto=True: va ESCLUSO,
+        # altrimenti l'import lo storna e sparisce dai Sospesi.
+        _vuoto = lambda f: {"$or": [{f: None}, {f: ""}, {f: {"$exists": False}}]}
         res_t = await db.titoli.update_many(
-            {"polizza_id": old_id, "stato": "da_incassare"},
+            {"polizza_id": old_id, "stato": "da_incassare",
+             "titolo_coperto": {"$ne": True},
+             "$and": [_vuoto("data_copertura"), _vuoto("data_incasso"),
+                      _vuoto("movimento_pagamento_id"), _vuoto("chiusura_id")]},
             {"$set": {"stato": "stornato",
                       "nota_storno": f"Stornato automaticamente: polizza sostituita da N. {nuovo_num}".strip(),
                       "updated_at": _now_iso()}})
