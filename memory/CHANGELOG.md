@@ -643,3 +643,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Regola (server.py _revert_entita_da_movimento): eliminando una riga di Prima Nota il titolo torna allo stato precedente (incasso di coperto -> sospeso + copertura ripristinata; incasso di arretrato -> arretrato; copertura -> arretrato). Snapshot coperture_assorbite sugli incassi unificati. Testato iter107 (5/5).
 - Rimosso pulsante UI "Ripristina coperti" (Titoli.jsx).
 - Modifiche dirette produzione: titoli Panella 117255437 (200) e Nautilus 117231036 (242,47) ripristinati da import che li aveva azzerati.
+
+## 2026-10-12 (2) — Incasso MULTIPLO di titoli coperti: forzato incasso_coperto (no merge)
+- BUG: i flussi bulk (Titoli.jsx, TitoliSospesi.jsx) passavano merge_copertura:true -> con copertura su giornata APERTA il backend unificava in incasso_premio (totale+provv+saldo+banca) invece di incasso_coperto (solo sospesi- + banca). Il flusso SINGOLO (DialogIncasso.jsx) non passava merge -> corretto.
+- Diagnosi produzione: BORMOLINI 1000946659 (incasso_coperto, corretto -58/58) vs 1001740080 (incasso_premio via merge, errato 86/22,93/63,07/86).
+- FIX: rimosso merge_copertura dai due flussi bulk. Ora incasso multiplo di coperti = incasso_coperto (come il singolo). Verificato preview.
+- Bonifica produzione: 1001740080 corretto (delete incasso_premio -> titolo torna coperto + copertura ripristinata dalla regola -> re-incasso senza merge -> incasso_coperto). Unico caso errato trovato (01-12/10).

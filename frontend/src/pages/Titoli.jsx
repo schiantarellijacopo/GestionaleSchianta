@@ -748,7 +748,6 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                             conto_cassa_id: null,
                             importo_pagato: importo,
                             tipo_chiusura: tipo_ch,
-                            merge_copertura: true,
                         });
                         ok += 1;
                         totale += importo;
