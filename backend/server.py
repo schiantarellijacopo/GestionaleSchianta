@@ -5045,6 +5045,26 @@ async def ripristina_coperti_azzerati(user=Depends(require_user("admin"))):
     return {"ripristinati": ripristinati}
 
 
+@api.post("/titoli/ripristina-coperti-stornati")
+async def ripristina_coperti_stornati(body: dict, user=Depends(require_user("admin"))):
+    """Ripristina a SOSPESO (stato=da_incassare) i titoli COPERTI che erano stati
+    ERRONEAMENTE stornati dall'import Omnia per "polizza sostituita". Cambia SOLO lo
+    stato (mantiene titolo_coperto, data_copertura e gli importi): nessun impatto su
+    movimenti/Prima Nota. Se `ids` è fornito agisce solo su quei titoli, altrimenti su
+    tutti i coperti stornati per sostituzione."""
+    ids = body.get("ids") or []
+    flt = {"id": {"$in": ids}} if ids else {
+        "titolo_coperto": True, "stato": "stornato",
+        "nota_storno": {"$regex": "sostituit", "$options": "i"}}
+    res = await db.titoli.update_many(
+        flt,
+        {"$set": {"stato": "da_incassare", "updated_at": _now_iso()},
+         "$unset": {"nota_storno": ""}})
+    await log_attivita(user, "ripristina", "titoli", None,
+                       f"Ripristinati {res.modified_count} titoli coperti stornati a sospeso")
+    return {"ripristinati": res.modified_count}
+
+
 @api.get("/titoli/{tid}")
 async def get_titolo(tid: str, user=Depends(current_user)):
     """Ritorna il DOCUMENTO COMPLETO di un singolo titolo (tutti i campi).

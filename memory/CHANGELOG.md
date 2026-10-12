@@ -634,3 +634,12 @@ Admin: `admin@assicura.it / Admin123!`
 - Senza confronto → contratti attivi = intero portafoglio; con anno_confronto → confronto per anno di decorrenza.
 - Testato: 2026 vs 2025, filtro collaboratore (BS BROKER 1639), ciambelle con nomi compagnie/operatori; screenshot UI OK.
 - PROSSIMI riquadri da fare (uno per volta): Incassi, Clientela, Produzione, + grafici Nuovi contratti/Incassi per mese e Controllo clienti.
+
+## 2026-10-12 — Fix import Omnia: storno errato dei titoli COPERTI (sospesi)
+- ROOT CAUSE: ania_importer._marca_polizze_sostituite stornava TUTTI i titoli da_incassare delle polizze sostituite, inclusi i COPERTI (sospeso ha stato=da_incassare). Risultato: titoli coperti spariti dai sospesi dopo import.
+- FIX (ania_importer.py): lo storno da sostituzione ora ESCLUDE titolo_coperto/data_copertura/data_incasso/movimento_pagamento_id/chiusura_id. Verificato (preview).
+- Nuovo endpoint admin POST /api/titoli/ripristina-coperti-stornati (solo stato stornato->da_incassare, nessun impatto su importi/movimenti). Usato in produzione per ripristinare 5 titoli (180394255, 180992397 x2, 183628941, 183629529): sospesi (importo_da_pagare) riportati a 18.380,31 come da lista di riferimento al 02/10.
+- Fix incasso MULTIPLO (Titoli.jsx): ora passa merge_copertura:true -> una sola riga in Prima Nota (come incasso singolo), niente doppione copertura+incasso_coperto.
+- Regola (server.py _revert_entita_da_movimento): eliminando una riga di Prima Nota il titolo torna allo stato precedente (incasso di coperto -> sospeso + copertura ripristinata; incasso di arretrato -> arretrato; copertura -> arretrato). Snapshot coperture_assorbite sugli incassi unificati. Testato iter107 (5/5).
+- Rimosso pulsante UI "Ripristina coperti" (Titoli.jsx).
+- Modifiche dirette produzione: titoli Panella 117255437 (200) e Nautilus 117231036 (242,47) ripristinati da import che li aveva azzerati.
