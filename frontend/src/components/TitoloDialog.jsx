@@ -107,11 +107,19 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             }
             if (haGiaSuoi) return;
             const po = r.data?.provvigioni_operatori || [];
+            const ctx = { compagnia_id: r.data?.compagnia_id || titolo.compagnia_id || null, ramo: titolo.ramo || r.data?.ramo || null };
             if (po.length > 0) {
-                setOperatori(po.map((o) => ({ operatore_id: o.operatore_id || o.collaboratore_id || "", provvigione: o.provvigione ?? 0 })));
+                // Ricalcola la quota di ogni operatore per il premio di QUESTO titolo:
+                // la polizza memorizza gli importi dell'annuale, che NON vanno copiati
+                // tali e quali su rate o storni (premi negativi → quote negative).
+                const base = titolo.provvigioni ?? r.data?.provvigioni ?? 0;
+                Promise.all(po.map(async (o) => {
+                    const oid = o.operatore_id || o.collaboratore_id || "";
+                    const q = oid ? await quotaCollaboratore(oid, base, ctx) : null;
+                    return { operatore_id: oid, provvigione: q != null ? q : (o.provvigione ?? 0) };
+                })).then((ops) => setOperatori(ops));
             } else if (r.data?.collaboratore_id && !titolo.collaboratore_id) {
                 const base = titolo.provvigioni ?? r.data?.provvigioni ?? 0;
-                const ctx = { compagnia_id: r.data?.compagnia_id || titolo.compagnia_id || null, ramo: titolo.ramo || r.data?.ramo || null };
                 quotaCollaboratore(r.data.collaboratore_id, base, ctx).then((q) => {
                     setOperatori([{ operatore_id: r.data.collaboratore_id, provvigione: (q ?? 0) }]);
                 });
@@ -138,7 +146,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                 },
             });
             const q = r.data?.provvigione_collaboratore;
-            return (q != null && q > 0) ? q : null;
+            return (q != null && Math.abs(q) > 0.0001) ? q : null;
         } catch { return null; }
     };
     const addOperatore = () => setOperatori((p) => [...p, { operatore_id: "", provvigione: 0 }]);
@@ -158,7 +166,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         // AUTO-CALCOLO provvigioni dallo schema del collaboratore appena selezionato
         if (k === "operatore_id" && v) {
             quotaCollaboratore(v, f.provvigioni).then((q) => {
-                if (q !== null && q > 0) {
+                if (q !== null && Math.abs(q) > 0.0001) {
                     setOperatori((p) => p.map((o, idx) => idx === i ? { ...o, provvigione: q } : o));
                     toast.success(`Provvigione calcolata dallo schema: ${q.toFixed(2)} €`);
                 }
@@ -192,7 +200,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                     ramo: provvCtx.ramo || undefined,
                 },
             });
-            if (r.data.provvigione_totale > 0) {
+            if (r.data.provvigione_totale !== 0) {
                 set("provvigioni", r.data.provvigione_totale);
                 const collabId = operatori[0]?.operatore_id || f.collaboratore_id || "";
                 // Ripartizione piramidale: collaboratore diretto + upline a cascata

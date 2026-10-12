@@ -7562,7 +7562,10 @@ async def _provv_breakdown(
       }
     """
     tot = round(float(provv_totale_reale or 0), 2)
-    if tot <= 0:
+    # Solo una provvigione ESATTAMENTE nulla azzera la ripartizione. I titoli a premio
+    # negativo (rimborsi/storni) hanno provvigione negativa e vanno ripartiti normalmente
+    # (anche la quota collaboratore può essere negativa).
+    if abs(tot) < 0.005:
         return {
             "provvigione_totale": 0.0,
             "provvigione_collaboratore": 0.0,
@@ -7624,7 +7627,8 @@ def _quota_collab_da_schema(schema: dict, provv_titolo_tot: float,
     """
     pct_netto = float(schema.get("percentuale_su_premio_netto") or 0)
     pct_collab = float(schema.get("percentuale_collaboratore") or 0)
-    if pct_netto > 0 and premio_netto and premio_netto > 0:
+    # premio_netto può essere negativo (rimborsi/storni): la quota segue il segno.
+    if pct_netto > 0 and premio_netto:
         base = round(premio_netto * pct_netto / 100.0, 2)
         return round(base * pct_collab / 100.0, 2) if pct_collab > 0 else base
     if pct_collab > 0:
@@ -8477,8 +8481,10 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
 
 @api.put("/contabilita/movimenti/{mid}")
 async def update_movimento(mid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0, "chiusura_id": 1})
-    if cur and cur.get("chiusura_id"):
+    cur = await db.movimenti.find_one({"id": mid}, {"_id": 0})
+    if not cur:
+        raise HTTPException(404, "Movimento non trovato")
+    if cur.get("chiusura_id"):
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per modificare")
     body["updated_at"] = _now_iso()
     # Se cambia il tipo pagamento senza indicare il conto, riallinea il conto.
@@ -8489,8 +8495,69 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
     res = await db.movimenti.update_one({"id": mid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Movimento non trovato")
-    await log_attivita(user, "update", "movimento", mid)
+    # Propaga data e metodo di pagamento all'entità collegata (titolo/ritenuta/PNT/rappel)
+    # nella sua sezione dedicata. Solo a giornata APERTA (garantito dal blocco qui sopra).
+    azione_prop = await _propaga_modifica_movimento(cur, body)
+    await log_attivita(user, "update", "movimento", mid, azione_prop or "")
     return strip_mongo_id(await db.movimenti.find_one({"id": mid}, {"_id": 0}))
+
+
+async def _propaga_modifica_movimento(mov: dict, body: dict) -> Optional[str]:
+    """Quando si modifica un movimento di Prima Nota (data o metodo di pagamento),
+    riallinea il record collegato nella sua sezione dedicata. Giornata aperta richiesta.
+
+    Mappatura:
+      - ritenuta_compagnia -> db.ritenute_compagnia (data + data_versamento)
+      - pnc                -> db.pnc               (data + data_versamento)
+      - rappel             -> db.rappel            (data + data_incasso)
+      - titoli             -> db.titoli            (data_incasso/data_copertura + mezzo/conto)
+    """
+    cat = mov.get("categoria")
+    mid = mov.get("id")
+    nuova_data = body.get("data_movimento")
+    now = _now_iso()
+    azione = None
+
+    if cat == "ritenuta_compagnia":
+        rid = mov.get("ritenuta_compagnia_id")
+        q = {"id": rid} if rid else {"movimento_id": mid}
+        if nuova_data:
+            await db.ritenute_compagnia.update_one(q, {"$set": {
+                "data": nuova_data, "data_versamento": nuova_data, "updated_at": now}})
+            azione = "ritenuta compagnia riallineata"
+    elif cat == "pnc":
+        pid = mov.get("pnc_id")
+        q = {"id": pid} if pid else {"movimento_id": mid}
+        if nuova_data:
+            await db.pnc.update_one(q, {"$set": {
+                "data": nuova_data, "data_versamento": nuova_data, "updated_at": now}})
+            azione = "PNT riallineata"
+    elif mov.get("rappel_id") or mov.get("is_rappel"):
+        rid = mov.get("rappel_id")
+        q = {"id": rid} if rid else {"movimento_id": mid}
+        if nuova_data:
+            await db.rappel.update_one(q, {"$set": {
+                "data": nuova_data, "data_incasso": nuova_data, "updated_at": now}})
+            azione = "rappel riallineato"
+
+    # Titoli: data incasso/copertura + metodo di pagamento + conto
+    tid = mov.get("titolo_id")
+    if tid and cat in ("incasso_premio", "incasso_coperto", "incasso_premio_direzione", "copertura_titolo"):
+        upd: dict = {}
+        if nuova_data:
+            if cat == "copertura_titolo":
+                upd["data_copertura"] = nuova_data
+            else:
+                upd["data_incasso"] = nuova_data
+        if "mezzo_pagamento" in body:
+            upd["mezzo_pagamento"] = body.get("mezzo_pagamento") or None
+        if "conto_cassa_id" in body:
+            upd["conto_cassa_id"] = body.get("conto_cassa_id") or None
+        if upd:
+            upd["updated_at"] = now
+            await db.titoli.update_one({"id": tid}, {"$set": upd})
+            azione = "titolo riallineato (data/pagamento)"
+    return azione
 
 
 async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
@@ -8607,6 +8674,29 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
         n = len(ids) + len(mov.get("voci_versate") or [])
         azione = f"pagamento compagnia annullato ({n} voci ripristinate)"
 
+    # --- Ritenuta compagnia / PNT / Rappel: tornano nella loro sezione come 'da versare' ---
+    if cat == "ritenuta_compagnia":
+        rid = mov.get("ritenuta_compagnia_id")
+        q = {"id": rid} if rid else {"movimento_id": mov.get("id")}
+        await db.ritenute_compagnia.update_one(q, {
+            "$set": {"stato": "da_versare", "updated_at": _now_iso()},
+            "$unset": {"movimento_id": "", "data_versamento": ""}})
+        azione = "ritenuta compagnia ripristinata a 'da versare'"
+    elif cat == "pnc":
+        pid = mov.get("pnc_id")
+        q = {"id": pid} if pid else {"movimento_id": mov.get("id")}
+        await db.pnc.update_one(q, {
+            "$set": {"stato": "da_versare", "updated_at": _now_iso()},
+            "$unset": {"movimento_id": "", "data_versamento": ""}})
+        azione = "PNT ripristinata a 'da versare'"
+    elif mov.get("rappel_id") or mov.get("is_rappel"):
+        rid = mov.get("rappel_id")
+        q = {"id": rid} if rid else {"movimento_id": mov.get("id")}
+        await db.rappel.update_one(q, {
+            "$set": {"stato": "da_incassare", "updated_at": _now_iso()},
+            "$unset": {"movimento_id": "", "data_incasso": ""}})
+        azione = "rappel ripristinato a 'da incassare'"
+
     return azione
 
 
@@ -8636,9 +8726,8 @@ async def delete_movimento(mid: str, user=Depends(require_user("admin", "collabo
         })
         await log_attivita(user, "delete", "giroconto", pair_id)
         return {"ok": True, "deleted_pair": True}
-    # se collegato a un rappel, blocca eliminazione
-    if cur.get("rappel_id") or cur.get("is_rappel"):
-        raise HTTPException(400, "Movimento collegato a un Rappel: usa 'Annulla incasso' dalla pagina Rappel")
+    # se collegato a un rappel, ripristina il rappel a 'da incassare' (revert sotto)
+    # (eliminazione consentita direttamente dalla Prima Nota, come ritenute/PNT)
     # se è un pagamento collaboratore, blocca eliminazione
     if cur.get("categoria") == "provvigioni" and cur.get("tipo") == "uscita":
         if cur.get("pagamento_provvigioni_id"):
@@ -9000,6 +9089,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
         riga = {
             "id": m["id"],
+            "data": m.get("data_movimento"),
             "descrizione": m.get("descrizione", "")[:120],
             "contraente": contr_nome,
             "numero_polizza": (polizza_riga or {}).get("numero_polizza"),

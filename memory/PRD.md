@@ -1,5 +1,22 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
 
+## Sessione 12/10/2026 (fork) — Prima Nota: modifica/elimina sincronizzate + provvigioni negative
+- **Modifica movimento in Prima Nota pre-compila la data REALE di registrazione** (prima proponeva oggi). Backend: `_compute_brogliaccio` ora include `data` nella riga; frontend `EditMovimentoDialog` la legge.
+- **Propagazione in modifica** (solo giornata APERTA/riaperta): `PUT /api/contabilita/movimenti/{id}` → `_propaga_modifica_movimento`. Allinea il record collegato nella sua sezione:
+  - ritenuta_compagnia → `ritenute_compagnia` (data + data_versamento, allineate)
+  - pnc → `pnc` (data + data_versamento)
+  - rappel (cat 'provvigioni' con rappel_id/is_rappel) → `rappel` (data + data_incasso)
+  - titoli (incasso/incasso_coperto/incasso_direzione/copertura) → `titoli` (data_incasso o data_copertura + mezzo_pagamento + conto_cassa_id)
+- **Eliminazione da Prima Nota ripristina lo stato precedente** (`_revert_entita_da_movimento`): ritenuta/PNT → stato 'da_versare'; rappel → 'da_incassare'; movimento_id/data_versamento|data_incasso azzerati. **Rimosso il blocco** che impediva di eliminare un rappel dalla Prima Nota (ora consentito come ritenute/PNT).
+- **Provvigioni su titoli a premio NEGATIVO (rimborsi/storni) ora corrette** (le provvigioni collaboratore possono essere negative):
+  - `_provv_breakdown`: azzera solo se `abs(tot) < 0.005` (prima `tot <= 0` azzerava anche i negativi → lista mostrava 0,00).
+  - `_quota_collab_da_schema`: accetta `premio_netto` negativo (prima richiedeva `>0`).
+  - Frontend `TitoloDialog.jsx`: rimossi i guard `>0` (ora `abs(q)>0.0001`); su "Eredita da polizza" la quota viene RICALCOLATA sul premio del titolo (prima copiava l'importo annuale → 21,33 errato su un titolo −49).
+  - Verificato: BS BROKER su netto −49 → −2,21; su +474 → 21,33.
+- Verificato end-to-end su backend preview (ritenuta/PNT/rappel: crea→versa→modifica data→allineamento→elimina→ripristino). Frontend si avvia regolarmente.
+- **NB: modifiche solo in PREVIEW** — la produzione gira ancora il codice precedente: serve deploy per applicarle.
+
+
 ## Sessione 12/10/2026 (fork) — Fix titoli: vista /titoli, protezione Prima Nota, ripristino coperti
 - Wizard Mapping OMNIA: salvataggio collaboratori reso affidabile (endpoint BULK) + back-fill in background (no timeout 120s). Verificato.
 - "Modifica titolo" dalla pagina /titoli ora carica il titolo COMPLETO (GET /api/titoli/{id}) → mostra imposte/SSN/tipo/lordo come la vista Polizza (prima erano a 0 per la projection ridotta). Verificato.
