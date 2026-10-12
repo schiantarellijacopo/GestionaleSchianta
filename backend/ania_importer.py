@@ -1495,10 +1495,22 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                     "effetto": eff_titolo,
                 })
             if existing:
-                # Titolo già presente. Per NON toccare incassi/pagamenti/versamenti
-                # né prime note chiuse o estratti pagati: aggiorna gli IMPORTI solo
-                # se il titolo è ancora "da_incassare". Negli altri stati → salta.
-                if existing.get("stato") == "da_incassare":
+                # Titolo già presente. REGOLA: NON toccare MAI i titoli già
+                # registrati in Prima Nota (coperti / incassati / pagati) né quelli
+                # con importi "congelati". Aggiorna gli IMPORTI SOLO se:
+                #   (a) è ancora "da_incassare" E non è mai stato registrato in
+                #       Prima Nota (nessun incasso/copertura/pagamento); E
+                #   (b) abbiamo davvero i dati dal rec42 → un batch PARZIALE senza
+                #       rec42 NON deve azzerare un importo già presente.
+                _stato_ex = (existing.get("stato") or "").lower()
+                _in_prima_nota = bool(
+                    existing.get("data_incasso")
+                    or existing.get("data_copertura")
+                    or existing.get("titolo_coperto") is True
+                    or (existing.get("importo_pagato") not in (None, 0, 0.0))
+                    or existing.get("chiusura_id")
+                )
+                if _stato_ex == "da_incassare" and not _in_prima_nota and _r42:
                     upd = {
                         "importo_lordo": lordo,
                         "importo_netto": netto_calc,

@@ -7,7 +7,7 @@
 - **FIX backend (server.py)**: nuovo endpoint `GET /api/titoli/{tid}` (documento completo + arricchimento numero_polizza/compagnia/ramo/frazionamento/collaboratore dalla polizza, guardia ruolo cliente). Inserito DOPO `/titoli/sospesi` e `/titoli/sospesi-storico` per non oscurare le rotte letterali.
 - **FIX frontend (Titoli.jsx)**: nuovo helper `openEdit(t)` che fa `GET /titoli/{id}` e apre il dialog con il titolo completo; sostituite le 2 chiamate `setEditing(t)` (link contratto + RowActions). La lista resta leggera.
 - **Verifica**: testing_agent 100% backend+frontend. Dialog ora mostra valori IDENTICI da /titoli e da /polizze/{id}: netto 415,43 · imposte 95,07 · lordo 510,5 · tipo Rinnovo.
-- **NOTA aperta (SSN)**: il titolo importato memorizza l'imposta COMBINATA in `imposte` (95,07) con `ssn=null`; lo split Imposte 51,99 + SSN 43,08 visto in un vecchio screenshot NON è nei dati attuali. Eventuale ripristino dello split SSN è un intervento separato su import/dati (da confermare con l'utente).
+- **NOTA SSN (decisione utente)**: ~51.000 titoli storici hanno l'imposta ACCORPATA in `imposte` con `ssn=0` (import massivo vecchio); l'importer attuale invece separa già SSN/Imposte dai tracciati Omnia (rec42). L'utente ha deciso di NON migrare lo storico: i nuovi import si allineeranno nel tempo. Obiettivo richiesto = coerenza tra le due viste (tab Titoli nella polizza e pagina /titoli): RAGGIUNTO (entrambe mostrano gli stessi valori). Lo split 51,99/43,08 di vecchi screenshot non è più nei dati (campo ssn vuoto dal 24/09) e NON viene ricalcolato per ora.
 
 
 ## 2026-10 — Wizard Mapping OMNIA: salvataggio affidabile collaboratori + back-fill in background ✅
