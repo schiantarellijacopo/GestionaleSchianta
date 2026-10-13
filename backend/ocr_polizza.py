@@ -16,6 +16,7 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
 
 {
   "numero_polizza": "stringa o null",
+  "sostituisce_polizza": "numero della polizza sostituita (campo 'Sostituisce polizza') o null",
   "compagnia": "stringa (nome compagnia esattamente come scritto) o null",
   "ramo": "RCA | RCAUTO | INFORTUNI | INFR | VITA | CASA | INCENDIO | FURTO | RC_PROFESSIONALE | SANITARIA | TUTELA_GIUDIZIARIA | altro o null",
   "prodotto": "nome commerciale del prodotto (es. 'Cattolica Auto Plus') o null",
@@ -81,6 +82,7 @@ Regole:
 - Tutti i campi opzionali. Restituisci null se non leggibili
 - Il documento può avere PIÙ PAGINE: ti vengono fornite più immagini (una per pagina). Cerca i dati in TUTTE le immagini.
 - numero_polizza: cerca etichette tipo "Polizza n.", "N. polizza", "Numero polizza", "Contratto n.", "Certificato n.", "Polizza numero". È di solito un numero lungo (es. 1001870957).
+- sostituisce_polizza: se è presente un campo "Sostituisce polizza" (o "Sostituisce la polizza n.", "In sostituzione della polizza") riporta il NUMERO della polizza sostituita. Se il campo è vuoto o assente, null.
 - "ID. Veicolo" / "ID Veicolo" / "Identificativo veicolo": se contiene un codice tipo targa (es. DS973SV) usalo come veicolo.targa.
 - Durata: se vedi "dalle ore 24 del GG/MM/AAAA alle ore 24 del GG/MM/AAAA" (oppure "dal GG/MM/AAAA al GG/MM/AAAA"), la PRIMA data è data_decorrenza, la SECONDA è data_scadenza.
 - Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale. Se il totale non è esplicito, premio_lordo_totale = premio_netto_totale + imposte_totali + diritti.

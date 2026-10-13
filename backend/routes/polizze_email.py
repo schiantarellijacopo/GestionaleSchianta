@@ -198,6 +198,7 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
             "premio_tasse": round(_imposte + _diritti, 2),
             "provvigioni": _num(dati.get("provvigioni_totali")),
             "targa": (veicolo.get("targa") or "").strip().upper() or None,
+            "sostituisce_polizza": (dati.get("sostituisce_polizza") or "").strip() or None,
             "note": "Creata automaticamente da OCR polizza (email)",
         }
         if not pol_body["scadenza"]:
