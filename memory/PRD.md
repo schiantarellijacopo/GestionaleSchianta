@@ -14,7 +14,8 @@
   - Frontend `TitoloDialog.jsx`: rimossi i guard `>0` (ora `abs(q)>0.0001`); su "Eredita da polizza" la quota viene RICALCOLATA sul premio del titolo (prima copiava l'importo annuale → 21,33 errato su un titolo −49).
   - Verificato: BS BROKER su netto −49 → −2,21; su +474 → 21,33.
 - Verificato end-to-end su backend preview (ritenuta/PNT/rappel: crea→versa→modifica data→allineamento→elimina→ripristino). Frontend si avvia regolarmente.
-- **NB: modifiche solo in PREVIEW** — la produzione gira ancora il codice precedente: serve deploy per applicarle.
+- **NB: modifiche solo in PREVIEW** — la produzione gira ancora il codice precedente: serve deploy per applicarle. (Deploy Emergent lanciato il 12/10.)
+- **Pacchetto migrazione Railway creato** (l'utente valuta lo spostamento su Railway): `MIGRATION_RAILWAY.md` (guida + elenco completo variabili d'ambiente, WhatsApp/Evolution API, storage), `scripts/migrate_data_emergent_to_railway.sh` (mongodump/mongorestore Emergent→Railway), `deploy/Dockerfile.backend` + `deploy/Dockerfile.frontend`. Allegati restano su object storage Emergent (storage.py via EMERGENT_LLM_KEY) salvo futura migrazione a S3/MinIO. Il dump dati va eseguito dall'utente (serve MONGO_URL produzione da Republish→Database, non accessibile dal pod preview).
 
 
 ## Sessione 12/10/2026 (fork) — Fix titoli: vista /titoli, protezione Prima Nota, ripristino coperti

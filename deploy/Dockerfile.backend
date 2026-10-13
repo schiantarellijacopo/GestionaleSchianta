@@ -1,0 +1,25 @@
+# Backend FastAPI — Gestionale Schianta (Railway)
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+# Dipendenze di sistema minime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installazione dipendenze Python.
+# NB: emergentintegrations richiede l'index Emergent dedicato.
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt \
+      --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+
+# Codice backend
+COPY backend/ ./
+
+# Railway fornisce $PORT. Il backend espone le API sotto /api.
+ENV PORT=8001
+EXPOSE 8001
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8001}"]

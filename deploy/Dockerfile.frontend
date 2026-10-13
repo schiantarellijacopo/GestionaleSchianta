@@ -1,0 +1,27 @@
+# Frontend React (CRA/craco) — Gestionale Schianta (Railway)
+# Build multi-stage: build statico + serve
+
+# --- Stage build ---
+FROM node:20-slim AS build
+WORKDIR /app
+
+# REACT_APP_BACKEND_URL deve essere disponibile al BUILD time (CRA la inietta al build).
+# Su Railway impostala come Build Variable / Variable del servizio frontend.
+ARG REACT_APP_BACKEND_URL
+ENV REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL}
+
+COPY frontend/package.json frontend/yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+COPY frontend/ ./
+RUN yarn build
+
+# --- Stage serve ---
+FROM node:20-slim AS serve
+WORKDIR /app
+RUN npm install -g serve
+COPY --from=build /app/build ./build
+ENV PORT=3000
+EXPOSE 3000
+# -s = single page app (fallback su index.html per il routing client-side)
+CMD ["sh", "-c", "serve -s build -l ${PORT:-3000}"]
