@@ -322,6 +322,7 @@ _COMUNICAZIONI_FIELDS = [
     "imap_host", "imap_port", "imap_user", "imap_password", "imap_use_ssl", "imap_folder",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
+    "polizze_mittenti",
 ]
 
 # Campi gestibili SOLO dal super admin (chiavi API / provider a pagamento)
@@ -359,6 +360,7 @@ class ComunicazioniBody(BaseModel):
     spoki_api_key: Optional[str] = None
     spoki_sender_name: Optional[str] = None
     whatsapp_provider: Optional[str] = "wame"  # wame | twilio | spoki
+    polizze_mittenti: Optional[list] = None  # whitelist email mittenti PDF polizze
 
 
 @router.get("/librerie/comunicazioni")
@@ -441,6 +443,12 @@ async def update_comunicazioni(body: ComunicazioniBody,
             if upd.get("imap_use_ssl") is None and az.get("imap_use_ssl") is None:
                 upd["imap_use_ssl"] = True
     upd["updated_at"] = _now_iso()
+    if "polizze_mittenti" in upd:
+        _pm = upd.get("polizze_mittenti")
+        if _pm is None:
+            upd.pop("polizze_mittenti", None)
+        else:
+            upd["polizze_mittenti"] = sorted({(x or "").strip().lower() for x in _pm if (x or "").strip()})
     if az:
         await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
     else:

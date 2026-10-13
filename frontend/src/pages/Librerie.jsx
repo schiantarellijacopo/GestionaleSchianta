@@ -3734,6 +3734,42 @@ function ImapPollerControl() {
 }
 
 
+function PolizzeMittentiSection({ f, set }) {
+    const value = (f.polizze_mittenti || []).join("\n");
+    const onChange = (txt) => {
+        const arr = txt.split(/[\n,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+        set("polizze_mittenti", arr);
+    };
+    return (
+        <section data-testid="lib-com-polizze-mittenti" className="border border-slate-200 rounded-lg p-4 bg-white">
+            <div className="flex items-start gap-3 mb-3">
+                <div className="bg-amber-100 text-amber-700 p-2 rounded-md mt-0.5"><Mail size={18} /></div>
+                <div className="flex-1">
+                    <h4 className="text-base font-semibold text-slate-800">Mittenti documenti polizze</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Inserisci gli indirizzi email da cui ricevi i PDF delle polizze (uno per riga). In <strong>Posta → Polizze</strong> vedrai solo le email di questi mittenti con allegato PDF, pronte per l&apos;estrazione automatica di polizza e anagrafica.
+                    </p>
+                </div>
+            </div>
+            <textarea
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                rows={4}
+                placeholder={"emissioni@compagnia.it\nagenzia@broker.it"}
+                className="w-full border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                data-testid="com-polizze-mittenti"
+            />
+            {(f.polizze_mittenti || []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                    {(f.polizze_mittenti || []).map((m, i) => (
+                        <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">{m}</span>
+                    ))}
+                </div>
+            )}
+        </section>
+    );
+}
+
 function ComunicazioniSezione() {
     const [f, setF] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -3814,6 +3850,9 @@ function ComunicazioniSezione() {
 
             {/* IMAP — Ricezione email + smistamento per alias */}
             <ImapSection f={f} set={set} onSet={setF} />
+
+            {/* Whitelist mittenti PDF polizze → estrazione automatica in Posta */}
+            <PolizzeMittentiSection f={f} set={set} />
 
             {/* WHATSAPP — libreria unica: wa.me + Evolution API */}
             <WhatsAppSection f={f} set={set} />

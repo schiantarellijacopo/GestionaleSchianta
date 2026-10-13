@@ -17111,6 +17111,9 @@ api.include_router(_mkt_pres_router.router)
 from routes import app_cliente as _app_cliente_router
 api.include_router(_app_cliente_router.router)
 
+from routes import polizze_email as _polizze_email_router
+api.include_router(_polizze_email_router.router)
+
 app.include_router(api)
 
 # Router pubblico non autenticato per upload documenti veicolo via link cliente

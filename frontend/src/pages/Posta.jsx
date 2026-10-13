@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, MailOpen, Users, Inbox, Paperclip, Search, RefreshCw, AlertCircle } from "lucide-react";
+import { Mail, MailOpen, Users, Inbox, Paperclip, Search, RefreshCw, AlertCircle, FileText, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const fmtDate = (iso) => {
@@ -55,13 +55,19 @@ export default function Posta() {
     const [q, setQ] = useState("");
     const [syncing, setSyncing] = useState(false);
     const [selected, setSelected] = useState(null);
+    const [estraendo, setEstraendo] = useState(false);
 
     const loadStats = async () => {
         try { setStats((await api.get("/email/inbox/stats")).data); } catch { /* ignore */ }
     };
     const loadList = async () => {
         try {
-            const r = await api.get("/email/inbox", { params: { categoria: tab, q: q || undefined } });
+            let r;
+            if (tab === "polizze") {
+                r = await api.get("/email/polizze-inbox");
+            } else {
+                r = await api.get("/email/inbox", { params: { categoria: tab, q: q || undefined } });
+            }
             setItems(r.data || []);
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore caricamento");
@@ -92,6 +98,25 @@ export default function Posta() {
         if (it.non_letta) {
             try { await api.post(`/email/inbox/${it.id}/leggi`); loadStats(); loadList(); } catch { /* ignore */ }
         }
+    };
+
+    const estrai = async (it) => {
+        setEstraendo(true);
+        try {
+            const r = await api.post(`/email/polizze-inbox/${it.id}/estrai`);
+            const res = r.data?.risultati || [];
+            const ok = res.filter((x) => x.ok);
+            const creaP = ok.filter((x) => x.polizza_creata).length;
+            const creaA = ok.filter((x) => x.anagrafica_creata).length;
+            toast.success(`Estrazione: ${ok.length}/${res.length} PDF · ${creaP} polizze create, ${creaA} anagrafiche create`);
+            const errs = res.filter((x) => !x.ok);
+            if (errs.length) toast.warning(`${errs.length} PDF con errori: ${errs.map((e) => e.errore).join("; ").slice(0, 200)}`);
+            await loadList();
+            setSelected((prev) => prev ? { ...prev, polizze_estratte: true, polizze_estratte_result: res } : prev);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore estrazione");
+        }
+        setEstraendo(false);
     };
 
     const pers = stats?.personale || { totale: 0, non_lette: 0 };
@@ -194,6 +219,15 @@ export default function Posta() {
                         >
                             <Users size={14} /> Condivisa {cond.non_lette > 0 && <span className="bg-emerald-600 text-white text-[10px] px-1.5 rounded-full font-semibold">{cond.non_lette}</span>}
                         </button>
+                        <button
+                            onClick={() => setTab("polizze")}
+                            className={`px-4 py-1.5 text-sm font-medium rounded transition-colors inline-flex items-center gap-1.5 ${
+                                tab === "polizze" ? "bg-white shadow-sm text-amber-700" : "text-slate-600 hover:text-slate-800"
+                            }`}
+                            data-testid="posta-tab-polizze"
+                        >
+                            <FileText size={14} /> Polizze
+                        </button>
                     </div>
                     <form onSubmit={cerca} className="flex items-center gap-2 ml-auto">
                         <div className="relative">
@@ -256,7 +290,7 @@ export default function Posta() {
                                 Seleziona un&apos;email per leggerla
                             </div>
                         )}
-                        {selected && <DettaglioEmail email={selected} />}
+                        {selected && <DettaglioEmail email={selected} tab={tab} onEstrai={estrai} estraendo={estraendo} />}
                     </div>
                 </div>
             </Card>
@@ -264,7 +298,8 @@ export default function Posta() {
     );
 }
 
-function DettaglioEmail({ email }) {
+function DettaglioEmail({ email, tab, onEstrai, estraendo }) {
+    const pdfs = (email.attachments || []).filter((a) => (a.content_type || "").toLowerCase().includes("pdf") || (a.filename || "").toLowerCase().endsWith(".pdf"));
     return (
         <div className="space-y-3" data-testid="posta-dettaglio">
             <div className="border-b border-slate-100 pb-3">
@@ -297,6 +332,38 @@ function DettaglioEmail({ email }) {
                             <Paperclip size={11} /> {a.filename}
                         </a>
                     ))}
+                </div>
+            )}
+            {tab === "polizze" && pdfs.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2" data-testid="posta-estrai-box">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="text-sm text-amber-900 font-medium inline-flex items-center gap-1.5">
+                            <Sparkles size={14} /> {pdfs.length} PDF polizza — estrazione automatica
+                        </div>
+                        <Button
+                            onClick={() => onEstrai(email)}
+                            disabled={estraendo}
+                            className="bg-amber-600 hover:bg-amber-700 text-white h-8"
+                            data-testid="posta-estrai-btn"
+                        >
+                            {estraendo ? "Estrazione…" : (email.polizze_estratte ? "Ri-estrai polizze" : "Estrai polizze")}
+                        </Button>
+                    </div>
+                    {(email.polizze_estratte_result || []).length > 0 && (
+                        <div className="space-y-1">
+                            {email.polizze_estratte_result.map((r, i) => (
+                                <div key={i} className="text-xs flex items-center gap-2" data-testid={`posta-estrai-res-${i}`}>
+                                    {r.ok ? (
+                                        <span className="text-emerald-700">
+                                            ✓ {r.filename}: polizza {r.numero_polizza || "(n/d)"} {r.polizza_creata ? "creata" : "già esistente"} · anagrafica {r.anagrafica_nome || ""} {r.anagrafica_creata ? "creata" : "esistente"}
+                                        </span>
+                                    ) : (
+                                        <span className="text-rose-700">✕ {r.filename}: {r.errore}</span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
             <div

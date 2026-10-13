@@ -1177,6 +1177,7 @@ class ProgressoCorso(BaseDoc):
 class AziendaConfig(BaseDoc):
     """Dati dell'agenzia: ragione sociale, P.IVA, indirizzo, contatti, logo (singleton)."""
     ragione_sociale: str = ""
+    polizze_mittenti: List[str] = Field(default_factory=list)  # email mittenti PDF polizze (whitelist)
     forma_giuridica: Optional[str] = None  # SRL, SAS, SNC, ditta individuale...
     partita_iva: Optional[str] = None
     codice_fiscale: Optional[str] = None

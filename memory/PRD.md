@@ -1,4 +1,24 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
+# CHANGELOG 2026-10-13 — Polizze da Email (whitelist + OCR auto-create)
+- Nuovo campo azienda_config `polizze_mittenti` (whitelist email mittenti PDF polizze).
+  UI in Librerie → Comunicazioni (`PolizzeMittentiSection`, data-testid `com-polizze-mittenti`).
+  Salvato/normalizzato (lowercase, dedupe) via PUT /api/librerie/comunicazioni.
+- Posta: nuova scheda "Polizze" (`posta-tab-polizze`) → GET /api/email/polizze-inbox
+  mostra SOLO email dei mittenti whitelist CON allegato PDF. Visibilità: admin+dipendente
+  (NO collaboratori).
+- Estrazione automatica: POST /api/email/polizze-inbox/{eid}/estrai (routes/polizze_email.py)
+  → per ogni PDF: storage.get_object → _convert_pdf_to_jpeg → ocr_polizza.estrai_dati_polizza
+  (Gemini) → crea Anagrafica (se non esiste, match CF/PIVA/ragione sociale) + Compagnia
+  (match/crea) + Polizza (se non esiste per numero; altrimenti allega PDF). Allegati copiati
+  su polizza e anagrafica via imap_poller._copia_allegato_su_entita. Creazione AUTOMATICA
+  (scelta utente; dati modificabili). No duplicati polizza.
+- Riusa create_polizza (server.py) e create_anagrafica (routes/anagrafiche.py).
+- Testato: endpoint whitelist (save/read/normalizza), polizze-inbox (lista/filtro),
+  estrai 404 su id errato, e _estrai_una end-to-end offline (compagnia+anagrafica+polizza
+  create correttamente). OCR reale + storage fetch = funzioni preesistenti provate.
+- DEPLOY: richiede Save to GitHub + redeploy Railway. OCR usa EMERGENT_LLM_KEY (già su Railway).
+
+
 
 ## Sessione 12/10/2026 (fork) — Prima Nota: modifica/elimina sincronizzate + provvigioni negative
 - **Modifica movimento in Prima Nota pre-compila la data REALE di registrazione** (prima proponeva oggi). Backend: `_compute_brogliaccio` ora include `data` nella riga; frontend `EditMovimentoDialog` la legge.
