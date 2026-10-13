@@ -17111,6 +17111,9 @@ api.include_router(_mkt_pres_router.router)
 from routes import app_cliente as _app_cliente_router
 api.include_router(_app_cliente_router.router)
 
+from routes import migrate_railway as _migrate_railway_router
+api.include_router(_migrate_railway_router.router)
+
 app.include_router(api)
 
 # Router pubblico non autenticato per upload documenti veicolo via link cliente
