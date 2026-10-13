@@ -1218,6 +1218,7 @@ export default function PolizzaDetail() {
                             categorie={[
                                 { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true, multiple: true },
                                 { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true, multiple: true },
+                                { key: "privacy_compagnia", label: "Privacy compagnia", icon: "🔒", default_visibile: true, multiple: true, descrizione: "Informativa e consenso privacy della compagnia (GDPR)" },
                                 { key: "appendici", label: "Appendici", icon: "➕", default_visibile: true, multiple: true, descrizione: "Appendici / variazioni di polizza" },
                                 { key: "libretto_veicolo", label: "Libretto veicolo", icon: "📕", default_visibile: true, multiple: true, descrizione: "Libretto di circolazione del veicolo" },
                                 { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true, descrizione: "Atto di vendita / passaggio proprietà" },

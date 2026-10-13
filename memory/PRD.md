@@ -1,4 +1,21 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
+# CHANGELOG 2026-10-13 (2) — Polizze da Email: multi-documento + card
+- OCR: aggiunto campo `sostituisce_polizza` (legge "Sostituisce polizza"; vuoto→null).
+  Mappato su Polizza.sostituisce_polizza. Default: salva solo il riferimento (no auto-sostituzione).
+- Multi-documento per email: `_classifica_pdf` (routes/polizze_email.py) classifica ogni PDF
+  da testo (prime 2 pagine):
+  - privacy (GDPR/"trattamento dei dati"/"consenso"/"679/2016") → categoria `privacy_compagnia`
+  - fascicolo/condizioni ("set informativo"/"fascicolo informativo"/"condizioni"/"tutela legale"/DIP) → `condizioni`
+  - altrimenti → `polizza` (modello): OCR + crea polizza/anagrafica.
+- Endpoint estrai ristrutturato: OCR solo sui modelli; gli altri PDF vengono ALLEGATI alla
+  polizza creata nella card giusta (polizza/condizioni/privacy_compagnia). Report per PDF con tipo.
+- Frontend: nuova card "Privacy compagnia" (key `privacy_compagnia`) in PolizzaDetail; Posta
+  mostra esito per-documento (polizza creata vs allegato in card X).
+- Validato E2E con 3 PDF reali UCA: modello→polizza 1001870957 (card Polizza),
+  Fascicolo→card Condizioni, ANGDUC→card Privacy compagnia. Cleanup ok. Frontend compila.
+- DEPLOY: Save to GitHub + redeploy Railway.
+
+
 # CHANGELOG 2026-10-13 — Polizze da Email (whitelist + OCR auto-create)
 - Nuovo campo azienda_config `polizze_mittenti` (whitelist email mittenti PDF polizze).
   UI in Librerie → Comunicazioni (`PolizzeMittentiSection`, data-testid `com-polizze-mittenti`).

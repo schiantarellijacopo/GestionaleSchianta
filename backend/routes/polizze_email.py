@@ -218,9 +218,38 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
     }
 
 
+def _classifica_pdf(pdf_bytes: bytes) -> str:
+    """Categoria allegato in base al contenuto: 'privacy_compagnia' | 'condizioni' | 'polizza'."""
+    from io import BytesIO
+    import pdfplumber
+    txt = ""
+    try:
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages[:2]:
+                txt += " " + (page.extract_text() or "")
+    except Exception:
+        return "polizza"
+    t = " ".join(txt.lower().split())
+    privacy_kw = [
+        "trattamento dei dati personali", "consenso al trattamento", "informativa privacy",
+        "regolamento (ue) 2016/679", "reg. ue 679/2016", "679/2016", "gdpr", "art. 13 del reg",
+    ]
+    cond_kw = [
+        "set informativo", "fascicolo informativo", "documento informativo precontrattuale",
+        "condizioni di assicurazione", "condizioni generali", "contratto di tutela legale",
+        "dip danni", "dip aggiuntivo",
+    ]
+    if any(k in t for k in privacy_kw):
+        return "privacy_compagnia"
+    if any(k in t for k in cond_kw):
+        return "condizioni"
+    return "polizza"
+
+
 @router.post("/email/polizze-inbox/{eid}/estrai")
 async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "dipendente"))) -> dict:
-    """OCR dei PDF dell'email → crea polizza+anagrafica (se non esistenti) + allega PDF."""
+    """OCR del MODELLO polizza → crea polizza+anagrafica; allega gli altri PDF nelle card giuste
+    (Condizioni = fascicolo informativo, Privacy compagnia = informativa/consenso privacy)."""
     import storage as obj_storage
     from ocr_polizza import estrai_dati_polizza, pdf_to_page_images
     from imap_poller import _copia_allegato_su_entita
@@ -232,35 +261,72 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
     if not pdfs:
         raise HTTPException(400, "Nessun allegato PDF nell'email")
 
-    risultati: list[dict] = []
+    # 1) scarica i byte e classifica ogni PDF
+    items: list[dict] = []
     for att in pdfs:
-        voce: dict = {"filename": att.get("filename")}
         try:
-            data, ctype = obj_storage.get_object(att["storage_path"])
-            pages = pdf_to_page_images(data)
+            data, _ctype = obj_storage.get_object(att["storage_path"])
+            items.append({"att": att, "data": data, "cat": _classifica_pdf(data), "err": None})
+        except Exception as e:  # noqa: BLE001
+            items.append({"att": att, "data": None, "cat": None, "err": f"download fallito: {e}"})
+
+    subject = em.get("subject") or ""
+    risultati: list[dict] = []
+    primary_pol_id = None
+
+    # 2) MODELLO polizza → OCR + creazione
+    for it in [i for i in items if i["cat"] == "polizza"]:
+        att = it["att"]
+        voce: dict = {"filename": att.get("filename"), "tipo": "polizza", "allegato_categoria": "polizza"}
+        try:
+            if it["err"]:
+                raise HTTPException(400, it["err"])
+            pages = pdf_to_page_images(it["data"])
             if not pages:
                 raise HTTPException(400, "PDF senza pagine leggibili")
             dati = await estrai_dati_polizza(pages)
             esito = await _estrai_una(dati, user)
             voce.update(esito)
-            # Allega il PDF alla polizza e all'anagrafica (idempotente)
             try:
-                await _copia_allegato_su_entita(
-                    db, att, entita_tipo="polizza", entita_id=esito["polizza_id"],
-                    categoria="polizza", subject=em.get("subject") or "",
-                )
-                await _copia_allegato_su_entita(
-                    db, att, entita_tipo="anagrafica", entita_id=esito["anagrafica_id"],
-                    categoria="polizza", subject=em.get("subject") or "",
-                )
+                await _copia_allegato_su_entita(db, att, entita_tipo="polizza", entita_id=esito["polizza_id"], categoria="polizza", subject=subject)
+                await _copia_allegato_su_entita(db, att, entita_tipo="anagrafica", entita_id=esito["anagrafica_id"], categoria="polizza", subject=subject)
             except Exception:
-                logger.exception("Errore allegamento PDF polizza")
+                logger.exception("Errore allegamento modello polizza")
+            if primary_pol_id is None:
+                primary_pol_id = esito["polizza_id"]
             voce["ok"] = True
         except HTTPException as he:
             voce["ok"] = False
             voce["errore"] = he.detail
         except Exception as e:  # noqa: BLE001
             logger.exception("Errore estrazione polizza da email %s", eid)
+            voce["ok"] = False
+            voce["errore"] = str(e)
+        risultati.append(voce)
+
+    # 3) documenti accessori → allegati nelle card (condizioni / privacy_compagnia / altri)
+    CAT_LABEL = {"condizioni": "Condizioni", "privacy_compagnia": "Privacy compagnia", "altri": "Documenti altri"}
+    for it in [i for i in items if i["cat"] != "polizza"]:
+        att = it["att"]
+        cat = it["cat"] or "altri"
+        voce = {"filename": att.get("filename"), "tipo": "allegato",
+                "allegato_categoria": cat, "allegato_label": CAT_LABEL.get(cat, cat)}
+        if it["err"]:
+            voce["ok"] = False
+            voce["errore"] = it["err"]
+            risultati.append(voce)
+            continue
+        if not primary_pol_id:
+            voce["ok"] = False
+            voce["errore"] = "Nessun modello di polizza nell'email a cui allegare il documento"
+            risultati.append(voce)
+            continue
+        try:
+            await _copia_allegato_su_entita(db, att, entita_tipo="polizza", entita_id=primary_pol_id, categoria=cat, subject=subject)
+            voce["polizza_id"] = primary_pol_id
+            voce["ok"] = True
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Errore allegamento documento accessorio")
             voce["ok"] = False
             voce["errore"] = str(e)
         risultati.append(voce)

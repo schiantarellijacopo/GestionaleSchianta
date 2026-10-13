@@ -108,7 +108,8 @@ export default function Posta() {
             const ok = res.filter((x) => x.ok);
             const creaP = ok.filter((x) => x.polizza_creata).length;
             const creaA = ok.filter((x) => x.anagrafica_creata).length;
-            toast.success(`Estrazione: ${ok.length}/${res.length} PDF · ${creaP} polizze create, ${creaA} anagrafiche create`);
+            const alleg = ok.filter((x) => x.tipo === "allegato").length;
+            toast.success(`Estrazione: ${creaP} polizze create, ${creaA} anagrafiche create, ${alleg} documenti allegati`);
             const errs = res.filter((x) => !x.ok);
             if (errs.length) toast.warning(`${errs.length} PDF con errori: ${errs.map((e) => e.errore).join("; ").slice(0, 200)}`);
             await loadList();
@@ -354,9 +355,15 @@ function DettaglioEmail({ email, tab, onEstrai, estraendo }) {
                             {email.polizze_estratte_result.map((r, i) => (
                                 <div key={i} className="text-xs flex items-center gap-2" data-testid={`posta-estrai-res-${i}`}>
                                     {r.ok ? (
-                                        <span className="text-emerald-700">
-                                            ✓ {r.filename}: polizza {r.numero_polizza || "(n/d)"} {r.polizza_creata ? "creata" : "già esistente"} · anagrafica {r.anagrafica_nome || ""} {r.anagrafica_creata ? "creata" : "esistente"}
-                                        </span>
+                                        r.tipo === "allegato" ? (
+                                            <span className="text-emerald-700">
+                                                ✓ {r.filename}: allegato in «{r.allegato_label || r.allegato_categoria}»
+                                            </span>
+                                        ) : (
+                                            <span className="text-emerald-700">
+                                                ✓ {r.filename}: polizza {r.numero_polizza || "(n/d)"} {r.polizza_creata ? "creata" : "già esistente"} · anagrafica {r.anagrafica_nome || ""} {r.anagrafica_creata ? "creata" : "esistente"}
+                                            </span>
+                                        )
                                     ) : (
                                         <span className="text-rose-700">✕ {r.filename}: {r.errore}</span>
                                     )}
