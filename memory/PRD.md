@@ -1879,3 +1879,19 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
 - RICERCA+DATE estesa a: Ritenute Collaboratori (Ritenute.jsx, testid rit-collab-*) e Fatture Agenzia Partner (FattureAgenziaPartner.jsx, filtra lista `fatture`, testid fat-part-*). Helper applyRicercaData esteso con campi agenzia_partner_nome/fornitore_nome/partner_nome/ragione_sociale/causale/numero/numero_fattura. Ora tutti e 3 i tab Ritenute + Rappel + PNT hanno Cerca + Dal/Al.
 - PULIZIA STUB PRODUTTORE: nuovo endpoint POST /api/librerie/stub-operatori/pulisci (admin, param dry_run). Elimina SOLO gli stub auto_created già mappati (merged_into impostato, oppure mapping_operatori per auto_created_from_codice che punta a un collaboratore reale non-stub). Prima di eliminare ri-punta i riferimenti residui (collaboratore_id su _MERGE_USER_COLLECTIONS, provvigioni_operatori annidati in polizze/titoli, rete parent) sul target — stessa logica di /auth/users/merge. Gli stub NON mappati vengono saltati (nessuna cancellazione accidentale). Pulsante in Librerie → Mapping Operatori: "Pulizia stub Produttore" (testid lib-pulisci-stub) con anteprima (dry_run) + conferma.
 - Verificato: dry-run su jacopo → 3 stub, 0 eliminabili (non mappati), 3 saltati → safety OK. Deletion reuse della logica merge collaudata.
+
+
+## 2026-10-13 — Link portale cliente canonico (Railway dominio unico)
+- FIX portale cliente: `_portale_link_per_ana` (server.py ~17196) usa il ramo
+  sottodominio SOLO se `BASE_APP_DOMAIN` è impostato (vero wildcard). Altrimenti usa
+  `PUBLIC_BASE_URL` → link canonico `https://<host>/c/{slug}`. Evita link con
+  sottodominio inesistente quando non c'è un dominio custom. MANTENUTO.
+- Login per-agenzia path-based (`/{slug}/login` + branding + endpoint
+  public/agenzia-branding + dialog super-admin path-based): IMPLEMENTATO e poi
+  RIMOSSO su richiesta utente — Railway non ha ancora un dominio privato. Login resta
+  INVARIATO per tutti. Da riprendere quando l'utente acquisterà il dominio privato
+  (allora: DNS wildcard o path-based + BASE_APP_DOMAIN).
+- Nota: per link portale ASSOLUTI serve `PUBLIC_BASE_URL` su Railway; senza, il link
+  resta relativo `/c/{slug}` (comportamento attuale).
+
+
