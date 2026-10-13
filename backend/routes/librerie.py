@@ -422,6 +422,24 @@ async def update_comunicazioni(body: ComunicazioniBody,
         upd.pop("twilio_auth_token", None)
     if upd.get("spoki_api_key") in (None, "", "••••••••"):
         upd.pop("spoki_api_key", None)
+    # Deriva automaticamente l'host IMAP se mancante ma il provider è noto
+    # (Google/Microsoft). Evita l'errore "IMAP non configurato" quando l'utente
+    # seleziona il provider senza che il preset host venga salvato.
+    if not upd.get("imap_host") and not az.get("imap_host"):
+        _smtp = (upd.get("smtp_host") or az.get("smtp_host") or "").lower()
+        _email = (upd.get("imap_user") or az.get("imap_user") or upd.get("smtp_user") or az.get("smtp_user") or "")
+        _dom = _email.split("@")[-1].lower() if "@" in _email else ""
+        _derived = None
+        if "gmail" in _smtp or "google" in _smtp or _dom in ("gmail.com", "googlemail.com"):
+            _derived = "imap.gmail.com"
+        elif "office365" in _smtp or "outlook" in _smtp or "microsoft" in _smtp:
+            _derived = "outlook.office365.com"
+        if _derived:
+            upd["imap_host"] = _derived
+            if not (upd.get("imap_port") or az.get("imap_port")):
+                upd["imap_port"] = 993
+            if upd.get("imap_use_ssl") is None and az.get("imap_use_ssl") is None:
+                upd["imap_use_ssl"] = True
     upd["updated_at"] = _now_iso()
     if az:
         await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})

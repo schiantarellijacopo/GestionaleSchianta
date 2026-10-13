@@ -3452,6 +3452,15 @@ function ImapSection({ f, set, onSet }) {
     const [risultato, setRisultato] = useState(null);
     const attivo = !!(f.imap_host && f.imap_user && (f.imap_password_set || f.imap_password));
 
+    // Auto-compila l'host IMAP quando il provider è noto (Google/Microsoft) ma
+    // l'host non è ancora impostato (es. provider auto-rilevato dallo SMTP).
+    useEffect(() => {
+        if ((provider === "google" || provider === "microsoft") && !f.imap_host) {
+            onSet((prev) => ({ ...prev, ...(IMAP_PRESETS[provider] || {}) }));
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [provider, f.imap_host]);
+
     const cambiaProvider = (p) => {
         setProvider(p);
         const preset = IMAP_PRESETS[p] || {};
