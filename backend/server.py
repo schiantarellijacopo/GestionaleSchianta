@@ -17194,7 +17194,12 @@ async def _portale_link_per_ana(ana: dict) -> dict:
             i += 1
         await db.anagrafiche.update_one({"id": ana["id"]}, {"$set": {"portale_slug": slug}})
     public_base = (os.environ.get("PUBLIC_BASE_URL") or os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
-    dominio_base = os.environ.get("BASE_APP_DOMAIN") or public_base.replace("https://", "").replace("http://", "")
+    # Il ramo "sottodominio per agenzia" (es. https://agenzia.dominio/c/slug) si usa
+    # SOLO se esiste un vero dominio wildcard configurato esplicitamente via
+    # BASE_APP_DOMAIN. Senza di esso (es. Railway/Emergent con singolo host) si usa
+    # l'URL canonico dell'app: {public_base}/c/{slug}. Evita link con sottodominio
+    # inesistente o link relativi.
+    dominio_base = os.environ.get("BASE_APP_DOMAIN")
     tenant = None
     tid = ana.get("tenant_id") or ana.get("agenzia_tenant_id")
     if tid:
