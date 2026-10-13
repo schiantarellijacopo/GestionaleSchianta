@@ -44,6 +44,17 @@ Testato in preview (2026-10-13):
 6. Deploy/accesso Railway → login `jacopo@schiantarelli.it` → smoke test
    (titoli, polizze, Prima Nota, ritenute/PNT/rappel).
 
+## ESITO — Migrazione DB eseguita (2026-10-13)
+- Republish produzione fatto dall'utente; endpoint live su whatsapp-crm-146.emergent.host.
+- Login super_admin PROD: superadmin@assicura.it (is_super_admin=true).
+- Copia eseguita collezione-per-collezione (per evitare timeout): tutte HTTP=200.
+- Sorgente DB prod reale: `whatsapp-crm-146-test_database`.
+- Letti = Scritti = 190.541 doc. Railway `assicura` verificato: users 64, agenzie 5,
+  anagrafiche 16387, polizze 75756, titoli 64156, compagnie 30, movimenti 1558,
+  allegati 426, sinistri 6623. 120 collezioni (10 vuote non ricreate).
+- FILE: Opzione A (zero-copy). Railway deve avere EMERGENT_LLM_KEY + APP_NAME = prod.
+- TODO sicurezza: rimuovere l'endpoint /api/migrate/to-railway (one-time) e ri-deploy.
+
 ## Note
 - Gli ALLEGATI non sono in Mongo: restano su Object Storage Emergent. Copiando solo il
   DB i metadati arrivano su Railway ma i file restano serviti da Emergent finché non si
