@@ -111,10 +111,21 @@ Due scenari:
 
 ## 6. Dockerfile (se GestionaleSchianta è un monoservizio)
 Vedi cartella `deploy/`:
-- `deploy/Dockerfile.backend` — FastAPI su `uvicorn ... --port 8001`
-- `deploy/Dockerfile.frontend` — build React servita con `serve`/nginx
-Su Railway puoi creare due servizi dal repo puntando ai rispettivi Dockerfile,
-oppure usare il Nixpacks di default se i comandi di start sono corretti.
+- **`deploy/Dockerfile.railway`** — **CONSIGLIATO per il tuo setup**: un solo servizio/URL che serve
+  **sia la UI React sia le API**. Builda il frontend, lo copia in `backend/frontend_build`, e il
+  backend lo serve (le rotte `/api` restano prioritarie; fallback SPA su `index.html`).
+  Build dalla radice del repo:
+  `docker build -f deploy/Dockerfile.railway --build-arg REACT_APP_BACKEND_URL=https://gestionaleschianta-production.up.railway.app .`
+  Su Railway: *Dockerfile Path* = `deploy/Dockerfile.railway`, *Root Directory* = radice.
+  In questo caso **`REACT_APP_BACKEND_URL` = lo stesso dominio pubblico** (UI e API sono sulla
+  stessa origine) e **non serve** configurare CORS tra domini diversi.
+- `deploy/Dockerfile.backend` / `deploy/Dockerfile.frontend` — alternativa a **due servizi separati**
+  (frontend con suo dominio + backend). In tal caso `REACT_APP_BACKEND_URL` = dominio del backend
+  e aggiungi il dominio frontend in `CORS_ORIGINS`.
+
+> Il backend serve la UI solo se esiste la cartella di build (`FRONTEND_BUILD_DIR`, default
+> `backend/frontend_build`). Su Emergent quella cartella non esiste → la UI statica è disattivata
+> e non cambia nulla.
 
 > **Build context = radice del repo.** I Dockerfile fanno `COPY backend/` e `COPY frontend/`,
 > quindi vanno buildati dalla root: `docker build -f deploy/Dockerfile.backend .`

@@ -1,0 +1,39 @@
+# Deploy MONOSERVIZIO per Railway: un solo servizio/URL serve sia la UI React sia le API FastAPI.
+# Build frontend -> copia il build dentro l'immagine backend -> uvicorn serve API + UI statica.
+#
+# Build dalla RADICE del repo:
+#   docker build -f deploy/Dockerfile.railway \
+#     --build-arg REACT_APP_BACKEND_URL=https://gestionaleschianta-production.up.railway.app .
+# Su Railway: Dockerfile Path = deploy/Dockerfile.railway, Root Directory = repo root.
+
+# --- Stage 1: build del frontend React ---
+FROM node:20-slim AS frontend
+WORKDIR /fe
+# Stessa origine di backend+UI: punta al dominio pubblico del servizio (le chiamate usano /api).
+ARG REACT_APP_BACKEND_URL
+ENV REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL}
+COPY frontend/package.json frontend/yarn.lock ./
+RUN yarn install --frozen-lockfile
+COPY frontend/ ./
+RUN yarn build
+
+# --- Stage 2: backend FastAPI che serve anche la UI ---
+FROM python:3.11-slim
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt \
+      --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+
+COPY backend/ ./
+# Copia il build del frontend dove server.py lo cerca (FRONTEND_BUILD_DIR, default ./frontend_build)
+COPY --from=frontend /fe/build ./frontend_build
+
+ENV PORT=8080
+EXPOSE 8080
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]

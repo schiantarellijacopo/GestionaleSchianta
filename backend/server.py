@@ -17769,6 +17769,39 @@ async def tenant_context_middleware(request, call_next):
     return response
 
 
+# ============================================================
+# Frontend statico (deploy MONOSERVIZIO, es. Railway)
+# ------------------------------------------------------------
+# Serve la UI React compilata SOLO se la cartella di build esiste.
+# - Su Railway il Dockerfile copia il build in questa cartella → la UI viene servita.
+# - Su Emergent (frontend separato su :3000) la cartella NON esiste → blocco saltato.
+# Le rotte /api sono registrate sopra e restano PRIORITARIE; il catch-all qui
+# gestisce solo le rotte client-side della SPA (fallback su index.html).
+# ============================================================
+from pathlib import Path as _Path  # noqa: E402
+from fastapi.staticfiles import StaticFiles as _StaticFiles  # noqa: E402
+from starlette.responses import FileResponse as _FileResponse  # noqa: E402
+
+_FRONTEND_DIR = _Path(os.environ.get("FRONTEND_BUILD_DIR") or (_Path(__file__).parent / "frontend_build"))
+if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():
+    _static_sub = _FRONTEND_DIR / "static"
+    if _static_sub.is_dir():
+        app.mount("/static", _StaticFiles(directory=str(_static_sub)), name="frontend-static")
+
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str):
+        # Non intercettare le API / la documentazione: restano 404 JSON corretti.
+        if full_path.startswith(("api", "docs", "redoc", "openapi.json")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = _FRONTEND_DIR / full_path
+        if full_path and candidate.is_file():
+            return _FileResponse(str(candidate))
+        return _FileResponse(str(_FRONTEND_DIR / "index.html"))
+
+    logger.info("Frontend statico servito da %s", _FRONTEND_DIR)
+
+
+
 # ----- Startup -----
 @app.on_event("startup")
 async def startup():
