@@ -154,6 +154,7 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
             "ragione_sociale": (contr.get("cognome_nome_o_ragione_sociale") or "").strip(),
             "codice_fiscale": (contr.get("codice_fiscale") or "").strip().upper() or None,
             "partita_iva": (contr.get("partita_iva") or "").strip() or None,
+            "email": (contr.get("email") or "").strip().lower() or None,
             "indirizzo": contr.get("indirizzo") or None,
             "comune": contr.get("comune") or None,
             "provincia": (contr.get("provincia") or "").strip().upper() or None,
@@ -179,6 +180,10 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
     else:
         effetto = (dati.get("data_decorrenza") or dati.get("data_emissione") or _today())
         veicolo = dati.get("veicolo") or {}
+        _netto = _num(dati.get("premio_netto_totale"))
+        _imposte = _num(dati.get("imposte_totali"))
+        _diritti = _num(dati.get("diritti"))
+        _lordo = _num(dati.get("premio_lordo_totale")) or round(_netto + _imposte + _diritti, 2)
         pol_body = {
             "numero_polizza": numero or f"DA-INSERIRE-{uuid.uuid4().hex[:6].upper()}",
             "compagnia_id": compagnia_id,
@@ -188,9 +193,9 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
             "effetto": effetto,
             "scadenza": dati.get("data_scadenza") or None,
             "frazionamento": _map_frazionamento(dati.get("frazionamento")),
-            "premio_lordo": _num(dati.get("premio_lordo_totale")),
-            "premio_netto": _num(dati.get("premio_netto_totale")),
-            "premio_tasse": _num(dati.get("imposte_totali")),
+            "premio_lordo": _lordo,
+            "premio_netto": _netto,
+            "premio_tasse": round(_imposte + _diritti, 2),
             "provvigioni": _num(dati.get("provvigioni_totali")),
             "targa": (veicolo.get("targa") or "").strip().upper() or None,
             "note": "Creata automaticamente da OCR polizza (email)",
@@ -216,8 +221,7 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
 async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "dipendente"))) -> dict:
     """OCR dei PDF dell'email → crea polizza+anagrafica (se non esistenti) + allega PDF."""
     import storage as obj_storage
-    from ocr_polizza import estrai_dati_polizza
-    from routes.documenti_inbox import _convert_pdf_to_jpeg
+    from ocr_polizza import estrai_dati_polizza, pdf_to_page_images
     from imap_poller import _copia_allegato_su_entita
 
     em = await db.email_inbox.find_one({"id": eid}, {"_id": 0})
@@ -232,8 +236,10 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
         voce: dict = {"filename": att.get("filename")}
         try:
             data, ctype = obj_storage.get_object(att["storage_path"])
-            img_bytes, img_ct = await _convert_pdf_to_jpeg(data)
-            dati = await estrai_dati_polizza(img_bytes, img_ct)
+            pages = pdf_to_page_images(data)
+            if not pages:
+                raise HTTPException(400, "PDF senza pagine leggibili")
+            dati = await estrai_dati_polizza(pages)
             esito = await _estrai_una(dati, user)
             voce.update(esito)
             # Allega il PDF alla polizza e all'anagrafica (idempotente)

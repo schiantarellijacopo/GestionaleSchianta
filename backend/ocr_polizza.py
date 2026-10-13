@@ -33,6 +33,7 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
     "cognome_nome_o_ragione_sociale": "stringa o null",
     "codice_fiscale": "16 caratteri o null",
     "partita_iva": "stringa o null",
+    "email": "indirizzo email del contraente o null",
     "indirizzo": "stringa o null",
     "comune": "stringa o null",
     "provincia": "sigla 2 lettere o null",
@@ -78,9 +79,15 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
 
 Regole:
 - Tutti i campi opzionali. Restituisci null se non leggibili
+- Il documento può avere PIÙ PAGINE: ti vengono fornite più immagini (una per pagina). Cerca i dati in TUTTE le immagini.
+- numero_polizza: cerca etichette tipo "Polizza n.", "N. polizza", "Numero polizza", "Contratto n.", "Certificato n.", "Polizza numero". È di solito un numero lungo (es. 1001870957).
+- "ID. Veicolo" / "ID Veicolo" / "Identificativo veicolo": se contiene un codice tipo targa (es. DS973SV) usalo come veicolo.targa.
+- Durata: se vedi "dalle ore 24 del GG/MM/AAAA alle ore 24 del GG/MM/AAAA" (oppure "dal GG/MM/AAAA al GG/MM/AAAA"), la PRIMA data è data_decorrenza, la SECONDA è data_scadenza.
+- Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale. Se il totale non è esplicito, premio_lordo_totale = premio_netto_totale + imposte_totali + diritti.
+- UCA / "UcaSicura" / "tutela legale" → ramo = TUTELA_GIUDIZIARIA.
 - Targhe in MAIUSCOLO senza spazi (es. AB123CD)
 - Cognomi/nomi in MAIUSCOLO
-- Date sempre YYYY-MM-DD
+- Date sempre YYYY-MM-DD (converti da GG/MM/AAAA)
 - Premi e importi come numeri decimali (es. 850.50, non "850,50 €")
 - garanzie: array, può essere vuoto se non visibili
 - Non aggiungere testo prima o dopo il JSON
@@ -88,14 +95,29 @@ Regole:
 """
 
 
-async def estrai_dati_polizza(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Restituisce dict con i campi estratti dalla polizza."""
+def pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, resolution: int = 200) -> list[bytes]:
+    """Converte un PDF in una lista di immagini JPEG (una per pagina), piena risoluzione."""
+    from io import BytesIO
+    import pdfplumber
+    out: list[bytes] = []
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages[:max_pages]:
+            im = page.to_image(resolution=resolution).original.convert("RGB")
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=85)
+            out.append(buf.getvalue())
+    return out
+
+
+async def estrai_dati_polizza(image_bytes, mime_type: str = "image/jpeg") -> dict:
+    """Estrae i campi dalla polizza. `image_bytes` può essere bytes (singola pagina)
+    o una lista di bytes (più pagine → più immagini inviate a Gemini)."""
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise RuntimeError("EMERGENT_LLM_KEY non configurata")
 
-    b64 = base64.b64encode(image_bytes).decode("ascii")
-    image_content = ImageContent(image_base64=b64)
+    pages = image_bytes if isinstance(image_bytes, (list, tuple)) else [image_bytes]
+    image_contents = [ImageContent(image_base64=base64.b64encode(p).decode("ascii")) for p in pages]
 
     chat = LlmChat(
         api_key=key,
@@ -103,7 +125,7 @@ async def estrai_dati_polizza(image_bytes: bytes, mime_type: str = "image/jpeg")
         system_message="Estrai dati strutturati da polizze assicurative italiane.",
     ).with_model("gemini", "gemini-3-flash-preview")
 
-    msg = UserMessage(text=PROMPT, file_contents=[image_content])
+    msg = UserMessage(text=PROMPT, file_contents=image_contents)
     response_text = ""
     try:
         async for ev in chat.stream_message(msg):
