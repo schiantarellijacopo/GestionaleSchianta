@@ -1,6 +1,8 @@
-# .dockerignore — escludi tutto ciò che non serve al backend
-frontend/
+# .dockerignore — escludi cio' che non serve alle build (backend e monoservizio Railway)
+# NB: frontend/ NON va escluso: serve a deploy/Dockerfile.railway per compilare la UI.
 node_modules/
+frontend/node_modules/
+frontend/build/
 .git/
 .emergent/
 .pytest_cache/
@@ -8,10 +10,8 @@ node_modules/
 memory/
 test_reports/
 tests/
-*.md
 *.log
 .env
 .env.*
 design_guidelines.json
-yarn.lock
 package-lock.json
