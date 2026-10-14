@@ -182,8 +182,9 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
         veicolo = dati.get("veicolo") or {}
         _netto = _num(dati.get("premio_netto_totale"))
         _imposte = _num(dati.get("imposte_totali"))
+        _ssn = _num(dati.get("contributo_ssn"))
         _diritti = _num(dati.get("diritti"))
-        _lordo = _num(dati.get("premio_lordo_totale")) or round(_netto + _imposte + _diritti, 2)
+        _lordo = _num(dati.get("premio_lordo_totale")) or round(_netto + _imposte + _ssn + _diritti, 2)
         pol_body = {
             "numero_polizza": numero or f"DA-INSERIRE-{uuid.uuid4().hex[:6].upper()}",
             "compagnia_id": compagnia_id,
@@ -196,7 +197,9 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
             "premio_lordo": _lordo,
             "premio_netto": _netto,
             "premio_tasse": round(_imposte + _diritti, 2),
-            "provvigioni": _num(dati.get("provvigioni_totali")),
+            "premio_ssn": _ssn,
+            # Provvigioni NON importate da OCR: vengono inserite manualmente.
+            "provvigioni": 0.0,
             "targa": (veicolo.get("targa") or "").strip().upper() or None,
             "sostituisce_polizza": (dati.get("sostituisce_polizza") or "").strip() or None,
             "note": "Creata automaticamente da OCR polizza (email)",

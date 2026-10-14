@@ -1967,3 +1967,14 @@ ramo "else" (nessun movimento rimasto): se il titolo è baseline-coperto
 altrimenti ARRETRATO. Testato (login jacopo): setup-coperto+incasso→delete→coperto;
 import-coperto+incasso→delete→coperto; import-arretrato+incasso→delete→arretrato;
 regressione manuale arretrato+cop+inc→delete tutto→arretrato. Tutti PASS.
+
+## [2026-06-29] OCR polizze — Cattolica: SSN separato e provvigioni escluse
+Richiesta utente (verificata su PDF Cattolica 184643552 BORMOLINI):
+- Il Contributo SSN NON va nelle imposte: estratto in campo dedicato `contributo_ssn`
+  (ocr_polizza.py) e mappato su polizza.premio_ssn → titolo.ssn. imposte_totali ora
+  contiene SOLO le imposte assicurative. Lordo = netto + imposte + ssn + diritti.
+- Le provvigioni NON vengono importate da OCR (inserite manualmente): polizze_email.py
+  imposta provvigioni=0.0 (create_polizza non le auto-calcola senza collaboratore_id).
+Test OCR reale: compagnia Cattolica Assicurazioni, ramo RCAUTO, prodotto "Active Veicoli
+AUTOPIÙ", netto 250.29, imposte 32.12, SSN 17.59, lordo 300 (quadra). provvigioni OCR
+ignorate.

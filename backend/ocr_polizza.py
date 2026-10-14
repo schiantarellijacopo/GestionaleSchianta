@@ -27,7 +27,8 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
   "tacito_rinnovo": "true | false | null",
   "premio_lordo_totale": "numero decimale o null",
   "premio_netto_totale": "numero decimale o null",
-  "imposte_totali": "numero decimale o null",
+  "imposte_totali": "numero decimale (SOLO imposte assicurative, SENZA il contributo SSN) o null",
+  "contributo_ssn": "numero decimale (Contributo SSN / Servizio Sanitario Nazionale) o null",
   "provvigioni_totali": "numero decimale o null",
   "diritti": "numero decimale o null",
   "contraente": {
@@ -85,7 +86,9 @@ Regole:
 - sostituisce_polizza: se è presente un campo "Sostituisce polizza" (o "Sostituisce la polizza n.", "In sostituzione della polizza") riporta il NUMERO della polizza sostituita. Se il campo è vuoto o assente, null.
 - "ID. Veicolo" / "ID Veicolo" / "Identificativo veicolo": se contiene un codice tipo targa (es. DS973SV) usalo come veicolo.targa.
 - Durata: se vedi "dalle ore 24 del GG/MM/AAAA alle ore 24 del GG/MM/AAAA" (oppure "dal GG/MM/AAAA al GG/MM/AAAA"), la PRIMA data è data_decorrenza, la SECONDA è data_scadenza.
-- Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale. Se il totale non è esplicito, premio_lordo_totale = premio_netto_totale + imposte_totali + diritti.
+- Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"/"tasse"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale.
+- Contributo SSN: la voce "Contributo SSN", "Contributo S.S.N.", "Servizio Sanitario Nazionale" (tipica dei rami RC Auto) va messa SOLO in `contributo_ssn` e NON va inclusa in imposte_totali. imposte_totali deve contenere esclusivamente le imposte assicurative.
+- Se il totale non è esplicito, premio_lordo_totale = premio_netto_totale + imposte_totali + contributo_ssn + diritti.
 - UCA / "UcaSicura" / "tutela legale" → ramo = TUTELA_GIUDIZIARIA.
 - Targhe in MAIUSCOLO senza spazi (es. AB123CD)
 - Cognomi/nomi in MAIUSCOLO
