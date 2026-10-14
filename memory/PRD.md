@@ -1957,3 +1957,13 @@ Testato E2E (login jacopo) su 4 scenari — tutti PASS:
  S1 arretrato+cop+inc→delete entrambi→arretrato (ordine cop→inc e inc→cop);
  S2 già coperto+solo incasso→delete incasso→coperto;
  S3 arretrato+solo copertura→delete copertura→arretrato.
+
+## [2026-06-29] Prima Nota — titoli coperti da SETUP/IMPORT (baseline, senza movimento)
+Confermato con l'utente: esistono titoli coperti creati al SETUP INIZIALE (is_setup_iniziale)
+e da IMPORT (caricato_da_import) con data_copertura ma SENZA alcun movimento copertura in
+Prima Nota. Non vanno toccati, salvo operazioni manuali. Nel revert (_revert_entita_da_movimento),
+ramo "else" (nessun movimento rimasto): se il titolo è baseline-coperto
+((is_setup_iniziale OR caricato_da_import) AND data_copertura) → torna COPERTO/sospeso,
+altrimenti ARRETRATO. Testato (login jacopo): setup-coperto+incasso→delete→coperto;
+import-coperto+incasso→delete→coperto; import-arretrato+incasso→delete→arretrato;
+regressione manuale arretrato+cop+inc→delete tutto→arretrato. Tutti PASS.

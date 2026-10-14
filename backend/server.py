@@ -8633,10 +8633,26 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
                     "$unset": _unset_incasso})
                 azione = "titolo ripristinato a coperto/sospeso"
             else:
-                await db.titoli.update_one({"id": tid}, {
-                    "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
-                    "$unset": {**_unset_incasso, "data_copertura": "", "note_copertura": ""}})
-                azione = "titolo ripristinato ad arretrato"
+                # Nessun movimento rimasto. Un titolo COPERTO da SETUP INIZIALE o da
+                # IMPORT non ha un movimento di copertura in Prima Nota: la copertura è
+                # un dato "di apertura" e NON va toccata. Eliminando l'incasso manuale il
+                # titolo torna quindi COPERTO/sospeso (non arretrato), salvo che l'utente
+                # non lo scopra con un'operazione manuale (storna copertura / rimetti
+                # arretrato). Per gli altri casi → arretrato.
+                baseline_coperto = bool(
+                    (t.get("is_setup_iniziale") or t.get("caricato_da_import"))
+                    and t.get("data_copertura"))
+                if baseline_coperto:
+                    await db.titoli.update_one({"id": tid}, {
+                        "$set": {"stato": "da_incassare", "titolo_coperto": True,
+                                 "updated_at": _now_iso()},
+                        "$unset": _unset_incasso})
+                    azione = "titolo ripristinato a coperto (sospeso da setup/import)"
+                else:
+                    await db.titoli.update_one({"id": tid}, {
+                        "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
+                        "$unset": {**_unset_incasso, "data_copertura": "", "note_copertura": ""}})
+                    azione = "titolo ripristinato ad arretrato"
             # Riallinea le scadenze della polizza
             if t.get("polizza_id"):
                 try:
