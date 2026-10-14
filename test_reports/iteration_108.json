@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only validation of 'Nuova polizza' auto-compile via 'Carica PDF polizza' on /polizze with the Cattolica substitution PDF. Login OK, dialog opens, OCR completes in ~30-50s. Most fields auto-fill correctly (numero, contraente, date, frazionamento, dati veicolo incl. CV/KW), toast shows numero + sostituisce + contraente NUOVO. However Ramo and Prodotto SelectValue triggers render empty due to a value-mismatch with the backend rami/prodotti lists.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Polizze → Nuova polizza dialog → Ramo Select", "issue": "Dopo OCR il trigger 'pol-ramo-select' resta VUOTO. onOcrPolizza setta f.ramo='RCA' (ramoMap {RCAUTO:'RCA', INFR:'INFORTUNI'}), ma la lista rami caricata dal backend contiene 'RC Auto' (non 'RCA'), quindi il <SelectValue> non trova corrispondenza e mostra il placeholder 'Seleziona ramo'. Lista disponibile osservata: ['-','01','02',...,'RC Auto','RC Generale',...]. Suggerimento: mappare RCAUTO/RCA → 'RC Auto' (match case-insensitive sui rami esistenti) o normalizzare lato backend.", "selector": "[data-testid='pol-ramo-select']", "priority": "HIGH"},
+      {"component": "Polizze → Nuova polizza dialog → Prodotto Select", "issue": "Dopo OCR il trigger 'pol-prodotto-select' resta VUOTO. L'endpoint prodotti carica correttamente 3 opzioni per Cattolica (ACTIVE VEICOLI AUTOPIU', ATTIVA FLOTTA SICURA, GENERALI SEI IN AUTO NEW/GENMAR), ma d.prodotto restituito dall'OCR non corrisponde esattamente al nome in DB (atteso 'contiene Active Veicoli'; DB ha ACTIVE VEICOLI AUTOPIU'). Suggerimento: in onOcrPolizza fare un best-match (startsWith/toUpperCase includes) tra d.prodotto e la lista prodotti caricata, impostando il nome esatto trovato.", "selector": "[data-testid='pol-prodotto-select']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DialogContent (Nuova polizza)", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}. Aggiungere DialogDescription per accessibilità."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix ramoMap/normalizzazione: 'RCAUTO'/'RCA' deve mappare al nome esistente nel DB rami (es. 'RC Auto'), oppure fare lookup case-insensitive sulla lista rami prima di set('ramo', v).",
+    "In onOcrPolizza, dopo che prodotti è caricato per il ramo risolto, risolvere d.prodotto al nome esatto presente in prodotti (match .toUpperCase().includes() o startsWith) e settare quello; altrimenti il Select non visualizza il valore.",
+    "Aggiungere DialogDescription al DialogContent per rimuovere warning a11y."
+  ],
+  "critical_code_review_comments": [
+    "Polizze.jsx:694-695 ramoMap è troppo stretto (solo RCAUTO/INFR) e assume naming hard-coded. Preferire lookup dinamico su `rami` caricati dal backend con normalizzazione (upper/trim/senza spazi).",
+    "Polizze.jsx:717 set prodotto=d.prodotto senza verificare l'esistenza nella lista: in shadcn <Select> il value deve coincidere esattamente con un <SelectItem value>, altrimenti il trigger resta vuoto senza alcun feedback utente."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "80% (8/10 campi + toast OK; 2 Select non visualizzati)"},
+  "test_credentials": "admin: jacopo@schiantarelli.it / NtdZs5ilxTSP",
+  "seed_data_creation": "none (polizza NON creata come richiesto)",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Il PDF Cattolica è scaricabile da https://customer-assets-wrfwihn1.emergentagent.net/job_24ad771c-c3b3-4e05-9e82-ecb09db00768/artifacts/b527fb93dc699b15_auto000000546304409.pdf . Usare set_input_files su [data-testid='pol-ocr-input'] (NON cliccare il bottone). L'OCR impiega 30-60s. Toast osservato: 'Polizza riconosciuta: 184643507 · ⚠ Contraente NUOVO (BTTGLR94A71I1829N) da creare · 🔗 Sostituisce la n° 183629506'. Nota: il CF nel toast contiene un '1' in più rispetto al CF atteso (BTTGLR94A71I829N vs backend returns BTTGLR94A71I1829N) — verificare se è errore OCR o del PDF; il contraente infatti NON viene collegato all'anagrafica BOTTONI GLORIA esistente a causa di questa discrepanza di CF.",
+  "rca of the issue": "Ramo/Prodotto empty: shadcn <Select value={f.ramo}> cerca un <SelectItem value={r.nome}> con value identico. f.ramo='RCA' (da ramoMap) non corrisponde a nessuna delle entry della lista rami caricata (contiene 'RC Auto'). Stessa dinamica per Prodotto. La riproduzione: aprire Nuova polizza, caricare PDF → entrambi i trigger (pol-ramo-select, pol-prodotto-select) mostrano solo il placeholder. Mitigazione: normalizzare valore OCR tramite lookup fuzzy sulla lista opzioni effettiva prima di set('ramo')/set('prodotto'). Possibile anche collegare il contraente esistente per CF, gestendo whitespace/caratteri OCR errati (es. doppio '1' nel CF)."
+}

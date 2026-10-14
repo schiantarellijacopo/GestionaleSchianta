@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
-    Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+    Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
     Search, Plus, ScanLine, Filter, X, Printer, FileSpreadsheet, FileText,
@@ -509,6 +509,9 @@ function NuovaPolizzaDialog({ onClose }) {
     const [contraenteSel, setContraenteSel] = useState(null);
     const [ocrLoading, setOcrLoading] = useState(false);
     const ocrRef = useRef(null);
+    // Nome prodotto grezzo da OCR in attesa che la lista `prodotti` del ramo si carichi,
+    // per risolverlo al nome ESATTO presente in DB (altrimenti il Select resta vuoto).
+    const pendingProdRef = useRef(null);
     const [polizzaFile, setPolizzaFile] = useState(null);
     // Suggerimenti targa per autocomplete live (search nei veicoli del libro matricola)
     const [targheSuggest, setTargheSuggest] = useState([]);
@@ -597,6 +600,19 @@ function NuovaPolizzaDialog({ onClose }) {
         if (f.compagnia_id) params.compagnia_id = f.compagnia_id;
         api.get("/librerie/prodotti", { params }).then((r) => setProdotti(r.data || []));
     }, [f.ramo, f.compagnia_id]);
+
+    // Quando la lista prodotti si carica dopo l'OCR, risolvi il prodotto grezzo al nome
+    // ESATTO presente in DB (match normalizzato) così il Select lo visualizza.
+    useEffect(() => {
+        if (!pendingProdRef.current || prodotti.length === 0) return;
+        const norm = (s) => (s || "").toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const want = norm(pendingProdRef.current);
+        const m = prodotti.find((p) => norm(p.nome) === want)
+            || prodotti.find((p) => norm(p.nome).includes(want) || want.includes(norm(p.nome)))
+            || prodotti.find((p) => want && norm(p.nome).startsWith(want.slice(0, 8)));
+        if (m) set("prodotto", m.nome);
+        pendingProdRef.current = null;
+    }, [prodotti]); /* eslint-disable-line */
 
     // Anagrafica selezionata (memoria persistente + fallback ricerca in lista)
     const contraenteSelezionato = contraenteSel || ana.find((a) => a.id === f.contraente_id);
@@ -691,8 +707,18 @@ function NuovaPolizzaDialog({ onClose }) {
             const r = await api.post("/utility/ocr-polizza", fd,
                 { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
             const d = r.data;
-            const ramoMap = { RCAUTO: "RCA", INFR: "INFORTUNI" };
-            const ramo = ramoMap[d.ramo] || d.ramo || "RCA";
+            // Risolvi il RAMO sul nome ESATTO presente nella lista rami del backend
+            // (es. OCR 'RCAUTO'/'RCA' → 'RC Auto'); altrimenti il Select resta vuoto.
+            const normR = (s) => (s || "").toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
+            const ramoSyn = { RCAUTO: "RCAUTO", RCA: "RCAUTO", INFR: "INFORTUNI" };
+            const ocrR = normR(d.ramo);
+            const targetR = ramoSyn[ocrR] || ocrR;
+            const ramo = (
+                rami.find((x) => normR(x.nome) === targetR)
+                || rami.find((x) => targetR && (normR(x.nome).includes(targetR) || targetR.includes(normR(x.nome))))
+            )?.nome || d.ramo || "";
+            // Prodotto: risolto quando la lista prodotti del ramo si carica (useEffect).
+            pendingProdRef.current = d.prodotto || null;
             const compMatch = d.compagnia
                 ? comp.find((c) => c.ragione_sociale?.toUpperCase().includes(d.compagnia.toUpperCase().split(" ")[0]))
                 : null;
@@ -714,7 +740,7 @@ function NuovaPolizzaDialog({ onClose }) {
                 numero_polizza: d.numero_polizza || p.numero_polizza,
                 compagnia_id: compMatch?.id || p.compagnia_id,
                 contraente_id: anaEsist?.id || "",
-                ramo, prodotto: d.prodotto || p.prodotto,
+                ramo, prodotto: "",
                 effetto: d.data_decorrenza || p.effetto,
                 scadenza: d.data_scadenza || p.scadenza,
                 frazionamento: d.frazionamento || p.frazionamento,
@@ -798,7 +824,7 @@ function NuovaPolizzaDialog({ onClose }) {
 
     return (
         <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto gap-3 [&_input]:h-8 [&_[role=combobox]]:h-8 [&_label]:text-xs">
-            <DialogHeader className="space-y-0"><DialogTitle className="text-base">Nuova polizza</DialogTitle></DialogHeader>
+            <DialogHeader className="space-y-0"><DialogTitle className="text-base">Nuova polizza</DialogTitle><DialogDescription className="text-xs text-slate-500">Compila i dati o carica il PDF per l'auto-compilazione.</DialogDescription></DialogHeader>
 
             <div className="bg-sky-50 border border-sky-200 rounded-md p-3 flex items-center gap-3 flex-wrap" data-testid="pol-ocr-toolbar">
                 <div className="text-xs text-sky-900 flex-1">
