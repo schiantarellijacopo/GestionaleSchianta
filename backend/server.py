@@ -3152,35 +3152,15 @@ async def ocr_polizza_endpoint(
     ct_for_ocr = ct
     if ct == "application/pdf":
         try:
-            import pdfplumber
-            from io import BytesIO
-            with pdfplumber.open(BytesIO(contents)) as pdf:
-                if not pdf.pages:
-                    raise HTTPException(400, "PDF vuoto")
-                # per polizze processa prime 2 pagine (frontespizio + dettagli)
-                images = []
-                for p in pdf.pages[:2]:
-                    img = p.to_image(resolution=200).original
-                    out = BytesIO()
-                    img.save(out, format="JPEG", quality=85)
-                    images.append(out.getvalue())
-                # combina in unica immagine verticale se più pagine
-                if len(images) == 1:
-                    file_for_ocr = images[0]
-                else:
-                    from PIL import Image
-                    imgs = [Image.open(BytesIO(x)) for x in images]
-                    w = max(i.width for i in imgs)
-                    h = sum(i.height for i in imgs)
-                    combined = Image.new("RGB", (w, h), "white")
-                    y = 0
-                    for i in imgs:
-                        combined.paste(i, (0, y))
-                        y += i.height
-                    out = BytesIO()
-                    combined.save(out, format="JPEG", quality=80)
-                    file_for_ocr = out.getvalue()
-                ct_for_ocr = "image/jpeg"
+            # Tutte le pagine (fino a 10), una immagine per pagina → estrazione più
+            # completa (premi/SSN/veicolo possono stare su pagine successive).
+            pages = ocr_pol.pdf_to_page_images(contents, max_pages=10, resolution=200)
+            if not pages:
+                raise HTTPException(400, "PDF vuoto")
+            file_for_ocr = pages
+            ct_for_ocr = "image/jpeg"
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(400, f"Errore conversione PDF: {e}")
     elif not ct.startswith("image/"):
@@ -3189,6 +3169,32 @@ async def ocr_polizza_endpoint(
         data = await ocr_pol.estrai_dati_polizza(file_for_ocr, ct_for_ocr)
     except Exception as e:
         raise HTTPException(503, f"Errore OCR polizza: {e}")
+
+    # Verifica se CONTRAENTE (per CF/P.IVA) e POLIZZA (per numero) esistono già nel
+    # portafoglio dell'utente, così il frontend può collegarli invece di duplicarli.
+    _contr = data.get("contraente") or {}
+    _cf = (_contr.get("codice_fiscale") or "").strip().upper() or None
+    _piva = (_contr.get("partita_iva") or "").strip() or None
+    _ana_or = []
+    if _cf:
+        _ana_or.append({"codice_fiscale": _cf})
+    if _piva:
+        _ana_or.append({"partita_iva": _piva})
+    if _ana_or:
+        _ana_flt = await visibility_filter(user, {"$or": _ana_or})
+        data["anagrafica_esistente"] = await db.anagrafiche.find_one(
+            _ana_flt, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome_nome": 1,
+                       "nome": 1, "cognome": 1, "codice_fiscale": 1, "partita_iva": 1,
+                       "comune": 1, "collaboratore_id": 1})
+    else:
+        data["anagrafica_esistente"] = None
+    _num = (data.get("numero_polizza") or "").strip()
+    if _num:
+        _pol_flt = await visibility_filter(user, {"numero_polizza": _num})
+        data["polizza_esistente"] = await db.polizze.find_one(
+            _pol_flt, {"_id": 0, "id": 1, "numero_polizza": 1, "stato": 1, "contraente_nome": 1})
+    else:
+        data["polizza_esistente"] = None
 
     if salva_come_allegato and polizza_id:
         ext = (file.filename or "polizza.pdf").rsplit(".", 1)[-1].lower() or "pdf"
@@ -3987,6 +3993,17 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             stato="da_incassare",
         )
         await db.titoli.insert_one(primo.model_dump())
+    # Catena di sostituzione: se la nuova polizza ne sostituisce un'altra, marca la
+    # vecchia come 'sostituita', collega la catena e storna SOLO i titoli arretrati
+    # (da_incassare) NON coperti. Coperto/sospeso/incassato = in Prima Nota → mai toccati.
+    sostituzione = None
+    if getattr(obj, "sostituisce_polizza", None):
+        try:
+            from routes.polizze_email import _applica_sostituzione
+            sostituzione = await _applica_sostituzione(
+                obj.id, str(obj.sostituisce_polizza).strip(), user)
+        except Exception as _e:
+            logger.warning("Sostituzione polizza fallita per %s: %s", obj.numero_polizza, _e)
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
     # Alert: polizza emessa
     from alert_dispatcher import safe_dispatch
@@ -4002,7 +4019,10 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
         "premio_totale": obj.premio_lordo,
         "link": f"/polizze/{obj.id}",
     })
-    return obj.model_dump()
+    out = obj.model_dump()
+    if sostituzione is not None:
+        out["sostituzione"] = sostituzione
+    return out
 
 
 @api.put("/polizze/{pid}")

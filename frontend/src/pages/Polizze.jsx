@@ -689,36 +689,66 @@ function NuovaPolizzaDialog({ onClose }) {
         fd.append("file", file);
         try {
             const r = await api.post("/utility/ocr-polizza", fd,
-                { headers: { "Content-Type": "multipart/form-data" }, timeout: 90000 });
+                { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
             const d = r.data;
             const ramoMap = { RCAUTO: "RCA", INFR: "INFORTUNI" };
             const ramo = ramoMap[d.ramo] || d.ramo || "RCA";
             const compMatch = d.compagnia
                 ? comp.find((c) => c.ragione_sociale?.toUpperCase().includes(d.compagnia.toUpperCase().split(" ")[0]))
                 : null;
+            // Contraente: match AFFIDABILE dal backend (ricerca per CF/P.IVA su tutto il DB).
+            const anaEsist = d.anagrafica_esistente || null;
             const cfContr = d.contraente?.codice_fiscale || d.contraente?.partita_iva;
-            const contrMatch = cfContr
-                ? ana.find((a) => a.codice_fiscale === cfContr || a.partita_iva === cfContr)
-                : null;
-            if (contrMatch) setContraenteSel(contrMatch);
+            if (anaEsist) {
+                setContraenteSel(anaEsist);
+                setContraenteQuery("");
+                if (anaEsist.collaboratore_id) set("collaboratore_id", anaEsist.collaboratore_id);
+            } else {
+                // Nessuna anagrafica: pre-compila la ricerca col nome del PDF per crearla.
+                setContraenteSel(null);
+                setContraenteQuery(d.contraente?.cognome_nome_o_ragione_sociale || cfContr || "");
+            }
+            const v = d.veicolo || {};
             setF((p) => ({
                 ...p,
                 numero_polizza: d.numero_polizza || p.numero_polizza,
                 compagnia_id: compMatch?.id || p.compagnia_id,
-                contraente_id: contrMatch?.id || p.contraente_id,
+                contraente_id: anaEsist?.id || "",
                 ramo, prodotto: d.prodotto || p.prodotto,
                 effetto: d.data_decorrenza || p.effetto,
                 scadenza: d.data_scadenza || p.scadenza,
-                premio_lordo: d.premio_lordo_totale ?? p.premio_lordo,
-                premio_netto: d.premio_netto_totale ?? p.premio_netto,
-                provvigioni: d.provvigioni_totali ?? p.provvigioni,
-                targa: d.veicolo?.targa || p.targa,
                 frazionamento: d.frazionamento || p.frazionamento,
+                // Premi: netto / imposte(tasse)+diritti / SSN separato → lordo.
+                // Provvigioni NON importate (inserite manualmente). Identico al flusso email.
+                premio_netto: d.premio_netto_totale ?? p.premio_netto,
+                premio_tasse: (d.imposte_totali != null || d.diritti != null)
+                    ? Math.round(((d.imposte_totali || 0) + (d.diritti || 0)) * 100) / 100
+                    : p.premio_tasse,
+                premio_ssn: d.contributo_ssn ?? p.premio_ssn,
+                premio_lordo: d.premio_lordo_totale
+                    ?? Math.round(((d.premio_netto_totale || 0) + (d.imposte_totali || 0) + (d.contributo_ssn || 0) + (d.diritti || 0)) * 100) / 100,
+                // Sostituzione: la catena viene applicata alla creazione.
+                sostituisce_polizza: d.sostituisce_polizza || p.sostituisce_polizza || "",
+                // Dati veicolo
+                targa: v.targa || p.targa,
+                veicolo_marca: v.marca || p.veicolo_marca,
+                veicolo_modello: v.modello || p.veicolo_modello,
+                veicolo_tipo: v.tipo_veicolo || p.veicolo_tipo,
+                veicolo_alimentazione: v.alimentazione || p.veicolo_alimentazione,
+                veicolo_uso: v.uso_veicolo || p.veicolo_uso,
+                veicolo_data_immatricolazione: v.data_immatricolazione || p.veicolo_data_immatricolazione,
+                veicolo_cv_fiscali: v.cv_fiscali ?? p.veicolo_cv_fiscali,
+                veicolo_kw: v.kw ?? p.veicolo_kw,
+                veicolo_cilindrata: v.cilindrata ?? p.veicolo_cilindrata,
+                veicolo_posti: v.numero_posti ?? p.veicolo_posti,
             }));
             let msg = `Polizza riconosciuta: ${d.numero_polizza || "?"}`;
-            if (!compMatch && d.compagnia) msg += ` · ⚠ Compagnia "${d.compagnia}" da abbinare manualmente`;
-            if (!contrMatch && cfContr) msg += ` · ⚠ Contraente CF ${cfContr} da abbinare manualmente`;
-            toast.success(msg);
+            if (d.polizza_esistente) msg += ` · ⚠ Polizza GIÀ presente (stato: ${d.polizza_esistente.stato || "?"})`;
+            if (!compMatch && d.compagnia) msg += ` · ⚠ Compagnia "${d.compagnia}" da abbinare`;
+            if (anaEsist) msg += ` · 👤 Contraente collegato: ${labelAna(anaEsist)}`;
+            else if (cfContr) msg += ` · ⚠ Contraente NUOVO (${cfContr}) da creare`;
+            if (d.sostituisce_polizza) msg += ` · 🔗 Sostituisce la n° ${d.sostituisce_polizza}`;
+            if (d.polizza_esistente) toast.warning(msg); else toast.success(msg);
         } catch (e) {
             toast.error("OCR fallito: " + (e.response?.data?.detail || e.message));
         } finally { setOcrLoading(false); }
