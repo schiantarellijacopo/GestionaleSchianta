@@ -362,6 +362,9 @@ function DettaglioEmail({ email, tab, onEstrai, estraendo }) {
                                         ) : (
                                             <span className="text-emerald-700">
                                                 ✓ {r.filename}: polizza {r.numero_polizza || "(n/d)"} {r.polizza_creata ? "creata" : "già esistente"} · anagrafica {r.anagrafica_nome || ""} {r.anagrafica_creata ? "creata" : "esistente"}
+                                                {r.sostituzione && r.sostituzione.trovata && (
+                                                    <span className="text-amber-700"> · sostituisce {r.sostituzione.vecchia_numero || r.sostituzione.vecchia_polizza_id}{typeof r.sostituzione.titoli_stornati === "number" ? ` (${r.sostituzione.titoli_stornati} titoli arretrati stornati)` : ""}</span>
+                                                )}
                                             </span>
                                         )
                                     ) : (

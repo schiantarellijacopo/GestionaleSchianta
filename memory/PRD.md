@@ -1,4 +1,18 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
+# CHANGELOG 2026-10-14 — Sostituzione polizza automatica (flusso OCR email)
+- Quando l'OCR crea una NUOVA polizza con "Sostituisce polizza" = numero di una polizza
+  esistente, `_applica_sostituzione` (routes/polizze_email.py):
+  - marca la vecchia polizza `stato="sostituita"` + `sostituita_da_id` + `data_sostituzione`
+    (finisce nella sezione "Sostituite", catena mostrata come già previsto);
+  - STORNA SOLO i titoli in arretrato (`da_incassare`/`insoluto`/`sospeso`) e NON coperti;
+  - REGOLA: un titolo in Prima Nota (coperto OPPURE incassato) non viene MAI toccato;
+  - salta se la vecchia è già annullata/sostituita.
+- Scope: solo flusso OCR email (NON create_polizza generico, per non impattare import Omnia).
+- Posta: il riepilogo mostra "sostituisce N (X titoli arretrati stornati)".
+- Validato offline: vecchia→sostituita; arretrato_non_coperto→stornato; arretrato_coperto→intatto;
+  incassato→intatto. Backend 200, frontend compila.
+
+
 # CHANGELOG 2026-10-13 (2) — Polizze da Email: multi-documento + card
 - OCR: aggiunto campo `sostituisce_polizza` (legge "Sostituisce polizza"; vuoto→null).
   Mappato su Polizza.sostituisce_polizza. Default: salva solo il riferimento (no auto-sostituzione).

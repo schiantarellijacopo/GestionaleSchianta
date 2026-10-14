@@ -207,6 +207,12 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
         pol_id = created.get("id")
         pol_creata = True
 
+    # Sostituzione: se è una NUOVA polizza che sostituisce una esistente
+    sostituzione = None
+    rif_sost = (dati.get("sostituisce_polizza") or "").strip()
+    if pol_creata and rif_sost:
+        sostituzione = await _applica_sostituzione(pol_id, rif_sost, user)
+
     return {
         "numero_polizza": numero or None,
         "compagnia_id": compagnia_id,
@@ -215,7 +221,47 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
         "anagrafica_id": ana_id,
         "anagrafica_nome": ana.get("ragione_sociale"),
         "anagrafica_creata": ana_creata,
+        "sostituzione": sostituzione,
     }
+
+
+async def _applica_sostituzione(nuova_pol_id: str, rif: str, user: dict) -> dict | None:
+    """Marca la vecchia polizza come 'sostituita' e storna SOLO i titoli in arretrato
+    (da_incassare/insoluto/sospeso) e NON coperti. Regola: un titolo in Prima Nota
+    (coperto o incassato) non va MAI toccato."""
+    old = await db.polizze.find_one(
+        {"$or": [{"id": rif}, {"numero_polizza": rif}]},
+        {"_id": 0, "id": 1, "numero_polizza": 1, "stato": 1},
+    )
+    if not old:
+        return {"trovata": False, "rif": rif}
+    if old.get("stato") in ("annullata", "sostituita"):
+        return {"trovata": True, "vecchia_polizza_id": old["id"],
+                "vecchia_numero": old.get("numero_polizza"), "gia_stato": old.get("stato"),
+                "titoli_stornati": 0}
+    now = _now_iso()
+    await db.polizze.update_one(
+        {"id": old["id"]},
+        {"$set": {"stato": "sostituita", "sostituita_da_id": nuova_pol_id,
+                  "data_sostituzione": _today(), "updated_at": now}},
+    )
+    titoli = await db.titoli.find(
+        {"polizza_id": old["id"]},
+        {"_id": 0, "id": 1, "stato": 1, "titolo_coperto": 1},
+    ).to_list(1000)
+    stornati = 0
+    for t in titoli:
+        in_prima_nota = bool(t.get("titolo_coperto")) or t.get("stato") == "incassato"
+        if t.get("stato") in ("da_incassare", "insoluto", "sospeso") and not in_prima_nota:
+            await db.titoli.update_one(
+                {"id": t["id"]},
+                {"$set": {"stato": "stornato",
+                          "nota": "Storno automatico per sostituzione polizza",
+                          "updated_at": now}},
+            )
+            stornati += 1
+    return {"trovata": True, "vecchia_polizza_id": old["id"],
+            "vecchia_numero": old.get("numero_polizza"), "titoli_stornati": stornati}
 
 
 def _classifica_pdf(pdf_bytes: bytes) -> str:
