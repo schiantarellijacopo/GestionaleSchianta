@@ -975,6 +975,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
     agenzia_op_id = await _agenzia_op_id()
     _sost_cache: dict = {}          # pol_id -> bool (la polizza sostituisce un'altra)
     sostituisce_refs: set = set()   # riferimenti (numero/id) delle polizze sostituite in questo import
+    targhe_sync: set = set()        # targhe toccate: a fine import allinea i dati veicolo
 
     plan_sorted = sorted(plan, key=lambda p: ENTITY_ORDER.index(p["entity"]) if p.get("entity") in ENTITY_ORDER else 99)
 
@@ -1017,6 +1018,8 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                         doc["collaboratore_id"] = p_op_id
                     if doc.get("sostituisce_polizza"):
                         sostituisce_refs.add(doc["sostituisce_polizza"])
+                    if doc.get("targa"):
+                        targhe_sync.add(str(doc["targa"]).strip().upper())
                     if rec.get("data_annullamento"):
                         doc["stato"] = "annullata"
                     elif rec.get("data_sospensione"):
@@ -1302,6 +1305,17 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         titoli_stornati_sost += _r.modified_count
     if titoli_stornati_sost:
         stats["titoli_stornati_sostituzione"] = titoli_stornati_sost
+    # Allinea i dati veicolo tra polizze con la stessa targa importate in questo batch.
+    if targhe_sync:
+        try:
+            from server import _sync_veicolo_targa
+            pol_sync = 0
+            for tg in targhe_sync:
+                pol_sync += await _sync_veicolo_targa(user, tg)
+            if pol_sync:
+                stats["veicoli_allineati"] = pol_sync
+        except Exception:
+            pass
     auto_creati_tot = {k: len(v) for k, v in auto_creati.items()}
     await db.import_massivo_sessioni.update_one({"id": sid}, {"$set": {
         "status": "completato",

@@ -3922,6 +3922,61 @@ async def get_polizza(pid: str, user=Depends(current_user)):
     return doc
 
 
+# Campi "veicolo + dati associazione contratto" condivisi tra polizze con la stessa
+# targa (richiesta utente: non duplicare, l'ultima informazione vince).
+_VEICOLO_SYNC_FIELDS = [
+    "veicolo_marca", "veicolo_modello", "veicolo_tipo", "veicolo_settore",
+    "veicolo_alimentazione", "veicolo_uso", "veicolo_data_immatricolazione",
+    "veicolo_cilindrata", "veicolo_cv_fiscali", "veicolo_kw", "veicolo_quintali",
+    "veicolo_posti", "veicolo_gancio_traino", "veicolo_targa_rimorchio",
+    "tipo_tariffa", "bm_provenienza", "bm_assegnata", "bm_assegnata_cu", "pejus",
+    "franchigia", "valore_veicolo", "valore_residuo_veicolo", "valore_accessori",
+    "guida_esperta", "guida_esclusiva", "rinuncia_rivalsa",
+    "intestatario", "provincia_intestatario", "massimali",
+]
+
+
+def _veicolo_val_meaningful(field: str, v) -> bool:
+    """True se il valore porta informazione (da propagare)."""
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return True  # i flag guida/gancio seguono la regola 'ultima info vince'
+    if isinstance(v, (int, float)):
+        return v != 0
+    return str(v).strip() != ""
+
+
+async def _sync_veicolo_targa(user: dict, targa: Optional[str]) -> int:
+    """Allinea i dati veicolo/contratto su TUTTE le polizze (non annullate/sostituite)
+    con la stessa targa del tenant. Per ogni campo vince il valore della polizza
+    aggiornata più di recente che lo valorizza (ultima info vince). Ritorna il n. di
+    polizze modificate."""
+    tg = (targa or "").strip().upper()
+    if len(tg) < 4:
+        return 0
+    flt = await visibility_filter(user, {
+        "targa": {"$regex": f"^{re.escape(tg)}$", "$options": "i"},
+        "stato": {"$nin": ["annullata", "sostituita"]},
+    })
+    pols = await db.polizze.find(flt, {"_id": 0}).sort("updated_at", -1).to_list(500)
+    if len(pols) < 2:
+        return 0  # niente da propagare se c'è una sola polizza con quella targa
+    merged: dict = {}
+    for field in _VEICOLO_SYNC_FIELDS:
+        for p in pols:  # già ordinate per updated_at desc → la più recente vince
+            if field in p and _veicolo_val_meaningful(field, p.get(field)):
+                merged[field] = p.get(field)
+                break
+    if not merged:
+        return 0
+    merged["updated_at"] = _now_iso()
+    ids = [p["id"] for p in pols]
+    res = await db.polizze.update_many({"id": {"$in": ids}}, {"$set": merged})
+    return res.modified_count
+
+
+
 @api.post("/polizze", status_code=201)
 async def create_polizza(body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     # Applica default termini_mora_giorni dal prodotto in libreria,
@@ -4004,6 +4059,12 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
                 obj.id, str(obj.sostituisce_polizza).strip(), user)
         except Exception as _e:
             logger.warning("Sostituzione polizza fallita per %s: %s", obj.numero_polizza, _e)
+    # Allinea i dati veicolo tra le polizze con la stessa targa (ultima info vince).
+    if getattr(obj, "targa", None):
+        try:
+            await _sync_veicolo_targa(user, obj.targa)
+        except Exception as _e:
+            logger.warning("Sync veicolo targa fallita per %s: %s", obj.numero_polizza, _e)
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
     # Alert: polizza emessa
     from alert_dispatcher import safe_dispatch
@@ -4032,7 +4093,16 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     if res.matched_count == 0:
         raise HTTPException(404, "Non trovata")
     await log_attivita(user, "update", "polizza", pid)
-    return strip_mongo_id(await db.polizze.find_one({"id": pid}, {"_id": 0}))
+    doc = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    # Se è cambiato un dato veicolo/contratto (o la targa), propaga alle altre polizze
+    # con la stessa targa (ultima info vince).
+    if doc and doc.get("targa") and (set(body) & (set(_VEICOLO_SYNC_FIELDS) | {"targa"})):
+        try:
+            await _sync_veicolo_targa(user, doc.get("targa"))
+            doc = await db.polizze.find_one({"id": pid}, {"_id": 0})
+        except Exception as _e:
+            logger.warning("Sync veicolo targa fallita per %s: %s", pid, _e)
+    return strip_mongo_id(doc)
 
 
 def _norm_tags(raw) -> list:
