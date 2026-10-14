@@ -8487,11 +8487,27 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
     if cur.get("chiusura_id"):
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per modificare")
     body["updated_at"] = _now_iso()
-    # Se cambia il tipo pagamento senza indicare il conto, riallinea il conto.
-    if body.get("mezzo_pagamento") and not body.get("conto_cassa_id"):
-        rc = await _resolve_conto_cassa(body["mezzo_pagamento"], fallback_any=False)
-        if rc:
-            body["conto_cassa_id"] = rc
+    # Riallinea conto e flag "in direzione" quando cambia il metodo di pagamento.
+    # Per gli incassi, passare da/ a "direzione" cambia categoria, conto e is_direzione
+    # (altrimenti il brogliaccio continua a classificarlo come Incasso Direzione).
+    if body.get("mezzo_pagamento") is not None:
+        new_mezzo = body.get("mezzo_pagamento")
+        new_dir = "direzione" in (new_mezzo or "").lower()
+        if cur.get("categoria") in ("incasso_premio", "incasso_coperto", "incasso_premio_direzione"):
+            body["is_direzione"] = new_dir
+            if new_dir:
+                body["categoria"] = "incasso_premio_direzione"
+                body["conto_cassa_id"] = None
+                body["quota_sconto"] = 0.0
+            else:
+                if cur.get("categoria") == "incasso_premio_direzione":
+                    body["categoria"] = "incasso_premio"
+                if not body.get("conto_cassa_id"):
+                    body["conto_cassa_id"] = await _resolve_conto_cassa(new_mezzo, fallback_any=False)
+        elif not body.get("conto_cassa_id"):
+            rc = await _resolve_conto_cassa(new_mezzo, fallback_any=False)
+            if rc:
+                body["conto_cassa_id"] = rc
     res = await db.movimenti.update_one({"id": mid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Movimento non trovato")
@@ -8551,6 +8567,7 @@ async def _propaga_modifica_movimento(mov: dict, body: dict) -> Optional[str]:
                 upd["data_incasso"] = nuova_data
         if "mezzo_pagamento" in body:
             upd["mezzo_pagamento"] = body.get("mezzo_pagamento") or None
+            upd["pagamento_in_direzione"] = "direzione" in (body.get("mezzo_pagamento") or "").lower()
         if "conto_cassa_id" in body:
             upd["conto_cassa_id"] = body.get("conto_cassa_id") or None
         if upd:
