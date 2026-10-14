@@ -227,8 +227,8 @@ async def _estrai_una(dati: dict, user: dict) -> dict:
 
 async def _applica_sostituzione(nuova_pol_id: str, rif: str, user: dict) -> dict | None:
     """Marca la vecchia polizza come 'sostituita' e storna SOLO i titoli in arretrato
-    (da_incassare/insoluto/sospeso) e NON coperti. Regola: un titolo in Prima Nota
-    (coperto o incassato) non va MAI toccato."""
+    (stato 'da_incassare') e NON coperti. Regola: un titolo in Prima Nota non va MAI
+    toccato; 'coperto'/'sospeso'/'incassato' sono in Prima Nota (sospeso = coperto)."""
     old = await db.polizze.find_one(
         {"$or": [{"id": rif}, {"numero_polizza": rif}]},
         {"_id": 0, "id": 1, "numero_polizza": 1, "stato": 1},
@@ -251,8 +251,9 @@ async def _applica_sostituzione(nuova_pol_id: str, rif: str, user: dict) -> dict
     ).to_list(1000)
     stornati = 0
     for t in titoli:
-        in_prima_nota = bool(t.get("titolo_coperto")) or t.get("stato") == "incassato"
-        if t.get("stato") in ("da_incassare", "insoluto", "sospeso") and not in_prima_nota:
+        # Storno SOLO 'da_incassare' (arretrato) e NON coperto. Mai toccare ciò che è in
+        # Prima Nota: coperto/sospeso (stessa cosa) o incassato.
+        if t.get("stato") == "da_incassare" and not t.get("titolo_coperto"):
             await db.titoli.update_one(
                 {"id": t["id"]},
                 {"$set": {"stato": "stornato",
