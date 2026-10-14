@@ -1,0 +1,20 @@
+{
+  "summary": "RETEST OCR 'Nuova polizza' su /polizze dopo fix iteration_108. Entrambi i bug HIGH precedenti sono RISOLTI: dopo upload del PDF Cattolica, il Select Ramo mostra 'RC Auto' e il Select Prodotto mostra 'ACTIVE VEICOLI AUTOPIU''. L'OCR si completa in ~30s e tutti i campi richiesti risultano auto-compilati come confermato visivamente dallo screenshot del dialog.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "admin: jacopo@schiantarelli.it / NtdZs5ilxTSP",
+  "seed_data_creation": "Nessuna polizza creata (Crea polizza NON cliccato come da richiesta).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "OCR polizza flow su /polizze → 'Nuova polizza' → set_input_files su [data-testid='pol-ocr-input']. L'OCR richiede ~30s. Dopo il completamento: Ramo e Prodotto Select ora si popolano correttamente (RCAUTO→'RC Auto' lookup e prodotto risolto via useEffect sulla lista prodotti del ramo). Campi verificati nello screenshot finale: Numero 184643507, Effetto 2026-10-20, Scadenza 2027-10-20, Targa FJ358XS, Marca FIAT, Modello 500 1.2 S, Alimentazione BENZINA. I 2 bug HIGH di iteration_108 sono chiusi.",
+  "rca of the issue": "Fix applicati in Polizze.jsx (onOcrPolizza): (1) risoluzione ramo tramite lookup sulla lista `rami` del backend con normalizzazione (es. 'RCAUTO'→'RC Auto'); (2) prodotto gestito con pendingProdRef + useEffect che risolve il nome esatto quando la lista prodotti del ramo si carica (match normalizzato). Comportamento confermato dal retest."
+}

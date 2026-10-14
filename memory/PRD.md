@@ -1978,3 +1978,12 @@ Richiesta utente (verificata su PDF Cattolica 184643552 BORMOLINI):
 Test OCR reale: compagnia Cattolica Assicurazioni, ramo RCAUTO, prodotto "Active Veicoli
 AUTOPIÙ", netto 250.29, imposte 32.12, SSN 17.59, lordo 300 (quadra). provvigioni OCR
 ignorate.
+
+## [2026-06-29] OCR "Crea polizza da PDF" allineato al flusso email + catena + sync targa
+- UNICO motore OCR (ocr_polizza.estrai_dati_polizza + stesso prompt) per: email (routes/polizze_email.py) e creazione manuale ("Carica PDF polizza" in Polizze.jsx / endpoint /api/utility/ocr-polizza).
+- /api/utility/ocr-polizza: ora converte TUTTE le pagine PDF (max 10) e restituisce anche `anagrafica_esistente` (match CF/P.IVA, tenant-scoped) e `polizza_esistente` (numero).
+- onOcrPolizza (Polizze.jsx): mappa dati veicolo, premi netto/tasse(+diritti)/SSN separato, provvigioni NON importate; risolve Ramo sul nome esatto della lista rami (RCAUTO→RC Auto) e Prodotto via useEffect sul caricamento lista prodotti (match normalizzato); collega anagrafica esistente o segnala "contraente nuovo"; avvisa se polizza già presente; imposta sostituisce_polizza.
+- Catena di sostituzione: create_polizza applica _applica_sostituzione quando sostituisce_polizza è valorizzato (vecchia→sostituita, link, storno SOLO titoli da_incassare non coperti). Testato E2E: 184643507 sostituisce 183629506.
+- Sync veicolo per targa (server.py _sync_veicolo_targa): a ogni create/update polizza (se tocca campi veicolo/targa) e a fine import massivo/Omnia, allinea TUTTI i campi veicolo+dati contratto tra le polizze (non annullate/sostituite) con la stessa targa del tenant; "ultima info vince" (polizza aggiornata più di recente valorizzante il campo). Testato E2E (create propaga a polizza vuota; update propaga valore aggiornato).
+- Testing agent frontend: iteration_109 = 100% (Ramo 'RC Auto' e Prodotto 'ACTIVE VEICOLI AUTOPIU'' visualizzati, campi veicolo compilati).
+- NOTA: OCR del CF occasionalmente impreciso (un test ha letto BTTGLR94A71I1829N vs BTTGLR94A71I829N): se il CF è errato il match anagrafica fallisce legittimamente → l'utente collega/crea a mano.
