@@ -8590,74 +8590,53 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
         t = await db.titoli.find_one({"id": tid}, {"_id": 0})
         if t:
             _unset_incasso = {"data_incasso": "", "conto_cassa_id": "", "importo_pagato": "",
-                              "mezzo_pagamento": "", "sconto_applicato": "", "pagamento_in_direzione": ""}
-            if cat == "incasso_coperto":
-                # Il titolo era COPERTO prima dell'incasso → torna coperto
+                              "mezzo_pagamento": "", "sconto_applicato": "", "motivo_sconto": "",
+                              "pagamento_in_direzione": ""}
+            # Incasso UNIFICATO (merge): la copertura era stata assorbita in questa riga.
+            # Ripristinala come movimento PRIMA di ricalcolare lo stato del titolo.
+            for _c in (mov.get("coperture_assorbite") or []):
+                _doc = {k: v for k, v in _c.items() if k != "_id"}
+                _doc["chiusura_id"] = None
+                _doc["updated_at"] = _now_iso()
+                await db.movimenti.replace_one({"id": _doc.get("id")}, _doc, upsert=True)
+            # REGOLA (richiesta utente): eliminando una registrazione dalla Prima Nota,
+            # il titolo torna allo stato determinato dai movimenti RIMANENTI — in modo
+            # ORDINE-INDIPENDENTE (il movimento corrente è già stato cancellato):
+            #   • se resta un INCASSO                    → incassato
+            #   • altrimenti se resta una COPERTURA      → coperto/sospeso
+            #     (anche pregressa / di una registrazione precedente)
+            #   • altrimenti                             → arretrato
+            # Esempi: arretrato + copertura + incasso, eliminando entrambe le righe →
+            # arretrato; già coperto + solo incasso, eliminando l'incasso → coperto;
+            # arretrato + solo copertura, eliminando la copertura → arretrato.
+            rem_inc = await db.movimenti.find_one(
+                {"titolo_id": tid, "categoria": {"$in": ["incasso_premio", "incasso_coperto",
+                 "incasso_premio_direzione"]}}, {"_id": 0}, sort=[("data_movimento", -1)])
+            rem_cop = await db.movimenti.find_one(
+                {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
+                {"_id": 0}, sort=[("data_movimento", -1)])
+            if rem_inc:
+                set_doc = {"stato": "incassato", "data_incasso": rem_inc.get("data_movimento"),
+                           "mezzo_pagamento": rem_inc.get("mezzo_pagamento"),
+                           "conto_cassa_id": rem_inc.get("conto_cassa_id"),
+                           "pagamento_in_direzione": bool(rem_inc.get("is_direzione")),
+                           "titolo_coperto": bool(rem_cop) or rem_inc.get("categoria") == "incasso_coperto",
+                           "updated_at": _now_iso()}
+                if rem_cop:
+                    set_doc["data_copertura"] = rem_cop.get("data_movimento")
+                await db.titoli.update_one({"id": tid}, {"$set": set_doc})
+                azione = "titolo rimane incassato (resta un incasso in Prima Nota)"
+            elif rem_cop:
                 await db.titoli.update_one({"id": tid}, {
-                    "$set": {"stato": "da_incassare", "updated_at": _now_iso()},
-                    "$unset": _unset_incasso,
-                })
-                azione = "titolo ripristinato a coperto"
-            elif cat in ("incasso_premio", "incasso_premio_direzione"):
-                # REGOLA: eliminando un incasso, il titolo torna allo stato PRECEDENTE.
-                #  - se era COPERTO (sospeso) prima dell'incasso → torna a SOSPESO e la
-                #    copertura viene ripristinata in Prima Nota;
-                #  - altrimenti (era arretrato/da incassare) → torna ARRETRATO.
-                # Un incasso UNIFICATO (merge) ha assorbito la copertura salvandone lo
-                # snapshot in `coperture_assorbite`; per i dati legacy si usa come indizio
-                # il flag `titolo_coperto` ancora presente sul titolo.
-                cop_assorbite = mov.get("coperture_assorbite") or []
-                was_coperto = (cat != "incasso_premio_direzione") and (
-                    bool(cop_assorbite) or bool(t.get("titolo_coperto")))
-                if was_coperto:
-                    await db.titoli.update_one({"id": tid}, {
-                        "$set": {"stato": "da_incassare", "titolo_coperto": True,
-                                 "updated_at": _now_iso()},
-                        "$unset": _unset_incasso,
-                    })
-                    if cop_assorbite:
-                        for _c in cop_assorbite:
-                            _doc = {k: v for k, v in _c.items() if k != "_id"}
-                            _doc["chiusura_id"] = None
-                            _doc["updated_at"] = _now_iso()
-                            await db.movimenti.replace_one(
-                                {"id": _doc.get("id")}, _doc, upsert=True)
-                        azione = "titolo ripristinato a sospeso (copertura ripristinata in Prima Nota)"
-                    else:
-                        # Legacy/merge senza snapshot: ricostruisci la copertura dai dati
-                        # del titolo. Rimuove eventuali coperture residue per evitare doppioni.
-                        await db.movimenti.delete_many(
-                            {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}})
-                        pol = await db.polizze.find_one(
-                            {"id": t.get("polizza_id")}, {"_id": 0}) if t.get("polizza_id") else None
-                        cop = MovimentoContabile(
-                            data_movimento=(t.get("data_copertura") or mov.get("data_movimento")),
-                            tipo="entrata", categoria="copertura_titolo",
-                            importo=float(t.get("importo_lordo") or 0),
-                            descrizione=(f"Copertura anticipata polizza "
-                                         f"{(pol or {}).get('numero_polizza') or t.get('polizza_id')}"),
-                            polizza_id=t.get("polizza_id"), titolo_id=tid,
-                            anagrafica_id=(pol or {}).get("contraente_id"),
-                            compagnia_id=(pol or {}).get("compagnia_id"),
-                            provvigioni=float(t.get("provvigioni") or 0),
-                        )
-                        await db.movimenti.insert_one(cop.model_dump())
-                        azione = "titolo ripristinato a sospeso (copertura ricostruita in Prima Nota)"
-                else:
-                    # Il titolo era ARRETRATO/da incassare → torna arretrato
-                    await db.titoli.update_one({"id": tid}, {
-                        "$set": {"stato": "da_incassare", "titolo_coperto": False,
-                                 "updated_at": _now_iso()},
-                        "$unset": _unset_incasso,
-                    })
-                    azione = "titolo ripristinato ad arretrato"
-            elif cat == "copertura_titolo":
-                # La copertura viene annullata → torna arretrato
+                    "$set": {"stato": "da_incassare", "titolo_coperto": True,
+                             "data_copertura": rem_cop.get("data_movimento"), "updated_at": _now_iso()},
+                    "$unset": _unset_incasso})
+                azione = "titolo ripristinato a coperto/sospeso"
+            else:
                 await db.titoli.update_one({"id": tid}, {
                     "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
-                    "$unset": {"data_copertura": "", "note_copertura": ""},
-                })
-                azione = "copertura annullata, titolo ripristinato ad arretrato"
+                    "$unset": {**_unset_incasso, "data_copertura": "", "note_copertura": ""}})
+                azione = "titolo ripristinato ad arretrato"
             # Riallinea le scadenze della polizza
             if t.get("polizza_id"):
                 try:

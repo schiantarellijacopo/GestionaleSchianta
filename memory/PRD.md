@@ -1946,3 +1946,14 @@ Sessione (20) aggiunta: badge colorato tipo titolo (sostituzione/sospensione/rip
   resta relativo `/c/{slug}` (comportamento attuale).
 
 
+
+## [2026-06-29] Prima Nota — regola ripristino stato titolo al delete (verificata)
+Regola utente: eliminando una registrazione dalla Prima Nota, il titolo torna allo
+stato PRECEDENTE. Riscritta `_revert_entita_da_movimento` (server.py) con logica
+ORDINE-INDIPENDENTE: ricalcola lo stato dai movimenti RIMANENTI del titolo
+(resta incasso→incassato; resta copertura→coperto/sospeso, anche pregressa; nulla→arretrato).
+Gestito anche l'incasso unificato (coperture_assorbite ripristinate prima del ricalcolo).
+Testato E2E (login jacopo) su 4 scenari — tutti PASS:
+ S1 arretrato+cop+inc→delete entrambi→arretrato (ordine cop→inc e inc→cop);
+ S2 già coperto+solo incasso→delete incasso→coperto;
+ S3 arretrato+solo copertura→delete copertura→arretrato.
