@@ -4105,6 +4105,22 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
     body["frazionamento"] = _fz if _fz in {
         "annuale", "semestrale", "quadrimestrale", "trimestrale", "mensile", "unica"
     } else "annuale"
+    # Coercizione campi numerici veicolo: dati da Libro Matricola/OCR/manuale possono
+    # arrivare come float ("217.5") o stringa → evita errori di validazione.
+    for _f in ("veicolo_cv_fiscali", "veicolo_cilindrata", "veicolo_posti"):
+        _v = body.get(_f)
+        if _v not in (None, ""):
+            try:
+                body[_f] = int(round(float(str(_v).replace(",", "."))))
+            except (ValueError, TypeError):
+                body.pop(_f, None)
+    for _f in ("veicolo_kw", "veicolo_quintali"):
+        _v = body.get(_f)
+        if _v not in (None, ""):
+            try:
+                body[_f] = float(str(_v).replace(",", "."))
+            except (ValueError, TypeError):
+                body.pop(_f, None)
     # Auto-calcolo scadenza polizza + prossima quietanza + scad. copertura da effetto+frazionamento
     _eff = body.get("effetto")
     if _eff:

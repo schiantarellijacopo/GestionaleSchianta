@@ -2039,3 +2039,15 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
 - Testato: sync ciclomotore NON tocca il rimorchio; lookup tipo diverso → tipo_diverso.
 - create_polizza: le ValidationError di Pydantic ora tornano HTTP 400 con il campo/motivo
   esatto (prima era 500 generico 'Errore'). Fix frazionamento maiuscolo già applicato.
+
+## [2026-06-29] FIX creazione manuale + FB828CV (needs deploy)
+- Creazione polizza manuale falliva (500) per campi numerici veicolo in formato NON intero:
+  veicolo_cv_fiscali/cilindrata/posti sono Optional[int] nel modello ma Libro Matricola/OCR/
+  manuale possono inviare float (es. 217.5) o stringa. FIX: create_polizza coerce questi
+  campi a int (round) e kw/quintali a float prima della validazione. Testato: payload con
+  cv_fiscali=217.5, kw="160" → 201 (cv salvato 218). Inoltre ValidationError → HTTP 400 con
+  campo/motivo esatto (niente più 500 'Errore' generico) e frazionamento normalizzato.
+- FB828CV "importa Volkswagen": nel DB la targa è SEMPRE Mercedes; il problema è solo che la
+  produzione gira ancora il codice VECCHIO (il dialog non interroga il DB interno). Il nuovo
+  lookup /polizze/veicolo-by-targa restituisce correttamente MERCEDES (verificato via API,
+  sia senza tipo sia con tipo=AUTOVETTURA → MERCEDES-BENZ A 250). Serve deploy su Railway.
