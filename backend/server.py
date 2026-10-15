@@ -8451,6 +8451,23 @@ async def sostituisci_polizza(
     crea_titolo = bool(body.pop("crea_titolo", True))  # default: sempre crea titolo di sostituzione
     storna_arretrati = bool(body.pop("storna_titoli", True))
     today = _now_iso()[:10]
+    _vkeys = ("veicolo_marca", "veicolo_modello", "veicolo_tipo", "veicolo_settore",
+              "veicolo_alimentazione", "veicolo_uso", "veicolo_data_immatricolazione",
+              "veicolo_cilindrata", "veicolo_cv_fiscali", "veicolo_kw", "veicolo_quintali",
+              "veicolo_posti", "veicolo_gancio_traino", "veicolo_targa_rimorchio")
+    _old_tg = (old.get("targa") or "").strip().upper().replace(" ", "")
+    _new_tg = (body.get("targa") or old.get("targa") or "").strip().upper().replace(" ", "")
+    if _new_tg and _new_tg != _old_tg:
+        # Targa CAMBIATA: non ereditare i dati del vecchio veicolo. Se la nuova targa
+        # esiste già in portafoglio, riporta i suoi dati veicolo; altrimenti resta vuoto
+        # (riempito dagli eventuali override del body). I campi del body hanno priorità.
+        _esist = await db.polizze.find_one(
+            {"targa": {"$regex": f"^{re.escape(_new_tg)}$", "$options": "i"},
+             "stato": {"$nin": ["annullata", "sostituita"]}},
+            {"_id": 0}, sort=[("updated_at", -1)])
+        base_veicolo = {k: _esist.get(k) for k in _vkeys if _esist and _esist.get(k) is not None}
+    else:
+        base_veicolo = {k: old.get(k) for k in _vkeys if old.get(k) is not None}
     nuovo: dict = {
         # campi ereditati salvo override
         "contraente_id": old.get("contraente_id"),
@@ -8465,12 +8482,9 @@ async def sostituisci_polizza(
         "ultimo_mezzo_pagamento_data": old.get("ultimo_mezzo_pagamento_data"),
         # eredita la ripartizione provvigioni multi-collaboratore
         "provvigioni_operatori": old.get("provvigioni_operatori") or [],
-        # eredita dati veicolo (override dal body se il mezzo è cambiato)
-        **{k: old.get(k) for k in (
-            "veicolo_marca", "veicolo_modello", "veicolo_tipo", "veicolo_settore",
-            "veicolo_alimentazione", "veicolo_uso", "veicolo_data_immatricolazione",
-            "veicolo_cilindrata", "veicolo_cv_fiscali", "veicolo_kw") if old.get(k) is not None},
-        # override dal body (compagnia, ramo, prodotto, numero, date, premi, ecc.)
+        # dati veicolo: del vecchio mezzo se targa invariata, della NUOVA targa se cambiata
+        **base_veicolo,
+        # override dal body (compagnia, ramo, prodotto, numero, date, premi, veicolo, ecc.)
         **{k: v for k, v in body.items() if v not in (None, "")},
         # link sostituzione (sempre)
         "sostituisce_polizza": pid,
@@ -8481,6 +8495,12 @@ async def sostituisci_polizza(
     nuovo.setdefault("ramo", old.get("ramo"))
     obj = Polizza(**nuovo)
     await db.polizze.insert_one(obj.model_dump())
+    # Allinea i dati veicolo tra le polizze con la stessa targa (ultima info vince).
+    if getattr(obj, "targa", None):
+        try:
+            await _sync_veicolo_targa(user, obj.targa)
+        except Exception as _e:
+            logger.warning("Sync veicolo targa (sostituzione) fallita: %s", _e)
     # marca vecchia
     await db.polizze.update_one({"id": pid}, {"$set": {
         "stato": "sostituita",
@@ -8490,11 +8510,12 @@ async def sostituisci_polizza(
         "updated_at": _now_iso(),
     }})
 
-    # STORNO titoli arretrati/aperti della polizza sostituita (se richiesto)
+    # STORNO titoli SOLO arretrati (da_incassare) e NON coperti della polizza
+    # sostituita (se richiesto). Coperto/sospeso/incassato = in Prima Nota → mai toccati.
     titoli_stornati = 0
     if storna_arretrati:
         storno = await db.titoli.update_many(
-            {"polizza_id": pid, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+            {"polizza_id": pid, "stato": "da_incassare", "titolo_coperto": {"$ne": True}},
             {"$set": {"stato": "stornato",
                       "nota": f"Stornato per sostituzione con polizza {obj.numero_polizza}",
                       "updated_at": _now_iso()}},

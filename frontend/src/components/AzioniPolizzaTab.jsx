@@ -168,12 +168,34 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
     );
     const [targaLoading, setTargaLoading] = useState(false);
 
-    // Cambio mezzo: recupera i dati del veicolo dalla targa (cache interna → OpenAPI)
-    const cercaTarga = async () => {
+    // Recupera i dati del veicolo dalla targa: prima dal portafoglio interno (targa già
+    // esistente → riporta i dati del veicolo selezionato), poi fallback al registro esterno.
+    const cercaTarga = async (auto = false) => {
         const tg = (sost.targa || "").trim().toUpperCase().replace(/\s/g, "");
-        if (tg.length < 5) { toast.error("Inserisci una targa valida"); return; }
+        if (tg.length < 5) { if (!auto) toast.error("Inserisci una targa valida"); return; }
         setTargaLoading(true);
         try {
+            // 1) interno: polizze esistenti con la stessa targa
+            const ri = await api.get("/polizze/veicolo-by-targa", { params: { targa: tg } });
+            if (ri.data?.trovata) {
+                const v = ri.data;
+                setSost((p) => ({
+                    ...p, targa: tg,
+                    veicolo_marca: v.veicolo_marca || p.veicolo_marca,
+                    veicolo_modello: v.veicolo_modello || p.veicolo_modello,
+                    veicolo_tipo: v.veicolo_tipo ?? p.veicolo_tipo,
+                    veicolo_alimentazione: v.veicolo_alimentazione ?? p.veicolo_alimentazione,
+                    veicolo_cilindrata: v.veicolo_cilindrata ?? p.veicolo_cilindrata,
+                    veicolo_kw: v.veicolo_kw ?? p.veicolo_kw,
+                    veicolo_cv_fiscali: v.veicolo_cv_fiscali ?? p.veicolo_cv_fiscali,
+                    veicolo_uso: v.veicolo_uso ?? p.veicolo_uso,
+                    veicolo_posti: v.veicolo_posti ?? p.veicolo_posti,
+                    veicolo_data_immatricolazione: v.veicolo_data_immatricolazione ?? p.veicolo_data_immatricolazione,
+                }));
+                toast.success(`Veicolo dal portafoglio: ${v.veicolo_marca || "?"} ${v.veicolo_modello || ""} (${v.n_polizze} polizz${v.n_polizze === 1 ? "a" : "e"})`);
+                return;
+            }
+            // 2) fallback: registro esterno OpenAPI
             const r = await api.get(`/openapi-it/automotive-by-targa/${encodeURIComponent(tg)}`);
             const v = r.data?.veicolo || {};
             setSost((p) => ({
@@ -188,7 +210,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             }));
             toast.success(`Veicolo trovato: ${v.marca || "?"} ${v.modello || ""}`);
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Veicolo non trovato per questa targa");
+            if (!auto) toast.error(e.response?.data?.detail || "Veicolo non trovato per questa targa");
         } finally { setTargaLoading(false); }
     };
 
@@ -491,6 +513,10 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
                                         <div className="flex gap-1">
                                             <Input value={sost.targa}
                                                 onChange={(e) => setSost((p) => ({ ...p, targa: e.target.value.toUpperCase() }))}
+                                                onBlur={(e) => {
+                                                    const tg = (e.target.value || "").trim().toUpperCase().replace(/\s/g, "");
+                                                    if (tg.length >= 5 && tg !== (polizza.targa || "").toUpperCase()) cercaTarga(true);
+                                                }}
                                                 placeholder="es. AB123CD"
                                                 disabled={isLocked} data-testid="sost-targa" />
                                             <Button type="button" size="sm" variant="outline" className="h-9 px-2 shrink-0"

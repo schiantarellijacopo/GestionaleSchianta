@@ -2001,3 +2001,16 @@ UI: Anagrafiche.jsx bottone 'Unisci doppioni' (data-testid anagrafica-unisci-dop
 Test read-only produzione: trovato 1 doppione reale per P.IVA 82002990149 (PARROCCHIA S.MARIA
 MADDALENA, 38 polizze vs 0). CORREZIONE: il 'duplicato' BOTTONI GLORIA segnalato prima era un
 artefatto del mio test (poi eliminato), NON un doppione reale.
+
+## [2026-06-29] Sostituzione con cambio targa → dati veicolo aggiornati al nuovo mezzo
+- Backend /api/polizze/{id}/sostituisci: se la targa CAMBIA, NON eredita più i dati del
+  vecchio veicolo; se la nuova targa esiste già in portafoglio riporta i suoi dati veicolo
+  (sort updated_at desc), altrimenti vuoto; i campi del body hanno priorità. Dopo la
+  creazione chiama _sync_veicolo_targa(nuova targa). Storno in sostituzione corretto: solo
+  titoli da_incassare NON coperti (tolti insoluto/sospeso).
+- Frontend AzioniPolizzaTab.jsx (dialog SOSTITUISCI): cercaTarga ora cerca PRIMA nel
+  portafoglio interno (/polizze/veicolo-by-targa) e popola i campi veicolo del mezzo
+  selezionato, poi fallback al registro esterno OpenAPI. Lookup automatico anche onBlur del
+  campo targa (se cambiata). 
+- Testato E2E: targa cambiata HE..WW(VW PASSAT) → FB..CV esistente(FORD FIESTA); la nuova
+  polizza riporta FORD FIESTA kw70 (NON VW PASSAT) anche senza dati veicolo nel body.
