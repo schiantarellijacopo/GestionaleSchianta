@@ -6334,14 +6334,6 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
         )
         await db.movimenti.delete_many({"id": {"$in": cop_movs_merge}})
 
-    # INCASSO IN DIREZIONE su titolo COPERTO: il pagamento in direzione RI-registra
-    # l'intera entrata/provvigioni/saldo del premio (riga incasso_premio_direzione col
-    # LORDO). La precedente riga di COPERTURA diventerebbe un DOPPIONE (Totale e Sospesi
-    # contati due volte). Assorbila nel movimento d'incasso: eliminando l'incasso in
-    # direzione il titolo tornerà a coperto/sospeso e la copertura verrà ripristinata.
-    if is_direzione and bool(titolo.get("titolo_coperto")):
-        await _assorbi_copertura_in_direzione(tid, mov_in.id)
-
     # aggiorna anagrafica con ultimo mezzo di pagamento usato
     if pol and pol.get("contraente_id"):
         await db.anagrafiche.update_one(
@@ -8712,31 +8704,6 @@ async def crea_giroconto(body: dict, user=Depends(require_user("admin", "collabo
     }
 
 
-async def _assorbi_copertura_in_direzione(tid: str, mov_in_id: str) -> int:
-    """Un incasso IN DIREZIONE ri-registra l'intero premio (entrata+provv+saldo).
-    Se il titolo era COPERTO, la riga di COPERTURA diventa un doppione (Totale/Sospesi
-    contati due volte). Assorbe la copertura nel movimento d'incasso (snapshot su
-    coperture_assorbite + delete, solo giornate aperte) così il brogliaccio mostra UNA
-    sola riga; eliminando l'incasso in direzione il titolo tornerà a coperto/sospeso.
-    Ritorna il numero di coperture assorbite."""
-    cop_ids = []
-    cop_docs = []
-    async for _cm in db.movimenti.find(
-        {"titolo_id": tid, "categoria": "copertura_titolo"}, {"_id": 0},
-    ):
-        _ch = await db.chiusure_giorno.find_one(
-            {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
-        if _ch and not _ch.get("riaperta_at"):
-            continue  # giornata chiusa: immutabile
-        cop_ids.append(_cm["id"])
-        cop_docs.append(_cm)
-    if cop_ids:
-        await db.movimenti.update_one(
-            {"id": mov_in_id}, {"$set": {"coperture_assorbite": cop_docs}})
-        await db.movimenti.delete_many({"id": {"$in": cop_ids}})
-    return len(cop_ids)
-
-
 @api.put("/contabilita/movimenti/{mid}")
 async def update_movimento(mid: str, body: dict, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     cur = await db.movimenti.find_one({"id": mid}, {"_id": 0})
@@ -8769,27 +8736,6 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
     res = await db.movimenti.update_one({"id": mid}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(404, "Movimento non trovato")
-    # Conversione incasso -> DIREZIONE su titolo COPERTO: assorbi la copertura per
-    # evitare il doppio conteggio (Totale/Sospesi duplicati). Conversione inversa
-    # (direzione -> normale): ripristina le eventuali coperture assorbite.
-    _tid = cur.get("titolo_id")
-    if _tid and body.get("is_direzione") is True and not cur.get("coperture_assorbite"):
-        _t = await db.titoli.find_one({"id": _tid}, {"_id": 0, "titolo_coperto": 1})
-        if _t and _t.get("titolo_coperto"):
-            await _assorbi_copertura_in_direzione(_tid, mid)
-    elif body.get("is_direzione") is False and cur.get("coperture_assorbite"):
-        for _c in cur.get("coperture_assorbite") or []:
-            _doc = {k: v for k, v in _c.items() if k != "_id"}
-            _doc["chiusura_id"] = None
-            _doc["updated_at"] = _now_iso()
-            await db.movimenti.replace_one({"id": _doc.get("id")}, _doc, upsert=True)
-        # La copertura è di nuovo presente (registra entrata/provv/sospeso): l'incasso
-        # deve tornare "incasso_coperto" (Totale 0, sposta solo sospeso->banca) per non
-        # duplicare il premio. Azzera anche provvigioni/sconto come un incasso coperto.
-        await db.movimenti.update_one(
-            {"id": mid},
-            {"$set": {"categoria": "incasso_coperto", "provvigioni": 0.0, "quota_sconto": 0.0},
-             "$unset": {"coperture_assorbite": ""}})
     # Propaga data e metodo di pagamento all'entità collegata (titolo/ritenuta/PNT/rappel)
     # nella sua sezione dedicata. Solo a giornata APERTA (garantito dal blocco qui sopra).
     azione_prop = await _propaga_modifica_movimento(cur, body)

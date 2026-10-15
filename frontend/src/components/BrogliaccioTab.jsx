@@ -454,14 +454,16 @@ export default function BrogliaccioTab({ refreshKey }) {
                                     <td className="text-center px-2 whitespace-nowrap">
                                         {!b.chiusa && (
                                             <>
-                                                <button
-                                                    onClick={() => setEditMov(r)}
-                                                    className="inline-flex items-center justify-center h-6 w-6 rounded border border-slate-200 hover:bg-sky-50 hover:border-sky-300 mr-1"
-                                                    title="Modifica movimento"
-                                                    data-testid={`brog-edit-${r.id}`}
-                                                >
-                                                    <Pencil size={11} className="text-slate-600" />
-                                                </button>
+                                                {r.categoria !== "copertura_titolo" && (
+                                                    <button
+                                                        onClick={() => setEditMov(r)}
+                                                        className="inline-flex items-center justify-center h-6 w-6 rounded border border-slate-200 hover:bg-sky-50 hover:border-sky-300 mr-1"
+                                                        title="Modifica movimento"
+                                                        data-testid={`brog-edit-${r.id}`}
+                                                    >
+                                                        <Pencil size={11} className="text-slate-600" />
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => elimina(r)}
                                                     className="inline-flex items-center justify-center h-6 w-6 rounded border border-rose-200 hover:bg-rose-50 text-rose-600"

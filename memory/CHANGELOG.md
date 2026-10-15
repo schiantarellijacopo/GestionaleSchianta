@@ -656,3 +656,9 @@ Admin: `admin@assicura.it / Admin123!`
 - FIX (backend/server.py): nuovo helper _assorbi_copertura_in_direzione(tid, mov_in_id) che assorbe la copertura nel movimento d'incasso (snapshot su coperture_assorbite + delete, solo giornate aperte). Chiamato sia in incassa_titolo (is_direzione & titolo coperto) sia in update_movimento (conversione a direzione). Conversione INVERSA (direzione->normale) ripristina la copertura e riporta l'incasso a incasso_coperto (Totale 0).
 - VERIFICATO preview: incasso direzione su coperto -> 1 sola riga; elimina incasso dir -> torna coperto/sospeso (copertura ripristinata); edit incasso->direzione -> 1 riga; edit direzione->normale -> copertura+incasso_coperto (no doppione); incasso NORMALE su coperto invariato (2 righe corrette). +54 righe, solo server.py.
 - DA DEPLOYARE: Save to GitHub -> Railway. NB: le righe doppie GIA' presenti in produzione non vengono ripulite dal fix; vanno corrette eliminando l'incasso in direzione (il titolo torna coperto) e re-registrandolo (ora assorbe la copertura).
+
+## 2026-06 (2) — REVERT assorbimento direzione + nuova regola UI copertura
+- REVERT: rimossa la correzione "assorbimento copertura in direzione" (helper _assorbi_copertura_in_direzione + hook in incassa_titolo/update_movimento). Richiesta utente: "non farla perché non va bene". server.py riportato allo stato precedente.
+- NUOVA REGOLA (frontend/src/components/BrogliaccioTab.jsx): le righe di SOLA COPERTURA (categoria=copertura_titolo) NON mostrano più il tasto Modifica (matita) in Prima Nota; resta solo il tasto Cancella (cestino). Condizione: r.categoria !== 'copertura_titolo'. Le altre categorie mantengono il tasto Modifica.
+- VERIFICATO preview via screenshot + DOM: riga copertura -> edit buttons=0, delete buttons=1.
+- DA DEPLOYARE: Save to GitHub -> Railway.
