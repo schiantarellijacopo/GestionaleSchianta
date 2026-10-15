@@ -1019,7 +1019,8 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
                     if doc.get("sostituisce_polizza"):
                         sostituisce_refs.add(doc["sostituisce_polizza"])
                     if doc.get("targa"):
-                        targhe_sync.add(str(doc["targa"]).strip().upper())
+                        targhe_sync.add((str(doc["targa"]).strip().upper(),
+                                         (doc.get("veicolo_tipo") or "").strip().upper()))
                     if rec.get("data_annullamento"):
                         doc["stato"] = "annullata"
                     elif rec.get("data_sospensione"):
@@ -1312,8 +1313,8 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         try:
             from server import _sync_veicolo_targa
             pol_sync = 0
-            for tg in targhe_sync:
-                pol_sync += await _sync_veicolo_targa(user, tg)
+            for tg, tp in targhe_sync:
+                pol_sync += await _sync_veicolo_targa(user, tg, tp)
             if pol_sync:
                 stats["veicoli_allineati"] = pol_sync
         except Exception:

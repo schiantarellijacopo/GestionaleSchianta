@@ -2025,3 +2025,17 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
   FB828CV): risolto dai fix precedenti (lookup interno /polizze/veicolo-by-targa nel dialog
   SOSTITUISCI + backend che per targa cambiata prende i dati della targa NUOVA esistente).
   Richiede deploy su Railway per avere effetto in produzione.
+
+## [2026-06-29] Targa + TIPO veicolo (ciclomotore vs rimorchio) + errori creazione chiari
+- Regola utente: stessa targa ma TIPO diverso = veicolo DIVERSO → non sincronizzare, non
+  sovrascrivere, non segnalare come esistente.
+- _sync_veicolo_targa(user, targa, tipo): ora sincronizza solo nel gruppo stessa targa+tipo
+  (None/"" è un gruppo a sé). Chiamanti aggiornati: create_polizza, update_polizza,
+  sostituisci_polizza (passano veicolo_tipo); import massivo raccoglie coppie (targa, tipo).
+- /polizze/veicolo-by-targa?targa=&tipo=: se la targa esiste solo con tipo diverso →
+  {trovata:False, tipo_diverso:True, tipi_esistenti:[...]}. Frontend (Polizze.jsx lookupTarga
+  e AzioniPolizzaTab cercaTarga) passano il tipo e mostrano un avviso senza copiare i dati.
+- sostituisci_polizza: il pull della targa nuova filtra per veicolo_tipo se presente nel body.
+- Testato: sync ciclomotore NON tocca il rimorchio; lookup tipo diverso → tipo_diverso.
+- create_polizza: le ValidationError di Pydantic ora tornano HTTP 400 con il campo/motivo
+  esatto (prima era 500 generico 'Errore'). Fix frazionamento maiuscolo già applicato.

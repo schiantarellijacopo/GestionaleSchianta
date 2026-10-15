@@ -667,8 +667,11 @@ function NuovaPolizzaDialog({ onClose }) {
                 }
             } catch { /* not found, fallback */ }
             try {
-                const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t } });
-                if (r.data && r.data.trovata) {
+                const r = await api.get("/polizze/veicolo-by-targa", { params: { targa: t, tipo: f.veicolo_tipo || "" } });
+                if (r.data?.tipo_diverso) {
+                    toast.info(`Targa ${t} già presente ma di tipo diverso (${(r.data.tipi_esistenti || []).join(", ")}): è un altro veicolo, dati non copiati.`);
+                    setF((prev) => ({ ...prev, targa: t }));
+                } else if (r.data && r.data.trovata) {
                     setF((prev) => ({
                         ...prev, targa: t,
                         veicolo_marca: prev.veicolo_marca || r.data.veicolo_marca || "",

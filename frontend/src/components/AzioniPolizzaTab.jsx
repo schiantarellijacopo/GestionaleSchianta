@@ -175,8 +175,13 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
         if (tg.length < 5) { if (!auto) toast.error("Inserisci una targa valida"); return; }
         setTargaLoading(true);
         try {
-            // 1) interno: polizze esistenti con la stessa targa
-            const ri = await api.get("/polizze/veicolo-by-targa", { params: { targa: tg } });
+            // 1) interno: polizze esistenti con la stessa targa E stesso tipo
+            const ri = await api.get("/polizze/veicolo-by-targa", { params: { targa: tg, tipo: sost.veicolo_tipo || polizza.veicolo_tipo || "" } });
+            if (ri.data?.tipo_diverso) {
+                toast.info(`Targa ${tg} già presente ma di tipo diverso (${(ri.data.tipi_esistenti || []).join(", ")}): è un altro veicolo, dati non copiati.`);
+                setSost((p) => ({ ...p, targa: tg }));
+                return;
+            }
             if (ri.data?.trovata) {
                 const v = ri.data;
                 setSost((p) => ({

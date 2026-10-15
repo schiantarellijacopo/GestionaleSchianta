@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Literal
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from starlette.middleware.cors import CORSMiddleware
 
 from database import client, db
@@ -3610,21 +3610,32 @@ async def ricalcola_scadute(user=Depends(require_user("admin"))):
 @api.get("/polizze/veicolo-by-targa")
 async def veicolo_by_targa(
     targa: str,
+    tipo: str | None = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Cerca l'ultima polizza con la stessa targa e restituisce i dati veicolo
-    per auto-popolare il form 'Nuova polizza'. Restituisce {trovata: bool, ...campi}.
+    """Cerca l'ultima polizza con la stessa targa (e stesso tipo veicolo, se indicato)
+    e restituisce i dati veicolo per auto-popolare i form. Una stessa targa su tipi
+    diversi (es. ciclomotore vs rimorchio) è un veicolo DIVERSO: in quel caso restituisce
+    {trovata: False, tipo_diverso: True} per non sovrascrivere dati del veicolo sbagliato.
     """
     t = (targa or "").strip().upper().replace(" ", "")
     if not t or len(t) < 4:
         return {"trovata": False}
-    # Trova polizze con targa che combacia (case-insensitive su forma normalizzata)
     polizze = await db.polizze.find(
         {"targa": {"$regex": f"^{t}$", "$options": "i"}},
         {"_id": 0},
     ).sort("created_at", -1).to_list(20)
     if not polizze:
         return {"trovata": False}
+    tp = (tipo or "").strip().upper()
+    if tp:
+        same = [p for p in polizze if (p.get("veicolo_tipo") or "").strip().upper() == tp]
+        if not same:
+            # la targa esiste ma con un TIPO diverso → veicolo differente
+            return {"trovata": False, "tipo_diverso": True,
+                    "tipi_esistenti": sorted({(p.get("veicolo_tipo") or "").strip().upper()
+                                              for p in polizze if p.get("veicolo_tipo")})}
+        polizze = same
     last = polizze[0]
     return {
         "trovata": True,
@@ -3939,11 +3950,16 @@ def _veicolo_val_meaningful(field: str, v) -> bool:
     return str(v).strip() != ""
 
 
-async def _sync_veicolo_targa(user: dict, targa: Optional[str]) -> int:
-    """Allinea i dati veicolo/contratto su TUTTE le polizze (non annullate/sostituite)
-    con la stessa targa del tenant. Per ogni campo vince il valore della polizza
-    aggiornata più di recente che lo valorizza (ultima info vince). Ritorna il n. di
-    polizze modificate."""
+def _norm_tipo(v: Optional[str]) -> str:
+    return (v or "").strip().upper()
+
+
+async def _sync_veicolo_targa(user: dict, targa: Optional[str], tipo: Optional[str] = None) -> int:
+    """Allinea i dati veicolo/contratto tra le polizze (non annullate/sostituite) con la
+    STESSA targa E lo STESSO tipo veicolo del tenant: una stessa targa su tipi diversi
+    (es. ciclomotore vs rimorchio) è un veicolo DIVERSO e non va sincronizzata.
+    Per ogni campo vince il valore della polizza aggiornata più di recente che lo
+    valorizza (ultima info vince). Ritorna il n. di polizze modificate."""
     tg = (targa or "").strip().upper()
     if len(tg) < 4:
         return 0
@@ -3952,8 +3968,11 @@ async def _sync_veicolo_targa(user: dict, targa: Optional[str]) -> int:
         "stato": {"$nin": ["annullata", "sostituita"]},
     })
     pols = await db.polizze.find(flt, {"_id": 0}).sort("updated_at", -1).to_list(500)
+    # Restringi al gruppo con lo STESSO tipo veicolo (None/"" è un gruppo a sé).
+    tp = _norm_tipo(tipo)
+    pols = [p for p in pols if _norm_tipo(p.get("veicolo_tipo")) == tp]
     if len(pols) < 2:
-        return 0  # niente da propagare se c'è una sola polizza con quella targa
+        return 0  # niente da propagare se c'è una sola polizza con quella targa+tipo
     merged: dict = {}
     for field in _VEICOLO_SYNC_FIELDS:
         for p in pols:  # già ordinate per updated_at desc → la più recente vince
@@ -4099,7 +4118,12 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             body["prossima_quietanza"] = _add_months(_eff, _mesi_fraz)
         if not body.get("scadenza_copertura"):
             body["scadenza_copertura"] = body["prossima_quietanza"]
-    obj = Polizza(**body)
+    try:
+        obj = Polizza(**body)
+    except ValidationError as _ve:
+        _errs = "; ".join(
+            f"{'.'.join(str(x) for x in e.get('loc', []))}: {e.get('msg')}" for e in _ve.errors())
+        raise HTTPException(400, f"Dati polizza non validi — {_errs}")
     await db.polizze.insert_one(obj.model_dump())
     # Primo titolo automatico con gli stessi dati della polizza (se non già creato altrove)
     if obj.effetto:
@@ -4135,7 +4159,7 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
     # Allinea i dati veicolo tra le polizze con la stessa targa (ultima info vince).
     if getattr(obj, "targa", None):
         try:
-            await _sync_veicolo_targa(user, obj.targa)
+            await _sync_veicolo_targa(user, obj.targa, getattr(obj, 'veicolo_tipo', None))
         except Exception as _e:
             logger.warning("Sync veicolo targa fallita per %s: %s", obj.numero_polizza, _e)
     await log_attivita(user, "create", "polizza", obj.id, f"Polizza {obj.numero_polizza}")
@@ -4171,7 +4195,7 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     # con la stessa targa (ultima info vince).
     if doc and doc.get("targa") and (set(body) & (set(_VEICOLO_SYNC_FIELDS) | {"targa"})):
         try:
-            await _sync_veicolo_targa(user, doc.get("targa"))
+            await _sync_veicolo_targa(user, doc.get("targa"), doc.get("veicolo_tipo"))
             doc = await db.polizze.find_one({"id": pid}, {"_id": 0})
         except Exception as _e:
             logger.warning("Sync veicolo targa fallita per %s: %s", pid, _e)
@@ -8469,7 +8493,8 @@ async def sostituisci_polizza(
         # (riempito dagli eventuali override del body). I campi del body hanno priorità.
         _esist = await db.polizze.find_one(
             {"targa": {"$regex": f"^{re.escape(_new_tg)}$", "$options": "i"},
-             "stato": {"$nin": ["annullata", "sostituita"]}},
+             "stato": {"$nin": ["annullata", "sostituita"]},
+             **({"veicolo_tipo": body.get("veicolo_tipo")} if body.get("veicolo_tipo") else {})},
             {"_id": 0}, sort=[("updated_at", -1)])
         base_veicolo = {k: _esist.get(k) for k in _vkeys if _esist and _esist.get(k) is not None}
     else:
@@ -8504,7 +8529,7 @@ async def sostituisci_polizza(
     # Allinea i dati veicolo tra le polizze con la stessa targa (ultima info vince).
     if getattr(obj, "targa", None):
         try:
-            await _sync_veicolo_targa(user, obj.targa)
+            await _sync_veicolo_targa(user, obj.targa, getattr(obj, 'veicolo_tipo', None))
         except Exception as _e:
             logger.warning("Sync veicolo targa (sostituzione) fallita: %s", _e)
     # marca vecchia
