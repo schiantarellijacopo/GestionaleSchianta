@@ -1288,7 +1288,9 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         await _flush()
 
     await _flush()
-    # STORNO automatico dei titoli in arretrato delle polizze SOSTITUITE in questo import.
+    # STORNO automatico SOLO dei titoli arretrati (da_incassare) e NON coperti delle
+    # polizze SOSTITUITE in questo import. Regola: coperto/sospeso/incassato sono in
+    # Prima Nota e NON vanno MAI toccati da nessuna importazione.
     titoli_stornati_sost = 0
     for ref in sostituisce_refs:
         old_id = await _polizza_id(ref)
@@ -1298,7 +1300,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         if not old_id:
             continue
         _r = await db.titoli.update_many(
-            {"polizza_id": old_id, "stato": {"$in": ["da_incassare", "insoluto", "sospeso"]}},
+            {"polizza_id": old_id, "stato": "da_incassare", "titolo_coperto": {"$ne": True}},
             {"$set": {"stato": "stornato", "nota": "Stornato per sostituzione (import)",
                       "updated_at": now_iso}},
         )

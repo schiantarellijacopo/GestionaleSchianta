@@ -771,8 +771,10 @@ function NuovaPolizzaDialog({ onClose }) {
             let msg = `Polizza riconosciuta: ${d.numero_polizza || "?"}`;
             if (d.polizza_esistente) msg += ` · ⚠ Polizza GIÀ presente (stato: ${d.polizza_esistente.stato || "?"})`;
             if (!compMatch && d.compagnia) msg += ` · ⚠ Compagnia "${d.compagnia}" da abbinare`;
-            if (anaEsist) msg += ` · 👤 Contraente collegato: ${labelAna(anaEsist)}`;
-            else if (cfContr) msg += ` · ⚠ Contraente NUOVO (${cfContr}) da creare`;
+            if (anaEsist) msg += ` · 👤 Contraente collegato: ${labelAna(anaEsist)}${d.anagrafica_match_fuzzy ? " (CF corretto automaticamente)" : ""}`;
+            else if (cfContr) msg += d.cf_ocr_valido === false
+                ? ` · ⚠ Contraente NUOVO (CF ${cfContr} forse letto male, verificalo)`
+                : ` · ⚠ Contraente NUOVO (${cfContr}) da creare`;
             if (d.sostituisce_polizza) msg += ` · 🔗 Sostituisce la n° ${d.sostituisce_polizza}`;
             if (d.polizza_esistente) toast.warning(msg); else toast.success(msg);
         } catch (e) {

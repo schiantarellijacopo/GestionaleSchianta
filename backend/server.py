@@ -3172,22 +3172,14 @@ async def ocr_polizza_endpoint(
 
     # Verifica se CONTRAENTE (per CF/P.IVA) e POLIZZA (per numero) esistono già nel
     # portafoglio dell'utente, così il frontend può collegarli invece di duplicarli.
+    # Il CF viene normalizzato/validato e, se l'OCR è impreciso, si prova un match fuzzy.
     _contr = data.get("contraente") or {}
-    _cf = (_contr.get("codice_fiscale") or "").strip().upper() or None
+    _cf = (_contr.get("codice_fiscale") or "").strip() or None
     _piva = (_contr.get("partita_iva") or "").strip() or None
-    _ana_or = []
-    if _cf:
-        _ana_or.append({"codice_fiscale": _cf})
-    if _piva:
-        _ana_or.append({"partita_iva": _piva})
-    if _ana_or:
-        _ana_flt = await visibility_filter(user, {"$or": _ana_or})
-        data["anagrafica_esistente"] = await db.anagrafiche.find_one(
-            _ana_flt, {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome_nome": 1,
-                       "nome": 1, "cognome": 1, "codice_fiscale": 1, "partita_iva": 1,
-                       "comune": 1, "collaboratore_id": 1})
-    else:
-        data["anagrafica_esistente"] = None
+    _ana_match, _ana_fuzzy = await _match_anagrafica_cf_piva(user, _cf, _piva)
+    data["anagrafica_esistente"] = _ana_match
+    data["anagrafica_match_fuzzy"] = _ana_fuzzy
+    data["cf_ocr_valido"] = _cf_valido(_cf) if _cf else None
     _num = (data.get("numero_polizza") or "").strip()
     if _num:
         _pol_flt = await visibility_filter(user, {"numero_polizza": _num})
@@ -3974,6 +3966,81 @@ async def _sync_veicolo_targa(user: dict, targa: Optional[str]) -> int:
     ids = [p["id"] for p in pols]
     res = await db.polizze.update_many({"id": {"$in": ids}}, {"$set": merged})
     return res.modified_count
+
+
+# ---- Normalizzazione / validazione Codice Fiscale (riduce i mismatch OCR) ----
+_CF_ODD = {"0": 1, "1": 0, "2": 5, "3": 7, "4": 9, "5": 13, "6": 15, "7": 17, "8": 19,
+           "9": 21, "A": 1, "B": 0, "C": 5, "D": 7, "E": 9, "F": 13, "G": 15, "H": 17,
+           "I": 19, "J": 21, "K": 2, "L": 4, "M": 18, "N": 20, "O": 11, "P": 3, "Q": 6,
+           "R": 8, "S": 12, "T": 14, "U": 16, "V": 10, "W": 22, "X": 25, "Y": 24, "Z": 23}
+_CF_EVEN = {c: (int(c) if c.isdigit() else ord(c) - 65) for c in
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+_CF_REM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _normalize_cf(s: Optional[str]) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+
+def _cf_valido(cf: Optional[str]) -> bool:
+    """Valida un CF persona fisica (16 char) con il carattere di controllo."""
+    cf = _normalize_cf(cf)
+    if len(cf) != 16:
+        return False
+    try:
+        tot = sum((_CF_ODD if i % 2 == 0 else _CF_EVEN)[ch] for i, ch in enumerate(cf[:15]))
+    except KeyError:
+        return False
+    return _CF_REM[tot % 26] == cf[15]
+
+
+def _lev(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a or not b:
+        return max(len(a), len(b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+async def _match_anagrafica_cf_piva(user: dict, cf: Optional[str], piva: Optional[str]):
+    """Trova l'anagrafica per CF/P.IVA normalizzati. Se l'OCR del CF è impreciso
+    (es. una cifra in più) ripiega su un match fuzzy: stesso prefisso di 6 caratteri
+    e distanza di Levenshtein <= 1 (solo se il candidato è UNICO)."""
+    proj = {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome_nome": 1, "nome": 1,
+            "cognome": 1, "codice_fiscale": 1, "partita_iva": 1, "comune": 1,
+            "collaboratore_id": 1}
+    cf_n = _normalize_cf(cf) if cf else ""
+    piva_n = re.sub(r"[^0-9]", "", piva or "") or None
+    ors = []
+    if cf_n:
+        ors.append({"codice_fiscale": {"$regex": f"^{re.escape(cf_n)}$", "$options": "i"}})
+    if piva_n:
+        ors.append({"partita_iva": piva_n})
+    if ors:
+        doc = await db.anagrafiche.find_one(await visibility_filter(user, {"$or": ors}), proj)
+        if doc:
+            return doc, False
+    # Fuzzy fallback sul CF (OCR impreciso)
+    if cf_n and len(cf_n) >= 15:
+        flt = await visibility_filter(user, {
+            "codice_fiscale": {"$regex": f"^{re.escape(cf_n[:6])}", "$options": "i"}})
+        cands = await db.anagrafiche.find(flt, proj).to_list(50)
+        best = None
+        for c in cands:
+            if _lev(_normalize_cf(c.get("codice_fiscale")), cf_n) <= 1:
+                if best is not None:
+                    return None, False  # ambiguo → non scegliere
+                best = c
+        if best:
+            return best, True
+    return None, False
+
 
 
 
