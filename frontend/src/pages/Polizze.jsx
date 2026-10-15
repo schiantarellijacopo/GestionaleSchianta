@@ -743,7 +743,7 @@ function NuovaPolizzaDialog({ onClose }) {
                 ramo, prodotto: "",
                 effetto: d.data_decorrenza || p.effetto,
                 scadenza: d.data_scadenza || p.scadenza,
-                frazionamento: d.frazionamento || p.frazionamento,
+                frazionamento: (d.frazionamento || "").toLowerCase() || p.frazionamento,
                 // Premi: netto / imposte(tasse)+diritti / SSN separato → lordo.
                 // Provvigioni NON importate (inserite manualmente). Identico al flusso email.
                 premio_netto: d.premio_netto_totale ?? p.premio_netto,

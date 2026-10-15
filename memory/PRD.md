@@ -2014,3 +2014,14 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
   campo targa (se cambiata). 
 - Testato E2E: targa cambiata HE..WW(VW PASSAT) → FB..CV esistente(FORD FIESTA); la nuova
   polizza riporta FORD FIESTA kw70 (NON VW PASSAT) anche senza dati veicolo nel body.
+
+## [2026-06-29] FIX BLOCCANTE: 500 creazione polizza (frazionamento) + veicolo sostituzione
+- BUG: POST /api/polizze restituiva 500 (manuale e OCR) perché il modello Polizza accetta
+  frazionamento SOLO minuscolo (Literal: annuale/semestrale/...) ma form/OCR inviavano
+  'Annuale'. FIX: create_polizza normalizza body['frazionamento'] a minuscolo valido (default
+  'annuale') prima di Polizza(**body). Frontend onOcrPolizza: frazionamento .toLowerCase().
+  Testato: create con 'Annuale' → 201 (salvato 'annuale').
+- Sostituzione con cambio targa che mostrava il veicolo SBAGLIATO (VW invece del Mercedes di
+  FB828CV): risolto dai fix precedenti (lookup interno /polizze/veicolo-by-targa nel dialog
+  SOSTITUISCI + backend che per targa cambiata prende i dati della targa NUOVA esistente).
+  Richiede deploy su Railway per avere effetto in produzione.

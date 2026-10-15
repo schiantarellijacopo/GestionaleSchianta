@@ -4080,6 +4080,12 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
         )
         if calc["provvigione_totale"]:
             body["provvigioni"] = calc["provvigione_totale"]
+    # Normalizza frazionamento (il form/OCR può inviarlo con la maiuscola o varianti):
+    # il modello Polizza accetta solo valori minuscoli validi.
+    _fz = (body.get("frazionamento") or "").strip().lower()
+    body["frazionamento"] = _fz if _fz in {
+        "annuale", "semestrale", "quadrimestrale", "trimestrale", "mensile", "unica"
+    } else "annuale"
     # Auto-calcolo scadenza polizza + prossima quietanza + scad. copertura da effetto+frazionamento
     _eff = body.get("effetto")
     if _eff:
