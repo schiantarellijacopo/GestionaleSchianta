@@ -1992,3 +1992,12 @@ ignorate.
 - CF OCR: aggiunti in server.py _normalize_cf, _cf_valido (checksum carattere di controllo), _lev (Levenshtein) e _match_anagrafica_cf_piva. L'endpoint /api/utility/ocr-polizza ora: normalizza CF/P.IVA, cerca match esatto, e se l'OCR del CF è impreciso (es. una cifra in più) ripiega su match FUZZY (stesso prefisso 6 char + distanza <=1, SOLO se candidato UNICO; ambiguo → non sceglie). Restituisce anche anagrafica_match_fuzzy e cf_ocr_valido. Frontend (Polizze.jsx) mostra "CF corretto automaticamente" o avviso CF forse letto male. Testato: match esatto, fuzzy (1 char), no-match, ambiguo (duplicato → None).
 - Import Omnia/massivo: lo storno in sostituzione ora riguarda SOLO titoli da_incassare e NON coperti (titolo_coperto != True). Coperto/sospeso/incassato NON vengono mai toccati da nessuna importazione (regola utente). Rimossi 'insoluto' e 'sospeso' dal filtro.
 - NOTA dati: rilevato un DUPLICATO anagrafica BOTTONI GLORIA (stesso CF BTTGLR94A71I829N su 2 record) nel dataset produzione-mirror → il match fuzzy correttamente non sceglie quando ambiguo.
+
+## [2026-06-29] Deduplica anagrafiche — VERIFICATA (già esistente)
+Strumento già presente e funzionante: GET /api/anagrafiche-duplicati (gruppi per CF/P.IVA,
+case/spazi normalizzati) + POST /api/anagrafiche-unisci (riassegna polizze/titoli/sinistri/
+allegati/diario/users/veicoli/relazioni al principale, completa campi vuoti, elimina doppioni).
+UI: Anagrafiche.jsx bottone 'Unisci doppioni' (data-testid anagrafica-unisci-doppioni-btn).
+Test read-only produzione: trovato 1 doppione reale per P.IVA 82002990149 (PARROCCHIA S.MARIA
+MADDALENA, 38 polizze vs 0). CORREZIONE: il 'duplicato' BOTTONI GLORIA segnalato prima era un
+artefatto del mio test (poi eliminato), NON un doppione reale.
