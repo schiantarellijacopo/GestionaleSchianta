@@ -18403,7 +18403,7 @@ async def startup():
     # di Railway (la chiamata a Evolution può essere lenta/irraggiungibile).
     try:
         import asyncio as _aio_wh
-        from routes.whatsapp_evo import auto_repair_webhooks
+        from routes.whatsapp_evo import auto_repair_webhooks, backfill_message_tenants
 
         async def _delayed_wa_webhook_repair():
             await _aio_wh.sleep(20)
@@ -18413,6 +18413,13 @@ async def startup():
                     logger.info("WhatsApp webhook auto-ripristinati: %s", res_wh["updated"])
             except Exception as e:  # noqa: BLE001
                 logger.warning("Auto-repair webhook WhatsApp fallito (non bloccante): %s", e)
+            # Backfill tenant sui messaggi ricevuti prima del fix (DB-only, idempotente)
+            try:
+                res_bf = await backfill_message_tenants()
+                if res_bf.get("updated"):
+                    logger.info("WhatsApp backfill tenant: %s messaggi resi visibili", res_bf["updated"])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Backfill tenant WhatsApp fallito (non bloccante): %s", e)
 
         _aio_wh.create_task(_delayed_wa_webhook_repair())
     except Exception as e:

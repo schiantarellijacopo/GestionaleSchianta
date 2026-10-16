@@ -792,3 +792,4 @@ Admin: `admin@assicura.it / Admin123!`
 - Webhook agenzia-03425 ripristinato sul dominio privato produzione.
 - DA DEPLOYARE: Save to GitHub -> Railway. Dopo deploy i NUOVI messaggi in entrata appaiono automaticamente nelle chat.
 - RESIDUO: i messaggi in entrata ricevuti PRIMA del fix sono salvati senza agenzia_tenant_id (invisibili). Serve backfill opzionale (assegnare tenant dall'istanza) -> da confermare con l'utente (modifica dati produzione).
+- BACKFILL (Opzione 1 scelta dall'utente): nuova funzione backfill_message_tenants() in whatsapp_evo.py — per ogni istanza con agenzia_tenant_id assegna quel tenant ai messaggi dell'istanza privi del campo (idempotente, DB-only). Collegata allo startup in background dopo l'auto-repair webhook (server.py _delayed_wa_webhook_repair). Test locale: 2 messaggi senza tenant corretti, 1 già-ok intatto. Dopo deploy "Prova test 3" e gli altri messaggi pre-fix tornano visibili.

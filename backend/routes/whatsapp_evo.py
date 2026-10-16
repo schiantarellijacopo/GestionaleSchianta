@@ -460,6 +460,39 @@ async def auto_repair_webhooks() -> dict:
     return out
 
 
+async def backfill_message_tenants() -> dict:
+    """Assegna `agenzia_tenant_id` ai messaggi WhatsApp salvati SENZA tenant
+    (ricevuti via webhook prima del fix di tenant isolation), ricavandolo
+    dall'istanza. Idempotente: aggiorna solo i doc privi del campo, così i
+    messaggi 'persi' tornano visibili nelle chat. DB-only, nessuna chiamata
+    esterna → sicuro in ogni ambiente."""
+    out = {"ok": True, "updated": 0, "instances": 0}
+    try:
+        instances = await db.whatsapp_instances.find(
+            {"agenzia_tenant_id": {"$exists": True, "$ne": None}},
+            {"_id": 0, "instance_name": 1, "agenzia_tenant_id": 1},
+        ).to_list(500)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    for inst in instances:
+        name = inst.get("instance_name")
+        tid = inst.get("agenzia_tenant_id")
+        if not name or not tid:
+            continue
+        r = await db.whatsapp_messages.update_many(
+            {"instance_name": name, "$or": [
+                {"agenzia_tenant_id": {"$exists": False}},
+                {"agenzia_tenant_id": None},
+            ]},
+            {"$set": {"agenzia_tenant_id": tid}},
+        )
+        out["updated"] += getattr(r, "modified_count", 0)
+        out["instances"] += 1
+    if out["updated"]:
+        logger.info("Backfill tenant WhatsApp: %s messaggi aggiornati su %s istanze", out["updated"], out["instances"])
+    return out
+
+
 # ---------- Invio messaggi ----------
 class SendTextBody(BaseModel):
     number: str  # es. "393401234567"
