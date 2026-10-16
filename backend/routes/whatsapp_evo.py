@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
+import logging
 from typing import Optional
 
 import httpx
@@ -25,6 +26,8 @@ from auth import current_user, require_user
 from database import db
 from db_models import _now_iso
 from tenant import is_super_admin
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/whatsapp-evo", tags=["whatsapp-evo"])
@@ -189,6 +192,14 @@ async def list_instances(user=Depends(require_user("admin", "collaboratore"))) -
     return rows
 
 
+WEBHOOK_EVENTS = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "MESSAGES_UPDATE"]
+
+
+def _webhook_url(slug: str) -> Optional[str]:
+    base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+    return f"{base}/api/whatsapp-evo/webhook/{slug}" if base else None
+
+
 @router.post("/instances", status_code=201)
 async def create_instance(
     body: CreateInstanceBody,
@@ -202,8 +213,7 @@ async def create_instance(
         raise HTTPException(409, f"Istanza '{slug}' già esistente")
 
     # Webhook che riceverà i messaggi in arrivo per questa istanza
-    backend_base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
-    webhook_url = f"{backend_base}/api/whatsapp-evo/webhook/{slug}" if backend_base else None
+    webhook_url = _webhook_url(slug)
 
     # crea su Evolution API — usa integration Baileys (default) e richiede QR
     payload: dict = {
@@ -214,9 +224,10 @@ async def create_instance(
     if webhook_url:
         payload["webhook"] = {
             "url": webhook_url,
+            "enabled": True,
             "byEvents": False,
             "base64": False,
-            "events": ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "MESSAGES_UPDATE"],
+            "events": WEBHOOK_EVENTS,
         }
     resp = await _call("POST", "/instance/create", json=payload)
     inst = (resp or {}).get("instance") or {}
@@ -236,6 +247,20 @@ async def create_instance(
     }
     await db.whatsapp_instances.insert_one(doc.copy())
     doc.pop("_id", None)
+    # Registra/forza il webhook anche via endpoint dedicato (alcune versioni di
+    # Evolution ignorano il webhook passato a /instance/create).
+    if webhook_url:
+        try:
+            await _call(
+                "POST", f"/webhook/set/{slug}",
+                json={"webhook": {
+                    "enabled": True, "url": webhook_url,
+                    "byEvents": False, "base64": False, "events": WEBHOOK_EVENTS,
+                }},
+                instance_token=hash_key,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Webhook set post-create fallito per %s", slug)
     doc["qr"] = {
         "code": qr.get("code"),
         "base64": qr.get("base64"),
@@ -301,6 +326,73 @@ async def delete_instance(name: str, user=Depends(require_user("admin"))) -> dic
         pass  # istanza già rimossa lato Evolution
     r = await db.whatsapp_instances.delete_one({"instance_name": name})
     return {"ok": True, "deleted": r.deleted_count}
+
+
+@router.get("/instances/{name}/webhook")
+async def get_instance_webhook(name: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    """Ritorna la configurazione webhook attuale dell'istanza su Evolution,
+    confrontata con quella attesa (per capire perché i messaggi IN non arrivano)."""
+    inst = await db.whatsapp_instances.find_one({"instance_name": name}, {"_id": 0})
+    if not inst:
+        raise HTTPException(404, "Istanza non trovata")
+    expected = _webhook_url(name)
+    try:
+        resp = await _call("GET", f"/webhook/find/{name}", instance_token=inst.get("token"), timeout=8.0)
+    except HTTPException as e:
+        return {"instance_name": name, "expected_url": expected, "error": str(e.detail)[:300], "current": None}
+    cur = (resp or {}).get("webhook") or resp or {}
+    cur_url = cur.get("url")
+    return {
+        "instance_name": name,
+        "expected_url": expected,
+        "current_url": cur_url,
+        "enabled": cur.get("enabled"),
+        "events": cur.get("events"),
+        "ok": bool(cur.get("enabled")) and cur_url == expected,
+        "raw": cur,
+    }
+
+
+@router.post("/instances/{name}/repair-webhook")
+async def repair_instance_webhook(name: str, request: Request, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    """(Ri)configura il webhook dell'istanza verso QUESTO backend, così i
+    messaggi in ARRIVO vengono di nuovo ricevuti. Da usare se '0 in'.
+
+    L'URL di destinazione è, in ordine: BACKEND_PUBLIC_URL (se impostato),
+    altrimenti l'origine della richiesta corrente (rispettando i forwarded
+    headers dell'ingress). Così cliccando il pulsante DALLA produzione il
+    webhook punta alla produzione, non al preview."""
+    inst = await db.whatsapp_instances.find_one({"instance_name": name}, {"_id": 0})
+    if not inst:
+        raise HTTPException(404, "Istanza non trovata")
+    base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+    if not base:
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if host:
+            base = f"{proto}://{host}".rstrip("/")
+    if not base:
+        raise HTTPException(503, "Impossibile determinare l'URL pubblico del backend")
+    webhook_url = f"{base}/api/whatsapp-evo/webhook/{name}"
+    await _call(
+        "POST", f"/webhook/set/{name}",
+        json={"webhook": {
+            "enabled": True, "url": webhook_url,
+            "byEvents": False, "base64": False, "events": WEBHOOK_EVENTS,
+        }},
+        instance_token=inst.get("token"),
+    )
+    await db.whatsapp_instances.update_one(
+        {"instance_name": name},
+        {"$set": {"webhook_url": webhook_url, "updated_at": _now_iso()}},
+    )
+    # verifica
+    try:
+        resp = await _call("GET", f"/webhook/find/{name}", instance_token=inst.get("token"), timeout=8.0)
+        cur = (resp or {}).get("webhook") or resp or {}
+    except HTTPException:
+        cur = {}
+    return {"ok": True, "webhook_url": webhook_url, "enabled": cur.get("enabled"), "current_url": cur.get("url")}
 
 
 # ---------- Invio messaggi ----------

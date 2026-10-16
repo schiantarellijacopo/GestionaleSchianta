@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import {
     MessageCircle, Plus, RefreshCcw, Trash2, LogOut,
-    QrCode, Send, ShieldAlert, CheckCircle2, Loader2,
+    QrCode, Send, ShieldAlert, CheckCircle2, Loader2, RadioTower,
 } from "lucide-react";
 
 // ─── Utility: colore + label per lo stato Evolution API ──────────────
@@ -147,6 +147,12 @@ export default function WhatsAppInstances() {
                                                     data-testid={`wa-send-${inst.instance_name}`}>
                                                 <Send size={13} />
                                             </Button>
+                                            <Button size="sm" variant="outline" title="Ripristina ricezione messaggi (webhook)"
+                                                    className="text-emerald-700 hover:bg-emerald-50"
+                                                    onClick={() => repairWebhook(inst.instance_name)}
+                                                    data-testid={`wa-webhook-${inst.instance_name}`}>
+                                                <RadioTower size={13} />
+                                            </Button>
                                             <Button size="sm" variant="outline" title="Disconnetti"
                                                     onClick={() => onLogout(inst.instance_name, load)}
                                                     data-testid={`wa-logout-${inst.instance_name}`}>
@@ -277,6 +283,22 @@ async function onDelete(name, reload) {
         toast.success("Istanza eliminata");
         reload();
     } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+}
+
+async function repairWebhook(name) {
+    try {
+        toast.loading("Ripristino ricezione…", { id: "wa-repair" });
+        const r = await api.post(`/whatsapp-evo/instances/${name}/repair-webhook`);
+        toast.dismiss("wa-repair");
+        if (r.data?.enabled) {
+            toast.success("Ricezione messaggi ripristinata ✅ I nuovi messaggi in arrivo verranno ora ricevuti.");
+        } else {
+            toast.success("Webhook configurato. Verifica l'arrivo di un nuovo messaggio di prova.");
+        }
+    } catch (e) {
+        toast.dismiss("wa-repair");
+        toast.error(e.response?.data?.detail || "Errore ripristino webhook");
+    }
 }
 
 async function testSend(name) {

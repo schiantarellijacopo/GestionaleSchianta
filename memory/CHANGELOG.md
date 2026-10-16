@@ -1,6 +1,13 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — WhatsApp: messaggi IN non ricevuti (webhook puntava al preview) ✅
+- **Sintomo (produzione)**: si inviano messaggi WhatsApp ma non se ne ricevono ("0 in" su tutte le chat).
+- **RCA**: gli "out" sono salvati localmente da `send-text`; gli "in" arrivano SOLO via webhook. `GET /webhook/find` sull'istanza `agenzia-0342706000` ha mostrato che il webhook puntava a `https://whatsapp-crm-146.preview.emergentagent.com/...` (PREVIEW) → gli inbound finivano nel preview, la produzione Railway non li vedeva. Inoltre `create_instance` registrava il webhook senza `enabled:true`.
+- **FIX** (`routes/whatsapp_evo.py`): nuovo `POST /whatsapp-evo/instances/{name}/repair-webhook` (ripunta il webhook a QUESTO backend, URL derivato da BACKEND_PUBLIC_URL o dai forwarded headers della richiesta → corretto su Railway); nuovo `GET /whatsapp-evo/instances/{name}/webhook` di diagnosi; `create_instance` ora invia `enabled:true` e forza anche `/webhook/set`. UI (`WhatsAppInstances.jsx`): pulsante 📡 "Ripristina ricezione" per riga istanza.
+- **Verificato in preview**: find endpoint OK (ha rivelato la causa), pulsante UI presente. Il repair NON è stato eseguito dal preview di proposito (va lanciato DALLA produzione per puntare a Railway).
+- **Azione utente**: Save to GitHub → deploy; poi in produzione cliccare 📡 sull'istanza.
+
 ## 2026-10-16 — FIX GLOBALE Object Storage → fallback MongoDB GridFS ✅
 - **Problema (produzione Railway)**: l'Emergent Object Storage non è raggiungibile da Railway → errore "Object storage non configurato" su TUTTO (loghi compagnie, allegati email/OCR, PDF prima nota, documenti, firme, attestati). Richiesta utente: "Object Storage SISTEMALO PER TUTTO IL PROGRAMMA".
 - **FIX CENTRALE** (`backend/storage.py`, riscritto): `put_object`/`get_object`/`delete_object` ora provano l'Emergent object storage e, se non disponibile/irraggiungibile, fanno **fallback trasparente su MongoDB GridFS** (collection `object_store`, client pymongo sync, env MONGO_URL/DB_NAME). Nessun chiamante è stato toccato: il fix vale per l'intero programma.
