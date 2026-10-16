@@ -3261,7 +3261,7 @@ async def ocr_polizza_endpoint(
         try:
             # Tutte le pagine (fino a 10), una immagine per pagina → estrazione più
             # completa (premi/SSN/veicolo possono stare su pagine successive).
-            pages = ocr_pol.pdf_to_page_images(contents, max_pages=10, resolution=150)
+            pages = ocr_pol.pdf_to_page_images(contents, max_pages=6, resolution=150)
             if not pages:
                 raise HTTPException(400, "PDF vuoto")
             file_for_ocr = pages

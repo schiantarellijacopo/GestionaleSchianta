@@ -118,7 +118,7 @@ class LlmChat:
         import time
         key = os.environ["GEMINI_API_KEY"]
         primary = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
-        fallbacks = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+        fallbacks = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3-flash-preview"]
         candidates = [primary] + [m for m in fallbacks if m != primary]
         # OTTIMIZZAZIONE VELOCITÀ: disabilita il "thinking" di Gemini 3 flash
         # (riduce drasticamente la latenza) e, per gli OCR, forza output JSON
@@ -128,20 +128,34 @@ class LlmChat:
             gen_cfg["responseMimeType"] = "application/json"
         parts = self._build_parts(message)
         last_err = "sconosciuto"
-        with httpx.Client(timeout=120) as c:
+        # Budget totale limitato: evita il 502 del proxy su richieste troppo
+        # lunghe. Meglio un errore chiaro e rapido che un timeout dell'ingress.
+        deadline = time.monotonic() + 70.0
+        with httpx.Client(timeout=45.0) as c:
             for model in candidates:
+                if time.monotonic() > deadline:
+                    break
                 url = f"{GEMINI_REST}/{model}:generateContent"
                 cfg = dict(gen_cfg)
                 for attempt in range(3):
                     payload = {"contents": [{"parts": parts}], "generationConfig": cfg}
                     if self._system:
                         payload["systemInstruction"] = {"parts": [{"text": self._system}]}
-                    r = c.post(url, params={"key": key},
-                               headers={"Content-Type": "application/json"}, json=payload)
+                    try:
+                        r = c.post(url, params={"key": key},
+                                   headers={"Content-Type": "application/json"}, json=payload)
+                    except httpx.RequestError as e:
+                        last_err = f"timeout/connessione ({model}): {str(e)[:80]}"
+                        break  # prova il prossimo modello
                     if r.status_code in (429, 503):
+                        # Sovraccarico/limite: backoff esponenziale breve, ma solo
+                        # se resta budget. Altrimenti passa subito al modello dopo.
                         last_err = f"{r.status_code} (sovraccarico {model})"
-                        time.sleep(1.0 * (attempt + 1))
-                        continue
+                        wait = min(2.0 * (2 ** attempt), 8.0)
+                        if attempt < 2 and (time.monotonic() + wait) < deadline:
+                            time.sleep(wait)
+                            continue
+                        break  # cambia modello
                     if r.status_code == 400:
                         # Una config opzionale (thinking/JSON) potrebbe non essere
                         # supportata dal modello: rimuovila e riprova subito. Così

@@ -817,3 +817,11 @@ Admin: `admin@assicura.it / Admin123!`
 - CAVEAT (non-OCR, non-Gemini): OpenAITextToSpeech (TTS audio) in routes/marketing_studio.py e routes/notebooklm.py usa ancora emergentintegrations.llm.openai (Gemini non espone TTS da questo path). Se si rimuove del tutto EMERGENT_LLM_KEY da Railway, quelle funzioni audio smetteranno di funzionare; gli OCR e il testo/vision restano su Gemini.
 - VERIFICHE: sintassi OK, OCR libretto preview HTTP 200 (preview senza chiave usa fallback, invariato). Il percorso solo-Gemini è attivo in produzione dopo deploy.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (15) — OCR Gemini produzione: fix 502 (timeout) + gestione 429/503 (sovraccarico)
+- SINTOMI produzione: (1) "Errore chiamata Gemini: Gemini API non disponibile: 429 (sovraccarico gemini-flash-latest)"; (2) "Request failed with status code 502". CONFERMA: in produzione ora si usa Gemini diretto (la chiave Emergent non è più coinvolta).
+- 502 = il loop di retry OCR superava il timeout del proxy/ingress. FIX (llm_compat._direct_call): budget totale max 70s + httpx timeout 45s (prima 120s) -> errore chiaro e rapido invece del 502. Gestione httpx.RequestError (timeout) -> passa al modello successivo.
+- 429/503 (sovraccarico/limite): backoff esponenziale breve (2s,4s, max 8s) con massimo 3 tentativi per modello, ma solo finché resta budget; altrimenti cambia modello. Lista modelli ripulita: primary gemini-3-flash-preview (o GEMINI_MODEL), fallback gemini-3.5-flash, gemini-flash-latest (rimosso gemini-3.8-flash inesistente).
+- Richiesta più leggera: OCR polizza ora invia max 6 pagine (era 10), immagini già ridotte -> meno token, meno rischio sovraccarico e timeout.
+- NB: il 429 può dipendere dal piano/quota della GEMINI_API_KEY (free tier Google AI Studio ha limiti bassi e "overloaded" frequenti sui modelli preview/flash). Se persiste, valutare billing su Google AI Studio o pin di un modello stabile via env GEMINI_MODEL.
+- VERIFICHE: sintassi OK, OCR libretto preview HTTP 200. DA DEPLOYARE: Save to GitHub -> Railway.
