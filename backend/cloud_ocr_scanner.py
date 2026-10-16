@@ -294,7 +294,7 @@ async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -
     solo immagini). File multi-pagina: viene classificata solo la prima.
     Il filename è usato come HINT nel prompt per aumentare la precisione.
     """
-    from emergentintegrations.llm.chat import (
+    from llm_compat import (
         LlmChat, UserMessage, ImageContent, TextDelta, StreamDone,
     )
     key = os.environ.get("EMERGENT_LLM_KEY")

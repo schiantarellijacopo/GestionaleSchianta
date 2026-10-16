@@ -42,7 +42,7 @@ async def ai_chat(body: AiChatBody, user=Depends(current_user)) -> dict:
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage  # type: ignore
+    from llm_compat import LlmChat, UserMessage  # type: ignore
 
     session_id = body.session_id or str(uuid.uuid4())
     chat = LlmChat(
@@ -79,7 +79,7 @@ async def ai_chat_stream(body: AiChatBody, user=Depends(current_user)):
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone  # type: ignore
+    from llm_compat import LlmChat, UserMessage, TextDelta, StreamDone  # type: ignore
 
     session_id = body.session_id or str(uuid.uuid4())
     chat = LlmChat(

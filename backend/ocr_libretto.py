@@ -4,7 +4,7 @@ import base64
 import json
 import os
 import re
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
 
 
 PROMPT = """Sei un OCR specializzato in libretti di circolazione (Carta di Circolazione) della

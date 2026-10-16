@@ -830,7 +830,7 @@ async def copilot_chat(
     )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         model_name, _ = _modo_modello(user_message)
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
@@ -898,7 +898,7 @@ async def copilot_chat_stream(user_message: str, user: dict, session_id: Optiona
 
     parts: list[str] = []
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+        from llm_compat import LlmChat, UserMessage, TextDelta, StreamDone
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"copilot_{sid}",
@@ -966,7 +966,7 @@ async def copilot_answer(user_message: str, ctx_data: dict) -> str:
     if not EMERGENT_LLM_KEY:
         return "⚠️ Emergent LLM Key non configurata."
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"copilot_legacy_{uuid.uuid4().hex[:8]}",

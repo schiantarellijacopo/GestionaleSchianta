@@ -771,7 +771,7 @@ async def genera_consiglio_ai(
 
     Body: ``{anagrafica_id: str, contesto_extra?: str}``
     """
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_compat import LlmChat, UserMessage
 
     aid = body.get("anagrafica_id")
     if not aid:

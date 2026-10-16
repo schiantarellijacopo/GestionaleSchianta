@@ -453,7 +453,7 @@ async def _ai_detect(headers: List[str], samples: List[dict]) -> Optional[dict]:
     if not key:
         return None
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage  # type: ignore
+        from llm_compat import LlmChat, UserMessage  # type: ignore
         prompt = (
             "Sei un esperto di migrazione dati per CRM assicurativi italiani. "
             "Analizza le colonne di un file e determina:\n"

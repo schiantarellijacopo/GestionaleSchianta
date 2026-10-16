@@ -48,14 +48,14 @@ def _parse_json(raw: str) -> dict:
 
 
 async def _llm_text(prompt: str, system: str = "Rispondi SOLO con JSON valido, in italiano.") -> str:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_compat import LlmChat, UserMessage
     llm = LlmChat(api_key=os.environ.get("EMERGENT_LLM_KEY"),
                   session_id=f"mkt_{_uid()}", system_message=system).with_model(*TEXT_MODEL)
     return str(await llm.send_message(UserMessage(text=prompt)))
 
 
 async def _genera_sfondo(prompt: str, verticale: bool = False, orizzontale: bool = False) -> bytes:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_compat import LlmChat, UserMessage
     chat = LlmChat(api_key=os.environ.get("EMERGENT_LLM_KEY"),
                    session_id=f"mktimg_{_uid()}", system_message="You are a helpful AI assistant")
     chat.with_model(*IMG_MODEL).with_params(modalities=["image", "text"])

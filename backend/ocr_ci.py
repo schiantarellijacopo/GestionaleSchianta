@@ -7,7 +7,7 @@ import base64
 import json
 import os
 import re
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from llm_compat import LlmChat, UserMessage, ImageContent
 
 
 PROMPT = """Sei un OCR specializzato in documenti di identità italiani:
@@ -69,7 +69,7 @@ async def estrai_dati_ci(image_bytes: bytes, mime_type: str = "image/jpeg") -> d
     response_text = ""
     try:
         async for ev in chat.stream_message(msg):
-            from emergentintegrations.llm.chat import TextDelta, StreamDone
+            from llm_compat import TextDelta, StreamDone
             if isinstance(ev, TextDelta):
                 response_text += ev.content
             elif isinstance(ev, StreamDone):

@@ -290,7 +290,7 @@ async def chat(nid: str, body: dict, user=Depends(require_user(*STAFF))):
     async def event_gen():
         full = []
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+            from llm_compat import LlmChat, UserMessage, TextDelta, StreamDone
             llm = LlmChat(
                 api_key=os.environ.get("EMERGENT_LLM_KEY"),
                 session_id=f"nblm_{nid}",
@@ -345,7 +345,7 @@ GEN_PROMPTS = {
 async def _run_generazione(oid: str, nid: str, tipo: str):
     try:
         ctx, n_fonti = await _sorgenti_context(nid)
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         llm = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"nblm_gen_{oid}",
@@ -393,7 +393,7 @@ def _parse_script(raw: str) -> dict:
 async def _run_audio(oid: str, nid: str):
     try:
         ctx, n_fonti = await _sorgenti_context(nid, budget=40_000)
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         llm = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"nblm_audio_{oid}",

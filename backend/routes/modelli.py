@@ -209,7 +209,7 @@ async def crea_modello_da_pdf(
     )
     corpo = ""
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"modello_pdf_{user.get('id')}",

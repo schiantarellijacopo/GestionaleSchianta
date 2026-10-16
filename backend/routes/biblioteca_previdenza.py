@@ -357,7 +357,7 @@ async def consulta_ai(body: dict, user=Depends(current_user)):
     )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"bibl_{sezione}_{user.get('id')}",
@@ -475,7 +475,7 @@ async def genera_scheda(body: dict, user=Depends(require_user("admin", "collabor
 
 async def _genera_scheda_worker(jid: str, categoria: str, chunks: list, fonti: list, user: dict):
     """Worker in background — genera la scheda AI + confronto semantico + salvataggio."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_compat import LlmChat, UserMessage
 
     await _job_update(jid, progress={"categoria": categoria, "step": "generazione_ai", "docs": len(fonti)})
 
@@ -609,7 +609,7 @@ async def _confronto_scheda(prev, contenuto, categoria, user, jid):
 
     # confronto semantico con AI
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         diff_prompt = (
             "Confronta la VECCHIA e la NUOVA scheda di calcolo previdenziale. "
             "Ignora differenze di sola forma/riformulazione: segnala SOLO le modifiche "
@@ -794,7 +794,7 @@ async def _ai_suggerisci_url_condizioni(compagnia: str, prodotto: Optional[str],
                                         ramo: Optional[str]) -> list[str]:
     """Chiede all'AI un elenco di URL PDF pubblici delle condizioni contrattuali.
     Ritorna lista di URL candidati (max 5), da tentare in sequenza."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    from llm_compat import LlmChat, UserMessage
     q = f"Compagnia: {compagnia}"
     if prodotto:
         q += f"\nProdotto: {prodotto}"

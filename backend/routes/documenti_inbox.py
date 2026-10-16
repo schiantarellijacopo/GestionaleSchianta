@@ -180,7 +180,7 @@ async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
 
 
 async def _ocr_classifica(image_bytes: bytes, mime: str) -> dict:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+    from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
@@ -244,7 +244,7 @@ async def ocr_veicolo(
     else:
         raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG/WEBP)")
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+    from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")

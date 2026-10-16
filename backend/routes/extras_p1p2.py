@@ -1050,7 +1050,7 @@ async def elimina_calcolo_regolazione(
 # 4) OCR BILANCIO (Cervello)
 # ===========================================================
 async def _ocr_bilancio_gemini(img_bytes: bytes) -> dict:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+    from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
@@ -1186,7 +1186,7 @@ async def ocr_corso_ivass(
             o = BytesIO(); img.save(o, format="JPEG", quality=85); img_bytes = o.getvalue()
     else:
         img_bytes = contents
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
+    from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
         raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")

@@ -45,7 +45,7 @@ async def genera_immagine(body: dict, user=Depends(require_user(*STAFF))):
     full_prompt += f" Immagine in {FORMATI[formato]}. Nessun testo sgrammaticato; se includi testo, in italiano corretto."
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        from llm_compat import LlmChat, UserMessage
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY"),
             session_id=f"imgai_{_uid()}",
