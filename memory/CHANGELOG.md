@@ -1,6 +1,12 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — HOTFIX: build Railway fallito (CI=true + warning ESLint) ✅
+- **Sintomo**: "Deployment failed to build" su Railway.
+- **RCA**: Railway imposta `CI=true` in build; `react-scripts build` con CI=true promuove i warning ESLint a errori. Il frontend ha molti warning pre-esistenti (`react-hooks/exhaustive-deps`) → build fallito. Nessun errore reale di sintassi/dipendenza.
+- **FIX** (`deploy/Dockerfile.railway` e `deploy/Dockerfile.frontend`): step di build ora `RUN CI=false DISABLE_ESLINT_PLUGIN=true yarn build` → i warning non bloccano più il build. Verificato in locale: build OK (exit 0).
+- **Azione utente**: Save to GitHub per il nuovo deploy.
+
 ## 2026-10-16 — HOTFIX: deploy Railway fallito per healthcheck (auto-repair webhook bloccante) ✅
 - **Sintomo**: dopo Save to GitHub il deploy di GestionaleSchianta falliva con "Network > Healthcheck failure" (commit fe60faed).
 - **RCA**: la chiamata `await auto_repair_webhooks()` aggiunta allo startup (`@app.on_event("startup")`) era BLOCCANTE: attendeva Evolution prima che l'app iniziasse a servire → startup troppo lento → healthcheck Railway in timeout.

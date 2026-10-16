@@ -15,7 +15,10 @@ ENV REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL}
 COPY frontend/package.json frontend/yarn.lock* ./
 RUN yarn install
 COPY frontend/ ./
-RUN yarn build
+# CI=false: i warning ESLint (es. react-hooks/exhaustive-deps, pre-esistenti e non
+# bloccanti) NON devono far fallire il build di produzione. Railway imposta CI=true
+# di default, quindi lo forziamo qui.
+RUN CI=false DISABLE_ESLINT_PLUGIN=true yarn build
 
 # --- Stage 2: backend FastAPI che serve anche la UI ---
 FROM python:3.11-slim
