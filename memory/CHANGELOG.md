@@ -1,6 +1,15 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — FIX GLOBALE Object Storage → fallback MongoDB GridFS ✅
+- **Problema (produzione Railway)**: l'Emergent Object Storage non è raggiungibile da Railway → errore "Object storage non configurato" su TUTTO (loghi compagnie, allegati email/OCR, PDF prima nota, documenti, firme, attestati). Richiesta utente: "Object Storage SISTEMALO PER TUTTO IL PROGRAMMA".
+- **FIX CENTRALE** (`backend/storage.py`, riscritto): `put_object`/`get_object`/`delete_object` ora provano l'Emergent object storage e, se non disponibile/irraggiungibile, fanno **fallback trasparente su MongoDB GridFS** (collection `object_store`, client pymongo sync, env MONGO_URL/DB_NAME). Nessun chiamante è stato toccato: il fix vale per l'intero programma.
+- **Verificato in preview**: (1) object storage disponibile → usa quello (etag reale); (2) storage forzato KO → put/get/delete su GridFS con byte e content-type corretti; (3) oggetto solo in GridFS + object storage 404 → letto da GridFS. Round-trip OK su tutti gli scenari.
+- **Fallback allegati email vecchi** (`imap_poller.py` + `routes/polizze_email.py`): le email scaricate PRIMA dei fallback non hanno i byte da nessuna parte → aggiunto `fetch_attachment_bytes()` che, se mancano data_b64/storage/GridFS, **riscarica l'allegato da IMAP per UID** (cartella da `em.folder`), lo usa per l'OCR e lo persiste in base64 nel documento email per le volte successive. Endpoint `/email/polizze-inbox/{eid}/estrai` aggiornato.
+- **NON testato in preview**: il re-download IMAP (nessun dato email reale in preview); logica verificata a livello di codice, backend parte correttamente. Da validare su Railway dopo Save to GitHub.
+- **Deploy**: richiede Save to GitHub per Railway.
+
+
 ## 2026-10 — Import OMNIA azzerava titoli COPERTI (Prima Nota) + strumento ripristino ✅
 - **BUG (produzione, tenant jacopo@schiantarelli.it)**: titoli COPERTI/registrati in Prima Nota (es. polizza 117255437 PANELLA → 200€) venivano azzerati a premio 0 da un re-import OMNIA.
 - **RCA (confermata da deployer su dati prod)**: il flusso di copertura (`server.py` marca-sospeso ~5247) imposta `titolo_coperto=true`/`data_copertura` ma LASCIA `stato='da_incassare'`; la vecchia guardia dell'importer (`ania_importer.py:1501`, `stato=='da_incassare'`) non li proteggeva → sovrascritti con importi ANIA = 0.

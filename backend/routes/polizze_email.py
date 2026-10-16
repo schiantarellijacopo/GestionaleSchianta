@@ -336,7 +336,7 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
     (Condizioni = fascicolo informativo, Privacy compagnia = informativa/consenso privacy)."""
     import storage as obj_storage
     from ocr_polizza import estrai_dati_polizza, pdf_to_page_images
-    from imap_poller import _copia_allegato_su_entita, attachment_bytes
+    from imap_poller import _copia_allegato_su_entita, fetch_attachment_bytes
 
     em = await db.email_inbox.find_one({"id": eid}, {"_id": 0})
     if not em:
@@ -349,7 +349,7 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
     items: list[dict] = []
     for att in pdfs:
         try:
-            data, _ctype = attachment_bytes(att)
+            data, _ctype = await fetch_attachment_bytes(db, em, att)
             items.append({"att": att, "data": data, "cat": _classifica_pdf(data), "err": None})
         except Exception as e:  # noqa: BLE001
             items.append({"att": att, "data": None, "cat": None, "err": f"download fallito: {e}"})

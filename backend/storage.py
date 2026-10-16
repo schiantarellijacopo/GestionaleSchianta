@@ -1,4 +1,14 @@
-"""Emergent object storage helpers."""
+"""Object storage helpers con fallback automatico su MongoDB (GridFS).
+
+Strategia (vale per TUTTO il programma):
+  1. Se l'Emergent Object Storage è disponibile e raggiungibile → usa quello.
+  2. Altrimenti (es. Railway, dove l'object storage non è raggiungibile) →
+     salva/leggi i byte da MongoDB GridFS (collection ``object_store``),
+     in modo totalmente trasparente per i chiamanti.
+
+In questo modo loghi, allegati email, PDF di prima nota, documenti, firme,
+attestati, ecc. continuano a funzionare anche senza object storage.
+"""
 from __future__ import annotations
 import os
 import logging
@@ -11,7 +21,55 @@ APP_NAME = os.environ.get("APP_NAME", "assicura")
 
 _storage_key: str | None = None
 
+# ---- GridFS (fallback MongoDB) -------------------------------------------
+_fs = None  # gridfs.GridFS
 
+
+def _gridfs():
+    """Bucket GridFS lazy (client pymongo sincrono, separato da Motor)."""
+    global _fs
+    if _fs is None:
+        import pymongo
+        import gridfs
+        url = os.environ["MONGO_URL"]
+        dbname = os.environ["DB_NAME"]
+        client = pymongo.MongoClient(url, serverSelectionTimeoutMS=8000)
+        _fs = gridfs.GridFS(client[dbname], collection="object_store")
+    return _fs
+
+
+def _gridfs_put(path: str, data: bytes, content_type: str) -> None:
+    fs = _gridfs()
+    # Sovrascrivi: rimuovi eventuali versioni precedenti con lo stesso path
+    for old in fs.find({"filename": path}):
+        try:
+            fs.delete(old._id)
+        except Exception:  # noqa: BLE001
+            pass
+    fs.put(data, filename=path, contentType=content_type or "application/octet-stream")
+
+
+def _gridfs_get(path: str) -> tuple[bytes, str] | None:
+    fs = _gridfs()
+    f = fs.find_one({"filename": path}, sort=[("uploadDate", -1)])
+    if not f:
+        return None
+    return f.read(), (getattr(f, "content_type", None) or "application/octet-stream")
+
+
+def _gridfs_delete(path: str) -> bool:
+    try:
+        fs = _gridfs()
+        found = False
+        for old in fs.find({"filename": path}):
+            fs.delete(old._id)
+            found = True
+        return found
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---- Emergent object storage ---------------------------------------------
 def init_storage() -> str | None:
     """Initialize storage session once. Returns storage_key or None if failure."""
     global _storage_key
@@ -19,7 +77,6 @@ def init_storage() -> str | None:
         return _storage_key
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
-        logger.warning("EMERGENT_LLM_KEY not set; storage disabled")
         return None
     try:
         r = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": key}, timeout=20)
@@ -28,7 +85,7 @@ def init_storage() -> str | None:
         logger.info("Storage initialized OK")
         return _storage_key
     except Exception as e:
-        logger.error("Storage init failed: %s", e)
+        logger.warning("Storage init failed (%s); uso fallback GridFS", e)
         return None
 
 
@@ -37,7 +94,7 @@ def _reset():
     _storage_key = None
 
 
-def put_object(path: str, data: bytes, content_type: str) -> dict:
+def _emergent_put(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
     if not key:
         raise RuntimeError("Object storage non configurato")
@@ -60,7 +117,8 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
     return r.json()
 
 
-def get_object(path: str) -> tuple[bytes, str]:
+def _emergent_get(path: str) -> tuple[bytes, str] | None:
+    """Ritorna (data, ctype) o None se non presente. Solleva su errori di rete."""
     key = init_storage()
     if not key:
         raise RuntimeError("Object storage non configurato")
@@ -77,23 +135,50 @@ def get_object(path: str) -> tuple[bytes, str]:
             f"{STORAGE_URL}/objects/{path}",
             headers={"X-Storage-Key": key}, timeout=60,
         )
+    if r.status_code == 404:
+        return None
     r.raise_for_status()
     return r.content, r.headers.get("Content-Type", "application/octet-stream")
 
 
+# ---- API pubblica (con fallback trasparente) ------------------------------
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    """Salva un oggetto. Prova Emergent object storage, altrimenti GridFS."""
+    try:
+        return _emergent_put(path, data, content_type)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("put_object: object storage non disponibile (%s); salvo in GridFS: %s", e, path)
+        _gridfs_put(path, data, content_type)
+        return {"path": path, "storage": "gridfs"}
+
+
+def get_object(path: str) -> tuple[bytes, str]:
+    """Legge un oggetto. Prova Emergent object storage, altrimenti GridFS."""
+    try:
+        got = _emergent_get(path)
+        if got is not None:
+            return got
+    except Exception as e:  # noqa: BLE001
+        logger.warning("get_object: object storage non disponibile (%s); leggo da GridFS: %s", e, path)
+    got = _gridfs_get(path)
+    if got is not None:
+        return got
+    raise RuntimeError(f"Oggetto non trovato: {path}")
+
+
 def delete_object(path: str) -> bool:
+    ok_gridfs = _gridfs_delete(path)
     key = init_storage()
     if not key:
-        return False
+        return ok_gridfs
     try:
         r = requests.delete(
             f"{STORAGE_URL}/objects/{path}",
             headers={"X-Storage-Key": key}, timeout=30,
         )
-        return r.status_code in (200, 204, 404)
-    except Exception:
-        return False
-
+        return r.status_code in (200, 204, 404) or ok_gridfs
+    except Exception:  # noqa: BLE001
+        return ok_gridfs
 
 
 MIME_TYPES = {

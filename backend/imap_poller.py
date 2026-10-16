@@ -156,12 +156,114 @@ def _extract_attachments(msg, *, uid: int) -> list[dict]:
 
 def attachment_bytes(att: dict):
     """Ritorna (data, content_type) di un allegato: dal DB (base64) se presente,
-    altrimenti dall'object storage."""
+    altrimenti dall'object storage (che ha fallback GridFS)."""
     import storage as obj_storage
     if att.get("data_b64"):
         import base64 as _b64
         return _b64.b64decode(att["data_b64"]), att.get("content_type") or "application/octet-stream"
     return obj_storage.get_object(att["storage_path"])
+
+
+def _redownload_attachment_from_imap(az: dict, *, uid: str, folder: str) -> dict:
+    """Riscarica un messaggio da IMAP per UID e ritorna i suoi allegati come
+    ``{storage_path: (payload_bytes, content_type)}``. Usato come ultimo fallback
+    per le email scaricate PRIMA dell'introduzione dei fallback (byte non più
+    presenti né in object storage né in DB)."""
+    from credentials_utils import clean_password, clean_email
+    host = az.get("imap_host")
+    port = int(az.get("imap_port") or 993)
+    user_ = clean_email(az.get("imap_user"))
+    pwd = clean_password(az.get("imap_password"))
+    if not (host and user_ and pwd):
+        raise RuntimeError("IMAP non configurato")
+    if az.get("imap_use_ssl", True):
+        M = imaplib.IMAP4_SSL(host, port, timeout=25)
+    else:
+        M = imaplib.IMAP4(host, port, timeout=25)
+    M.login(user_, pwd)
+    out: dict[str, tuple[bytes, str]] = {}
+    try:
+        typ, _ = M.select(folder or "INBOX", readonly=True)
+        if typ != "OK":
+            raise RuntimeError(f"Cartella '{folder}' non apribile")
+        typ, msg_data = M.uid("FETCH", str(uid).encode(), "(RFC822)")
+        if typ != "OK" or not msg_data or not msg_data[0]:
+            raise RuntimeError("Messaggio non più presente sul server IMAP")
+        raw = msg_data[0][1]
+        msg = _emaillib.message_from_bytes(raw)
+        idx = 0
+        for part in msg.walk():
+            disp = (part.get("Content-Disposition") or "").lower()
+            filename = part.get_filename()
+            if not (("attachment" in disp or "inline" in disp) and filename):
+                continue
+            payload = part.get_payload(decode=True)
+            if not payload:
+                continue
+            try:
+                decoded = decode_header(filename)
+                filename = "".join(
+                    (p.decode(enc or "utf-8", errors="replace") if isinstance(p, bytes) else p)
+                    for p, enc in decoded
+                )
+            except Exception:
+                pass
+            ctype = part.get_content_type() or "application/octet-stream"
+            safe = re.sub(r"[^\w.\- ]+", "_", filename)[:120].strip() or f"file_{idx}"
+            path = f"email/{uid}/{idx}_{safe}"
+            out[path] = (payload, ctype)
+            idx += 1
+    finally:
+        try:
+            M.logout()
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+async def fetch_attachment_bytes(db: AsyncIOMotorDatabase, em: dict, att: dict):
+    """Ritorna (data, content_type) di un allegato email con fallback a cascata:
+      1. data_b64 nel DB / object storage (GridFS)
+      2. riscaricamento diretto da IMAP per UID (per email vecchie senza byte).
+    Quando riscarica da IMAP, persiste i byte in base64 nel documento email così
+    le volte successive sono immediate."""
+    try:
+        return attachment_bytes(att)
+    except Exception as first_err:  # noqa: BLE001
+        uid = em.get("uid")
+        folder = em.get("folder") or "INBOX"
+        if not uid:
+            raise first_err
+        az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+        downloaded = await asyncio.to_thread(
+            _redownload_attachment_from_imap, az, uid=str(uid), folder=folder
+        )
+        sp = att.get("storage_path")
+        found = downloaded.get(sp)
+        if not found:
+            # match per nome file se il path non combacia esattamente
+            fname = str(att.get("filename") or "")
+            safe = re.sub(r"[^\w.\- ]+", "_", fname)[:120].strip()
+            for _p, pair in downloaded.items():
+                if safe and _p.endswith(safe):
+                    found = pair
+                    break
+        if not found and len(downloaded) == 1:
+            found = next(iter(downloaded.values()))
+        if not found:
+            raise first_err
+        data, ctype = found
+        import base64 as _b64
+        b64 = _b64.b64encode(data).decode("ascii")
+        att["data_b64"] = b64  # in memoria per i passaggi successivi
+        try:
+            await db.email_inbox.update_one(
+                {"id": em.get("id"), "attachments.storage_path": sp},
+                {"$set": {"attachments.$.data_b64": b64}},
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Impossibile persistere data_b64 per allegato %s", sp)
+        return data, ctype
 
 
 def _parse_date_iso(raw: Optional[str]) -> str:
