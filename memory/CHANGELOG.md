@@ -682,3 +682,9 @@ Admin: `admin@assicura.it / Admin123!`
   - download_chiusura_pdf e invia_chiusura_giorno ora usano l'helper -> PDF sempre disponibile anche se non archiviato.
 - VERIFICATO preview: chiusura ok (201) + download PDF ok; azzerato pdf_storage_path -> download rigenera il PDF al volo (200, application/pdf).
 - DA DEPLOYARE: Save to GitHub -> Railway. (Opzionale: configurare EMERGENT_LLM_KEY su Railway per ri-abilitare l'archiviazione permanente dei PDF.)
+
+## 2026-06 (5) — Incasso MULTIPLO su titoli già coperti: copertura non selezionabile
+- RICHIESTA: nell'incasso multiplo, come per l'incasso singolo, se i titoli selezionati sono GIA' coperti NON si deve poter flaggare la Copertura.
+- FIX (frontend/pages/Titoli.jsx, BulkActionDialog): nuova var allCoperti = titoli.every(t => t.titolo_coperto). Se true: checkbox Copertura disabled + default off (doCopertura=!allCoperti), default Incasso on (doIncasso=allCoperti), label "(già coperti)". Selezioni miste/non coperte: comportamento invariato (Copertura attiva).
+- VERIFICATO preview (screenshot + DOM): 3 titoli coperti -> Copertura disabilitata con "(già coperti)", solo Incasso attivo con tabella riga-per-riga.
+- DA DEPLOYARE: Save to GitHub -> Railway.

@@ -649,6 +649,9 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
     const today = new Date().toISOString().slice(0, 10);
     const totaleLordo = (titoli || []).reduce((s, t) => s + (parseFloat(t.importo_lordo) || 0), 0);
     const totaleProvv = (titoli || []).reduce((s, t) => s + (parseFloat(t.provvigioni) || 0), 0);
+    // Tutti i titoli selezionati sono GIA' coperti? In tal caso, come per l'incasso
+    // singolo, la copertura NON è selezionabile (titolo già coperto).
+    const allCoperti = (titoli || []).length > 0 && (titoli || []).every((t) => !!t.titolo_coperto);
     // Riepilogo per compagnia (utile quando si selezionano titoli di compagnie diverse)
     const breakdown = (() => {
         const map = new Map();
@@ -661,8 +664,8 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
         }
         return Array.from(map.values()).sort((a, b) => b.totale - a.totale);
     })();
-    const [doCopertura, setDoCopertura] = useState(true);
-    const [doIncasso, setDoIncasso] = useState(false);
+    const [doCopertura, setDoCopertura] = useState(!allCoperti);
+    const [doIncasso, setDoIncasso] = useState(allCoperti);
     const [emailOperatori, setEmailOperatori] = useState(false);
     const [emailContraenti, setEmailContraenti] = useState(false);
     const [inDirezione, setInDirezione] = useState(false);
@@ -811,9 +814,12 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                                 id="bulk-cb-copertura"
                                 checked={doCopertura}
                                 onCheckedChange={(v) => setDoCopertura(v === true)}
+                                disabled={allCoperti}
                                 data-testid="bulk-cb-copertura"
                             />
-                            <span className="text-cyan-700 font-semibold text-lg">Copertura</span>
+                            <span className="text-cyan-700 font-semibold text-lg">
+                                Copertura {allCoperti && <span className="text-emerald-700 text-xs ml-2">(già coperti)</span>}
+                            </span>
                         </label>
                         {doCopertura && (
                             <div className="pl-8 mt-2 space-y-2" data-testid="bulk-copertura-options">
