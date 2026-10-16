@@ -873,3 +873,11 @@ Admin: `admin@assicura.it / Admin123!`
 - COMPAGNIE UNIFICATA: Compagnie.jsx edit dialog ora usa i CHECKBOX multi-partner "Agenzia partner (anche più di una)" (agenzie_partner_ids) come in Librerie, al posto del vecchio Select singolo + tipo_mandato. Salvataggio: agenzie_partner_ids + agenzia_partner_id (legacy, se singolo) + tipo_mandato ricalcolato (collaborazione se >=1 partner, altrimenti diretto). Init legge plurale con fallback singolare.
 - VERIFICHE preview (login reale + screenshot): nessun errore di compilazione; dialog Compagnie mostra i checkbox partner (Bottoni/giorgia); app Polizze/detail caricano senza crash.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (22) — OCR polizza: contraente completo (no duplicati) + premio netto
+- PREMIO: premio_netto_totale dall'OCR è spesso null -> ora CALCOLATO nel form (lordo - imposte - ssn - diritti). Es. INCALCATERRA: netto 273.24, tasse 43.59, ssn 28.17, lordo 345. tasse/ssn/lordo già mappati; il save invia tutti i premi (Polizze.jsx righe ~777-787, payload ~879-884).
+- CONTRAENTE: creaContraente ora include data_nascita RICAVATA DAL CODICE FISCALE (l'OCR polizza non la fornisce) oltre a indirizzo/comune/provincia/cap/email già presenti.
+- NO DUPLICATI: POST /anagrafiche ora fa DEDUP su codice_fiscale/partita_iva (ricerca su tutto il DB tenant). Se esiste, NON crea un duplicato ma restituisce l'esistente COMPLETANDO i campi mancanti (indirizzo, data_nascita, ecc.) senza sovrascrivere. Verificato in preview: 2 POST stesso CF -> stesso id, indirizzo+data_nascita integrati.
+- VERIFICHE: backend syntax OK, dedup/merge testato via curl (stesso id, campi completati), frontend compila, modale Nuova polizza ok. OCR produzione confermato (INCALCATERRA: Cattolica, premi, veicolo KAWASAKI, contraente con indirizzo VIA LAVORESCO).
+- NB: l'anagrafica INCALCATERRA già creata in prod (incompleta) verrà COMPLETATA al prossimo OCR (merge), senza duplicati.
+- DA DEPLOYARE: Save to GitHub -> Railway.

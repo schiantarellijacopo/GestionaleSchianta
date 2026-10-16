@@ -719,6 +719,32 @@ async def create_anagrafica(body: dict, user: dict = Depends(require_user("admin
     if not body.get("collaboratore_id"):
         body["collaboratore_id"] = user.get("id")
 
+    # DEDUP: non creare duplicati se CF o P.IVA sono già presenti nel DB del
+    # tenant. Verifica SEMPRE su codice_fiscale / partita_iva e, se trova,
+    # restituisce l'anagrafica esistente (idempotente) invece di crearne una nuova.
+    _cf = (body.get("codice_fiscale") or "").strip().upper()
+    _piva = (body.get("partita_iva") or "").strip()
+    if not body.get("overwrite_id") and (_cf or _piva):
+        _ors = []
+        if _cf:
+            _ors.append({"codice_fiscale": _cf})
+        if _piva:
+            _ors.append({"partita_iva": _piva})
+        _dup = await db.anagrafiche.find_one({"$or": _ors}, {"_id": 0})
+        if _dup:
+            # Completa i campi mancanti dell'esistente SENZA sovrascrivere i dati già presenti.
+            def _vuoto(v):
+                return v is None or v == "" or v == [] or v == {}
+            _upd = {}
+            for _k in ("indirizzo", "comune", "provincia", "cap", "email", "data_nascita", "nome", "cognome", "collaboratore_id"):
+                if not _vuoto(body.get(_k)) and _vuoto(_dup.get(_k)):
+                    _upd[_k] = body[_k]
+            if _upd:
+                _upd["updated_at"] = _now_iso()
+                await db.anagrafiche.update_one({"id": _dup["id"]}, {"$set": _upd})
+                _dup = await db.anagrafiche.find_one({"id": _dup["id"]}, {"_id": 0})
+            return strip_mongo_id(_dup)
+
     # Se il chiamante indica overwrite_id (flusso import OCR/Excel con conferma
     # utente), esegue una UPDATE sull'anagrafica esistente invece di crearne
     # una nuova. Restituisce comunque lo status_code=201 + il documento aggiornato.

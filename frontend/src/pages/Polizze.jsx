@@ -774,7 +774,11 @@ function NuovaPolizzaDialog({ onClose }) {
                 frazionamento: (d.frazionamento || "").toLowerCase() || p.frazionamento,
                 // Premi: netto / imposte(tasse)+diritti / SSN separato → lordo.
                 // Provvigioni NON importate (inserite manualmente). Identico al flusso email.
-                premio_netto: d.premio_netto_totale ?? p.premio_netto,
+                premio_netto: (d.premio_netto_totale != null)
+                    ? d.premio_netto_totale
+                    : (d.premio_lordo_totale != null
+                        ? Math.round((d.premio_lordo_totale - (d.imposte_totali || 0) - (d.contributo_ssn || 0) - (d.diritti || 0)) * 100) / 100
+                        : p.premio_netto),
                 premio_tasse: (d.imposte_totali != null || d.diritti != null)
                     ? Math.round(((d.imposte_totali || 0) + (d.diritti || 0)) * 100) / 100
                     : p.premio_tasse,
@@ -830,6 +834,19 @@ function NuovaPolizzaDialog({ onClose }) {
             const parts = nome.split(/\s+/);
             payload.cognome = parts[0] || nome;
             payload.nome = parts.slice(1).join(" ") || null;
+            // Data di nascita ricavata dal codice fiscale (non presente nell'OCR polizza)
+            const cf = (src.codice_fiscale || "").toUpperCase();
+            const mesi = { A: 1, B: 2, C: 3, D: 4, E: 5, H: 6, L: 7, M: 8, P: 9, R: 10, S: 11, T: 12 };
+            if (cf.length >= 11 && mesi[cf[8]]) {
+                const yy = parseInt(cf.substr(6, 2), 10);
+                let day = parseInt(cf.substr(9, 2), 10);
+                if (!isNaN(yy) && !isNaN(day)) {
+                    if (day > 40) day -= 40;
+                    const soglia = new Date().getFullYear() % 100;
+                    const year = yy <= soglia ? 2000 + yy : 1900 + yy;
+                    payload.data_nascita = `${year}-${String(mesi[cf[8]]).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                }
+            }
         }
         setCreandoContr(true);
         try {
