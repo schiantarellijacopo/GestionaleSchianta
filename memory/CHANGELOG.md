@@ -673,3 +673,12 @@ Admin: `admin@assicura.it / Admin123!`
 - VERIFICATO preview: creato movimento ricavo (voce Consulenze attive, 326,25) -> brogliaccio Totale=0, Saldo=0, Sospesi=0, banca=326,25. Incasso premio reale (senza voce) invariato.
 - NB produzione: i movimenti ricavo GIA' salvati come incasso_premio restano errati; vanno eliminati e re-inseriti (o bonifica mirata su conferma).
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (4) — Chiusura Prima Nota bloccata da "Object storage non configurato" (Railway)
+- BUG (produzione Railway): alla Chiusura giornata usciva "Errore salvataggio PDF: Object storage non configurato" (503) e la chiusura NON andava a buon fine. Causa: su Railway l'object storage Emergent non è raggiungibile/EMERGENT_LLM_KEY assente, e chiudi_giorno faceva raise bloccante sul salvataggio PDF.
+- FIX (backend/server.py):
+  - chiudi_giorno: archiviazione PDF resa BEST-EFFORT (try/except con logger.warning invece di raise). La chiusura si completa comunque (snapshot + movimenti congelati). L'invio commercialista immediato usa il PDF in memoria, quindi funziona anche senza storage.
+  - nuovo helper _chiusura_pdf_bytes(ch): restituisce il PDF dallo storage se presente, altrimenti lo RIGENERA al volo da _compute_brogliaccio (i movimenti del giorno restano in DB).
+  - download_chiusura_pdf e invia_chiusura_giorno ora usano l'helper -> PDF sempre disponibile anche se non archiviato.
+- VERIFICATO preview: chiusura ok (201) + download PDF ok; azzerato pdf_storage_path -> download rigenera il PDF al volo (200, application/pdf).
+- DA DEPLOYARE: Save to GitHub -> Railway. (Opzionale: configurare EMERGENT_LLM_KEY su Railway per ri-abilitare l'archiviazione permanente dei PDF.)

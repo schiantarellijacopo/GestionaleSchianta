@@ -10101,11 +10101,16 @@ async def chiudi_giorno(
     pdf_bytes = await _generate_brogliaccio_pdf(payload)
     storage_path = (f"{os.environ.get('APP_NAME', 'assicura')}"
                     f"/brogliaccio/{data_giorno}/{chiusura.id}.pdf")
+    # Archiviazione PDF in object storage: BEST-EFFORT. Se lo storage non è
+    # configurato/raggiungibile (es. produzione senza EMERGENT_LLM_KEY) NON deve
+    # bloccare la chiusura: i movimenti vengono comunque congelati e il PDF resta
+    # scaricabile/ri-generabile on-demand da _compute_brogliaccio.
     try:
         obj_storage.put_object(storage_path, pdf_bytes, "application/pdf")
         chiusura.pdf_storage_path = storage_path
     except Exception as e:
-        raise HTTPException(503, f"Errore salvataggio PDF: {e}")
+        logger.warning("Archiviazione PDF brogliaccio %s non riuscita (%s): "
+                       "chiusura completata, PDF scaricabile on-demand", data_giorno, e)
 
     # 1) salva chiusura, 2) marca movimenti. Se 2 fallisce, almeno chiusura è ok.
     await db.chiusure_giorno.insert_one(chiusura.model_dump())
@@ -10131,10 +10136,8 @@ async def invia_chiusura_giorno(
     ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
     if not ch:
         raise HTTPException(404, "Chiusura non trovata")
-    if not ch.get("pdf_storage_path"):
-        raise HTTPException(400, "PDF non disponibile")
     try:
-        pdf_bytes, _ = obj_storage.get_object(ch["pdf_storage_path"])
+        pdf_bytes = await _chiusura_pdf_bytes(ch)
     except Exception as e:
         raise HTTPException(503, f"Errore lettura PDF: {e}")
     res = await _invia_brogliaccio_email(chiusura_id, pdf_bytes, ch["data"])
@@ -10326,15 +10329,30 @@ async def delete_chiusura_giorno(
     return {"ok": True}
 
 
+async def _chiusura_pdf_bytes(ch: dict) -> bytes:
+    """PDF brogliaccio di una giornata chiusa: dallo storage se presente,
+    altrimenti rigenerato al volo dai movimenti del giorno (snapshot in DB)."""
+    if ch.get("pdf_storage_path"):
+        try:
+            data, _ = obj_storage.get_object(ch["pdf_storage_path"])
+            return data
+        except Exception as e:
+            logger.warning("Lettura PDF storage fallita (%s): rigenero on-demand", e)
+    payload = await _compute_brogliaccio(ch["data"])
+    payload["chiusa"] = True
+    payload["chiusura"] = ch
+    return await _generate_brogliaccio_pdf(payload)
+
+
 @api.get("/contabilita/chiusura-giorno/{chiusura_id}/pdf")
 async def download_chiusura_pdf(
     chiusura_id: str, user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     ch = await db.chiusure_giorno.find_one({"id": chiusura_id}, {"_id": 0})
-    if not ch or not ch.get("pdf_storage_path"):
-        raise HTTPException(404, "PDF non trovato")
+    if not ch:
+        raise HTTPException(404, "Chiusura non trovata")
     try:
-        data, _ = obj_storage.get_object(ch["pdf_storage_path"])
+        data = await _chiusura_pdf_bytes(ch)
     except Exception as e:
         raise HTTPException(503, f"Errore: {e}")
     return StreamingResponse(
