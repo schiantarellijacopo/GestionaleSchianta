@@ -122,21 +122,37 @@ export default function DocumentiSezioneSplit({
         if (!file) return;
         setUploading("libretto");
         try {
-            const fd = new FormData();
-            fd.append("file", file);
-            fd.append("polizza_id", entita_id);
-            const r = await api.post(`/ocr/libretto`, fd, {
-                headers: { "Content-Type": "multipart/form-data" }, timeout: 120000,
+            // 1) Salva SEMPRE il file nella card (categoria libretto_veicolo) — affidabile
+            const fdUp = new FormData();
+            fdUp.append("file", file);
+            const params = new URLSearchParams({
+                entita_tipo, entita_id,
+                visibile_cliente: "true", categoria: "libretto_veicolo",
             });
-            const dati = r.data?.dati || {};
-            const campi = Object.entries(dati).filter(([, v]) => v !== null && v !== "").map(([k]) => k);
-            if (campi.length) {
-                await api.post("/ocr/libretto/apply", { polizza_id: entita_id, dati, campi });
-            }
-            toast.success("Libretto analizzato: dati veicolo aggiornati e file archiviato");
+            if (applicazione_matricola_id) params.set("applicazione_matricola_id", applicazione_matricola_id);
+            await api.post(`/allegati?${params.toString()}`, fdUp, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
             await load();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore OCR libretto"); }
-        finally { setUploading(null); }
+            // 2) OCR per estrarre/applicare i dati veicolo (senza polizza_id → nessun doppio salvataggio)
+            try {
+                const fd = new FormData(); fd.append("file", file);
+                const r = await api.post(`/ocr/libretto`, fd, {
+                    headers: { "Content-Type": "multipart/form-data" }, timeout: 120000,
+                });
+                const dati = r.data?.dati || {};
+                const campi = Object.entries(dati).filter(([, v]) => v !== null && v !== "").map(([k]) => k);
+                if (campi.length) {
+                    await api.post("/ocr/libretto/apply", { polizza_id: entita_id, dati, campi });
+                }
+                toast.success("Libretto salvato e dati veicolo aggiornati");
+            } catch (e) {
+                toast.warning("Libretto salvato nella card, ma l'OCR non è riuscito: " + (e.response?.data?.detail || "riprova"));
+            }
+            await load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore caricamento libretto");
+        } finally { setUploading(null); }
     };
 
     const toggleVisibilita = async (alleg) => {
