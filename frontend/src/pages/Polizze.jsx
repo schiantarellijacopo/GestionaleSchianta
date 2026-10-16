@@ -897,11 +897,14 @@ function NuovaPolizzaDialog({ onClose }) {
             });
             const created = await api.post("/polizze", payload);
             if (polizzaFile && created.data?.id) {
+                // Salva il PDF/immagine come allegato nella card "polizza" (niente re-OCR)
                 const fd = new FormData();
                 fd.append("file", polizzaFile);
-                fd.append("salva_come_allegato", "true");
-                fd.append("polizza_id", created.data.id);
-                api.post("/utility/ocr-polizza", fd,
+                const params = new URLSearchParams({
+                    entita_tipo: "polizza", entita_id: created.data.id,
+                    categoria: "polizza", visibile_cliente: "true",
+                });
+                api.post(`/allegati?${params.toString()}`, fd,
                     { headers: { "Content-Type": "multipart/form-data" } }).catch(() => {});
             }
             toast.success("Polizza creata — ora inserisci premi e provvigioni");

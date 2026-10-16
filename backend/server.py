@@ -3300,17 +3300,18 @@ async def ocr_polizza_endpoint(
         path = f"{os.environ.get('APP_NAME', 'assicura')}/polizze/{polizza_id}/polizza_{_uid()}.{ext}"
         try:
             result = obj_storage.put_object(path, contents, ct)
-            url = f"/api/storage/{result['path']}"
             alleg = Allegato(
                 entita_tipo="polizza", entita_id=polizza_id,
                 nome_file=file.filename or "polizza.pdf",
-                url=url, storage_path=result["path"],
-                mime=ct, size_kb=round(len(contents) / 1024, 1),
-                caricato_da=user.get("id"),
+                storage_path=result["path"],
+                content_type=ct, size=result.get("size", len(contents)),
+                descrizione="OCR polizza",
+                categoria="polizza", visibile_cliente=True,
+                autore_id=user.get("id"),
             )
             await db.allegati.insert_one(alleg.model_dump())
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.warning("Errore salvataggio allegato polizza: %s", exc)
 
     await log_attivita(user, "ocr", "polizza", polizza_id,
                        f"OCR polizza: {data.get('numero_polizza')} - {data.get('compagnia')}")
