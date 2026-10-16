@@ -38,9 +38,9 @@ class AiChatBody(BaseModel):
 @router.post("/chat")
 async def ai_chat(body: AiChatBody, user=Depends(current_user)) -> dict:
     """One-shot AI response (non-streaming). Per interazioni brevi/veloci."""
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     from llm_compat import LlmChat, UserMessage  # type: ignore
 
@@ -75,9 +75,9 @@ async def ai_chat(body: AiChatBody, user=Depends(current_user)) -> dict:
 @router.post("/chat/stream")
 async def ai_chat_stream(body: AiChatBody, user=Depends(current_user)):
     """Streaming response SSE per UI real-time (tokens on-the-fly)."""
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     from llm_compat import LlmChat, UserMessage, TextDelta, StreamDone  # type: ignore
 

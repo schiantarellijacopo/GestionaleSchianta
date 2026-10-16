@@ -47,9 +47,9 @@ REGOLE:
 
 async def estrai_dati_libretto(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """Restituisce dict con i campi estratti dal libretto."""
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("EMERGENT_LLM_KEY non configurata")
+        raise RuntimeError("Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
     image_content = ImageContent(image_base64=b64)

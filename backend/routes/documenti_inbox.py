@@ -181,9 +181,9 @@ async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
 
 async def _ocr_classifica(image_bytes: bytes, mime: str) -> dict:
     from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
     b64 = base64.b64encode(image_bytes).decode("ascii")
     chat = LlmChat(
         api_key=key,
@@ -245,9 +245,9 @@ async def ocr_veicolo(
         raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG/WEBP)")
 
     from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
     b64 = base64.b64encode(img_bytes).decode("ascii")
     chat = LlmChat(
         api_key=key, session_id=f"ocrveic-{os.urandom(4).hex()}",

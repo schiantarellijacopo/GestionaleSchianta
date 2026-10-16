@@ -28,7 +28,7 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
+EMERGENT_LLM_KEY = (os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
 COPILOT_MODEL_PROVIDER = "anthropic"
 COPILOT_MODEL_NAME = "claude-sonnet-4-6"                 # domande complesse/analitiche
 COPILOT_FAST_MODEL_NAME = "claude-haiku-4-5-20251001"    # lookup semplici (veloce)

@@ -117,9 +117,9 @@ def pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, resolution: int = 
 async def estrai_dati_polizza(image_bytes, mime_type: str = "image/jpeg") -> dict:
     """Estrae i campi dalla polizza. `image_bytes` può essere bytes (singola pagina)
     o una lista di bytes (più pagine → più immagini inviate a Gemini)."""
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("EMERGENT_LLM_KEY non configurata")
+        raise RuntimeError("Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     pages = image_bytes if isinstance(image_bytes, (list, tuple)) else [image_bytes]
     image_contents = [ImageContent(image_base64=base64.b64encode(p).decode("ascii")) for p in pages]

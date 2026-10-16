@@ -1051,9 +1051,9 @@ async def elimina_calcolo_regolazione(
 # ===========================================================
 async def _ocr_bilancio_gemini(img_bytes: bytes) -> dict:
     from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
     prompt = """Sei un OCR specializzato in bilanci d'esercizio italiani. Analizza il documento
 e ritorna ESCLUSIVAMENTE un JSON con questo schema (numeri in euro, no separatori migliaia, decimali col punto):
 
@@ -1187,9 +1187,9 @@ async def ocr_corso_ivass(
     else:
         img_bytes = contents
     from llm_compat import LlmChat, UserMessage, ImageContent, TextDelta, StreamDone
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
     prompt = """OCR del certificato di un corso IVASS. JSON SCHEMA:
 {
   "ente_erogatore": "MAIUSCOLO o null",

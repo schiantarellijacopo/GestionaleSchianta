@@ -804,9 +804,9 @@ Contesto extra dell'operatore: {body.get('contesto_extra','')}"""
         "Sii specifico e fattuale. Non inventare dati. Mai più di 100 parole."
     )
 
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise HTTPException(503, "EMERGENT_LLM_KEY non configurata")
+        raise HTTPException(503, "Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     try:
         chat = LlmChat(

@@ -297,9 +297,9 @@ async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -
     from llm_compat import (
         LlmChat, UserMessage, ImageContent, TextDelta, StreamDone,
     )
-    key = os.environ.get("EMERGENT_LLM_KEY")
+    key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("EMERGENT_LLM_KEY non configurata")
+        raise RuntimeError("Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
     # Conversione PDF → immagine se necessario
     if mime == "application/pdf" or file_bytes[:4] == b"%PDF":
