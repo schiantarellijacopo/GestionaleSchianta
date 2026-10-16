@@ -100,16 +100,21 @@ Regole:
 """
 
 
-def pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, resolution: int = 200) -> list[bytes]:
-    """Converte un PDF in una lista di immagini JPEG (una per pagina), piena risoluzione."""
+def pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, resolution: int = 150) -> list[bytes]:
+    """Converte un PDF in una lista di immagini JPEG (una per pagina),
+    ottimizzate per OCR veloce (lato lungo max 1600px, JPEG q80)."""
     from io import BytesIO
     import pdfplumber
     out: list[bytes] = []
+    maxd = 1600
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages[:max_pages]:
             im = page.to_image(resolution=resolution).original.convert("RGB")
+            if max(im.size) > maxd:
+                r = maxd / max(im.size)
+                im = im.resize((int(im.width * r), int(im.height * r)))
             buf = BytesIO()
-            im.save(buf, format="JPEG", quality=85)
+            im.save(buf, format="JPEG", quality=80, optimize=True)
             out.append(buf.getvalue())
     return out
 
@@ -128,7 +133,7 @@ async def estrai_dati_polizza(image_bytes, mime_type: str = "image/jpeg") -> dic
         api_key=key,
         session_id=f"ocr-polizza-{os.urandom(4).hex()}",
         system_message="Estrai dati strutturati da polizze assicurative italiane.",
-    ).with_model("gemini", "gemini-3-flash-preview")
+    ).with_model("gemini", "gemini-3-flash-preview").with_json()
 
     msg = UserMessage(text=PROMPT, file_contents=image_contents)
     response_text = ""

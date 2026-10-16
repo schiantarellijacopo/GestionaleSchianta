@@ -264,9 +264,10 @@ Rispondi SOLO con il JSON. Nessun markdown, nessun testo prima o dopo.
 
 
 async def _pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
-    """Converte la PRIMA PAGINA di un PDF in un PNG (da passare a Gemini Vision).
+    """Converte la PRIMA PAGINA di un PDF in JPEG (per Gemini Vision).
 
     Uso pypdfium2 perché è già installato e non richiede poppler-utils.
+    Ottimizzato per velocità: 150 DPI, lato lungo max 1600px, JPEG q80.
     """
     import pypdfium2 as pdfium
     from io import BytesIO
@@ -274,16 +275,14 @@ async def _pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
     if len(pdf) == 0:
         raise ValueError("PDF vuoto")
     page = pdf[0]
-    # Renderizza a 200 DPI (compromesso qualità/dimensione per Gemini)
-    pil_image = page.render(scale=200 / 72).to_pil()
-    # Se pagina troppo grande, ridimensiona (Gemini accetta max ~4MB)
-    max_dim = 2000
+    pil_image = page.render(scale=150 / 72).to_pil().convert("RGB")
+    max_dim = 1600
     if max(pil_image.size) > max_dim:
         ratio = max_dim / max(pil_image.size)
         new_size = (int(pil_image.size[0] * ratio), int(pil_image.size[1] * ratio))
         pil_image = pil_image.resize(new_size)
     buf = BytesIO()
-    pil_image.save(buf, format="PNG", optimize=True)
+    pil_image.save(buf, format="JPEG", quality=80, optimize=True)
     return buf.getvalue()
 
 
@@ -342,7 +341,7 @@ async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -
         api_key=key,
         session_id=f"cloud-ocr-{os.urandom(4).hex()}",
         system_message="Classifica documenti assicurativi italiani con MASSIMA precisione. Rispondi solo JSON.",
-    ).with_model("gemini", "gemini-3-flash-preview")
+    ).with_model("gemini", "gemini-3-flash-preview").with_json()
     msg = UserMessage(text=prompt_final, file_contents=[img])
     text = ""
     async for ev in chat.stream_message(msg):

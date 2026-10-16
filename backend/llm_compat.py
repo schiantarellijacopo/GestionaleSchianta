@@ -53,6 +53,7 @@ class LlmChat:
         self._provider = None
         self._model = None
         self._real = None
+        self._json_mode = False
         self._real_kwargs = dict(
             api_key=api_key, session_id=session_id, system_message=system_message, **kwargs
         )
@@ -60,6 +61,13 @@ class LlmChat:
     def with_model(self, provider, model):
         self._provider = provider
         self._model = model
+        return self
+
+    def with_json(self):
+        """Opt-in: forza output JSON puro su Gemini diretto (più veloce e
+        affidabile per gli OCR; niente markdown da ripulire). No-op sul
+        percorso emergentintegrations."""
+        self._json_mode = True
         return self
 
     # --- routing ---
@@ -108,30 +116,45 @@ class LlmChat:
         primary = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         fallbacks = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
         candidates = [primary] + [m for m in fallbacks if m != primary]
-        payload = {
-            "contents": [{"parts": self._build_parts(message)}],
-            "generationConfig": {"temperature": 0},
-        }
-        if self._system:
-            payload["systemInstruction"] = {"parts": [{"text": self._system}]}
+        # OTTIMIZZAZIONE VELOCITÀ: disabilita il "thinking" di Gemini 3 flash
+        # (riduce drasticamente la latenza) e, per gli OCR, forza output JSON
+        # puro (niente markdown da ripulire, meno re-parsing).
+        gen_cfg = {"temperature": 0, "thinkingConfig": {"thinkingBudget": 0}}
+        if self._json_mode:
+            gen_cfg["responseMimeType"] = "application/json"
+        parts = self._build_parts(message)
         last_err = "sconosciuto"
         with httpx.Client(timeout=120) as c:
             for model in candidates:
                 url = f"{GEMINI_REST}/{model}:generateContent"
+                cfg = dict(gen_cfg)
                 for attempt in range(3):
+                    payload = {"contents": [{"parts": parts}], "generationConfig": cfg}
+                    if self._system:
+                        payload["systemInstruction"] = {"parts": [{"text": self._system}]}
                     r = c.post(url, params={"key": key},
                                headers={"Content-Type": "application/json"}, json=payload)
                     if r.status_code in (429, 503):
                         last_err = f"{r.status_code} (sovraccarico {model})"
-                        time.sleep(1.5 * (attempt + 1))
+                        time.sleep(1.0 * (attempt + 1))
                         continue
+                    if r.status_code == 400:
+                        # Una config opzionale (thinking/JSON) potrebbe non essere
+                        # supportata dal modello: rimuovila e riprova subito. Così
+                        # le ottimizzazioni non causano mai un errore bloccante.
+                        if "thinkingConfig" in cfg or "responseMimeType" in cfg:
+                            cfg.pop("thinkingConfig", None)
+                            cfg.pop("responseMimeType", None)
+                            continue
+                        last_err = f"400: {r.text[:200]}"
+                        break
                     if r.status_code >= 400:
                         last_err = f"{r.status_code}: {r.text[:200]}"
                         break  # errore non transitorio: prova il prossimo modello
                     data = r.json()
                     cands = data.get("candidates") or []
-                    parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
-                    txt = "".join(p.get("text", "") for p in parts)
+                    parts_out = (cands[0].get("content") or {}).get("parts") or [] if cands else []
+                    txt = "".join(p.get("text", "") for p in parts_out)
                     if txt.strip():
                         return txt
                     last_err = "risposta vuota"

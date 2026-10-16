@@ -3149,7 +3149,7 @@ async def ocr_documento_identita(
             with pdfplumber.open(BytesIO(contents)) as pdf:
                 if not pdf.pages:
                     raise HTTPException(400, "PDF vuoto")
-                img = pdf.pages[0].to_image(resolution=200).original
+                img = pdf.pages[0].to_image(resolution=150).original
                 out = BytesIO()
                 img.save(out, format="JPEG", quality=85)
                 file_for_ocr = out.getvalue()
@@ -3261,7 +3261,7 @@ async def ocr_polizza_endpoint(
         try:
             # Tutte le pagine (fino a 10), una immagine per pagina → estrazione più
             # completa (premi/SSN/veicolo possono stare su pagine successive).
-            pages = ocr_pol.pdf_to_page_images(contents, max_pages=10, resolution=200)
+            pages = ocr_pol.pdf_to_page_images(contents, max_pages=10, resolution=150)
             if not pages:
                 raise HTTPException(400, "PDF vuoto")
             file_for_ocr = pages
@@ -3342,7 +3342,7 @@ async def ocr_carta_identita(
             with pdfplumber.open(BytesIO(contents)) as pdf:
                 if not pdf.pages:
                     raise HTTPException(400, "PDF vuoto")
-                img = pdf.pages[0].to_image(resolution=200).original
+                img = pdf.pages[0].to_image(resolution=150).original
                 out = BytesIO()
                 img.save(out, format="JPEG", quality=85)
                 file_for_ocr = out.getvalue()
@@ -3427,7 +3427,7 @@ async def ocr_visura_camerale(
                 if not pdf.pages:
                     raise HTTPException(400, "PDF vuoto")
                 # per visure camerali analizziamo solo la prima pagina (sintesi)
-                img = pdf.pages[0].to_image(resolution=200).original
+                img = pdf.pages[0].to_image(resolution=150).original
                 out = BytesIO()
                 img.save(out, format="JPEG", quality=85)
                 file_for_ocr = out.getvalue()

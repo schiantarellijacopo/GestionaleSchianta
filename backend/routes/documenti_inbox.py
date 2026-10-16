@@ -157,7 +157,7 @@ async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
         # (es. il retro della carta d'identità con comune e data di emissione).
         imgs = []
         for page in pdf.pages[:3]:
-            imgs.append(page.to_image(resolution=200).original.convert("RGB"))
+            imgs.append(page.to_image(resolution=150).original.convert("RGB"))
         if len(imgs) == 1:
             combined = imgs[0]
         else:
@@ -175,7 +175,11 @@ async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
                 combined.paste(im, (0, yoff))
                 yoff += im.height
         out = BytesIO()
-        combined.save(out, format="JPEG", quality=85)
+        # Downscale finale: larghezza max 1400px → OCR più rapido
+        if combined.width > 1400:
+            r = 1400 / combined.width
+            combined = combined.resize((1400, int(combined.height * r)))
+        combined.save(out, format="JPEG", quality=80, optimize=True)
         return out.getvalue(), "image/jpeg"
 
 
@@ -189,7 +193,7 @@ async def _ocr_classifica(image_bytes: bytes, mime: str) -> dict:
         api_key=key,
         session_id=f"docinbox-{os.urandom(4).hex()}",
         system_message="Sei un OCR/classificatore di documenti italiani.",
-    ).with_model("gemini", "gemini-3-flash-preview")
+    ).with_model("gemini", "gemini-3-flash-preview").with_json()
     msg = UserMessage(text=PROMPT_CLASSIFICA, file_contents=[ImageContent(image_base64=b64)])
     resp = ""
     try:
@@ -252,7 +256,7 @@ async def ocr_veicolo(
     chat = LlmChat(
         api_key=key, session_id=f"ocrveic-{os.urandom(4).hex()}",
         system_message="Sei un OCR di libretti di circolazione italiani.",
-    ).with_model("gemini", "gemini-3-flash-preview")
+    ).with_model("gemini", "gemini-3-flash-preview").with_json()
     msg = UserMessage(text=_PROMPT_LIBRETTO, file_contents=[ImageContent(image_base64=b64)])
     resp = ""
     try:

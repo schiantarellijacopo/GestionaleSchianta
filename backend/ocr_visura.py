@@ -74,7 +74,7 @@ async def estrai_dati_visura(image_bytes: bytes, mime_type: str = "image/jpeg") 
         api_key=key,
         session_id=f"ocr-visura-{os.urandom(4).hex()}",
         system_message="Estrai dati strutturati da visure camerali italiane.",
-    ).with_model("gemini", "gemini-3-flash-preview")
+    ).with_model("gemini", "gemini-3-flash-preview").with_json()
 
     msg = UserMessage(text=PROMPT, file_contents=[image_content])
     response_text = ""

@@ -22,15 +22,20 @@ router = APIRouter()
 
 
 async def _convert_pdf_to_jpeg(contents: bytes) -> tuple[bytes, str]:
-    """Converte la prima pagina di un PDF in JPEG (200 dpi)."""
+    """Converte la prima pagina di un PDF in JPEG ottimizzato per OCR veloce."""
     try:
         import pdfplumber
         with pdfplumber.open(BytesIO(contents)) as pdf:
             if not pdf.pages:
                 raise HTTPException(400, "PDF vuoto")
-            img = pdf.pages[0].to_image(resolution=200).original
+            img = pdf.pages[0].to_image(resolution=150).original.convert("RGB")
+            # Downscale: lato lungo max 1600px → payload più piccolo e OCR più rapido
+            maxd = 1600
+            if max(img.size) > maxd:
+                r = maxd / max(img.size)
+                img = img.resize((int(img.width * r), int(img.height * r)))
             out = BytesIO()
-            img.save(out, format="JPEG", quality=85)
+            img.save(out, format="JPEG", quality=80, optimize=True)
             return out.getvalue(), "image/jpeg"
     except HTTPException:
         raise
