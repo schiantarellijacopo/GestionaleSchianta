@@ -1,6 +1,12 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — HOTFIX: deploy Railway fallito per healthcheck (auto-repair webhook bloccante) ✅
+- **Sintomo**: dopo Save to GitHub il deploy di GestionaleSchianta falliva con "Network > Healthcheck failure" (commit fe60faed).
+- **RCA**: la chiamata `await auto_repair_webhooks()` aggiunta allo startup (`@app.on_event("startup")`) era BLOCCANTE: attendeva Evolution prima che l'app iniziasse a servire → startup troppo lento → healthcheck Railway in timeout.
+- **FIX** (`server.py`): l'auto-repair ora parte come background task (`asyncio.create_task`) con delay di 20s, dopo che l'app è già up. L'avvio non è più bloccato. Verificato in preview: `/api/` risponde 200 immediatamente, task background senza errori.
+- **Azione utente**: rifare Save to GitHub per deployare l'hotfix.
+
 ## 2026-10-16 — WhatsApp: messaggi IN non ricevuti (webhook puntava al preview) ✅
 - **Sintomo (produzione)**: si inviano messaggi WhatsApp ma non se ne ricevono ("0 in" su tutte le chat).
 - **RCA**: gli "out" sono salvati localmente da `send-text`; gli "in" arrivano SOLO via webhook. `GET /webhook/find` sull'istanza `agenzia-0342706000` ha mostrato che il webhook puntava a `https://whatsapp-crm-146.preview.emergentagent.com/...` (PREVIEW) → gli inbound finivano nel preview, la produzione Railway non li vedeva. Inoltre `create_instance` registrava il webhook senza `enabled:true`.
