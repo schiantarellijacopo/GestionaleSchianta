@@ -858,3 +858,12 @@ Admin: `admin@assicura.it / Admin123!`
 - FIX backend routes/agenzie.py: conteggio "compagnie con mandato diretto" del principale = compagnie SENZA alcuna agenzia partner (plurale vuoto AND singolare null).
 - VERIFICA preview (login reale + screenshot): partner Collega compagnie -> toggle/salva/riapri PERSISTE; principale -> compagnie collegate a partner mostrate DESELEZIONATE con avviso e non conteggiate come dirette (conteggio 9->6). Backend/frontend OK, nessun crash.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (20) — OCR polizza: auto-creazione contraente + verifiche produzione
+- VERIFICA PRODUZIONE (credenziali admin, read-only): associazioni compagnia→agenzia CORRETTE (CATTOLICA/UCA diretto; GROUPAMA/GLOBAL/NOBIS/REDION su CONAP via agenzie_partner_ids). REDION ha tipo_mandato="diretto" legacy ma plurale=[CONAP] -> il mio fix plurale la gestisce.
+- OCR in produzione TESTATO e FUNZIONANTE: carta identità (BOTTONI GLORIA), libretto /ocr/libretto e /documenti-inbox/ocr-veicolo (FIAT 500), polizza /utility/ocr-polizza (INCALCATERRA, Cattolica, KAWASAKI). Tutti HTTP 200 ~15-18s.
+- "3 compagnie dirette invece di 2": conteggio backend principale già corretto nel mio fix (plurale vuoto AND singolare null) -> dopo deploy mostrerà 2.
+- NUOVO: creazione AUTOMATICA del contraente dall'OCR polizza. Se il backend (ricerca su CF/P.IVA) non trova l'anagrafica, viene creata al volo dai dati del PDF (ragione_sociale/cognome/nome, CF o P.IVA, indirizzo/comune/prov/cap/email) e collegata. In più, pulsante manuale "➕ Crea e collega" nel dropdown contraente. File: Polizze.jsx (creaContraente(srcData), chiamata nel ramo OCR senza match).
+- Messaggio campi obbligatori specifico + auto-mandato da OCR + filtro compagnie plurale (già fatti). Verificato in preview: modale ok, bottone crea-contraente visibile, nessun crash.
+- PENDING: libretto OCR "dentro la card" (DocumentiSezioneSplit per-categoria non ha OCR; il pulsante "OCR Libretto veicolo" è in DocumentiPolizzaTab). Da confermare schermata esatta.
+- DA DEPLOYARE: Save to GitHub -> Railway.

@@ -510,6 +510,8 @@ function NuovaPolizzaDialog({ onClose }) {
     // della ricerca (server-side): risolve il bug per cui il nome sparisce dopo la
     // selezione se l'anagrafica non è più nei primi 50 risultati.
     const [contraenteSel, setContraenteSel] = useState(null);
+    const [ocrContraente, setOcrContraente] = useState(null);
+    const [creandoContr, setCreandoContr] = useState(false);
     const [ocrLoading, setOcrLoading] = useState(false);
     const ocrRef = useRef(null);
     // Nome prodotto grezzo da OCR in attesa che la lista `prodotti` del ramo si carichi,
@@ -744,12 +746,20 @@ function NuovaPolizzaDialog({ onClose }) {
             const cfContr = d.contraente?.codice_fiscale || d.contraente?.partita_iva;
             if (anaEsist) {
                 setContraenteSel(anaEsist);
+                setOcrContraente(null);
                 setContraenteQuery("");
                 if (anaEsist.collaboratore_id) set("collaboratore_id", anaEsist.collaboratore_id);
             } else {
-                // Nessuna anagrafica: pre-compila la ricerca col nome del PDF per crearla.
+                // Il backend ha cercato per CF/P.IVA su tutto il DB e non ha
+                // trovato il contraente: lo CREIAMO automaticamente dai dati del
+                // PDF (se abbiamo CF o P.IVA per identificarlo univocamente).
                 setContraenteSel(null);
-                setContraenteQuery(d.contraente?.cognome_nome_o_ragione_sociale || cfContr || "");
+                const cData = d.contraente || { cognome_nome_o_ragione_sociale: cfContr };
+                setOcrContraente(cData);
+                setContraenteQuery(cData.cognome_nome_o_ragione_sociale || cfContr || "");
+                if (cData.codice_fiscale || cData.partita_iva) {
+                    await creaContraente(cData);
+                }
             }
             const v = d.veicolo || {};
             setF((p) => ({
@@ -798,6 +808,42 @@ function NuovaPolizzaDialog({ onClose }) {
         } catch (e) {
             toast.error("OCR fallito: " + (e.response?.data?.detail || e.message));
         } finally { setOcrLoading(false); }
+    };
+
+    const creaContraente = async (srcData) => {
+        const src = srcData || ocrContraente || {};
+        const nome = (src.cognome_nome_o_ragione_sociale || contraenteQuery || "").trim();
+        if (!nome) { toast.error("Inserisci un nome per il nuovo contraente"); return; }
+        const isPG = !!src.partita_iva;
+        const payload = {
+            tipo: isPG ? "persona_giuridica" : "persona_fisica",
+            ragione_sociale: nome,
+            codice_fiscale: src.codice_fiscale || null,
+            partita_iva: src.partita_iva || null,
+            indirizzo: src.indirizzo || null,
+            comune: src.comune || null,
+            provincia: src.provincia || null,
+            cap: src.cap || null,
+            email: src.email || null,
+        };
+        if (!isPG) {
+            const parts = nome.split(/\s+/);
+            payload.cognome = parts[0] || nome;
+            payload.nome = parts.slice(1).join(" ") || null;
+        }
+        setCreandoContr(true);
+        try {
+            const res = await api.post("/anagrafiche", payload);
+            const a = res.data;
+            set("contraente_id", a.id);
+            setContraenteSel(a);
+            setOcrContraente(null);
+            setContraenteQuery("");
+            setShowContraenteList(false);
+            toast.success("Contraente creato e collegato");
+        } catch (e) {
+            toast.error("Creazione contraente fallita: " + (e.response?.data?.detail || e.message));
+        } finally { setCreandoContr(false); }
     };
 
     const save = async () => {
@@ -987,8 +1033,19 @@ function NuovaPolizzaDialog({ onClose }) {
                         />
                         {showContraenteList && (
                             <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-y-auto" data-testid="contraente-suggestions">
+                                {contraenteQuery.trim() && (
+                                    <button
+                                        type="button"
+                                        className="w-full text-left px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border-b border-slate-100 text-sm font-medium text-emerald-800"
+                                        onMouseDown={(e) => { e.preventDefault(); creaContraente(); }}
+                                        disabled={creandoContr}
+                                        data-testid="contraente-crea-nuovo"
+                                    >
+                                        ➕ {creandoContr ? "Creo…" : `Crea e collega "${contraenteQuery.trim()}"`}
+                                    </button>
+                                )}
                                 {anaFiltrate.length === 0 ? (
-                                    <div className="p-3 text-xs text-slate-500">Nessun contraente trovato</div>
+                                    <div className="p-3 text-xs text-slate-500">Nessun contraente trovato — usa il pulsante sopra per crearlo</div>
                                 ) : anaFiltrate.map((a) => (
                                     <button
                                         type="button"
