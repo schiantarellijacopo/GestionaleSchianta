@@ -4472,6 +4472,185 @@ async def statistiche_premi_provvigioni(
             "scoped_operatore": scoped}
 
 
+@api.get("/statistiche/incassi-situazione")
+async def statistiche_incassi_situazione(
+    anno: Optional[int] = None,
+    mese: Optional[int] = None,
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Cruscotto Incassi (replica layout gestionale):
+       - snapshot del mese: titoli arretrati (scaduti non incassati), sospesi cliente, sospesi rete vendita
+       - KPI rolling 12 mesi: velocità di incasso / recupero
+       - donut: provvigioni per compagnia, provvigioni per ramo, premi per modalità incasso
+       - tabella 'situazione del mese': confronto anno corrente vs precedente di
+         Provvigioni Attive, Provvigioni Nette, Premi Lordi, Premi Netti.
+    """
+    from datetime import date as _date
+    oggi = _date.today()
+    anno = int(anno or oggi.year)
+    mese = int(mese or oggi.month)
+
+    scoped = user.get("role") != "admin"
+    eff_op = user.get("id") if scoped else None
+
+    base_flt: dict = {"stato": {"$ne": "stornato"}}
+    if eff_op:
+        base_flt["$or"] = [{"collaboratore_id": eff_op}, {"provvigioni_operatori.operatore_id": eff_op}]
+
+    def _provv_attiva(t: dict) -> float:
+        if not eff_op:
+            return float(t.get("provvigioni") or 0)
+        for op in (t.get("provvigioni_operatori") or []):
+            if op.get("operatore_id") == eff_op:
+                return float(op.get("provvigione") or 0)
+        return float(t.get("provvigioni") or 0) if t.get("collaboratore_id") == eff_op else 0.0
+
+    def _quota_rete(t: dict) -> float:
+        # quota della provvigione girata alla rete vendita (collaboratori/sub-agenti)
+        return sum(float(op.get("provvigione") or 0) for op in (t.get("provvigioni_operatori") or []))
+
+    # cache polizza → compagnia/ramo
+    pol_cache: dict = {}
+    comp_cache: dict = {}
+
+    async def _pol(pid):
+        if pid not in pol_cache:
+            pol_cache[pid] = await db.polizze.find_one({"id": pid}, {"_id": 0, "compagnia_id": 1, "ramo": 1}) or {}
+        return pol_cache[pid]
+
+    async def _comp_nome(cid):
+        if not cid:
+            return "—"
+        if cid not in comp_cache:
+            c = await db.compagnie.find_one({"id": cid}, {"_id": 0, "ragione_sociale": 1})
+            comp_cache[cid] = (c or {}).get("ragione_sociale") or "—"
+        return comp_cache[cid]
+
+    # ---- snapshot stato corrente (indipendente dal mese selezionato) ----
+    oggi_iso = oggi.isoformat()
+    arretrati = 0.0        # scaduti e non incassati
+    sospesi_cliente = 0.0  # da incassare non ancora scaduti
+    sospesi_rete = 0.0     # insoluti (a recupero)
+    async for t in db.titoli.find({**base_flt, "stato": {"$in": ["da_incassare", "insoluto"]}},
+                                  {"_id": 0, "importo_lordo": 1, "scadenza": 1, "stato": 1,
+                                   "collaboratore_id": 1, "provvigioni_operatori": 1}):
+        imp = float(t.get("importo_lordo") or 0)
+        sc = (t.get("scadenza") or "")[:10]
+        if t.get("stato") == "insoluto":
+            sospesi_rete += imp
+        elif sc and sc < oggi_iso:
+            arretrati += imp
+        else:
+            sospesi_cliente += imp
+
+    # ---- KPI rolling 12 mesi (finestra che termina nel mese selezionato) ----
+    # finestra: dal mese+1 dell'anno-1 fino al mese selezionato
+    def _add_months(y, m, delta):
+        idx = (y * 12 + (m - 1)) + delta
+        return idx // 12, idx % 12 + 1
+    win_start_y, win_start_m = _add_months(anno, mese, -11)
+    win_start = f"{win_start_y:04d}-{win_start_m:02d}-01"
+    # fine mese selezionato
+    end_y, end_m = _add_months(anno, mese, 1)
+    win_end = f"{end_y:04d}-{end_m:02d}-01"
+
+    dovuto_12 = incassato_12 = insoluto_12 = recuperato_12 = 0.0
+    async for t in db.titoli.find(base_flt, {"_id": 0, "importo_lordo": 1, "scadenza": 1,
+                                             "data_incasso": 1, "stato": 1}):
+        imp = float(t.get("importo_lordo") or 0)
+        sc = (t.get("scadenza") or "")[:10]
+        di = (t.get("data_incasso") or "")[:10]
+        if sc and win_start <= sc < win_end:
+            dovuto_12 += imp
+            if t.get("stato") == "insoluto":
+                insoluto_12 += imp
+        if di and win_start <= di < win_end:
+            incassato_12 += imp
+            if t.get("stato") == "incassato":
+                recuperato_12 += 0.0  # placeholder; recupero calcolato sotto
+
+    vel_incasso = round(incassato_12 / dovuto_12, 2) if dovuto_12 else 0.0
+    vel_recupero = round((dovuto_12 - insoluto_12) / dovuto_12, 2) if dovuto_12 else 0.0
+
+    # ---- aggregati del mese selezionato + stesso mese anno precedente ----
+    def _mese_acc():
+        return {"provv_attive": 0.0, "provv_nette": 0.0, "premi_lordi": 0.0, "premi_netti": 0.0}
+    acc = {anno: _mese_acc(), anno - 1: _mese_acc()}
+    donut_provv_comp: dict = {}
+    donut_provv_ramo: dict = {}
+    donut_premi_mezzo: dict = {}
+
+    async for t in db.titoli.find({**base_flt, "stato": "incassato", "data_incasso": {"$ne": None}},
+                                  {"_id": 0, "data_incasso": 1, "importo_lordo": 1, "importo_netto": 1,
+                                   "provvigioni": 1, "provvigioni_operatori": 1, "collaboratore_id": 1,
+                                   "polizza_id": 1, "mezzo_pagamento": 1}):
+        di = (t.get("data_incasso") or "")[:10]
+        if len(di) < 7:
+            continue
+        try:
+            ty, tm = int(di[:4]), int(di[5:7])
+        except ValueError:
+            continue
+        if tm != mese or ty not in acc:
+            continue
+        pa = _provv_attiva(t)
+        pn = pa - _quota_rete(t)
+        lordo = float(t.get("importo_lordo") or 0)
+        netto = float(t.get("importo_netto") or 0)
+        a = acc[ty]
+        a["provv_attive"] += pa
+        a["provv_nette"] += pn
+        a["premi_lordi"] += lordo
+        a["premi_netti"] += netto
+        # donut solo anno corrente
+        if ty == anno:
+            pol = await _pol(t.get("polizza_id"))
+            nome_comp = await _comp_nome(pol.get("compagnia_id"))
+            donut_provv_comp[nome_comp] = donut_provv_comp.get(nome_comp, 0.0) + pa
+            ramo = (pol.get("ramo") or "Altro").strip() or "Altro"
+            donut_provv_ramo[ramo] = donut_provv_ramo.get(ramo, 0.0) + pa
+            mezzo = (t.get("mezzo_pagamento") or "Non indicato").strip() or "Non indicato"
+            donut_premi_mezzo[mezzo] = donut_premi_mezzo.get(mezzo, 0.0) + lordo
+
+    def _var(a, b):
+        return round(((a - b) / b) * 100, 2) if b else (100.0 if a else 0.0)
+
+    def _riga(key, label):
+        a = round(acc[anno][key], 2)
+        b = round(acc[anno - 1][key], 2)
+        return {"label": label, "corrente": a, "precedente": b, "var_perc": _var(a, b)}
+
+    def _donut(d):
+        return [{"nome": k, "valore": round(v, 2)} for k, v in sorted(d.items(), key=lambda x: -x[1]) if round(v, 2) != 0]
+
+    return {
+        "anno": anno, "mese": mese,
+        "snapshot": {
+            "arretrati_scaduto": round(arretrati, 2),
+            "sospesi_rete_vendita": round(sospesi_rete, 2),
+            "sospesi_cliente": round(sospesi_cliente, 2),
+        },
+        "finestra_12": {"label": f"{win_start_m:02d}/{win_start_y} - {mese:02d}/{anno}",
+                        "mese_start": win_start_m, "anno_start": win_start_y},
+        "kpi": {
+            "velocita_incasso": vel_incasso,
+            "velocita_recupero_cliente": vel_recupero,
+            "velocita_recupero_rete": round((dovuto_12 - insoluto_12) / dovuto_12, 2) if dovuto_12 else 0.0,
+        },
+        "donut_provv_compagnia": _donut(donut_provv_comp),
+        "donut_provv_ramo": _donut(donut_provv_ramo),
+        "donut_premi_modalita": _donut(donut_premi_mezzo),
+        "situazione": [
+            _riga("provv_attive", "Provvigioni Attive"),
+            _riga("provv_nette", "Provvigioni Nette"),
+            _riga("premi_lordi", "Premi Lordi"),
+            _riga("premi_netti", "Premi Netti"),
+        ],
+        "scoped_operatore": scoped,
+    }
+
+
+
 @api.get("/statistiche/per-operatore")
 async def statistiche_per_operatore(
     anni: str,

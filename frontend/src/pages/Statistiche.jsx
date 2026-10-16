@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import StatistichePremi from "@/pages/StatistichePremi";
+import StatisticheIncassi from "@/pages/StatisticheIncassi";
 import StatistichePortafoglio from "@/pages/StatistichePortafoglio";
 import StatistichePerOperatore from "@/pages/StatistichePerOperatore";
 import { TopClientiModulo, SegmentazioneModulo } from "@/pages/StatisticheClienti";
@@ -45,6 +46,9 @@ export default function Statistiche() {
                     <TabsTrigger value="premi" data-testid="stat-tab-premi">
                         <TrendingUp size={14} className="mr-1" /> Premi / Provvigioni
                     </TabsTrigger>
+                    <TabsTrigger value="incassi" data-testid="stat-tab-incassi">
+                        <Wallet size={14} className="mr-1" /> Incassi
+                    </TabsTrigger>
                     <TabsTrigger value="operatore" data-testid="stat-tab-operatore">
                         <UserCog size={14} className="mr-1" /> Per Operatore
                     </TabsTrigger>
@@ -61,6 +65,7 @@ export default function Statistiche() {
                 <TabsContent value="overview" className="space-y-4 mt-4"><OverviewModulo /></TabsContent>
                 <TabsContent value="isa" className="space-y-4 mt-4"><IsaModulo /></TabsContent>
                 <TabsContent value="premi" className="space-y-4 mt-4"><StatistichePremi /></TabsContent>
+                <TabsContent value="incassi" className="space-y-4 mt-4"><StatisticheIncassi /></TabsContent>
                 <TabsContent value="operatore" className="space-y-4 mt-4"><StatistichePerOperatore /></TabsContent>
                 <TabsContent value="topclienti" className="space-y-4 mt-4"><TopClientiModulo /></TabsContent>
                 <TabsContent value="segmentazione" className="space-y-4 mt-4"><SegmentazioneModulo /></TabsContent>
