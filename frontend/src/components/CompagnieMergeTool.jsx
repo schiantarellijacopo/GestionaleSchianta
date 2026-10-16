@@ -5,7 +5,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Merge } from "lucide-react";
+import { Merge, Image as ImageIcon } from "lucide-react";
 
 /**
  * Strumento per UNIRE compagnie duplicate (es. le UCA create in automatico dall'OCR).
@@ -17,6 +17,22 @@ export default function CompagnieMergeTool({ list = [] }) {
     const [targetId, setTargetId] = useState("");
     const [sources, setSources] = useState(new Set());
     const [busy, setBusy] = useState(false);
+    const [migrando, setMigrando] = useState(false);
+
+    const migraLoghi = async () => {
+        setMigrando(true);
+        try {
+            const r = await api.post("/compagnie/migra-loghi");
+            const d = r.data || {};
+            toast.success(`Loghi: ${d.migrati} recuperati · ${d.gia_nel_db} già ok · ${d.falliti} non recuperabili`);
+            if (d.migrati > 0) setTimeout(() => window.location.reload(), 1000);
+            else if (d.falliti > 0) toast.message("I loghi non recuperabili vanno ricaricati manualmente.");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore migrazione loghi");
+        } finally {
+            setMigrando(false);
+        }
+    };
 
     const toggleSource = (id) => {
         setSources((prev) => {
@@ -48,7 +64,11 @@ export default function CompagnieMergeTool({ list = [] }) {
     };
 
     return (
-        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setSources(new Set()); setTargetId(""); } }}>
+        <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1" onClick={migraLoghi} disabled={migrando} data-testid="compagnie-migra-loghi">
+                <ImageIcon size={14} /> {migrando ? "Migrazione…" : "Migra loghi"}
+            </Button>
+            <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setSources(new Set()); setTargetId(""); } }}>
             <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1" data-testid="compagnie-merge-open">
                     <Merge size={14} /> Unisci duplicati
@@ -90,5 +110,6 @@ export default function CompagnieMergeTool({ list = [] }) {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+        </div>
     );
 }

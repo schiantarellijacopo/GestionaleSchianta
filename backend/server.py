@@ -4779,6 +4779,16 @@ async def list_titoli(
         if stati_excl:
             flt["stato"] = {"$nin": stati_excl}
 
+    # I titoli STORNATI non devono MAI comparire negli elenchi "arretrati"/da incassare.
+    # Esclusi sempre, tranne nel dettaglio di una singola polizza (polizza_id) o quando
+    # richiesti esplicitamente (stato="stornato").
+    if not polizza_id and stato != "stornato":
+        _cur = flt.get("stato")
+        if _cur is None:
+            flt["stato"] = {"$nin": ["stornato"]}
+        elif isinstance(_cur, dict) and "$nin" in _cur and "stornato" not in _cur["$nin"]:
+            _cur["$nin"] = list(_cur["$nin"]) + ["stornato"]
+
     # filtri lato polizza (compagnia/collaboratore/ramo/prodotto/q-su-targa-numero)
     pol_filter: dict = {}
     if compagnia_id: pol_filter["compagnia_id"] = compagnia_id

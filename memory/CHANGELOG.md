@@ -711,3 +711,8 @@ Admin: `admin@assicura.it / Admin123!`
 - ISSUE 5 (BS BROKER solo 4.5%): la risoluzione schema per-compagnia e' CORRETTA (test: compagnia con schema specifico=98%, altra=4.5% default). Causa reale = ISSUE 3: le polizze UCA stavano sotto le UCA duplicate, lo schema 98% punta a "UCA - ASSICURAZIONI SPESE LEGALI". Dopo merge delle UCA, lo schema 98% si applica. Nessuna modifica di codice al calcolo.
 - EXTRA: TitoloDialog.jsx - il numero polizza nel titolo del dialog "Modifica titolo" ora e' CLICCABILE e porta a /polizze/{id}.
 - DA DEPLOYARE: Save to GitHub -> Railway. Dopo deploy su Railway: 1) eseguire "Unisci duplicati" per le UCA; 2) ricaricare i loghi (o POST /compagnie/migra-loghi se storage raggiungibile).
+
+## 2026-06 (8) — Titoli stornati fuori dagli arretrati + pulsante Migra loghi
+- ISSUE (stornato negli arretrati): /titoli senza filtro stato mostrava anche i titoli 'stornato'. FIX (server.py list_titoli): se NON c'e' polizza_id e stato!='stornato', esclude sempre 'stornato' (gestisce flt.stato None e $nin). Il dettaglio polizza (polizza_id) e la richiesta esplicita stato=stornato continuano a mostrarli. Verificato: senza filtro 0 stornati, dettaglio polizza 1, stato=stornato 1.
+- LOGHI: aggiunto pulsante "Migra loghi" (CompagnieMergeTool.jsx) che chiama POST /compagnie/migra-loghi (storage legacy -> DB base64) con reload. Verificato in preview: 4 migrati, 1 gia nel DB, 0 falliti. Su Railway: cliccare dopo il deploy; i loghi non recuperabili vanno ricaricati.
+- DA DEPLOYARE: Save to GitHub -> Railway.
