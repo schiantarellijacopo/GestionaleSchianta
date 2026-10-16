@@ -165,12 +165,19 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
     useEffect(() => {
         api.get("/compagnie").then((r) => {
             setComps(r.data);
+            const partnersOf = (c) => (c.agenzie_partner_ids && c.agenzie_partner_ids.length)
+                ? c.agenzie_partner_ids
+                : (c.agenzia_partner_id ? [c.agenzia_partner_id] : []);
             const iniz = (r.data || []).filter((c) =>
-                isPrincipale ? !c.agenzia_partner_id : c.agenzia_partner_id === agenzia.id,
+                isPrincipale ? partnersOf(c).length === 0 : partnersOf(c).includes(agenzia.id),
             ).map((c) => c.id);
             setCollegate(new Set(iniz));
         });
     }, [agenzia.id]);
+
+    const partnersOf = (c) => (c.agenzie_partner_ids && c.agenzie_partner_ids.length)
+        ? c.agenzie_partner_ids
+        : (c.agenzia_partner_id ? [c.agenzia_partner_id] : []);
 
     const toggle = (id) => {
         setCollegate((p) => {
@@ -185,18 +192,21 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
         try {
             for (const c of comps) {
                 const wantLinked = collegate.has(c.id);
+                const partners = partnersOf(c);
                 if (isPrincipale) {
-                    const isDirect = !c.agenzia_partner_id;
-                    // collegare al principale = mandato diretto (stacca da eventuale partner)
-                    if (wantLinked && !isDirect) {
-                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                    // "Mandato diretto" = nessuna agenzia partner. Se selezioni una
+                    // compagnia che ha partner, la riporti a diretto (pulisci i partner).
+                    if (wantLinked && partners.length) {
+                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null, agenzie_partner_ids: [] });
                     }
                 } else {
-                    const isLinked = c.agenzia_partner_id === agenzia.id;
-                    if (wantLinked && !isLinked) {
-                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "collaborazione", agenzia_partner_id: agenzia.id });
-                    } else if (!wantLinked && isLinked) {
-                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "diretto", agenzia_partner_id: null });
+                    const linked = partners.includes(agenzia.id);
+                    if (wantLinked && !linked) {
+                        const next = [...partners, agenzia.id];
+                        await api.put(`/compagnie/${c.id}`, { ...c, tipo_mandato: "collaborazione", agenzia_partner_id: null, agenzie_partner_ids: next });
+                    } else if (!wantLinked && linked) {
+                        const next = partners.filter((id) => id !== agenzia.id);
+                        await api.put(`/compagnie/${c.id}`, { ...c, agenzia_partner_id: null, agenzie_partner_ids: next, tipo_mandato: next.length ? "collaborazione" : "diretto" });
                     }
                 }
             }
@@ -234,10 +244,10 @@ function CollegaCompagnieDialog({ agenzia, onClose }) {
                                         <div className="text-[10px] text-slate-400 font-mono">{c.codice}</div>
                                     </div>
                                     {isPrincipale
-                                        ? (c.agenzia_partner_id && (
+                                        ? (partnersOf(c).length > 0 && (
                                             <span className="text-[10px] text-amber-700">⚠ collegata a un&apos;agenzia partner</span>
                                         ))
-                                        : (c.agenzia_partner_id && c.agenzia_partner_id !== agenzia.id && (
+                                        : (partnersOf(c).some((id) => id !== agenzia.id) && !partnersOf(c).includes(agenzia.id) && (
                                             <span className="text-[10px] text-amber-700">⚠ già collegata ad altra agenzia</span>
                                         ))}
                                 </label>

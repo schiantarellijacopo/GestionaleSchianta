@@ -732,8 +732,11 @@ function NuovaPolizzaDialog({ onClose }) {
             // campo Agenzia si compila da solo e la Compagnia resta valida.
             let mandatoOcr = null;
             if (compMatch) {
-                mandatoOcr = compMatch.agenzia_partner_id
-                    ? (agenzie.find((a) => a.id === compMatch.agenzia_partner_id)?.ragione_sociale || null)
+                const partners = (compMatch.agenzie_partner_ids && compMatch.agenzie_partner_ids.length)
+                    ? compMatch.agenzie_partner_ids
+                    : (compMatch.agenzia_partner_id ? [compMatch.agenzia_partner_id] : []);
+                mandatoOcr = partners.length
+                    ? (agenzie.find((a) => a.id === partners[0])?.ragione_sociale || null)
                     : (agenzie.find((a) => a.tipo === "principale")?.ragione_sociale || null);
             }
             // Contraente: match AFFIDABILE dal backend (ricerca per CF/P.IVA su tutto il DB).
@@ -913,7 +916,10 @@ function NuovaPolizzaDialog({ onClose }) {
                                 if (!f.mandato) return false;
                                 const ag = agenzie.find((a) => a.ragione_sociale === f.mandato);
                                 if (!ag) return true;
-                                return ag.tipo === "principale" ? !c.agenzia_partner_id : c.agenzia_partner_id === ag.id;
+                                const partners = (c.agenzie_partner_ids && c.agenzie_partner_ids.length)
+                                    ? c.agenzie_partner_ids
+                                    : (c.agenzia_partner_id ? [c.agenzia_partner_id] : []);
+                                return ag.tipo === "principale" ? partners.length === 0 : partners.includes(ag.id);
                             }).map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                         </SelectContent>
                     </Select>

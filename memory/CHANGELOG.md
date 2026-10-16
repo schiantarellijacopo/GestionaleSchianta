@@ -849,3 +849,12 @@ Admin: `admin@assicura.it / Admin123!`
 - VERIFICA preview (screenshot + login reale): modal mostra il toast specifico con l'elenco campi mancanti. Frontend compila senza errori.
 - LIMITE noto: se il Contraente non è in anagrafica, va creato prima (il modal non ha ancora creazione inline) -> eventuale enhancement.
 - DA DEPLOYARE: Save to GitHub -> Railway (modifiche frontend).
+
+## 2026-06 (19) — Agenzie/Compagnie: bug "non salva" collegamenti + REDION sotto principale (singolare vs plurale)
+- CAUSA: sorgente di verità = compagnia.agenzie_partner_ids (PLURALE, più agenzie partner), ma alcune parti usavano ancora agenzia_partner_id (SINGOLARE legacy): dialog Agenzie "Collega compagnie" (init/badge/save), filtro compagnie in Nuova polizza, conteggio backend principale. Per questo REDION (collegata a CONAP via plurale) risultava "diretta" di Schiantarelli e, nel dialog principale, deselezionandola non salvava (il ramo principale non gestiva l'uncheck e leggeva il singolare).
+- FIX frontend:
+  - Agenzie.jsx CollegaCompagnieDialog: init/badge/save ora basati su partnersOf(c)=agenzie_partner_ids (fallback singolare). Principale: check di una compagnia con partner -> la riporta a diretto pulendo agenzie_partner_ids=[] e agenzia_partner_id=null. Partner: add/remove di agenzia.id in agenzie_partner_ids (tipo_mandato ricalcolato).
+  - Polizze.jsx: filtro Compagnia nel form Nuova polizza usa il plurale (principale = nessun partner; partner = include ag.id). Derivazione automatica mandato dall'OCR usa il plurale (primo partner o principale).
+- FIX backend routes/agenzie.py: conteggio "compagnie con mandato diretto" del principale = compagnie SENZA alcuna agenzia partner (plurale vuoto AND singolare null).
+- VERIFICA preview (login reale + screenshot): partner Collega compagnie -> toggle/salva/riapri PERSISTE; principale -> compagnie collegate a partner mostrate DESELEZIONATE con avviso e non conteggiate come dirette (conteggio 9->6). Backend/frontend OK, nessun crash.
+- DA DEPLOYARE: Save to GitHub -> Railway.
