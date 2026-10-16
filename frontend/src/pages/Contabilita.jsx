@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtEur } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import KpiBar from "@/components/KpiBar";
 import { Card } from "@/components/ui/card";
@@ -44,6 +45,8 @@ export default function Contabilita() {
         api.get("/contabilita/prima-nota", { params }).then((r) => setPrimaNota(r.data));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [dal, al]);
+    // Aggiornamento automatico (10s + al rientro finestra)
+    useAutoRefresh(() => load(), 10000);
 
     const buildMovQuery = () => {
         const p = new URLSearchParams();

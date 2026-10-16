@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
@@ -188,6 +189,8 @@ export default function Polizze() {
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters, page, sortBy, sortDir, pageSize]);
     useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, pageSize]);
     useEffect(() => { loadConteggi(); /* eslint-disable-next-line */ }, []);
+    // Aggiornamento automatico (10s + al rientro finestra)
+    useAutoRefresh(() => { load(); loadConteggi(); }, 10000);
 
     useEffect(() => {
         Promise.all([

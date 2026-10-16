@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtEur } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { openPdf } from "@/lib/pdf";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -84,6 +85,8 @@ export default function BrogliaccioTab({ refreshKey }) {
         api.get("/contabilita/brogliaccio", { params: { data } }).then((r) => setB(r.data));
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [data, refreshKey]);
+    // Aggiornamento automatico (10s + al rientro finestra)
+    useAutoRefresh(() => load(), 10000);
     useEffect(() => {
         api.get("/librerie/conti-cassa", { params: { attivi: true } }).then((r) => setContiCassa(r.data || []));
     }, []);

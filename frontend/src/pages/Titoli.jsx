@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
@@ -153,8 +154,8 @@ export default function Titoli({ storicoMode = false } = {}) {
     };
 
     const loadSeq = useRef(0);
-    const load = () => {
-        setSelected(new Set());
+    const load = (opts = {}) => {
+        if (!opts.keepSelection) setSelected(new Set());
         const seq = ++loadSeq.current;
         api.get("/titoli", { params: { ...buildParams(), paged: true, page, page_size: PAGE_SIZE, sort: sortBy, dir: sortDir } }).then((r) => {
             // Ignora risposte fuori-ordine (evita che una ricerca precedente sovrascriva l'ultima)
@@ -173,6 +174,8 @@ export default function Titoli({ storicoMode = false } = {}) {
         // eslint-disable-next-line
     }, [filters, page, sortBy, sortDir, pageSize]);
     useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filters, pageSize]);
+    // Aggiornamento automatico (10s + al rientro finestra), senza azzerare la selezione
+    useAutoRefresh(() => load({ keepSelection: true }), 10000);
     useEffect(() => {
         Promise.all([
             api.get("/compagnie"), api.get("/librerie/rami?dedup=1&con_polizze=1"),

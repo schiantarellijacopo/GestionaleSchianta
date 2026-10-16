@@ -688,3 +688,15 @@ Admin: `admin@assicura.it / Admin123!`
 - FIX (frontend/pages/Titoli.jsx, BulkActionDialog): nuova var allCoperti = titoli.every(t => t.titolo_coperto). Se true: checkbox Copertura disabled + default off (doCopertura=!allCoperti), default Incasso on (doIncasso=allCoperti), label "(già coperti)". Selezioni miste/non coperte: comportamento invariato (Copertura attiva).
 - VERIFICATO preview (screenshot + DOM): 3 titoli coperti -> Copertura disabilitata con "(già coperti)", solo Incasso attivo con tabella riga-per-riga.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (6) — Aggiornamento automatico liste (near real-time, 10s)
+- RICHIESTA: quando un utente crea polizza/titolo/anagrafica o una scrittura in Prima Nota, gli altri utenti devono vederla senza ricaricare. Intervallo richiesto: ogni 10 secondi, su tutte le scritture.
+- IMPL (frontend): nuovo hook src/hooks/useAutoRefresh.js (polling ogni 10s SOLO se scheda visibile + refetch immediato su focus/visibilitychange). Applicato a:
+  - pages/Titoli.jsx (load con opzione keepSelection per non azzerare le selezioni durante il poll)
+  - pages/Polizze.jsx (load + loadConteggi)
+  - pages/Anagrafiche.jsx (load)
+  - pages/Contabilita.jsx (prima-nota list)
+  - components/BrogliaccioTab.jsx (brogliaccio giornaliero)
+- VERIFICATO preview: su /titoli, dopo il load iniziale, +2 poll automatici in ~23s (10s/20s). Compila ok (1 warning pre-esistente).
+- NOTA: niente websocket, è polling leggero lato client; i dialog aperti e i filtri non vengono disturbati. Le selezioni checkbox in Titoli sono preservate.
+- DA DEPLOYARE: Save to GitHub -> Railway.

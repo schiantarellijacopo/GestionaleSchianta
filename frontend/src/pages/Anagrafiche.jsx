@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatPhone, telHref } from "@/lib/phone";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
 import AnagraficaAvatar from "@/components/AnagraficaAvatar";
@@ -201,6 +202,8 @@ export default function Anagrafiche() {
     }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, page, pageSize, srt, collabFilter, profFilter, comuneFilter, conFigliFilter, etaMinFilter, etaMaxFilter]);
 
     useEffect(() => { load(); }, [load]);
+    // Aggiornamento automatico (10s + al rientro finestra)
+    useAutoRefresh(() => load(), 10000);
     // reset alla pagina 1 quando cambiano ricerca o filtri
     useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [qDeb, tagFilter, catFilter, compleannoFilter, docFilter, collabFilter, profFilter, comuneFilter, conFigliFilter, etaMinFilter, etaMaxFilter]);
     useEffect(() => { api.get("/collaboratori").then((r) => setCollaboratoriList(r.data || [])).catch(() => {}); }, []);
