@@ -1494,7 +1494,7 @@ async def list_compagnie(tutte: bool = False, user=Depends(current_user)):
     Default (filtri/form): nasconde TUTTE le compagnie disabilitate (`attiva=False`).
     `tutte=true` (Librerie/Compagnie) le restituisce tutte per la gestione/riattivazione.
     """
-    items = await db.compagnie.find({}, {"_id": 0}).to_list(1000)
+    items = await db.compagnie.find({}, {"_id": 0, "logo_b64": 0}).to_list(1000)
     if tutte:
         return items
     return [c for c in items if c.get("attiva") is not False]
@@ -1524,6 +1524,46 @@ async def delete_compagnia(cid: str, user=Depends(require_user("admin"))):
     await db.compagnie.delete_one({"id": cid})
     await log_attivita(user, "delete", "compagnia", cid)
     return {"ok": True}
+
+
+class UnisciCompagnieBody(BaseModel):
+    source_ids: List[str]  # compagnie duplicate da assorbire
+    target_id: str         # compagnia da mantenere
+
+
+@api.post("/compagnie/unisci")
+async def unisci_compagnie(body: UnisciCompagnieBody, user=Depends(require_user("admin"))):
+    """Unisce una o più compagnie DUPLICATE in una compagnia di destinazione.
+
+    Tutti i riferimenti `compagnia_id` (polizze, titoli, movimenti, sinistri, prodotti,
+    schemi provvigionali, rappel, ritenute, ecc.) vengono riassegnati alla compagnia
+    di destinazione; le compagnie sorgente vengono poi eliminate. Operazione pensata
+    per correggere i doppioni creati in automatico dall'OCR/import.
+    """
+    target = await db.compagnie.find_one({"id": body.target_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Compagnia di destinazione non trovata")
+    sources = [sid for sid in (body.source_ids or []) if sid and sid != body.target_id]
+    if not sources:
+        raise HTTPException(400, "Nessuna compagnia da unire")
+    riassegnati: dict[str, int] = {}
+    from database import raw_db as _raw_db
+    for cname in await _raw_db.list_collection_names():
+        if cname == "compagnie":
+            continue
+        try:
+            res = await db[cname].update_many(
+                {"compagnia_id": {"$in": sources}},
+                {"$set": {"compagnia_id": body.target_id}})
+            if res.modified_count:
+                riassegnati[cname] = res.modified_count
+        except Exception:
+            continue
+    await db.compagnie.delete_many({"id": {"$in": sources}})
+    await log_attivita(user, "merge", "compagnia", body.target_id,
+                       f"Unite {len(sources)} compagnie in {target.get('ragione_sociale')}")
+    return {"ok": True, "target_id": body.target_id, "unite": len(sources),
+            "riassegnati": riassegnati}
 
 
 # ============================================================
@@ -1939,7 +1979,11 @@ async def _compagnia_estratto_data(compagnia_id: str, dal: Optional[str], al: Op
 @api.post("/compagnie/{cid}/logo")
 async def upload_logo_compagnia(cid: str, file: UploadFile = File(...),
                                 user=Depends(require_user("admin", "collaboratore"))):
-    """Carica/sostituisce il logo della compagnia (visibile in polizza)."""
+    """Carica/sostituisce il logo della compagnia (visibile in polizza).
+
+    Il logo viene salvato DIRETTAMENTE in MongoDB (base64): così è sempre
+    disponibile anche dove l'object storage Emergent non è raggiungibile (Railway).
+    """
     comp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1})
     if not comp:
         raise HTTPException(404, "Compagnia non trovata")
@@ -1949,12 +1993,68 @@ async def upload_logo_compagnia(cid: str, file: UploadFile = File(...),
     ct = file.content_type or obj_storage.mime_for(file.filename or "")
     if not ct.startswith("image/"):
         raise HTTPException(400, "Il logo deve essere un'immagine (PNG/JPG/SVG/WEBP)")
-    ext = (file.filename or "logo.png").rsplit(".", 1)[-1].lower() or "png"
-    path = f"{os.environ.get('APP_NAME', 'assicura')}/compagnie/{cid}/logo_{_uid()}.{ext}"
-    res = obj_storage.put_object(path, data, ct)
-    url = f"/api/storage/{res['path']}"
-    await db.compagnie.update_one({"id": cid}, {"$set": {"logo_url": url, "updated_at": _now_iso()}})
+    import base64 as _b64
+    b64 = _b64.b64encode(data).decode("ascii")
+    url = f"/api/compagnie/{cid}/logo?v={_uid()[:8]}"
+    await db.compagnie.update_one({"id": cid}, {"$set": {
+        "logo_b64": b64, "logo_mime": ct, "logo_url": url, "updated_at": _now_iso()}})
     return {"logo_url": url}
+
+
+@api.get("/compagnie/{cid}/logo")
+async def get_logo_compagnia(cid: str):
+    """Serve il logo della compagnia dal DB (base64). Fallback all'object storage
+    per i loghi legacy caricati prima della migrazione in DB."""
+    comp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "logo_b64": 1, "logo_mime": 1,
+                                                     "logo_storage_path": 1, "logo_url": 1})
+    if not comp:
+        raise HTTPException(404, "Compagnia non trovata")
+    if comp.get("logo_b64"):
+        import base64 as _b64
+        raw = _b64.b64decode(comp["logo_b64"])
+        return Response(content=raw, media_type=comp.get("logo_mime") or "image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    # fallback legacy: object storage
+    legacy = comp.get("logo_storage_path")
+    if not legacy and (comp.get("logo_url") or "").startswith("/api/storage/"):
+        legacy = comp["logo_url"].split("/api/storage/", 1)[1]
+    if legacy:
+        try:
+            data, ctype = obj_storage.get_object(legacy)
+            return Response(content=data, media_type=ctype or "image/png")
+        except Exception:
+            pass
+    raise HTTPException(404, "Logo non disponibile")
+
+
+@api.post("/compagnie/migra-loghi")
+async def migra_loghi_compagnie(user=Depends(require_user("admin"))):
+    """Migrazione one-shot: porta i loghi legacy (object storage) dentro il DB (base64),
+    così restano visibili anche dove lo storage non è raggiungibile (Railway).
+    Per i loghi non recuperabili la compagnia andrà ri-caricata manualmente."""
+    import base64 as _b64
+    migrati = 0; falliti = 0; gia_db = 0
+    async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "logo_b64": 1,
+                                          "logo_url": 1, "logo_storage_path": 1}):
+        if c.get("logo_b64"):
+            gia_db += 1
+            continue
+        legacy = c.get("logo_storage_path")
+        if not legacy and (c.get("logo_url") or "").startswith("/api/storage/"):
+            legacy = c["logo_url"].split("/api/storage/", 1)[1]
+        if not legacy:
+            continue
+        try:
+            data, ctype = obj_storage.get_object(legacy)
+            await db.compagnie.update_one({"id": c["id"]}, {"$set": {
+                "logo_b64": _b64.b64encode(data).decode("ascii"),
+                "logo_mime": ctype or "image/png",
+                "logo_url": f"/api/compagnie/{c['id']}/logo?v={_uid()[:8]}",
+            }})
+            migrati += 1
+        except Exception:
+            falliti += 1
+    return {"ok": True, "migrati": migrati, "gia_nel_db": gia_db, "falliti": falliti}
 
 
 @api.get("/compagnie/{cid}/estratto-conto")

@@ -76,6 +76,21 @@ async def polizze_inbox(user: dict = Depends(require_user("admin", "dipendente")
     return out
 
 
+def _norm_comp_core(s: str) -> str:
+    """Nome compagnia normalizzato: solo i token 'brand', senza punteggiatura e
+    senza parole societarie generiche (SPA, ASSICURAZIONI, ...). Serve a riconoscere
+    che 'UCA ASSICURAZIONE SPA' e 'UCA - ASSICURAZIONI SPESE LEGALI' sono la stessa UCA
+    ed evitare doppioni creati dall'OCR."""
+    import re
+    s = (s or "").upper()
+    s = re.sub(r"[^A-Z0-9 ]", " ", s)
+    stop = {"SPA", "SRL", "SNC", "SAS", "SCARL", "SCRL", "SCPA", "SOCIETA", "SOC",
+            "COOPERATIVA", "COOP", "DI", "C", "E", "S", "P", "A", "IN", "DEL", "DELLA",
+            "ASSICURAZIONE", "ASSICURAZIONI", "ASSICURATRICE", "ASSICURATA",
+            "COMPAGNIA", "GROUP", "GRUPPO", "SPZA", "AG", "AGENZIA"}
+    return " ".join(t for t in s.split() if t and t not in stop)
+
+
 async def _resolve_compagnia(nome: str | None) -> str:
     """Trova (o crea) la compagnia e ritorna il suo id."""
     from db_models import Compagnia
@@ -92,6 +107,16 @@ async def _resolve_compagnia(nome: str | None) -> str:
             )
         if comp:
             return comp["id"]
+        # Match NORMALIZZATO (brand): evita di creare UCA/Generali/... doppie quando
+        # l'OCR restituisce una variante del nome (punteggiatura, SPA, SPESE LEGALI...).
+        core = _norm_comp_core(nome)
+        if len(core) >= 2:
+            async for c in db.compagnie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
+                ec = _norm_comp_core(c.get("ragione_sociale"))
+                if not ec:
+                    continue
+                if ec == core or ec.startswith(core + " ") or core.startswith(ec + " ") or ec == core:
+                    return c["id"]
     obj = Compagnia(
         codice=f"AUTO-{uuid.uuid4().hex[:6].upper()}",
         ragione_sociale=(nome or "DA VERIFICARE").upper(),

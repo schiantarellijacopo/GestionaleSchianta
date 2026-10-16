@@ -700,3 +700,14 @@ Admin: `admin@assicura.it / Admin123!`
 - VERIFICATO preview: su /titoli, dopo il load iniziale, +2 poll automatici in ~23s (10s/20s). Compila ok (1 warning pre-esistente).
 - NOTA: niente websocket, è polling leggero lato client; i dialog aperti e i filtri non vengono disturbati. Le selezioni checkbox in Titoli sono preservate.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (7) — Estratto Conto Compagnie, loghi, duplicati UCA, provvigioni BS BROKER
+- ISSUE 1 (compagnie non attive in Estratto Conto): saldi_cassa_compagnie ora filtra {"attiva":{"$ne":False}}. Solo attive.
+- ISSUE 2 (REDION-CONAP non mostrato): la modale "Agenzia partner" salva nel campo PLURALE agenzie_partner_ids; l'estratto leggeva solo il singolare gated su tipo_mandato. Ora legge agenzie_partner_ids (fallback singolare) e mostra il partner su QUALSIASI mandato (frontend EstrattoContoCompagnie.jsx aggiornato).
+- ISSUE 3 (UCA duplicate): causa = flusso OCR polizza (routes/polizze_email.py _resolve_compagnia) creava compagnie AUTO-xxxx perche' il match nome era troppo rigido. FIX: _norm_comp_core() normalizza brand (toglie punteggiatura, SPA/ASSICURAZIONI/SPESE LEGALI...) + match equality/prefix -> riconosce varianti UCA come stessa compagnia (no falsi positivi su Generali/Allianz ecc). Verificato. NB: OMNIA/wizard mapping era gia' corretto.
+  + nuovo endpoint POST /compagnie/unisci {source_ids,target_id}: riassegna compagnia_id in TUTTE le collezioni (via raw_db.list_collection_names + db[cname] tenant-aware) e elimina le duplicate. Verificato (polizza/schema riassegnati, dup eliminata).
+  + UI: components/CompagnieMergeTool.jsx ("Unisci duplicati") nella sezione Librerie>Compagnie. TIENI (radio) + UNISCI (checkbox), reload dopo merge.
+- ISSUE 4 (loghi non visibili su Railway = object storage non raggiungibile): loghi ora salvati in MongoDB base64. POST /compagnie/{id}/logo salva logo_b64+logo_mime; nuovo GET /compagnie/{id}/logo (pubblico) serve dal DB (fallback storage legacy). list_compagnie esclude logo_b64. Frontend usa ${API_BASE}/compagnie/{id}/logo?u=... (Librerie lista + form). + POST /compagnie/migra-loghi (one-shot: storage legacy -> DB). Verificato upload+GET.
+- ISSUE 5 (BS BROKER solo 4.5%): la risoluzione schema per-compagnia e' CORRETTA (test: compagnia con schema specifico=98%, altra=4.5% default). Causa reale = ISSUE 3: le polizze UCA stavano sotto le UCA duplicate, lo schema 98% punta a "UCA - ASSICURAZIONI SPESE LEGALI". Dopo merge delle UCA, lo schema 98% si applica. Nessuna modifica di codice al calcolo.
+- EXTRA: TitoloDialog.jsx - il numero polizza nel titolo del dialog "Modifica titolo" ora e' CLICCABILE e porta a /polizze/{id}.
+- DA DEPLOYARE: Save to GitHub -> Railway. Dopo deploy su Railway: 1) eseguire "Unisci duplicati" per le UCA; 2) ricaricare i loghi (o POST /compagnie/migra-loghi se storage raggiungibile).

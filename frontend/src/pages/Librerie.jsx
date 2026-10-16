@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
+import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1311,14 +1312,18 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
     }
     if (section.key === "compagnie") {
         return (
-            <table className="tbl w-full">
+            <>
+                <div className="flex justify-end mb-2">
+                    <CompagnieMergeTool list={list} />
+                </div>
+                <table className="tbl w-full">
                 <thead><tr><th className="w-16">Logo</th><th>Codice</th><th>Ragione sociale</th><th>Referente</th><th>Email</th><th>Trattiene Provv.</th><th>Attiva</th><th></th></tr></thead>
                 <tbody>
                     {list.map((c) => (
                         <tr key={c.id}>
                             <td>
                                 {c.logo_url
-                                    ? <img src={c.logo_url} alt={c.ragione_sociale} className="h-7 w-12 object-contain" data-testid={`compagnia-logo-${c.id}`} />
+                                    ? <img src={`${API_BASE}/compagnie/${c.id}/logo?u=${encodeURIComponent(c.logo_url)}`} alt={c.ragione_sociale} className="h-7 w-12 object-contain" data-testid={`compagnia-logo-${c.id}`} />
                                     : <span className="text-slate-300 text-xs">—</span>}
                             </td>
                             <td className="num text-xs">{c.codice}</td>
@@ -1334,6 +1339,7 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
                     ))}
                 </tbody>
             </table>
+            </>
         );
     }
     if (section.key === "schema-provvigionale") {
@@ -2110,7 +2116,7 @@ function CompagniaForm({ section, editing, onClose }) {
                     <Label className="mb-1.5 block">Logo compagnia <span className="text-[10px] text-slate-400 font-normal">(visibile nella polizza)</span></Label>
                     <div className="flex items-center gap-3">
                         {f.logo_url
-                            ? <img src={f.logo_url} alt="logo" className="h-10 w-20 object-contain bg-white rounded border border-slate-200" data-testid="compagnia-logo-preview" />
+                            ? <img src={`${API_BASE}/compagnie/${editing?.id}/logo?u=${encodeURIComponent(f.logo_url)}`} alt="logo" className="h-10 w-20 object-contain bg-white rounded border border-slate-200" data-testid="compagnia-logo-preview" />
                             : <span className="text-xs text-slate-400">Nessun logo</span>}
                         <input
                             type="file" accept="image/*" className="text-xs"

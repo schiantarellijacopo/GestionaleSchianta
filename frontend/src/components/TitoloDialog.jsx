@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import TagsEditor from "@/components/TagsEditor";
  *  - onDelete?: opzionale, se passato mostra pulsante elimina
  */
 export default function TitoloDialog({ titolo, onClose, onDelete }) {
+    const navigate = useNavigate();
     const round2 = (x) => Math.round((parseFloat(x) || 0) * 100) / 100;
     const [f, setF] = useState(() => ({
         ...titolo,
@@ -300,7 +302,23 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             <DialogContent className="max-w-xl p-4 gap-2 max-h-[96vh] overflow-y-auto [&_input]:h-8 [&_[role=combobox]]:h-8 [&_label]:text-xs" data-testid="titolo-edit-dialog">
                 <DialogHeader className="space-y-0">
                     <DialogTitle className="text-base">
-                        {titolo._new ? "Nuovo titolo" : "Modifica titolo"} {titolo.numero_polizza ? `– Polizza ${titolo.numero_polizza}` : ""}
+                        {titolo._new ? "Nuovo titolo" : "Modifica titolo"}{" "}
+                        {titolo.numero_polizza ? (
+                            <>
+                                – Polizza{" "}
+                                {titolo.polizza_id ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => { onClose && onClose(); navigate(`/polizze/${titolo.polizza_id}`); }}
+                                        className="text-sky-700 hover:text-sky-900 underline underline-offset-2 font-semibold"
+                                        title="Apri la polizza"
+                                        data-testid="titolo-polizza-link"
+                                    >
+                                        {titolo.numero_polizza}
+                                    </button>
+                                ) : titolo.numero_polizza}
+                            </>
+                        ) : ""}
                     </DialogTitle>
                     <p className="text-[11px] text-slate-500">
                         Lo stato del titolo si aggiorna automaticamente con incasso / copertura / storno.
