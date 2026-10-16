@@ -380,6 +380,10 @@ function NuovoMovimentoDialog({ anagrafiche, onClose }) {
                         onValueChange={(v) => {
                             if (v.startsWith("voce:")) {
                                 set("voce_bilancio_id", v.slice(5));
+                                // Voce di bilancio senza categoria_sistema: categoria neutra
+                                // ("altro") così il brogliaccio riporta solo l'importo in banca
+                                // e non la tratta come premio.
+                                set("categoria", "altro");
                             } else {
                                 set("categoria", v.slice(4));
                                 set("voce_bilancio_id", "");

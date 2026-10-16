@@ -8635,6 +8635,13 @@ async def create_movimento(body: dict, user=Depends(require_user("admin", "colla
     # Lock: blocco inserimento in giornata di Prima Nota chiusa.
     await assert_giornata_aperta(body.get("data_movimento"), azione="inserire un movimento nel giorno")
     obj = MovimentoContabile(**body)
+    # Movimento manuale legato a una VOCE DI BILANCIO (ricavo/costo): non è un premio.
+    # Il default del form lascia categoria="incasso_premio"; va neutralizzata a "altro"
+    # altrimenti il brogliaccio lo tratta come premio (popola Totale/Saldo/Sospesi)
+    # invece di riportare SOLO l'importo in banca (regola utente).
+    if obj.voce_bilancio_id and obj.categoria in (
+        "incasso_premio", "incasso_premio_direzione", "copertura_titolo", "incasso_coperto"):
+        obj.categoria = "altro"
     # Risolvi il conto dal tipo pagamento se non fornito (i saldi conti/liquidità
     # si muovono solo se il movimento è agganciato a un conto_cassa_id).
     if not obj.conto_cassa_id and not obj.is_direzione and obj.mezzo_pagamento and obj.categoria != "ritenuta_compagnia":

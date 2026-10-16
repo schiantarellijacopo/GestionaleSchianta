@@ -662,3 +662,14 @@ Admin: `admin@assicura.it / Admin123!`
 - NUOVA REGOLA (frontend/src/components/BrogliaccioTab.jsx): le righe di SOLA COPERTURA (categoria=copertura_titolo) NON mostrano più il tasto Modifica (matita) in Prima Nota; resta solo il tasto Cancella (cestino). Condizione: r.categoria !== 'copertura_titolo'. Le altre categorie mantengono il tasto Modifica.
 - VERIFICATO preview via screenshot + DOM: riga copertura -> edit buttons=0, delete buttons=1.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (3) — Registrazione manuale ENTRATA/Ricavo: solo in banca
+- BUG (screenshot CONAP 326,25): una registrazione manuale di tipo Entrata con una VOCE DI BILANCIO ricavo SENZA categoria_sistema (es. "Fatture Provvigioni Conap", "Consulenze attive", "Altro ricavo") veniva salvata con categoria di default "incasso_premio". Il brogliaccio la trattava come PREMIO -> popolava Totale + Saldo + banca (importo contato 3 volte).
+- CAUSA: Contabilita.jsx, nel Select "Categoria / Voce di bilancio", selezionando una voce via voce_bilancio_id NON resettava categoria dal default "incasso_premio".
+- FIX:
+  - frontend (pages/Contabilita.jsx): selezionando una voce (ramo voce:) ora set categoria="altro".
+  - backend (server.py create_movimento): difensivo - se voce_bilancio_id presente e categoria in (incasso_premio, incasso_premio_direzione, copertura_titolo, incasso_coperto) -> categoria="altro".
+  - "altro" entrata nel brogliaccio = ramo generico: c_totale=0, nessun Saldo/Sospesi, solo per_conto (banca).
+- VERIFICATO preview: creato movimento ricavo (voce Consulenze attive, 326,25) -> brogliaccio Totale=0, Saldo=0, Sospesi=0, banca=326,25. Incasso premio reale (senza voce) invariato.
+- NB produzione: i movimenti ricavo GIA' salvati come incasso_premio restano errati; vanno eliminati e re-inseriti (o bonifica mirata su conferma).
+- DA DEPLOYARE: Save to GitHub -> Railway.
