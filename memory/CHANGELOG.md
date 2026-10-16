@@ -1,6 +1,14 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — WhatsApp reception FIX definitivo: rete privata Railway ✅
+- **Diagnosi conclusiva**: con webhook puntato al preview, un messaggio REALE è arrivato → Evolution emette e raggiunge URL esterni, ma NON il servizio gemello GestionaleSchianta via URL pubblico (limite rete same-project Railway). In produzione arrivava solo il test iniettato manualmente, nessun inbound reale.
+- **FIX**:
+  - `deploy/Dockerfile.railway`: uvicorn ora bind `--host ::` (IPv6) → requisito per la rete privata Railway (il pubblico continua a funzionare in dual-stack).
+  - `routes/whatsapp_evo.py` (`auto_repair_webhooks` + `_webhook_url`): se presente `RAILWAY_PRIVATE_DOMAIN`, il webhook di Evolution viene registrato su `http://{RAILWAY_PRIVATE_DOMAIN}:{PORT}/api/whatsapp-evo/webhook/{name}` (rete interna) invece dell'URL pubblico. In preview resta su URL pubblico/Emergent.
+- **Verificato** (logica URL): produzione→privato, preview→pubblico. Self-healing ad ogni deploy (startup).
+- **Azione utente**: Save to GitHub → deploy; al riavvio il webhook si imposta da solo sulla rete privata. Poi test con messaggio reale.
+
 ## 2026-10-16 — OCR/AI in produzione: fix 403 → chiave Gemini diretta (shim centralizzato) ✅
 - **Problema**: su Railway (fuori da Emergent) l'OCR dà 403 Forbidden perché la Emergent Universal Key non è usabile da deployment esterni su piano Free (confermato dal supporto).
 - **FIX centralizzato** (`backend/llm_compat.py`, nuovo): shim drop-in di `emergentintegrations.llm.chat`. Se `GEMINI_API_KEY` è presente, le chiamate al provider "gemini" vanno DIRETTE all'API Google (REST generateContent), altrimenti resta tutto su emergentintegrations (preview). Reindirizzati tutti i 16 file che importavano da `emergentintegrations.llm.chat` → `llm_compat` (sed). Ri-esporta UserMessage/ImageContent/TextDelta/StreamDone reali (isinstance invariato).

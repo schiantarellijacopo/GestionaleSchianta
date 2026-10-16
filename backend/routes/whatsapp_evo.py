@@ -196,6 +196,12 @@ WEBHOOK_EVENTS = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "MESSAGES_UPDATE"]
 
 
 def _webhook_url(slug: str) -> Optional[str]:
+    # Preferisci la rete privata di Railway (i servizi dello stesso progetto non
+    # si raggiungono via URL pubblico); altrimenti usa l'URL pubblico.
+    priv = (os.environ.get("RAILWAY_PRIVATE_DOMAIN") or "").strip()
+    if priv:
+        port = (os.environ.get("PORT") or "8080").strip()
+        return f"http://{priv}:{port}/api/whatsapp-evo/webhook/{slug}"
     base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
     return f"{base}/api/whatsapp-evo/webhook/{slug}" if base else None
 
@@ -413,14 +419,26 @@ async def auto_repair_webhooks() -> dict:
     if flag not in ("1", "true", "yes") and (is_preview or not base):
         return {"ok": False, "skipped": "non produzione (preview o base mancante)"}
 
-    out = {"ok": True, "updated": [], "errors": []}
+    # Su Railway i servizi dello stesso progetto NON si raggiungono via URL
+    # pubblico. Se disponibile, usa la RETE PRIVATA (RAILWAY_PRIVATE_DOMAIN):
+    # Evolution chiamerà il gestionale sul dominio interno, che funziona.
+    priv = (os.environ.get("RAILWAY_PRIVATE_DOMAIN") or "").strip()
+    port = (os.environ.get("PORT") or "8080").strip()
+    if priv:
+        webhook_base = f"http://{priv}:{port}"
+    else:
+        webhook_base = base
+    if not webhook_base:
+        return {"ok": False, "skipped": "nessun URL (privato o pubblico) disponibile"}
+
+    out = {"ok": True, "updated": [], "errors": [], "base": webhook_base}
     try:
         instances = await db.whatsapp_instances.find({}, {"_id": 0, "instance_name": 1, "token": 1}).to_list(200)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
     for inst in instances:
         name = inst.get("instance_name")
-        webhook_url = f"{base}/api/whatsapp-evo/webhook/{name}"
+        webhook_url = f"{webhook_base}/api/whatsapp-evo/webhook/{name}"
         try:
             await _call(
                 "POST", f"/webhook/set/{name}",
@@ -438,7 +456,7 @@ async def auto_repair_webhooks() -> dict:
         except Exception as e:  # noqa: BLE001
             out["errors"].append({"instance": name, "error": str(e)[:200]})
     if out["updated"]:
-        logger.info("Auto-repair webhook WhatsApp: riallineate %s istanze -> %s", len(out["updated"]), base)
+        logger.info("Auto-repair webhook WhatsApp: riallineate %s istanze -> %s", len(out["updated"]), webhook_base)
     return out
 
 
