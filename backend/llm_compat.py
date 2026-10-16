@@ -26,9 +26,75 @@ from emergentintegrations.llm.chat import (  # noqa: F401
 
 __all__ = ["LlmChat", "UserMessage", "ImageContent", "TextDelta", "StreamDone"]
 
+import threading
+
 _gemini_client = None
 GEMINI_REST = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+
+# Preferenza modelli per gli OCR: PRIMA i modelli STABILI (GA) che hanno
+# capacità affidabile e raramente vanno in "overloaded"; i modelli "preview"
+# (prone al sovraccarico) solo come ultima risorsa. Viene filtrata su ciò che
+# la chiave supporta davvero (model discovery), così niente 404 e niente
+# preview sovraccarichi quando esiste un'alternativa stabile.
+STABLE_PREFERENCE = [
+    "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest",
+    "gemini-2.5-pro", "gemini-pro-latest",
+    "gemini-3-flash-preview", "gemini-3.5-flash",
+]
+
+_models_cache = None
+_models_lock = threading.Lock()
+
+
+def _available_models(key, client) -> list:
+    """Elenco (cached) dei modelli della chiave che supportano generateContent."""
+    global _models_cache
+    if _models_cache is not None:
+        return _models_cache
+    with _models_lock:
+        if _models_cache is not None:
+            return _models_cache
+        ids = []
+        try:
+            r = client.get(GEMINI_REST, params={"key": key, "pageSize": 200})
+            if r.status_code < 400:
+                for m in (r.json().get("models") or []):
+                    name = (m.get("name") or "").split("/")[-1]
+                    methods = m.get("supportedGenerationMethods") or []
+                    if name and "generateContent" in methods:
+                        ids.append(name)
+        except Exception:
+            ids = []
+        _models_cache = ids
+        return ids
+
+
+def _ordered_candidates(key, client) -> list:
+    """Ordine dei modelli da provare: override env, poi preferenza stabile,
+    poi qualunque flash disponibile. Filtrato sui modelli realmente esistenti."""
+    env_model = os.environ.get("GEMINI_MODEL")
+    avail = _available_models(key, client)
+    if not avail:
+        # discovery fallita → lista statica con preferenza stabile
+        base = ([env_model] if env_model else []) + STABLE_PREFERENCE + [DEFAULT_GEMINI_MODEL]
+        out = []
+        for m in base:
+            if m and m not in out:
+                out.append(m)
+        return out
+    out = []
+    if env_model and env_model in avail:
+        out.append(env_model)
+    for m in STABLE_PREFERENCE:
+        if m in avail and m not in out:
+            out.append(m)
+    for m in avail:  # altri flash disponibili non elencati
+        if "flash" in m and m not in out:
+            out.append(m)
+    if not out:
+        out = avail[:4]
+    return out
 
 
 def _direct_gemini_enabled() -> bool:
@@ -117,12 +183,6 @@ class LlmChat:
         import httpx
         import time
         key = os.environ["GEMINI_API_KEY"]
-        primary = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
-        fallbacks = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3-flash-preview"]
-        candidates = [primary] + [m for m in fallbacks if m != primary]
-        # OTTIMIZZAZIONE VELOCITÀ: disabilita il "thinking" di Gemini 3 flash
-        # (riduce drasticamente la latenza) e, per gli OCR, forza output JSON
-        # puro (niente markdown da ripulire, meno re-parsing).
         gen_cfg = {"temperature": 0, "thinkingConfig": {"thinkingBudget": 0}}
         if self._json_mode:
             gen_cfg["responseMimeType"] = "application/json"
@@ -132,6 +192,7 @@ class LlmChat:
         # lunghe. Meglio un errore chiaro e rapido che un timeout dell'ingress.
         deadline = time.monotonic() + 70.0
         with httpx.Client(timeout=45.0) as c:
+            candidates = _ordered_candidates(key, c)
             for model in candidates:
                 if time.monotonic() > deadline:
                     break

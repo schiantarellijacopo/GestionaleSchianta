@@ -148,3 +148,50 @@ async def ocr_libretto_apply(
         f"Campi applicati: {list(update.keys())}",
     )
     return {"updated": len(update), "campi": list(update.keys())}
+
+
+
+@router.get("/ocr/gemini-diagnostic")
+async def gemini_diagnostic(
+    user: dict = Depends(require_user("admin")),
+) -> dict:
+    """Diagnostica Gemini in produzione: quali modelli sono disponibili sulla
+    chiave e come rispondono a un test minimo. Distingue 'quota esaurita'
+    (RESOURCE_EXHAUSTED) da 'sovraccarico temporaneo' (UNAVAILABLE/overloaded).
+    """
+    import httpx
+    from llm_compat import GEMINI_REST, _available_models, _ordered_candidates
+
+    gem = os.environ.get("GEMINI_API_KEY")
+    if not gem:
+        return {"direct_gemini": False, "note": "GEMINI_API_KEY non impostata: si usa il fallback Emergent."}
+
+    out: dict = {"direct_gemini": True}
+    with httpx.Client(timeout=20.0) as c:
+        avail = _available_models(gem, c)
+        out["modelli_disponibili"] = avail
+        candidates = _ordered_candidates(gem, c)
+        out["ordine_tentativi"] = candidates
+        tests = []
+        for model in candidates[:4]:
+            url = f"{GEMINI_REST}/{model}:generateContent"
+            payload = {"contents": [{"parts": [{"text": "ping"}]}],
+                       "generationConfig": {"temperature": 0, "maxOutputTokens": 5}}
+            try:
+                r = c.post(url, params={"key": gem},
+                           headers={"Content-Type": "application/json"}, json=payload)
+                status_label = "OK" if r.status_code < 400 else None
+                detail = ""
+                if r.status_code >= 400:
+                    try:
+                        err = (r.json().get("error") or {})
+                        detail = f"{err.get('status')}: {err.get('message', '')[:150]}"
+                    except Exception:
+                        detail = r.text[:150]
+                tests.append({"model": model, "http": r.status_code,
+                              "ok": r.status_code < 400, "detail": detail or status_label})
+            except Exception as e:  # noqa: BLE001
+                tests.append({"model": model, "http": None, "ok": False, "detail": str(e)[:150]})
+        out["test"] = tests
+        out["funzionante"] = any(t["ok"] for t in tests)
+    return out

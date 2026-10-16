@@ -825,3 +825,10 @@ Admin: `admin@assicura.it / Admin123!`
 - Richiesta più leggera: OCR polizza ora invia max 6 pagine (era 10), immagini già ridotte -> meno token, meno rischio sovraccarico e timeout.
 - NB: il 429 può dipendere dal piano/quota della GEMINI_API_KEY (free tier Google AI Studio ha limiti bassi e "overloaded" frequenti sui modelli preview/flash). Se persiste, valutare billing su Google AI Studio o pin di un modello stabile via env GEMINI_MODEL.
 - VERIFICHE: sintassi OK, OCR libretto preview HTTP 200. DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (16) — OCR Gemini: model discovery + preferenza modelli STABILI (fix overload)
+- CAUSA del "sovraccarico" persistente: i modelli PREVIEW (gemini-3-flash-preview) vanno spesso in overload (429/503). 
+- FIX (llm_compat): scoperta automatica dei modelli supportati dalla chiave (GET v1beta/models, cached) + ordine di preferenza STABILE: gemini-2.5-flash, gemini-2.0-flash, gemini-flash-latest, poi pro, infine i preview. Filtrato sui modelli realmente disponibili (niente 404). Override via env GEMINI_MODEL se impostato. Se discovery fallisce → lista statica stabile-first.
+- NUOVO endpoint admin GET /api/ocr/gemini-diagnostic: mostra modelli disponibili, ordine tentativi e test ping per i primi 4, con dettaglio errore Google (distingue RESOURCE_EXHAUSTED quota vs UNAVAILABLE/overload).
+- VERIFICHE preview: diagnostic ritorna direct_gemini=false (preview senza chiave); OCR libretto HTTP 200. Il percorso Gemini diretto va verificato con la chiave reale.
+- DA DEPLOYARE: Save to GitHub -> Railway.
