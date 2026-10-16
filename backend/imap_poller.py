@@ -134,20 +134,34 @@ def _extract_attachments(msg, *, uid: int) -> list[dict]:
         # sanitize filename
         safe = _re.sub(r"[^\w.\- ]+", "_", filename)[:120].strip() or f"file_{idx}"
         path = f"email/{uid}/{idx}_{safe}"
-        try:
-            obj_storage.put_object(path, payload, ctype)
-        except Exception:
-            logger.exception("Errore upload allegato %s", filename)
-            continue
-        out.append({
+        rec = {
             "filename": filename,
             "content_type": ctype,
             "size": len(payload),
             "storage_path": path,
             "url": f"/api/storage/{path}",
-        })
+        }
+        try:
+            obj_storage.put_object(path, payload, ctype)
+        except Exception:
+            # Object storage non disponibile (es. Railway): conserva i byte nel DB
+            # in base64 così l'allegato resta scaricabile e processabile (OCR).
+            import base64 as _b64
+            rec["data_b64"] = _b64.b64encode(payload).decode("ascii")
+            logger.warning("Storage non disponibile per %s: allegato salvato in DB (base64)", filename)
+        out.append(rec)
         idx += 1
     return out
+
+
+def attachment_bytes(att: dict):
+    """Ritorna (data, content_type) di un allegato: dal DB (base64) se presente,
+    altrimenti dall'object storage."""
+    import storage as obj_storage
+    if att.get("data_b64"):
+        import base64 as _b64
+        return _b64.b64decode(att["data_b64"]), att.get("content_type") or "application/octet-stream"
+    return obj_storage.get_object(att["storage_path"])
 
 
 def _parse_date_iso(raw: Optional[str]) -> str:
@@ -231,17 +245,20 @@ async def _copia_allegato_su_entita(
     if dup:
         return None
     try:
-        data, ctype = obj_storage.get_object(att["storage_path"])
+        data, ctype = attachment_bytes(att)
     except Exception:
         logger.exception("Impossibile leggere allegato %s", att.get("storage_path"))
         return None
     app_name = _os.environ.get("APP_NAME", "assicura")
     new_path = f"{app_name}/{entita_tipo}/{entita_id}/email_{_now_iso()[:10]}_{att['filename']}"
+    _data_b64 = None
     try:
         obj_storage.put_object(new_path, data, ctype or "application/octet-stream")
     except Exception:
-        logger.exception("Errore salvataggio allegato %s per %s", entita_tipo, entita_id)
-        return None
+        # Storage non disponibile (Railway): conserva l'allegato nel DB (base64)
+        import base64 as _b64
+        _data_b64 = _b64.b64encode(data).decode("ascii")
+        logger.warning("Storage non disponibile: allegato %s salvato in DB (base64)", att.get("filename"))
     alleg = Allegato(
         entita_tipo=entita_tipo, entita_id=entita_id,
         nome_file=att["filename"],
@@ -250,6 +267,8 @@ async def _copia_allegato_su_entita(
         size=len(data),
         autore_id=None,
     ).model_dump()
+    if _data_b64:
+        alleg["data_b64"] = _data_b64
     alleg["url"] = f"/api/storage/{new_path}"
     alleg["fonte"] = "email_imap"
     alleg["visibile_cliente"] = False
@@ -374,7 +393,7 @@ async def _auto_allega_polizza(
         for att in pdf_attachments:
             # Recupera i byte dal path già salvato per copiarli in un path polizza-scoped
             try:
-                data, ctype = obj_storage.get_object(att["storage_path"])
+                data, ctype = attachment_bytes(att)
             except Exception:
                 logger.exception("Impossibile leggere allegato %s per riclassificazione polizza",
                                  att.get("storage_path"))
@@ -382,11 +401,13 @@ async def _auto_allega_polizza(
             import os as _os
             app_name = _os.environ.get("APP_NAME", "assicura")
             new_path = f"{app_name}/polizze/{pol['id']}/firmata_email_{_now_iso()[:10]}_{att['filename']}"
+            _b64p = None
             try:
                 obj_storage.put_object(new_path, data, ctype or "application/pdf")
             except Exception:
-                logger.exception("Errore salvataggio allegato polizza %s", pol["id"])
-                continue
+                import base64 as _b64
+                _b64p = _b64.b64encode(data).decode("ascii")
+                logger.warning("Storage non disponibile: allegato polizza %s in DB (base64)", pol["id"])
             alleg = Allegato(
                 entita_tipo="polizza", entita_id=pol["id"],
                 nome_file=att["filename"],
@@ -395,6 +416,8 @@ async def _auto_allega_polizza(
                 size=len(data),
                 autore_id=None,   # System via IMAP
             ).model_dump()
+            if _b64p:
+                alleg["data_b64"] = _b64p
             alleg["url"] = f"/api/storage/{new_path}"
             alleg["fonte"] = "email_imap"
             alleg["visibile_cliente"] = False

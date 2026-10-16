@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Optional
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -44,14 +45,22 @@ async def _whitelist() -> set[str]:
 
 
 @router.get("/email/polizze-inbox")
-async def polizze_inbox(user: dict = Depends(require_user("admin", "dipendente"))) -> list[dict]:
-    """Email dai mittenti whitelist CON allegato PDF."""
+async def polizze_inbox(q: Optional[str] = None, user: dict = Depends(require_user("admin", "dipendente"))) -> list[dict]:
+    """Email dai mittenti whitelist CON allegato PDF. `q` filtra oggetto/mittente/
+    nome allegato/testo (utile per cercare un numero di polizza)."""
     wl = await _whitelist()
     if not wl:
         return []
-    cursor = db.email_inbox.find(
-        {"has_attachments": True}, {"_id": 0}
-    ).sort("date", -1).limit(500)
+    flt: dict = {"has_attachments": True}
+    if q:
+        flt["$or"] = [
+            {"subject": {"$regex": q, "$options": "i"}},
+            {"from_address": {"$regex": q, "$options": "i"}},
+            {"from_name": {"$regex": q, "$options": "i"}},
+            {"body_text": {"$regex": q, "$options": "i"}},
+            {"attachments.filename": {"$regex": q, "$options": "i"}},
+        ]
+    cursor = db.email_inbox.find(flt, {"_id": 0}).sort("date", -1).limit(500)
     out: list[dict] = []
     async for em in cursor:
         if (em.get("from_address") or "").strip().lower() not in wl:
@@ -327,7 +336,7 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
     (Condizioni = fascicolo informativo, Privacy compagnia = informativa/consenso privacy)."""
     import storage as obj_storage
     from ocr_polizza import estrai_dati_polizza, pdf_to_page_images
-    from imap_poller import _copia_allegato_su_entita
+    from imap_poller import _copia_allegato_su_entita, attachment_bytes
 
     em = await db.email_inbox.find_one({"id": eid}, {"_id": 0})
     if not em:
@@ -340,7 +349,7 @@ async def estrai_polizze(eid: str, user: dict = Depends(require_user("admin", "d
     items: list[dict] = []
     for att in pdfs:
         try:
-            data, _ctype = obj_storage.get_object(att["storage_path"])
+            data, _ctype = attachment_bytes(att)
             items.append({"att": att, "data": data, "cat": _classifica_pdf(data), "err": None})
         except Exception as e:  # noqa: BLE001
             items.append({"att": att, "data": None, "cat": None, "err": f"download fallito: {e}"})

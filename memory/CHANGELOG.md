@@ -723,3 +723,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Frontend (AnagraficaDetail.jsx DatiTab): caricamento operatori da /auth/users (admin/collaboratore/dipendente); blocco multi-select a chip "Collaboratori/Operatori di riferimento" nel form di modifica (★ = principale = primo selezionato); riga "Collaboratore/i di rif." nel riepilogo read-only.
 - VERIFICATO preview: PUT salva collaboratori_ids+collaboratore_id; GET li ritorna; filtro per operatore secondario trova l'anagrafica; UI mostra 4 chip, 2 selezionati con ★.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (10) — Posta: ricerca su tutti i tab, allegati in DB, WhatsApp nuova chat
+- RICERCA POSTA: la casella Cerca ora funziona su Personale/Condivisa/Polizze. Backend: /email/polizze-inbox accetta q (oggetto/mittente/nome allegato/body); /email/inbox q ampliato a body_text + attachments.filename. Frontend Posta.jsx: tab polizze passa q. Verificato 200.
+- ALLEGATI EMAIL (fix "download fallito: Object storage non configurato" + sync bloccato su Railway): imap_poller._extract_attachments ora, se l'object storage non è raggiungibile, salva i byte nel DB (data_b64 base64) invece di scartare. Nuovo helper attachment_bytes(att) (DB->storage). estrai_polizze e _copia_allegato_su_entita (entrambe le copie) usano attachment_bytes + fallback base64 in salvataggio. Così l'OCR estrazione funziona anche senza storage. Syntax OK. (In preview lo storage funziona, path fallback non triggerato; logica identica al fix loghi già verificato.)
+- WHATSAPP NUOVA CHAT (Chat.jsx WhatsAppTab): box "Nuova chat: nome cliente o numero" sopra la lista conversazioni. Digitando un numero -> Avvia (normalizza, default prefisso 39). Digitando un nome -> ricerca /anagrafiche?q= con dropdown risultati (mostra nome+numero), click avvia chat con cellulare/telefono. Compila OK. NB: in preview nessuna istanza WhatsApp -> pannello non renderizzato, verifica visiva solo in produzione.
+- DA DEPLOYARE: Save to GitHub -> Railway.

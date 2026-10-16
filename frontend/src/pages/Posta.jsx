@@ -64,7 +64,7 @@ export default function Posta() {
         try {
             let r;
             if (tab === "polizze") {
-                r = await api.get("/email/polizze-inbox");
+                r = await api.get("/email/polizze-inbox", { params: { q: q || undefined } });
             } else {
                 r = await api.get("/email/inbox", { params: { categoria: tab, q: q || undefined } });
             }

@@ -392,8 +392,36 @@ function WhatsAppInbox() {
     const [uploadingFile, setUploadingFile] = useState(false);
     const [showArchived, setShowArchived] = useState(false);
     const [archiving, setArchiving] = useState(false);
+    const [nuovoQ, setNuovoQ] = useState("");
+    const [nuovoRes, setNuovoRes] = useState([]);
     const scrollRef = useRef();
     const fileInputRef = useRef();
+
+    // Ricerca cliente / numero per avviare una NUOVA conversazione
+    useEffect(() => {
+        const t = (nuovoQ || "").trim();
+        if (t.length < 2 || /^[+\d\s]+$/.test(t)) { setNuovoRes([]); return; }
+        const h = setTimeout(() => {
+            api.get("/anagrafiche", { params: { q: t, limit: 6 } })
+                .then((r) => setNuovoRes((Array.isArray(r.data) ? r.data : (r.data?.items || [])).filter((a) => a.cellulare || a.telefono)))
+                .catch(() => setNuovoRes([]));
+        }, 300);
+        return () => clearTimeout(h);
+    }, [nuovoQ]);
+
+    const normNum = (raw) => {
+        let n = (raw || "").replace(/[^\d]/g, "");
+        if (!n) return "";
+        if (n.startsWith("00")) n = n.slice(2);
+        if (n.length <= 10 && !n.startsWith("39")) n = "39" + n;  // default Italia
+        return n;
+    };
+    const avviaChat = (number, nome, aid) => {
+        const n = normNum(number);
+        if (!n) { toast.error("Numero non valido"); return; }
+        setSelChat({ number: n, anagrafica_nome: nome || null, anagrafica_id: aid || null });
+        setNuovoQ(""); setNuovoRes([]);
+    };
 
     // Carica istanze
     useEffect(() => {
@@ -587,6 +615,43 @@ function WhatsAppInbox() {
                                     <RefreshCcw size={12} />
                                 </button>
                             </div>
+                        </div>
+                        <div className="px-3 py-2 border-b border-slate-200 bg-white relative">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    value={nuovoQ}
+                                    onChange={(e) => setNuovoQ(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === "Enter" && /^[+\d\s]+$/.test(nuovoQ.trim())) avviaChat(nuovoQ); }}
+                                    placeholder="Nuova chat: nome cliente o numero…"
+                                    className="flex-1 text-sm border border-slate-300 rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500"
+                                    data-testid="wa-new-input"
+                                />
+                                <button
+                                    onClick={() => avviaChat(nuovoQ)}
+                                    disabled={!/^[+\d\s]+$/.test((nuovoQ || "").trim()) || !nuovoQ.trim()}
+                                    className="text-xs px-2.5 py-1.5 rounded-md bg-emerald-600 text-white disabled:opacity-40 hover:bg-emerald-700"
+                                    title="Avvia chat con questo numero"
+                                    data-testid="wa-new-start"
+                                >
+                                    Avvia
+                                </button>
+                            </div>
+                            {nuovoRes.length > 0 && (
+                                <ul className="absolute left-3 right-3 top-full z-20 bg-white border border-slate-200 rounded-md shadow-lg max-h-64 overflow-y-auto" data-testid="wa-new-results">
+                                    {nuovoRes.map((a) => {
+                                        const num = a.cellulare || a.telefono;
+                                        return (
+                                            <li key={a.id}
+                                                onClick={() => avviaChat(num, a.denominazione || a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`.trim(), a.id)}
+                                                className="px-3 py-2 text-sm hover:bg-emerald-50 cursor-pointer flex items-center justify-between gap-2"
+                                                data-testid={`wa-new-res-${a.id}`}>
+                                                <span className="truncate font-medium text-slate-800">{a.denominazione || a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`.trim() || "—"}</span>
+                                                <span className="text-[11px] text-slate-500 font-mono shrink-0">{num}</span>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
                         </div>
                         {chats.length === 0 ? (
                             <div className="p-6 text-center text-xs text-slate-400">

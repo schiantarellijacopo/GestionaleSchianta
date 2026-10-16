@@ -14845,6 +14845,8 @@ async def email_inbox_list(
                 {"subject": {"$regex": q, "$options": "i"}},
                 {"from_address": {"$regex": q, "$options": "i"}},
                 {"from_name": {"$regex": q, "$options": "i"}},
+                {"body_text": {"$regex": q, "$options": "i"}},
+                {"attachments.filename": {"$regex": q, "$options": "i"}},
             ],
         }]
     items = await db.email_inbox.find(flt, {"_id": 0, "body_html": 0}).sort("date", -1).limit(limit).to_list(limit)
