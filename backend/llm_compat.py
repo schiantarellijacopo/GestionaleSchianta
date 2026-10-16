@@ -14,7 +14,6 @@ Ri-esporta UserMessage/ImageContent/TextDelta/StreamDone REALI così che gli
 """
 from __future__ import annotations
 import os
-import base64
 import asyncio
 
 from emergentintegrations.llm.chat import (  # noqa: F401
@@ -28,18 +27,12 @@ from emergentintegrations.llm.chat import (  # noqa: F401
 __all__ = ["LlmChat", "UserMessage", "ImageContent", "TextDelta", "StreamDone"]
 
 _gemini_client = None
+GEMINI_REST = "https://generativelanguage.googleapis.com/v1beta/models"
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 
 
 def _direct_gemini_enabled() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY"))
-
-
-def _get_client():
-    global _gemini_client
-    if _gemini_client is None:
-        from google import genai
-        _gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    return _gemini_client
 
 
 def _sniff_mime(b: bytes) -> str:
@@ -84,36 +77,66 @@ class LlmChat:
         # Metodi non gestiti (es. send_message_multimodal_response) → libreria reale
         return getattr(self._real_chat(), name)
 
-    # --- Gemini diretto ---
-    def _build_contents(self, message):
-        from google.genai import types
-        contents = []
+    # --- Gemini diretto (REST) ---
+    def _build_parts(self, message):
+        parts = []
         text = getattr(message, "text", None)
         if text:
-            contents.append(text)
+            parts.append({"text": text})
         for fc in (getattr(message, "file_contents", None) or []):
-            b64 = (getattr(fc, "image_base64", None)
+            b64 = (getattr(fc, "file_content_base64", None)
+                   or getattr(fc, "image_base64", None)
                    or getattr(fc, "file_base64", None)
                    or getattr(fc, "content_base64", None))
             if not b64:
                 continue
-            data = base64.b64decode(b64)
-            mime = getattr(fc, "mime_type", None) or _sniff_mime(data)
-            contents.append(types.Part.from_bytes(data=data, mime_type=mime))
-        return contents or [""]
+            import base64 as _b64
+            ct = getattr(fc, "content_type", None)
+            mime = ct if (ct and "/" in ct) else None
+            try:
+                raw = _b64.b64decode(b64)
+                mime = mime or _sniff_mime(raw)
+            except Exception:
+                mime = mime or "image/png"
+            parts.append({"inlineData": {"mimeType": mime, "data": b64}})
+        return parts or [{"text": ""}]
 
     def _direct_call(self, message) -> str:
-        from google.genai import types
-        client = _get_client()
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-        cfg = types.GenerateContentConfig(
-            temperature=0,
-            system_instruction=self._system or None,
-        )
-        resp = client.models.generate_content(
-            model=model, contents=self._build_contents(message), config=cfg
-        )
-        return resp.text or ""
+        import httpx
+        import time
+        key = os.environ["GEMINI_API_KEY"]
+        primary = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        fallbacks = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+        candidates = [primary] + [m for m in fallbacks if m != primary]
+        payload = {
+            "contents": [{"parts": self._build_parts(message)}],
+            "generationConfig": {"temperature": 0},
+        }
+        if self._system:
+            payload["systemInstruction"] = {"parts": [{"text": self._system}]}
+        last_err = "sconosciuto"
+        with httpx.Client(timeout=120) as c:
+            for model in candidates:
+                url = f"{GEMINI_REST}/{model}:generateContent"
+                for attempt in range(3):
+                    r = c.post(url, params={"key": key},
+                               headers={"Content-Type": "application/json"}, json=payload)
+                    if r.status_code in (429, 503):
+                        last_err = f"{r.status_code} (sovraccarico {model})"
+                        time.sleep(1.5 * (attempt + 1))
+                        continue
+                    if r.status_code >= 400:
+                        last_err = f"{r.status_code}: {r.text[:200]}"
+                        break  # errore non transitorio: prova il prossimo modello
+                    data = r.json()
+                    cands = data.get("candidates") or []
+                    parts = (cands[0].get("content") or {}).get("parts") or [] if cands else []
+                    txt = "".join(p.get("text", "") for p in parts)
+                    if txt.strip():
+                        return txt
+                    last_err = "risposta vuota"
+                    break
+        raise RuntimeError(f"Gemini API non disponibile: {last_err}")
 
     async def send_message(self, message):
         if self._use_direct():

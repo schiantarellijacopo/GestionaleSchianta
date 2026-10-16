@@ -1,6 +1,13 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — OCR/AI in produzione: fix 403 → chiave Gemini diretta (shim centralizzato) ✅
+- **Problema**: su Railway (fuori da Emergent) l'OCR dà 403 Forbidden perché la Emergent Universal Key non è usabile da deployment esterni su piano Free (confermato dal supporto).
+- **FIX centralizzato** (`backend/llm_compat.py`, nuovo): shim drop-in di `emergentintegrations.llm.chat`. Se `GEMINI_API_KEY` è presente, le chiamate al provider "gemini" vanno DIRETTE all'API Google (REST generateContent), altrimenti resta tutto su emergentintegrations (preview). Reindirizzati tutti i 16 file che importavano da `emergentintegrations.llm.chat` → `llm_compat` (sed). Ri-esporta UserMessage/ImageContent/TextDelta/StreamDone reali (isinstance invariato).
+- Dettagli: legge base64 immagine da `file_content_base64`, sniff MIME, `temperature=0`, system_instruction, retry su 429/503 e fallback automatico tra modelli. Modello default `gemini-3-flash-preview` (gemini-2.5-flash è 404 per nuovi utenti). Override con env `GEMINI_MODEL`.
+- **Testato** (preview, con GEMINI_API_KEY esportata): `estrai_dati_polizza` end-to-end estrae correttamente numero polizza/compagnia/date/premio/contraente via Gemini diretto; senza GEMINI_API_KEY delega a Emergent (OK). Backend health 200.
+- **Azione utente**: su Railway (servizio GestionaleSchianta) aggiungere `GEMINI_API_KEY` (la propria chiave Google AI Studio) e opzionale `GEMINI_MODEL=gemini-3-flash-preview`; poi Save to GitHub → deploy. Vale per tutti gli OCR gemini (polizza, libretto, CI, visura, documenti inbox). Le funzioni basate su Anthropic/Claude restano su Emergent (non coperte dalla chiave Gemini).
+
 ## 2026-10-16 — FIX Chat interna staff: "destinatario_id richiesto" ✅
 - **Bug (produzione)**: inviando un messaggio nella Chat interna → errore 400 "destinatario_id richiesto".
 - **RCA**: l'endpoint `POST /api/chat/messaggi` mischiava `file: UploadFile = File(None)` con un `body: dict` JSON; FastAPI non popola il body JSON quando è presente un File() → `destinatario_id` sempre vuoto per invii testuali (JSON). Riprodotto in preview (HTTP 400).
