@@ -91,6 +91,9 @@ async def ocr_libretto_endpoint(
     try:
         dati = await ocr_lib.estrai_dati_libretto(file_for_ocr, ct_for_ocr)
     except Exception as e:
+        # salva comunque il file nella card così non va perso
+        if polizza_id:
+            await _salva_allegato_libretto(polizza_id, file, contents, ct, user)
         raise HTTPException(503, f"Errore OCR libretto: {e}")
 
     allegato_id = None

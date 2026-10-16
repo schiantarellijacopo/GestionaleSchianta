@@ -401,21 +401,20 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                             )}
                         </div>
                     ))}
-                    {canEdit && (
+                    {canEdit && onOcrLibretto ? (
+                        <label className="block w-full p-2.5 text-center border-2 border-dashed border-violet-300 bg-violet-50 rounded cursor-pointer hover:bg-violet-100 text-xs text-violet-700 font-medium transition"
+                            data-testid={`quadrotto-upload-${c.key}`} title="Carica il libretto: l'AI estrae automaticamente targa, telaio, marca, modello… e li applica alla polizza. Il file viene salvato qui.">
+                            {uploading ? <Sparkles size={13} className="inline mr-1 animate-pulse" /> : <Upload size={13} className="inline mr-1" />}
+                            {uploading ? "Analisi OCR in corso…" : "Carica libretto (OCR automatico)"}
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" hidden
+                                onChange={(e) => e.target.files?.[0] && onOcrLibretto(e.target.files[0])} />
+                        </label>
+                    ) : canEdit && (
                         <label className="block w-full p-2.5 text-center border-2 border-dashed border-slate-300 rounded cursor-pointer hover:bg-sky-50 hover:border-sky-300 text-xs text-slate-500 transition"
                             data-testid={`quadrotto-upload-${c.key}`}>
                             <Upload size={13} className="inline mr-1" />
                             {uploading ? "Caricamento…" : "Carica documento"}
                             <input type="file" multiple={c.multiple !== false} hidden onChange={(e) => onUpload(e.target.files)} />
-                        </label>
-                    )}
-                    {canEdit && onOcrLibretto && (
-                        <label className="block w-full p-2.5 text-center border-2 border-dashed border-violet-300 bg-violet-50 rounded cursor-pointer hover:bg-violet-100 text-xs text-violet-700 font-medium transition"
-                            data-testid={`quadrotto-ocr-${c.key}`} title="Carica il libretto: l'AI estrae targa, telaio, marca, modello… e li applica alla polizza">
-                            <Sparkles size={13} className="inline mr-1" />
-                            {uploading ? "Analisi OCR in corso…" : "Carica + OCR libretto (estrai dati veicolo)"}
-                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" hidden
-                                onChange={(e) => e.target.files?.[0] && onOcrLibretto(e.target.files[0])} />
                         </label>
                     )}
                 </div>
