@@ -118,6 +118,25 @@ export default function DocumentiSezioneSplit({
         finally { setUploading(null); }
     };
 
+    const ocrLibretto = async (file) => {
+        if (!file) return;
+        setUploading("libretto");
+        try {
+            const fd = new FormData(); fd.append("file", file);
+            const r = await api.post(`/ocr/libretto?polizza_id=${entita_id}`, fd, {
+                headers: { "Content-Type": "multipart/form-data" }, timeout: 120000,
+            });
+            const dati = r.data?.dati || {};
+            const campi = Object.entries(dati).filter(([, v]) => v !== null && v !== "").map(([k]) => k);
+            if (campi.length) {
+                await api.post("/ocr/libretto/apply", { polizza_id: entita_id, dati, campi });
+            }
+            toast.success("Libretto analizzato: dati veicolo aggiornati e file archiviato");
+            await load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore OCR libretto"); }
+        finally { setUploading(null); }
+    };
+
     const toggleVisibilita = async (alleg) => {
         const newVis = !alleg.visibile_cliente;
         try {
@@ -157,8 +176,9 @@ export default function DocumentiSezioneSplit({
                             categoria={c}
                             files={gruppi[c.key] || []}
                             canEdit={canEdit}
-                            uploading={uploading === c.key}
+                            uploading={uploading === c.key || (uploading === "libretto" && c.key.includes("libretto"))}
                             onUpload={(files) => upload(files, { visibile: defVis(c), categoria: c.key })}
+                            onOcrLibretto={entita_tipo === "polizza" && c.key.includes("libretto") ? ocrLibretto : null}
                             onToggle={toggleVisibilita}
                             onDelete={elimina}
                             firmeByOrig={firmeByOrig}
@@ -320,7 +340,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
     );
 }
 
-function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
+function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onOcrLibretto, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
     const [open, setOpen] = useState(true);
     const c = categoria;
     const manca = !!c.obbligatoria && files.length === 0;
@@ -387,6 +407,15 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                             <Upload size={13} className="inline mr-1" />
                             {uploading ? "Caricamento…" : "Carica documento"}
                             <input type="file" multiple={c.multiple !== false} hidden onChange={(e) => onUpload(e.target.files)} />
+                        </label>
+                    )}
+                    {canEdit && onOcrLibretto && (
+                        <label className="block w-full p-2.5 text-center border-2 border-dashed border-violet-300 bg-violet-50 rounded cursor-pointer hover:bg-violet-100 text-xs text-violet-700 font-medium transition"
+                            data-testid={`quadrotto-ocr-${c.key}`} title="Carica il libretto: l'AI estrae targa, telaio, marca, modello… e li applica alla polizza">
+                            <Sparkles size={13} className="inline mr-1" />
+                            {uploading ? "Analisi OCR in corso…" : "Carica + OCR libretto (estrai dati veicolo)"}
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" hidden
+                                onChange={(e) => e.target.files?.[0] && onOcrLibretto(e.target.files[0])} />
                         </label>
                     )}
                 </div>

@@ -104,29 +104,40 @@ export default function Compagnie() {
 }
 
 function CompagniaDialog({ editing, agenzie, onClose }) {
-    const [f, setF] = useState(editing || {
-        codice: "", ragione_sociale: "", referente: "",
-        email: "", telefono: "", sito_web: "", descrizione: "", attiva: true,
-        trattiene_provvigioni: true,
-        tipo_mandato: "diretto",
-        agenzia_partner_id: null,
+    const [f, setF] = useState(() => {
+        const base = editing || {
+            codice: "", ragione_sociale: "", referente: "",
+            email: "", telefono: "", sito_web: "", descrizione: "", attiva: true,
+            trattiene_provvigioni: true,
+        };
+        const ids = (editing?.agenzie_partner_ids && editing.agenzie_partner_ids.length)
+            ? editing.agenzie_partner_ids
+            : (editing?.agenzia_partner_id ? [editing.agenzia_partner_id] : []);
+        return { ...base, agenzie_partner_ids: ids };
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const partnerList = agenzie.filter((a) => a.tipo === "partner");
+    const haPartner = (f.agenzie_partner_ids || []).length > 0;
+    const togglePartner = (id) => setF((p) => {
+        const cur = p.agenzie_partner_ids || [];
+        return { ...p, agenzie_partner_ids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
+    });
     const save = async () => {
         if (!f.codice || !f.ragione_sociale) { toast.error("Codice e ragione sociale obbligatori"); return; }
-        if (f.tipo_mandato === "collaborazione" && !f.agenzia_partner_id) {
-            toast.error("Per il mandato di collaborazione selezionare l'agenzia partner");
-            return;
-        }
         try {
-            const payload = { ...f, agenzia_partner_id: f.tipo_mandato === "collaborazione" ? f.agenzia_partner_id : null };
+            const ids = f.agenzie_partner_ids || [];
+            const payload = {
+                ...f,
+                agenzie_partner_ids: ids,
+                agenzia_partner_id: ids.length === 1 ? ids[0] : null,
+                tipo_mandato: ids.length ? "collaborazione" : "diretto",
+            };
             if (editing?.id) await api.put(`/compagnie/${editing.id}`, payload);
             else await api.post("/compagnie", payload);
             toast.success(editing?.id ? "Aggiornata" : "Creata"); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
-    const isColl = f.tipo_mandato === "collaborazione";
     return (
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>{editing?.id ? "Modifica" : "Nuova"} compagnia</DialogTitle></DialogHeader>
@@ -138,50 +149,44 @@ function CompagniaDialog({ editing, agenzie, onClose }) {
                         onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
                 </div>
 
-                {/* SEZIONE MANDATO */}
+                {/* SEZIONE MANDATO — una o più agenzie partner (multi) */}
                 <div className="border-t pt-3 mt-3">
                     <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-                        🔗 Tipo di mandato
+                        🔗 Agenzia partner (anche più di una)
                     </h3>
-                    <div className="grid grid-cols-2 gap-3 mb-2">
-                        <div>
-                            <Label>Tipo mandato *</Label>
-                            <Select value={f.tipo_mandato} onValueChange={(v) => set("tipo_mandato", v)}>
-                                <SelectTrigger data-testid="comp-tipo-mandato"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="diretto">Mandato diretto</SelectItem>
-                                    <SelectItem value="collaborazione">Mandato di collaborazione</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        {isColl && (
-                            <div>
-                                <Label>Agenzia partner *</Label>
-                                <Select value={f.agenzia_partner_id || ""} onValueChange={(v) => set("agenzia_partner_id", v)}>
-                                    <SelectTrigger data-testid="comp-agenzia-partner"><SelectValue placeholder="Seleziona agenzia" /></SelectTrigger>
-                                    <SelectContent>
-                                        {agenzie.filter((a) => a.tipo === "partner").map((a) => (
-                                            <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        )}
+                    <div className="text-[11px] text-slate-500 mb-2">
+                        Spunta le agenzie partner che hanno il mandato di questa compagnia. Se non spunti nulla, la compagnia è a <strong>mandato diretto</strong> dell&apos;agenzia principale.
                     </div>
-                    <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
-                        {isColl ? (
-                            <>📍 <strong>Collaborazione</strong>: il mandato diretto con la compagnia è dell'agenzia
+                    {partnerList.length === 0 ? (
+                        <div className="text-xs text-slate-400 italic">Nessuna agenzia partner configurata.</div>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                            {partnerList.map((a) => {
+                                const checked = (f.agenzie_partner_ids || []).includes(a.id);
+                                return (
+                                    <label key={a.id} className={`flex items-center gap-2 border rounded p-2 cursor-pointer text-sm ${checked ? "border-violet-400 bg-violet-50" : "border-slate-200"}`}
+                                        data-testid={`comp-partner-${a.id}`}>
+                                        <Checkbox checked={checked} onCheckedChange={() => togglePartner(a.id)} />
+                                        <span>{a.ragione_sociale}</span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                    )}
+                    <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded p-2 mt-2">
+                        {haPartner ? (
+                            <>📍 <strong>Collaborazione</strong>: il mandato diretto con la compagnia è dell&apos;agenzia
                                 partner. Saldo cassa = <strong>premi interi</strong> (no detrazione provvigioni). Le nostre provvigioni le
-                                fatturerà l'agenzia partner.</>
+                                fatturerà l&apos;agenzia partner.</>
                         ) : (
                             <>📍 <strong>Diretto</strong>: rapporto diretto con la compagnia. Saldo cassa =
-                                <strong> premi − provvigioni</strong> (se "tratteniamo le provvigioni"). Le ritenute compagnia sono in
+                                <strong> premi − provvigioni</strong> (se &quot;tratteniamo le provvigioni&quot;). Le ritenute compagnia sono in
                                 negativo sulle provvigioni e vanno versate.</>
                         )}
                     </div>
                 </div>
 
-                {!isColl && (
+                {!haPartner && (
                     <div className="flex items-center gap-2 mt-1">
                         <Checkbox id="trattiene" checked={!!f.trattiene_provvigioni}
                             onCheckedChange={(v) => set("trattiene_provvigioni", !!v)} />

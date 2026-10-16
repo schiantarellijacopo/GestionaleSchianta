@@ -867,3 +867,9 @@ Admin: `admin@assicura.it / Admin123!`
 - Messaggio campi obbligatori specifico + auto-mandato da OCR + filtro compagnie plurale (già fatti). Verificato in preview: modale ok, bottone crea-contraente visibile, nessun crash.
 - PENDING: libretto OCR "dentro la card" (DocumentiSezioneSplit per-categoria non ha OCR; il pulsante "OCR Libretto veicolo" è in DocumentiPolizzaTab). Da confermare schermata esatta.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (21) — OCR libretto dentro la card categoria + Compagnie unificata multi-partner
+- OCR LIBRETTO NELLA CARD: in DocumentiSezioneSplit (layout quadrotti, scheda Documenti polizza), la card "Libretto veicolo" ora ha il pulsante "Carica + OCR libretto": carica il file -> POST /ocr/libretto?polizza_id -> applica i dati veicolo via /ocr/libretto/apply (campi) -> archivia come allegato -> reload. Mostrato solo per entita_tipo=polizza e key che contiene "libretto". File: DocumentiSezioneSplit.jsx (ocrLibretto, prop onOcrLibretto su QuadrottoCategoria).
+- COMPAGNIE UNIFICATA: Compagnie.jsx edit dialog ora usa i CHECKBOX multi-partner "Agenzia partner (anche più di una)" (agenzie_partner_ids) come in Librerie, al posto del vecchio Select singolo + tipo_mandato. Salvataggio: agenzie_partner_ids + agenzia_partner_id (legacy, se singolo) + tipo_mandato ricalcolato (collaborazione se >=1 partner, altrimenti diretto). Init legge plurale con fallback singolare.
+- VERIFICHE preview (login reale + screenshot): nessun errore di compilazione; dialog Compagnie mostra i checkbox partner (Bottoni/giorgia); app Polizze/detail caricano senza crash.
+- DA DEPLOYARE: Save to GitHub -> Railway.
