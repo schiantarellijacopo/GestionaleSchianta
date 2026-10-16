@@ -367,6 +367,24 @@ function DatiTab({ ana, canEdit, onReload }) {
     const [editing, setEditing] = useState(false);
     const [f, setF] = useState({ ...ana });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const [operatori, setOperatori] = useState([]);
+    useEffect(() => {
+        api.get("/auth/users")
+            .then((r) => setOperatori((r.data || []).filter((u) => ["admin", "collaboratore", "dipendente"].includes(u.role))))
+            .catch(() => {});
+    }, []);
+    const selColl = (f.collaboratori_ids && f.collaboratori_ids.length)
+        ? f.collaboratori_ids
+        : (f.collaboratore_id ? [f.collaboratore_id] : []);
+    const toggleColl = (id) => {
+        const cur = new Set(selColl);
+        cur.has(id) ? cur.delete(id) : cur.add(id);
+        const arr = [...cur];
+        setF((p) => ({ ...p, collaboratori_ids: arr, collaboratore_id: arr[0] || null }));
+    };
+    const nomiColl = (ids) => (ids || [])
+        .map((id) => operatori.find((o) => o.id === id)?.name || operatori.find((o) => o.id === id)?.email || id)
+        .join(", ");
 
     const save = async () => {
         try {
@@ -431,6 +449,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Inizio contribuzione", fmtDate(ana.data_inizio_contribuzione)],
                         ["Settimane contributive", ana.settimane_contributive],
                         ["Coordinate", ana.lat && ana.lng ? `${ana.lat.toFixed(4)}, ${ana.lng.toFixed(4)}` : "-"],
+                        ["Collaboratore/i di rif.", nomiColl(ana.collaboratori_ids && ana.collaboratori_ids.length ? ana.collaboratori_ids : (ana.collaboratore_id ? [ana.collaboratore_id] : []))],
                     ].filter(([k]) => ana.tipo !== "persona_giuridica" || ![
                         "Data nascita", "Sesso", "Comune nascita", "Professione", "Tipo lavoratore",
                         "Stato civile", "N. figli", "Figli a carico", "Reddito annuo lordo",
@@ -634,6 +653,26 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
                 <div><Label>Inizio contribuzione</Label><Input type="date" value={f.data_inizio_contribuzione || ""} onChange={(e) => set("data_inizio_contribuzione", e.target.value)} /></div>
                 <div><Label>Settimane contributive</Label><Input type="number" value={f.settimane_contributive || ""} onChange={(e) => set("settimane_contributive", parseInt(e.target.value) || null)} /></div>
+                <div className="col-span-2 md:col-span-3 rounded-lg border border-sky-200 bg-sky-50/50 p-3">
+                    <Label className="text-xs uppercase tracking-wide text-sky-800 font-semibold mb-2 block">Collaboratori / Operatori di riferimento</Label>
+                    <div className="flex flex-wrap gap-2" data-testid="anag-collaboratori">
+                        {operatori.map((o) => {
+                            const active = selColl.includes(o.id);
+                            const primario = active && selColl[0] === o.id;
+                            return (
+                                <button
+                                    type="button" key={o.id} onClick={() => toggleColl(o.id)}
+                                    className={`px-3 py-1 rounded-full text-sm border transition-colors ${active ? "bg-sky-600 text-white border-sky-600" : "bg-white text-slate-700 border-slate-300 hover:border-sky-400"}`}
+                                    data-testid={`anag-coll-${o.id}`}
+                                >
+                                    {primario && "★ "}{o.name || o.email}
+                                </button>
+                            );
+                        })}
+                        {operatori.length === 0 && <span className="text-xs text-slate-400">Nessun operatore disponibile</span>}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-2">Puoi selezionarne più di uno. Il primo scelto (★) è il responsabile principale (usato per la visibilità).</p>
+                </div>
                 <div className="col-span-2 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                     <Label className="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-2 block">Documento d&apos;identità (carta d&apos;identità)</Label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

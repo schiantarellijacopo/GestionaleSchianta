@@ -311,6 +311,7 @@ class Anagrafica(BaseDoc):
     settimane_contributive: Optional[int] = None
     note: Optional[str] = None
     collaboratore_id: Optional[str] = None  # responsabile principale (filtro visibilità)
+    collaboratori_ids: List[str] = Field(default_factory=list)  # collaboratori/operatori di riferimento (anche più di uno)
     # relazione (albero genealogico legacy)
     parente_di: List[dict] = Field(default_factory=list)  # [{"anagrafica_id":..., "relazione":"figlio|coniuge|..."}]
     # consensi privacy

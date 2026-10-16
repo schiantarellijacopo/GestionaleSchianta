@@ -307,7 +307,10 @@ async def list_anagrafiche(
     if tag:
         flt["tags"] = tag
     if collaboratore_id:
-        flt["collaboratore_id"] = collaboratore_id
+        flt.setdefault("$and", []).append({"$or": [
+            {"collaboratore_id": collaboratore_id},
+            {"collaboratori_ids": collaboratore_id},
+        ]})
     if professione:
         flt["professione"] = {"$regex": re.escape(professione), "$options": "i"}
     if comune:

@@ -716,3 +716,10 @@ Admin: `admin@assicura.it / Admin123!`
 - ISSUE (stornato negli arretrati): /titoli senza filtro stato mostrava anche i titoli 'stornato'. FIX (server.py list_titoli): se NON c'e' polizza_id e stato!='stornato', esclude sempre 'stornato' (gestisce flt.stato None e $nin). Il dettaglio polizza (polizza_id) e la richiesta esplicita stato=stornato continuano a mostrarli. Verificato: senza filtro 0 stornati, dettaglio polizza 1, stato=stornato 1.
 - LOGHI: aggiunto pulsante "Migra loghi" (CompagnieMergeTool.jsx) che chiama POST /compagnie/migra-loghi (storage legacy -> DB base64) con reload. Verificato in preview: 4 migrati, 1 gia nel DB, 0 falliti. Su Railway: cliccare dopo il deploy; i loghi non recuperabili vanno ricaricati.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (9) — Anagrafica: collaboratori/operatori di riferimento (multi-selezione)
+- RICHIESTA: in anagrafica il collaboratore di riferimento non era visibile né modificabile; ora serve poterne selezionare più di uno.
+- Backend: Anagrafica.collaboratori_ids: List[str] (plurale) oltre a collaboratore_id (principale). PUT /anagrafiche salva entrambi (collaboratore_id = primo selezionato, per retro-compatibilità visibilità). Filtro lista: collaboratore_id match sia su collaboratore_id sia su collaboratori_ids ($or) -> anche gli operatori secondari vedono/filtrano il cliente.
+- Frontend (AnagraficaDetail.jsx DatiTab): caricamento operatori da /auth/users (admin/collaboratore/dipendente); blocco multi-select a chip "Collaboratori/Operatori di riferimento" nel form di modifica (★ = principale = primo selezionato); riga "Collaboratore/i di rif." nel riepilogo read-only.
+- VERIFICATO preview: PUT salva collaboratori_ids+collaboratore_id; GET li ritorna; filtro per operatore secondario trova l'anagrafica; UI mostra 4 chip, 2 selezionati con ★.
+- DA DEPLOYARE: Save to GitHub -> Railway.
