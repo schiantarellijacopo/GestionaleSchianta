@@ -516,6 +516,18 @@ async def evolution_webhook(name: str, request: Request) -> dict:
     event = payload.get("event") or ""
     data = payload.get("data") or payload
 
+    # Contesto tenant: il webhook NON è autenticato (Evolution posta senza JWT),
+    # quindi recuperiamo il tenant dell'agenzia dall'istanza. Senza questo campo
+    # i messaggi verrebbero salvati senza `agenzia_tenant_id` e resterebbero
+    # INVISIBILI alle query tenant-scoped della UI (chat vuote nonostante la
+    # ricezione funzioni).
+    inst_doc = await db.whatsapp_instances.find_one(
+        {"instance_name": name}, {"_id": 0, "agenzia_tenant_id": 1}
+    )
+    inst_tenant = (inst_doc or {}).get("agenzia_tenant_id")
+    if not inst_tenant:
+        logger.warning("Webhook %s: istanza senza agenzia_tenant_id, messaggi non filtrabili", name)
+
     # MESSAGES_UPSERT: nuovo messaggio ricevuto/inviato
     if "messages" in str(event).lower() or "messages" in payload:
         msgs = data if isinstance(data, list) else [data]
@@ -575,6 +587,7 @@ async def evolution_webhook(name: str, request: Request) -> dict:
             await db.whatsapp_messages.insert_one({
                 "id": str(uuid.uuid4()),
                 "instance_name": name,
+                **({"agenzia_tenant_id": inst_tenant} if inst_tenant else {}),
                 "direction": direction,
                 "number": remote,
                 "text": text,
