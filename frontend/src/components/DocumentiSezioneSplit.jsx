@@ -122,8 +122,10 @@ export default function DocumentiSezioneSplit({
         if (!file) return;
         setUploading("libretto");
         try {
-            const fd = new FormData(); fd.append("file", file);
-            const r = await api.post(`/ocr/libretto?polizza_id=${entita_id}`, fd, {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("polizza_id", entita_id);
+            const r = await api.post(`/ocr/libretto`, fd, {
                 headers: { "Content-Type": "multipart/form-data" }, timeout: 120000,
             });
             const dati = r.data?.dati || {};
