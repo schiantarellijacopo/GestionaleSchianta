@@ -809,3 +809,11 @@ Admin: `admin@assicura.it / Admin123!`
 - IMMAGINI più leggere (meno upload + meno token vision): routes/ocr.py e ocr_polizza.pdf_to_page_images e cloud_ocr_scanner._pdf_to_image_bytes e documenti_inbox._convert_pdf_to_jpeg -> render 150 dpi, lato lungo max ~1600px (1400 per lo stack multipagina CI), JPEG q80 optimize. cloud scanner passato da PNG a JPEG. server.py: tutte le conversioni OCR PDF da resolution=200 a 150 (4 punti).
 - VERIFICHE: preview OCR libretto end-to-end HTTP 200 dati corretti (percorso Emergent, invariato). Routing Gemini diretto confermato (test con chiave dummy -> raggiunge Google). Sintassi OK su 13 file, backend health 200. NB: la velocità del percorso Gemini diretto è misurabile solo in produzione (preview non ha GEMINI_API_KEY).
 - DA DEPLOYARE: Save to GitHub -> Railway (GEMINI_API_KEY già impostata).
+
+## 2026-06 (14) — Solo Gemini: nessun uso della chiave Emergent in produzione
+- RICHIESTA utente: usare SOLO la propria GEMINI_API_KEY, mai EMERGENT_LLM_KEY.
+- FIX (llm_compat._use_direct): ora ritorna True per QUALSIASI provider quando GEMINI_API_KEY è presente (prima solo provider=="gemini"). Così TUTTE le chiamate LlmChat (testo+vision: OCR, copilot, chat AI, insights, marketing testi, biblioteca, modelli, import, notebooklm testo) passano da Gemini diretto REST. Verificato che tutti i moduli importano LlmChat da llm_compat (nessun bypass).
+- Emergentintegrations resta SOLO come fallback quando GEMINI_API_KEY NON è configurata (es. preview). In produzione Railway (GEMINI_API_KEY impostata) la chiave Emergent non viene mai usata.
+- CAVEAT (non-OCR, non-Gemini): OpenAITextToSpeech (TTS audio) in routes/marketing_studio.py e routes/notebooklm.py usa ancora emergentintegrations.llm.openai (Gemini non espone TTS da questo path). Se si rimuove del tutto EMERGENT_LLM_KEY da Railway, quelle funzioni audio smetteranno di funzionare; gli OCR e il testo/vision restano su Gemini.
+- VERIFICHE: sintassi OK, OCR libretto preview HTTP 200 (preview senza chiave usa fallback, invariato). Il percorso solo-Gemini è attivo in produzione dopo deploy.
+- DA DEPLOYARE: Save to GitHub -> Railway.

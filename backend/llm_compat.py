@@ -72,7 +72,11 @@ class LlmChat:
 
     # --- routing ---
     def _use_direct(self) -> bool:
-        return self._provider == "gemini" and _direct_gemini_enabled()
+        # Se GEMINI_API_KEY è presente, TUTTE le chiamate LLM (testo e vision,
+        # qualsiasi provider) passano da Gemini diretto. La chiave Emergent NON
+        # viene mai usata. Emergentintegrations resta solo come fallback quando
+        # GEMINI_API_KEY non è configurata (es. preview senza chiave).
+        return _direct_gemini_enabled()
 
     def _real_chat(self):
         if self._real is None:
