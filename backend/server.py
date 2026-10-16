@@ -18386,6 +18386,16 @@ async def startup():
     except Exception as e:
         logger.warning("IMAP poller non avviato: %s", e)
 
+    # WhatsApp — riallinea automaticamente i webhook verso questo backend
+    # (solo in produzione) così i messaggi IN non si perdono dopo un deploy.
+    try:
+        from routes.whatsapp_evo import auto_repair_webhooks
+        res_wh = await auto_repair_webhooks()
+        if res_wh.get("updated"):
+            logger.info("WhatsApp webhook auto-ripristinati: %s", res_wh["updated"])
+    except Exception as e:
+        logger.warning("Auto-repair webhook WhatsApp fallito (non bloccante): %s", e)
+
     # One-shot: unifica vecchi sconti su singola riga del brogliaccio
     try:
         res = await _migrate_unify_sconti()

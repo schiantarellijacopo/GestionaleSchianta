@@ -395,6 +395,53 @@ async def repair_instance_webhook(name: str, request: Request, user=Depends(requ
     return {"ok": True, "webhook_url": webhook_url, "enabled": cur.get("enabled"), "current_url": cur.get("url")}
 
 
+async def auto_repair_webhooks() -> dict:
+    """Riallinea il webhook di TUTTE le istanze verso questo backend.
+    Pensato per l'avvio del server: così la ricezione dei messaggi in arrivo
+    non va mai 'persa' dopo un deploy/restart, senza interventi manuali.
+
+    SICUREZZA MULTI-AMBIENTE: siccome preview e produzione condividono lo stesso
+    numero/istanza, l'auto-ripristino viene eseguito SOLO in produzione. Il
+    preview non tocca il webbook (altrimenti si ruberebbe gli inbound a vicenda).
+    Disattivabile con WHATSAPP_WEBHOOK_AUTO=0; forzabile con =1.
+    """
+    base = (os.environ.get("BACKEND_PUBLIC_URL") or "").rstrip("/")
+    flag = (os.environ.get("WHATSAPP_WEBHOOK_AUTO") or "").strip().lower()
+    is_preview = "preview.emergentagent.com" in base
+    if flag in ("0", "false", "no"):
+        return {"ok": False, "skipped": "disabilitato via env"}
+    if flag not in ("1", "true", "yes") and (is_preview or not base):
+        return {"ok": False, "skipped": "non produzione (preview o base mancante)"}
+
+    out = {"ok": True, "updated": [], "errors": []}
+    try:
+        instances = await db.whatsapp_instances.find({}, {"_id": 0, "instance_name": 1, "token": 1}).to_list(200)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    for inst in instances:
+        name = inst.get("instance_name")
+        webhook_url = f"{base}/api/whatsapp-evo/webhook/{name}"
+        try:
+            await _call(
+                "POST", f"/webhook/set/{name}",
+                json={"webhook": {
+                    "enabled": True, "url": webhook_url,
+                    "byEvents": False, "base64": False, "events": WEBHOOK_EVENTS,
+                }},
+                instance_token=inst.get("token"), timeout=10.0,
+            )
+            await db.whatsapp_instances.update_one(
+                {"instance_name": name},
+                {"$set": {"webhook_url": webhook_url, "updated_at": _now_iso()}},
+            )
+            out["updated"].append(name)
+        except Exception as e:  # noqa: BLE001
+            out["errors"].append({"instance": name, "error": str(e)[:200]})
+    if out["updated"]:
+        logger.info("Auto-repair webhook WhatsApp: riallineate %s istanze -> %s", len(out["updated"]), base)
+    return out
+
+
 # ---------- Invio messaggi ----------
 class SendTextBody(BaseModel):
     number: str  # es. "393401234567"
