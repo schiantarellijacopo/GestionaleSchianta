@@ -30,17 +30,18 @@ import threading
 
 _gemini_client = None
 GEMINI_REST = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
-# Preferenza modelli per gli OCR: PRIMA i modelli STABILI (GA) che hanno
-# capacità affidabile e raramente vanno in "overloaded"; i modelli "preview"
-# (prone al sovraccarico) solo come ultima risorsa. Viene filtrata su ciò che
-# la chiave supporta davvero (model discovery), così niente 404 e niente
-# preview sovraccarichi quando esiste un'alternativa stabile.
+# Preferenza modelli per gli OCR, VERIFICATA sulla chiave in uso (free tier):
+# gemini-3.5-flash risponde in ~0.7s ed è affidabile; gemini-3-flash-preview
+# come alternativa; i flash-lite come ripiego leggero. Sono ESCLUSI di
+# proposito i modelli che vanno in timeout/sovraccarico su questa chiave
+# (gemini-flash-latest, gemini-3.8-flash) e quelli dismessi (gemini-2.5-*).
+# NB: richiede thinkingConfig.thinkingBudget=0, altrimenti il "thinking"
+# consuma i token e la risposta torna vuota.
 STABLE_PREFERENCE = [
-    "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest",
-    "gemini-2.5-pro", "gemini-pro-latest",
-    "gemini-3-flash-preview", "gemini-3.5-flash",
+    "gemini-3.5-flash", "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite", "gemini-pro-latest",
 ]
 
 _models_cache = None
@@ -71,29 +72,24 @@ def _available_models(key, client) -> list:
 
 
 def _ordered_candidates(key, client) -> list:
-    """Ordine dei modelli da provare: override env, poi preferenza stabile,
-    poi qualunque flash disponibile. Filtrato sui modelli realmente esistenti."""
+    """Ordine dei modelli da provare: override env, poi preferenza verificata.
+    Lista curata e ristretta (niente modelli image/tts o prone al timeout)."""
     env_model = os.environ.get("GEMINI_MODEL")
     avail = _available_models(key, client)
-    if not avail:
-        # discovery fallita → lista statica con preferenza stabile
-        base = ([env_model] if env_model else []) + STABLE_PREFERENCE + [DEFAULT_GEMINI_MODEL]
-        out = []
-        for m in base:
-            if m and m not in out:
-                out.append(m)
-        return out
     out = []
-    if env_model and env_model in avail:
+    if env_model:
         out.append(env_model)
     for m in STABLE_PREFERENCE:
-        if m in avail and m not in out:
-            out.append(m)
-    for m in avail:  # altri flash disponibili non elencati
-        if "flash" in m and m not in out:
-            out.append(m)
+        if m in out:
+            continue
+        # Se la discovery è disponibile, salta i modelli non presenti; ma la
+        # lista è già curata su modelli esistenti, quindi in caso di dubbio
+        # proviamo comunque.
+        if avail and m not in avail:
+            continue
+        out.append(m)
     if not out:
-        out = avail[:4]
+        out = list(STABLE_PREFERENCE)
     return out
 
 

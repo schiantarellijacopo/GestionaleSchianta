@@ -832,3 +832,10 @@ Admin: `admin@assicura.it / Admin123!`
 - NUOVO endpoint admin GET /api/ocr/gemini-diagnostic: mostra modelli disponibili, ordine tentativi e test ping per i primi 4, con dettaglio errore Google (distingue RESOURCE_EXHAUSTED quota vs UNAVAILABLE/overload).
 - VERIFICHE preview: diagnostic ritorna direct_gemini=false (preview senza chiave); OCR libretto HTTP 200. Il percorso Gemini diretto va verificato con la chiave reale.
 - DA DEPLOYARE: Save to GitHub -> Railway.
+
+## 2026-06 (17) — OCR Gemini: RISOLTO sovraccarico (modello verificato sulla chiave reale)
+- DIAGNOSI con la chiave reale (free tier): gemini-2.5-flash/lite = 404 (dismessi); gemini-flash-latest e gemini-3.8-flash = TIMEOUT (erano i "sovraccarichi" visti dall'utente, erano nei fallback); gemini-3.6-flash = 429 quota; gemini-3.5-flash e gemini-3-flash-preview = OK <1s. Senza thinkingBudget=0 la risposta tornava VUOTA (il thinking consumava i token).
+- FIX: DEFAULT_GEMINI_MODEL = gemini-3.5-flash. STABLE_PREFERENCE curata e ristretta: [gemini-3.5-flash, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-pro-latest]. Rimossi i modelli prone a timeout/404. _ordered_candidates semplificato (niente append generico di flash image/tts). thinkingBudget=0 confermato indispensabile.
+- VERIFICA END-TO-END con chiave reale: OCR libretto PDF -> dati corretti (targa FJ358XS, FIAT 500, kw51, cv69, 1242cc, 2017-07-07) in ~14,6s (prima chiamata include discovery, poi più rapida). Ordine modelli runtime confermato: gemini-3.5-flash first.
+- La chiave NON è stata salvata in alcun file (usata solo in test subprocess).
+- DA DEPLOYARE: Save to GitHub -> Railway. Assicurarsi che su Railway GEMINI_API_KEY sia la stessa chiave funzionante.
