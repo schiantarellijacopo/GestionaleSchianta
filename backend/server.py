@@ -2357,7 +2357,8 @@ async def saldi_cassa_compagnie(
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Saldo da versare/da incassare per ciascuna compagnia (tutti i periodi)."""
-    compagnie = await db.compagnie.find({}, {"_id": 0}).to_list(500)
+    # Solo compagnie ATTIVE (le non attive non devono comparire in Estratto Conto).
+    compagnie = await db.compagnie.find({"attiva": {"$ne": False}}, {"_id": 0}).to_list(500)
     # mappa agenzie partner (id -> ragione sociale) per sapere "a chi versare"
     age_map: dict[str, str] = {}
     async for a in db.agenzie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
@@ -2367,15 +2368,21 @@ async def saldi_cassa_compagnie(
         try:
             data = await _compagnia_estratto_data(c["id"], None, None)
             tipo_mandato = c.get("tipo_mandato", "diretto")
-            age_pid = c.get("agenzia_partner_id")
+            # Agenzie partner: la libreria Compagnie salva nel campo PLURALE
+            # agenzie_partner_ids (checkbox "anche più di una"); fallback al vecchio
+            # campo singolare agenzia_partner_id. Mostrate indipendentemente dal mandato.
+            age_pids = list(c.get("agenzie_partner_ids") or [])
+            if not age_pids and c.get("agenzia_partner_id"):
+                age_pids = [c.get("agenzia_partner_id")]
+            partner_nomi = [age_map.get(pid) for pid in age_pids if age_map.get(pid)]
             risultati.append({
                 "compagnia_id": c["id"],
                 "codice": c.get("codice"),
                 "ragione_sociale": c.get("ragione_sociale"),
                 "trattiene_provvigioni": c.get("trattiene_provvigioni", True),
                 "tipo_mandato": tipo_mandato,
-                "agenzia_partner_id": age_pid if tipo_mandato == "collaborazione" else None,
-                "agenzia_partner_nome": age_map.get(age_pid) if tipo_mandato == "collaborazione" else None,
+                "agenzia_partner_id": age_pids[0] if age_pids else None,
+                "agenzia_partner_nome": ", ".join(partner_nomi) if partner_nomi else None,
                 "totale_incassato": data["totale_dare"],
                 "totale_versato": data["totale_avere"],
                 "saldo_da_versare": data["saldo"],

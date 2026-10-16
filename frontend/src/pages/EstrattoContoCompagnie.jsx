@@ -84,11 +84,13 @@ export default function EstrattoContoCompagnie() {
                                     <td className="num text-xs">{r.codice}</td>
                                     <td className="font-medium">{r.ragione_sociale}</td>
                                     <td className="text-xs" data-testid={`ec-partner-${r.compagnia_id}`}>
-                                        {r.tipo_mandato === "collaborazione" ? (
+                                        {r.agenzia_partner_nome ? (
                                             <span className="inline-flex items-center gap-1 text-violet-700">
                                                 <Handshake size={12} className="shrink-0" />
-                                                {r.agenzia_partner_nome || <span className="text-amber-600">partner non impostato</span>}
+                                                {r.agenzia_partner_nome}
                                             </span>
+                                        ) : r.tipo_mandato === "collaborazione" ? (
+                                            <span className="text-amber-600">partner non impostato</span>
                                         ) : (
                                             <span className="text-slate-400">Diretto (compagnia)</span>
                                         )}
