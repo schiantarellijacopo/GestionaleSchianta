@@ -16073,26 +16073,37 @@ async def chat_messaggi(con: str, limit: int = 200, user=Depends(current_user)):
 
 
 @api.post("/chat/messaggi", status_code=201)
-async def chat_invia(
-    destinatario_id: str = Query(None),
-    testo: str = Query(""),
-    file: Optional[UploadFile] = File(None),
-    body: Optional[dict] = None,
-    user=Depends(current_user),
-):
-    # supporta sia JSON (body) che multipart (con file)
-    if body is None:
+async def chat_invia(request: Request, user=Depends(current_user)):
+    # Supporta sia JSON ({destinatario_id, testo}) sia multipart (file + query/form).
+    # NB: non si possono mischiare File() e body JSON nella stessa firma FastAPI,
+    # quindi il body viene letto manualmente in base al Content-Type.
+    ctype = (request.headers.get("content-type") or "").lower()
+    qp = request.query_params
+    dest_id = qp.get("destinatario_id")
+    txt = qp.get("testo") or ""
+    file_name = file_ct = None
+    file_bytes = None
+    if "multipart/form-data" in ctype:
+        form = await request.form()
+        dest_id = dest_id or form.get("destinatario_id")
+        if not txt:
+            txt = form.get("testo") or ""
+        up = form.get("file")
+        if up is not None and hasattr(up, "filename"):
+            file_bytes = await up.read()
+            file_name = up.filename
+            file_ct = up.content_type
+    elif "application/json" in ctype:
         try:
-            from fastapi import Request as _Req
-            pass
+            jbody = await request.json()
         except Exception:
-            pass
-    # multipart: prendi destinatario_id e testo dai query/form param
-    dest_id = destinatario_id or (body or {}).get("destinatario_id")
-    txt = testo or (body or {}).get("testo", "")
+            jbody = {}
+        dest_id = dest_id or jbody.get("destinatario_id")
+        if not txt:
+            txt = jbody.get("testo") or ""
     if not dest_id:
         raise HTTPException(400, "destinatario_id richiesto")
-    if not txt.strip() and not file:
+    if not (txt or "").strip() and file_bytes is None:
         raise HTTPException(400, "Testo o allegato richiesto")
     dest = await db.users.find_one({"id": dest_id}, {"_id": 0})
     if not dest:
@@ -16101,28 +16112,28 @@ async def chat_invia(
         raise HTTPException(403, "I clienti possono scrivere solo allo staff")
 
     allegato_id = allegato_nome = allegato_ct = None
-    if file:
-        data = await file.read()
+    if file_bytes is not None:
+        data = file_bytes
         if len(data) > 25 * 1024 * 1024:
             raise HTTPException(400, "File troppo grande (max 25 MB)")
-        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin"
+        ext = file_name.rsplit(".", 1)[-1].lower() if file_name and "." in file_name else "bin"
         file_id = _uid()
         path = f"{os.environ.get('APP_NAME', 'assicura')}/chat/{user['id']}/{file_id}.{ext}"
-        ct = file.content_type or obj_storage.mime_for(file.filename or "")
+        ct = file_ct or obj_storage.mime_for(file_name or "")
         try:
             result = obj_storage.put_object(path, data, ct)
         except Exception as e:
             raise HTTPException(503, f"Errore upload: {e}")
         al = Allegato(
             entita_tipo="anagrafica", entita_id=dest_id,  # uso anagrafica come fallback
-            nome_file=file.filename, storage_path=result["path"],
+            nome_file=file_name, storage_path=result["path"],
             content_type=ct, size=result.get("size", len(data)),
             descrizione=f"Allegato chat tra {user.get('name')} e {dest.get('name')}",
             autore_id=user["id"],
         )
         await db.allegati.insert_one(al.model_dump())
         allegato_id = al.id
-        allegato_nome = file.filename
+        allegato_nome = file_name
         allegato_ct = ct
 
     msg = MessaggioChat(

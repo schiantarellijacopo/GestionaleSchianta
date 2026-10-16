@@ -1,6 +1,15 @@
 # Programma Assicurativo - CHANGELOG
 
 
+## 2026-10-16 — FIX Chat interna staff: "destinatario_id richiesto" ✅
+- **Bug (produzione)**: inviando un messaggio nella Chat interna → errore 400 "destinatario_id richiesto".
+- **RCA**: l'endpoint `POST /api/chat/messaggi` mischiava `file: UploadFile = File(None)` con un `body: dict` JSON; FastAPI non popola il body JSON quando è presente un File() → `destinatario_id` sempre vuoto per invii testuali (JSON). Riprodotto in preview (HTTP 400).
+- **FIX** (`server.py`): endpoint riscritto con `request: Request` e parsing manuale del body in base al Content-Type (JSON vs multipart); il file viene letto dal form, destinatario_id/testo da query o JSON. Testato: invio JSON ora HTTP 201.
+
+## 2026-10-16 — WhatsApp: ri-registrazione pulita webhook agenzia-03425 + diagnosi reception
+- Webhook re-registrato (disable→enable): URL = produzione esatta, enabled=True, eventi MESSAGES_UPSERT+MESSAGES_UPDATE attivi, istanza open. Rotta produzione risponde 200.
+- Causa reception mancante: la env `WEBHOOK_EVENTS_MESSAGES_UPSERT=true` su Evolution richiede RESTART del servizio Evolution per essere applicata (altrimenti Evolution non emette i webhook sui messaggi in arrivo).
+
 ## 2026-10-16 — HOTFIX: build Railway fallito (CI=true + warning ESLint) ✅
 - **Sintomo**: "Deployment failed to build" su Railway.
 - **RCA**: Railway imposta `CI=true` in build; `react-scripts build` con CI=true promuove i warning ESLint a errori. Il frontend ha molti warning pre-esistenti (`react-hooks/exhaustive-deps`) → build fallito. Nessun errore reale di sintassi/dipendenza.
