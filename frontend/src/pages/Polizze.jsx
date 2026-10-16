@@ -728,6 +728,14 @@ function NuovaPolizzaDialog({ onClose }) {
             const compMatch = d.compagnia
                 ? comp.find((c) => c.ragione_sociale?.toUpperCase().includes(d.compagnia.toUpperCase().split(" ")[0]))
                 : null;
+            // Deriva l'agenzia (mandato) dalla compagnia riconosciuta, così il
+            // campo Agenzia si compila da solo e la Compagnia resta valida.
+            let mandatoOcr = null;
+            if (compMatch) {
+                mandatoOcr = compMatch.agenzia_partner_id
+                    ? (agenzie.find((a) => a.id === compMatch.agenzia_partner_id)?.ragione_sociale || null)
+                    : (agenzie.find((a) => a.tipo === "principale")?.ragione_sociale || null);
+            }
             // Contraente: match AFFIDABILE dal backend (ricerca per CF/P.IVA su tutto il DB).
             const anaEsist = d.anagrafica_esistente || null;
             const cfContr = d.contraente?.codice_fiscale || d.contraente?.partita_iva;
@@ -744,6 +752,7 @@ function NuovaPolizzaDialog({ onClose }) {
             setF((p) => ({
                 ...p,
                 numero_polizza: d.numero_polizza || p.numero_polizza,
+                mandato: mandatoOcr || p.mandato,
                 compagnia_id: compMatch?.id || p.compagnia_id,
                 contraente_id: anaEsist?.id || "",
                 ramo, prodotto: "",
@@ -789,8 +798,15 @@ function NuovaPolizzaDialog({ onClose }) {
     };
 
     const save = async () => {
-        if (!f.numero_polizza || !f.compagnia_id || !f.contraente_id || !f.effetto || !f.scadenza) {
-            toast.error("Compila tutti i campi obbligatori");
+        const missing = [];
+        if (!f.numero_polizza) missing.push("Numero polizza");
+        if (!f.mandato) missing.push("Agenzia (mandato)");
+        if (!f.compagnia_id) missing.push("Compagnia");
+        if (!f.contraente_id) missing.push("Contraente");
+        if (!f.effetto) missing.push("Data effetto");
+        if (!f.scadenza) missing.push("Data scadenza");
+        if (missing.length) {
+            toast.error("Mancano questi campi obbligatori: " + missing.join(", "));
             return;
         }
         try {

@@ -839,3 +839,13 @@ Admin: `admin@assicura.it / Admin123!`
 - VERIFICA END-TO-END con chiave reale: OCR libretto PDF -> dati corretti (targa FJ358XS, FIAT 500, kw51, cv69, 1242cc, 2017-07-07) in ~14,6s (prima chiamata include discovery, poi più rapida). Ordine modelli runtime confermato: gemini-3.5-flash first.
 - La chiave NON è stata salvata in alcun file (usata solo in test subprocess).
 - DA DEPLOYARE: Save to GitHub -> Railway. Assicurarsi che su Railway GEMINI_API_KEY sia la stessa chiave funzionante.
+
+## 2026-06 (18) — Polizze: "non mi lascia salvare" (messaggio obbligatori generico)
+- SINTOMO (ricorrente, OCR e manuale): clic su "Crea polizza" -> "Compila tutti i campi obbligatori", senza dire quale.
+- CAUSA: validazione save controlla numero_polizza, compagnia_id, contraente_id, effetto, scadenza; il campo Agenzia (mandato) è obbligatorio (*) e la Compagnia è disabilitata finché il mandato non è scelto. Messaggio generico -> l'utente non capiva quale campo mancava (spesso Agenzia o Contraente non in DB).
+- FIX (frontend/src/pages/Polizze.jsx): 
+  1) messaggio specifico -> "Mancano questi campi obbligatori: ..." con elenco (incluso Agenzia (mandato)).
+  2) OCR: quando riconosce la compagnia, deriva e compila automaticamente anche l'Agenzia (mandato) dalla compagnia (agenzia_partner_id -> partner; altrimenti principale) così la Compagnia resta valida e si può salvare.
+- VERIFICA preview (screenshot + login reale): modal mostra il toast specifico con l'elenco campi mancanti. Frontend compila senza errori.
+- LIMITE noto: se il Contraente non è in anagrafica, va creato prima (il modal non ha ancora creazione inline) -> eventuale enhancement.
+- DA DEPLOYARE: Save to GitHub -> Railway (modifiche frontend).
