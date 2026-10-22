@@ -354,16 +354,32 @@ async def list_users(user=Depends(require_user("admin", "collaboratore", "dipend
     return users
 
 
+_USER_UPDATE_PROTECTED = {
+    "id", "created_at", "updated_at", "is_super_admin",
+    "agenzia_tenant_id", "token_valid_after", "password_hash",
+}
+# Campi che un admin può modificare: tutti quelli del modello pubblico (meno i
+# protetti) + password (gestita a parte) + il flag riapertura giornate.
+_USER_UPDATE_ALLOWED = (set(UserPublic.model_fields.keys()) - _USER_UPDATE_PROTECTED) | {
+    "password", "puo_riaprire_giornate",
+}
+_VALID_ROLES = {"admin", "collaboratore", "dipendente", "cliente"}
+
+
 @api.put("/auth/users/{uid}")
 async def update_user(uid: str, body: dict, user=Depends(require_user("admin"))):
     await _assert_user_same_tenant(user, uid, {"_id": 0, "id": 1})
-    body.pop("password_hash", None)
-    body.pop("id", None)
-    body.pop("agenzia_tenant_id", None)  # non consentire lo spostamento di tenant
-    if body.get("password"):
-        body["password_hash"] = hash_password(body.pop("password"))
-    body["updated_at"] = _now_iso()
-    res = await db.users.update_one({"id": uid}, {"$set": body})
+    # Whitelist: scarta ogni campo non consentito (impedisce escalation via
+    # is_super_admin / agenzia_tenant_id / token_valid_after, ecc.)
+    clean = {k: v for k, v in (body or {}).items() if k in _USER_UPDATE_ALLOWED}
+    if "role" in clean and clean["role"] not in _VALID_ROLES:
+        raise HTTPException(400, "Ruolo non valido")
+    if clean.get("password"):
+        clean["password_hash"] = hash_password(clean.pop("password"))
+    else:
+        clean.pop("password", None)
+    clean["updated_at"] = _now_iso()
+    res = await db.users.update_one({"id": uid}, {"$set": clean})
     if res.matched_count == 0:
         raise HTTPException(404, "Utente non trovato")
     await log_attivita(user, "update", "user", uid)
