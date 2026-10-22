@@ -4,7 +4,6 @@ import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ModelliFirma from "@/pages/ModelliFirma";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,7 +61,6 @@ const SECTIONS = [
     { key: "voci-bilancio", label: "Voci di bilancio", icon: <Wallet size={14} />, endpoint: "/librerie/voci-bilancio" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
-    { key: "modelli-firma", label: "Modelli Firma (PDF/Word)", icon: <FileText size={14} />, custom: true },
     { key: "mup-modelli", label: "Modelli MUP (precontrattuale)", icon: <ClipboardList size={14} />, endpoint: "/librerie/mup-modelli", custom: true },
     { key: "questionari", label: "Questionari", icon: <ClipboardList size={14} />, custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
@@ -276,7 +274,6 @@ export default function Librerie() {
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
-                            : s.key === "modelli-firma" ? <ModelliFirma />
                             : s.key === "mup-modelli" ? <ModelliMupSezione />
                             : s.key === "questionari" ? <QuestionariManager />
                             : s.key === "permessi" ? <PermessiSezione />
@@ -4381,6 +4378,8 @@ const PLACEHOLDERS_DOC = [
     { k: "operatore_nome", desc: "Nome collaboratore di riferimento", cat: "Operatore" },
     { k: "operatore_email", desc: "Email collaboratore", cat: "Operatore" },
     { k: "operatore_telefono", desc: "Telefono collaboratore", cat: "Operatore" },
+    { k: "operatore_rui", desc: "Numero iscrizione RUI del collaboratore (o agenzia)", cat: "Operatore" },
+    { k: "operatore_sezione", desc: "Sezione RUI del collaboratore (o agenzia)", cat: "Operatore" },
     // === Agenzia ===
     { k: "azienda_nome", desc: "Ragione sociale agenzia", cat: "Agenzia" },
     { k: "azienda_iban", desc: "IBAN agenzia", cat: "Agenzia" },
@@ -4388,6 +4387,11 @@ const PLACEHOLDERS_DOC = [
     { k: "azienda_email", desc: "Email agenzia", cat: "Agenzia" },
     { k: "azienda_indirizzo", desc: "Indirizzo agenzia", cat: "Agenzia" },
     { k: "azienda_pec", desc: "PEC agenzia", cat: "Agenzia" },
+    { k: "agenzia_rui", desc: "Numero iscrizione RUI agenzia", cat: "Agenzia" },
+    // === Firma / Immagini (inseriti come elementi grafici nel documento) ===
+    { k: "logo", desc: "Logo dell'agenzia (immagine) nel punto indicato", cat: "Firma / Immagini" },
+    { k: "firma_operatore", desc: "Foto della firma del collaboratore selezionato (immagine)", cat: "Firma / Immagini" },
+    { k: "firma", desc: "Punto dove il cliente firma digitalmente (firma elettronica)", cat: "Firma / Immagini" },
     // === Totali aggregati ===
     { k: "totale", desc: "Importo totale (€)", cat: "Totali" },
     { k: "totale_lordo", desc: "Totale lordo (€)", cat: "Totali" },
@@ -4511,6 +4515,25 @@ function ModelloMupDialog({ editing, onClose }) {
         attivo: editing.attivo !== false,
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const [importando, setImportando] = useState(false);
+
+    const importaFile = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setImportando(true);
+        toast.info("Analisi del documento… l'AI sta estraendo il testo");
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const r = await api.post("/librerie/modelli/estrai-testo", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            set("corpo", r.data?.corpo || "");
+            if (!f.nome.trim() && r.data?.nome) set("nome", r.data.nome);
+            toast.success("Testo importato — rivedilo e salva");
+        } catch (err) {
+            toast.error(errMsg(err, "Errore durante l'import del documento"));
+        } finally { setImportando(false); }
+    };
 
     const save = async () => {
         const garanzie = f.garanzieText.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -4551,7 +4574,15 @@ function ModelloMupDialog({ editing, onClose }) {
                             className="font-mono text-xs" />
                     </div>
                     <div>
-                        <Label>Testo precontrattuale (con segnaposto)</Label>
+                        <div className="flex items-center justify-between">
+                            <Label>Testo precontrattuale (con segnaposto)</Label>
+                            <label className={`inline-flex items-center gap-1 px-2 h-7 rounded-md border border-indigo-300 text-indigo-700 text-xs font-medium cursor-pointer hover:bg-indigo-50 ${importando ? "opacity-60 pointer-events-none" : ""}`}
+                                data-testid="mup-modello-importa">
+                                <Upload size={13} /> {importando ? "Analisi…" : "Importa da PDF/Word"}
+                                <input type="file" hidden accept=".pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={importaFile}
+                                    data-testid="mup-modello-importa-input" />
+                            </label>
+                        </div>
                         <Textarea rows={8} value={f.corpo} onChange={(e) => set("corpo", e.target.value)}
                             placeholder={"Incolla qui il testo completo del MUP.\nUsa i segnaposto: {contraente}, {cliente_cf}, {compagnia}, {collaboratore}, {agenzia_nome}, {numero_polizza}, {ramo}, {prodotto}, {premio_lordo}, {data_oggi}"}
                             data-testid="mup-modello-corpo" className="text-xs" />
@@ -4641,25 +4672,28 @@ function ModelliSezione() {
     };
 
     const [uploadingPdf, setUploadingPdf] = useState(false);
-    const caricaPdf = async (e) => {
+    const caricaDoc = async (e, endpoint, label) => {
         const f = e.target.files?.[0];
         e.target.value = "";
         if (!f) return;
         setUploadingPdf(true);
-        toast.info("Analisi del PDF in corso… l'AI sta creando il modello");
+        toast.info(`Analisi del ${label} in corso… l'AI sta creando il modello`);
         try {
             const fd = new FormData();
             fd.append("file", f);
-            fd.append("tipo", "pdf_altro");
-            const r = await api.post("/librerie/modelli/da-pdf", fd, { headers: { "Content-Type": "multipart/form-data" } });
-            toast.success("Modello creato dal PDF — rivedilo e salva");
+            if (endpoint.endsWith("da-pdf")) fd.append("tipo", "pdf_altro");
+            else fd.append("tipo", "word");
+            const r = await api.post(endpoint, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success(`Modello creato dal ${label} — rivedilo e salva`);
             await load();
             setEditing(r.data);
             setOpen(true);
         } catch (err) {
-            toast.error(errMsg(err, "Errore durante l'analisi del PDF"));
+            toast.error(errMsg(err, `Errore durante l'analisi del ${label}`));
         } finally { setUploadingPdf(false); }
     };
+    const caricaPdf = (e) => caricaDoc(e, "/librerie/modelli/da-pdf", "PDF");
+    const caricaWord = (e) => caricaDoc(e, "/librerie/modelli/da-word", "Word");
 
     return (
         <Card className="p-0 border-slate-200 overflow-hidden" data-testid="lib-modelli">
@@ -4717,13 +4751,21 @@ function ModelliSezione() {
                             className="bg-violet-700 hover:bg-violet-800 h-8" data-testid="modelli-new">
                             <Plus size={14} className="mr-1" />Nuovo {gruppoCorrente?.label}
                         </Button>
-                        {activeTab === "pdf" && (
-                            <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-violet-300 text-violet-700 text-sm font-medium cursor-pointer hover:bg-violet-50 ${uploadingPdf ? "opacity-60 pointer-events-none" : ""}`}
-                                data-testid="modelli-carica-pdf">
-                                <Upload size={14} /> {uploadingPdf ? "Analisi…" : "Carica PDF"}
-                                <input type="file" hidden accept="application/pdf" onChange={caricaPdf}
-                                    data-testid="modelli-carica-pdf-input" />
-                            </label>
+                        {(activeTab === "pdf" || activeTab === "word") && (
+                            <>
+                                <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-violet-300 text-violet-700 text-sm font-medium cursor-pointer hover:bg-violet-50 ${uploadingPdf ? "opacity-60 pointer-events-none" : ""}`}
+                                    data-testid="modelli-carica-pdf">
+                                    <Upload size={14} /> {uploadingPdf ? "Analisi…" : "Carica PDF"}
+                                    <input type="file" hidden accept="application/pdf" onChange={caricaPdf}
+                                        data-testid="modelli-carica-pdf-input" />
+                                </label>
+                                <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-sky-300 text-sky-700 text-sm font-medium cursor-pointer hover:bg-sky-50 ${uploadingPdf ? "opacity-60 pointer-events-none" : ""}`}
+                                    data-testid="modelli-carica-word">
+                                    <Upload size={14} /> {uploadingPdf ? "Analisi…" : "Carica Word"}
+                                    <input type="file" hidden accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={caricaWord}
+                                        data-testid="modelli-carica-word-input" />
+                                </label>
+                            </>
                         )}
                     </div>
                 </div>
@@ -4820,6 +4862,17 @@ function UsaModelloDialog({ modello, mode, onClose }) {
     const [polizze, setPolizze] = useState([]);
     const [polizzaId, setPolizzaId] = useState("");
     const [busy, setBusy] = useState(false);
+    const [operatori, setOperatori] = useState([]);
+    const [operatoreId, setOperatoreId] = useState("");
+    const [emailFirmatario, setEmailFirmatario] = useState("");
+    const [firmaLink, setFirmaLink] = useState(null);
+    const richiedeFirma = !!modello.richiede_firma;
+
+    useEffect(() => {
+        api.get("/auth/users")
+            .then((r) => setOperatori((Array.isArray(r.data) ? r.data : r.data.items || []).filter((u) => u.active !== false)))
+            .catch(() => setOperatori([]));
+    }, []);
 
     useEffect(() => {
         if (!q || q.length < 2 || cliente) { setRisultati([]); return; }
@@ -4841,7 +4894,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
         setBusy(true);
         try {
             const r = await api.post(`/librerie/modelli/${modello.id}/genera`,
-                { cliente_id: cliente?.id, polizza_id: polizzaId || null, formato },
+                { cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null, formato },
                 { responseType: "blob" });
             const url = URL.createObjectURL(r.data);
             if (formato === "docx") {
@@ -4852,6 +4905,26 @@ function UsaModelloDialog({ modello, mode, onClose }) {
             }
             URL.revokeObjectURL(url);
         } catch (e) { toast.error("Errore generazione documento"); }
+        setBusy(false);
+    };
+
+    const inviaFirma = async () => {
+        if (!cliente) { toast.error("Seleziona un cliente"); return; }
+        const email = emailFirmatario || cliente.email || "";
+        if (!email) { toast.error("Serve l'email del firmatario (il cliente non ne ha una)"); return; }
+        if (!window.confirm(`Inviare il documento a firma digitale a ${email}?`)) return;
+        setBusy(true);
+        try {
+            const r = await api.post(`/librerie/modelli/${modello.id}/genera`, {
+                cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null,
+                formato: "pdf", invia_firma: true, email_firmatario: email,
+            });
+            toast.success("Documento inviato a firma digitale ✓");
+            setFirmaLink(r.data?.signing_url || r.data?.url || null);
+            if (!r.data?.signing_url) onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Invio a firma fallito");
+        }
         setBusy(false);
     };
 
@@ -4910,6 +4983,36 @@ function UsaModelloDialog({ modello, mode, onClose }) {
                             </select>
                         </div>
                     )}
+                    {mode !== "wa" && (
+                        <div>
+                            <Label>Collaboratore (firma e dati operatore)</Label>
+                            <select className="w-full border rounded h-9 px-2 text-sm" value={operatoreId}
+                                onChange={(e) => setOperatoreId(e.target.value)} data-testid="usa-modello-operatore">
+                                <option value="">— nessuno —</option>
+                                {operatori.map((u) => (
+                                    <option key={u.id} value={u.id}>{u.name || u.nome || u.email}{u.firma_digitale_url ? " ✍︎" : ""}</option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-slate-400 mt-1">
+                                Compila i segnaposto <code className="bg-slate-100 px-1 rounded">{"{operatore_*}"}</code> e inserisce la <code className="bg-slate-100 px-1 rounded">{"{firma_operatore}"}</code> (✍︎ = firma caricata nel profilo).
+                            </p>
+                        </div>
+                    )}
+                    {mode !== "wa" && richiedeFirma && (
+                        <div className="bg-amber-50 border border-amber-300 rounded-md p-3 space-y-2" data-testid="usa-modello-firma-box">
+                            <div className="text-xs font-semibold text-amber-900">Questo modello richiede la firma digitale del cliente</div>
+                            <div>
+                                <Label className="text-xs">Email del firmatario</Label>
+                                <Input type="email" placeholder={cliente?.email || "email del cliente"} value={emailFirmatario}
+                                    onChange={(e) => setEmailFirmatario(e.target.value)} data-testid="usa-modello-email-firma" />
+                            </div>
+                            {firmaLink && (
+                                <a href={firmaLink} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-700 underline" data-testid="usa-modello-firma-link">
+                                    Apri il link di firma →
+                                </a>
+                            )}
+                        </div>
+                    )}
                     <div className="flex justify-end gap-2 pt-2">
                         <Button variant="outline" onClick={onClose}>Annulla</Button>
                         {mode === "wa" ? (
@@ -4919,7 +5022,12 @@ function UsaModelloDialog({ modello, mode, onClose }) {
                         ) : (
                             <>
                                 <Button variant="outline" onClick={() => genera("pdf")} disabled={busy} data-testid="usa-modello-pdf">PDF</Button>
-                                <Button onClick={() => genera("docx")} disabled={busy} className="bg-sky-700 hover:bg-sky-800" data-testid="usa-modello-word">Word (.docx)</Button>
+                                <Button variant="outline" onClick={() => genera("docx")} disabled={busy} data-testid="usa-modello-word">Word (.docx)</Button>
+                                {richiedeFirma && (
+                                    <Button onClick={inviaFirma} disabled={busy || !cliente} className="bg-violet-700 hover:bg-violet-800" data-testid="usa-modello-invia-firma">
+                                        {busy ? "Invio…" : "Invia a firma"}
+                                    </Button>
+                                )}
                             </>
                         )}
                     </div>
@@ -4933,7 +5041,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     const [f, setF] = useState(editing || {
         tipo: suggestedTipo || "email", nome: "", oggetto: "", corpo: "", sezioni: [],
         sezioni_visibili: MODELLO_SEZIONI.map((s) => s.key),
-        categoria: "", default: false, attivo: true, note: "",
+        categoria: "", default: false, attivo: true, note: "", richiede_firma: false,
     });
     const [saving, setSaving] = useState(false);
     const isPdf = (f.tipo || "").startsWith("pdf_");
@@ -4955,6 +5063,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 default: !!editing.default,
                 attivo: editing.attivo !== false,
                 note: editing.note || "",
+                richiede_firma: !!editing.richiede_firma,
             });
         }
     }, [editing?.id, editing?.updated_at]);
@@ -4999,6 +5108,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 template_riga: f.template_riga || null,
                 categoria: f.categoria || null, default: !!f.default,
                 attivo: f.attivo !== false, note: f.note || null,
+                richiede_firma: !!f.richiede_firma,
             };
             if (editing?.id) {
                 await api.put(`/librerie/modelli/${editing.id}`, payload);
@@ -5075,6 +5185,10 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             <label className="flex items-center gap-1.5 text-sm">
                                 <input type="checkbox" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} data-testid="modello-attivo" />
                                 Attivo
+                            </label>
+                            <label className="flex items-center gap-1.5 text-sm" title="Se attivo, il documento generato può essere inviato a firma digitale (segnaposto {firma})">
+                                <input type="checkbox" checked={!!f.richiede_firma} onChange={(e) => set("richiede_firma", e.target.checked)} data-testid="modello-richiede-firma" />
+                                Richiede firma digitale
                             </label>
                         </div>
                     </div>

@@ -2051,3 +2051,23 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
   produzione gira ancora il codice VECCHIO (il dialog non interroga il DB interno). Il nuovo
   lookup /polizze/veicolo-by-targa restituisce correttamente MERCEDES (verificato via API,
   sia senza tipo sia con tipo=AUTOVETTURA → MERCEDES-BENZ A 250). Serve deploy su Railway.
+
+---
+
+## 2026-10-22 — Gestioni Modelli: import Word/PDF + AI, firma collaboratore, firma digitale, MUP import
+
+**Problema/intento:** potenziare Librerie → Gestioni Modelli invece della vecchia scheda separata "Modelli Firma".
+
+**Implementato e testato (curl + screenshot):**
+- Rimossa la scheda separata "Modelli Firma (PDF/Word)" da Librerie (`Librerie.jsx`): tolto import `ModelliFirma`, voce menu `modelli-firma` e relativo branch di render. `App.js`/`ModelliFirma.jsx` restano ma non più accessibili dal menu.
+- Import documenti in Gestioni Modelli:
+  - `POST /api/librerie/modelli/da-pdf` (già esistente) + nuovo `POST /api/librerie/modelli/da-word` (DOCX) — AI trasforma il documento in modello con placeholder auto-rilevati. UI: pulsanti "Carica PDF" e "Carica Word".
+- Placeholder estesi (`_PLACEHOLDER_DISPONIBILI` backend + `PLACEHOLDERS_DOC` frontend): operatore_rui, operatore_sezione, agenzia_rui; nuova categoria "Firma / Immagini" con {logo}, {firma_operatore}, {firma}.
+- Flag modello `richiede_firma` (persistito in `db_models.TemplateModello`): checkbox nel form modello.
+- Generazione con collaboratore selezionato: `GeneraDocBody.operatore_id`; `build_context` include dati operatore; `{firma_operatore}`/`{logo}` caricati come immagini (helper `_load_image_from_url`, supporto URL http/https).
+- Firma digitale: quando `richiede_firma`, la UI mostra selettore collaboratore + "Invia a firma". `genera` con `invia_firma:true` costruisce il PDF, localizza `{firma}`, redige il campo e invia via Yousign (riuso `_invia_yousign` da `firma_modelli.py`). Ritorna `signing_url`/`request_id`/`status`. Errore firma → HTTP 400 con dettaglio (non più 502).
+- MUP (`ModelloMupDialog`): pulsante "Importa da PDF/Word" → `POST /api/librerie/modelli/estrai-testo` (AI estrae testo) che popola il corpo precontrattuale compilabile.
+
+**Verifiche eseguite:** da-word ✓, estrai-testo ✓, genera PDF ✓, genera DOCX ✓, firma Yousign sandbox ✓ (status "ongoing", limite sandbox: email firmatario deve essere dell'org). Frontend compila senza errori; dialog "Genera documento" mostra selettore Collaboratore + hint firma.
+
+**Nota:** firma digitale usa Yousign sandbox in preview; in produzione (chiave live) nessun limite su email firmatario. Deploy via Save to GitHub → Railway.

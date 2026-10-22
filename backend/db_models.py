@@ -1628,3 +1628,6 @@ class TemplateModello(BaseDoc):
     default: bool = False                           # marcato come modello predefinito per il tipo
     attivo: bool = True
     note: Optional[str] = None
+    # Se True, il documento generato da questo modello può essere inviato a firma
+    # digitale (Yousign). La posizione della firma è indicata dal segnaposto {firma}.
+    richiede_firma: bool = False

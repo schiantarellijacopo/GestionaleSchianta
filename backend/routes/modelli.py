@@ -37,6 +37,7 @@ class ModelloBody(BaseModel):
     default: bool = False
     attivo: bool = True
     note: Optional[str] = None
+    richiede_firma: bool = False
 
 
 def _autodetect_placeholders(body: ModelloBody) -> list[str]:
@@ -137,6 +138,7 @@ async def create_modello(
         default=body.default,
         attivo=body.attivo,
         note=body.note,
+        richiede_firma=body.richiede_firma,
         placeholders=placeholders,
     ).model_dump()
     # Se default=True, sbianca altri default dello stesso tipo
@@ -160,7 +162,74 @@ _PLACEHOLDER_DISPONIBILI = [
     "cliente_partita_iva", "cliente_email", "cliente_telefono", "cliente_cellulare",
     "cliente_data_nascita", "cliente_luogo_nascita", "cliente_professione", "cliente_iban",
     "numero_sinistro", "data_sinistro", "descrizione_sinistro", "stato_sinistro", "data_denuncia",
+    # Collaboratore/operatore selezionato in fase di generazione
+    "operatore_nome", "operatore_email", "operatore_telefono", "operatore_rui", "operatore_sezione",
+    "agenzia_rui", "azienda_iban", "azienda_pec",
+    # Immagini e firma (gestite come elementi grafici, non testo)
+    "logo", "firma_operatore", "firma",
 ]
+
+
+def _estrai_testo_pdf(raw: bytes) -> str:
+    """Estrae il testo da un PDF (pdfplumber)."""
+    import io
+    import pdfplumber
+    try:
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            pagine = [(pg.extract_text() or "") for pg in pdf.pages]
+        return "\n\n".join(pagine).strip()
+    except Exception as e:  # noqa
+        raise HTTPException(400, f"Impossibile leggere il PDF: {str(e)[:150]}")
+
+
+def _estrai_testo_docx(raw: bytes) -> str:
+    """Estrae il testo da un file Word .docx (paragrafi + tabelle)."""
+    import io
+    from docx import Document
+    try:
+        doc = Document(io.BytesIO(raw))
+    except Exception as e:  # noqa
+        raise HTTPException(400, f"Impossibile leggere il Word: {str(e)[:150]}")
+    parti: list[str] = [p.text for p in doc.paragraphs]
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            celle = [c.text.strip() for c in row.cells if c.text.strip()]
+            if celle:
+                parti.append(" | ".join(celle))
+    return "\n".join(x for x in parti if x is not None).strip()
+
+
+async def _ai_trasforma_in_modello(testo: str, user: dict) -> str:
+    """Trasforma il testo grezzo di un documento in un modello con {segnaposto}."""
+    import os
+    ph_list = ", ".join("{" + p + "}" for p in _PLACEHOLDER_DISPONIBILI)
+    prompt = (
+        "Trasforma il seguente documento in un MODELLO riutilizzabile per un CRM assicurativo italiano.\n"
+        "Sostituisci i dati specifici (nome cliente, indirizzo, codice fiscale/P.IVA, numero polizza, "
+        "compagnia, importi, date, contatti dell'agenzia e del collaboratore, ecc.) con i SEGNAPOSTO "
+        "tra parentesi graffe SOLO da questo elenco disponibile:\n"
+        f"{ph_list}\n\n"
+        "Regole:\n"
+        "- Usa esclusivamente i segnaposto elencati; se un dato non ha un segnaposto adatto, lascia il testo generico.\n"
+        "- Dove nel documento c'è lo spazio per la FIRMA del cliente, inserisci il segnaposto {firma}.\n"
+        "- Dove va la firma/timbro del collaboratore/intermediario, usa {firma_operatore}.\n"
+        "- Mantieni la struttura e i paragrafi del documento (intestazioni, articoli, elenchi).\n"
+        "- NON aggiungere commenti, spiegazioni o markdown: restituisci solo il testo del modello.\n"
+        "- Conserva la lingua originale (italiano).\n\n"
+        "DOCUMENTO:\n" + testo[:20000]
+    )
+    try:
+        from llm_compat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY"),
+            session_id=f"modello_doc_{user.get('id')}",
+            system_message="Sei un assistente che converte documenti assicurativi in modelli con segnaposto. Rispondi solo con il testo del modello.",
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        corpo = str(resp).strip() if resp else ""
+    except Exception as e:  # noqa
+        raise HTTPException(502, f"Errore AI durante la trasformazione: {str(e)[:200]}")
+    return corpo or testo
 
 
 @router.post("/librerie/modelli/da-pdf", status_code=201)
@@ -177,67 +246,86 @@ async def crea_modello_da_pdf(
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "File vuoto")
-
-    # 1) Estrazione testo dal PDF
-    testo = ""
-    try:
-        import io
-        import pdfplumber
-        with pdfplumber.open(io.BytesIO(raw)) as pdf:
-            pagine = [(pg.extract_text() or "") for pg in pdf.pages]
-        testo = "\n\n".join(pagine).strip()
-    except Exception as e:  # noqa
-        raise HTTPException(400, f"Impossibile leggere il PDF: {str(e)[:150]}")
+    testo = _estrai_testo_pdf(raw)
     if not testo:
         raise HTTPException(422, "Il PDF non contiene testo estraibile (potrebbe essere una scansione immagine)")
-
-    # 2) Trasformazione AI in template con segnaposto
-    import os
-    ph_list = ", ".join("{" + p + "}" for p in _PLACEHOLDER_DISPONIBILI)
-    prompt = (
-        "Trasforma il seguente documento in un MODELLO riutilizzabile per un CRM assicurativo italiano.\n"
-        "Sostituisci i dati specifici (nome cliente, indirizzo, codice fiscale/P.IVA, numero polizza, "
-        "compagnia, importi, date, contatti dell'agenzia, ecc.) con i SEGNAPOSTO tra parentesi graffe "
-        "SOLO da questo elenco disponibile:\n"
-        f"{ph_list}\n\n"
-        "Regole:\n"
-        "- Usa esclusivamente i segnaposto elencati; se un dato non ha un segnaposto adatto, lascia il testo generico.\n"
-        "- Mantieni la struttura e i paragrafi del documento (intestazioni, articoli, elenchi).\n"
-        "- NON aggiungere commenti, spiegazioni o markdown: restituisci solo il testo del modello.\n"
-        "- Conserva la lingua originale (italiano).\n\n"
-        "DOCUMENTO:\n" + testo[:20000]
-    )
-    corpo = ""
-    try:
-        from llm_compat import LlmChat, UserMessage
-        chat = LlmChat(
-            api_key=os.environ.get("EMERGENT_LLM_KEY"),
-            session_id=f"modello_pdf_{user.get('id')}",
-            system_message="Sei un assistente che converte documenti assicurativi in modelli con segnaposto. Rispondi solo con il testo del modello.",
-        ).with_model("anthropic", "claude-sonnet-4-6")
-        resp = await chat.send_message(UserMessage(text=prompt))
-        corpo = str(resp).strip() if resp else ""
-    except Exception as e:  # noqa
-        raise HTTPException(502, f"Errore AI durante la trasformazione: {str(e)[:200]}")
-    if not corpo:
-        corpo = testo  # fallback: testo grezzo
-
-    # 3) Salva come modello
+    corpo = await _ai_trasforma_in_modello(testo, user)
     nome_finale = (nome or "").strip() or (file.filename or "Modello da PDF").rsplit(".", 1)[0]
     body = ModelloBody(tipo=tipo, nome=nome_finale, corpo=corpo)
-    placeholders = _autodetect_placeholders(body)
     doc = TemplateModello(
         tipo=body.tipo,                 # type: ignore[arg-type]
         nome=body.nome.strip(),
         corpo=body.corpo,
         categoria="da_pdf",
         note=f"Generato da PDF: {file.filename}",
-        placeholders=placeholders,
+        placeholders=_autodetect_placeholders(body),
     ).model_dump()
     await db.template_modelli.insert_one(doc)
     doc.pop("_id", None)
     await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
     return doc
+
+
+@router.post("/librerie/modelli/da-word", status_code=201)
+async def crea_modello_da_word(
+    file: UploadFile = File(...),
+    tipo: str = Form("word"),
+    nome: Optional[str] = Form(None),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Carica un file Word (.docx), ne estrae il testo con l'AI e lo trasforma in
+    un modello editabile con i {segnaposto} del CRM."""
+    if file is None:
+        raise HTTPException(400, "Nessun file caricato")
+    fname = (file.filename or "").lower()
+    if not fname.endswith((".docx", ".doc")):
+        raise HTTPException(400, "Carica un file Word (.docx)")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "File vuoto")
+    testo = _estrai_testo_docx(raw)
+    if not testo:
+        raise HTTPException(422, "Il Word non contiene testo leggibile")
+    corpo = await _ai_trasforma_in_modello(testo, user)
+    nome_finale = (nome or "").strip() or (file.filename or "Modello da Word").rsplit(".", 1)[0]
+    body = ModelloBody(tipo=tipo, nome=nome_finale, corpo=corpo)
+    doc = TemplateModello(
+        tipo=body.tipo,                 # type: ignore[arg-type]
+        nome=body.nome.strip(),
+        corpo=body.corpo,
+        categoria="da_word",
+        note=f"Generato da Word: {file.filename}",
+        placeholders=_autodetect_placeholders(body),
+    ).model_dump()
+    await db.template_modelli.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
+    return doc
+
+
+@router.post("/librerie/modelli/estrai-testo")
+async def estrai_testo_documento(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Estrae e trasforma in {segnaposto} il testo di un PDF o Word, SENZA salvare.
+    Usato dai Modelli MUP per importare un documento e renderlo compilabile."""
+    if file is None:
+        raise HTTPException(400, "Nessun file caricato")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "File vuoto")
+    fname = (file.filename or "").lower()
+    if fname.endswith((".docx", ".doc")):
+        testo = _estrai_testo_docx(raw)
+    elif fname.endswith(".pdf"):
+        testo = _estrai_testo_pdf(raw)
+    else:
+        raise HTTPException(400, "Formato non supportato: carica un PDF o un Word (.docx)")
+    if not testo:
+        raise HTTPException(422, "Nessun testo estraibile dal documento")
+    corpo = await _ai_trasforma_in_modello(testo, user)
+    return {"corpo": corpo, "nome": (file.filename or "Modello").rsplit(".", 1)[0]}
 
 
 
@@ -443,8 +531,9 @@ async def _load_logo_bytes(az: dict) -> Optional[bytes]:
 
 async def build_context(cliente_id: Optional[str] = None,
                          polizza_id: Optional[str] = None,
-                         extra: Optional[dict] = None) -> dict:
-    """Contesto placeholder standard: azienda + cliente + polizza."""
+                         extra: Optional[dict] = None,
+                         operatore_id: Optional[str] = None) -> dict:
+    """Contesto placeholder standard: azienda + cliente + polizza + operatore."""
     from datetime import date
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     ctx: dict = {
@@ -452,6 +541,9 @@ async def build_context(cliente_id: Optional[str] = None,
         "azienda_indirizzo": az.get("indirizzo") or "",
         "azienda_telefono": az.get("telefono") or "",
         "azienda_email": az.get("email") or "",
+        "azienda_pec": az.get("pec") or "",
+        "azienda_iban": az.get("iban") or "",
+        "agenzia_rui": az.get("rui") or "",
         "data_oggi": date.today().strftime("%d/%m/%Y"),
     }
     p = None
@@ -498,15 +590,61 @@ async def build_context(cliente_id: Optional[str] = None,
                 "cliente_professione": a.get("professione") or a.get("attivita") or "-",
                 "cliente_iban": a.get("iban") or "-",
             })
+    if operatore_id:
+        u = await db.users.find_one({"id": operatore_id}, {"_id": 0}) or {}
+        if u:
+            ctx.update({
+                "operatore_nome": u.get("name") or u.get("nome") or "",
+                "operatore_email": u.get("email") or "",
+                "operatore_telefono": u.get("telefono") or "",
+                "operatore_rui": u.get("rui") or az.get("rui") or "",
+                "operatore_sezione": u.get("rui_sezione") or az.get("rui_sezione") or "",
+            })
+            # URL firma collaboratore (interno: usato per inserire l'immagine, non come testo)
+            ctx["_firma_operatore_url"] = u.get("firma_digitale_url")
     ctx.update(extra or {})
     return ctx
+
+
+async def _load_image_from_url(url: Optional[str]) -> Optional[bytes]:
+    """Carica i bytes di un'immagine da un URL interno /api/storage/... , data URL o http(s)."""
+    if not url:
+        return None
+    import base64
+    if url.startswith("/api/storage/"):
+        path = url[len("/api/storage/"):]
+        try:
+            import storage as obj_storage
+            data, _ = obj_storage.get_object(path)
+            return data
+        except Exception:
+            return None
+    if url.startswith("data:"):
+        try:
+            return base64.b64decode(url.split(",", 1)[1])
+        except (ValueError, IndexError):
+            return None
+    if url.startswith(("http://", "https://")):
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    return r.content
+        except Exception:
+            return None
+    return None
 
 
 class GeneraDocBody(BaseModel):
     cliente_id: Optional[str] = None
     polizza_id: Optional[str] = None
+    operatore_id: Optional[str] = None
     extra: dict = {}
     formato: str = "pdf"  # pdf | docx
+    invia_firma: bool = False               # invia a firma digitale Yousign
+    email_firmatario: Optional[str] = None  # email del firmatario (override cliente)
+    auth_mode: Optional[str] = None         # otp_email | otp_sms | no_otp
 
 
 class PreviewBody(BaseModel):
@@ -592,12 +730,18 @@ async def preview_modello(body: PreviewBody, user: dict = Depends(current_user))
 @router.post("/librerie/modelli/{mid}/genera")
 async def genera_documento(mid: str, body: GeneraDocBody,
                            user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
-    """Genera un documento PDF o Word dal modello, compilato coi dati reali."""
+    """Genera un documento PDF o Word dal modello, compilato coi dati reali.
+
+    Supporta i segnaposto immagine ``{logo}`` (logo agenzia) e ``{firma_operatore}``
+    (firma del collaboratore selezionato). Se il modello richiede firma e
+    ``invia_firma`` è attivo, il PDF viene inviato a firma digitale Yousign nella
+    posizione del segnaposto ``{firma}``.
+    """
     from fastapi.responses import Response
     m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Modello non trovato")
-    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra)
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id)
     titolo = render_text(m.get("oggetto") or m.get("nome") or "Documento", ctx)
     corpo = render_text(m.get("corpo") or "", ctx)
     sezioni = [
@@ -608,9 +752,13 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     az_nome = ctx.get("azienda_nome") or ""
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
 
-    # Logo agenzia (Librerie → Azienda → logo_url o logo_storage_path)
+    # Logo agenzia + firma del collaboratore selezionato
     az_full = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     logo_bytes: Optional[bytes] = await _load_logo_bytes(az_full)
+    firma_op_bytes: Optional[bytes] = await _load_image_from_url(ctx.get("_firma_operatore_url"))
+
+    richiede_firma = bool(m.get("richiede_firma")) or "{firma}" in (m.get("corpo") or "")
+    fai_firma = bool(body.invia_firma and richiede_firma and body.formato != "docx")
 
     if body.formato == "docx":
         import io
@@ -619,31 +767,52 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         doc = Document()
         if logo_bytes:
             try:
-                header_p = doc.add_paragraph()
-                run = header_p.add_run()
+                run = doc.add_paragraph().add_run()
                 run.add_picture(io.BytesIO(logo_bytes), width=Inches(1.6))
             except Exception:
-                pass  # logo corrotto → skip senza rompere il documento
+                pass
         if az_nome:
             h = doc.add_paragraph(az_nome)
             h.runs[0].bold = True
             h.runs[0].font.size = Pt(14)
-        # Contatti agenzia (piccoli, dopo la ragione sociale)
         contatti = " · ".join(x for x in [
             ctx.get("azienda_indirizzo"), ctx.get("azienda_telefono"), ctx.get("azienda_email"),
         ] if x)
         if contatti:
-            p_c = doc.add_paragraph(contatti)
-            p_c.runs[0].font.size = Pt(9)
+            doc.add_paragraph(contatti).runs[0].font.size = Pt(9)
         doc.add_paragraph(ctx.get("data_oggi") or "")
         doc.add_heading(titolo, level=1)
+
+        def _docx_para(testo: str):
+            """Aggiunge un paragrafo gestendo i segnaposto immagine/firma."""
+            t = testo.strip()
+            if t == "{logo}":
+                if logo_bytes:
+                    try:
+                        doc.add_paragraph().add_run().add_picture(io.BytesIO(logo_bytes), width=Inches(1.6))
+                    except Exception:
+                        pass
+                return
+            if t == "{firma_operatore}":
+                if firma_op_bytes:
+                    try:
+                        doc.add_paragraph().add_run().add_picture(io.BytesIO(firma_op_bytes), width=Inches(1.8))
+                    except Exception:
+                        pass
+                else:
+                    doc.add_paragraph("_______________________________")
+                return
+            t = t.replace("{logo}", "").replace("{firma_operatore}", "")
+            t = t.replace("{firma}", "_______________________________")
+            doc.add_paragraph(t)
+
         for para in corpo.split("\n\n"):
-            doc.add_paragraph(para)
+            _docx_para(para)
         for s in sezioni:
             if s["titolo"]:
                 doc.add_heading(s["titolo"], level=2)
             for para in s["contenuto"].split("\n\n"):
-                doc.add_paragraph(para)
+                _docx_para(para)
         buf = io.BytesIO()
         doc.save(buf)
         return Response(
@@ -663,7 +832,6 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     buf = io.BytesIO()
     pdf = SimpleDocTemplate(buf, pagesize=A4, topMargin=15 * mm, bottomMargin=18 * mm)
     el = []
-    # Intestazione: logo (sinistra) + ragione sociale + contatti (destra)
     contatti = "<br/>".join(x for x in [
         ctx.get("azienda_indirizzo"), ctx.get("azienda_telefono"), ctx.get("azienda_email"),
     ] if x)
@@ -671,10 +839,7 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     if logo_bytes:
         try:
             img = Image(io.BytesIO(logo_bytes), width=40 * mm, height=20 * mm, kind="proportional")
-            head_tbl = Table(
-                [[img, Paragraph(header_right, styles["Normal"])]],
-                colWidths=[45 * mm, 135 * mm],
-            )
+            head_tbl = Table([[img, Paragraph(header_right, styles["Normal"])]], colWidths=[45 * mm, 135 * mm])
             head_tbl.setStyle(TableStyle([
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#5b21b6")),
@@ -684,28 +849,106 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         except Exception:
             if az_nome:
                 el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
-    else:
-        if az_nome:
-            el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
-            if contatti:
-                el.append(Paragraph(f"<font size='8'>{contatti}</font>", styles["Normal"]))
+    elif az_nome:
+        el.append(Paragraph(f"<b>{az_nome}</b>", styles["Heading2"]))
+        if contatti:
+            el.append(Paragraph(f"<font size='8'>{contatti}</font>", styles["Normal"]))
     el.append(Spacer(1, 6))
     el.append(Paragraph(ctx.get("data_oggi") or "", styles["Normal"]))
     el.append(Spacer(1, 10))
     el.append(Paragraph(f"<b>{titolo}</b>", styles["Heading1"]))
     el.append(Spacer(1, 6))
-    for para in corpo.split("\n\n"):
-        el.append(Paragraph(para.replace("\n", "<br/>"), styles["Normal"]))
+
+    def _pdf_para(testo: str):
+        """Aggiunge flowable(s) gestendo i segnaposto immagine/firma."""
+        t = testo.strip()
+        if t == "{logo}":
+            if logo_bytes:
+                try:
+                    el.append(Image(io.BytesIO(logo_bytes), width=40 * mm, height=20 * mm, kind="proportional"))
+                    el.append(Spacer(1, 6))
+                except Exception:
+                    pass
+            return
+        if t == "{firma_operatore}":
+            if firma_op_bytes:
+                try:
+                    el.append(Image(io.BytesIO(firma_op_bytes), width=45 * mm, height=20 * mm, kind="proportional"))
+                    el.append(Spacer(1, 6))
+                except Exception:
+                    pass
+            else:
+                el.append(Paragraph("_______________________________", styles["Normal"]))
+                el.append(Spacer(1, 6))
+            return
+        t = t.replace("{logo}", "").replace("{firma_operatore}", "")
+        if fai_firma:
+            # mantiene il marcatore {firma} nel PDF per il posizionamento Yousign
+            t_html = t.replace("\n", "<br/>")
+        else:
+            t_html = t.replace("{firma}", "_______________________________").replace("\n", "<br/>")
+        el.append(Paragraph(t_html, styles["Normal"]))
         el.append(Spacer(1, 6))
+
+    for para in corpo.split("\n\n"):
+        _pdf_para(para)
     for s in sezioni:
         if s["titolo"]:
             el.append(Spacer(1, 8))
             el.append(Paragraph(f"<b>{s['titolo']}</b>", styles["Heading3"]))
         for para in s["contenuto"].split("\n\n"):
-            el.append(Paragraph(para.replace("\n", "<br/>"), styles["Normal"]))
-            el.append(Spacer(1, 4))
+            _pdf_para(para)
     pdf.build(el)
-    return Response(buf.getvalue(), media_type="application/pdf",
+    pdf_bytes = buf.getvalue()
+
+    # Invio a firma digitale Yousign (posizione del segnaposto {firma})
+    if fai_firma:
+        import uuid as _uuid
+        import os as _os
+        import fitz  # pymupdf
+        import storage as obj_storage
+        from routes.firma_modelli import _invia_yousign
+        doc_f = fitz.open(stream=pdf_bytes, filetype="pdf")
+        firma_fields = []
+        for page in doc_f:
+            for r in page.search_for("{firma}"):
+                page.add_redact_annot(r, text="", fill=(1, 1, 1))
+                firma_fields.append({
+                    "page": page.number, "x": round(r.x0), "y": round(r.y0),
+                    "width": max(120, round(r.width)), "height": max(40, round(r.height * 2.2)),
+                })
+            page.apply_redactions()
+        pdf_bytes = doc_f.tobytes()
+        doc_f.close()
+        if not firma_fields:
+            raise HTTPException(422, "Nessun segnaposto {firma} trovato nel documento")
+        cliente_email = ctx.get("cliente_email") if ctx.get("cliente_email") not in (None, "-", "") else ""
+        valori = {"nome_cliente": ctx.get("cliente_nome") or "Cliente", "email": cliente_email}
+        body_y = {"email_firmatario": body.email_firmatario,
+                  "auth_mode": body.auth_mode or "otp_email", "invia_firma": True}
+        signing = await _invia_yousign(db, {"nome": m.get("nome")}, pdf_bytes, firma_fields, valori, body_y)
+        fr = (signing or {}).get("firma") or {}
+        if not fr.get("ok"):
+            raise HTTPException(400, f"Invio a firma non riuscito: {fr.get('error') or 'errore sconosciuto'}")
+        # salva il PDF come allegato del cliente/polizza
+        aid = str(_uuid.uuid4())
+        path = f"{_os.environ.get('APP_NAME', 'assicura')}/documenti_firma/{aid}.pdf"
+        obj_storage.put_object(path, pdf_bytes, "application/pdf")
+        nome_file = f"{m.get('nome') or 'documento'} - {valori['nome_cliente']}.pdf"
+        await db.allegati.insert_one({
+            "id": aid, "entita_tipo": "polizza" if body.polizza_id else "anagrafica",
+            "entita_id": body.polizza_id or body.cliente_id, "nome_file": nome_file,
+            "storage_path": path, "content_type": "application/pdf",
+            "size": len(pdf_bytes), "categoria": "documento_firma", "visibile_cliente": True,
+            "descrizione": f"Generato da modello {m.get('nome')}",
+            "autore_id": user.get("id"), "created_at": _now_iso(), "updated_at": _now_iso(),
+        })
+        await log_attivita(user, "genera_firma", "modello", mid, nome_file)
+        return {"ok": True, "allegato_id": aid, "nome_file": nome_file, "firma_presente": True,
+                "signing_url": fr.get("signing_url"), "request_id": fr.get("request_id"),
+                "status": fr.get("status"), "firma": fr}
+
+    return Response(pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"inline; filename={fname}.pdf"})
 
 
