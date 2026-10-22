@@ -15293,6 +15293,8 @@ async def upload_documento_agenzia(
         "descrizione": descrizione or None,
         "data_rilascio": data_rilascio or None,
         "data_scadenza": data_scadenza or None,
+        "avviso_attivo": False,
+        "avviso_giorni": 15,
         "created_at": _now_iso(),
     }
     await db.agenzie.update_one({"id": aid}, {"$push": {"documenti": item}, "$set": {"updated_at": _now_iso()}})

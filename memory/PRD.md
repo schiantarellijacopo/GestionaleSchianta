@@ -2165,3 +2165,24 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 **Backlog/minori non ancora fatti:** `azienda_config` è collezione globale (ragione sociale + SMTP condivisi tra tenant — pattern pre-esistente, non ideale per invio email multi-tenant); un titolo con data_incasso e data_copertura in giorni diversi compare in entrambi i giorni finché non inviato.
 
 **Pendente da fork precedente (NON verificato):** whitelist campi su PUT /auth/users/{uid} — da leggere lo stato attuale del file e testare prima di dichiararlo fatto.
+
+---
+
+## 2026-10-22 — Documenti a CARD per tipologia (4 entità) + fix Brogliaccio REDION/CONAP
+
+**Richiesta utente:** nelle sezioni Documenti di Agenzie partner, Compagnie, Azienda e Collaboratori/Utenti mostrare i documenti come CARD tipo la card Polizza — una card per tipologia, SEMPRE visibile anche se vuota, con "Carica documento" dentro ciascuna card, mantenendo le scadenze (data rilascio/scadenza + avviso). Inoltre REDION deve risultare collegata al partner CONAP (non "Diretto (compagnia)") nel Brogliaccio.
+
+**Implementato e testato (testing agent iter.117: frontend 100%, backend 100% 7/7 pytest):**
+- **Nuovo componente condiviso** `/app/frontend/src/components/DocCardsScadenza.jsx`: griglia di card (una per tipologia da `/config/card-visibilita[cardKey]`, sempre visibili + "Altro" come catch-all). Ogni card: header icona+label+badge conteggio+chevron collapsibile; lista file (link, descrizione, badge Rilascio, badge scadenza colorato, `AvvisoScadenzaControl` se `avvisoEntita` valorizzato, elimina); "Carica documento" dashed → al select file apre form inline (file + descrizione + Rilascio + Scadenza + Carica/Annulla). Props: cardKey, fallbackTipi, files, onUpload(tipologia,payload)→throw on err, onDelete, avvisoEntita, avvisoEntitaId, onAvviso, testidPrefix.
+- **Wiring** (sostituito il vecchio pattern "form globale + folder-card solo se non vuote"):
+  - `Compagnie.jsx` → `DocumentiCompagnia` cardKey="compagnia", avvisoEntita="compagnia", testidPrefix "comp-doc", POST/DELETE `/compagnie/{cid}/documenti`.
+  - `Agenzie.jsx` → `DocumentiAgenzia` cardKey="agenzia_partner", testidPrefix "age-doc", `/agenzie/{aid}/documenti`.
+  - `Librerie.jsx` → `DocumentiAzienda` cardKey="azienda" (avvisoEntitaId=null, backend usa azienda_config), testidPrefix "azienda-doc", `/librerie/azienda/documenti`; `DocumentiCollaboratore` cardKey="collaboratore" (mantiene blocco Firma digitale sopra), testidPrefix "doc", POST `/auth/users/{uid}/allegati/documenti` + DELETE `/auth/users/{uid}/allegati/documenti/{id}`.
+- **Avviso scadenza**: supportato per compagnia/agenzia_partner/azienda (PUT `/documenti/avviso`). Per collaboratore l'avviso NON è supportato dal backend → il badge scadenza si mostra ma il controllo "Attiva avviso" è volutamente nascosto.
+- **Fix consistenza backend**: `POST /agenzie/{aid}/documenti` ora salva anche `avviso_attivo=False`/`avviso_giorni=15` come le compagnie.
+- **Fix Brogliaccio REDION→CONAP** (`server.py _compute_saldi_compagnie`): `_is_coll = tipo_mandato=='collaborazione' OR qualsiasi agenzie_partner_ids/agenzia_partner_id presente`. Così una compagnia con partner collegato ma `tipo_mandato` incoerente ('diretto'/mancante) viene comunque mostrata come collaborazione con il nome del partner. Verificato con record simulati; CATTOLICA/UCA restano direct. REDION vive nel tenant reale (c5ae2d0e, dove è CONAP), non nel DB di preview.
+
+**Caveat noti (minori, non bloccanti):**
+- Brogliaccio giorni GIÀ CHIUSI usano lo snapshot salvato: le giornate chiuse prima del fix continueranno a mostrare REDION come "Diretto". Solo i giorni live/aperti usano la nuova logica.
+- `slugify` dei testid elimina caratteri non-ASCII (es. "Carta d'identità" → "carta-d-identit"): solo cosmetico sui data-testid.
+- Helper morti lasciati (warning eslint, non bloccanti): `compDocScadenza` (Compagnie), `ageDocScadenza` (Agenzie), `DocFolderCard`/`docScadenza` (Librerie).

@@ -1,0 +1,38 @@
+{
+  "summary": "Tested the DocCardsScadenza document cards for Compagnie, Agenzie (principal + partner Agenzia Bottoni), Azienda (Librerie) and Collaboratori/Utenti (Librerie > Utenti > Modifica > tab Certificati > Documenti personali), plus the Brogliaccio saldi_compagnie partner link. All four UIs show one card per tipologia from /config/card-visibilita, always visible, with 'Nessun documento' plus a 'Carica documento' control inside each card. Upload through the inline form works: selecting a file opens the form with descrizione + Rilascio + Scadenza fields and a Carica button, then the 'Documento aggiunto' toast shows and the item appears with a scadenza badge. Badges shown: 'Scade il', 'In scadenza (≤30gg)' amber, 'Scaduto il' red. 'Attiva avviso' appears for compagnia, agenzia and azienda and is correctly hidden for collaboratore. Delete with confirm works, shows the 'Eliminato' toast and the card returns to 'Nessun documento'. Backend pytest: 7 passed, 1 skipped. REDION does not exist anywhere in the preview DB, so it could not be checked on real data. The logic was checked instead by inserting temporary TEST_REDION companies (tipo_mandato='diretto'/missing + agenzie_partner_ids, and legacy agenzia_partner_id); all came back as collaborazione with the partner name, and they were then deleted. CATTOLICA and UCA (both entries) remain diretto with agenzia_partner_nome=None. CONAP exists only in tenant c5ae2d0e (with GROUPAMA ASSICURAZIONI/GLOBAL ASSISTANCE/NOBIS linked to it, but no REDION).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/contabilita/brogliaccio?data=<giorno chiuso>", "issue": "For closed days (chiusa && snapshot) saldi_compagnie is replaced by the stored snapshot (server.py ~10091). Snapshots taken before the fix will still show REDION as 'Diretto (compagnia)' for those past dates. Only live/open days use the new logic."},
+      {"endpoint": "POST /api/agenzie/{aid}/documenti", "issue": "The item is stored without the avviso_attivo/avviso_giorni defaults, unlike compagnie (False/15). The UI still works because PUT /documenti/avviso sets them, but the data shape is inconsistent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DocCardsScadenza slugify", "issue": "Non-ASCII characters are dropped from testid slugs: \"Carta d'identità\" becomes 'carta-d-identit'. This is only a testid cosmetic issue; collisions are possible only in theory.", "selector": "[data-testid=doc-card-carta-d-identit]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_doc_cards_brogliaccio.py", "/app/test_reports/pytest/pytest_iter117.xml"],
+  "action_items": [
+    "Optional: confirm REDION→CONAP on the real/production tenant data. It is not present in the preview DB; the logic was checked with simulated records.",
+    "Optional: decide whether snapshot saldi_compagnie of already-closed days should be recomputed or refreshed for the partner name.",
+    "Optional cleanup: remove dead helpers compDocScadenza (Compagnie.jsx), ageDocScadenza (Agenzie.jsx) and possibly DocFolderCard/docScadenza in Librerie.jsx if no longer used.",
+    "Pre-existing doc 't.pdf' (Circolari, Scade 31/12/2026) on compagnia Generali Italia S.p.A. (id 4a1d48ed-...) looks like leftover main-agent test data. Delete it if it is not intended."
+  ],
+  "critical_code_review_comments": [
+    "DocCardsScadenza: scadenzaBadge is duplicated in Compagnie.jsx/Agenzie.jsx/Librerie.jsx (DRY). Keep only the shared component version.",
+    "Librerie.jsx is 6700+ lines and should be split (DocumentiAzienda/DocumentiCollaboratore could move to their own modules).",
+    "Collaboratore testid prefix 'doc' shares a namespace with the firma block testids ('doc-del-firma_digitale', 'doc-input-firma_digitale'). There is no clash today, but the prefix is fragile.",
+    "PUT /compagnie strips 'documenti' and AgenziaBody ignores it, so saving the edit dialog does not overwrite uploaded docs. Verified as safe."
+  ],
+  "updated_files": ["/app/backend/tests/test_doc_cards_brogliaccio.py"],
+  "success_rate": {"backend": "100% (7/7, 1 skipped data-dependent REDION)", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None left behind. Temporary TEST_REDION_* compagnie were inserted and deleted. All uploaded TEST docs were deleted, including one stray TEST_doc.pdf on Generali from my first test run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Locations: Compagnie edit = comp-edit-<id> → section comp-documenti-sezione. Agenzie edit = age-edit-<id> (nth(0) = principal, nth(1) = Agenzia Bottoni partner). Utenti = lib-tab-utenti → row 'tr' with the email → row-actions → action-edit → tab-certificati → doc-cards. Azienda = lib-tab-azienda → azienda-doc-cards. Upload: set_input_files on '[data-testid=<p>-upload-<slug>] input[type=file]' then <p>-form-save-<slug>. DateInputIt takes typed digits DDMMYYYY. Delete uses window.confirm, so accept the dialog; pressing Escape closes the whole edit dialog. Preview system date is 2026-10-22.",
+  "rca of the issue": "Brogliaccio: _compute_saldi_compagnie now sets _is_coll = tipo_mandato=='collaborazione' OR any agenzie_partner_ids/agenzia_partner_id. That fixes companies whose tipo_mandato is inconsistent ('diretto' or missing) even though a partner is linked. It was verified with simulated records. Remaining caveat: closed-day snapshots."
+}
