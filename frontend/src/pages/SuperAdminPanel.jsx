@@ -1869,6 +1869,19 @@ function ChiaviApiTab() {
                 </div>
             </div>
 
+            {/* OPENAPI.IT — DATI AZIENDE / VISURE / CATASTO */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-openapi">
+                <div className="font-semibold text-slate-800 text-sm">🗂️ OpenAPI.it — Dati aziende, visure, catasto, veicoli</div>
+                <div className="text-[11px] text-slate-500">
+                    Usata dalle funzioni di arricchimento dati (ricerca azienda/P.IVA, visure, catasto, automotive).
+                    Incolla qui il <b>token API</b> generato su <span className="font-mono">console.openapi.com/it</span>.
+                    Le agenzie consumano i servizi dal proprio credito senza mai vedere la chiave.
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <FormField label="Token API (OpenAPI.it)" type="password" value={f.openapi_it_bearer_token || ""} onChange={(v) => set("openapi_it_bearer_token", v)} testid="sa-openapi-key" />
+                </div>
+            </div>
+
             {/* TWILIO SMS */}
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-twilio">
                 <div className="font-semibold text-slate-800 text-sm">📱 SMS — Twilio</div>

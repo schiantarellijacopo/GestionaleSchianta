@@ -18807,7 +18807,7 @@ async def startup():
     # ai_studio_api_key → GEMINI_API_KEY, openai_api_key → OPENAI_API_KEY.
     try:
         _az_ai = await raw_db.azienda_config.find_one(
-            {}, {"_id": 0, "ai_studio_api_key": 1, "openai_api_key": 1})
+            {}, {"_id": 0, "ai_studio_api_key": 1, "openai_api_key": 1, "openapi_it_bearer_token": 1})
         if _az_ai:
             if _az_ai.get("ai_studio_api_key"):
                 os.environ["GEMINI_API_KEY"] = _az_ai["ai_studio_api_key"]
@@ -18815,6 +18815,9 @@ async def startup():
             if _az_ai.get("openai_api_key"):
                 os.environ["OPENAI_API_KEY"] = _az_ai["openai_api_key"]
                 logger.info("OPENAI_API_KEY caricata dal vault super-admin")
+            if _az_ai.get("openapi_it_bearer_token"):
+                os.environ["OPENAPI_IT_BEARER_TOKEN"] = _az_ai["openapi_it_bearer_token"]
+                logger.info("OPENAPI_IT_BEARER_TOKEN caricato dal vault super-admin")
     except Exception as _e:
         logger.warning("Impossibile caricare le chiavi AI dal vault: %s", _e)
 

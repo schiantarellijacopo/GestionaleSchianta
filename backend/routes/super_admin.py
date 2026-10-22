@@ -65,6 +65,7 @@ _CHIAVI_AZIENDA = [
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
     "ai_studio_api_key", "openai_api_key",
+    "openapi_it_bearer_token",
 ]
 
 # Chiavi AI del vault → variabile d'ambiente sincronizzata nel processo.
@@ -72,6 +73,11 @@ _CHIAVI_AZIENDA = [
 _CHIAVI_AI_ENV = {
     "ai_studio_api_key": "GEMINI_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
+}
+
+# Altre chiavi provider del vault → variabile d'ambiente sincronizzata.
+_CHIAVI_EXTRA_ENV = {
+    "openapi_it_bearer_token": "OPENAPI_IT_BEARER_TOKEN",
 }
 
 
@@ -102,6 +108,14 @@ async def sa_put_chiavi_api(body: dict, user=Depends(require_user("admin")),
             await raw_db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
     # AI Studio (Gemini): rendi subito effettiva la chiave nel processo come fallback GEMINI_API_KEY
     for _field, _env in _CHIAVI_AI_ENV.items():
+        if _field in body:
+            _k = (body.get(_field) or "").strip()
+            if _k:
+                os.environ[_env] = _k
+            else:
+                os.environ.pop(_env, None)
+    # Altre chiavi provider (es. OpenAPI.it bearer token) → env immediato
+    for _field, _env in _CHIAVI_EXTRA_ENV.items():
         if _field in body:
             _k = (body.get(_field) or "").strip()
             if _k:
