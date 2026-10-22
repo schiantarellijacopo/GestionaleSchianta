@@ -1518,7 +1518,7 @@ function MappingOperatoreForm({ section, editing, onClose }) {
     />;
 }
 
-function GenericForm({ section, editing, onClose, fields, defaults, dialogClass }) {
+function GenericForm({ section, editing, onClose, fields, defaults, dialogClass, omitOnSave }) {
     const [f, setF] = useState(editing || defaults);
     const isEdit = !!editing;
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -1531,13 +1531,22 @@ function GenericForm({ section, editing, onClose, fields, defaults, dialogClass 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editing]);
 
+    const buildPayload = () => {
+        const p = { ...f };
+        // Campi gestiti da endpoint dedicati (upload/push): non inviarli nel PUT,
+        // altrimenti un form "stale" sovrascriverebbe i dati più recenti sul server.
+        (omitOnSave || []).forEach((k) => delete p[k]);
+        if (!p.password) delete p.password;  // evita di salvare password vuota
+        return p;
+    };
+
     const save = async () => {
         try {
             if (isEdit) {
-                await api.put(`${section.endpoint}/${editing.id}`, f);
+                await api.put(`${section.endpoint}/${editing.id}`, buildPayload());
                 toast.success("Aggiornato");
             } else {
-                await api.post(section.endpoint, f);
+                await api.post(section.endpoint, buildPayload());
                 toast.success("Creato");
             }
             onClose();
@@ -2171,6 +2180,9 @@ function UtenteForm({ section, editing, onClose }) {
         api.get("/auth/users").then((r) => setStaff(r.data.filter((u) => u.role !== "cliente"))).catch(() => {});
     }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose} dialogClass="max-w-3xl"
+        omitOnSave={["contratti_collab", "dichiarazioni_collab", "certificati_collab", "corsi",
+            "avatar_url", "firma_digitale_url", "carta_identita_url", "casellario_url",
+            "carichi_pendenti_url", "documento_iban_url"]}
         defaults={{
             name: "", email: "", password: "", role: "dipendente", anagrafica_id: null,
             codice_fiscale: "", partita_iva: "", iban: "", indirizzo: "", telefono: "",
@@ -2316,6 +2328,14 @@ function UtenteForm({ section, editing, onClose }) {
                             <div><Label>Note interne (visibili solo admin)</Label><Input value={f.note_interne || ""} onChange={(e) => set("note_interne", e.target.value)} /></div>
                         </div>
                     )}
+
+                    <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1 mt-4">
+                        <div className="font-semibold text-slate-700 mb-1">Livelli di visibilità:</div>
+                        <div><span className="badge badge-danger">admin</span> Accesso completo, gestione utenti, eliminazioni</div>
+                        <div><span className="badge badge-info">collaboratore</span> Vede e gestisce tutto, no eliminazioni critiche</div>
+                        <div><span className="badge badge-success">dipendente</span> Operatività su clienti/polizze/sinistri, no librerie</div>
+                        <div><span className="badge badge-neutral">cliente</span> Vede solo le proprie polizze e i propri sinistri</div>
+                    </div>
                 </TabsContent>
 
                 {/* ============ ANAGRAFICA ============ */}
@@ -2452,13 +2472,6 @@ function UtenteForm({ section, editing, onClose }) {
                     </TabsContent>
                 )}
 
-                <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs space-y-1 mt-4">
-                    <div className="font-semibold text-slate-700 mb-1">Livelli di visibilità:</div>
-                    <div><span className="badge badge-danger">admin</span> Accesso completo, gestione utenti, eliminazioni</div>
-                    <div><span className="badge badge-info">collaboratore</span> Vede e gestisce tutto, no eliminazioni critiche</div>
-                    <div><span className="badge badge-success">dipendente</span> Operatività su clienti/polizze/sinistri, no librerie</div>
-                    <div><span className="badge badge-neutral">cliente</span> Vede solo le proprie polizze e i propri sinistri</div>
-                </div>
             </Tabs>
         )}
     />;
@@ -2959,6 +2972,7 @@ function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, cam
     const emptyForm = () => Object.fromEntries(campi.map((c) => [c.key, ""]));
     const [form, setForm] = useState(emptyForm());
     const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
     const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
     const aggiungi = async () => {
@@ -2971,7 +2985,7 @@ function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, cam
             const r = await api.post(`/auth/users/${userId}/allegati/${categoria}`, fd,
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange([...(items || []), r.data]);
-            setForm(emptyForm()); setFile(null);
+            setForm(emptyForm()); setFile(null); setFileKey((k) => k + 1);
             toast.success("Aggiunto");
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
@@ -3004,7 +3018,7 @@ function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, cam
                     ))}
                     <div>
                         <Label className="text-xs">Allegato (PDF/IMG)</Label>
-                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" data-testid={`allegato-${categoria}-file`} />
+                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" key={fileKey} data-testid={`allegato-${categoria}-file`} />
                     </div>
                 </div>
                 <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid={`allegato-${categoria}-add`}>
@@ -3099,6 +3113,7 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
     const [ore, setOre] = useState("");
     const [minuti, setMinuti] = useState("");
     const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
     const [filtroAnno, setFiltroAnno] = useState("");
 
     const annoDi = (c) => (c.anno || (c.data || c.data_scadenza || "").slice(0, 4) || "");
@@ -3126,11 +3141,12 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
                     { titolo, argomento, data: data || null, ore_corso: ore || null, minuti_corso: minuti || null, anno });
             }
             onChange([...(corsi || []), r.data]);
-            setTitolo(""); setArgomento(""); setData(""); setOre(""); setMinuti(""); setFile(null);
+            setTitolo(""); setArgomento(""); setData(""); setOre(""); setMinuti(""); setFile(null); setFileKey((k) => k + 1);
             toast.success("Corso aggiunto");
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
     const rimuovi = async (corsoId) => {
+        if (!window.confirm("Eliminare il corso?")) return;
         try {
             await api.delete(`/auth/users/${userId}/corsi/${corsoId}`);
             onChange((corsi || []).filter((c) => c.id !== corsoId));
@@ -3153,7 +3169,7 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">Attestato (PDF/IMG, opz.)</Label>
-                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" data-testid="corso-file" />
+                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" key={fileKey} data-testid="corso-file" />
                     </div>
                 </div>
                 <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="corso-add">

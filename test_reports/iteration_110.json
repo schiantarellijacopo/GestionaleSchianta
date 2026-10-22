@@ -1,0 +1,37 @@
+{
+  "summary": "Frontend E2E test (Playwright, desktop 1920x1080) of the new 6-tab 'Modifica utenti / collaboratori' dialog in /librerie > Utenti, run against Sara Collaboratrice (id 3286874c-...). Everything requested works: the 6 tabs, the Generale/Anagrafica/RUI fields persisting after Aggiorna and reload, adding/deleting Contratti and Dichiarazioni, adding Certificati, the Documenti personali slots, adding Formazione courses with duration and filtering by year, and the Amministratore and Ruolo selects staying in sync. Found 1 HIGH bug: stale form state when the dialog is closed without saving, which causes DATA LOSS of allegati and corsi.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "PUT /api/auth/users/{uid}", "issue": "Accepts a raw dict with no Pydantic validation and blindly $set-s every key, including the arrays contratti_collab, dichiarazioni_collab, certificati_collab and corsi and the *_url fields. That is what makes the stale-overwrite bug possible. An empty 'password' key is also written to the DB as password:'' (it is only popped when truthy)."},
+    {"endpoint": "login", "issue": "data_cessazione_account is stored but not enforced anywhere (login is not blocked after that date). Informational, in case this is expected."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "UtenteForm / Librerie section dialog (Librerie.jsx line ~413 onOpenChange)", "issue": "Closing the dialog with X or Escape (instead of Aggiorna) does not reload the list. Reopening the same user shows the old 'editing' row: contratti, dichiarazioni, certificati and corsi just added appear EMPTY or old. If the user then clicks Aggiorna, the PUT sends the old arrays and OVERWRITES the server data. Reproduced: added contract #2, pressed Escape, reopened (1 row shown), clicked Aggiorna, reloaded: only 1 contract left. Contract #2 is lost and any file uploaded with it is orphaned.", "selector": "[data-testid=lib-save-utenti], [data-testid^=allegato-contratti-del-]", "priority": "HIGH"},
+      {"component": "AllegatoManager / CorsiCollaboratore", "issue": "After Aggiungi the file state is reset (setFile(null)), but the <input type=file> is uncontrolled, so the previously chosen file name stays visible. Minor.", "selector": "[data-testid=allegato-*-file], [data-testid=corso-file]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Modifica utenti dialog", "issues": ["The 'Livelli di visibilità' legend is rendered under EVERY tab (Contratti, Formazione, RUI...). It belongs only in Generale.", "Date fields use the browser's native date picker, which is consistent with the rest of the app."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "HIGH: fix the stale-overwrite data loss. Option 1: in Librerie.jsx line ~413 call load() in onOpenChange when the dialog closes. Option 2 (more robust): in UtenteForm save, strip contratti_collab, dichiarazioni_collab, certificati_collab, corsi, avatar_url and the document *_url fields from the PUT payload, since these are managed by their own endpoints. Option 3: GET the fresh user when the dialog opens.",
+    "Optionally whitelist the fields accepted by PUT /api/auth/users/{uid} and drop an empty 'password' key.",
+    "Show the 'Livelli di visibilità' legend only in the Generale tab.",
+    "Reset the file inputs after Aggiungi (use a key or ref)."
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is 6530 lines. It should be split up, starting with UtenteForm, AllegatoManager, CorsiCollaboratore and DocumentiCollaboratore.",
+    "GenericForm PUTs the entire form object, including server-managed sub-collections. This is the root cause of the HIGH bug.",
+    "CorsiCollaboratore.rimuovi has no confirm dialog, unlike AllegatoManager."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skipped per request)", "frontend": "90% (all 9 requested flows pass; 1 HIGH data-loss bug found in the close-without-save flow)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Sara Collaboratrice was edited with TEST_ values: mansione TEST_Mansione, carica TEST_Carica, cognome TEST_Rossi, data_cessazione_account 2030-12-31, RUI E000123456, plus anagrafica data. Also 1 contract (Mandato), 1 certificate (TEST_Cert desc), 2 courses (TEST_Corso IVASS 2025, TEST_Corso vecchio 2023). The test dichiarazione was deleted.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Sara row: tr:has-text('Sara Collaboratrice') then [data-testid=row-actions] then [data-testid=action-edit]. Tabs are tab-*. Save is lib-save-utenti. window.confirm must be accepted for allegato deletion. Retest: add a contract, press Escape, reopen, click Aggiorna, reload. The contract must still be there.",
+  "rca of the issue": "Librerie section list keeps the rows in state. Dialog onOpenChange (line ~413) only does setOpen(false)/setEditing(null) without load(), while GenericForm.save calls onClose, which reloads. Sub-collections are written immediately by their own endpoints (POST/DELETE allegati and corsi) and only update the local form state 'f'. When the dialog is closed without saving, the list row stays stale. On reopen GenericForm seeds f from that stale row, and Aggiorna PUTs the stale arrays, which the backend $set-s, overwriting the newer data."
+}

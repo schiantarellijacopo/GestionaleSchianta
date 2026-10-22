@@ -1,5 +1,19 @@
 # Changelog — Axicura CRM
 
+
+## 2026-06 — Librerie → Utenti/Collaboratori: nuova "Gestione utente" a 6 tab
+- Riorganizzato il dialog `UtenteForm` (`frontend/src/pages/Librerie.jsx`) secondo le schermate del gestionale, con 6 tab:
+  **Generale** (tipologia_utente, mansione, carica, Amministratore?/Ruolo sincronizzati, responsabile/svolge/addetto intermediazione, deleghe_poteri, data_cessazione_account + blocco provvigioni/sottorete/note interne conservato),
+  **Anagrafica** (cognome_ragione_sociale, nome_proprio, luogo/data nascita, 3 indirizzi via/CAP/città residenza-sede-ufficio, CF, P.IVA, cellulare, tel/fax ufficio, PEC, codice gestionale, IBAN, avatar),
+  **RUI / IVASS** (albo, sezione A/B/C/D/E/F, n° iscrizione, qualifica, data iscrizione),
+  **Contratti** (lista contratti + lista dichiarazioni via `AllegatoManager` + 2 campi dichiarazione sintetica),
+  **Certificati** (lista certificati + slot "Documenti personali" esistenti),
+  **Formazione** (`CorsiCollaboratore` potenziato: titolo, argomento, data, ore/minuti, attestato, filtro per anno).
+- Backend (`server.py`): nuovi endpoint `POST/DELETE /api/auth/users/{uid}/allegati/{categoria}` (categoria ∈ contratti|dichiarazioni|certificati), estesi `POST /corsi` e `/corsi/upload` con argomento/data/ore/minuti/anno.
+- Modello `UserPublic` (`db_models.py`) esteso con i nuovi campi scalari + array `contratti_collab`, `dichiarazioni_collab`, `certificati_collab`.
+- FIX dataloss (HIGH da testing): `GenericForm` ora accetta `omitOnSave` e NON reinvia nel PUT gli array/URL gestiti da endpoint dedicati (contratti/dichiarazioni/certificati/corsi + *_url); rimossa anche la password vuota dal payload. Legenda "Livelli di visibilità" spostata nel solo tab Generale; reset input file dopo l'aggiunta; conferma su eliminazione corso.
+- Verificato: backend via curl (PUT persiste nuovi campi; allegati add/list/delete OK) e frontend via testing_agent (9/9 flussi) + screenshot.
+
 ## 2026-06 — Prima Nota: tutte le compagnie attive nel "Saldo cassa per compagnia"
 - La tabella "Saldo cassa per compagnia" (brogliaccio) ora elenca **tutte le compagnie attive**,
   anche quelle a **saldo 0,00 € senza movimenti** (prima venivano saltate con `continue`).
