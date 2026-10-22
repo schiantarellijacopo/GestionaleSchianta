@@ -5667,17 +5667,42 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
                       "updated_at": _now_iso()}},
         )
         pol = await db.polizze.find_one({"id": titolo["polizza_id"]}, {"_id": 0})
+        # Coerenza con l'incasso singolo/multiplo: un titolo COPERTO non riregistra
+        # entrate/provvigioni (già contabilizzate alla copertura). Se la copertura è
+        # dello stesso giorno (giornata aperta) viene UNIFICATA in un'unica riga; se è
+        # di un altro giorno si registra solo lo spostamento a banca (incasso_coperto).
+        is_direzione = "direzione" in (mezzo or "").lower()
+        is_coperto = bool(titolo.get("titolo_coperto")) and not is_direzione
+        cop_assorbite = []
+        if is_coperto:
+            async for _cm in db.movimenti.find(
+                {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]},
+                 "data_movimento": data_incasso}, {"_id": 0},
+            ):
+                _ch = await db.chiusure_giorno.find_one(
+                    {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
+                if _ch and not _ch.get("riaperta_at"):
+                    continue
+                cop_assorbite.append(_cm)
+        merge = bool(cop_assorbite)
+        effective_coperto = is_coperto and not merge
         mov = MovimentoContabile(
-            data_movimento=data_incasso, tipo="entrata", categoria="incasso_premio",
+            data_movimento=data_incasso, tipo="entrata",
+            categoria="incasso_coperto" if effective_coperto else "incasso_premio",
             importo=titolo.get("importo_lordo", 0.0),
             descrizione=f"Incasso polizza {pol['numero_polizza'] if pol else titolo['polizza_id']}",
             polizza_id=titolo["polizza_id"], titolo_id=tid,
             anagrafica_id=pol.get("contraente_id") if pol else None,
             compagnia_id=pol.get("compagnia_id") if pol else None,
             conto_cassa_id=conto_id, mezzo_pagamento=mezzo,
-            provvigioni=titolo.get("provvigioni", 0.0),
+            provvigioni=0.0 if effective_coperto else titolo.get("provvigioni", 0.0),
         )
-        await db.movimenti.insert_one(mov.model_dump())
+        doc_mov = mov.model_dump()
+        if merge:
+            doc_mov["coperture_assorbite"] = cop_assorbite
+        await db.movimenti.insert_one(doc_mov)
+        if merge:
+            await db.movimenti.delete_many({"id": {"$in": [c["id"] for c in cop_assorbite]}})
         # Incasso su polizza ANNULLATA → riportala 'attiva' (sostituita/sospesa invariate).
         await _riattiva_polizza_se_annullata(titolo["polizza_id"], user)
         n_incassati += 1
@@ -6475,28 +6500,30 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     # Titolo già coperto (anticipato dall'agenzia): l'incasso sposta solo da sospeso a banca,
     # senza riregistrare entrate/provvigioni/saldo (già contabilizzati alla copertura).
     is_coperto = bool(titolo.get("titolo_coperto")) and not is_direzione
-    # INCASSO MULTIPLO — niente sdoppiamento: la copertura (entrate/provv/saldo/sospeso) e
-    # l'incasso (banca) confluiscono in UN'UNICA riga. Vale solo se richiesto
-    # (merge_copertura=True, inviato dal dialog bulk) e solo per coperture su giornate
-    # ANCORA APERTE (le chiuse restano invariate -> comportamento storico a due righe).
-    merge_multiplo = bool(body.get("merge_copertura")) and is_coperto
+    # Unificazione copertura+incasso in UNA sola riga, per evitare la DOPPIA registrazione.
+    #  - SAFETY NET (sempre attivo): se esiste una copertura dello STESSO giorno dell'incasso
+    #    (giornata aperta) viene unificata a prescindere dal flag → nessun flusso (singolo,
+    #    multiplo, incasso rapido, dialog copertura+incasso) può più produrre la doppia riga.
+    #  - merge_copertura=True (flussi multipli): unifica anche coperture di ALTRI giorni APERTI.
+    #  Le coperture su giornate CHIUSE restano invariate (immutabili → due righe storiche).
+    merge_flag = bool(body.get("merge_copertura")) and is_coperto
     cop_movs_merge = []
     cop_docs_merge = []
-    if merge_multiplo:
+    if is_coperto:
         async for _cm in db.movimenti.find(
             {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
             {"_id": 0},
         ):
+            same_day = _cm.get("data_movimento") == data_incasso
+            if not (same_day or merge_flag):
+                continue  # copertura di altro giorno e nessun merge richiesto → lascia 2 righe
             _ch = await db.chiusure_giorno.find_one(
                 {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
             if _ch and not _ch.get("riaperta_at"):
-                # giornata chiusa: immutabile -> non si può unificare questa copertura
-                cop_movs_merge = []
-                cop_docs_merge = []
-                break
+                continue  # giornata chiusa: immutabile → non unificabile
             cop_movs_merge.append(_cm["id"])
             cop_docs_merge.append(_cm)
-    do_merge = bool(merge_multiplo and cop_movs_merge)
+    do_merge = bool(cop_movs_merge)
     # Per il movimento d'incasso: se unifichiamo, lo trattiamo come incasso premio
     # normale (entrate+provv+saldo+banca su una riga) invece che "incasso_coperto".
     effective_coperto = is_coperto and not do_merge
