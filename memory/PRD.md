@@ -2085,3 +2085,28 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
 - Bonifica dati storici: endpoint admin POST /api/admin/azzera-accessori-diritti (tenant-scoped, param dry_run). Azzera accessori SOLO su titoli stato=da_incassare e NON in prima nota; azzera diritti su TUTTE le polizze (livello polizza + garanzie[]). I titoli in prima nota non vengono toccati. In server.py dopo ricalcola_titoli_netto.
 - UI: pulsante "Azzera accessori/diritti" in Titoli.jsx (data-testid=titoli-azzera-accessori-diritti, solo admin) con dry-run+conferma. Da usare in produzione (tenant jacopo@schiantarelli.it) dopo deploy.
 - Verificato: endpoint funziona, path array garanzie (arrayFilters+$elemMatch) ok su raw_db, import code coerente, pulsante visibile.
+
+## 2026-10-22 (c) — Azioni cliente: Email / WhatsApp / Firma Moduli su anagrafica, titolo, polizza, sinistro
+Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e WhatsApp (scelta template + autocompilazione + invio reale sui canali agenzia) e Firma Moduli (Yousign: modello salvato o upload PDF, posizione firma trascinabile; link recapitato via WhatsApp/Email/entrambi a scelta all'invio).
+
+**Backend**
+- `routes/modelli.py` (nuovo blocco "Comunicazioni unificate"):
+  - `_resolve_contatti(entita_tipo, entita_id)`: risolve cliente_id+polizza_id+email+cellulare+nome per anagrafica/polizza/titolo/sinistro (tenant-scoped via `db`).
+  - `POST /api/librerie/comunica/contesto` → contatti+id risolti.
+  - `POST /api/librerie/comunica/render` {entita, modello_id} → oggetto/corpo compilati con `build_context`+`render_text` (dati reali).
+  - `POST /api/librerie/comunica/invia` {entita, canale email|whatsapp, destinatario, oggetto, corpo} → invio reale via `notification_helpers.send_email` / `send_whatsapp_message`; log in `storico_avvisi`. 400 se canale non configurato.
+- `routes/firma_modelli.py`:
+  - `_stamp_campi(doc, campi, valori, pages)`: scrive campi dato/libero alle coordinate salvate (frazioni 0..1) e ricava i rettangoli firma (punti PDF) per Yousign.
+  - `_recapita_link(canali, valori, signing_url, nome)`: recapita il link Yousign via WhatsApp e/o Email.
+  - `compila_modello` esteso: accetta `entita_tipo/entita_id` (resolver) + `canali`; usa `campi` salvati se presenti (altrimenti fallback token `{firma}`); Yousign `delivery_mode:"none"` + recapito link sui canali scelti.
+  - `POST /api/firma/modelli/render-pdf` (multipart) → immagini pagine + storage_path temporaneo (PDF o Word).
+  - `POST /api/firma/modelli/adhoc` → firma PDF caricato al volo con campi posizionati, salva allegato, Yousign + recapito link.
+- Consegna link firma: Yousign non invia più l'email (delivery none); il link è recapitato dall'app sui canali scelti (WA/Email/entrambi).
+
+**Frontend**
+- `components/FirmaDesigner.jsx` (nuovo): editor visivo drag&resize dei campi (firma/dato/libero) su immagini pagine PDF; coordinate in frazioni; riusato in ModelliFirma e nel flusso upload ad-hoc.
+- `components/AzioniCliente.jsx` (nuovo): barra 3 pulsanti + modali Email/WhatsApp (select template → render autofill → invia) e Firma (modalità "modello salvato" o "carica PDF" con designer + checkbox canali WA/Email).
+- Agganci barra: `AnagraficaDetail.jsx` (entita anagrafica), `PolizzaDetail.jsx` (polizza), `SinistroDetail.jsx` (sinistro), `components/TitoloDialog.jsx` (titolo, solo esistenti).
+- `ModelliFirma.jsx`: card "Posiziona la firma (trascina sul documento)" con FirmaDesigner + "Salva posizione nel modello" (PUT `/firma/modelli/{id}`). Rimossa vecchia anteprima statica.
+
+**Verifiche:** rotte registrate (401 senza auth) ✓; contesto risolve anagrafica/polizza/titolo con contatti reali ✓; render autofill template email ✓; PUT/GET salvataggio coordinate firma ✓; UI: barra azioni su anagrafica ✓, modale Firma con scelta canali ✓, FirmaDesigner con box firma trascinabile su PDF IVASS ✓. Invii reali (SMTP/WhatsApp/Yousign) NON innescati nei test per non contattare clienti reali; dipendono dalla config agenzia (email/WhatsApp/Yousign). Deploy via Save to GitHub → Railway.

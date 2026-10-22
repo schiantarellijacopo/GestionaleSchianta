@@ -9,8 +9,9 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-    FileSignature, Upload, Trash2, ArrowLeft, Copy, Play, Loader2, PenTool, Eye,
+    FileSignature, Upload, Trash2, ArrowLeft, Copy, Play, Loader2, PenTool, Save,
 } from "lucide-react";
+import FirmaDesigner from "@/components/FirmaDesigner";
 
 export default function ModelliFirma() {
     const [lista, setLista] = useState([]);
@@ -18,6 +19,8 @@ export default function ModelliFirma() {
     const [campiDisp, setCampiDisp] = useState([]);
     const [uploadNome, setUploadNome] = useState("");
     const [dragOver, setDragOver] = useState(false);
+    const [campi, setCampi] = useState([]);
+    const [savingCampi, setSavingCampi] = useState(false);
 
     const loadLista = () => api.get("/firma/modelli").then((r) => setLista(r.data)).catch(() => {});
     useEffect(() => {
@@ -26,8 +29,21 @@ export default function ModelliFirma() {
     }, []);
 
     const apri = async (mid) => {
-        try { setSel((await api.get(`/firma/modelli/${mid}`)).data); }
-        catch { toast.error("Errore apertura modello"); }
+        try {
+            const d = (await api.get(`/firma/modelli/${mid}`)).data;
+            setSel(d);
+            setCampi(d.campi || []);
+        } catch { toast.error("Errore apertura modello"); }
+    };
+
+    const salvaCampi = async () => {
+        if (!sel) return;
+        setSavingCampi(true);
+        try {
+            await api.put(`/firma/modelli/${sel.id}`, { campi });
+            toast.success("Posizione firma salvata nel modello");
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio"); }
+        finally { setSavingCampi(false); }
     };
 
     const upload = async (file) => {
@@ -89,16 +105,20 @@ export default function ModelliFirma() {
                     </div>
                 </Card>
 
-                <ProvaCompila modello={sel} />
-
                 {(sel.immagini || []).length > 0 && (
-                    <Card className="p-4">
-                        <div className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1"><Eye size={14} /> Anteprima documento</div>
-                        {sel.immagini.map((img, i) => (
-                            <img key={i} src={img} alt={`pag ${i + 1}`} className="w-full max-w-[640px] mx-auto block border mb-3" />
-                        ))}
+                    <Card className="p-4 border-violet-200" data-testid="mf-designer-card">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="text-sm font-medium text-violet-900 flex items-center gap-1"><PenTool size={14} /> Posiziona la firma (trascina sul documento)</div>
+                            <Button onClick={salvaCampi} disabled={savingCampi} size="sm" className="bg-violet-600 hover:bg-violet-700" data-testid="mf-save-campi">
+                                {savingCampi ? <Loader2 size={14} className="animate-spin mr-1" /> : <Save size={14} className="mr-1" />} Salva posizione nel modello
+                            </Button>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-3">In alternativa ai segnaposto {"{firma}"}, puoi trascinare qui il riquadro di firma: la posizione viene salvata nel modello e riusata ad ogni invio.</p>
+                        <FirmaDesigner pages={sel.pages} immagini={sel.immagini} campi={campi} onChange={setCampi} campiDisp={campiDisp} />
                     </Card>
                 )}
+
+                <ProvaCompila modello={sel} />
             </div>
         );
     }

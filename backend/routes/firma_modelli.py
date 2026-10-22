@@ -305,6 +305,65 @@ def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict]]:
     return out, firma_fields
 
 
+def _stamp_campi(doc, campi, valori, pages_meta):
+    """Scrive i campi dato/libero alle coordinate salvate (frazioni 0..1) e
+    raccoglie i rettangoli dei campi 'firma' (in punti PDF) per Yousign."""
+    firma_fields = []
+    for c in campi:
+        page_idx = int(c.get("page") or 0)
+        if page_idx >= len(doc):
+            continue
+        page = doc[page_idx]
+        pw = page.rect.width
+        ph = page.rect.height
+        x = float(c.get("x") or 0) * pw
+        y = float(c.get("y") or 0) * ph
+        w = float(c.get("w") or 0.2) * pw
+        h = float(c.get("h") or 0.04) * ph
+        tipo = c.get("tipo")
+        if tipo == "firma":
+            firma_fields.append({
+                "page": page_idx, "x": round(x), "y": round(y),
+                "width": max(100, round(w)), "height": max(40, round(h)),
+            })
+            continue
+        val = str(valori.get(c.get("chiave")) or "") if tipo == "dato" else str(c.get("valore") or "")
+        if not val:
+            continue
+        fs = int(c.get("font_size") or 11)
+        try:
+            page.insert_textbox(fitz.Rect(x, y, x + w, y + h), val, fontsize=fs, fontname="helv", align=0)
+        except Exception:
+            page.insert_text((x, y + fs), val, fontsize=fs, fontname="helv")
+    return firma_fields
+
+
+async def _recapita_link(canali, valori, signing_url, nome_doc) -> dict:
+    """Recapita il link di firma via WhatsApp e/o Email secondo i canali scelti."""
+    out = {"wa": None, "email": None}
+    if not signing_url:
+        return out
+    nome = valori.get("nome_cliente") or "Cliente"
+    testo = (f"Gentile {nome}, per firmare il documento \"{nome_doc}\" "
+             f"clicca qui: {signing_url}")
+    if canali.get("wa"):
+        cell = valori.get("telefono") or ""
+        if cell:
+            from notification_helpers import send_whatsapp_message
+            out["wa"] = await send_whatsapp_message(cell, testo)
+        else:
+            out["wa"] = {"ok": False, "error": "Nessun cellulare in anagrafica"}
+    if canali.get("email"):
+        em = valori.get("email") or ""
+        if em:
+            from notification_helpers import send_email
+            html = testo.replace(signing_url, f'<a href="{signing_url}">{signing_url}</a>')
+            out["email"] = await send_email(em, f"Documento da firmare — {nome_doc}", testo, html=html)
+        else:
+            out["email"] = {"ok": False, "error": "Nessuna email in anagrafica"}
+    return out
+
+
 @router.post("/{mid}/compila")
 async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
     """Compila i campi dato con i valori del cliente/polizza, salva il PDF come allegato e,
@@ -317,13 +376,25 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
         raise HTTPException(404, "Modello non trovato")
     anagrafica_id = body.get("anagrafica_id")
     polizza_id = body.get("polizza_id")
+    if (not anagrafica_id) and body.get("entita_tipo") and body.get("entita_id"):
+        from routes.modelli import _resolve_contatti
+        rc = await _resolve_contatti(body["entita_tipo"], body["entita_id"])
+        anagrafica_id = rc.get("cliente_id")
+        polizza_id = polizza_id or rc.get("polizza_id")
     if not anagrafica_id:
         raise HTTPException(400, "anagrafica_id richiesto")
 
     pdf_bytes, _ = obj_storage.get_object(doc["storage_path"])
     valori = await _valori_dato(db, anagrafica_id, polizza_id,
                                 collaboratore_id=body.get("collaboratore_id"), user=user)
-    filled, firma_fields = _compila_pdf(pdf_bytes, valori)
+    campi = doc.get("campi") or []
+    if campi:
+        fdoc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        firma_fields = _stamp_campi(fdoc, campi, valori, doc.get("pages") or [])
+        filled = fdoc.tobytes()
+        fdoc.close()
+    else:
+        filled, firma_fields = _compila_pdf(pdf_bytes, valori)
 
     # salva come allegato
     aid_alleg = str(uuid.uuid4())
@@ -346,8 +417,12 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
     if firma_fields and body.get("invia_firma"):
         signing = await _invia_yousign(db, doc, filled, firma_fields, valori, body)
         out.update(signing)
+        canali = body.get("canali") or {}
+        if signing.get("firma", {}).get("ok") and (canali.get("wa") or canali.get("email")):
+            out["recapito"] = await _recapita_link(
+                canali, valori, signing["firma"].get("signing_url"), doc["nome"])
     elif body.get("invia_firma") and not firma_fields:
-        out["firma"] = {"ok": False, "error": "Nessun segnaposto {firma} trovato nel documento"}
+        out["firma"] = {"ok": False, "error": "Nessun campo firma posizionato nel documento"}
     return out
 
 
@@ -375,7 +450,7 @@ async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body) -> 
             if not email:
                 return {"firma": {"ok": False, "error": "Email firmatario mancante"}}
             req = await cli.post("/signature_requests",
-                                 json={"name": f"{modello['nome']} - {nome}", "delivery_mode": "email"})
+                                 json={"name": f"{modello['nome']} - {nome}", "delivery_mode": "none"})
             if req.is_error:
                 return {"firma": {"ok": False, "error": req.text[:200]}}
             rid = req.json()["id"]
@@ -410,3 +485,82 @@ async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body) -> 
                           "signing_url": link, "email": email}}
     except Exception as e:
         return {"firma": {"ok": False, "error": str(e)[:200]}}
+
+
+@router.post("/render-pdf")
+async def render_pdf(file: UploadFile = File(...),
+                     user=Depends(require_user("admin", "collaboratore"))):
+    """Renderizza un PDF/Word caricato al volo in immagini per posizionare la firma.
+    Salva temporaneamente il PDF e ritorna storage_path da usare in /adhoc."""
+    raw = await file.read()
+    fn = (file.filename or "").lower()
+    if fn.endswith(".pdf"):
+        pdf_bytes = raw
+    elif fn.endswith(".docx") or fn.endswith(".doc"):
+        pdf_bytes = _word_to_pdf(raw, fn)
+        if pdf_bytes is None:
+            raise HTTPException(400, "Conversione Word non disponibile: carica un PDF.")
+    else:
+        raise HTTPException(400, "Formato non supportato: carica un PDF o Word.")
+    try:
+        pages, images = _render_pages(pdf_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"PDF non valido: {e}")
+    tmp_id = str(uuid.uuid4())
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/firma_adhoc/{tmp_id}.pdf"
+    res = obj_storage.put_object(path, pdf_bytes, "application/pdf")
+    return {"storage_path": res["path"], "pages": pages, "immagini": images,
+            "nome": (file.filename or "documento").rsplit(".", 1)[0]}
+
+
+@router.post("/adhoc")
+async def firma_adhoc(body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    """Invia a firma Yousign un PDF caricato (storage_path da /render-pdf) coi campi
+    posizionati visivamente. Recapita il link via WhatsApp/Email secondo i canali scelti."""
+    from server import db
+    storage_path = body.get("storage_path")
+    if not storage_path:
+        raise HTTPException(400, "storage_path richiesto")
+    campi = body.get("campi") or []
+    anagrafica_id = body.get("anagrafica_id")
+    polizza_id = body.get("polizza_id")
+    if (not anagrafica_id) and body.get("entita_tipo") and body.get("entita_id"):
+        from routes.modelli import _resolve_contatti
+        rc = await _resolve_contatti(body["entita_tipo"], body["entita_id"])
+        anagrafica_id = rc.get("cliente_id")
+        polizza_id = polizza_id or rc.get("polizza_id")
+    if not anagrafica_id:
+        raise HTTPException(400, "Cliente non risolto per questa entità")
+
+    pdf_bytes, _ = obj_storage.get_object(storage_path)
+    valori = await _valori_dato(db, anagrafica_id, polizza_id, user=user)
+    fdoc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    pages_meta = [{"w": p.rect.width, "h": p.rect.height} for p in fdoc]
+    firma_fields = _stamp_campi(fdoc, campi, valori, pages_meta)
+    filled = fdoc.tobytes()
+    fdoc.close()
+
+    nome_doc = body.get("nome") or "Documento"
+    aid = str(uuid.uuid4())
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/documenti_firma/{aid}.pdf"
+    res = obj_storage.put_object(path, filled, "application/pdf")
+    await db.allegati.insert_one({
+        "id": aid, "entita_tipo": "polizza" if polizza_id else "anagrafica",
+        "entita_id": polizza_id or anagrafica_id, "nome_file": f"{nome_doc}.pdf",
+        "storage_path": res["path"], "content_type": "application/pdf",
+        "size": len(filled), "categoria": "documento_firma", "visibile_cliente": True,
+        "descrizione": "Documento inviato a firma (caricato)", "autore_id": user.get("id"),
+        "created_at": _now(), "updated_at": _now(),
+    })
+    out = {"ok": True, "allegato_id": aid, "firma_presente": bool(firma_fields)}
+    if not firma_fields:
+        out["firma"] = {"ok": False, "error": "Nessun campo firma posizionato"}
+        return out
+    signing = await _invia_yousign(db, {"nome": nome_doc}, filled, firma_fields, valori, body)
+    out.update(signing)
+    canali = body.get("canali") or {}
+    if signing.get("firma", {}).get("ok") and (canali.get("wa") or canali.get("email")):
+        out["recapito"] = await _recapita_link(
+            canali, valori, signing["firma"].get("signing_url"), nome_doc)
+    return out
+

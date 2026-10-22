@@ -21,6 +21,7 @@ import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { Card } from "@/components/ui/card";
 import { Loading } from "@/components/Shared";
+import AzioniCliente from "@/components/AzioniCliente";
 import { QuestionariViewer } from "@/components/Questionari";
 import {
     Save, Trash2, Printer, FileText, ArrowLeft, Plus, X, CheckCircle, Upload, FileDown,
@@ -135,8 +136,11 @@ export default function SinistroDetail() {
                         <FileText size={14} className="mr-1" /> Stampa CID
                     </Button>
                 )}
-                <span className="ml-auto text-xs text-slate-500">
-                    Aggiornato: {(s.updated_at || "").slice(0, 16).replace("T", " ")}
+                <span className="ml-auto flex items-center gap-3">
+                    <AzioniCliente entitaTipo="sinistro" entitaId={id} />
+                    <span className="text-xs text-slate-500">
+                        Aggiornato: {(s.updated_at || "").slice(0, 16).replace("T", " ")}
+                    </span>
                 </span>
             </div>
 

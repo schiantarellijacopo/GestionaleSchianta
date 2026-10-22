@@ -993,3 +993,120 @@ async def invia_modello_whatsapp(mid: str, body: InviaWaModelloBody,
         raise HTTPException(400, f"Invio WhatsApp fallito: {r.get('error')}")
     await log_attivita(user, "whatsapp_modello", "modello", mid, f"→ {dest}")
     return {"ok": True, "instance": r.get("instance_name"), "anteprima": msg[:200]}
+
+
+# =====================================================================
+# Comunicazioni unificate (Email / WhatsApp) da anagrafica/polizza/titolo/sinistro
+# =====================================================================
+
+async def _resolve_contatti(entita_tipo: str, entita_id: str) -> dict:
+    """Risolve cliente_id + polizza_id + contatti per anagrafica/polizza/titolo/sinistro."""
+    cliente_id = None
+    polizza_id = None
+    et = (entita_tipo or "").lower()
+    if et in ("anagrafica", "cliente"):
+        cliente_id = entita_id
+    elif et == "polizza":
+        polizza_id = entita_id
+        p = await db.polizze.find_one({"id": entita_id}, {"_id": 0, "contraente_id": 1})
+        cliente_id = (p or {}).get("contraente_id")
+    elif et == "titolo":
+        t = await db.titoli.find_one({"id": entita_id}, {"_id": 0, "polizza_id": 1})
+        polizza_id = (t or {}).get("polizza_id")
+        if polizza_id:
+            p = await db.polizze.find_one({"id": polizza_id}, {"_id": 0, "contraente_id": 1})
+            cliente_id = (p or {}).get("contraente_id")
+    elif et == "sinistro":
+        s = await db.sinistri.find_one(
+            {"id": entita_id}, {"_id": 0, "polizza_id": 1, "contraente_id": 1})
+        polizza_id = (s or {}).get("polizza_id")
+        cliente_id = (s or {}).get("contraente_id")
+        if not cliente_id and polizza_id:
+            p = await db.polizze.find_one({"id": polizza_id}, {"_id": 0, "contraente_id": 1})
+            cliente_id = (p or {}).get("contraente_id")
+    email = cellulare = nome = ""
+    if cliente_id:
+        a = await db.anagrafiche.find_one({"id": cliente_id}, {"_id": 0}) or {}
+        email = a.get("email") or ""
+        cellulare = a.get("cellulare") or a.get("telefono") or ""
+        nome = a.get("ragione_sociale") or f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip()
+    return {"cliente_id": cliente_id, "polizza_id": polizza_id,
+            "email": email, "cellulare": cellulare, "cliente_nome": nome}
+
+
+class ComunicaRenderBody(BaseModel):
+    entita_tipo: str
+    entita_id: str
+    modello_id: Optional[str] = None
+
+
+@router.post("/librerie/comunica/contesto")
+async def comunica_contesto(body: ComunicaRenderBody, user: dict = Depends(current_user)) -> dict:
+    """Ritorna contatti (email/cellulare/nome) e id risolti per l'entità."""
+    return await _resolve_contatti(body.entita_tipo, body.entita_id)
+
+
+@router.post("/librerie/comunica/render")
+async def comunica_render(body: ComunicaRenderBody, user: dict = Depends(current_user)) -> dict:
+    """Compila un modello (oggetto+corpo) coi dati reali dell'entità."""
+    c = await _resolve_contatti(body.entita_tipo, body.entita_id)
+    out = {**c, "oggetto": "", "corpo": ""}
+    if body.modello_id:
+        m = await db.template_modelli.find_one({"id": body.modello_id}, {"_id": 0})
+        if not m:
+            raise HTTPException(404, "Modello non trovato")
+        ctx = await build_context(c.get("cliente_id"), c.get("polizza_id"),
+                                  operatore_id=user.get("id"))
+        out["oggetto"] = render_text(m.get("oggetto") or m.get("nome") or "", ctx)
+        out["corpo"] = render_text(m.get("corpo") or "", ctx)
+    return out
+
+
+class ComunicaInviaBody(BaseModel):
+    entita_tipo: str
+    entita_id: str
+    canale: str  # "email" | "whatsapp"
+    destinatario: Optional[str] = None
+    oggetto: Optional[str] = None
+    corpo: str = ""
+
+
+@router.post("/librerie/comunica/invia")
+async def comunica_invia(body: ComunicaInviaBody, user: dict = Depends(current_user)) -> dict:
+    """Invia realmente Email o WhatsApp al cliente usando i canali configurati."""
+    import uuid as _uuid
+    c = await _resolve_contatti(body.entita_tipo, body.entita_id)
+    canale = (body.canale or "").lower()
+    if not (body.corpo or "").strip():
+        raise HTTPException(400, "Il messaggio è vuoto")
+
+    if canale == "email":
+        dest = (body.destinatario or c.get("email") or "").strip()
+        if not dest or dest == "-":
+            raise HTTPException(400, "Nessuna email del destinatario")
+        from notification_helpers import send_email
+        html = body.corpo if "<" in body.corpo else body.corpo.replace("\n", "<br>")
+        r = await send_email(dest, body.oggetto or "Comunicazione", body.corpo, html=html)
+    elif canale == "whatsapp":
+        dest = (body.destinatario or c.get("cellulare") or "").strip()
+        if not dest or dest == "-":
+            raise HTTPException(400, "Nessun cellulare del destinatario")
+        from notification_helpers import send_whatsapp_message
+        r = await send_whatsapp_message(dest, body.corpo)
+    else:
+        raise HTTPException(400, "Canale non supportato")
+
+    await db.storico_avvisi.insert_one({
+        "id": str(_uuid.uuid4()), "canale": canale,
+        "contraente_id": c.get("cliente_id"), "contraente_nome": c.get("cliente_nome"),
+        "polizza_id": c.get("polizza_id"), "destinatario": dest, "target": dest,
+        "oggetto": body.oggetto, "soggetto": body.oggetto,
+        "messaggio": body.corpo[:4000], "tipo": f"comunica_{canale}",
+        "esito": "inviato" if r.get("ok") else f"errore: {r.get('error')}",
+        "sent_at": _now_iso(), "operatore_id": user.get("id"),
+        "operatore_nome": user.get("name") or user.get("email"),
+    })
+    if not r.get("ok"):
+        raise HTTPException(400, r.get("error") or f"Invio {canale} fallito")
+    await log_attivita(user, f"comunica_{canale}", body.entita_tipo, body.entita_id, dest)
+    return {"ok": True, "canale": canale, "destinatario": dest}

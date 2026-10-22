@@ -32,6 +32,7 @@ import IntestatarioAutocomplete from "@/components/IntestatarioAutocomplete";
 import DocumentiPolizzaTab from "@/components/DocumentiPolizzaTab";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
+import AzioniCliente from "@/components/AzioniCliente";
 import DocumentiSezioneSplit from "@/components/DocumentiSezioneSplit";
 import TagsEditor from "@/components/TagsEditor";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
@@ -376,6 +377,7 @@ export default function PolizzaDetail() {
                         📋 {mupBusy ? "…" : "MUP precontrattuale"}
                     </Button>
                     <GeneraDocumentoButton sezione="polizza" entitaId={id} firmatarioId={pol.contraente_id} onSaved={load} />
+                    <AzioniCliente entitaTipo="polizza" entitaId={id} />
                     {canDelete && (
                         <Button variant="outline" size="sm" onClick={handleDelete}
                                 disabled={haTitoliBloccanti}

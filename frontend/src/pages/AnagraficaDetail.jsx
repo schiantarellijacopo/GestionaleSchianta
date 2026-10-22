@@ -22,6 +22,7 @@ import RowActions, { PrintButton } from "@/components/RowActions";
 import { FirmaButton } from "@/components/DocumentiSezioneSplit";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
+import AzioniCliente from "@/components/AzioniCliente";
 import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
@@ -208,6 +209,10 @@ export default function AnagraficaDetail() {
                     </div>
                 }
             />
+
+            <div className="mb-3 flex justify-end">
+                <AzioniCliente entitaTipo="anagrafica" entitaId={id} />
+            </div>
 
             <TaskCollegati entitaTipo="anagrafica" entitaId={id} />
 

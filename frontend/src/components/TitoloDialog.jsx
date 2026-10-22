@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import ChiusuraGiornoBanner from "@/components/ChiusuraGiornoBanner";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import TagsEditor from "@/components/TagsEditor";
+import AzioniCliente from "@/components/AzioniCliente";
 
 /**
  * Dialog di modifica titolo, condiviso tra pagina Titoli e PolizzaDetail.
@@ -324,6 +325,11 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         Lo stato del titolo si aggiorna automaticamente con incasso / copertura / storno.
                     </p>
                 </DialogHeader>
+                {!titolo._new && titolo.id && (
+                    <div className="flex justify-end -mt-1 mb-1">
+                        <AzioniCliente entitaTipo="titolo" entitaId={titolo.id} />
+                    </div>
+                )}
                 <ChiusuraGiornoBanner data={f.data_incasso} />
                 <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                     <div>
