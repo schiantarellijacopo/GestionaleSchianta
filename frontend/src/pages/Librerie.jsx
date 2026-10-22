@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { api, API_BASE } from "@/lib/api";
 import CompagnieMergeTool from "@/components/CompagnieMergeTool";
-import { PageHeader, Loading, Empty } from "@/components/Shared";
-import { Card } from "@/components/ui/card";
+import { PageHeader, Loading, Empty } from "@/components/Shared";import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +18,7 @@ import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
 import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
+import DocCardsScadenza from "@/components/DocCardsScadenza";
 import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
 
@@ -2883,37 +2883,21 @@ function AziendaSezione() {
 // =================== DOCUMENTI AZIENDA (card) ===================
 function DocumentiAzienda({ documenti, onChange }) {
     const list = documenti || [];
-    const [tipi, setTipi] = useState(["Visura camerale", "Iscrizione RUI/IVASS", "Certificazioni", "Polizza RC professionale", "Documento IBAN", "Altro"]);
-    const [tipologia, setTipologia] = useState("");
-    const [descrizione, setDescrizione] = useState("");
-    const [dataRilascio, setDataRilascio] = useState("");
-    const [dataScadenza, setDataScadenza] = useState("");
-    const [file, setFile] = useState(null);
-    const [fileKey, setFileKey] = useState(0);
+    const AZ_FALLBACK = ["Visura camerale", "Iscrizione RUI/IVASS", "Certificazioni", "Polizza RC professionale", "Documento IBAN", "Altro"];
 
-    useEffect(() => {
-        api.get("/config/card-visibilita")
-            .then((r) => {
-                const lst = (r.data?.azienda || []).map((c) => c.label).filter(Boolean);
-                if (lst.length) setTipi(lst);
-            }).catch(() => {});
-    }, []);
-
-    const aggiungi = async () => {
-        if (!file) { toast.error("Seleziona un file"); return; }
+    const aggiungi = async (tipologia, { file, descrizione, data_rilascio, data_scadenza }) => {
         try {
             const fd = new FormData();
             fd.append("file", file);
             fd.append("tipologia", tipologia || "Altro");
             fd.append("descrizione", descrizione || "");
-            fd.append("data_rilascio", dataRilascio || "");
-            fd.append("data_scadenza", dataScadenza || "");
+            fd.append("data_rilascio", data_rilascio || "");
+            fd.append("data_scadenza", data_scadenza || "");
             const r = await api.post("/librerie/azienda/documenti", fd,
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange([...list, r.data]);
-            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
             toast.success("Documento aggiunto");
-        } catch (e) { toast.error(errMsg(e, "Errore")); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); throw e; }
     };
     const rimuovi = async (id) => {
         if (!window.confirm("Eliminare il documento?")) return;
@@ -2924,56 +2908,19 @@ function DocumentiAzienda({ documenti, onChange }) {
         } catch { toast.error("Errore"); }
     };
 
-    const gruppi = {};
-    list.forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
-    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
-
     return (
         <div className="space-y-3" data-testid="documenti-azienda">
-            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
-                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
-                <div className="grid grid-cols-2 gap-2">
-                    <div>
-                        <Label className="text-xs">Tipologia</Label>
-                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
-                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="azienda-doc-tipologia">
-                            <option value="">— Seleziona —</option>
-                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <Label className="text-xs">Descrizione (facoltativa)</Label>
-                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="azienda-doc-descrizione" />
-                    </div>
-                    <div>
-                        <Label className="text-xs">Data rilascio</Label>
-                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="azienda-doc-data-rilascio" />
-                    </div>
-                    <div>
-                        <Label className="text-xs">Data scadenza</Label>
-                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="azienda-doc-data-scadenza" />
-                    </div>
-                    <div className="col-span-2">
-                        <Label className="text-xs">File (PDF/IMG)</Label>
-                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="azienda-doc-file" />
-                    </div>
-                </div>
-                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="azienda-doc-add-btn">
-                    <Plus size={12} className="mr-1" /> Aggiungi
-                </Button>
-            </div>
-
-            {list.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="azienda-doc-cards">
-                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
-                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi}
-                            avvisoEntita="azienda"
-                            onAvviso={(itemId, patch) => onChange(list.map((x) => x.id === itemId ? { ...x, ...patch } : x))} />
-                    ))}
-                </div>
-            )}
+            <DocCardsScadenza
+                cardKey="azienda"
+                fallbackTipi={AZ_FALLBACK}
+                files={list}
+                onUpload={aggiungi}
+                onDelete={rimuovi}
+                avvisoEntita="azienda"
+                avvisoEntitaId={null}
+                onAvviso={(itemId, patch) => onChange(list.map((x) => x.id === itemId ? { ...x, ...patch } : x))}
+                testidPrefix="azienda-doc"
+            />
         </div>
     );
 }
@@ -3208,22 +3155,6 @@ function docScadenza(dataScadenza) {
 
 function DocumentiCollaboratore({ userId, user, items, onChange }) {
     const list = items || [];
-    const [tipologia, setTipologia] = useState("");
-    const [descrizione, setDescrizione] = useState("");
-    const [dataRilascio, setDataRilascio] = useState("");
-    const [dataScadenza, setDataScadenza] = useState("");
-    const [file, setFile] = useState(null);
-    const [fileKey, setFileKey] = useState(0);
-    const [tipi, setTipi] = useState(DOC_PERSONALI_TIPI);
-
-    // Tipologie documento configurabili dalla libreria "Visibilità documenti"
-    useEffect(() => {
-        api.get("/config/card-visibilita")
-            .then((r) => {
-                const lst = (r.data?.collaboratore || []).map((c) => c.label).filter(Boolean);
-                if (lst.length) setTipi(lst);
-            }).catch(() => {});
-    }, []);
 
     // --- Firma digitale (slot dedicato, usata per la firma dei moduli) ---
     const firmaUpload = async (f) => {
@@ -3245,22 +3176,20 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
         } catch { toast.error("Errore"); }
     };
 
-    // --- Documenti (multi, raggruppati in card per tipologia) ---
-    const aggiungi = async () => {
-        if (!file) { toast.error("Seleziona un file"); return; }
+    // --- Documenti (multi, card per tipologia) ---
+    const aggiungi = async (tipologia, { file, descrizione, data_rilascio, data_scadenza }) => {
         try {
             const fd = new FormData();
             fd.append("file", file);
             fd.append("tipologia", tipologia || "Altro");
             fd.append("descrizione", descrizione || "");
-            fd.append("data_rilascio", dataRilascio || "");
-            fd.append("data_scadenza", dataScadenza || "");
+            fd.append("data_rilascio", data_rilascio || "");
+            fd.append("data_scadenza", data_scadenza || "");
             const r = await api.post(`/auth/users/${userId}/allegati/documenti`, fd,
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange({ documenti_collab: [...list, r.data] });
-            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
             toast.success("Documento aggiunto");
-        } catch (e) { toast.error(errMsg(e, "Errore")); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); throw e; }
     };
     const rimuovi = async (id) => {
         if (!window.confirm("Eliminare il documento?")) return;
@@ -3270,11 +3199,6 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
             toast.success("Eliminato");
         } catch { toast.error("Errore"); }
     };
-
-    // Raggruppa per tipologia mantenendo l'ordine di DOC_PERSONALI_TIPI, poi eventuali tipologie extra
-    const gruppi = {};
-    list.forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
-    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
 
     const firmaUrl = user.firma_digitale_url;
 
@@ -3305,50 +3229,15 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
                 </div>
             </div>
 
-            {/* Aggiungi documento */}
-            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
-                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
-                <div className="grid grid-cols-2 gap-2">
-                    <div>
-                        <Label className="text-xs">Tipologia</Label>
-                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
-                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="doc-add-tipologia">
-                            <option value="">— Seleziona —</option>
-                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <Label className="text-xs">Descrizione (facoltativa)</Label>
-                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="doc-add-descrizione" />
-                    </div>
-                    <div>
-                        <Label className="text-xs">Data rilascio</Label>
-                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="doc-add-data-rilascio" />
-                    </div>
-                    <div>
-                        <Label className="text-xs">Data scadenza</Label>
-                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="doc-add-data-scadenza" />
-                    </div>
-                    <div className="col-span-2">
-                        <Label className="text-xs">File (PDF/IMG)</Label>
-                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="doc-add-file" />
-                    </div>
-                </div>
-                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="doc-add-btn">
-                    <Plus size={12} className="mr-1" /> Aggiungi
-                </Button>
-            </div>
-
-            {/* Card raggruppate per tipologia */}
-            {list.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="doc-cards">
-                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
-                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
-                    ))}
-                </div>
-            )}
+            {/* Card documenti per tipologia */}
+            <DocCardsScadenza
+                cardKey="collaboratore"
+                fallbackTipi={DOC_PERSONALI_TIPI}
+                files={list}
+                onUpload={aggiungi}
+                onDelete={rimuovi}
+                testidPrefix="doc"
+            />
         </div>
     );
 }

@@ -10225,13 +10225,18 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
         saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare + saldo_iniziale
         saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute + pnc_versate - setup_avere - direzione_provv
         # Mostriamo TUTTE le compagnie attive, anche senza movimenti (saldo 0,00).
+        # Mandato "collaborazione" se c'è QUALSIASI agenzia partner collegata
+        # (robusto verso record con tipo_mandato incoerente/mancante ma partner impostato).
+        _pids = c.get("agenzie_partner_ids") or ([c["agenzia_partner_id"]] if c.get("agenzia_partner_id") else [])
+        _is_coll = c.get("tipo_mandato") == "collaborazione" or bool(_pids)
+        _pnomi = [age_map.get(p) for p in _pids if age_map.get(p)]
         out.append({
             "compagnia_id": cid,
             "compagnia": c["ragione_sociale"],
             "trattiene_provvigioni": trattiene,
-            "tipo_mandato": c.get("tipo_mandato", "diretto"),
-            "agenzia_partner_id": c.get("agenzia_partner_id") if c.get("tipo_mandato") == "collaborazione" else None,
-            "agenzia_partner_nome": age_map.get(c.get("agenzia_partner_id")) if c.get("tipo_mandato") == "collaborazione" else None,
+            "tipo_mandato": "collaborazione" if _is_coll else "diretto",
+            "agenzia_partner_id": _pids[0] if _pids else None,
+            "agenzia_partner_nome": (", ".join(_pnomi) if _pnomi else None) if _is_coll else None,
             "incassi_lordi": round(incassi, 2),
             "provvigioni": round(provv, 2),
             "saldo_dovuto": round(saldo_dovuto, 2),
