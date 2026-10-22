@@ -1,0 +1,41 @@
+{
+  "summary": "Test FRONTEND (Playwright, admin) di: Documenti Compagnie + Attiva avviso, regola Alert 'Avviso scadenza documento aziendale', pannelli Visibilità documenti (compagnia, collaboratore, agenzia_partner, azienda), avvisi su Documenti Azienda e Agenzie partner. Tutti i flussi richiesti funzionano DOPO un fix in Compagnie.jsx: il dialog 'Modifica compagnia' apriva con TUTTI i campi vuoti (codice/ragione sociale) e 'Aggiorna' falliva con 'Codice e ragione sociale obbligatori'; inoltre riaprendo il dialog senza ricaricare la pagina i documenti appena caricati sparivano. Tutti i dati di test sono stati rimossi e la configurazione visibilità è identica a quella di partenza (verificato con un confronto JSON).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/documenti/avviso -> _ensure_regola_avviso_documenti", "issue": "Se la regola documento_aziendale_scaduto esiste ma è stata DISATTIVATA, attivare un avviso NON la riattiva (riprodotto: regola messa su off, PUT avviso attivo=true -> regola resta attivo=False). La richiesta era 'crea/attiva automaticamente'. Correzione: se existing e attivo=False -> update_one {$set:{attivo:True}}. (Regola ripristinata ad attiva dopo il test.)"},
+      {"endpoint": "PUT /api/documenti/avviso", "issue": "Con item_id inesistente risponde 200 ok (matched_count conta il documento padre, non l'elemento dell'array). Usare modified_count oppure filtrare per {'id': entita_id, 'documenti.id': item_id} per restituire 404."},
+      {"endpoint": "GET /api/config/card-visibilita", "issue": "Latenza intermittente: una chiamata ha impiegato 36s e il pannello è rimasto su 'Caricamento…' più di 10s; un altro caricamento 6s; le chiamate successive circa 0,13s. Probabile event loop bloccato da un job di background (finalizza_pending / scheduler). Instabile."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Compagnie.jsx CompagniaDialog", "issue": "CORRETTO DAL TESTING AGENT. CompagniaDialog resta montato dentro <Dialog>, quindi useState(() => editing...) veniva inizializzato una volta sola (editing=null): in modifica tutti i campi erano vuoti e 'Aggiorna' falliva con 'Codice e ragione sociale obbligatori'. Inoltre chiudendo con X/Esc non veniva chiamato load(), quindi riaprendo si vedevano editing.documenti vecchi e i documenti appena caricati sembravano spariti. Fix: key={open ? (editing?.id || 'new') : 'closed'} su CompagniaDialog + load() in onOpenChange alla chiusura.", "selector": "[data-testid=comp-edit-*], [data-testid=comp-codice-input]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog Compagnie (subito dopo il reload)", "issues": ["Se il dialog viene aperto prima che /api/agenzie risponda, la sezione partner mostra 'Nessuna agenzia partner configurata.' anche se la compagnia è in collaborazione (race condition minore)."]},
+      {"screen": "Campi data documenti (Compagnie/Agenzie/Azienda)", "issues": ["Usano <input type=date> nativo del browser (mm/dd/yyyy) invece del calendario shadcn: non coerente con la localizzazione italiana."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Rivedere/mantenere il fix di Compagnie.jsx (key su CompagniaDialog + load() alla chiusura); valutare lo stesso schema per altri dialog che inizializzano lo stato da props con useState.",
+    "_ensure_regola_avviso_documenti: riattivare la regola esistente se attivo=False.",
+    "PUT /documenti/avviso: restituire 404 se item_id non esiste nell'array documenti.",
+    "Indagare la latenza intermittente (6-36s) su GET /config/card-visibilita, probabilmente codice sincrono/bloccante nei job dello scheduler."
+  ],
+  "critical_code_review_comments": [
+    "Compagnie.jsx: stato del form derivato dalle props in un componente che non si smonta (bug descritto sopra, corretto).",
+    "server.py _ensure_regola_avviso_documenti: find_one senza filtro per tenant; va bene solo se db è già con scope per tenant, verificare per il multi-tenant.",
+    "AvvisoScadenzaControl: il valore dei giorni viene limitato tra 1 e 365 in silenzio (999 diventa 365) senza avvisare l'utente; meglio mostrare un messaggio di validazione.",
+    "server.py ha oltre 19.000 righe e Librerie.jsx oltre 6.800: vanno divisi in moduli."
+  ],
+  "updated_files": ["/app/frontend/src/pages/Compagnie.jsx"],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100% dopo il fix (prima del fix: modifica/salvataggio compagnia non funzionante)"},
+  "seed_data_creation": "Nessuno persistente. Creati e poi eliminati: documento compagnia su TEST_Compagnia QA (c097448b...), documento azienda, documento su Agenzia giorgia (be213cde...), card custom TEST_Card in 4 entità. Configurazione visibilità ripristinata identica.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regola alert id 7df9e4bd-02bd-49cf-b7e2-1da86dff8f4e (schedule_kind documento_aziendale_scaduto) è attiva. Orologio del container circa ottobre 2026: le date di scadenza devono essere successive. Testid: compagnia -> comp-doc-*, agenzia -> age-doc-*, azienda -> doc-item/doc-scadenza/doc-del + azienda-doc-*; avviso-attiva/badge/edit/giorni/save/off/cancel-{itemId}. Le chiavi delle card visibilità contengono spazi e '/' (es. vis-toggle-compagnia-Convenzione / Mandato).",
+  "test_credentials": "admin@assicura.it / Admin123! (da /app/memory/test_credentials.md)"
+}

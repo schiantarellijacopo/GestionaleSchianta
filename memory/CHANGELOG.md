@@ -1,6 +1,27 @@
 # Changelog — Axicura CRM
 
 
+## 2026-10-22 — Documenti Compagnie + Avvisi scadenza documentali (app+email) + verifica Visibilità
+### 1) Documenti Compagnie (come Azienda)
+- `backend/db_models.py` `Compagnia`: aggiunto campo `documenti: list = []`.
+- `backend/server.py`: nuovi endpoint `POST /api/compagnie/{cid}/documenti` (upload multiplo per tipologia su object storage, max 10MB) e `DELETE /api/compagnie/{cid}/documenti/{item_id}`. `PUT /api/compagnie/{cid}` ora fa `pop('documenti')` per non sovrascrivere i documenti col salvataggio del form.
+- `backend/server.py` CARD_DEFS: aggiunta entità `compagnia` (Convenzione/Mandato, Accordo provvigionale, Circolari, Listini, Altro) → appare nel pannello Librerie → Visibilità documenti.
+- `frontend/src/pages/Compagnie.jsx`: sezione "Documenti" (`comp-documenti-sezione`) nel dialog modifica (DocumentiCompagnia + CompDocFolderCard): upload multiplo, tipologia, descrizione, date rilascio/scadenza, eliminazione. In creazione mostra hint (`comp-documenti-hint`). Fix stato dialog: `key` su CompagniaDialog + `load()` alla chiusura.
+- `frontend/src/pages/Librerie.jsx`: `compagnia` aggiunta a `ENTITA_LABEL`, `ENTITA_ORDINE` e stato newCard.
+
+### 2) Avvisi scadenza documentali (opt-in per singolo documento, app + email)
+- `frontend/src/components/AvvisoScadenzaControl.jsx` (nuovo): pulsante "Attiva avviso" su ogni documento con `data_scadenza`; giorni di preavviso configurabili (default 15, range 1-365). Usato in Compagnie, Agenzie partner e Azienda.
+- `backend/server.py` `PUT /api/documenti/avviso`: persiste `avviso_attivo`/`avviso_giorni` sul documento (entità compagnia | agenzia_partner | azienda); 404 se item inesistente; all'attivazione crea/riattiva automaticamente la regola alert `documento_aziendale_scaduto` (`_ensure_regola_avviso_documenti`).
+- `backend/alert_models.py`: nuovo `schedule_kind` `documento_aziendale_scaduto`.
+- `backend/alert_presets.py`: nuovo preset template "Avviso scadenza documento aziendale" (canali app+email).
+- `backend/scheduler_alert.py`: resolver `_res_documenti_aziendali_in_scadenza` → rileva i documenti con avviso attivo la cui scadenza cade ESATTAMENTE tra `avviso_giorni` giorni (preavviso per-documento, fallback al default della regola). Verificato: match a 15gg, nessun match a 3gg.
+
+### 3) Verifica Visibilità documenti (end-to-end)
+- Pannelli Visibilità per collaboratore, agenzia_partner, azienda e compagnia verificati via testing agent (toggle visibile/interno, obbligatoria, card custom, salvataggio + persistenza). 100% dopo fix Compagnie.jsx.
+
+Note: nessuna email reale inviata nei test; tutti i dati di test rimossi.
+
+
 ## 2026-06 — Portale Cliente: isolamento multi-tenant del login (P0 sicurezza)
 Problema: il login del portale cercava l'anagrafica globalmente per email+CF e prendeva la PRIMA corrispondenza, il token non salvava il tenant (leggeva `tenant_id` inesistente invece di `agenzia_tenant_id`) e nessuna query filtrava per tenant. Un cliente presente in più agenzie poteva vedere le polizze dell'agenzia sbagliata.
 - `backend/portale_cliente.py`:

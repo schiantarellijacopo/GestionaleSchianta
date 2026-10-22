@@ -15244,14 +15244,17 @@ async def set_documento_avviso(body: dict, user=Depends(require_user("admin"))):
     }
     af = [{"d.id": item_id}]
     if entita == "compagnia":
-        res = await db.compagnie.update_one({"id": body.get("entita_id")}, {"$set": set_fields}, array_filters=af)
+        flt = {"id": body.get("entita_id"), "documenti.id": item_id}
+        res = await db.compagnie.update_one(flt, {"$set": set_fields}, array_filters=af)
     elif entita == "agenzia_partner":
-        res = await db.agenzie.update_one({"id": body.get("entita_id")}, {"$set": set_fields}, array_filters=af)
+        flt = {"id": body.get("entita_id"), "documenti.id": item_id}
+        res = await db.agenzie.update_one(flt, {"$set": set_fields}, array_filters=af)
     elif entita == "azienda":
         az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1})
         if not az:
             raise HTTPException(404, "Config azienda non trovata")
-        res = await db.azienda_config.update_one({"id": az["id"]}, {"$set": set_fields}, array_filters=af)
+        flt = {"id": az["id"], "documenti.id": item_id}
+        res = await db.azienda_config.update_one(flt, {"$set": set_fields}, array_filters=af)
     else:
         raise HTTPException(400, "Entità non supportata")
     if res.matched_count == 0:
@@ -15269,8 +15272,10 @@ async def _ensure_regola_avviso_documenti():
     """Crea (una volta) una regola attiva dal preset `documento_aziendale_scaduto`
     nel tenant corrente, così l'avviso è operativo senza passaggi manuali."""
     existing = await db.alert_rules.find_one(
-        {"schedule_kind": "documento_aziendale_scaduto"}, {"_id": 0, "id": 1})
+        {"schedule_kind": "documento_aziendale_scaduto"}, {"_id": 0, "id": 1, "attivo": 1})
     if existing:
+        if not existing.get("attivo"):
+            await db.alert_rules.update_one({"id": existing["id"]}, {"$set": {"attivo": True}})
         return
     from alert_presets import PRESETS
     from alert_models import AlertRule

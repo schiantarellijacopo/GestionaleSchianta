@@ -36,13 +36,13 @@ export default function Compagnie() {
                 title="Compagnie assicurative"
                 subtitle="Anagrafica compagnie · tipo mandato · agenzia partner"
                 actions={
-                    <Dialog open={open} onOpenChange={(o) => { if (!o) setEditing(null); setOpen(o); }}>
+                    <Dialog open={open} onOpenChange={(o) => { if (!o) { setEditing(null); load(); } setOpen(o); }}>
                         <DialogTrigger asChild>
                             <Button onClick={() => setEditing(null)} data-testid="comp-new-button" className="bg-sky-700 hover:bg-sky-800">
                                 <Plus size={16} className="mr-1" /> Nuova compagnia
                             </Button>
                         </DialogTrigger>
-                        <CompagniaDialog editing={editing} agenzie={agenzie}
+                        <CompagniaDialog key={open ? (editing?.id || "new") : "closed"} editing={editing} agenzie={agenzie}
                             onClose={() => { setOpen(false); setEditing(null); load(); }} />
                     </Dialog>
                 }

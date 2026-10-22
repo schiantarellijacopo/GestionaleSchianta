@@ -1,4 +1,6 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
+# STATO 2026-10-22 — Documenti Compagnie + Avvisi scadenza documentali (app+email) + verifica Visibilità: COMPLETATI e testati (vedi CHANGELOG.md). Avviso opt-in per singolo documento (compagnia/agenzia_partner/azienda), giorni configurabili (default 15), regola alert `documento_aziendale_scaduto` auto-creata/riattivata.
+
 # CHANGELOG 2026-10-14 — Sostituzione polizza automatica (flusso OCR email)
 - Quando l'OCR crea una NUOVA polizza con "Sostituisce polizza" = numero di una polizza
   esistente, `_applica_sostituzione` (routes/polizze_email.py):
