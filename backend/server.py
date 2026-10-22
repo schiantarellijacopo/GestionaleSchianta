@@ -15038,6 +15038,8 @@ async def upload_allegato_utente(
     anno: str = Form(""),
     data_sottoscrizione: str = Form(""),
     data_cessazione: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
     user=Depends(require_user("admin")),
 ):
     """Aggiunge un allegato (contratto / dichiarazione / certificato) al collaboratore."""
@@ -15071,6 +15073,8 @@ async def upload_allegato_utente(
         "anno": anno or None,
         "data_sottoscrizione": data_sottoscrizione or None,
         "data_cessazione": data_cessazione or None,
+        "data_rilascio": data_rilascio or None,
+        "data_scadenza": data_scadenza or None,
         "created_at": _now_iso(),
     }
     field = f"{categoria}_collab"
@@ -15086,6 +15090,58 @@ async def elimina_allegato_utente(uid: str, categoria: str, item_id: str,
         raise HTTPException(400, "Categoria non valida")
     field = f"{categoria}_collab"
     await db.users.update_one({"id": uid}, {"$pull": {field: {"id": item_id}}})
+    return {"ok": True}
+
+
+# =============== DOCUMENTI AGENZIE PARTNER (card) ===============
+@api.post("/agenzie/{aid}/documenti")
+async def upload_documento_agenzia(
+    aid: str,
+    file: UploadFile = File(None),
+    tipologia: str = Form(""),
+    descrizione: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
+    user=Depends(require_user("admin")),
+):
+    """Aggiunge un documento (card) a un'agenzia partner. Più documenti per tipologia."""
+    target = await db.agenzie.find_one({"id": aid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Agenzia non trovata")
+    url = None
+    nome_file = None
+    if file is not None:
+        content = await file.read()
+        if content:
+            if len(content) > 10 * 1024 * 1024:
+                raise HTTPException(400, "File troppo grande (max 10 MB)")
+            ct = file.content_type or obj_storage.mime_for(file.filename or "")
+            ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+            path = f"{os.environ.get('APP_NAME', 'assicura')}/agenzie/{aid}/doc_{_uid()}.{ext}"
+            try:
+                result = obj_storage.put_object(path, content, ct)
+            except Exception as e:
+                raise HTTPException(503, f"Errore upload: {e}")
+            url = f"/api/storage/{result['path']}"
+            nome_file = file.filename
+    item = {
+        "id": _uid(),
+        "url": url,
+        "nome_file": nome_file,
+        "tipologia": tipologia or "Altro",
+        "descrizione": descrizione or None,
+        "data_rilascio": data_rilascio or None,
+        "data_scadenza": data_scadenza or None,
+        "created_at": _now_iso(),
+    }
+    await db.agenzie.update_one({"id": aid}, {"$push": {"documenti": item}, "$set": {"updated_at": _now_iso()}})
+    return item
+
+
+@api.delete("/agenzie/{aid}/documenti/{item_id}")
+async def elimina_documento_agenzia(aid: str, item_id: str,
+                                     user=Depends(require_user("admin"))):
+    await db.agenzie.update_one({"id": aid}, {"$pull": {"documenti": {"id": item_id}}})
     return {"ok": True}
 
 
@@ -15293,6 +15349,26 @@ CARD_DEFS = {
         {"key": "fattura", "label": "Fattura", "default": True, "icon": "🧾"},
         {"key": "denuncia", "label": "Denuncia", "default": True, "icon": "📋"},
         {"key": "altri", "label": "Documenti altri", "default": False, "icon": "📎"},
+    ],
+    # Documenti personali dei collaboratori (sezione Librerie → Utenti).
+    # `visibile_cliente` non è rilevante qui (documenti interni): si usa per
+    # icona/obbligatorietà/ordine e per aggiungere tipologie personalizzate.
+    "collaboratore": [
+        {"key": "Carta d'identità", "label": "Carta d'identità", "default": False, "icon": "🪪"},
+        {"key": "Codice fiscale", "label": "Codice fiscale", "default": False, "icon": "🧾"},
+        {"key": "Casellario giudiziale", "label": "Casellario giudiziale", "default": False, "icon": "⚖️"},
+        {"key": "Carichi pendenti", "label": "Carichi pendenti", "default": False, "icon": "📋"},
+        {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
+        {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
+    ],
+    # Documenti delle agenzie partner (sezione Agenzie).
+    "agenzia_partner": [
+        {"key": "Contratto di mandato", "label": "Contratto di mandato", "default": False, "icon": "📝"},
+        {"key": "Lettera di incarico", "label": "Lettera di incarico", "default": False, "icon": "✉️"},
+        {"key": "Visura camerale", "label": "Visura camerale", "default": False, "icon": "🏢"},
+        {"key": "Iscrizione RUI/IVASS", "label": "Iscrizione RUI/IVASS", "default": False, "icon": "🪪"},
+        {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
+        {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
     ],
 }
 

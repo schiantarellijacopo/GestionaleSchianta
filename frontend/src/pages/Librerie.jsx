@@ -86,7 +86,11 @@ function errMsg(e, fallback = "Errore") {
     return e?.message || fallback;
 }
 
-const ENTITA_LABEL = { anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri" };
+const ENTITA_LABEL = {
+    anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri",
+    collaboratore: "Utenti / Collaboratori", agenzia_partner: "Agenzie partner",
+};
+const ENTITA_ORDINE = ["anagrafica", "polizza", "sinistro", "collaboratore", "agenzia_partner"];
 
 function VisibilitaDocCard({ ent, c, onToggleVis, onToggleObbl, onIcon, onDel }) {
     const dragControls = useDragControls();
@@ -136,6 +140,8 @@ function VisibilitaDocSezione() {
         anagrafica: { label: "", icon: "🗂️", obbligatoria: false },
         polizza: { label: "", icon: "🗂️", obbligatoria: false },
         sinistro: { label: "", icon: "🗂️", obbligatoria: false },
+        collaboratore: { label: "", icon: "🗂️", obbligatoria: false },
+        agenzia_partner: { label: "", icon: "🗂️", obbligatoria: false },
     });
 
     const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
@@ -205,10 +211,10 @@ function VisibilitaDocSezione() {
                 <strong>Card documenti.</strong> Per ogni card scegli <strong>icona</strong>, se è <strong>visibile al cliente</strong> di default,
                 e se è <strong>obbligatoria</strong> (<AlertTriangle size={11} className="inline text-rose-600" />): le card obbligatorie senza documenti vengono
                 evidenziate in rosso nei dettagli. Trascina (<GripVertical size={11} className="inline" />) per riordinarle. Le card personalizzate compaiono
-                automaticamente nei dettagli di Anagrafiche, Polizze e Sinistri.
+                automaticamente nei dettagli di Anagrafiche, Polizze, Sinistri, nei documenti dei Collaboratori e delle Agenzie partner.
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {["anagrafica", "polizza", "sinistro"].map((ent) => (
+                {ENTITA_ORDINE.filter((ent) => cfg[ent]).map((ent) => (
                     <Card key={ent} className="p-4" data-testid={`vis-panel-${ent}`}>
                         <div className="font-semibold text-sm text-slate-800 mb-3">{ENTITA_LABEL[ent]}</div>
                         <Reorder.Group axis="y" values={cfg[ent] || []} onReorder={(l) => reorder(ent, l)} className="space-y-1.5">
@@ -1421,7 +1427,7 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
     };
     return (
         <table className="tbl w-full">
-            <thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Anagrafica collegata</th><th></th></tr></thead>
+            <thead><tr><th>Nome</th><th>Email</th><th>Ruolo</th><th>Documenti</th><th>Anagrafica collegata</th><th></th></tr></thead>
             <tbody>
                 {list.map((u) => (
                     <tr key={u.id} className={u.attivo === false ? "opacity-60" : ""}>
@@ -1440,6 +1446,20 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
                         <td><span className={`badge ${ROLE_COLORS[u.role] || "badge-neutral"} inline-flex items-center gap-1`}>
                             <Shield size={10} /> {u.role}
                         </span></td>
+                        <td>
+                            {u.role === "cliente" ? (
+                                <span className="text-slate-300">—</span>
+                            ) : docMancanti(u).length > 0 ? (
+                                <span className="badge badge-warning inline-flex items-center gap-1 text-[10px]"
+                                    title={`Mancano: ${docMancanti(u).join(", ")}`} data-testid={`utente-doc-mancanti-${u.id}`}>
+                                    <AlertTriangle size={10} /> {docMancanti(u).length === DOC_OBBLIGATORI.length ? "Doc. mancanti" : `Manca ${docMancanti(u).join(", ")}`}
+                                </span>
+                            ) : (
+                                <span className="badge badge-success inline-flex items-center gap-1 text-[10px]" data-testid={`utente-doc-ok-${u.id}`}>
+                                    <CheckCircle2 size={10} /> Completi
+                                </span>
+                            )}
+                        </td>
                         <td className="text-xs text-slate-500 num">{u.anagrafica_id ? u.anagrafica_id.slice(0, 8) : "-"}</td>
                         <td className="text-right">
                             <RowActions
@@ -3044,12 +3064,46 @@ const DOC_PERSONALI_TIPI = [
     "Carichi pendenti", "Documento IBAN", "Altro",
 ];
 
+// Documenti obbligatori segnalati nella lista utenti
+const DOC_OBBLIGATORI = ["Carta d'identità", "Casellario giudiziale"];
+
+function docMancanti(user) {
+    if (!user || user.role === "cliente") return [];
+    const presenti = new Set((user.documenti_collab || []).map((d) => d.tipologia));
+    return DOC_OBBLIGATORI.filter((t) => !presenti.has(t));
+}
+
+// Stato scadenza documento: {label, cls} oppure null
+function docScadenza(dataScadenza) {
+    if (!dataScadenza) return null;
+    const d = new Date(dataScadenza + "T00:00:00");
+    if (isNaN(d)) return null;
+    const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+    const giorni = Math.round((d - oggi) / 86400000);
+    const dmt = d.toLocaleDateString("it-IT");
+    if (giorni < 0) return { label: `Scaduto il ${dmt}`, cls: "bg-red-100 text-red-700" };
+    if (giorni <= 30) return { label: `In scadenza (${dmt})`, cls: "bg-amber-100 text-amber-700" };
+    return { label: `Scade il ${dmt}`, cls: "bg-slate-100 text-slate-600" };
+}
+
 function DocumentiCollaboratore({ userId, user, items, onChange }) {
     const list = items || [];
     const [tipologia, setTipologia] = useState("");
     const [descrizione, setDescrizione] = useState("");
+    const [dataRilascio, setDataRilascio] = useState("");
+    const [dataScadenza, setDataScadenza] = useState("");
     const [file, setFile] = useState(null);
     const [fileKey, setFileKey] = useState(0);
+    const [tipi, setTipi] = useState(DOC_PERSONALI_TIPI);
+
+    // Tipologie documento configurabili dalla libreria "Visibilità documenti"
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => {
+                const lst = (r.data?.collaboratore || []).map((c) => c.label).filter(Boolean);
+                if (lst.length) setTipi(lst);
+            }).catch(() => {});
+    }, []);
 
     // --- Firma digitale (slot dedicato, usata per la firma dei moduli) ---
     const firmaUpload = async (f) => {
@@ -3079,10 +3133,12 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
             fd.append("file", file);
             fd.append("tipologia", tipologia || "Altro");
             fd.append("descrizione", descrizione || "");
+            fd.append("data_rilascio", dataRilascio || "");
+            fd.append("data_scadenza", dataScadenza || "");
             const r = await api.post(`/auth/users/${userId}/allegati/documenti`, fd,
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange({ documenti_collab: [...list, r.data] });
-            setTipologia(""); setDescrizione(""); setFile(null); setFileKey((k) => k + 1);
+            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
             toast.success("Documento aggiunto");
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
@@ -3098,7 +3154,7 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
     // Raggruppa per tipologia mantenendo l'ordine di DOC_PERSONALI_TIPI, poi eventuali tipologie extra
     const gruppi = {};
     list.forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
-    const ordine = [...DOC_PERSONALI_TIPI, ...Object.keys(gruppi).filter((k) => !DOC_PERSONALI_TIPI.includes(k))];
+    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
 
     const firmaUrl = user.firma_digitale_url;
 
@@ -3138,12 +3194,20 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
                         <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
                             className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="doc-add-tipologia">
                             <option value="">— Seleziona —</option>
-                            {DOC_PERSONALI_TIPI.map((t) => <option key={t} value={t}>{t}</option>)}
+                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                     </div>
                     <div>
                         <Label className="text-xs">Descrizione (facoltativa)</Label>
                         <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="doc-add-descrizione" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data rilascio</Label>
+                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="doc-add-data-rilascio" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data scadenza</Label>
+                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="doc-add-data-scadenza" />
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">File (PDF/IMG)</Label>
@@ -3183,7 +3247,9 @@ function DocFolderCard({ tipologia, files, onDelete }) {
             </button>
             {open && (
                 <ul className="divide-y divide-slate-100 px-3">
-                    {files.map((a) => (
+                    {files.map((a) => {
+                        const sc = docScadenza(a.data_scadenza);
+                        return (
                         <li key={a.id} className="py-2.5 flex items-center gap-3" data-testid={`doc-item-${a.id}`}>
                             <Paperclip size={15} className="text-slate-400 shrink-0" />
                             <div className="flex-1 min-w-0">
@@ -3193,12 +3259,17 @@ function DocFolderCard({ tipologia, files, onDelete }) {
                                     <span className="text-sm text-slate-700 truncate block">{a.nome_file || "—"}</span>
                                 )}
                                 {a.descrizione && <div className="text-[11px] text-slate-500 truncate">{a.descrizione}</div>}
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    {a.data_rilascio && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Rilascio: {new Date(a.data_rilascio + "T00:00:00").toLocaleDateString("it-IT")}</span>}
+                                    {sc && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sc.cls}`} data-testid={`doc-scadenza-${a.id}`}>{sc.label}</span>}
+                                </div>
                             </div>
                             <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`doc-del-${a.id}`}>
                                 <Trash2 size={13} />
                             </button>
                         </li>
-                    ))}
+                        );
+                    })}
                 </ul>
             )}
         </div>

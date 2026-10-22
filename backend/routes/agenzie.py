@@ -39,6 +39,11 @@ class AgenziaBody(BaseModel):
     iban: Optional[str] = None
     note: Optional[str] = None
     attiva: bool = True
+    # Dati del mandato (agenzia partner)
+    tipo_rapporto: Optional[str] = None  # mandato_diretto | lettera_incarico | collaborazione_orizzontale | mandato_non_assicurativo | ""
+    autorizzato_incasso: Optional[str] = None  # "si" | "no" | None
+    denominazione_sociale: Optional[str] = None
+    rui_ivass: Optional[str] = None
     # Ritenuta d'acconto applicata alle fatture provvigioni dell'agenzia
     # (es. 20% per professionisti, 23% per società di intermediazione).
     perc_ritenuta_acconto: float = 0

@@ -16,8 +16,15 @@ import {
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Building2, Edit, Trash2, Crown, Handshake, Link2 } from "lucide-react";
+import { Plus, Building2, Edit, Trash2, Crown, Handshake, Link2, Upload, FileText, Paperclip } from "lucide-react";
 import { toast } from "sonner";
+
+const RAPPORTO_LABEL = {
+    mandato_diretto: "Mandato diretto",
+    lettera_incarico: "Lettera di incarico",
+    collaborazione_orizzontale: "Collaborazione orizzontale",
+    mandato_non_assicurativo: "Mandato non assicurativo",
+};
 
 export default function Agenzie() {
     const [list, setList] = useState(null);
@@ -125,6 +132,12 @@ function AgenziaCard({ a, onEdit, onDelete, testid }) {
                 {a.telefono && <div className="font-mono">{a.telefono}</div>}
                 {a.citta && <div>{a.citta} {a.provincia ? `(${a.provincia})` : ""}</div>}
                 {a.partita_iva && <div>P.IVA: <span className="font-mono">{a.partita_iva}</span></div>}
+                {a.tipo_rapporto && <div>Rapporto: <span className="font-medium">{RAPPORTO_LABEL[a.tipo_rapporto] || a.tipo_rapporto}</span></div>}
+                {a.autorizzato_incasso && <div>Autorizzato incasso: <span className="font-medium">{a.autorizzato_incasso === "si" ? "Sì" : "No"}</span></div>}
+                {a.rui_ivass && <div>RUI/IVASS: <span className="font-mono">{a.rui_ivass}</span></div>}
+                {(a.documenti || []).length > 0 && (
+                    <div className="flex items-center gap-1 text-slate-500"><FileText size={12} /> {a.documenti.length} documenti</div>
+                )}
                 {a.perc_ritenuta_acconto > 0 && (
                     <div className="text-rose-700 font-medium">Ritenuta acconto: {a.perc_ritenuta_acconto}%</div>
                 )}
@@ -332,6 +345,38 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     <Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
                 <div className="col-span-2"><Label>Note</Label>
                     <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+
+                {/* Dati del mandato */}
+                <div className="col-span-2 pt-1 mt-1 border-t border-slate-100">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Dati del mandato</div>
+                </div>
+                <div>
+                    <Label>Tipo di rapporto</Label>
+                    <Select value={f.tipo_rapporto || ""} onValueChange={(v) => set("tipo_rapporto", v)}>
+                        <SelectTrigger data-testid="age-tipo-rapporto"><SelectValue placeholder="— Seleziona —" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="mandato_diretto">Mandato diretto</SelectItem>
+                            <SelectItem value="lettera_incarico">Lettera di incarico</SelectItem>
+                            <SelectItem value="collaborazione_orizzontale">Collaborazione orizzontale</SelectItem>
+                            <SelectItem value="mandato_non_assicurativo">Mandato non assicurativo</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label>Autorizzato all'incasso?</Label>
+                    <Select value={f.autorizzato_incasso || ""} onValueChange={(v) => set("autorizzato_incasso", v)}>
+                        <SelectTrigger data-testid="age-autorizzato-incasso"><SelectValue placeholder="— Seleziona —" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="si">Sì</SelectItem>
+                            <SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div><Label>Denominazione sociale</Label>
+                    <Input value={f.denominazione_sociale || ""} onChange={(e) => set("denominazione_sociale", e.target.value)} data-testid="age-denominazione" /></div>
+                <div><Label>Numero iscrizione RUI / IVASS</Label>
+                    <Input value={f.rui_ivass || ""} onChange={(e) => set("rui_ivass", e.target.value)} data-testid="age-rui-ivass" /></div>
+
                 <div>
                     <Label className="text-rose-700">Ritenuta d'acconto % (auto su fatture)</Label>
                     <Input type="number" step="0.01" min="0" max="100"
@@ -370,11 +415,179 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     </div>
                 )}
             </div>
+            {editing?.id ? (
+                <div className="border-t border-slate-100 pt-3 mt-1" data-testid="age-documenti-sezione">
+                    <div className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
+                        <FileText size={14} className="text-slate-500" /> Documenti
+                    </div>
+                    <DocumentiAgenzia aid={editing.id} iniziali={editing.documenti || []} />
+                </div>
+            ) : (
+                <div className="border-t border-slate-100 pt-3 mt-1 text-xs text-slate-400" data-testid="age-documenti-hint">
+                    Salva l'agenzia per poter caricare i documenti.
+                </div>
+            )}
             <DialogFooter>
                 <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="age-save">
                     {editing?.id ? "Aggiorna" : "Crea"}
                 </Button>
             </DialogFooter>
         </DialogContent>
+    );
+}
+
+// =================== DOCUMENTI AGENZIA (card) ===================
+const AGE_DOC_TIPI_FALLBACK = [
+    "Contratto di mandato", "Lettera di incarico", "Visura camerale",
+    "Iscrizione RUI/IVASS", "Documento IBAN", "Altro",
+];
+
+function ageDocScadenza(dataScadenza) {
+    if (!dataScadenza) return null;
+    const d = new Date(dataScadenza + "T00:00:00");
+    if (isNaN(d)) return null;
+    const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+    const giorni = Math.round((d - oggi) / 86400000);
+    const dmt = d.toLocaleDateString("it-IT");
+    if (giorni < 0) return { label: `Scaduto il ${dmt}`, cls: "bg-red-100 text-red-700" };
+    if (giorni <= 30) return { label: `In scadenza (${dmt})`, cls: "bg-amber-100 text-amber-700" };
+    return { label: `Scade il ${dmt}`, cls: "bg-slate-100 text-slate-600" };
+}
+
+function DocumentiAgenzia({ aid, iniziali }) {
+    const [list, setList] = useState(iniziali || []);
+    const [tipi, setTipi] = useState(AGE_DOC_TIPI_FALLBACK);
+    const [tipologia, setTipologia] = useState("");
+    const [descrizione, setDescrizione] = useState("");
+    const [dataRilascio, setDataRilascio] = useState("");
+    const [dataScadenza, setDataScadenza] = useState("");
+    const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
+
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => {
+                const lst = (r.data?.agenzia_partner || []).map((c) => c.label).filter(Boolean);
+                if (lst.length) setTipi(lst);
+            }).catch(() => {});
+    }, []);
+
+    const aggiungi = async () => {
+        if (!file) { toast.error("Seleziona un file"); return; }
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("tipologia", tipologia || "Altro");
+            fd.append("descrizione", descrizione || "");
+            fd.append("data_rilascio", dataRilascio || "");
+            fd.append("data_scadenza", dataScadenza || "");
+            const r = await api.post(`/agenzie/${aid}/documenti`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            setList((p) => [...p, r.data]);
+            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
+            toast.success("Documento aggiunto");
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/agenzie/${aid}/documenti/${id}`);
+            setList((p) => p.filter((x) => x.id !== id));
+            toast.success("Eliminato");
+        } catch { toast.error("Errore"); }
+    };
+
+    const gruppi = {};
+    (list || []).forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
+    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
+
+    return (
+        <div className="space-y-3" data-testid="documenti-agenzia">
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <Label className="text-xs">Tipologia</Label>
+                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
+                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="age-doc-tipologia">
+                            <option value="">— Seleziona —</option>
+                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <Label className="text-xs">Descrizione (facoltativa)</Label>
+                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="age-doc-descrizione" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data rilascio</Label>
+                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="age-doc-data-rilascio" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data scadenza</Label>
+                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="age-doc-data-scadenza" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">File (PDF/IMG)</Label>
+                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="age-doc-file" />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="age-doc-add-btn">
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+
+            {(list || []).length === 0 ? (
+                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="age-doc-cards">
+                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
+                        <AgeDocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AgeDocFolderCard({ tipologia, files, onDelete }) {
+    const [open, setOpen] = useState(true);
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`age-doc-folder-${tipologia}`}>
+            <button onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                data-testid={`age-doc-folder-toggle-${tipologia}`}>
+                <FileText size={16} className="text-slate-500" />
+                <span className="font-medium text-sm text-slate-800 flex-1">{tipologia}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">{files.length}</span>
+                <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+            </button>
+            {open && (
+                <ul className="divide-y divide-slate-100 px-3">
+                    {files.map((a) => {
+                        const sc = ageDocScadenza(a.data_scadenza);
+                        return (
+                            <li key={a.id} className="py-2.5 flex items-center gap-3" data-testid={`age-doc-item-${a.id}`}>
+                                <Paperclip size={15} className="text-slate-400 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    {a.url ? (
+                                        <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-sky-700 hover:underline truncate block">{a.nome_file || "Apri"}</a>
+                                    ) : (
+                                        <span className="text-sm text-slate-700 truncate block">{a.nome_file || "—"}</span>
+                                    )}
+                                    {a.descrizione && <div className="text-[11px] text-slate-500 truncate">{a.descrizione}</div>}
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                        {a.data_rilascio && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Rilascio: {new Date(a.data_rilascio + "T00:00:00").toLocaleDateString("it-IT")}</span>}
+                                        {sc && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sc.cls}`} data-testid={`age-doc-scadenza-${a.id}`}>{sc.label}</span>}
+                                    </div>
+                                </div>
+                                <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`age-doc-del-${a.id}`}>
+                                    <Trash2 size={13} />
+                                </button>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+        </div>
     );
 }
