@@ -1,0 +1,42 @@
+{
+  "summary": "Backend-only test of the iter116 changes: (1) the copertura_auto_* fields in GET/PUT /api/alert-scheduler/config, (2) POST /api/comunicazioni-copertura/auto-invia-ora, (3) scheduler _tick_copertura, called directly, (4) GET /api/audit/operatori now isolated per tenant, (5) PUT /api/auth/users/{uid} returns 400 instead of 500 on a duplicate email. All 21 pytest tests pass. The direct scheduler check passes all 4 cases: disabled → skip, outside the time window → skip, inside the window → state written, second tick the same day → no run. auto-invia-ora on 2026-10-12 (principal tenant, 2 titoli) created 1 gruppo. With SMTP not configured that gruppo ended with stato='errore', the agenzia_tenant_id was set correctly, the other tenant could not see it, and a second run created 0 (idempotent). Test data was cleaned up and the config was restored.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "invia_coperture_giorno / scheduler", "issue": "_build_gruppi skips titoli already in ANY comunicazione, including those with stato 'errore'. Example: if SMTP is not configured, or the partner agency has no email, the nightly run creates 'errore' docs and those titoli are never retried by later automatic runs. The user has to resend them from Storico by hand, but nothing tells them to (no alert or notification on errori>0). Consider retrying 'errore' docs in the auto run, or sending an alert."},
+      {"endpoint": "_next_numero (counters)", "issue": "The counter is new: it starts at seq=1 when no counter doc exists. Comunicazioni created before (numbered with max+1) could then get duplicate numeri. Seed the counter from max(numero) for each tenant on first use."},
+      {"endpoint": "_invia_doc", "issue": "email_utils.smtp_send is synchronous and is called inside an async route or scheduler job. It blocks the event loop on every send. Wrap it in asyncio.to_thread."},
+      {"endpoint": "auto-invia-ora / _tick_copertura", "issue": "Timezone: the default giorno uses datetime.date.today() and the scheduler uses tzlocal. The container runs in UTC, so 20:00 configured by an Italian agency runs at 22:00 CEST, and close to midnight 'today' can be off by one day. Use ZoneInfo('Europe/Rome') explicitly (the alert scheduler has the same issue)."},
+      {"endpoint": "_tick_copertura", "issue": "last_run_date is written BEFORE the run. If invia_coperture_giorno throws, that day is never retried. Acceptable, but log or alert on failure."},
+      {"endpoint": "POST /auto-invia-ora", "issue": "The body is an untyped dict (no Pydantic model). The giorno check only looks at length and dashes, so '2026-13-99' passes. Use date.fromisoformat."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter116_copertura_auto_operatori_email.py",
+    "/app/backend/tests/cc_tick_copertura_check.py",
+    "/app/backend/tests/cc_auto_db_helper.py",
+    "/app/test_reports/pytest/pytest_iter116.xml"
+  ],
+  "action_items": [
+    "Update /app/memory/test_credentials.md: qa.tester@schiantarelli.it / QaTest123! returns 'Credenziali non valide' (the user does not exist in the DB). Recreate it or remove the entry. jacopo@schiantarelli.it works.",
+    "Optional: retry 'errore' comunicazioni in the automatic run, or notify the admin when errori>0",
+    "Optional: seed the counters doc from the existing max numero; run smtp_send in a thread; use the Europe/Rome timezone"
+  ],
+  "critical_code_review_comments": [
+    "lista_operatori now uses tenant_filter. Correct: verified that the principal and c5ae tenants see only their own users.",
+    "update_user: the duplicate check is global (it matches the unique index) and DuplicateKeyError is caught. Verified 400 for duplicates in the same tenant and in another tenant, and that email is lowercased/trimmed. Small detail: the 400 reveals that an email exists in another tenant (minor enumeration risk, admin only).",
+    "server.py is 19k lines and should keep being split into routes/*."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter116_copertura_auto_operatori_email.py",
+    "/app/backend/tests/cc_tick_copertura_check.py",
+    "/app/backend/tests/cc_auto_db_helper.py"
+  ],
+  "success_rate": {"backend": "100% (21/21 pytest + 4/4 scheduler checks)", "frontend": "not tested (backend only)"},
+  "test_credentials": "admin@assicura.it/Admin123!, collaboratore@assicura.it/Collab123!, dipendente@assicura.it/Dipendente123!, jacopo@schiantarelli.it/NtdZs5ilxTSP (tenant c5ae). qa.tester@schiantarelli.it is INVALID (not in the DB).",
+  "seed_data_creation": "None kept. Temporary comunicazioni for 2026-10-12 (principal) were deleted. The counters doc 'comunicazioni_copertura' for the principal tenant now has seq=1 (side effect of the test).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Principal tenant titoli still eligible on 2026-10-05, 2026-10-12, 2026-10-15. SMTP is not configured on the principal tenant, so invio always ends in stato='errore' ('SMTP non configurato'). Scheduler logic can be checked directly with python tests/cc_tick_copertura_check.py (it restores the config)."
+}
