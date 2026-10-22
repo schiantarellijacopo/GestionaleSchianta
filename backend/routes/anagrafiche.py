@@ -893,16 +893,22 @@ async def delete_anagrafica(
         p for p in polizze
         if (p.get("stato") or "").lower() in ("attiva", "in_emissione", "sospesa")
     ]
-    n_sinistri = await db.sinistri.count_documents({"anagrafica_id": aid})
-    n_allegati = await db.allegati.count_documents({"anagrafica_id": aid})
+    n_sinistri = await db.sinistri.count_documents({"contraente_id": aid})
+    n_allegati = await db.allegati.count_documents({"entita_tipo": "anagrafica", "entita_id": aid})
     analisi = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
     has_analisi = _analisi_compilata(analisi)
     n_extra = 0
-    for coll in ("diario_voci", "interviste", "avvisi", "raccolta_dati", "potenti_domande"):
+    for coll in ("diario", "diario_note", "diario_cliente", "interviste",
+                 "avvisi", "raccolta_dati", "potenti_domande"):
         try:
-            n_extra += await db[coll].count_documents({"anagrafica_id": aid})
+            n_extra += await db[coll].count_documents(
+                {"$or": [{"anagrafica_id": aid}, {"contraente_id": aid}, {"cliente_id": aid}]})
         except Exception:
             pass
+    try:
+        n_extra += await db.cloud_documents.count_documents({"matched_anagrafica_id": aid})
+    except Exception:
+        pass
     ha_collegati = bool(n_polizze or n_sinistri or n_allegati or has_analisi or n_extra)
 
     # REGOLA 1 — blocco totale: anagrafica "lavorata"
@@ -944,6 +950,7 @@ async def delete_anagrafica(
         return {"ok": True, "archiviata": True, "ragione_sociale": anag.get("ragione_sociale")}
 
     # REGOLA 3 — anagrafica vuota: eliminazione definitiva
+    await db.analisi_cliente.delete_many({"anagrafica_id": aid})
     await db.anagrafiche.delete_one({"id": aid})
     await log_attivita(
         user, "delete", "anagrafica", aid,

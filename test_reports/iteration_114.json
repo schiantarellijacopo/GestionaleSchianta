@@ -1,0 +1,44 @@
+{
+  "summary": "Tested the new business rules for anagrafica delete/archive/restore, the polizza delete block when a titolo has a Prima Nota movimento in a CLOSED day, and the puo_riaprire_giornate permission for reopening days, on both backend and frontend. Backend: 15/16 pytest pass. One HIGH bug: sinistri and allegati are never counted, so an anagrafica that only has sinistri gets PHYSICALLY DELETED instead of archived, leaving orphan sinistri. Frontend: everything requested works (Annullata badge + Ripristina, blocked dialog, archive via dialog, 'Può riaprire le giornate' checkbox persists). NOTE: the sandbox user test@sandbox.it does NOT exist in the preview DB (login 401, no user with 'sandbox' in users), so all tests ran in tenant principale with admin@assicura.it and TEST_-prefixed data.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "DELETE /api/anagrafiche/{aid}", "issue": "Rule 2 (archive) does not detect sinistri: it counts db.sinistri by {'anagrafica_id': aid}, but the Sinistro model/DB only has 'contraente_id' (6417/6417 sinistri have contraente_id, 0 have anagrafica_id). Reproduced: anagrafica with one sinistro (contraente_id=aid) -> response {eliminata:true}, the anagrafica is physically deleted and the sinistro is left orphaned. Fix: count {'contraente_id': aid}.", "priority": "HIGH"},
+      {"endpoint": "DELETE /api/anagrafiche/{aid}", "issue": "Allegati are counted by {'anagrafica_id': aid}, but the allegati collection uses entita_tipo/entita_id (0/38 docs have anagrafica_id), so allegati are never detected. Collections diario, diario_cliente, diario_note and cloud_documents (matched_anagrafica_id) are also not checked. An anagrafica that only has allegati/diario notes is hard-deleted.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/sinistri", "issue": "Missing numero_sinistro -> 500 Internal Server Error (pydantic ValidationError from Sinistro(**body) on a raw dict). It should return 422/400. This existed before this change."},
+      {"endpoint": "DELETE /api/anagrafiche/{aid} (eliminata path)", "issue": "When the anagrafica is hard-deleted, an empty analisi_cliente doc created by GET /analisi (_ensure_analisi) stays orphaned."},
+      {"endpoint": "DELETE /api/polizze/{pid}", "issue": "The new 'titolo in Prima Nota in a closed day' check is only reachable when the titolo is NOT incassato/coperto. Normal incasso/copertura paths are caught first by the older 409 'titoli incassati/coperti' check. Behaviour is correct, but the message the user sees is the older one."},
+      {"endpoint": "PUT /api/auth/users/{uid}", "issue": "Security: the body is a raw dict passed to $set. An admin can set any field (is_super_admin, role, token_valid_after...). Only agenzia_tenant_id, id and password_hash are stripped. This existed before this change; use a whitelist."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Anagrafiche list", "issues": ["The Ripristina (RotateCcw) and trash icons are text-slate-300 and hard to see until hover; the restore action is hard to discover.", "There is no 'Annullate' filter: archived anagrafiche stay mixed into all lists and are only told apart by the badge. Consider a dedicated filter and excluding them by default.", "At 1920px the table overflows horizontally: the Polizze, Premio and delete columns are cut off on first render."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter_anag_delete_rules_riapri.py", "/app/test_reports/pytest/pytest_anag_delete_rules.xml"],
+  "action_items": [
+    "Fix delete_anagrafica (routes/anagrafiche.py ~L896): count sinistri by contraente_id instead of anagrafica_id.",
+    "Fix delete_anagrafica (~L897): count allegati by entita_tipo='anagrafica' + entita_id=aid (check the actual entita_tipo value). Also consider diario, diario_cliente, diario_note and cloud_documents.matched_anagrafica_id.",
+    "On the hard-delete path, also delete the orphan analisi_cliente doc.",
+    "POST /api/sinistri: return 422 instead of 500 when numero_sinistro is missing.",
+    "Optional UX: add an 'Annullate' filter in Anagrafiche and improve the contrast of the restore icon.",
+    "Recreate the sandbox user test@sandbox.it in the preview DB, or update /app/memory/test_credentials.md."
+  ],
+  "critical_code_review_comments": [
+    "delete_anagrafica uses the field name anagrafica_id for every linked collection, but real schemas differ (sinistri.contraente_id, allegati.entita_id). Centralise a helper that maps each collection to its foreign key.",
+    "PUT /auth/users/{uid} accepts arbitrary fields (privilege escalation possible through is_super_admin).",
+    "server.py is about 19k lines and Librerie.jsx about 6.8k lines; both should be split."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter_anag_delete_rules_riapri.py"],
+  "success_rate": {"backend": "94% (15/16)", "frontend": "100% of the requested UI flows"},
+  "test_credentials": "test@sandbox.it / Test1234! FAILED (401; the user does not exist in the preview DB). Used admin@assicura.it / Admin123! (tenant-principale-schiantarelli).",
+  "seed_data_creation": "TEST_DEL* and TESTUI* anagrafiche left in tenant principale (blocked ones cannot be deleted by design). A 2019-03-xx day was closed and then reopened (chiusure_giorno docs remain with riaperta_at). Temporary collaborator users and the test sinistro were cleaned up.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest /app/backend/tests/test_iter_anag_delete_rules_riapri.py with REACT_APP_BACKEND_URL exported. It uses TEST_ADMIN_EMAIL/TEST_ADMIN_PWD env vars (default admin@assicura.it). test_archived_with_sinistro is expected to pass once delete_anagrafica counts sinistri by contraente_id. The closed-day polizza scenario is built with titolo + manual movimento (categoria=altro, titolo_id) on a 2019 date, then chiusura-giorno, and works.",
+  "rca of the issue": "Repro: POST /api/anagrafiche, then POST /api/sinistri {contraente_id: aid, numero_sinistro: 'X'}, then DELETE /api/anagrafiche/{aid}. Result: 200 {eliminata:true} (expected archiviata:true). Root cause: routes/anagrafiche.py L896 uses db.sinistri.count_documents({'anagrafica_id': aid}), but the Sinistro model has no anagrafica_id (it uses contraente_id). The same mismatch on L897 affects allegati (entita_id)."
+}

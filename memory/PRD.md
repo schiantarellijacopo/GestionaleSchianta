@@ -2120,3 +2120,22 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 - `ModelliFirma.jsx`: card "Posiziona la firma (trascina sul documento)" con FirmaDesigner + "Salva posizione nel modello" (PUT `/firma/modelli/{id}`). Rimossa vecchia anteprima statica.
 
 **Verifiche:** rotte registrate (401 senza auth) ✓; contesto risolve anagrafica/polizza/titolo con contatti reali ✓; render autofill template email ✓; PUT/GET salvataggio coordinate firma ✓; UI: barra azioni su anagrafica ✓, modale Firma con scelta canali ✓, FirmaDesigner con box firma trascinabile su PDF IVASS ✓. Invii reali (SMTP/WhatsApp/Yousign) NON innescati nei test per non contattare clienti reali; dipendono dalla config agenzia (email/WhatsApp/Yousign). Deploy via Save to GitHub → Railway.
+
+---
+
+## [2026-06] Regole cancellazione anagrafiche/polizze + riapertura giornate Prima Nota
+
+**Richiesta:** blindare cancellazioni e riaperture giornate.
+
+**Implementato e testato (16/16 pytest + frontend 100%):**
+- **DELETE /api/anagrafiche/{aid}** (`routes/anagrafiche.py`):
+  1. 409 `blocked:true` se ha un'Analisi Cliente COMPILATA (`_analisi_compilata`, esclude la scheda vuota auto-creata) o polizze attive/sospese (`attiva|in_emissione|sospesa`).
+  2. 200 `archiviata:true` se ha altri collegamenti (polizze non attive, sinistri, allegati, diario, cloud docs) → set `archiviata=True`, `annullata_at/by`.
+  3. 200 `eliminata:true` solo se completamente vuota (pulisce anche l'analisi_cliente vuota).
+  - FK corretti: sinistri=`contraente_id`, allegati=`entita_tipo=anagrafica/entita_id`, diario/diario_note/diario_cliente/interviste/avvisi via `$or`, cloud_documents=`matched_anagrafica_id`.
+- **POST /api/anagrafiche/{aid}/ripristina**: riporta `archiviata=False` (admin/collaboratore/dipendente).
+- **DELETE /api/polizze/{pid}** (`server.py`): nuovo blocco 409 se un titolo ha un movimento di Prima Nota in giornata CHIUSA (movimenti con `chiusura_id` non nullo).
+- **Riapertura giornata** (`POST /contabilita/chiusura-giorno/{id}/riapri`, `giornata-stato`): consentita ad admin OPPURE utente con flag `puo_riaprire_giornate`; altrimenti 403.
+- **Frontend:** checkbox "Può riaprire le giornate chiuse" in scheda Utente (`Librerie.jsx`, testid `utente-riapri-giornate`); badge "Annullata" + pulsante Ripristina (`anag-restore-{id}`) in `Anagrafiche.jsx`; dialog eliminazione aggiornato in `Anagrafiche.jsx`/`AnagraficaDetail.jsx`; pulsante "Riapri" in `BrogliaccioTab.jsx` disabilitato per utenti non autorizzati.
+
+**Backlog/minori (pre-esistenti, non in questa richiesta):** PUT /auth/users accetta dict arbitrario (whitelist consigliata); POST /sinistri senza numero_sinistro → 500 invece di 422.
