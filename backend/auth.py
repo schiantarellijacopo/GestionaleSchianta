@@ -30,22 +30,26 @@ def _secret() -> str:
 def create_access_token(user_id: str, email: str, role: str,
                         agenzia_tenant_id: str | None = None,
                         is_super_admin: bool = False) -> str:
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
         "agenzia_tenant_id": agenzia_tenant_id,
         "is_super_admin": is_super_admin,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_MINUTES),
+        "iat": int(now.timestamp()),
+        "exp": now + timedelta(minutes=ACCESS_TOKEN_MINUTES),
         "type": "access",
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
 def create_refresh_token(user_id: str) -> str:
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_DAYS),
+        "iat": int(now.timestamp()),
+        "exp": now + timedelta(days=REFRESH_TOKEN_DAYS),
         "type": "refresh",
     }
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
@@ -92,6 +96,11 @@ def require_user(*allowed_roles: str) -> Callable[[Request], Awaitable[dict[str,
         if not user:
             raise HTTPException(status_code=401, detail="Utente non trovato")
         user.pop("_id", None)
+        # Invalidazione sessioni dopo reset password: ogni token emesso prima di
+        # `token_valid_after` viene rifiutato (richiede nuovo login).
+        tva = user.get("token_valid_after")
+        if tva is not None and int(payload.get("iat", 0)) < int(tva):
+            raise HTTPException(status_code=401, detail="Sessione scaduta, effettua di nuovo l'accesso")
         if allowed_roles and user.get("role") not in allowed_roles:
             raise HTTPException(status_code=403, detail="Permesso negato")
         return user

@@ -107,6 +107,15 @@ export default function Login() {
                         >
                             {loading ? "Accesso..." : "Accedi"}
                         </Button>
+                        <div className="text-center pt-1">
+                            <a
+                                href="/forgot-password"
+                                data-testid="forgot-password-link"
+                                className="text-sm text-sky-700 hover:text-sky-800"
+                            >
+                                Password dimenticata?
+                            </a>
+                        </div>
                     </form>
                 </Card>
             </div>

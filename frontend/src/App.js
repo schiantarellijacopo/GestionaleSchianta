@@ -78,6 +78,8 @@ import DocumentiInbox from "@/pages/DocumentiInbox";
 import WhatsAppInstances from "@/pages/WhatsAppInstances";
 import SuperAdminPanel from "@/pages/SuperAdminPanel";
 import AdminLogin from "@/pages/AdminLogin";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import SuperAdminLayout from "@/components/SuperAdminLayout";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -90,6 +92,8 @@ function App() {
                     <Routes>
                         <Route path="/login" element={<Login />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
+                        <Route path="/forgot-password" element={<ForgotPassword />} />
+                        <Route path="/reset-password" element={<ResetPassword />} />
                         <Route path="/portale/*" element={<PortaleCliente />} />
                         <Route path="/c/:slug" element={<PortaleLanding />} />
                         <Route path="/upload-doc" element={<UploadDocPublic />} />

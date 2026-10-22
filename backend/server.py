@@ -167,6 +167,81 @@ async def auth_me(user=Depends(current_user)):
     return user
 
 
+def _app_base_url() -> str:
+    return (os.environ.get("APP_BASE_URL") or "https://gestionaleschianta.it").rstrip("/")
+
+
+@api.post("/auth/password-reset/request")
+async def password_reset_request(body: dict):
+    """Richiesta reset password. Risposta sempre identica (non-enumerabile)."""
+    import secrets as _secrets
+    import hashlib
+    from datetime import timedelta
+    from database import raw_db as _rdb
+    email = (body.get("email") or "").lower().strip()
+    generic = {"ok": True,
+               "message": "Se l'indirizzo è associato a un account, riceverai un'email con le istruzioni."}
+    if not email:
+        return generic
+    user = await _rdb.users.find_one(
+        {"email": email},
+        {"_id": 0, "id": 1, "email": 1, "name": 1, "accesso_software": 1})
+    # Nessun reset per account inesistenti o profili senza accesso al software
+    if not user or user.get("accesso_software") is False:
+        return generic
+    raw = _secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    await _rdb.password_reset_tokens.update_many(
+        {"user_id": user["id"], "used": False}, {"$set": {"used": True}})
+    await _rdb.password_reset_tokens.insert_one({
+        "id": str(uuid.uuid4()),
+        "token_hash": digest,
+        "user_id": user["id"],
+        "created_at": now.isoformat(),
+        "expires_at": now + timedelta(minutes=45),
+        "used": False,
+    })
+    reset_url = f"{_app_base_url()}/reset-password?token={raw}"
+    try:
+        from resend_service import send_password_reset
+        await send_password_reset(to=user["email"], name=user.get("name") or "", reset_url=reset_url)
+    except Exception as e:
+        logger.error("Invio email reset password fallito (%s): %s", email, e)
+    return generic
+
+
+@api.post("/auth/password-reset/confirm")
+async def password_reset_confirm(body: dict):
+    """Conferma reset: valida token monouso (hash SHA-256, TTL 45 min) e
+    imposta la nuova password invalidando tutte le sessioni precedenti."""
+    import hashlib
+    from datetime import timedelta
+    from database import raw_db as _rdb
+    token = (body.get("token") or "").strip()
+    new_pwd = body.get("new_password") or ""
+    if not token or len(new_pwd) < 8:
+        raise HTTPException(400, "Token mancante o password troppo corta (minimo 8 caratteri)")
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    claimed = await _rdb.password_reset_tokens.find_one_and_update(
+        {"token_hash": digest, "used": False, "expires_at": {"$gt": now}},
+        {"$set": {"used": True, "used_at": now.isoformat()}},
+    )
+    if not claimed:
+        raise HTTPException(400, "Link non valido o scaduto")
+    target = await _rdb.users.find_one({"id": claimed["user_id"]}, {"_id": 0, "id": 1, "email": 1})
+    if not target:
+        raise HTTPException(400, "Link non valido o scaduto")
+    await _rdb.users.update_one({"id": target["id"]}, {"$set": {
+        "password_hash": hash_password(new_pwd),
+        "token_valid_after": int((now + timedelta(seconds=1)).timestamp()),
+        "password_changed_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }})
+    return {"ok": True, "message": "Password aggiornata. Effettua l'accesso con la nuova password."}
+
+
 @api.post("/auth/users", status_code=201)
 async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
     from tenant import assign_tenant, user_tenant_id, TENANT_PRINCIPALE_ID
@@ -227,6 +302,18 @@ async def create_user(payload: UserCreate, user=Depends(require_user("admin"))):
     doc.pop("password_hash", None)
     doc.pop("_id", None)
     await log_attivita(user, "create", "user", doc["id"], f"Creato utente {email}")
+    # Invia email con credenziali di accesso (link + email + password temporanea)
+    if accesso and (payload.password or "").strip():
+        try:
+            from resend_service import send_user_credentials
+            az = await db.azienda_config.find_one({}, {"_id": 0, "ragione_sociale": 1}) or {}
+            await send_user_credentials(
+                to=email, name=payload.name or email, login_email=email,
+                password=payload.password,
+                agency_name=az.get("ragione_sociale") or "la tua agenzia",
+            )
+        except Exception as e:
+            logger.error("Invio credenziali operatore fallito (%s): %s", email, e)
     return doc
 
 

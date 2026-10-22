@@ -15,9 +15,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _app_base() -> str:
+    return (os.environ.get("APP_BASE_URL") or "https://gestionaleschianta.it").rstrip("/")
+
+
+def _html_to_text(html: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
 
 
 def _api_key() -> str:
@@ -34,7 +43,21 @@ def is_mock_mode() -> bool:
 
 
 async def _send(to: str, subject: str, html: str) -> dict:
-    """Send email (mock or real). Non-blocking."""
+    """Invio email. Priorità: SMTP admin (Gmail) se configurato → Resend → MOCK."""
+    # 1) SMTP configurato dall'admin (Librerie › Comunicazioni) = invio reale via Gmail/SMTP
+    try:
+        from database import raw_db
+        az = await raw_db.azienda_config.find_one({}, {"_id": 0}) or {}
+        if az.get("smtp_host") and az.get("smtp_user"):
+            from email_utils import smtp_send
+            await asyncio.to_thread(
+                smtp_send, az, to_addrs=to, subject=subject,
+                text=_html_to_text(html), html=html)
+            logger.info("[EMAIL SMTP] to=%s subject=%r", to, subject)
+            return {"status": "sent", "transport": "smtp", "to": to}
+    except Exception as e:
+        logger.error("Invio SMTP fallito to=%s: %s (fallback Resend/mock)", to, e)
+    # 2) Resend / MOCK
     if is_mock_mode():
         logger.info("[EMAIL MOCK] to=%s subject=%r", to, subject)
         return {"status": "mock", "to": to, "subject": subject, "id": "mock_" + str(hash(to + subject))[:12]}
@@ -43,7 +66,7 @@ async def _send(to: str, subject: str, html: str) -> dict:
         resend.api_key = _api_key()
         params = {"from": _sender(), "to": [to], "subject": subject, "html": html}
         res = await asyncio.to_thread(resend.Emails.send, params)
-        return {"status": "sent", "id": (res or {}).get("id"), "to": to}
+        return {"status": "sent", "transport": "resend", "id": (res or {}).get("id"), "to": to}
     except Exception as e:
         logger.error("resend send failed to=%s: %s", to, e)
         return {"status": "error", "error": str(e), "to": to}
@@ -113,8 +136,9 @@ async def send_welcome_user(*, to: str, name: str, agency_name: str,
 
 async def send_agency_credentials(*, to: str, name: str, agency_name: str,
                                   login_email: str, password: str,
-                                  login_url: str = "https://gestionaleschianta.it") -> dict:
+                                  login_url: Optional[str] = None) -> dict:
     """Email con le CREDENZIALI DI ACCESSO alla creazione di una nuova agenzia."""
+    login_url = login_url or f"{_app_base()}/login"
     body = f"""
     <p>Ciao <b>{name}</b>,<br>
     è stato creato l'account amministratore per l'agenzia <b>{agency_name}</b> sulla piattaforma.</p>
@@ -131,6 +155,43 @@ async def send_agency_credentials(*, to: str, name: str, agency_name: str,
     """
     return await _send(to, f"Credenziali di accesso — {agency_name}",
                        _html_wrap("Il tuo accesso alla piattaforma", body, login_url, "Accedi ora"))
+
+
+async def send_user_credentials(*, to: str, name: str, agency_name: str,
+                                login_email: str, password: str,
+                                login_url: Optional[str] = None) -> dict:
+    """Email con le CREDENZIALI DI ACCESSO alla creazione di un nuovo operatore."""
+    login_url = login_url or f"{_app_base()}/login"
+    body = f"""
+    <p>Ciao <b>{name}</b>,<br>
+    è stato creato il tuo account operatore su <b>{agency_name}</b>.</p>
+    <p>Ecco le tue <b>credenziali di accesso</b>:</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;background:#f1f5f9;border-radius:8px;margin:12px 0;">
+      <tr><td style="padding:14px 16px;font-size:14px;">
+        <div style="margin-bottom:6px;"><span style="color:#64748b;">Email:</span> <b style="color:#1e293b;">{login_email}</b></div>
+        <div><span style="color:#64748b;">Password:</span>
+          <b style="color:#1e293b;font-family:monospace;font-size:15px;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #e2e8f0;">{password}</b>
+        </div>
+      </td></tr>
+    </table>
+    <p style="font-size:13px;color:#64748b;">Per sicurezza ti consigliamo di cambiare la password al primo accesso.</p>
+    """
+    return await _send(to, f"Il tuo accesso — {agency_name}",
+                       _html_wrap("Il tuo accesso alla piattaforma", body, login_url, "Accedi ora"))
+
+
+async def send_password_reset(*, to: str, name: str, reset_url: str) -> dict:
+    """Email con il link per reimpostare la password (valido 45 minuti)."""
+    body = f"""
+    <p>Ciao <b>{name or ''}</b>,<br>
+    abbiamo ricevuto una richiesta di reimpostazione della password del tuo account.</p>
+    <p>Clicca il pulsante qui sotto per impostare una nuova password.
+    Il link è valido per <b>45 minuti</b> e può essere usato una sola volta.</p>
+    <p style="font-size:13px;color:#64748b;">Se non hai richiesto tu il reset, ignora questa email:
+    la tua password resterà invariata.</p>
+    """
+    return await _send(to, "Reimposta la tua password",
+                       _html_wrap("Recupero password", body, reset_url, "Reimposta password"))
 
 
 async def send_policy_expiring(*, to: str, contraente: str, numero_polizza: str,

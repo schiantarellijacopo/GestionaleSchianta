@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, setToken, formatError } from "@/lib/api";
 
 const AuthContext = createContext(null);
+const IDLE_MS = 10 * 60 * 1000; // 10 minuti di inattività → logout automatico
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null); // null = checking
@@ -27,11 +28,34 @@ export function AuthProvider({ children }) {
         }
     };
 
-    const logout = async () => {
+    const logout = useCallback(async (opts = {}) => {
         try { await api.post("/auth/logout"); } catch { /* ignore */ }
         setToken(null);
         setUser(false);
-    };
+        if (opts.idle) {
+            const { toast } = await import("sonner");
+            toast.message("Sessione terminata", {
+                description: "Sei stato disconnesso dopo 10 minuti di inattività.",
+            });
+        }
+    }, []);
+
+    // Auto-logout dopo 10 minuti di inattività (solo se autenticato)
+    useEffect(() => {
+        if (!user || user === false) return;
+        let timer;
+        const reset = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => logout({ idle: true }), IDLE_MS);
+        };
+        const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"];
+        events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+        reset();
+        return () => {
+            clearTimeout(timer);
+            events.forEach((e) => window.removeEventListener(e, reset));
+        };
+    }, [user, logout]);
 
     return (
         <AuthContext.Provider value={{ user, loading, login, logout, setUser }}>
