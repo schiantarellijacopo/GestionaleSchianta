@@ -1,0 +1,33 @@
+{
+  "summary": "Tested the auth/email features: password recovery (backend + UI), creating an operator with a MOCK credentials email, and a code review of the 10-minute idle logout. Backend: 5/5 pytest tests passed. Frontend: 4/4 flows passed (forgot link, forgot page with generic message, reset with mismatched passwords, reset with fake token). Test data was removed (0 residual users operatore.test*/temp.reset*). No real emails were sent: everything went to [EMAIL MOCK].",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/password-reset/request", "issue": "The JSON response is the same for every email, but the response time is not: for an existing user the endpoint also does DB writes and sends the email inline, so an attacker could tell accounts apart by timing. Possible fix: send the email in a background task."},
+      {"endpoint": "POST /api/auth/password-reset/confirm", "issue": "token_valid_after = now+1s, while iat has 1-second granularity. A login within about 1-2s of the reset gets a token that require_user immediately rejects (401). The UI is not affected in practice because of the 2.5s redirect, but an API client could hit it."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration_113_auth_email.py", "/app/test_reports/pytest/pytest_iter113.xml"],
+  "action_items": [
+    "(Optional) Send the reset email in a background task (asyncio.create_task/BackgroundTasks) to remove the timing difference between existing and non-existing emails",
+    "(Optional) Use token_valid_after = int(now.timestamp()) and compare iat with < instead of setting it to +1s, or put the reset timestamp in a separate claim",
+    "(Optional) The idle logout is per-tab: a tab left unused logs out (via /auth/logout, which clears the cookie) even if the user is active in another tab. Consider syncing activity through localStorage/BroadcastChannel"
+  ],
+  "critical_code_review_comments": [
+    "AuthContext: the idle logout is implemented correctly (6 activity events, 10-min setTimeout, cleanup on unmount, sonner toast). The only issue is that it is not synced across tabs.",
+    "create_user: the credentials email is sent only when accesso_software=true and a password is set. Correct. The password appears only in the email HTML, not in the logs.",
+    "server.py is >19000 lines: it should be split into modules."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_113_auth_email.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Temporary operator operatore.test.<hex>@example.com created and deleted inside the test (finally block). It also triggered a MOCK reset request for admin@assicura.it; the password was not changed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All email goes to MOCK because SMTP is not configured; check grep '[EMAIL MOCK]' /var/log/supervisor/backend.err.log. The full reset flow (confirm + session invalidation) was verified by the main agent and was not re-run here so admin's password stays untouched."
+}

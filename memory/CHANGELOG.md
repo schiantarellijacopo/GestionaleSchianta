@@ -1,6 +1,25 @@
 # Changelog — Axicura CRM
 
 
+## 2026-10-22 — Auth batch (auto-logout 10 min, email credenziali agenzia/operatore, recupero password + invalidazione sessioni) + chiavi OpenAPI.it/Gemini AI Studio
+### Chiavi API (Super Admin)
+- `backend/routes/super_admin.py`: aggiunto `openapi_it_bearer_token` a `_CHIAVI_AZIENDA` + sync env `OPENAPI_IT_BEARER_TOKEN` (`_CHIAVI_EXTRA_ENV`). `frontend/src/pages/SuperAdminPanel.jsx` (`ChiaviApiTab`): nuova sezione "OpenAPI.it". Chiave OpenAPI.it salvata nel vault e caricata allo startup (log `OPENAPI_IT_BEARER_TOKEN caricato dal vault`).
+- Gemini AI Studio: salvata chiave `ai_studio_api_key` (formato `AQ.`) nel vault → `GEMINI_API_KEY` ri-idratata allo startup. Verificata reale (list_models 200 + generateContent "OK"). Tutte le funzioni AI testuali passano da `llm_compat` → Gemini.
+
+### Auto-logout inattività (10 min)
+- `frontend/src/contexts/AuthContext.jsx`: `logout()` ora `useCallback` con opzione `{idle}`; nuovo effetto che, solo da autenticati, traccia attività (mousemove/mousedown/keydown/scroll/touchstart/click) e dopo 10 min idle esegue logout + toast "Sessione terminata". Cleanup listener/timer su unmount. Nota: per-tab (non sincronizzato tra schede).
+
+### Email credenziali di accesso (agenzia + operatore)
+- `backend/resend_service.py`: `_send()` ora preferisce **SMTP admin** (azienda_config `smtp_host`/`smtp_user`, es. Gmail configurato in Librerie › Comunicazioni) → invio reale; fallback Resend → MOCK (log `[EMAIL MOCK]`). Nuovi template `send_user_credentials` (operatore) e `send_password_reset`; `send_agency_credentials`/login_url ora usano `_app_base()` (env `APP_BASE_URL`, default gestionaleschianta.it).
+- `backend/server.py` `create_user` (POST /api/auth/users): invia email credenziali operatore (email + password temporanea + link) quando `accesso_software=true` e password presente. Agenzia: `create_agenzia` già invia `send_agency_credentials`.
+
+### Recupero password + invalidazione sessioni (playbook integration_expert)
+- `backend/auth.py`: token access/refresh ora includono `iat`; `require_user` rifiuta token con `iat < user.token_valid_after` (401) → tutte le sessioni precedenti cadono dopo un reset.
+- `backend/server.py`: `POST /api/auth/password-reset/request` (non-enumerabile, risposta identica, email inviata in **background** via `asyncio.create_task` per eliminare la differenza di timing; token `secrets.token_urlsafe(32)`, salvato solo hash SHA-256 in `password_reset_tokens`, TTL 45 min, monouso) e `POST /api/auth/password-reset/confirm` (claim atomico `find_one_and_update`, nuova password bcrypt, `token_valid_after=now+1s`).
+- `frontend`: nuove pagine `ForgotPassword.jsx` + `ResetPassword.jsx`, route `/forgot-password` e `/reset-password` in `App.js`, link "Password dimenticata?" in `Login.jsx`.
+- Verifica: backend e2e (confirm 200, login nuova pwd 200, vecchia pwd 401, token monouso, vecchio access token→401). Testing agent iteration_113: backend 5/5, frontend 4/4, 0 bug critici. Email SMTP non configurato → tutto in MOCK (nessun invio reale). Dati temporanei ripuliti.
+
+
 ## 2026-10-22 — Documenti Compagnie + Avvisi scadenza documentali (app+email) + verifica Visibilità
 ### 1) Documenti Compagnie (come Azienda)
 - `backend/db_models.py` `Compagnia`: aggiunto campo `documenti: list = []`.

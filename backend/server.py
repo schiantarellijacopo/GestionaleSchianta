@@ -176,6 +176,7 @@ async def password_reset_request(body: dict):
     """Richiesta reset password. Risposta sempre identica (non-enumerabile)."""
     import secrets as _secrets
     import hashlib
+    import asyncio as _asyncio
     from datetime import timedelta
     from database import raw_db as _rdb
     email = (body.get("email") or "").lower().strip()
@@ -203,11 +204,16 @@ async def password_reset_request(body: dict):
         "used": False,
     })
     reset_url = f"{_app_base_url()}/reset-password?token={raw}"
-    try:
-        from resend_service import send_password_reset
-        await send_password_reset(to=user["email"], name=user.get("name") or "", reset_url=reset_url)
-    except Exception as e:
-        logger.error("Invio email reset password fallito (%s): %s", email, e)
+
+    async def _send_reset_bg():
+        try:
+            from resend_service import send_password_reset
+            await send_password_reset(to=user["email"], name=user.get("name") or "", reset_url=reset_url)
+        except Exception as e:
+            logger.error("Invio email reset password fallito (%s): %s", email, e)
+
+    # Invio in background: risposta immediata e indistinguibile (anti-enumerazione)
+    _asyncio.create_task(_send_reset_bg())
     return generic
 
 
