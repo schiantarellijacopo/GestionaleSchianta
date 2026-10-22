@@ -1738,6 +1738,15 @@ function ChiaviApiTab() {
     const [saving, setSaving] = useState(false);
     const [testingWa, setTestingWa] = useState(false);
     const [testingAi, setTestingAi] = useState("");
+    const [aiStatus, setAiStatus] = useState(null);
+
+    const loadAiStatus = () => {
+        api.get("/super-admin/chiavi-api/ai-status")
+            .then((r) => setAiStatus(r.data))
+            .catch(() => setAiStatus(null));
+    };
+
+    useEffect(() => { loadAiStatus(); }, []);
 
     useEffect(() => {
         api.get("/super-admin/chiavi-api")
@@ -1752,6 +1761,7 @@ function ChiaviApiTab() {
         try {
             await api.put("/super-admin/chiavi-api", f);
             toast.success("Chiavi API salvate");
+            loadAiStatus();
         } catch (e) { toast.error(e?.response?.data?.detail || "Errore salvataggio"); }
         finally { setSaving(false); }
     };
@@ -1778,6 +1788,21 @@ function ChiaviApiTab() {
     };
 
     if (!f) return <div className="text-slate-400 text-sm py-8 text-center">Caricamento…</div>;
+
+    const AiBadge = ({ attiva }) => {
+        const cfg = {
+            pannello: ["bg-emerald-100 text-emerald-700 border-emerald-200", "✓ Attiva: chiave pannello"],
+            emergent: ["bg-amber-100 text-amber-700 border-amber-200", "Attiva: Emergent (fallback)"],
+            nessuna: ["bg-rose-100 text-rose-700 border-rose-200", "⚠ Nessuna chiave configurata"],
+        }[attiva] || ["bg-slate-100 text-slate-500 border-slate-200", "—"];
+        return (
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg[0]}`}
+                data-testid={`sa-ai-badge-${attiva}`}>
+                {cfg[1]}
+            </span>
+        );
+    };
+
 
     return (
         <div className="space-y-4 max-w-4xl" data-testid="sa-chiavi-api">
@@ -1808,7 +1833,9 @@ function ChiaviApiTab() {
 
             {/* AI STUDIO — Google Gemini */}
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-aistudio">
-                <div className="font-semibold text-slate-800 text-sm">🤖 AI Studio — Google Gemini</div>
+                <div className="font-semibold text-slate-800 text-sm">🤖 AI Studio — Google Gemini
+                    {aiStatus && <span className="ml-2 align-middle"><AiBadge attiva={aiStatus.gemini?.attiva} /></span>}
+                </div>
                 <div className="text-[11px] text-slate-500">Usata dalle funzioni AI (OCR polizze, assistente, insight, generazione contenuti). <b>La chiave inserita qui ha priorità</b> sulla chiave gestita Emergent, che resta solo come fallback quando questo campo è vuoto.</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <FormField label="API Key (Google AI Studio)" type="password" value={f.ai_studio_api_key || ""} onChange={(v) => set("ai_studio_api_key", v)} testid="sa-aistudio-key" />
@@ -1825,7 +1852,9 @@ function ChiaviApiTab() {
 
             {/* OPENAI */}
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-openai">
-                <div className="font-semibold text-slate-800 text-sm">🧠 OpenAI — GPT / Voce / Immagini</div>
+                <div className="font-semibold text-slate-800 text-sm">🧠 OpenAI — GPT / Voce / Immagini
+                    {aiStatus && <span className="ml-2 align-middle"><AiBadge attiva={aiStatus.openai?.attiva} /></span>}
+                </div>
                 <div className="text-[11px] text-slate-500">Usata dalle funzioni vocali (podcast NotebookLM, video marketing) e immagini. <b>La chiave inserita qui ha priorità</b> sulla chiave gestita Emergent, che resta solo come fallback quando questo campo è vuoto.</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <FormField label="API Key (OpenAI, sk-…)" type="password" value={f.openai_api_key || ""} onChange={(v) => set("openai_api_key", v)} testid="sa-openai-key" />

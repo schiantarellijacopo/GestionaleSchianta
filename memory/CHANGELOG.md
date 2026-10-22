@@ -138,3 +138,9 @@
 - Verificato: GET espone entrambi i campi, roundtrip salva/pulisce, test-openai con chiave
   invalida → HTTP 401, UI renderizza sezioni e pulsanti.
 > NB: da pubblicare su Railway via **Save to GitHub**.
+
+## 2026-06 — Spia provider AI attivo
+- Nuovo endpoint `GET /super-admin/chiavi-api/ai-status`: riporta per Gemini e OpenAI
+  se è attiva la chiave `pannello`, `emergent` (fallback) o `nessuna`. Non espone valori.
+- UI pannello Chiavi API: badge colorato accanto a ogni sezione AI (verde=pannello,
+  ambra=Emergent fallback, rosso=nessuna). Si aggiorna dopo ogni salvataggio.

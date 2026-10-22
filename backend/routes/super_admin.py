@@ -172,6 +172,25 @@ async def sa_test_openai(body: dict | None = None,
         return {"ok": False, "error": str(e)[:160]}
 
 
+@router.get("/chiavi-api/ai-status")
+async def sa_ai_status(user=Depends(require_user("admin"))) -> dict:
+    """Riporta quale chiave è attiva per ogni provider AI: pannello (ha priorità),
+    Emergent (fallback) o nessuna. Non espone alcun valore."""
+    _ensure_super_admin(user)
+    emergent = bool((os.environ.get("EMERGENT_LLM_KEY") or "").strip())
+
+    def _src(env_name: str) -> str:
+        if (os.environ.get(env_name) or "").strip():
+            return "pannello"
+        return "emergent" if emergent else "nessuna"
+
+    return {
+        "emergent_disponibile": emergent,
+        "gemini": {"attiva": _src("GEMINI_API_KEY")},
+        "openai": {"attiva": _src("OPENAI_API_KEY")},
+    }
+
+
 @router.post("/chiavi-api/test-whatsapp")
 async def sa_test_evolution(user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
