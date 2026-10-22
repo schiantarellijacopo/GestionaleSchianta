@@ -1,6 +1,20 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Portale Cliente: isolamento multi-tenant del login (P0 sicurezza)
+Problema: il login del portale cercava l'anagrafica globalmente per email+CF e prendeva la PRIMA corrispondenza, il token non salvava il tenant (leggeva `tenant_id` inesistente invece di `agenzia_tenant_id`) e nessuna query filtrava per tenant. Un cliente presente in più agenzie poteva vedere le polizze dell'agenzia sbagliata.
+- `backend/portale_cliente.py`:
+  - `_issue_token` ora riceve il tenant autorevole `agenzia_tenant_id`.
+  - `current_cliente` ricava il tenant SEMPRE dal DB (`ana.agenzia_tenant_id`), lo espone come `cliente["_tenant_id"]` e rifiuta (401) i token il cui `tid` non coincide col DB.
+  - `POST /api/portale/auth/login`: accetta `slug` opzionale → con il link personale `/c/{slug}` il login è vincolato a QUELLA anagrafica/tenant (verifica email+CF/PIVA). Senza slug: se le credenziali valide esistono in più agenzie risponde `{status:"tenant_selection_required", challenge, agencies:[{aid,label}]}`.
+  - Nuovo `POST /api/portale/auth/login/select-tenant`: completa il login con challenge monouso (TTL 5 min, collection `portale_login_challenges`).
+  - Filtro `agenzia_tenant_id` aggiunto (defense-in-depth) alle query portale: polizze, titoli, polizza/titoli, documenti (pol_ids/sin_ids), nuclei collegati.
+- Frontend:
+  - `PortaleLanding.jsx`: salva anche `portale_slug` in sessionStorage prima di `/portale`.
+  - `PortaleCliente.jsx` `LoginScreen`: invia `slug`, gestisce la schermata "Scegli l'agenzia" (`portale-agency-select`, `portale-agency-option-{aid}`) e chiama select-tenant; pulisce sessionStorage al successo.
+- Test API (dati temporanei su 2 tenant, poi rimossi): slug A→solo polizza tenant A, slug B→solo tenant B, login generico→disambiguazione con 2 agenzie, select-tenant→solo tenant scelto, riuso challenge→401, password errata→401. Tutti superati.
+
+
 ## 2026-06 — Librerie → Utenti/Collaboratori: nuova "Gestione utente" a 6 tab
 - Riorganizzato il dialog `UtenteForm` (`frontend/src/pages/Librerie.jsx`) secondo le schermate del gestionale, con 6 tab:
   **Generale** (tipologia_utente, mansione, carica, Amministratore?/Ruolo sincronizzati, responsabile/svolge/addetto intermediazione, deleghe_poteri, data_cessazione_account + blocco provvigioni/sottorete/note interne conservato),

@@ -23,6 +23,7 @@ export default function PortaleLanding() {
 
     const accedi = () => {
         if (info?.email) sessionStorage.setItem("portale_prefill_email", info.email);
+        if (slug) sessionStorage.setItem("portale_slug", slug);
         navigate("/portale");
     };
 

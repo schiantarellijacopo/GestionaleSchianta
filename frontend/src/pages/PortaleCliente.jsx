@@ -231,17 +231,75 @@ function LoginScreen({ onLogin }) {
     const [email, setEmail] = useState(() => sessionStorage.getItem("portale_prefill_email") || "");
     const [password, setPassword] = useState("");
     const [busy, setBusy] = useState(false);
+    const [agencies, setAgencies] = useState(null);   // [{aid,label}] se serve scelta agenzia
+    const [challenge, setChallenge] = useState(null);
+
+    const finalizza = (data) => {
+        sessionStorage.removeItem("portale_prefill_email");
+        sessionStorage.removeItem("portale_slug");
+        toast.success(`Benvenuto ${data.cliente.nome}`);
+        onLogin(data.access_token);
+    };
+
     const submit = async (e) => {
         e.preventDefault();
         setBusy(true);
         try {
-            const r = await clientApi.post("/auth/login", { email, password });
-            toast.success(`Benvenuto ${r.data.cliente.nome}`);
-            onLogin(r.data.access_token);
+            const slug = sessionStorage.getItem("portale_slug") || undefined;
+            const r = await clientApi.post("/auth/login", { email, password, slug });
+            if (r.data?.status === "tenant_selection_required") {
+                setChallenge(r.data.challenge);
+                setAgencies(r.data.agencies || []);
+            } else {
+                finalizza(r.data);
+            }
         } catch (err) {
             toast.error(err.response?.data?.detail || "Login fallito");
         } finally { setBusy(false); }
     };
+
+    const scegliAgenzia = async (aid) => {
+        setBusy(true);
+        try {
+            const r = await clientApi.post("/auth/login/select-tenant", { challenge, aid });
+            finalizza(r.data);
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Accesso non riuscito");
+            setAgencies(null);
+            setChallenge(null);
+        } finally { setBusy(false); }
+    };
+
+    if (agencies) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-100 via-white to-blue-100 p-4">
+                <Toaster position="top-center" richColors />
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8" data-testid="portale-agency-select">
+                    <div className="text-center mb-6">
+                        <h1 className="text-2xl font-bold text-slate-800">Scegli l'agenzia</h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Le tue credenziali risultano associate a più agenzie. Seleziona quella a cui vuoi accedere.
+                        </p>
+                    </div>
+                    <div className="space-y-3">
+                        {agencies.map((a) => (
+                            <button key={a.aid} disabled={busy} onClick={() => scegliAgenzia(a.aid)}
+                                className="w-full py-3 px-4 rounded-lg border border-slate-200 hover:border-sky-500 hover:bg-sky-50 text-left font-semibold text-slate-700 disabled:opacity-50 transition-colors"
+                                data-testid={`portale-agency-option-${a.aid}`}>
+                                {a.label}
+                            </button>
+                        ))}
+                    </div>
+                    <button onClick={() => { setAgencies(null); setChallenge(null); }}
+                        className="w-full mt-5 text-sm text-slate-500 hover:underline"
+                        data-testid="portale-agency-back">
+                        ← Torna al login
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-100 via-white to-blue-100 p-4">
             <Toaster position="top-center" richColors />

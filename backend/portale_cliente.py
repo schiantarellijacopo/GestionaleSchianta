@@ -20,7 +20,10 @@ Endpoints (prefix `/api/portale`):
 from __future__ import annotations
 
 import os
+import re
 import uuid
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -61,7 +64,52 @@ async def current_cliente(authorization: Optional[str] = Header(None)) -> dict:
     ana = await db.anagrafiche.find_one({"id": p["aid"]}, {"_id": 0})
     if not ana:
         raise HTTPException(404, "Anagrafica cliente non trovata")
+    # Tenant AUTOREVOLE: sempre dal DB (mai dal client/token).
+    tid = ana.get("agenzia_tenant_id") or ana.get("tenant_id")
+    tok_tid = p.get("tid")
+    # Se il token porta un tenant esplicito diverso da quello del DB → sessione non valida
+    # (anagrafica spostata di tenant o token manomesso/stale).
+    if tok_tid and tid and str(tok_tid) != str(tid):
+        raise HTTPException(401, "Sessione non valida per questo tenant")
+    ana["_tenant_id"] = tid
     return ana
+
+
+def _tenant_q(cliente: dict) -> dict:
+    """Filtro tenant (defense-in-depth) da unire a ogni query dati del portale."""
+    tid = cliente.get("_tenant_id")
+    return {"agenzia_tenant_id": tid} if tid else {}
+
+
+def _ana_tid(a: dict):
+    return a.get("agenzia_tenant_id") or a.get("tenant_id")
+
+
+def _pwd_match(a: dict, pwd_norm_upper: str) -> bool:
+    cf = (a.get("codice_fiscale") or "").strip().upper()
+    piva = (a.get("partita_iva") or "").strip().upper()
+    return bool((cf and pwd_norm_upper == cf) or (piva and pwd_norm_upper == piva))
+
+
+def _cliente_payload(ana: dict) -> dict:
+    return {
+        "id": ana["id"],
+        "nome": ana.get("ragione_sociale") or ana.get("cognome_nome")
+                or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
+        "email": ana.get("email"),
+        "cellulare": ana.get("cellulare"),
+        "tipo_soggetto": ana.get("tipo_soggetto"),
+        "is_master": bool(ana.get("is_master")),
+    }
+
+
+async def _tenant_label(db, tid) -> str:
+    if tid:
+        t = await db.tenants.find_one({"id": tid}, {"_id": 0, "ragione_sociale": 1})
+        if t and t.get("ragione_sociale"):
+            return t["ragione_sociale"]
+    cfg = await db.azienda_config.find_one({}, {"_id": 0, "ragione_sociale": 1}) or {}
+    return cfg.get("ragione_sociale") or "La tua agenzia"
 
 
 def _norm(s: str) -> str:
@@ -73,46 +121,92 @@ def _norm(s: str) -> str:
 # ============================================================
 @router.post("/auth/login")
 async def login_cliente(body: dict):
-    """Login cliente: email + password = codice_fiscale (privato) o partita_iva (azienda)."""
+    """Login cliente: email + password = codice_fiscale (privato) o partita_iva (azienda).
+
+    Isolamento tenant:
+      * Se arriva `slug` (dal link personale /c/{slug}) il login è vincolato a QUELLA
+        anagrafica e al tenant dell'agenzia che ha inviato le credenziali.
+      * Senza slug (portale generico): se le credenziali valide esistono in PIÙ agenzie
+        si chiede al cliente di scegliere l'agenzia (challenge monouso).
+    """
     from server import db
     email = _norm(body.get("email") or body.get("username"))
     password = (body.get("password") or "").strip()
+    slug = (body.get("slug") or "").strip()
     if not email or not password:
         raise HTTPException(400, "Email e password obbligatorie")
+    pwd_norm = password.upper()
 
-    # Cerca TUTTE le anagrafiche con quella email/PEC (possono esserci duplicati:
-    # es. familiari o soci che condividono email). Prova la password su ciascuna.
+    # ── Percorso 1: link personale → vincolo a UNA anagrafica/tenant ──
+    if slug:
+        ana = await db.anagrafiche.find_one({"portale_slug": slug}, {"_id": 0})
+        if (not ana
+                or (_norm(ana.get("email")) != email and _norm(ana.get("pec")) != email)
+                or not _pwd_match(ana, pwd_norm)):
+            raise HTTPException(401, "Credenziali non valide")
+        return {
+            "access_token": _issue_token(ana["id"], tenant_id=_ana_tid(ana)),
+            "cliente": _cliente_payload(ana),
+        }
+
+    # ── Percorso 2: login generico email + CF/PIVA ──
     ana_list = await db.anagrafiche.find(
-        {"$or": [{"email": {"$regex": f"^{email}$", "$options": "i"}},
-                 {"pec": {"$regex": f"^{email}$", "$options": "i"}}]},
+        {"$or": [{"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                 {"pec": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}]},
         {"_id": 0},
-    ).to_list(20)
-    if not ana_list:
+    ).to_list(50)
+    matches = [a for a in ana_list if _pwd_match(a, pwd_norm)]
+    if not matches:
         raise HTTPException(401, "Credenziali non valide")
 
-    pwd_norm = password.strip().upper()
-    ana = None
-    for a in ana_list:
-        cf = _norm(a.get("codice_fiscale"))
-        piva = _norm(a.get("partita_iva"))
-        if (cf and pwd_norm == cf.upper()) or (piva and pwd_norm == piva.upper()):
-            ana = a
-            break
+    # Raggruppa per tenant: un solo tenant → accesso diretto
+    by_tid: dict = {}
+    for a in matches:
+        by_tid.setdefault(_ana_tid(a), a)
+    if len(by_tid) == 1:
+        ana = matches[0]
+        return {
+            "access_token": _issue_token(ana["id"], tenant_id=_ana_tid(ana)),
+            "cliente": _cliente_payload(ana),
+        }
+
+    # Più agenzie → disambiguazione (challenge monouso, TTL 5 min)
+    challenge = secrets.token_urlsafe(32)
+    await db.portale_login_challenges.insert_one({
+        "hash": hashlib.sha256(challenge.encode()).hexdigest(),
+        "candidate_aids": [a["id"] for a in by_tid.values()],
+        "used": False,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+    })
+    agencies = []
+    for a in by_tid.values():
+        agencies.append({"aid": a["id"], "label": await _tenant_label(db, _ana_tid(a))})
+    return {"status": "tenant_selection_required", "challenge": challenge, "agencies": agencies}
+
+
+@router.post("/auth/login/select-tenant")
+async def login_select_tenant(body: dict):
+    """Completa il login quando le credenziali risultano su più agenzie: il cliente
+    sceglie l'anagrafica/agenzia tramite una challenge monouso emessa dal login."""
+    from server import db
+    challenge = (body.get("challenge") or "").strip()
+    aid = (body.get("aid") or "").strip()
+    if not challenge or not aid:
+        raise HTTPException(400, "Richiesta non valida")
+    h = hashlib.sha256(challenge.encode()).hexdigest()
+    ch = await db.portale_login_challenges.find_one_and_update(
+        {"hash": h, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}},
+        {"$set": {"used": True}},
+    )
+    if not ch or aid not in (ch.get("candidate_aids") or []):
+        raise HTTPException(401, "Sessione di accesso non valida o scaduta")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
     if not ana:
-        raise HTTPException(401, "Credenziali non valide")
-
-    token = _issue_token(ana["id"], tenant_id=ana.get("tenant_id"))
+        raise HTTPException(401, "Sessione di accesso non valida")
     return {
-        "access_token": token,
-        "cliente": {
-            "id": ana["id"],
-            "nome": ana.get("ragione_sociale") or ana.get("cognome_nome")
-                    or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
-            "email": ana.get("email"),
-            "cellulare": ana.get("cellulare"),
-            "tipo_soggetto": ana.get("tipo_soggetto"),
-            "is_master": bool(ana.get("is_master")),
-        },
+        "access_token": _issue_token(ana["id"], tenant_id=_ana_tid(ana)),
+        "cliente": _cliente_payload(ana),
     }
 
 
@@ -224,7 +318,7 @@ async def get_me(cliente=Depends(current_cliente)):
             {"$or": [
                 {"master_anagrafica_id": cliente["id"]},
                 {"gruppo_familiare_id": cliente.get("gruppo_familiare_id")}
-            ], "id": {"$ne": cliente["id"]}},
+            ], "id": {"$ne": cliente["id"]}, **_tenant_q(cliente)},
             {"_id": 0, "id": 1, "cognome": 1, "nome": 1, "ragione_sociale": 1, "cognome_nome": 1},
         ):
             out["nuclei_collegati"].append({
@@ -243,7 +337,7 @@ async def list_polizze(cliente=Depends(current_cliente),
                        includi_storiche: bool = True):
     """Elenco polizze del cliente. Include applicazioni libro matricola e stats titoli."""
     from server import db
-    flt = {"contraente_id": cliente["id"]}
+    flt = {"contraente_id": cliente["id"], **_tenant_q(cliente)}
     polizze = await db.polizze.find(flt, {"_id": 0}).sort("scadenza", -1).to_list(500)
 
     oggi = datetime.now(timezone.utc).date().isoformat()
@@ -301,7 +395,7 @@ async def list_titoli(cliente=Depends(current_cliente)):
     # Mappa polizza_id → {numero_polizza, ramo, prodotto, compagnia_nome, targa}
     pol_map = {}
     async for p in db.polizze.find(
-        {"contraente_id": cliente["id"]},
+        {"contraente_id": cliente["id"], **_tenant_q(cliente)},
         {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1,
          "prodotto": 1, "targa": 1, "compagnia_id": 1},
     ):
@@ -354,7 +448,7 @@ async def polizza_titoli(polizza_id: str, cliente=Depends(current_cliente)):
     """
     from server import db
     p = await db.polizze.find_one(
-        {"id": polizza_id, "contraente_id": cliente["id"]},
+        {"id": polizza_id, "contraente_id": cliente["id"], **_tenant_q(cliente)},
         {"_id": 0, "id": 1},
     )
     if not p:
@@ -503,9 +597,9 @@ async def portale_allegato_download(allegato_id: str, cliente=Depends(current_cl
 async def list_documenti(cliente=Depends(current_cliente)):
     from server import db
     pol_ids = [p["id"] async for p in db.polizze.find(
-        {"contraente_id": cliente["id"]}, {"_id": 0, "id": 1})]
+        {"contraente_id": cliente["id"], **_tenant_q(cliente)}, {"_id": 0, "id": 1})]
     sin_ids = [s["id"] async for s in db.sinistri.find(
-        {"contraente_id": cliente["id"]}, {"_id": 0, "id": 1})]
+        {"contraente_id": cliente["id"], **_tenant_q(cliente)}, {"_id": 0, "id": 1})]
     or_query = [
         {"entita_tipo": "anagrafica", "entita_id": cliente["id"]},
         {"entita_tipo": "polizza", "entita_id": {"$in": pol_ids}},
