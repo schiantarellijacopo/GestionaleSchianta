@@ -41,6 +41,7 @@ ALERT_EVENT_TYPES = [
 ALERT_SCHEDULE_TYPES = [
     "compleanno_cliente",
     "documento_id_scaduto",
+    "documento_aziendale_scaduto",  # documenti compagnie/agenzie/azienda con avviso opt-in
     "titolo_scaduto_oltre",        # parametro: giorni
     "sospesi_settimanali",          # digest collaboratore
     "arretrati_settimanali",        # digest collaboratore

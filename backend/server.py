@@ -1511,6 +1511,7 @@ async def create_compagnia(body: dict, user=Depends(require_user("admin", "colla
 
 @api.put("/compagnie/{cid}")
 async def update_compagnia(cid: str, body: dict, user=Depends(require_user("admin", "collaboratore"))):
+    body.pop("documenti", None)  # i documenti si gestiscono via endpoint dedicati
     body["updated_at"] = _now_iso()
     res = await db.compagnie.update_one({"id": cid}, {"$set": body})
     if res.matched_count == 0:
@@ -15154,8 +15155,134 @@ async def elimina_documento_agenzia(aid: str, item_id: str,
 
 
 # ============================================================
-# POSTA — Inbox (popolata dal poller IMAP, in arrivo Step 2)
+# DOCUMENTI COMPAGNIE (card per tipologia, più file per card)
 # ============================================================
+@api.post("/compagnie/{cid}/documenti")
+async def upload_documento_compagnia(
+    cid: str,
+    file: UploadFile = File(...),
+    tipologia: str = Form(""),
+    descrizione: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
+    user=Depends(require_user("admin", "collaboratore")),
+):
+    """Aggiunge un documento (card) a una compagnia. Più documenti per tipologia."""
+    target = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Compagnia non trovata")
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "File vuoto")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/compagnie/{cid}/doc_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, content, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    item = {
+        "id": _uid(),
+        "url": f"/api/storage/{result['path']}",
+        "storage_path": result["path"],
+        "nome_file": file.filename,
+        "tipologia": tipologia or "Altro",
+        "descrizione": descrizione or None,
+        "data_rilascio": data_rilascio or None,
+        "data_scadenza": data_scadenza or None,
+        "avviso_attivo": False,
+        "avviso_giorni": 15,
+        "created_at": _now_iso(),
+    }
+    await db.compagnie.update_one({"id": cid}, {"$push": {"documenti": item}, "$set": {"updated_at": _now_iso()}})
+    return item
+
+
+@api.delete("/compagnie/{cid}/documenti/{item_id}")
+async def elimina_documento_compagnia(cid: str, item_id: str,
+                                      user=Depends(require_user("admin", "collaboratore"))):
+    cp = await db.compagnie.find_one({"id": cid}, {"_id": 0, "id": 1, "documenti": 1})
+    if not cp:
+        raise HTTPException(404, "Compagnia non trovata")
+    item = next((x for x in (cp.get("documenti") or []) if x.get("id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Documento non trovato")
+    if item.get("storage_path"):
+        try:
+            obj_storage.delete_object(item["storage_path"])
+        except Exception:
+            pass
+    await db.compagnie.update_one({"id": cid}, {"$pull": {"documenti": {"id": item_id}}})
+    return {"ok": True}
+
+
+# ============================================================
+# AVVISO SCADENZA DOCUMENTO (opt-in per singolo documento aziendale)
+# Entità supportate: compagnia | agenzia_partner | azienda
+# ============================================================
+@api.put("/documenti/avviso")
+async def set_documento_avviso(body: dict, user=Depends(require_user("admin"))):
+    """Attiva/aggiorna l'avviso di scadenza (app + email) per un singolo documento.
+    L'invio avviene `giorni` giorni prima della data di scadenza, via la regola
+    «Avviso scadenza documento aziendale» in Alert e automazioni."""
+    entita = body.get("entita")
+    item_id = body.get("item_id")
+    if not item_id:
+        raise HTTPException(400, "item_id mancante")
+    attivo = bool(body.get("attivo", True))
+    try:
+        giorni = int(body.get("giorni") or 15)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Giorni non validi")
+    if giorni < 1 or giorni > 365:
+        raise HTTPException(400, "Giorni non validi (1-365)")
+    set_fields = {
+        "documenti.$[d].avviso_attivo": attivo,
+        "documenti.$[d].avviso_giorni": giorni,
+    }
+    af = [{"d.id": item_id}]
+    if entita == "compagnia":
+        res = await db.compagnie.update_one({"id": body.get("entita_id")}, {"$set": set_fields}, array_filters=af)
+    elif entita == "agenzia_partner":
+        res = await db.agenzie.update_one({"id": body.get("entita_id")}, {"$set": set_fields}, array_filters=af)
+    elif entita == "azienda":
+        az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1})
+        if not az:
+            raise HTTPException(404, "Config azienda non trovata")
+        res = await db.azienda_config.update_one({"id": az["id"]}, {"$set": set_fields}, array_filters=af)
+    else:
+        raise HTTPException(400, "Entità non supportata")
+    if res.matched_count == 0:
+        raise HTTPException(404, "Documento non trovato")
+    # Assicura che esista (e sia attiva) la regola alert per lo scadenzario documenti
+    if attivo:
+        try:
+            await _ensure_regola_avviso_documenti()
+        except Exception:
+            logger.exception("Impossibile creare la regola avviso documenti")
+    return {"ok": True, "avviso_attivo": attivo, "avviso_giorni": giorni}
+
+
+async def _ensure_regola_avviso_documenti():
+    """Crea (una volta) una regola attiva dal preset `documento_aziendale_scaduto`
+    nel tenant corrente, così l'avviso è operativo senza passaggi manuali."""
+    existing = await db.alert_rules.find_one(
+        {"schedule_kind": "documento_aziendale_scaduto"}, {"_id": 0, "id": 1})
+    if existing:
+        return
+    from alert_presets import PRESETS
+    from alert_models import AlertRule
+    tpl = next((p for p in PRESETS if p["preset_key"] == "documento_aziendale_scaduto"), None)
+    if not tpl:
+        return
+    body = dict(tpl)
+    body["is_preset"] = False
+    body["preset_key"] = None
+    body["attivo"] = True
+    obj = AlertRule(**body)
+    await db.alert_rules.insert_one(obj.model_dump())
 @api.get("/email/inbox/stats")
 async def email_inbox_stats(user=Depends(current_user)):
     """KPI per la pagina Posta dell'utente loggato."""
@@ -15384,6 +15511,16 @@ CARD_DEFS = {
         {"key": "Iscrizione RUI/IVASS", "label": "Iscrizione RUI/IVASS", "default": False, "icon": "🪪"},
         {"key": "Certificazioni", "label": "Certificazioni", "default": False, "icon": "📜"},
         {"key": "Polizza RC professionale", "label": "Polizza RC professionale", "default": False, "icon": "🛡️"},
+        {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
+        {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
+    ],
+    # Documenti delle compagnie assicurative (sezione Compagnie).
+    "compagnia": [
+        {"key": "Convenzione / Mandato", "label": "Convenzione / Mandato", "default": False, "icon": "📝"},
+        {"key": "Accordo provvigionale", "label": "Accordo provvigionale", "default": False, "icon": "💶"},
+        {"key": "Circolari", "label": "Circolari", "default": False, "icon": "📣"},
+        {"key": "Condizioni di assicurazione", "label": "Condizioni di assicurazione", "default": False, "icon": "📜"},
+        {"key": "Listini / Tariffe", "label": "Listini / Tariffe", "default": False, "icon": "🏷️"},
         {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
         {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
     ],

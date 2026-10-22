@@ -198,6 +198,69 @@ async def _res_documento_id_in_scadenza(giorni: int) -> list[dict]:
     return out
 
 
+async def _res_documenti_aziendali_in_scadenza(default_giorni: int) -> list[dict]:
+    """Documenti di compagnie/agenzie partner/azienda con `avviso_attivo` la cui
+    `data_scadenza` cade ESATTAMENTE tra `avviso_giorni` giorni (preavviso per singolo
+    documento; fallback al default della regola)."""
+    oggi = _today()
+    out: list[dict] = []
+
+    def _match(d: dict) -> Optional[int]:
+        if not d.get("avviso_attivo"):
+            return None
+        sc = d.get("data_scadenza")
+        if not sc:
+            return None
+        g = int(d.get("avviso_giorni") or default_giorni)
+        target = (oggi + timedelta(days=max(0, g))).isoformat()
+        return g if str(sc)[:10] == target else None
+
+    async def _scan(coll, entita: str, link_prefix: str) -> None:
+        cur = coll.find({"documenti.avviso_attivo": True}, {"_id": 0})
+        async for rec in cur:
+            nome = rec.get("ragione_sociale") or rec.get("nome") or "—"
+            for d in (rec.get("documenti") or []):
+                g = _match(d)
+                if g is None:
+                    continue
+                out.append({
+                    "entita_tipo": entita,
+                    "entita_id": rec.get("id"),
+                    "nome": nome,
+                    "cliente_nome": nome,
+                    "tipo_documento": d.get("tipologia") or "Documento",
+                    "numero_documento": d.get("nome_file") or "",
+                    "data_scadenza": _fmt_date(d.get("data_scadenza")),
+                    "scadenza": _fmt_date(d.get("data_scadenza")),
+                    "giorni": g,
+                    "link": f"{link_prefix}{rec.get('id')}",
+                })
+
+    await _scan(db.compagnie, "compagnia", "/compagnie")
+    await _scan(db.agenzie, "agenzia_partner", "/agenzie")
+
+    az = await db.azienda_config.find_one({"documenti.avviso_attivo": True}, {"_id": 0})
+    if az:
+        nome = az.get("ragione_sociale") or "Azienda"
+        for d in (az.get("documenti") or []):
+            g = _match(d)
+            if g is None:
+                continue
+            out.append({
+                "entita_tipo": "azienda",
+                "entita_id": az.get("id"),
+                "nome": nome,
+                "cliente_nome": nome,
+                "tipo_documento": d.get("tipologia") or "Documento",
+                "numero_documento": d.get("nome_file") or "",
+                "data_scadenza": _fmt_date(d.get("data_scadenza")),
+                "scadenza": _fmt_date(d.get("data_scadenza")),
+                "giorni": g,
+                "link": "/librerie",
+            })
+    return out
+
+
 _OFFSET_KINDS = {
     "polizza_scaduta_giorno": 0,
     "polizza_scaduta_5g": 5,
@@ -220,6 +283,8 @@ async def resolve_payloads(rule: dict) -> list[dict]:
         return await _res_titolo_scaduto_oltre(int(rule.get("soglia_giorni") or 30))
     if kind == "documento_id_scaduto":
         return await _res_documento_id_in_scadenza(int(rule.get("soglia_giorni") or 30))
+    if kind == "documento_aziendale_scaduto":
+        return await _res_documenti_aziendali_in_scadenza(int(rule.get("soglia_giorni") or 15))
     # schedule_kind non gestito da questo esecutore (es. digest settimanali,
     # documento_veicolo_mancante gestito da sollecito_veicoli, documento_id_scaduto)
     return []

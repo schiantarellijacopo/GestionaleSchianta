@@ -99,6 +99,17 @@ PRESETS: list[dict] = [
         "template_corpo": "Gentile {nome},\n\nle ricordiamo che il documento {tipo_documento} risulta in scadenza il {data_scadenza}.\n\nProvveda al rinnovo prima della data indicata.\n\nUn cordiale saluto",
     },
     {
+        "preset_key": "documento_aziendale_scaduto",
+        "nome": "Avviso scadenza documento aziendale",
+        "descrizione": "Avvisa l'agenzia quando un documento di Compagnie/Agenzie partner/Azienda (con avviso attivo) sta per scadere. Il preavviso in giorni si imposta su ogni singolo documento (default 15).",
+        "tipo": "schedule", "schedule_kind": "documento_aziendale_scaduto",
+        "cron": "0 8 * * *",            # ogni giorno alle 08:00
+        "soglia_giorni": 15,
+        "canali": ["inapp", "email"], "destinatari": ["admin"],
+        "template_oggetto": "Documento in scadenza: {tipo_documento} — {nome}",
+        "template_corpo": "Attenzione: il documento «{tipo_documento}» di {nome} è in scadenza il {data_scadenza} (preavviso {giorni} giorni).\n\nVerifica e provvedi al rinnovo dalla piattaforma.",
+    },
+    {
         "preset_key": "titolo_scaduto_oltre",
         "nome": "Titolo scaduto oltre soglia",
         "descrizione": "Sollecito automatico al cliente se un titolo è scaduto da N giorni (default 5).",

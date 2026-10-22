@@ -18,6 +18,7 @@ import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Buil
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
+import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
 import { toast } from "sonner";
 
 function RiassegnaProvvigioniButton({ schema }) {
@@ -89,8 +90,9 @@ function errMsg(e, fallback = "Errore") {
 const ENTITA_LABEL = {
     anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri",
     collaboratore: "Utenti / Collaboratori", agenzia_partner: "Agenzie partner", azienda: "Azienda",
+    compagnia: "Compagnie",
 };
-const ENTITA_ORDINE = ["anagrafica", "polizza", "sinistro", "collaboratore", "agenzia_partner", "azienda"];
+const ENTITA_ORDINE = ["anagrafica", "polizza", "sinistro", "collaboratore", "agenzia_partner", "azienda", "compagnia"];
 
 function VisibilitaDocCard({ ent, c, onToggleVis, onToggleObbl, onIcon, onDel }) {
     const dragControls = useDragControls();
@@ -143,6 +145,7 @@ function VisibilitaDocSezione() {
         collaboratore: { label: "", icon: "🗂️", obbligatoria: false },
         agenzia_partner: { label: "", icon: "🗂️", obbligatoria: false },
         azienda: { label: "", icon: "🗂️", obbligatoria: false },
+        compagnia: { label: "", icon: "🗂️", obbligatoria: false },
     });
 
     const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
@@ -2954,7 +2957,9 @@ function DocumentiAzienda({ documenti, onChange }) {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="azienda-doc-cards">
                     {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
-                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
+                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi}
+                            avvisoEntita="azienda"
+                            onAvviso={(itemId, patch) => onChange(list.map((x) => x.id === itemId ? { ...x, ...patch } : x))} />
                     ))}
                 </div>
             )}
@@ -3337,7 +3342,7 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
     );
 }
 
-function DocFolderCard({ tipologia, files, onDelete }) {
+function DocFolderCard({ tipologia, files, onDelete, avvisoEntita, avvisoEntitaId, onAvviso }) {
     const [open, setOpen] = useState(true);
     return (
         <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`doc-folder-${tipologia}`}>
@@ -3366,6 +3371,7 @@ function DocFolderCard({ tipologia, files, onDelete }) {
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                     {a.data_rilascio && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Rilascio: {new Date(a.data_rilascio + "T00:00:00").toLocaleDateString("it-IT")}</span>}
                                     {sc && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sc.cls}`} data-testid={`doc-scadenza-${a.id}`}>{sc.label}</span>}
+                                    {avvisoEntita && <AvvisoScadenzaControl entita={avvisoEntita} entitaId={avvisoEntitaId} item={a} onChange={onAvviso} />}
                                 </div>
                             </div>
                             <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`doc-del-${a.id}`}>

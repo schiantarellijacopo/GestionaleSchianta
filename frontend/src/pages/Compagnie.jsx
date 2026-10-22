@@ -11,8 +11,9 @@ import {
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Building2, Edit, Trash2, Link2 } from "lucide-react";
+import { Plus, Building2, Edit, Trash2, Link2, FileText, Paperclip } from "lucide-react";
 import { toast } from "sonner";
+import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
 
 export default function Compagnie() {
     const [list, setList] = useState(null);
@@ -211,6 +212,20 @@ function CompagniaDialog({ editing, agenzie, onClose }) {
                         <Label htmlFor="attiva" className="text-xs cursor-pointer">Compagnia attiva</Label>
                     </div>
                 </div>
+
+                {/* DOCUMENTI COMPAGNIA */}
+                {editing?.id ? (
+                    <div className="border-t pt-3 mt-3" data-testid="comp-documenti-sezione">
+                        <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <FileText size={13} className="text-slate-500" /> Documenti
+                        </h3>
+                        <DocumentiCompagnia cid={editing.id} iniziali={editing.documenti || []} />
+                    </div>
+                ) : (
+                    <div className="border-t pt-3 mt-3 text-xs text-slate-400" data-testid="comp-documenti-hint">
+                        Salva la compagnia per poter caricare i documenti.
+                    </div>
+                )}
             </div>
             <DialogFooter>
                 <Button data-testid="comp-save-button" onClick={save} className="bg-sky-700 hover:bg-sky-800">
@@ -218,5 +233,165 @@ function CompagniaDialog({ editing, agenzie, onClose }) {
                 </Button>
             </DialogFooter>
         </DialogContent>
+    );
+}
+
+// =================== DOCUMENTI COMPAGNIA (card) ===================
+const COMP_DOC_TIPI_FALLBACK = [
+    "Convenzione / Mandato", "Accordo provvigionale", "Circolari",
+    "Condizioni di assicurazione", "Listini / Tariffe", "Documento IBAN", "Altro",
+];
+
+function compDocScadenza(dataScadenza) {
+    if (!dataScadenza) return null;
+    const d = new Date(dataScadenza + "T00:00:00");
+    if (isNaN(d)) return null;
+    const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+    const giorni = Math.round((d - oggi) / 86400000);
+    const dmt = d.toLocaleDateString("it-IT");
+    if (giorni < 0) return { label: `Scaduto il ${dmt}`, cls: "bg-red-100 text-red-700" };
+    if (giorni <= 30) return { label: `In scadenza (${dmt})`, cls: "bg-amber-100 text-amber-700" };
+    return { label: `Scade il ${dmt}`, cls: "bg-slate-100 text-slate-600" };
+}
+
+function DocumentiCompagnia({ cid, iniziali }) {
+    const [list, setList] = useState(iniziali || []);
+    const [tipi, setTipi] = useState(COMP_DOC_TIPI_FALLBACK);
+    const [tipologia, setTipologia] = useState("");
+    const [descrizione, setDescrizione] = useState("");
+    const [dataRilascio, setDataRilascio] = useState("");
+    const [dataScadenza, setDataScadenza] = useState("");
+    const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
+
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => {
+                const lst = (r.data?.compagnia || []).map((c) => c.label).filter(Boolean);
+                if (lst.length) setTipi(lst);
+            }).catch(() => {});
+    }, []);
+
+    const aggiungi = async () => {
+        if (!file) { toast.error("Seleziona un file"); return; }
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("tipologia", tipologia || "Altro");
+            fd.append("descrizione", descrizione || "");
+            fd.append("data_rilascio", dataRilascio || "");
+            fd.append("data_scadenza", dataScadenza || "");
+            const r = await api.post(`/compagnie/${cid}/documenti`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            setList((p) => [...p, r.data]);
+            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
+            toast.success("Documento aggiunto");
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/compagnie/${cid}/documenti/${id}`);
+            setList((p) => p.filter((x) => x.id !== id));
+            toast.success("Eliminato");
+        } catch { toast.error("Errore"); }
+    };
+    const aggiornaAvviso = (itemId, patch) =>
+        setList((p) => p.map((x) => x.id === itemId ? { ...x, ...patch } : x));
+
+    const gruppi = {};
+    (list || []).forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
+    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
+
+    return (
+        <div className="space-y-3" data-testid="documenti-compagnia">
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <Label className="text-xs">Tipologia</Label>
+                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
+                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="comp-doc-tipologia">
+                            <option value="">— Seleziona —</option>
+                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <Label className="text-xs">Descrizione (facoltativa)</Label>
+                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="comp-doc-descrizione" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data rilascio</Label>
+                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="comp-doc-data-rilascio" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data scadenza</Label>
+                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="comp-doc-data-scadenza" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">File (PDF/IMG)</Label>
+                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="comp-doc-file" />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="comp-doc-add-btn">
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+
+            {(list || []).length === 0 ? (
+                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="comp-doc-cards">
+                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
+                        <CompDocFolderCard key={t} tipologia={t} files={gruppi[t]} cid={cid}
+                            onDelete={rimuovi} onAvviso={aggiornaAvviso} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function CompDocFolderCard({ tipologia, files, cid, onDelete, onAvviso }) {
+    const [open, setOpen] = useState(true);
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`comp-doc-folder-${tipologia}`}>
+            <button onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                data-testid={`comp-doc-folder-toggle-${tipologia}`}>
+                <FileText size={16} className="text-slate-500" />
+                <span className="font-medium text-sm text-slate-800 flex-1">{tipologia}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">{files.length}</span>
+                <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+            </button>
+            {open && (
+                <ul className="divide-y divide-slate-100 px-3">
+                    {files.map((a) => {
+                        const sc = compDocScadenza(a.data_scadenza);
+                        return (
+                            <li key={a.id} className="py-2.5 flex items-center gap-3" data-testid={`comp-doc-item-${a.id}`}>
+                                <Paperclip size={15} className="text-slate-400 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    {a.url ? (
+                                        <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-sky-700 hover:underline truncate block">{a.nome_file || "Apri"}</a>
+                                    ) : (
+                                        <span className="text-sm text-slate-700 truncate block">{a.nome_file || "—"}</span>
+                                    )}
+                                    {a.descrizione && <div className="text-[11px] text-slate-500 truncate">{a.descrizione}</div>}
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                        {a.data_rilascio && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Rilascio: {new Date(a.data_rilascio + "T00:00:00").toLocaleDateString("it-IT")}</span>}
+                                        {sc && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sc.cls}`} data-testid={`comp-doc-scadenza-${a.id}`}>{sc.label}</span>}
+                                        <AvvisoScadenzaControl entita="compagnia" entitaId={cid} item={a} onChange={onAvviso} />
+                                    </div>
+                                </div>
+                                <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`comp-doc-del-${a.id}`}>
+                                    <Trash2 size={13} />
+                                </button>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+        </div>
     );
 }

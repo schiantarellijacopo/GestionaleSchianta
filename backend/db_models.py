@@ -309,6 +309,8 @@ class Compagnia(BaseDoc):
     logo_url: Optional[str] = None
     logo_storage_path: Optional[str] = None
     logo_mime: Optional[str] = None
+    # Documenti (card per tipologia, più file per card) — stesso schema di agenzie/azienda
+    documenti: list = []
 
 
 # =============== ANAGRAFICHE ===============

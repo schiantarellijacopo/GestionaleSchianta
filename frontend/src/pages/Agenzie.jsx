@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Building2, Edit, Trash2, Crown, Handshake, Link2, Upload, FileText, Paperclip } from "lucide-react";
 import { toast } from "sonner";
+import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
 
 const RAPPORTO_LABEL = {
     mandato_diretto: "Mandato diretto",
@@ -498,6 +499,8 @@ function DocumentiAgenzia({ aid, iniziali }) {
             toast.success("Eliminato");
         } catch { toast.error("Errore"); }
     };
+    const aggiornaAvviso = (itemId, patch) =>
+        setList((p) => p.map((x) => x.id === itemId ? { ...x, ...patch } : x));
 
     const gruppi = {};
     (list || []).forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
@@ -543,7 +546,7 @@ function DocumentiAgenzia({ aid, iniziali }) {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="age-doc-cards">
                     {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
-                        <AgeDocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
+                        <AgeDocFolderCard key={t} tipologia={t} files={gruppi[t]} aid={aid} onDelete={rimuovi} onAvviso={aggiornaAvviso} />
                     ))}
                 </div>
             )}
@@ -551,7 +554,7 @@ function DocumentiAgenzia({ aid, iniziali }) {
     );
 }
 
-function AgeDocFolderCard({ tipologia, files, onDelete }) {
+function AgeDocFolderCard({ tipologia, files, aid, onDelete, onAvviso }) {
     const [open, setOpen] = useState(true);
     return (
         <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`age-doc-folder-${tipologia}`}>
@@ -580,6 +583,7 @@ function AgeDocFolderCard({ tipologia, files, onDelete }) {
                                     <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                         {a.data_rilascio && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Rilascio: {new Date(a.data_rilascio + "T00:00:00").toLocaleDateString("it-IT")}</span>}
                                         {sc && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${sc.cls}`} data-testid={`age-doc-scadenza-${a.id}`}>{sc.label}</span>}
+                                        <AvvisoScadenzaControl entita="agenzia_partner" entitaId={aid} item={a} onChange={onAvviso} />
                                     </div>
                                 </div>
                                 <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`age-doc-del-${a.id}`}>
