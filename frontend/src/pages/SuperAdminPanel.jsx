@@ -1794,6 +1794,16 @@ function ChiaviApiTab() {
                 </div>
             </div>
 
+            {/* AI STUDIO — Google Gemini */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-aistudio">
+                <div className="font-semibold text-slate-800 text-sm">🤖 AI Studio — Google Gemini</div>
+                <div className="text-[11px] text-slate-500">Chiave usata dalle funzioni AI (OCR polizze, assistente, insight, generazione contenuti). Fallback a <code>GEMINI_API_KEY</code> quando non è presente la chiave gestita Emergent.</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <FormField label="API Key (Google AI Studio)" type="password" value={f.ai_studio_api_key || ""} onChange={(v) => set("ai_studio_api_key", v)} testid="sa-aistudio-key" />
+                </div>
+                <div className="text-[11px] text-slate-400 mt-2">Ottieni la chiave su <span className="font-mono">aistudio.google.com/apikey</span>.</div>
+            </div>
+
             {/* TWILIO SMS */}
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-twilio">
                 <div className="font-semibold text-slate-800 text-sm">📱 SMS — Twilio</div>

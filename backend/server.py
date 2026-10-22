@@ -18488,6 +18488,15 @@ async def startup():
     from indexes import ensure_indexes
     await ensure_indexes()
 
+    # AI Studio (Gemini): carica la chiave dal vault super-admin come fallback GEMINI_API_KEY
+    try:
+        _az_ai = await raw_db.azienda_config.find_one({}, {"_id": 0, "ai_studio_api_key": 1})
+        if _az_ai and _az_ai.get("ai_studio_api_key"):
+            os.environ["GEMINI_API_KEY"] = _az_ai["ai_studio_api_key"]
+            logger.info("GEMINI_API_KEY caricata dal vault super-admin (AI Studio)")
+    except Exception as _e:
+        logger.warning("Impossibile caricare AI Studio key dal vault: %s", _e)
+
     # admin seed (admin agenzia principale — NON super_admin)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@assicura.it").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")

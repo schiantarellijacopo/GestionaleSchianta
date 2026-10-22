@@ -64,6 +64,7 @@ _CHIAVI_AZIENDA = [
     "firma_api_token", "firma_webhook_secret",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
+    "ai_studio_api_key",
 ]
 
 
@@ -92,6 +93,13 @@ async def sa_put_chiavi_api(body: dict, user=Depends(require_user("admin")),
         az = await raw_db.azienda_config.find_one({}, {"_id": 0, "id": 1})
         if az:
             await raw_db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
+    # AI Studio (Gemini): rendi subito effettiva la chiave nel processo come fallback GEMINI_API_KEY
+    if "ai_studio_api_key" in body:
+        _k = (body.get("ai_studio_api_key") or "").strip()
+        if _k:
+            os.environ["GEMINI_API_KEY"] = _k
+        else:
+            os.environ.pop("GEMINI_API_KEY", None)
     if "evolution_server_url" in body or "evolution_api_key" in body:
         url = (body.get("evolution_server_url") or "").strip().rstrip("/")
         key = (body.get("evolution_api_key") or "").strip()
