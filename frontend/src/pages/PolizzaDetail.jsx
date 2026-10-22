@@ -745,7 +745,7 @@ export default function PolizzaDetail() {
                 <TabsContent value="premi">
                     <Card className="p-4">
                         <div className="flex items-center justify-between mb-3">
-                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Premi di polizza</div>
+                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Premi di polizza <span className="text-[11px] font-normal text-slate-400">· valori annui</span></div>
                             {canEdit && !premiEdit && (
                                 <Button size="sm" variant="outline" onClick={startPremiEdit} data-testid="premi-edit-btn">Modifica premi</Button>
                             )}
@@ -895,7 +895,7 @@ export default function PolizzaDetail() {
                 <TabsContent value="provvigioni">
                     <Card className="p-6 border-slate-200 mt-4">
                         <div className="flex items-center justify-between mb-3">
-                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Provvigioni</div>
+                            <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5"><Banknote size={15} /> Provvigioni <span className="text-[11px] font-normal text-slate-400">· valori annui</span></div>
                             {canEdit && !provvEdit && (
                                 <Button size="sm" variant="outline" onClick={startProvvEdit} data-testid="provv-edit-btn"><Pencil size={13} className="mr-1" /> Modifica</Button>
                             )}

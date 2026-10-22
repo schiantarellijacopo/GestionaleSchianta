@@ -1385,6 +1385,7 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
     fraz_cache: Dict[str, str] = {}
     pol_meta_cache: Dict[str, dict] = {}
     nome_cache: Dict[str, str] = {}
+    pol_ids_titoli: set = set()  # 🆕 polizze da riallineare al Premio Annuo a fine import
     # ═══ REGOLA UTENTE (import OMNIA) — IMPORTI SOLO DAL rec42 ═══
     # Netto/Tasse/SSN/Lordo/Provvigioni derivano ESCLUSIVAMENTE dal rec42
     # (somma delle righe-garanzia del titolo, collegate per id_titolo_exp, col C/idx 2):
@@ -1425,6 +1426,7 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
             pol_id = polizza_id_map.get(pol_exp) if pol_exp else None
             if not pol_id:
                 continue
+            pol_ids_titoli.add(pol_id)
             id_t = row.get("id_titolo_exp") or _uid()
             # ═══ Importi SOLO dal rec42 (vedi regola in testa alla funzione) ═══
             # Accessori: su richiesta utente NON vengono più importati (sempre 0).
@@ -1573,6 +1575,12 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                         {"id": pol_id},
                         {"$set": {"provvigioni": titolo_provv, "updated_at": _now_iso()}},
                     )
+
+    # 🆕 Premio ANNUO: riallinea la scheda polizza all'ultimo titolo valido
+    # (rata × rate/anno) per ogni polizza che ha ricevuto titoli in questo import.
+    from shared import ricalcola_premio_annuo_polizza
+    for _pid in pol_ids_titoli:
+        await ricalcola_premio_annuo_polizza(db, _pid)
 
 
 # ---------------------------------------------------------------------------

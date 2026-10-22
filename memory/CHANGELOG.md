@@ -1,5 +1,24 @@
 # Changelog — Axicura CRM
 
+## 2026-06 — Premio Annuo automatico sulla scheda polizza (da titolo)
+- Nuovi titoli (import Omnia/ANIA, OCR polizza, creazione manuale, creazione polizza) ora
+  **annualizzano** i premi e le provvigioni della scheda polizza: **rata × n. rate/anno**
+  (annuale×1, semestrale×2, quadrimestrale×3, trimestrale×4, mensile×12, unica×1).
+- Si applica **solo** ai titoli tipo `nuova`, `rinnovo`, `quietanza`. **Esclusi** `sospensione` e
+  `regolazione` (non modificano la polizza).
+- Campi sovrascritti sulla polizza: `premio_netto`, `premio_imposte`, `premio_ssn`,
+  `premio_accessori`, `diritti`, `premio_lordo`, `provvigioni`. Le quote **collaboratore/margine**
+  si derivano a lettura dallo schema provvigionale (tab Provvigioni).
+- Nessuna bonifica retroattiva: effetto solo dai **prossimi** titoli/import. La riconciliazione
+  prende sempre il **titolo valido più recente** (per effetto/scadenza) → l'ultimo vince.
+- Implementazione: `shared.ricalcola_premio_annuo_polizza(db, polizza_id)` + `_RATE_PER_ANNO`,
+  `TIPI_TITOLO_ANNUALIZZA`. Hook in `server.py` (create polizza, create/update titolo) e
+  `ania_importer._processa_titoli` (riconcilia le polizze toccate a fine import, dopo le garanzie).
+- UI: tab **Premi** e **Provvigioni** della scheda polizza etichettate "· valori annui".
+- Verificato: polizza semestrale rata 100/80/18/2 provv10 → annui 200/160/36/4 provv20; titolo
+  sospensione più recente ignorato. Test API end-to-end + test unit motor.
+
+
 ## 2026-10-22 — Modelli Firma: modalità {placeholder} + Word + Librerie
 - Aggiunto segnaposto `{x}` per **sbarrare una casella** (scrive una X nel punto). Verificato.
 - **Pivot a segnaposto `{...}`** (niente più riquadri da trascinare): nel Word/PDF si scrivono

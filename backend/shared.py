@@ -65,6 +65,70 @@ def calcola_scadenza_titolo(effetto: Optional[str], frazionamento: str) -> Optio
 
 
 # ---------------------------------------------------------------------------
+# Premio ANNUO di polizza (da titolo rata × numero rate/anno)
+# ---------------------------------------------------------------------------
+# Numero di rate che compongono l'annualità per ciascun frazionamento.
+_RATE_PER_ANNO = {
+    "annuale": 1,
+    "semestrale": 2,
+    "quadrimestrale": 3,
+    "trimestrale": 4,
+    "mensile": 12,
+    "unica": 1,
+}
+
+# Solo questi tipi di titolo aggiornano il Premio Annuo di polizza.
+# I titoli di sospensione/regolazione (e gli altri) NON toccano la scheda polizza.
+TIPI_TITOLO_ANNUALIZZA = {"nuova", "rinnovo", "quietanza"}
+
+
+async def ricalcola_premio_annuo_polizza(db, polizza_id: Optional[str]) -> None:
+    """Allinea i premi/provvigioni della SCHEDA POLIZZA al Premio ANNUO calcolato
+    dall'ultimo titolo valido (rata × numero rate dell'anno).
+
+    Regole (richiesta utente):
+      - vale SOLO per i titoli di tipo nuova / rinnovo / quietanza;
+      - i titoli di sospensione / regolazione (e altri) non aggiornano la polizza;
+      - Premio Annuo = importo della rata × rate/anno (es. semestrale ×2, mensile ×12);
+      - sovrascrive i campi premio_* / diritti / provvigioni della polizza;
+      - le quote collaboratore/margine sono ricalcolate in lettura dallo schema.
+    """
+    if not polizza_id:
+        return
+    pol = await db.polizze.find_one(
+        {"id": polizza_id}, {"_id": 0, "frazionamento": 1})
+    if not pol:
+        return
+    t = await db.titoli.find(
+        {"polizza_id": polizza_id, "tipo": {"$in": list(TIPI_TITOLO_ANNUALIZZA)}},
+        {"_id": 0, "importo_netto": 1, "imposte": 1, "ssn": 1, "accessori": 1,
+         "diritti": 1, "importo_lordo": 1, "provvigioni": 1, "effetto": 1,
+         "scadenza": 1},
+    ).sort([("effetto", -1), ("scadenza", -1)]).limit(1).to_list(1)
+    if not t:
+        return
+    tit = t[0]
+    fraz = (pol.get("frazionamento") or "annuale").strip().lower()
+    f = _RATE_PER_ANNO.get(fraz, 1)
+
+    def _a(v):
+        return round(float(v or 0.0) * f, 2)
+
+    upd = {
+        "premio_netto": _a(tit.get("importo_netto")),
+        "premio_imposte": _a(tit.get("imposte")),
+        "premio_ssn": _a(tit.get("ssn")),
+        "premio_accessori": _a(tit.get("accessori")),
+        "diritti": _a(tit.get("diritti")),
+        "premio_lordo": _a(tit.get("importo_lordo")),
+        "provvigioni": _a(tit.get("provvigioni")),
+        "updated_at": _now_iso(),
+    }
+    await db.polizze.update_one({"id": polizza_id}, {"$set": upd})
+
+
+
+# ---------------------------------------------------------------------------
 # Mongo helpers
 # ---------------------------------------------------------------------------
 def strip_mongo_id(doc: dict | None) -> dict | None:

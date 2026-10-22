@@ -32,6 +32,7 @@ from shared import (
     resolve_conto_cassa as _resolve_conto_cassa,
     intestazione_pdf as _intestazione_pdf,
     assert_giornata_aperta,
+    ricalcola_premio_annuo_polizza,
 )
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -4269,6 +4270,8 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             stato="da_incassare",
         )
         await db.titoli.insert_one(primo.model_dump())
+        # 🆕 Premio ANNUO della scheda polizza (rata × rate/anno) dal titolo valido.
+        await ricalcola_premio_annuo_polizza(db, obj.id)
     # Catena di sostituzione: se la nuova polizza ne sostituisce un'altra, marca la
     # vecchia come 'sostituita', collega la catena e storna SOLO i titoli arretrati
     # (da_incassare) NON coperti. Coperto/sospeso/incassato = in Prima Nota → mai toccati.
@@ -6398,6 +6401,8 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
             body[_k] = round(float(body[_k]), 2)
     obj = Titolo(**body)
     await db.titoli.insert_one(obj.model_dump())
+    # 🆕 Aggiorna il Premio ANNUO della scheda polizza (solo tipi nuova/rinnovo/quietanza).
+    await ricalcola_premio_annuo_polizza(db, obj.polizza_id)
     await log_attivita(user, "create", "titolo", obj.id)
     return obj.model_dump()
 
@@ -6460,6 +6465,8 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
                       "compagnia_id": pol.get("compagnia_id"), "updated_at": _now_iso()}},
         )
     updated = await db.titoli.find_one({"id": tid}, {"_id": 0})
+    # 🆕 Aggiorna il Premio ANNUO della scheda polizza (solo tipi nuova/rinnovo/quietanza).
+    await ricalcola_premio_annuo_polizza(db, (updated or {}).get("polizza_id"))
     await log_attivita(user, "update", "titolo", tid)
     return strip_mongo_id(updated)
 
