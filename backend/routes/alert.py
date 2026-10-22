@@ -189,6 +189,9 @@ async def get_scheduler_config(user: dict = Depends(require_user("admin", "colla
         "alert_scheduler_attivo": bool(cfg.get("alert_scheduler_attivo", True)),
         "alert_scheduler_hour": int(cfg.get("alert_scheduler_hour", 8)),
         "alert_scheduler_minute": int(cfg.get("alert_scheduler_minute", 0)),
+        "copertura_auto_attivo": bool(cfg.get("copertura_auto_attivo", False)),
+        "copertura_auto_hour": int(cfg.get("copertura_auto_hour", 20)),
+        "copertura_auto_minute": int(cfg.get("copertura_auto_minute", 0)),
     }
 
 
@@ -196,6 +199,9 @@ class SchedulerConfigBody(BaseModel):
     alert_scheduler_attivo: Optional[bool] = None
     alert_scheduler_hour: Optional[int] = None
     alert_scheduler_minute: Optional[int] = None
+    copertura_auto_attivo: Optional[bool] = None
+    copertura_auto_hour: Optional[int] = None
+    copertura_auto_minute: Optional[int] = None
 
 
 @router.put("/alert-scheduler/config")
@@ -207,6 +213,12 @@ async def set_scheduler_config(body: SchedulerConfigBody, user: dict = Depends(r
         upd["alert_scheduler_hour"] = max(0, min(23, int(body.alert_scheduler_hour)))
     if body.alert_scheduler_minute is not None:
         upd["alert_scheduler_minute"] = max(0, min(59, int(body.alert_scheduler_minute)))
+    if body.copertura_auto_attivo is not None:
+        upd["copertura_auto_attivo"] = bool(body.copertura_auto_attivo)
+    if body.copertura_auto_hour is not None:
+        upd["copertura_auto_hour"] = max(0, min(23, int(body.copertura_auto_hour)))
+    if body.copertura_auto_minute is not None:
+        upd["copertura_auto_minute"] = max(0, min(59, int(body.copertura_auto_minute)))
     if not upd:
         raise HTTPException(400, "Nessun campo da aggiornare")
     existing = await db.azienda_config.find_one({}, {"_id": 0, "id": 1})

@@ -14,6 +14,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Literal
+from pymongo.errors import DuplicateKeyError
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
@@ -374,12 +375,28 @@ async def update_user(uid: str, body: dict, user=Depends(require_user("admin")))
     clean = {k: v for k, v in (body or {}).items() if k in _USER_UPDATE_ALLOWED}
     if "role" in clean and clean["role"] not in _VALID_ROLES:
         raise HTTPException(400, "Ruolo non valido")
+    # Email: normalizza e verifica che non sia già usata da un ALTRO utente
+    # (l'indice `users.email` è unico a livello globale → senza questo check
+    # un'email duplicata farebbe fallire update_one con 500 DuplicateKeyError).
+    if "email" in clean:
+        new_email = (clean["email"] or "").lower().strip()
+        if not new_email:
+            clean.pop("email")
+        else:
+            clean["email"] = new_email
+            dup = await db.users.find_one(
+                {"email": new_email, "id": {"$ne": uid}}, {"_id": 0, "id": 1})
+            if dup:
+                raise HTTPException(400, "Email già in uso da un altro utente")
     if clean.get("password"):
         clean["password_hash"] = hash_password(clean.pop("password"))
     else:
         clean.pop("password", None)
     clean["updated_at"] = _now_iso()
-    res = await db.users.update_one({"id": uid}, {"$set": clean})
+    try:
+        res = await db.users.update_one({"id": uid}, {"$set": clean})
+    except DuplicateKeyError:
+        raise HTTPException(400, "Email già in uso da un altro utente")
     if res.matched_count == 0:
         raise HTTPException(404, "Utente non trovato")
     await log_attivita(user, "update", "user", uid)

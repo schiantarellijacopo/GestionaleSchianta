@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Request
 from database import db, raw_db
 from auth import require_user
 from db_models import _now_iso, _uid
-from tenant import user_tenant_id
+from tenant import user_tenant_id, tenant_filter
 
 logger = logging.getLogger(__name__)
 
@@ -367,9 +367,15 @@ async def percorso_operatore(
 
 @router.get("/operatori")
 async def lista_operatori(user=Depends(require_user("admin"))):
-    """Elenco operatori del tenant per i filtri."""
+    """Elenco operatori del tenant per i filtri. ISOLATO per agenzia: ogni
+    admin vede SOLO gli operatori della propria agenzia (users NON è
+    tenant-scoped dal wrapper, quindi filtriamo esplicitamente)."""
+    flt: dict = {"role": {"$in": ["admin", "collaboratore", "dipendente"]}}
+    tf = tenant_filter(user)
+    if tf:
+        flt.update(tf)
     items = await db.users.find(
-        {"role": {"$in": ["admin", "collaboratore", "dipendente"]}},
+        flt,
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1},
     ).sort("name", 1).to_list(500)
     return items

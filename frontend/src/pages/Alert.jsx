@@ -24,7 +24,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import {
     Bell, Mail, MessageCircle, Smartphone, Edit3, Send, Trash2, Plus, Library,
-    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink, Copy,
+    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink, Copy, ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -203,6 +203,7 @@ export default function Alert() {
             {tab === "regole" && (
                 <>
                     <SchedulerConfigCard />
+                    <CoperturaAutoCard />
                     {/* Toolbar: filtro tipo + actions */}
                     <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
                         <div className="flex gap-2">
@@ -410,6 +411,76 @@ function SchedulerConfigCard() {
             </div>
             <div className="text-[11px] text-slate-500 mt-2">
                 I messaggi vengono inviati al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
+            </div>
+        </Card>
+    );
+}
+
+
+function CoperturaAutoCard() {
+    const [cfg, setCfg] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const [running, setRunning] = useState(false);
+    useEffect(() => {
+        api.get("/alert-scheduler/config").then((r) => setCfg(r.data)).catch(() => {});
+    }, []);
+    if (!cfg) return null;
+    const save = async (next) => {
+        setSaving(true);
+        try {
+            const r = await api.put("/alert-scheduler/config", next);
+            setCfg(r.data);
+            toast.success("Invio automatico coperture aggiornato");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        } finally { setSaving(false); }
+    };
+    const inviaOra = async () => {
+        setRunning(true);
+        try {
+            const r = await api.post("/comunicazioni-copertura/auto-invia-ora", {});
+            toast.success(`Coperture di oggi: ${r.data.inviati} inviate, ${r.data.errori} errori`);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore invio");
+        } finally { setRunning(false); }
+    };
+    return (
+        <Card className="p-4 mb-4 border-emerald-200 bg-emerald-50/40" data-testid="copertura-auto-card">
+            <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                    <ShieldCheck size={18} className="text-emerald-700" />
+                    <div>
+                        <div className="text-sm font-semibold text-slate-800">Comunicazioni di copertura — invio automatico</div>
+                        <div className="text-[11px] text-slate-500">A fine giornata invia alle agenzie partner i titoli del giorno registrati in Prima Nota.</div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    <Label className="text-xs text-slate-600">Ora</Label>
+                    <Input type="number" min={0} max={23} value={cfg.copertura_auto_hour}
+                        onChange={(e) => setCfg({ ...cfg, copertura_auto_hour: parseInt(e.target.value || "0", 10) })}
+                        className="w-16 h-9" data-testid="copertura-auto-hour" />
+                    <span className="text-slate-400">:</span>
+                    <Input type="number" min={0} max={59} value={cfg.copertura_auto_minute}
+                        onChange={(e) => setCfg({ ...cfg, copertura_auto_minute: parseInt(e.target.value || "0", 10) })}
+                        className="w-16 h-9" data-testid="copertura-auto-minute" />
+                    <div className="flex items-center gap-2 ml-2">
+                        <Switch checked={cfg.copertura_auto_attivo}
+                            onCheckedChange={(v) => save({ ...cfg, copertura_auto_attivo: v })}
+                            data-testid="copertura-auto-attivo" />
+                        <Label className="text-xs text-slate-600">{cfg.copertura_auto_attivo ? "Attivo" : "Sospeso"}</Label>
+                    </div>
+                    <Button size="sm" disabled={saving} onClick={() => save(cfg)}
+                        className="bg-emerald-700 hover:bg-emerald-800" data-testid="copertura-auto-save">
+                        Salva orario
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={running} onClick={inviaOra}
+                        data-testid="copertura-auto-invia-ora">
+                        <Send size={14} className="mr-1" /> {running ? "Invio…" : "Invia ora"}
+                    </Button>
+                </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2">
+                I titoli inviati vengono marcati <strong>copertura comunicata</strong> e non rientrano nelle comunicazioni successive. Lo storico è consultabile in <strong>Comunicazioni copertura</strong>.
             </div>
         </Card>
     );

@@ -377,6 +377,52 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
             logger.exception("Errore tick avvisi programmati tenant %s", tid)
 
 
+async def _tick_copertura(raw_db: AsyncIOMotorDatabase) -> None:
+    """Invio AUTOMATICO giornaliero delle comunicazioni di copertura, a fine
+    giornata, all'orario configurato per agenzia (`copertura_auto_*`). Una sola
+    esecuzione al giorno per tenant (idempotenza via `copertura_auto_state`)."""
+    try:
+        from tzlocal import get_localzone
+        tz = get_localzone()
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    now_min = now.hour * 60 + now.minute
+    today = now.date().isoformat()
+
+    async for t in raw_db.tenants.find({"attivo": True}, {"_id": 0, "id": 1}):
+        tid = t.get("id")
+        if not tid:
+            continue
+        try:
+            cfg = await _tenant_alert_config(raw_db, tid)
+            if not cfg.get("copertura_auto_attivo", False):
+                continue
+            target = int(cfg.get("copertura_auto_hour", 20)) * 60 + int(cfg.get("copertura_auto_minute", 0))
+            if not (target <= now_min < target + _TICK_MINUTES):
+                continue
+            state = await raw_db.copertura_auto_state.find_one({"tenant_id": tid}, {"_id": 0})
+            if state and state.get("last_run_date") == today:
+                continue
+            await raw_db.copertura_auto_state.update_one(
+                {"tenant_id": tid},
+                {"$set": {"tenant_id": tid, "last_run_date": today, "last_run_at": now.isoformat()}},
+                upsert=True,
+            )
+            user = {"id": "scheduler", "role": "admin",
+                    "name": "Automazione", "agenzia_tenant_id": tid, "is_super_admin": False}
+            token = set_current_user(user)
+            try:
+                from routes.comunicazioni_copertura import invia_coperture_giorno
+                res = await invia_coperture_giorno(today, user)
+                logger.info("Invio automatico coperture tenant %s (%s): %s inviate, %s errori",
+                            tid, today, res.get("inviati"), res.get("errori"))
+            finally:
+                reset_current_user(token)
+        except Exception:  # noqa: BLE001
+            logger.exception("Errore invio automatico coperture tenant %s", tid)
+
+
 async def _daily_auto_diario(raw_db: AsyncIOMotorDatabase) -> None:
     """Salva automaticamente le conversazioni WhatsApp nel diario cliente,
     una volta al giorno, per ogni tenant (upsert → nessun doppione)."""
@@ -494,8 +540,14 @@ def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     async def _reminder_job() -> None:
         await _daily_upload_reminders(raw_db)
 
+    async def _copertura_job() -> None:
+        await _tick_copertura(raw_db)
+
     sched.add_job(_job, IntervalTrigger(minutes=_TICK_MINUTES),
                   id="avvisi_programmati_tick", replace_existing=True,
+                  misfire_grace_time=600)
+    sched.add_job(_copertura_job, IntervalTrigger(minutes=_TICK_MINUTES),
+                  id="copertura_auto_tick", replace_existing=True,
                   misfire_grace_time=600)
     sched.add_job(_diario_job, CronTrigger(hour=6, minute=30),
                   id="auto_diario_whatsapp", replace_existing=True,

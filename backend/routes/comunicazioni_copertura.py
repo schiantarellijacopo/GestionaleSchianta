@@ -334,6 +334,62 @@ async def _invia_doc(doc: dict, user: dict) -> dict:
     return doc
 
 
+async def invia_coperture_giorno(giorno: str, user: dict) -> dict:
+    """Servizio riutilizzabile (usato dallo scheduler automazioni): genera le
+    comunicazioni di copertura del giorno per il tenant corrente e le INVIA
+    subito alle agenzie partner. Idempotente: i titoli già comunicati vengono
+    esclusi da `_build_gruppi`, quindi ri-eseguendolo non crea doppioni.
+    Richiede che il `current_user` ContextVar sia già impostato sul tenant."""
+    gruppi = await _build_gruppi(giorno)
+    creati, inviati, errori = 0, 0, 0
+    for src in gruppi:
+        titoli = src.get("titoli") or []
+        if not titoli:
+            continue
+        numero = await _next_numero()
+        com = ComunicazioneCopertura(
+            numero=numero,
+            giorno=giorno,
+            compagnia_id=src.get("compagnia_id"),
+            compagnia_nome=src.get("compagnia_nome"),
+            mandato_label=src.get("mandato_label"),
+            agenzia_partner_id=src.get("agenzia_partner_id"),
+            agenzia_partner_nome=src.get("agenzia_partner_nome"),
+            destinatario_email=src.get("destinatario_email"),
+            titoli=titoli,
+            totale=round(sum(float(r.get("importo") or 0) for r in titoli), 2),
+            stato="bozza",
+            created_by=user.get("id"),
+            created_by_name=user.get("name") or "Automazione",
+        )
+        doc = com.model_dump()
+        await db.comunicazioni_copertura.insert_one(doc)
+        doc.pop("_id", None)
+        creati += 1
+        doc = await _invia_doc(doc, user)
+        if doc.get("stato") == "inviata":
+            inviati += 1
+        else:
+            errori += 1
+    return {"giorno": giorno, "gruppi": creati, "inviati": inviati, "errori": errori}
+
+
+@router.post("/auto-invia-ora")
+async def auto_invia_ora(body: dict | None = None, user=Depends(require_user("admin"))):
+    """Esegue SUBITO l'invio automatico delle coperture del giorno (stessa logica
+    dello scheduler), utile per test o invio manuale immediato."""
+    giorno = (body or {}).get("giorno")
+    if not giorno:
+        import datetime
+        giorno = datetime.date.today().isoformat()
+    if not (len(giorno) == 10 and giorno[4] == "-" and giorno[7] == "-"):
+        raise HTTPException(400, "Parametro 'giorno' non valido (YYYY-MM-DD)")
+    res = await invia_coperture_giorno(giorno, user)
+    await log_attivita(user, "auto-invia", "comunicazione_copertura", giorno,
+                       f"Invio automatico: {res.get('inviati')} inviate, {res.get('errori')} errori")
+    return {"ok": True, **res}
+
+
 @router.get("/genera")
 async def genera(giorno: str, user=Depends(require_user(*_ROLES))):
     if not (len(giorno) == 10 and giorno[4] == "-" and giorno[7] == "-"):
