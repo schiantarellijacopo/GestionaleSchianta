@@ -5041,7 +5041,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
     const [f, setF] = useState(editing || {
         tipo: suggestedTipo || "email", nome: "", oggetto: "", corpo: "", sezioni: [],
         sezioni_visibili: MODELLO_SEZIONI.map((s) => s.key),
-        categoria: "", default: false, attivo: true, note: "", richiede_firma: false,
+        categoria: "", default: false, attivo: true, note: "", richiede_firma: false, logo_url: "",
     });
     const [saving, setSaving] = useState(false);
     const isPdf = (f.tipo || "").startsWith("pdf_");
@@ -5064,13 +5064,23 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 attivo: editing.attivo !== false,
                 note: editing.note || "",
                 richiede_firma: !!editing.richiede_firma,
+                logo_url: editing.logo_url || "",
             });
         }
     }, [editing?.id, editing?.updated_at]);
 
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
-    // Ref al textarea corpo per inserimento placeholder nel punto del cursore
+    const onLogoFile = (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        if (file.size > 1024 * 1024) { toast.error("Logo troppo grande (max 1 MB)"); return; }
+        const reader = new FileReader();
+        reader.onload = () => set("logo_url", reader.result);
+        reader.onerror = () => toast.error("Impossibile leggere l'immagine");
+        reader.readAsDataURL(file);
+    };
     const corpoRef = useRef(null);
 
     const insertPlaceholder = (ph) => {
@@ -5109,6 +5119,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 categoria: f.categoria || null, default: !!f.default,
                 attivo: f.attivo !== false, note: f.note || null,
                 richiede_firma: !!f.richiede_firma,
+                logo_url: f.logo_url || null,
             };
             if (editing?.id) {
                 await api.put(`/librerie/modelli/${editing.id}`, payload);
@@ -5192,6 +5203,29 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             </label>
                         </div>
                     </div>
+
+                    {isPdf && (
+                        <div className="rounded-lg border border-gray-200 p-3" data-testid="modello-logo-box">
+                            <Label>Logo del modello</Label>
+                            <p className="text-xs text-gray-500 mb-2">Se vuoto, nelle stampe viene usato il logo dell'agenzia (default).</p>
+                            <div className="flex items-center gap-3">
+                                {f.logo_url ? (
+                                    <img src={f.logo_url} alt="Logo modello" className="h-12 w-auto max-w-[160px] object-contain rounded border border-gray-200 bg-white p-1" data-testid="modello-logo-preview" />
+                                ) : (
+                                    <span className="text-xs text-gray-400 italic">Logo agenzia (default)</span>
+                                )}
+                                <label className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-gray-300 cursor-pointer hover:bg-gray-50" data-testid="modello-logo-upload">
+                                    <Upload size={14} /> Carica logo
+                                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onLogoFile} data-testid="modello-logo-input" />
+                                </label>
+                                {f.logo_url && (
+                                    <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => set("logo_url", "")} data-testid="modello-logo-remove">
+                                        Usa logo agenzia
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     <div className="mt-3">
                         <SezioniVisibiliPicker value={f.sezioni_visibili} onChange={(v) => set("sezioni_visibili", v)} testidPrefix="modello-sez" />

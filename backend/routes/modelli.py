@@ -38,6 +38,7 @@ class ModelloBody(BaseModel):
     attivo: bool = True
     note: Optional[str] = None
     richiede_firma: bool = False
+    logo_url: Optional[str] = None
 
 
 def _autodetect_placeholders(body: ModelloBody) -> list[str]:
@@ -139,6 +140,7 @@ async def create_modello(
         attivo=body.attivo,
         note=body.note,
         richiede_firma=body.richiede_firma,
+        logo_url=body.logo_url,
         placeholders=placeholders,
     ).model_dump()
     # Se default=True, sbianca altri default dello stesso tipo
@@ -752,9 +754,12 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     az_nome = ctx.get("azienda_nome") or ""
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
 
-    # Logo agenzia + firma del collaboratore selezionato
+    # Logo: specifico del modello se impostato, altrimenti logo agenzia
     az_full = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    logo_bytes: Optional[bytes] = await _load_logo_bytes(az_full)
+    if m.get("logo_url"):
+        logo_bytes: Optional[bytes] = await _load_logo_bytes({"logo_url": m.get("logo_url")})
+    else:
+        logo_bytes = await _load_logo_bytes(az_full)
     firma_op_bytes: Optional[bytes] = await _load_image_from_url(ctx.get("_firma_operatore_url"))
 
     richiede_firma = bool(m.get("richiede_firma")) or "{firma}" in (m.get("corpo") or "")

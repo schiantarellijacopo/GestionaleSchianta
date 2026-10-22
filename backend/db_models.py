@@ -1631,3 +1631,6 @@ class TemplateModello(BaseDoc):
     # Se True, il documento generato da questo modello può essere inviato a firma
     # digitale (Yousign). La posizione della firma è indicata dal segnaposto {firma}.
     richiede_firma: bool = False
+    # Logo specifico del modello (data URL base64 o URL http). Se vuoto, nelle
+    # stampe viene usato il logo dell'agenzia (azienda_config).
+    logo_url: Optional[str] = None

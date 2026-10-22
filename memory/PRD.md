@@ -2071,3 +2071,9 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
 **Verifiche eseguite:** da-word ✓, estrai-testo ✓, genera PDF ✓, genera DOCX ✓, firma Yousign sandbox ✓ (status "ongoing", limite sandbox: email firmatario deve essere dell'org). Frontend compila senza errori; dialog "Genera documento" mostra selettore Collaboratore + hint firma.
 
 **Nota:** firma digitale usa Yousign sandbox in preview; in produzione (chiave live) nessun limite su email firmatario. Deploy via Save to GitHub → Railway.
+
+### 2026-10-22 (b) — Logo per-modello
+- Aggiunto `logo_url` opzionale a `TemplateModello` (db_models) e a `ModelloBody`/create/update (`modelli.py`).
+- `genera_documento`: se il modello ha `logo_url` usa quello, altrimenti fallback al logo agenzia (`azienda_config`).
+- UI form modello (solo PDF): box "Logo del modello" con upload immagine (data URL base64, max 1 MB), anteprima e "Usa logo agenzia" per resettare al default.
+- Testato: salvataggio logo_url ✓, generazione PDF con logo del modello ✓, UI dialog ✓.
