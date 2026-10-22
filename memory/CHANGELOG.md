@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-06 — Prima Nota: tutte le compagnie attive nel "Saldo cassa per compagnia"
+- La tabella "Saldo cassa per compagnia" (brogliaccio) ora elenca **tutte le compagnie attive**,
+  anche quelle a **saldo 0,00 € senza movimenti** (prima venivano saltate con `continue`).
+- Filtro compagnie allineato: `attiva ≠ false` (prima `attiva == True` stretto, escludeva quelle
+  col campo `attiva` assente). Coerente con `/compagnie` e col conteggio Agenzie.
+- File: `server.py::_compute_saldi_compagnie`. Verificato: tenant admin 13 attive → 13 righe.
+
+## 2026-06 — Agenzie: conteggio "mandato diretto" solo compagnie attive
+- `routes/agenzie.py` ora conta nel badge solo le compagnie **attive** (sia principale che
+  partner). Prima includeva anche compagnie dirette disattivate → conteggio gonfiato (es. 3 vs 2).
+
+
 ## 2026-06 — Premio Annuo automatico sulla scheda polizza (da titolo)
 - Nuovi titoli (import Omnia/ANIA, OCR polizza, creazione manuale, creazione polizza) ora
   **annualizzano** i premi e le provvigioni della scheda polizza: **rata × n. rate/anno**

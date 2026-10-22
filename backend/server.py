@@ -9959,7 +9959,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
     Saldo > 0 = dobbiamo ancora versare alla compagnia.
     """
     out = []
-    compagnie = await db.compagnie.find({"attiva": True}, {"_id": 0}).to_list(500)
+    compagnie = await db.compagnie.find({"attiva": {"$ne": False}}, {"_id": 0}).to_list(500)
     # mappa agenzie partner (id -> ragione sociale) per sapere "a chi versare"
     age_map: dict[str, str] = {}
     async for a in db.agenzie.find({}, {"_id": 0, "id": 1, "ragione_sociale": 1}):
@@ -10069,8 +10069,7 @@ async def _compute_saldi_compagnie(fino_a: str) -> list:
         # saldo = (premi - provv) se trattiene else premi ; meno rimesse ; meno rappel ; PIÙ ritenute (alimentano il saldo)
         saldo_dovuto = ((incassi - provv) if trattiene else incassi) + setup_dare + saldo_iniziale
         saldo_residuo = saldo_dovuto - rimesse - rappel + ritenute + pnc_versate - setup_avere - direzione_provv
-        if abs(saldo_residuo) < 0.01 and abs(incassi) < 0.01 and abs(rappel) < 0.01 and abs(pnc_versate) < 0.01 and abs(setup_dare) < 0.01 and abs(setup_avere) < 0.01 and abs(direzione_provv) < 0.01 and abs(saldo_iniziale) < 0.01:
-            continue  # skip compagnie senza movimenti
+        # Mostriamo TUTTE le compagnie attive, anche senza movimenti (saldo 0,00).
         out.append({
             "compagnia_id": cid,
             "compagnia": c["ragione_sociale"],
