@@ -159,6 +159,46 @@ class UserPublic(BaseDoc):
     email_aliases: List[str] = Field(default_factory=list)
     # Corsi completati: [{titolo, ente, data_scadenza, url_attestato}]
     corsi: List[dict] = Field(default_factory=list)
+    # Allegati collaboratore
+    contratti_collab: List[dict] = Field(default_factory=list)
+    dichiarazioni_collab: List[dict] = Field(default_factory=list)
+    certificati_collab: List[dict] = Field(default_factory=list)
+    # --- Dati "Gestione utente" (gestionale) ---
+    # Generale
+    tipologia_utente: Optional[str] = None
+    mansione: Optional[str] = None
+    carica: Optional[str] = None
+    responsabile_intermediazione: Optional[str] = None
+    svolge_intermediazione_altri: Optional[str] = None
+    addetto_distribuzione: Optional[str] = None
+    deleghe_poteri: Optional[str] = None
+    data_cessazione_account: Optional[str] = None
+    # Anagrafica estesa
+    cognome_ragione_sociale: Optional[str] = None
+    nome_proprio: Optional[str] = None
+    luogo_nascita: Optional[str] = None
+    data_nascita: Optional[str] = None
+    residenza_cap: Optional[str] = None
+    residenza_citta: Optional[str] = None
+    sede_legale_via: Optional[str] = None
+    sede_legale_cap: Optional[str] = None
+    sede_legale_citta: Optional[str] = None
+    ufficio_via: Optional[str] = None
+    ufficio_cap: Optional[str] = None
+    ufficio_citta: Optional[str] = None
+    telefono_ufficio: Optional[str] = None
+    fax_ufficio: Optional[str] = None
+    pec: Optional[str] = None
+    codice_gestionale_produttore: Optional[str] = None
+    # RUI / IVASS
+    rui_albo: Optional[str] = None
+    rui_sezione: Optional[str] = None
+    rui_numero_iscrizione: Optional[str] = None
+    rui_qualifica: Optional[str] = None
+    rui_data_iscrizione: Optional[str] = None
+    # Contratti — dichiarazioni sintetiche
+    dichiarazione_codice_etico: Optional[str] = None
+    dichiarazione_autocert_requisiti: Optional[str] = None
     # Note interne (visibile solo admin)
     note_interne: Optional[str] = None
 

@@ -14958,9 +14958,13 @@ async def aggiungi_corso_utente(
     corso = {
         "id": _uid(),
         "titolo": body.get("titolo") or "Corso",
+        "argomento": body.get("argomento"),
         "ente": body.get("ente"),
         "data": body.get("data"),
         "data_scadenza": body.get("data_scadenza"),
+        "ore_corso": body.get("ore_corso"),
+        "minuti_corso": body.get("minuti_corso"),
+        "anno": body.get("anno"),
         "url_attestato": body.get("url_attestato"),
         "note": body.get("note"),
     }
@@ -14972,29 +14976,39 @@ async def aggiungi_corso_utente(
 async def upload_attestato_corso(
     uid: str,
     file: UploadFile = File(...),
-    titolo: str = "",
-    ente: str = "",
-    data_scadenza: str = "",
+    titolo: str = Form(""),
+    argomento: str = Form(""),
+    ente: str = Form(""),
+    data: str = Form(""),
+    data_scadenza: str = Form(""),
+    ore_corso: str = Form(""),
+    minuti_corso: str = Form(""),
+    anno: str = Form(""),
     user=Depends(require_user("admin")),
 ):
     target = await db.users.find_one({"id": uid}, {"_id": 0})
     if not target:
         raise HTTPException(404, "Utente non trovato")
-    data = await file.read()
-    if len(data) > 10 * 1024 * 1024:
+    data_bytes = await file.read()
+    if len(data_bytes) > 10 * 1024 * 1024:
         raise HTTPException(400, "File troppo grande (max 10 MB)")
     ct = file.content_type or obj_storage.mime_for(file.filename or "")
     ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
     path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/corso_{_uid()}.{ext}"
     try:
-        result = obj_storage.put_object(path, data, ct)
+        result = obj_storage.put_object(path, data_bytes, ct)
     except Exception as e:
         raise HTTPException(503, f"Errore upload: {e}")
     corso = {
         "id": _uid(),
         "titolo": titolo or (file.filename or "Corso"),
+        "argomento": argomento or None,
         "ente": ente or None,
+        "data": data or None,
         "data_scadenza": data_scadenza or None,
+        "ore_corso": ore_corso or None,
+        "minuti_corso": minuti_corso or None,
+        "anno": anno or None,
         "url_attestato": f"/api/storage/{result['path']}",
         "nome_file": file.filename,
     }
@@ -15006,6 +15020,72 @@ async def upload_attestato_corso(
 async def elimina_corso_utente(uid: str, corso_id: str,
                                 user=Depends(require_user("admin"))):
     await db.users.update_one({"id": uid}, {"$pull": {"corsi": {"id": corso_id}}})
+    return {"ok": True}
+
+
+# ============================================================
+# ALLEGATI collaboratore: contratti | dichiarazioni | certificati
+# ============================================================
+_ALLEGATO_CATEGORIE = {"contratti", "dichiarazioni", "certificati"}
+
+
+@api.post("/auth/users/{uid}/allegati/{categoria}")
+async def upload_allegato_utente(
+    uid: str, categoria: str,
+    file: UploadFile = File(None),
+    tipologia: str = Form(""),
+    descrizione: str = Form(""),
+    anno: str = Form(""),
+    data_sottoscrizione: str = Form(""),
+    data_cessazione: str = Form(""),
+    user=Depends(require_user("admin")),
+):
+    """Aggiunge un allegato (contratto / dichiarazione / certificato) al collaboratore."""
+    if categoria not in _ALLEGATO_CATEGORIE:
+        raise HTTPException(400, "Categoria non valida")
+    target = await db.users.find_one({"id": uid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    url = None
+    nome_file = None
+    if file is not None:
+        content = await file.read()
+        if content:
+            if len(content) > 10 * 1024 * 1024:
+                raise HTTPException(400, "File troppo grande (max 10 MB)")
+            ct = file.content_type or obj_storage.mime_for(file.filename or "")
+            ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+            path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/{categoria}_{_uid()}.{ext}"
+            try:
+                result = obj_storage.put_object(path, content, ct)
+            except Exception as e:
+                raise HTTPException(503, f"Errore upload: {e}")
+            url = f"/api/storage/{result['path']}"
+            nome_file = file.filename
+    item = {
+        "id": _uid(),
+        "url": url,
+        "nome_file": nome_file,
+        "tipologia": tipologia or None,
+        "descrizione": descrizione or None,
+        "anno": anno or None,
+        "data_sottoscrizione": data_sottoscrizione or None,
+        "data_cessazione": data_cessazione or None,
+        "created_at": _now_iso(),
+    }
+    field = f"{categoria}_collab"
+    await db.users.update_one({"id": uid}, {"$push": {field: item}, "$set": {"updated_at": _now_iso()}})
+    await log_attivita(user, "upload", "user_allegato", uid, f"Aggiunto {categoria} per {uid}")
+    return item
+
+
+@api.delete("/auth/users/{uid}/allegati/{categoria}/{item_id}")
+async def elimina_allegato_utente(uid: str, categoria: str, item_id: str,
+                                   user=Depends(require_user("admin"))):
+    if categoria not in _ALLEGATO_CATEGORIE:
+        raise HTTPException(400, "Categoria non valida")
+    field = f"{categoria}_collab"
+    await db.users.update_one({"id": uid}, {"$pull": {field: {"id": item_id}}})
     return {"ok": True}
 
 

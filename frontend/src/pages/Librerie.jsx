@@ -2178,24 +2178,52 @@ function UtenteForm({ section, editing, onClose }) {
             parent_collaboratore_id: null, parent_provvigione_pct: 0,
             note_fiscali: "", note_interne: "", attivo: true, email_aliases: [],
             profilo_permessi_id: null, avatar_url: null, accesso_software: true,
+            tipologia_utente: "", mansione: "", carica: "",
+            responsabile_intermediazione: "", svolge_intermediazione_altri: "", addetto_distribuzione: "",
+            deleghe_poteri: "", data_cessazione_account: "",
+            cognome_ragione_sociale: "", nome_proprio: "", luogo_nascita: "", data_nascita: "",
+            residenza_cap: "", residenza_citta: "",
+            sede_legale_via: "", sede_legale_cap: "", sede_legale_citta: "",
+            ufficio_via: "", ufficio_cap: "", ufficio_citta: "",
+            telefono_ufficio: "", fax_ufficio: "", pec: "", codice_gestionale_produttore: "",
+            rui_albo: "IVASS", rui_sezione: "", rui_numero_iscrizione: "", rui_qualifica: "", rui_data_iscrizione: "",
+            dichiarazione_codice_etico: "", dichiarazione_autocert_requisiti: "",
+            contratti_collab: [], dichiarazioni_collab: [], certificati_collab: [],
         }}
         fields={(f, set) => (
-            <Tabs defaultValue="anagrafica" className="w-full">
-                <TabsList className="bg-slate-100">
-                    <TabsTrigger value="anagrafica">Anagrafica</TabsTrigger>
-                    <TabsTrigger value="fiscale">Dati fiscali / IBAN</TabsTrigger>
-                    {editing && f.role !== "cliente" && <TabsTrigger value="documenti">Documenti</TabsTrigger>}
-                    {editing && f.role !== "cliente" && <TabsTrigger value="corsi">Corsi</TabsTrigger>}
+            <Tabs defaultValue="generale" className="w-full">
+                <TabsList className="bg-slate-100 flex-wrap h-auto">
+                    <TabsTrigger value="generale" data-testid="tab-generale">Generale</TabsTrigger>
+                    <TabsTrigger value="anagrafica" data-testid="tab-anagrafica">Anagrafica</TabsTrigger>
+                    <TabsTrigger value="rui" data-testid="tab-rui">RUI / IVASS</TabsTrigger>
+                    {editing && f.role !== "cliente" && <TabsTrigger value="contratti" data-testid="tab-contratti">Contratti</TabsTrigger>}
+                    {editing && f.role !== "cliente" && <TabsTrigger value="certificati" data-testid="tab-certificati">Certificati</TabsTrigger>}
+                    {editing && f.role !== "cliente" && <TabsTrigger value="formazione" data-testid="tab-formazione">Formazione</TabsTrigger>}
                 </TabsList>
 
-                <TabsContent value="anagrafica" className="space-y-3 mt-4">
-                    {editing && f.role !== "cliente" && (
-                        <AvatarUploader userId={editing.id} avatarUrl={f.avatar_url} onChange={(url) => set("avatar_url", url)} />
+                {/* ============ GENERALE ============ */}
+                <TabsContent value="generale" className="space-y-3 mt-4">
+                    {editing && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-xs text-slate-500">
+                            ID Utente: <span className="font-mono text-slate-700" data-testid="utente-id">{editing.id}</span>
+                        </div>
                     )}
                     <div className="grid grid-cols-2 gap-3">
-                        <div><Label>Nome *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} /></div>
-                        <div><Label>Email {f.accesso_software !== false ? "*" : "(facoltativa)"}</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} data-testid="utente-email" /></div>
+                        <div>
+                            <Label>Tipologia utente</Label>
+                            <select value={f.tipologia_utente || ""} onChange={(e) => set("tipologia_utente", e.target.value)}
+                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-tipologia">
+                                <option value="">— Seleziona —</option>
+                                {["Collaboratore di rete", "Dipendente interno", "Agente", "Sub-agente", "Produttore", "Broker", "Altro"].map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                        </div>
+                        <div><Label>Mansione</Label><Input value={f.mansione || ""} onChange={(e) => set("mansione", e.target.value)} data-testid="utente-mansione" /></div>
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Nome completo (visualizzato) *</Label><Input value={f.name || ""} onChange={(e) => set("name", e.target.value)} data-testid="utente-name" /></div>
+                        <div><Label>Carica</Label><Input value={f.carica || ""} onChange={(e) => set("carica", e.target.value)} data-testid="utente-carica" /></div>
+                    </div>
+                    <div><Label>Nome utente / E-mail {f.accesso_software !== false ? "*" : "(facoltativa)"}</Label><Input type="email" value={f.email || ""} onChange={(e) => set("email", e.target.value.toLowerCase())} data-testid="utente-email" /></div>
                     {f.role !== "cliente" && (
                         <label className="flex items-center gap-2 text-sm cursor-pointer bg-sky-50 border border-sky-200 rounded-md px-3 py-2"
                                data-testid="utente-accesso-software-label">
@@ -2206,102 +2234,220 @@ function UtenteForm({ section, editing, onClose }) {
                         </label>
                     )}
                     <div>
-                        <Label>{editing ? "Nuova password (lasciare vuoto per non cambiare)" : (f.accesso_software !== false ? "Password *" : "Password (facoltativa)")}</Label>
-                        <Input
-                            type="password"
-                            value={f.password || ""}
-                            onChange={(e) => set("password", e.target.value)}
-                            placeholder={editing ? "•••••••• (invariata)" : ""}
-                            data-testid="utente-password"
-                        />
+                        <Label>{editing ? "Modifica password (lasciare vuoto per non cambiare)" : (f.accesso_software !== false ? "Password *" : "Password (facoltativa)")}</Label>
+                        <Input type="password" value={f.password || ""} onChange={(e) => set("password", e.target.value)}
+                            placeholder={editing ? "•••••••• (invariata)" : ""} data-testid="utente-password" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Amministratore?</Label>
+                            <select value={f.role === "admin" ? "si" : "no"}
+                                onChange={(e) => set("role", e.target.value === "si" ? "admin" : (f.role === "admin" ? "collaboratore" : f.role || "dipendente"))}
+                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-amministratore">
+                                <option value="si">Sì</option>
+                                <option value="no">No</option>
+                            </select>
+                        </div>
+                        <div>
+                            <Label>Ruolo (permessi software) *</Label>
+                            <Select value={f.role || "dipendente"} onValueChange={(v) => set("role", v)}>
+                                <SelectTrigger data-testid="utente-role"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
+                                    <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
+                                    <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <Label className="text-xs">Responsabile attività di intermediazione?</Label>
+                            <SiNoSelect value={f.responsabile_intermediazione} onChange={(v) => set("responsabile_intermediazione", v)} testid="utente-responsabile-interm" />
+                        </div>
+                        <div>
+                            <Label className="text-xs">Svolge intermediazione per altri soggetti?</Label>
+                            <SiNoSelect value={f.svolge_intermediazione_altri} onChange={(v) => set("svolge_intermediazione_altri", v)} testid="utente-interm-altri" />
+                        </div>
+                        <div>
+                            <Label className="text-xs">Addetto all'attività di distribuzione?</Label>
+                            <SiNoSelect value={f.addetto_distribuzione} onChange={(v) => set("addetto_distribuzione", v)} testid="utente-addetto-distrib" />
+                        </div>
                     </div>
                     <div>
-                        <Label>Ruolo *</Label>
-                        <Select value={f.role || "dipendente"} onValueChange={(v) => set("role", v)}>
-                            <SelectTrigger data-testid="utente-role"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="admin">Amministratore - vede e modifica tutto</SelectItem>
-                                <SelectItem value="collaboratore">Collaboratore - vede tutto, no cancellazioni</SelectItem>
-                                <SelectItem value="dipendente">Dipendente - vede tutto, no compagnie/import</SelectItem>
-                            </SelectContent>
-                        </Select>
+                        <Label>Deleghe e poteri</Label>
+                        <textarea value={f.deleghe_poteri || ""} onChange={(e) => set("deleghe_poteri", e.target.value)} rows={2}
+                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-deleghe" />
                     </div>
-                    {f.role !== "cliente" && (
-                        <div className="grid grid-cols-2 gap-3">
-                            <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
-                            <div><Label>Indirizzo</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value.toUpperCase())} /></div>
-                        </div>
-                    )}
+                    <div><Label>Data cessazione account</Label><Input type="date" value={f.data_cessazione_account || ""} onChange={(e) => set("data_cessazione_account", e.target.value)} data-testid="utente-data-cessazione" /></div>
+
                     {f.role !== "cliente" && (
                         <EmailAliasesEditor value={f.email_aliases || []} mainEmail={f.email || ""} onChange={(v) => set("email_aliases", v)} />
                     )}
                     {f.role !== "cliente" && (
                         <ProfiloPermessiSelector value={f.profilo_permessi_id} onChange={(v) => set("profilo_permessi_id", v)} />
                     )}
+
+                    {f.role !== "cliente" && (
+                        <div className="space-y-3 border-t border-slate-200 pt-3">
+                            <div className="text-xs font-semibold text-slate-600">Impostazioni provvigionali (uso interno agenzia)</div>
+                            <div className="grid grid-cols-3 gap-3 bg-amber-50 border border-amber-200 rounded-md p-3">
+                                <div><Label>% Provvigione default</Label><Input type="number" step="0.01" value={f.perc_provvigione_default || 0} onChange={(e) => set("perc_provvigione_default", parseFloat(e.target.value) || 0)} /></div>
+                                <div><Label>% Ritenuta d&apos;acconto</Label><Input type="number" step="0.01" value={f.perc_ritenuta_acconto || 0} onChange={(e) => set("perc_ritenuta_acconto", parseFloat(e.target.value) || 0)} /></div>
+                                <div><Label>% INPS / Inarcassa</Label><Input type="number" step="0.01" value={f.perc_inps_inarcassa || 0} onChange={(e) => set("perc_inps_inarcassa", parseFloat(e.target.value) || 0)} /></div>
+                                <div className="col-span-3 text-xs text-amber-800">Valori di default usati nei pagamenti provvigioni. Le regole specifiche per compagnia/ramo si gestiscono in <strong>Sistema provvigionale</strong>.</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 bg-violet-50 border border-violet-200 rounded-md p-3">
+                                <div>
+                                    <Label>Riporta a (sottorete — collaboratore sopra)</Label>
+                                    <select value={f.parent_collaboratore_id || ""} onChange={(e) => set("parent_collaboratore_id", e.target.value || null)}
+                                        className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-parent-collab">
+                                        <option value="">— Nessuno (diretto agenzia) —</option>
+                                        {staff.filter((u) => u.id !== editing?.id).map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <Label>% provvigione al collaboratore sopra</Label>
+                                    <Input type="number" step="0.01" value={f.parent_provvigione_pct || 0} onChange={(e) => set("parent_provvigione_pct", parseFloat(e.target.value) || 0)} disabled={!f.parent_collaboratore_id} data-testid="utente-parent-pct" />
+                                </div>
+                                <div className="col-span-2 text-xs text-violet-800">Schema piramidale: quando questo utente lavora una polizza, il collaboratore sopra matura la % concordata. Viene proposta in automatico nella sezione <strong>Provvigioni</strong> della polizza.</div>
+                            </div>
+                            <div><Label>Note fiscali</Label><Input value={f.note_fiscali || ""} onChange={(e) => set("note_fiscali", e.target.value)} /></div>
+                            <div><Label>Note interne (visibili solo admin)</Label><Input value={f.note_interne || ""} onChange={(e) => set("note_interne", e.target.value)} /></div>
+                        </div>
+                    )}
                 </TabsContent>
 
-                <TabsContent value="fiscale" className="space-y-3 mt-4">
+                {/* ============ ANAGRAFICA ============ */}
+                <TabsContent value="anagrafica" className="space-y-3 mt-4">
+                    {editing && f.role !== "cliente" && (
+                        <AvatarUploader userId={editing.id} avatarUrl={f.avatar_url} onChange={(url) => set("avatar_url", url)} />
+                    )}
                     <div className="grid grid-cols-2 gap-3">
-                        <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
-                        <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                        <div><Label>Cognome o Ragione sociale</Label><Input value={f.cognome_ragione_sociale || ""} onChange={(e) => set("cognome_ragione_sociale", e.target.value)} data-testid="utente-cognome" /></div>
+                        <div><Label>Nome</Label><Input value={f.nome_proprio || ""} onChange={(e) => set("nome_proprio", e.target.value)} data-testid="utente-nome-proprio" /></div>
                     </div>
-                    <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
-                    <div className="grid grid-cols-3 gap-3 bg-amber-50 border border-amber-200 rounded-md p-3">
-                        <div>
-                            <Label>% Provvigione default</Label>
-                            <Input type="number" step="0.01" value={f.perc_provvigione_default || 0} onChange={(e) => set("perc_provvigione_default", parseFloat(e.target.value) || 0)} />
-                        </div>
-                        <div>
-                            <Label>% Ritenuta d&apos;acconto</Label>
-                            <Input type="number" step="0.01" value={f.perc_ritenuta_acconto || 0} onChange={(e) => set("perc_ritenuta_acconto", parseFloat(e.target.value) || 0)} />
-                        </div>
-                        <div>
-                            <Label>% INPS / Inarcassa</Label>
-                            <Input type="number" step="0.01" value={f.perc_inps_inarcassa || 0} onChange={(e) => set("perc_inps_inarcassa", parseFloat(e.target.value) || 0)} />
-                        </div>
-                        <div className="col-span-3 text-xs text-amber-800">
-                            Valori di default usati nei pagamenti provvigioni. Le regole specifiche per compagnia/ramo si gestiscono in <strong>Sistema provvigionale</strong>.
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Luogo di nascita</Label><Input value={f.luogo_nascita || ""} onChange={(e) => set("luogo_nascita", e.target.value)} data-testid="utente-luogo-nascita" /></div>
+                        <div><Label>Data di nascita</Label><Input type="date" value={f.data_nascita || ""} onChange={(e) => set("data_nascita", e.target.value)} data-testid="utente-data-nascita" /></div>
+                    </div>
+                    <div className="border border-slate-200 rounded-md p-3">
+                        <div className="text-xs font-semibold text-slate-600 mb-2">Indirizzo di residenza</div>
+                        <div className="grid grid-cols-4 gap-2">
+                            <div className="col-span-2"><Label className="text-xs">Via e n. civico</Label><Input value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value.toUpperCase())} data-testid="utente-residenza-via" /></div>
+                            <div><Label className="text-xs">CAP</Label><Input value={f.residenza_cap || ""} onChange={(e) => set("residenza_cap", e.target.value)} data-testid="utente-residenza-cap" /></div>
+                            <div><Label className="text-xs">Città</Label><Input value={f.residenza_citta || ""} onChange={(e) => set("residenza_citta", e.target.value.toUpperCase())} data-testid="utente-residenza-citta" /></div>
                         </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 bg-violet-50 border border-violet-200 rounded-md p-3">
+                    <div className="border border-slate-200 rounded-md p-3">
+                        <div className="text-xs font-semibold text-slate-600 mb-2">Indirizzo sede legale</div>
+                        <div className="grid grid-cols-4 gap-2">
+                            <div className="col-span-2"><Label className="text-xs">Via e n. civico</Label><Input value={f.sede_legale_via || ""} onChange={(e) => set("sede_legale_via", e.target.value.toUpperCase())} data-testid="utente-sede-via" /></div>
+                            <div><Label className="text-xs">CAP</Label><Input value={f.sede_legale_cap || ""} onChange={(e) => set("sede_legale_cap", e.target.value)} data-testid="utente-sede-cap" /></div>
+                            <div><Label className="text-xs">Città</Label><Input value={f.sede_legale_citta || ""} onChange={(e) => set("sede_legale_citta", e.target.value.toUpperCase())} data-testid="utente-sede-citta" /></div>
+                        </div>
+                    </div>
+                    <div className="border border-slate-200 rounded-md p-3">
+                        <div className="text-xs font-semibold text-slate-600 mb-2">Indirizzo ufficio</div>
+                        <div className="grid grid-cols-4 gap-2">
+                            <div className="col-span-2"><Label className="text-xs">Via e n. civico</Label><Input value={f.ufficio_via || ""} onChange={(e) => set("ufficio_via", e.target.value.toUpperCase())} data-testid="utente-ufficio-via" /></div>
+                            <div><Label className="text-xs">CAP</Label><Input value={f.ufficio_cap || ""} onChange={(e) => set("ufficio_cap", e.target.value)} data-testid="utente-ufficio-cap" /></div>
+                            <div><Label className="text-xs">Città</Label><Input value={f.ufficio_citta || ""} onChange={(e) => set("ufficio_citta", e.target.value.toUpperCase())} data-testid="utente-ufficio-citta" /></div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Codice fiscale</Label><Input value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} data-testid="utente-cf" /></div>
+                        <div><Label>Partita IVA</Label><Input value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} data-testid="utente-piva" /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Telefono cellulare</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} data-testid="utente-cellulare" /></div>
+                        <div><Label>Telefono ufficio</Label><Input value={f.telefono_ufficio || ""} onChange={(e) => set("telefono_ufficio", e.target.value)} data-testid="utente-tel-ufficio" /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Fax ufficio</Label><Input value={f.fax_ufficio || ""} onChange={(e) => set("fax_ufficio", e.target.value)} data-testid="utente-fax" /></div>
+                        <div><Label>PEC</Label><Input type="email" value={f.pec || ""} onChange={(e) => set("pec", e.target.value.toLowerCase())} data-testid="utente-pec" /></div>
+                    </div>
+                    <div><Label>E-mail (coincide con username)</Label><Input value={f.email || ""} disabled className="bg-slate-50" data-testid="utente-email-mirror" /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Codice gestionale / produttore</Label><Input value={f.codice_gestionale_produttore || ""} onChange={(e) => set("codice_gestionale_produttore", e.target.value)} data-testid="utente-cod-gestionale" /></div>
+                        <div><Label>IBAN</Label><Input value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} data-testid="utente-iban" /></div>
+                    </div>
+                </TabsContent>
+
+                {/* ============ RUI / IVASS ============ */}
+                <TabsContent value="rui" className="space-y-3 mt-4">
+                    <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <Label>Riporta a (sottorete — collaboratore sopra)</Label>
-                            <select
-                                value={f.parent_collaboratore_id || ""}
-                                onChange={(e) => set("parent_collaboratore_id", e.target.value || null)}
-                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white"
-                                data-testid="utente-parent-collab"
-                            >
-                                <option value="">— Nessuno (diretto agenzia) —</option>
-                                {staff.filter((u) => u.id !== editing?.id).map((u) => (
-                                    <option key={u.id} value={u.id}>{u.name}</option>
-                                ))}
+                            <Label>Albo</Label>
+                            <select value={f.rui_albo || "IVASS"} onChange={(e) => set("rui_albo", e.target.value)}
+                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-rui-albo">
+                                {["IVASS", "RUI", "OAM", "Altro"].map((o) => <option key={o} value={o}>{o}</option>)}
                             </select>
                         </div>
                         <div>
-                            <Label>% provvigione al collaboratore sopra</Label>
-                            <Input type="number" step="0.01" value={f.parent_provvigione_pct || 0}
-                                onChange={(e) => set("parent_provvigione_pct", parseFloat(e.target.value) || 0)}
-                                disabled={!f.parent_collaboratore_id}
-                                data-testid="utente-parent-pct" />
-                        </div>
-                        <div className="col-span-2 text-xs text-violet-800">
-                            Schema piramidale: quando questo utente lavora una polizza, il collaboratore sopra matura la % concordata.
-                            Viene proposta in automatico nella sezione <strong>Provvigioni</strong> della polizza.
+                            <Label>Sezione</Label>
+                            <select value={f.rui_sezione || ""} onChange={(e) => set("rui_sezione", e.target.value)}
+                                className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-rui-sezione">
+                                <option value="">— Seleziona —</option>
+                                <option value="A">A - Agenti</option>
+                                <option value="B">B - Broker / Mediatori</option>
+                                <option value="C">C - Produttori diretti</option>
+                                <option value="D">D - Banche / Intermediari finanziari</option>
+                                <option value="E">E - Collaboratori di intermediari (A, B, D)</option>
+                                <option value="F">F - Collaboratori di sez. E</option>
+                            </select>
                         </div>
                     </div>
-                    <div><Label>Note fiscali</Label><Input value={f.note_fiscali || ""} onChange={(e) => set("note_fiscali", e.target.value)} /></div>
-                    <div><Label>Note interne (visibili solo admin)</Label><Input value={f.note_interne || ""} onChange={(e) => set("note_interne", e.target.value)} /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>N° iscrizione</Label><Input value={f.rui_numero_iscrizione || ""} onChange={(e) => set("rui_numero_iscrizione", e.target.value)} data-testid="utente-rui-numero" /></div>
+                        <div><Label>Qualifica di esercizio / Operatività</Label><Input value={f.rui_qualifica || ""} onChange={(e) => set("rui_qualifica", e.target.value)} data-testid="utente-rui-qualifica" /></div>
+                    </div>
+                    <div><Label>Data iscrizione</Label><Input type="date" value={f.rui_data_iscrizione || ""} onChange={(e) => set("rui_data_iscrizione", e.target.value)} data-testid="utente-rui-data" /></div>
                 </TabsContent>
 
+                {/* ============ CONTRATTI ============ */}
                 {editing && f.role !== "cliente" && (
-                    <TabsContent value="documenti" className="space-y-3 mt-4">
-                        <DocumentiCollaboratore userId={editing.id} user={f} onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
+                    <TabsContent value="contratti" className="space-y-4 mt-4">
+                        <AllegatoManager userId={editing.id} categoria="contratti" titolo="Aggiungi contratto" icon={FileText}
+                            items={f.contratti_collab || []} onChange={(v) => set("contratti_collab", v)}
+                            campi={[
+                                { key: "tipologia", label: "Tipologia", type: "select", options: ["Agente", "Sub-agente", "Collaboratore", "Mandato", "Lettera di incarico", "Accordo economico", "Altro"] },
+                                { key: "data_sottoscrizione", label: "Data sottoscrizione", type: "date" },
+                                { key: "data_cessazione", label: "Data cessazione", type: "date" },
+                            ]} />
+                        <AllegatoManager userId={editing.id} categoria="dichiarazioni" titolo="Aggiungi dichiarazione" icon={FileText}
+                            items={f.dichiarazioni_collab || []} onChange={(v) => set("dichiarazioni_collab", v)}
+                            campi={[
+                                { key: "tipologia", label: "Tipologia", type: "select", options: ["Adesione Codice Etico", "Autocertificazione requisiti", "Conflitto di interessi", "Privacy", "Antiriciclaggio", "Altro"] },
+                                { key: "anno", label: "Anno", type: "text" },
+                            ]} />
+                        <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-3">
+                            <div><Label>Dichiarazione adesione al Codice Etico</Label><Input value={f.dichiarazione_codice_etico || ""} onChange={(e) => set("dichiarazione_codice_etico", e.target.value)} placeholder="Es: NA / Sì / No" data-testid="utente-dich-codice-etico" /></div>
+                            <div><Label>Dichiarazione autocertificazione requisiti</Label><Input value={f.dichiarazione_autocert_requisiti || ""} onChange={(e) => set("dichiarazione_autocert_requisiti", e.target.value)} placeholder="Es: Sì / No" data-testid="utente-dich-requisiti" /></div>
+                        </div>
                     </TabsContent>
                 )}
 
+                {/* ============ CERTIFICATI ============ */}
                 {editing && f.role !== "cliente" && (
-                    <TabsContent value="corsi" className="space-y-3 mt-4">
+                    <TabsContent value="certificati" className="space-y-4 mt-4">
+                        <AllegatoManager userId={editing.id} categoria="certificati" titolo="Aggiungi certificato / allegato" icon={FileText}
+                            items={f.certificati_collab || []} onChange={(v) => set("certificati_collab", v)}
+                            campi={[
+                                { key: "tipologia", label: "Tipologia", type: "select", options: ["Attestato formazione", "Casellario giudiziale", "Carichi pendenti", "Certificato IVASS", "Altro"] },
+                                { key: "descrizione", label: "Descrizione", type: "text" },
+                                { key: "anno", label: "Anno", type: "text" },
+                            ]} />
+                        <div className="border-t border-slate-200 pt-3">
+                            <div className="text-xs font-semibold text-slate-600 mb-2">Documenti personali</div>
+                            <DocumentiCollaboratore userId={editing.id} user={f} onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
+                        </div>
+                    </TabsContent>
+                )}
+
+                {/* ============ FORMAZIONE ============ */}
+                {editing && f.role !== "cliente" && (
+                    <TabsContent value="formazione" className="space-y-3 mt-4">
                         <CorsiCollaboratore userId={editing.id} corsi={f.corsi || []} onChange={(nuovi) => set("corsi", nuovi)} />
                     </TabsContent>
                 )}
@@ -2796,6 +2942,95 @@ const DOC_TIPI = [
     { key: "documento_iban", label: "Documento IBAN", urlField: "documento_iban_url" },
 ];
 
+// =================== SI/NO SELECT ===================
+function SiNoSelect({ value, onChange, testid }) {
+    return (
+        <select value={value || ""} onChange={(e) => onChange(e.target.value)}
+            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid={testid}>
+            <option value="">— n.d. —</option>
+            <option value="Sì">Sì</option>
+            <option value="No">No</option>
+        </select>
+    );
+}
+
+// =================== ALLEGATO MANAGER (contratti / dichiarazioni / certificati) ===================
+function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, campi, items, onChange }) {
+    const emptyForm = () => Object.fromEntries(campi.map((c) => [c.key, ""]));
+    const [form, setForm] = useState(emptyForm());
+    const [file, setFile] = useState(null);
+    const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+    const aggiungi = async () => {
+        const hasData = file || campi.some((c) => (form[c.key] || "").trim());
+        if (!hasData) { toast.error("Inserisci un allegato o almeno un dato"); return; }
+        try {
+            const fd = new FormData();
+            if (file) fd.append("file", file);
+            campi.forEach((c) => fd.append(c.key, form[c.key] || ""));
+            const r = await api.post(`/auth/users/${userId}/allegati/${categoria}`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            onChange([...(items || []), r.data]);
+            setForm(emptyForm()); setFile(null);
+            toast.success("Aggiunto");
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare l'allegato?")) return;
+        try {
+            await api.delete(`/auth/users/${userId}/allegati/${categoria}/${id}`);
+            onChange((items || []).filter((x) => x.id !== id));
+            toast.success("Eliminato");
+        } catch (e) { toast.error("Errore"); }
+    };
+    return (
+        <div className="space-y-2">
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Icon size={13} /> {titolo}</div>
+                <div className="grid grid-cols-2 gap-2">
+                    {campi.map((c) => (
+                        <div key={c.key}>
+                            <Label className="text-xs">{c.label}</Label>
+                            {c.type === "select" ? (
+                                <select value={form[c.key] || ""} onChange={(e) => setF(c.key, e.target.value)}
+                                    className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid={`allegato-${categoria}-${c.key}`}>
+                                    <option value="">— Seleziona —</option>
+                                    {c.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                            ) : (
+                                <Input type={c.type || "text"} value={form[c.key] || ""} onChange={(e) => setF(c.key, e.target.value)} data-testid={`allegato-${categoria}-${c.key}`} />
+                            )}
+                        </div>
+                    ))}
+                    <div>
+                        <Label className="text-xs">Allegato (PDF/IMG)</Label>
+                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" data-testid={`allegato-${categoria}-file`} />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid={`allegato-${categoria}-add`}>
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+            {(!items || items.length === 0) ? (
+                <div className="text-center text-xs text-slate-400 py-3">Nessun elemento</div>
+            ) : (
+                <table className="tbl w-full">
+                    <thead><tr>{campi.map((c) => <th key={c.key}>{c.label}</th>)}<th>Allegato</th><th></th></tr></thead>
+                    <tbody>
+                        {items.map((it) => (
+                            <tr key={it.id}>
+                                {campi.map((c) => <td key={c.key}>{it[c.key] || "—"}</td>)}
+                                <td>{it.url ? <a className="text-sky-700 hover:underline text-xs" href={it.url} target="_blank" rel="noreferrer">{it.nome_file || "Apri"}</a> : "—"}</td>
+                                <td className="text-right"><button onClick={() => rimuovi(it.id)} className="text-red-600 hover:bg-red-50 p-1 rounded" data-testid={`allegato-${categoria}-del-${it.id}`}><Trash2 size={12} /></button></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </div>
+    );
+}
+
 function DocumentiCollaboratore({ userId, user, onChange }) {
     const upload = async (tipo, file) => {
         if (!file) return;
@@ -2856,33 +3091,44 @@ function DocumentiCollaboratore({ userId, user, onChange }) {
     );
 }
 
-// =================== CORSI COLLABORATORE ===================
+// =================== CORSI / FORMAZIONE COLLABORATORE ===================
 function CorsiCollaboratore({ userId, corsi, onChange }) {
     const [titolo, setTitolo] = useState("");
-    const [ente, setEnte] = useState("");
-    const [scadenza, setScadenza] = useState("");
+    const [argomento, setArgomento] = useState("");
+    const [data, setData] = useState("");
+    const [ore, setOre] = useState("");
+    const [minuti, setMinuti] = useState("");
     const [file, setFile] = useState(null);
+    const [filtroAnno, setFiltroAnno] = useState("");
+
+    const annoDi = (c) => (c.anno || (c.data || c.data_scadenza || "").slice(0, 4) || "");
+    const anni = Array.from(new Set((corsi || []).map(annoDi).filter(Boolean))).sort().reverse();
+    const visibili = (corsi || []).filter((c) => !filtroAnno || annoDi(c) === filtroAnno);
 
     const aggiungi = async () => {
         if (!titolo && !file) { toast.error("Inserisci almeno titolo o attestato"); return; }
+        const anno = (data || "").slice(0, 4) || null;
         try {
             let r;
             if (file) {
                 const fd = new FormData();
                 fd.append("file", file);
                 fd.append("titolo", titolo);
-                fd.append("ente", ente);
-                fd.append("data_scadenza", scadenza);
+                fd.append("argomento", argomento);
+                fd.append("data", data);
+                fd.append("ore_corso", ore);
+                fd.append("minuti_corso", minuti);
+                fd.append("anno", anno || "");
                 r = await api.post(`/auth/users/${userId}/corsi/upload`, fd,
                     { headers: { "Content-Type": "multipart/form-data" } });
             } else {
                 r = await api.post(`/auth/users/${userId}/corsi`,
-                    { titolo, ente, data_scadenza: scadenza || null });
+                    { titolo, argomento, data: data || null, ore_corso: ore || null, minuti_corso: minuti || null, anno });
             }
             onChange([...(corsi || []), r.data]);
-            setTitolo(""); setEnte(""); setScadenza(""); setFile(null);
+            setTitolo(""); setArgomento(""); setData(""); setOre(""); setMinuti(""); setFile(null);
             toast.success("Corso aggiunto");
-        } catch (e) { toast.error("Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
     const rimuovi = async (corsoId) => {
         try {
@@ -2895,36 +3141,52 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
         <div className="space-y-3">
             <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
                 <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1">
-                    <GraduationCap size={13} /> Aggiungi corso / attestato
+                    <GraduationCap size={13} /> Aggiungi corso di formazione
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-xs">Titolo</Label><Input value={titolo} onChange={(e) => setTitolo(e.target.value)} placeholder="Es: IVASS 60h 2024" /></div>
-                    <div><Label className="text-xs">Ente</Label><Input value={ente} onChange={(e) => setEnte(e.target.value)} placeholder="Es: IVASS" /></div>
-                    <div><Label className="text-xs">Scadenza</Label><Input type="date" value={scadenza} onChange={(e) => setScadenza(e.target.value)} /></div>
-                    <div>
+                    <div><Label className="text-xs">Titolo</Label><Input value={titolo} onChange={(e) => setTitolo(e.target.value)} placeholder="Es: Aggiornamento IVASS 2024" data-testid="corso-titolo" /></div>
+                    <div><Label className="text-xs">Argomento</Label><Input value={argomento} onChange={(e) => setArgomento(e.target.value)} data-testid="corso-argomento" /></div>
+                    <div><Label className="text-xs">Data</Label><Input type="date" value={data} onChange={(e) => setData(e.target.value)} data-testid="corso-data" /></div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div><Label className="text-xs">Ore corso</Label><Input type="number" min="0" value={ore} onChange={(e) => setOre(e.target.value)} data-testid="corso-ore" /></div>
+                        <div><Label className="text-xs">Minuti corso</Label><Input type="number" min="0" max="59" value={minuti} onChange={(e) => setMinuti(e.target.value)} data-testid="corso-minuti" /></div>
+                    </div>
+                    <div className="col-span-2">
                         <Label className="text-xs">Attestato (PDF/IMG, opz.)</Label>
-                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" />
+                        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept=".pdf,image/*" data-testid="corso-file" />
                     </div>
                 </div>
-                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi}>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="corso-add">
                     <Plus size={12} className="mr-1" /> Aggiungi
                 </Button>
             </div>
 
-            {(!corsi || corsi.length === 0) ? (
+            {anni.length > 0 && (
+                <div className="flex items-center gap-2">
+                    <Label className="text-xs">Filtra per anno</Label>
+                    <select value={filtroAnno} onChange={(e) => setFiltroAnno(e.target.value)}
+                        className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="corso-filtro-anno">
+                        <option value="">Tutti</option>
+                        {anni.map((a) => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                </div>
+            )}
+
+            {(!visibili || visibili.length === 0) ? (
                 <div className="text-center text-xs text-slate-400 py-4">Nessun corso registrato</div>
             ) : (
                 <table className="tbl w-full">
-                    <thead><tr><th>Titolo</th><th>Ente</th><th>Scadenza</th><th>Attestato</th><th></th></tr></thead>
+                    <thead><tr><th>Titolo</th><th>Argomento</th><th>Data</th><th>Durata</th><th>Attestato</th><th></th></tr></thead>
                     <tbody>
-                        {corsi.map((c) => (
+                        {visibili.map((c) => (
                             <tr key={c.id}>
                                 <td className="font-medium">{c.titolo}</td>
-                                <td>{c.ente || "—"}</td>
-                                <td className="num">{c.data_scadenza || "—"}</td>
+                                <td>{c.argomento || "—"}</td>
+                                <td className="num">{c.data || c.data_scadenza || "—"}</td>
+                                <td className="num">{(c.ore_corso || c.minuti_corso) ? `${c.ore_corso || 0}h ${c.minuti_corso || 0}m` : "—"}</td>
                                 <td>{c.url_attestato ? <a className="text-sky-700 hover:underline text-xs" href={c.url_attestato} target="_blank" rel="noreferrer">Apri</a> : "—"}</td>
                                 <td className="text-right">
-                                    <button onClick={() => rimuovi(c.id)} className="text-red-600 hover:bg-red-50 p-1 rounded"><Trash2 size={12} /></button>
+                                    <button onClick={() => rimuovi(c.id)} className="text-red-600 hover:bg-red-50 p-1 rounded" data-testid={`corso-del-${c.id}`}><Trash2 size={12} /></button>
                                 </td>
                             </tr>
                         ))}
