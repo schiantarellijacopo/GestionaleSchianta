@@ -19,6 +19,7 @@ import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
 import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
+import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
 
 function RiassegnaProvvigioniButton({ schema }) {
@@ -2936,11 +2937,11 @@ function DocumentiAzienda({ documenti, onChange }) {
                     </div>
                     <div>
                         <Label className="text-xs">Data rilascio</Label>
-                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="azienda-doc-data-rilascio" />
+                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="azienda-doc-data-rilascio" />
                     </div>
                     <div>
                         <Label className="text-xs">Data scadenza</Label>
-                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="azienda-doc-data-scadenza" />
+                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="azienda-doc-data-scadenza" />
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">File (PDF/IMG)</Label>
@@ -3312,11 +3313,11 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
                     </div>
                     <div>
                         <Label className="text-xs">Data rilascio</Label>
-                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="doc-add-data-rilascio" />
+                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="doc-add-data-rilascio" />
                     </div>
                     <div>
                         <Label className="text-xs">Data scadenza</Label>
-                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="doc-add-data-scadenza" />
+                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="doc-add-data-scadenza" />
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">File (PDF/IMG)</Label>

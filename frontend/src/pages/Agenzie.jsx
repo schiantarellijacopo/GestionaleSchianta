@@ -19,6 +19,7 @@ import {
 import { Plus, Building2, Edit, Trash2, Crown, Handshake, Link2, Upload, FileText, Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
+import DateInputIt from "@/components/DateInputIt";
 
 const RAPPORTO_LABEL = {
     mandato_diretto: "Mandato diretto",
@@ -525,11 +526,11 @@ function DocumentiAgenzia({ aid, iniziali }) {
                     </div>
                     <div>
                         <Label className="text-xs">Data rilascio</Label>
-                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="age-doc-data-rilascio" />
+                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="age-doc-data-rilascio" />
                     </div>
                     <div>
                         <Label className="text-xs">Data scadenza</Label>
-                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="age-doc-data-scadenza" />
+                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="age-doc-data-scadenza" />
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">File (PDF/IMG)</Label>

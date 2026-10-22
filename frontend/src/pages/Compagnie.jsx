@@ -14,6 +14,7 @@ import {
 import { Plus, Building2, Edit, Trash2, Link2, FileText, Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import AvvisoScadenzaControl from "@/components/AvvisoScadenzaControl";
+import DateInputIt from "@/components/DateInputIt";
 
 export default function Compagnie() {
     const [list, setList] = useState(null);
@@ -322,11 +323,11 @@ function DocumentiCompagnia({ cid, iniziali }) {
                     </div>
                     <div>
                         <Label className="text-xs">Data rilascio</Label>
-                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="comp-doc-data-rilascio" />
+                        <DateInputIt value={dataRilascio} onChange={setDataRilascio} data-testid="comp-doc-data-rilascio" />
                     </div>
                     <div>
                         <Label className="text-xs">Data scadenza</Label>
-                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="comp-doc-data-scadenza" />
+                        <DateInputIt value={dataScadenza} onChange={setDataScadenza} data-testid="comp-doc-data-scadenza" />
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">File (PDF/IMG)</Label>
