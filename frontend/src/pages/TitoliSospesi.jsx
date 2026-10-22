@@ -426,6 +426,7 @@ function BulkIncassaDialog({ titoli, onClose }) {
                     importo_pagato: importo,
                     tipo_chiusura: tipo_ch,
                     motivo_sconto: tipo_ch === "sconto" && residuo > 0 ? "Sconto applicato" : null,
+                    merge_copertura: true,
                 });
                 ok += 1;
                 totale += importo;

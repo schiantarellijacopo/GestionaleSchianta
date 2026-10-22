@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-10-22 — FIX regressione: doppia registrazione in incasso multiplo
+- Sintomo: incassando più titoli COPERTI in blocco, nel brogliaccio comparivano 2 righe
+  per titolo (copertura + incasso) = doppia registrazione.
+- Causa: il commit `eade615` aveva RIMOSSO `merge_copertura: true` dai flussi di incasso
+  multiplo (`Titoli.jsx` dialog "Incasso/Copertura — N titoli" e `TitoliSospesi.jsx`),
+  annullando la correzione corretta `052602c`.
+- Fix: ripristinato `merge_copertura: true` in entrambi i flussi. Il backend
+  (`incassa_titolo`) unifica copertura+incasso in UNA riga `incasso_premio` (giornate aperte),
+  salvando lo snapshot `coperture_assorbite` (eliminando l'incasso il titolo torna a sospeso).
+- Verificato (DB, giornata aperta): senza merge = 2 movimenti; con merge = 1 movimento
+  `incasso_premio` (200€, provv 40). Dati di test rimossi.
+
 ## 2026-10-17 — Statistiche: nuova tab "Incassi" (replica cruscotto)
 - Nuova tab **Statistiche → Incassi** (`StatisticheIncassi.jsx`) che replica il layout dello
   screenshot richiesto: snapshot mese (Titoli arretrati/scaduto, Sospesi Rete Vendita, Sospesi
