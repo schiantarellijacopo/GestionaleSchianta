@@ -73,21 +73,22 @@ export default function AnagraficaDetail() {
         else if (tab !== "polizze") setPolizzeFilter(null);
     };
 
-    const doDelete = async (force = false) => {
+    const doDelete = async () => {
         setDeleting(true);
         try {
-            const r = await api.delete(`/anagrafiche/${id}${force ? "?force=true" : ""}`);
-            const cs = r.data?.cascade || {};
-            const msg = force && (cs.polizze || cs.sinistri)
-                ? `Anagrafica eliminata (cascade: ${cs.polizze} polizze, ${cs.sinistri} sinistri, ${cs.allegati} allegati)`
-                : "Anagrafica eliminata";
-            toast.success(msg);
+            const r = await api.delete(`/anagrafiche/${id}`);
+            if (r.data?.archiviata) {
+                toast.success("Anagrafica spostata tra le annullate");
+            } else {
+                toast.success("Anagrafica eliminata");
+            }
             navigate("/anagrafiche");
         } catch (e) {
-            if (e.response?.status === 409) {
-                setDeleteConflict(e.response.data?.detail || {});
+            const d = e.response?.data?.detail;
+            if (e.response?.status === 409 && d?.blocked) {
+                setDeleteConflict(d);
             } else {
-                toast.error(e.response?.data?.detail || "Errore eliminazione");
+                toast.error((typeof d === "string" ? d : d?.message) || "Errore eliminazione");
             }
         } finally {
             setDeleting(false);
@@ -316,51 +317,32 @@ export default function AnagraficaDetail() {
                     {!deleteConflict ? (
                         <>
                             <div className="text-sm text-slate-700">
-                                Sei sicuro di voler eliminare <b>{ana.ragione_sociale}</b>?
+                                Vuoi eliminare <b>{ana.ragione_sociale}</b>?
                             </div>
                             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
-                                L&apos;operazione è irreversibile. Verrà controllato se esistono polizze o sinistri collegati.
+                                Se ha record collegati (ma nessuna polizza attiva/sospesa) verrà
+                                spostata tra le annullate. Se è vuota verrà eliminata. Le anagrafiche
+                                con analisi cliente o polizze attive/sospese non sono eliminabili.
                             </div>
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting} data-testid="detail-delete-cancel">Annulla</Button>
-                                <Button onClick={() => doDelete(false)} disabled={deleting} className="bg-rose-600 hover:bg-rose-700" data-testid="detail-delete-confirm">
-                                    {deleting ? "Eliminazione..." : "Elimina"}
+                                <Button onClick={doDelete} disabled={deleting} className="bg-rose-600 hover:bg-rose-700" data-testid="detail-delete-confirm">
+                                    {deleting ? "Attendere..." : "Procedi"}
                                 </Button>
                             </DialogFooter>
                         </>
                     ) : (
                         <>
-                            <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm space-y-2">
+                            <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm space-y-2" data-testid="detail-delete-blocked">
                                 <div className="font-medium text-amber-900">
-                                    ⚠ Attenzione: <b>{(deleteConflict.collegati?.polizze || 0) + (deleteConflict.collegati?.sinistri || 0)} record collegati</b>
+                                    ⚠ Anagrafica lavorata — non eliminabile
                                 </div>
-                                <ul className="text-xs list-disc ml-5 text-amber-900 space-y-0.5">
-                                    {deleteConflict.collegati?.polizze > 0 && <li><b>{deleteConflict.collegati.polizze}</b> polizze (con relativi titoli e ricevute)</li>}
-                                    {deleteConflict.collegati?.sinistri > 0 && <li><b>{deleteConflict.collegati.sinistri}</b> sinistri</li>}
-                                    {deleteConflict.collegati?.allegati > 0 && <li><b>{deleteConflict.collegati.allegati}</b> allegati</li>}
-                                    <li>Diario, interviste, avvisi, raccolta dati</li>
-                                </ul>
-                            </div>
-                            <div>
-                                <Label className="text-xs">Per confermare, scrivi <b>ELIMINA</b>:</Label>
-                                <Input
-                                    value={deleteText}
-                                    onChange={(e) => setDeleteText(e.target.value)}
-                                    placeholder="ELIMINA"
-                                    data-testid="detail-delete-text"
-                                    autoFocus
-                                />
+                                <div className="text-amber-800">
+                                    {deleteConflict.message || "L'anagrafica non può essere eliminata."}
+                                </div>
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting} data-testid="detail-delete-force-cancel">Annulla</Button>
-                                <Button
-                                    onClick={() => doDelete(true)}
-                                    disabled={deleting || deleteText !== "ELIMINA"}
-                                    className="bg-rose-700 hover:bg-rose-800"
-                                    data-testid="detail-delete-force"
-                                >
-                                    {deleting ? "Eliminazione in corso..." : "Elimina TUTTO"}
-                                </Button>
+                                <Button variant="outline" onClick={() => setDeleteOpen(false)} data-testid="detail-delete-force-cancel">Chiudi</Button>
                             </DialogFooter>
                         </>
                     )}

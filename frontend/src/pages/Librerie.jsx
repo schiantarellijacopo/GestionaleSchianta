@@ -2226,6 +2226,7 @@ function UtenteForm({ section, editing, onClose }) {
             rui_albo: "IVASS", rui_sezione: "", rui_numero_iscrizione: "", rui_qualifica: "", rui_data_iscrizione: "",
             dichiarazione_codice_etico: "", dichiarazione_autocert_requisiti: "",
             contratti_collab: [], dichiarazioni_collab: [], certificati_collab: [],
+            puo_riaprire_giornate: false,
         }}
         fields={(f, set) => (
             <Tabs defaultValue="generale" className="w-full">
@@ -2268,6 +2269,15 @@ function UtenteForm({ section, editing, onClose }) {
                                    onChange={(e) => set("accesso_software", e.target.checked)}
                                    data-testid="utente-accesso-software" />
                             <span><strong>Accesso al software</strong> — se attivo, l'utente può effettuare il login (email e password obbligatorie). Se disattivato è solo un profilo (collaboratore senza login).</span>
+                        </label>
+                    )}
+                    {f.role !== "cliente" && f.role !== "admin" && (
+                        <label className="flex items-center gap-2 text-sm cursor-pointer bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+                               data-testid="utente-riapri-giornate-label">
+                            <input type="checkbox" checked={!!f.puo_riaprire_giornate}
+                                   onChange={(e) => set("puo_riaprire_giornate", e.target.checked)}
+                                   data-testid="utente-riapri-giornate" />
+                            <span><strong>Può riaprire le giornate chiuse</strong> — autorizza questo utente a riaprire le giornate chiuse in Prima Nota (gli amministratori sono sempre abilitati).</span>
                         </label>
                     )}
                     <div>

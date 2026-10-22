@@ -4916,6 +4916,19 @@ async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
             f"Polizza non eliminabile: ha {bloccanti} titoli incassati/coperti. "
             "Annullala o sostituiscila invece di eliminarla.",
         )
+    # Blocco: titolo registrato in Prima Nota con giornata CHIUSA
+    titoli_ids: list[str] = []
+    async for t in db.titoli.find({"polizza_id": pid}, {"_id": 0, "id": 1}):
+        titoli_ids.append(t["id"])
+    if titoli_ids:
+        n_pn_chiuse = await db.movimenti.count_documents(
+            {"titolo_id": {"$in": titoli_ids}, "chiusura_id": {"$nin": [None, ""]}})
+        if n_pn_chiuse:
+            raise HTTPException(
+                409,
+                "Polizza non eliminabile: ha un titolo registrato in Prima Nota in una "
+                "giornata chiusa. Riaprire la giornata per poterla eliminare.",
+            )
     await db.polizze.delete_one({"id": pid})
     await log_attivita(user, "delete", "polizza", pid)
     return {"ok": True}
@@ -10646,9 +10659,13 @@ async def _invia_brogliaccio_email(chiusura_id: str, pdf_bytes: bytes, data_gior
 
 @api.post("/contabilita/chiusura-giorno/{chiusura_id}/riapri")
 async def riapri_chiusura_giorno(
-    chiusura_id: str, body: dict, user=Depends(require_user("admin")),
+    chiusura_id: str, body: dict,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    """Riapre una giornata già chiusa (solo admin). Richiede motivo."""
+    """Riapre una giornata già chiusa. Consentito all'admin oppure a un utente
+    con il permesso `puo_riaprire_giornate`. Richiede motivo."""
+    if user.get("role") != "admin" and not user.get("puo_riaprire_giornate"):
+        raise HTTPException(403, "Non sei autorizzato a riaprire le giornate chiuse.")
     motivo = (body or {}).get("motivo")
     if not motivo:
         raise HTTPException(400, "Motivo riapertura obbligatorio")
@@ -10690,7 +10707,7 @@ async def giornata_stato(
         "chiusura_id": full.get("id") if full else ch["id"],
         "closed_by_name": (full or {}).get("closed_by_name"),
         "closed_at": (full or {}).get("created_at"),
-        "can_riapri": user.get("role") == "admin",
+        "can_riapri": user.get("role") == "admin" or bool(user.get("puo_riaprire_giornate")),
     }
 
 

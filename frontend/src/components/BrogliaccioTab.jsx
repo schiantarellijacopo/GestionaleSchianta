@@ -22,6 +22,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import SelectTipoPagamento from "@/components/SelectTipoPagamento";
 import useTipiPagamento from "@/hooks/useTipiPagamento";
+import { useAuth } from "@/contexts/AuthContext";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -57,6 +58,8 @@ function loadVisible(key, defaultAllVisible) {
 }
 
 export default function BrogliaccioTab({ refreshKey }) {
+    const { user } = useAuth();
+    const canRiapri = user?.role === "admin" || !!user?.puo_riaprire_giornate;
     const [data, setData] = useState(today());
     const [b, setB] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -293,8 +296,9 @@ export default function BrogliaccioTab({ refreshKey }) {
                                     <Mail size={14} className="mr-1" /> Invia commercialista
                                 </Button>
                                 <Button
-                                    variant="outline" onClick={() => setRiapriOpen(true)} disabled={busy}
+                                    variant="outline" onClick={() => setRiapriOpen(true)} disabled={busy || !canRiapri}
                                     data-testid="brogliaccio-riapri"
+                                    title={canRiapri ? "Riapri la giornata" : "Non sei autorizzato a riaprire le giornate"}
                                 >
                                     <Unlock size={14} className="mr-1" /> Riapri
                                 </Button>

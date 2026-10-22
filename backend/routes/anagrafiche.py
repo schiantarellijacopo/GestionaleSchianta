@@ -446,6 +446,7 @@ _ANAG_LEAN_PROJ = {
     "citta": 1, "provincia": 1, "cap": 1, "tags": 1, "collaboratore_id": 1,
     "data_nascita": 1, "codice_fiscale": 1, "partita_iva": 1, "avatar_url": 1,
     "consenso_marketing_email": 1, "canale_email": 1, "canale_sms": 1, "canale_whatsapp": 1,
+    "archiviata": 1, "annullata_at": 1,
 }
 
 
@@ -833,73 +834,146 @@ async def update_anagrafica(aid: str, body: dict, user: dict = Depends(require_u
     return strip_mongo_id(await db.anagrafiche.find_one({"id": aid}, {"_id": 0}))
 
 
+def _analisi_compilata(a: Optional[dict]) -> bool:
+    """True se l'analisi cliente ha contenuto reale (non la scheda vuota
+    auto-creata all'apertura del tab). reddito_lordo_annuo è escluso perché
+    pre-popolato dall'anagrafica."""
+    if not a:
+        return False
+    for k in ("immobili", "veicoli", "beni", "aziende", "storico_redditi",
+              "periodi_contributivi", "estratti_conto_inps", "piramide_soluzioni"):
+        if a.get(k):
+            return True
+    for k in ("contesto_familiare", "contesto_lavorativo", "contesto_patrimoniale",
+              "cosa_renderebbe_felice", "cosa_non_vuoi_carriera", "cosa_non_vuoi_dopo",
+              "cosa_non_vuoi_pensione"):
+        if (a.get(k) or "").strip():
+            return True
+    if a.get("trattativa") or a.get("ultimo_calcolo"):
+        return True
+    for k in ("dividendi_partecipazioni", "altri_redditi_annuali", "reddito_da_affitti",
+              "tfr_maturato", "liquidita", "debiti", "oneri_deducibili",
+              "oneri_fondo_pensione", "altre_detrazioni", "capacita_risparmio_annuale",
+              "danno_devastante_entrate_mensili", "danno_devastante_patrimonio"):
+        try:
+            if float(a.get(k) or 0) != 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    if a.get("reddito_estero") or a.get("regime_forfettario"):
+        return True
+    return False
+
+
 @router.delete("/anagrafiche/{aid}")
 async def delete_anagrafica(
     aid: str,
     force: bool = False,
     user: dict = Depends(require_user("admin")),
 ):
-    """Elimina un'anagrafica.
+    """Elimina/archivia un'anagrafica secondo le regole di business:
 
-    Se force=false (default) e l'anagrafica ha polizze, titoli o sinistri
-    collegati, blocca l'operazione con 409 CONFLICT e ritorna il numero
-    di record collegati per ciascuna entità. L'utente deve confermare
-    passando force=true per procedere con la cascade delete.
-
-    Nota: con force=true vengono ELIMINATE anche:
-      - polizze, titoli (di quelle polizze), sinistri, allegati, diario,
-        interviste, avvisi, raccolta_dati, potenti_domande.
+    1) Se ha un'Analisi Cliente compilata o polizze ATTIVE/SOSPESE
+       (attiva, in_emissione, sospesa) -> NON eliminabile (409 bloccata).
+    2) Altrimenti, se ha record collegati (polizze non attive, sinistri,
+       allegati, diario, ...) -> viene ARCHIVIATA tra le "annullate"
+       (archiviata=True), non cancellata fisicamente.
+    3) Se è completamente vuota (nessun collegamento) -> eliminata del tutto.
     """
-    anag = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, "id": 1, "ragione_sociale": 1})
+    anag = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, "id": 1, "ragione_sociale": 1, "archiviata": 1})
     if not anag:
         raise HTTPException(404, "Anagrafica non trovata")
 
-    # Conta collegati
-    n_polizze = await db.polizze.count_documents({"contraente_id": aid})
+    polizze: list[dict] = []
+    async for p in db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1, "stato": 1}):
+        polizze.append(p)
+    n_polizze = len(polizze)
+    attive_sospese = [
+        p for p in polizze
+        if (p.get("stato") or "").lower() in ("attiva", "in_emissione", "sospesa")
+    ]
     n_sinistri = await db.sinistri.count_documents({"anagrafica_id": aid})
     n_allegati = await db.allegati.count_documents({"anagrafica_id": aid})
+    analisi = await db.analisi_cliente.find_one({"anagrafica_id": aid}, {"_id": 0})
+    has_analisi = _analisi_compilata(analisi)
+    n_extra = 0
+    for coll in ("diario_voci", "interviste", "avvisi", "raccolta_dati", "potenti_domande"):
+        try:
+            n_extra += await db[coll].count_documents({"anagrafica_id": aid})
+        except Exception:
+            pass
+    ha_collegati = bool(n_polizze or n_sinistri or n_allegati or has_analisi or n_extra)
 
-    if not force and (n_polizze or n_sinistri):
+    # REGOLA 1 — blocco totale: anagrafica "lavorata"
+    if has_analisi or attive_sospese:
+        motivi = []
+        if attive_sospese:
+            motivi.append(f"{len(attive_sospese)} polizze attive/sospese")
+        if has_analisi:
+            motivi.append("un'analisi cliente compilata")
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "Anagrafica con record collegati. Confermare eliminazione a cascata.",
-                "collegati": {
-                    "polizze": n_polizze,
-                    "sinistri": n_sinistri,
-                    "allegati": n_allegati,
-                },
+                "blocked": True,
+                "message": ("Anagrafica lavorata: non può essere eliminata perché ha "
+                            + " e ".join(motivi) + "."),
+                "motivi": motivi,
                 "ragione_sociale": anag.get("ragione_sociale"),
             },
         )
 
-    # Cascade: recupera IDs delle polizze per eliminare titoli
-    polizze_ids: list[str] = []
-    async for p in db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1}):
-        polizze_ids.append(p["id"])
+    # REGOLA 2 — archivia tra le annullate (nessuna polizza attiva/sospesa, ma ha collegamenti)
+    if ha_collegati:
+        now = _now_iso()
+        await db.anagrafiche.update_one(
+            {"id": aid},
+            {"$set": {
+                "archiviata": True,
+                "annullata_at": now,
+                "annullata_by": user.get("id"),
+                "annullata_by_name": user.get("name") or user.get("email"),
+                "updated_at": now,
+            }},
+        )
+        await log_attivita(
+            user, "archivia", "anagrafica", aid,
+            f"Anagrafica '{anag.get('ragione_sociale')}' spostata tra le annullate "
+            f"(polizze={n_polizze}, sinistri={n_sinistri})"
+        )
+        return {"ok": True, "archiviata": True, "ragione_sociale": anag.get("ragione_sociale")}
 
-    # Elimina in cascata
-    if polizze_ids:
-        await db.titoli.delete_many({"polizza_id": {"$in": polizze_ids}})
-        await db.polizze.delete_many({"id": {"$in": polizze_ids}})
-    await db.sinistri.delete_many({"anagrafica_id": aid})
-    await db.allegati.delete_many({"anagrafica_id": aid})
-    for coll in ("diario_voci", "interviste", "avvisi", "raccolta_dati", "potenti_domande"):
-        try:
-            await db[coll].delete_many({"anagrafica_id": aid})
-        except Exception:
-            pass
-
+    # REGOLA 3 — anagrafica vuota: eliminazione definitiva
     await db.anagrafiche.delete_one({"id": aid})
     await log_attivita(
         user, "delete", "anagrafica", aid,
-        f"Anagrafica '{anag.get('ragione_sociale')}' eliminata "
-        f"(polizze={n_polizze}, sinistri={n_sinistri}, allegati={n_allegati})"
+        f"Anagrafica '{anag.get('ragione_sociale')}' eliminata (vuota)"
     )
-    return {
-        "ok": True,
-        "cascade": {"polizze": n_polizze, "sinistri": n_sinistri, "allegati": n_allegati},
-    }
+    return {"ok": True, "eliminata": True, "ragione_sociale": anag.get("ragione_sociale")}
+
+
+@router.post("/anagrafiche/{aid}/ripristina")
+async def ripristina_anagrafica(
+    aid: str,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Ripristina un'anagrafica archiviata (annullata) rendendola di nuovo attiva."""
+    anag = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, "id": 1, "ragione_sociale": 1, "archiviata": 1})
+    if not anag:
+        raise HTTPException(404, "Anagrafica non trovata")
+    if not anag.get("archiviata"):
+        raise HTTPException(400, "L'anagrafica non è archiviata")
+    await db.anagrafiche.update_one(
+        {"id": aid},
+        {"$set": {"archiviata": False, "updated_at": _now_iso()},
+         "$unset": {"annullata_at": "", "annullata_by": "", "annullata_by_name": ""}},
+    )
+    await log_attivita(
+        user, "ripristina", "anagrafica", aid,
+        f"Anagrafica '{anag.get('ragione_sociale')}' ripristinata dalle annullate"
+    )
+    return {"ok": True, "ripristinata": True}
 
 
 # ============================================================
