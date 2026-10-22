@@ -77,16 +77,20 @@ async def list_agenzie(
     # per ogni agenzia partner: conteggio compagnie collegate
     for a in items:
         if a.get("tipo") == "principale":
-            # mandato diretto = compagnie senza ALCUNA agenzia partner (plurale o legacy)
+            # mandato diretto = compagnie ATTIVE senza ALCUNA agenzia partner (plurale o legacy)
             a["n_compagnie_collegate"] = await db.compagnie.count_documents(
                 {"$and": [
+                    {"attiva": {"$ne": False}},
                     {"$or": [{"agenzia_partner_id": None}, {"agenzia_partner_id": {"$exists": False}}]},
                     {"$or": [{"agenzie_partner_ids": {"$exists": False}}, {"agenzie_partner_ids": []}, {"agenzie_partner_ids": None}]},
                 ]},
             )
         else:
             a["n_compagnie_collegate"] = await db.compagnie.count_documents(
-                {"$or": [{"agenzia_partner_id": a["id"]}, {"agenzie_partner_ids": a["id"]}]},
+                {"$and": [
+                    {"attiva": {"$ne": False}},
+                    {"$or": [{"agenzia_partner_id": a["id"]}, {"agenzie_partner_ids": a["id"]}]},
+                ]},
             )
             a["compagnie_ids"] = await _compagnie_ids_of(a["id"])
     return items
