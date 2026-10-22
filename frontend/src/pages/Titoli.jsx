@@ -252,6 +252,30 @@ export default function Titoli({ storicoMode = false } = {}) {
         }
     };
 
+    const azzeraAccessoriDiritti = async () => {
+        try {
+            const prev = await api.post(`/admin/azzera-accessori-diritti?dry_run=true`);
+            const { titoli_da_azzerare = 0, polizze_da_azzerare = 0 } = prev.data || {};
+            if (!titoli_da_azzerare && !polizze_da_azzerare) {
+                toast.info("Nessuna bonifica necessaria: accessori e diritti sono già a zero.");
+                return;
+            }
+            const ok = window.confirm(
+                `Bonifica accessori/diritti importati ANIA:\n\n` +
+                `• Titoli "da incassare" (NON in prima nota) con accessori da azzerare: ${titoli_da_azzerare}\n` +
+                `• Polizze con diritti da azzerare: ${polizze_da_azzerare}\n\n` +
+                `I titoli registrati in prima nota NON vengono toccati. Procedere?`,
+            );
+            if (!ok) return;
+            const res = await api.post(`/admin/azzera-accessori-diritti`);
+            const r = res.data || {};
+            toast.success(`Bonifica completata: ${r.titoli_azzerati} titoli e ${r.polizze_azzerate} polizze aggiornate`);
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore durante la bonifica");
+        }
+    };
+
     // Colonne tabella — selezionabili/riordinabili per utente
     const showStorico = storicoMode || ["storico", "storico_anno", "storico_mese"].includes(filters.preset);
     const titoliColsDefault = [
@@ -428,6 +452,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <Button variant="outline" onClick={bonificaScadenze} data-testid="titoli-bonifica-scadenze"
                                 title="Corregge scadenze errate (= effetto) e rimuove i doppioni da incassare">
                                 <Wrench size={14} className="mr-1" /> Correggi scadenze
+                            </Button>
+                        )}
+                        {user?.role === "admin" && (
+                            <Button variant="outline" onClick={azzeraAccessoriDiritti} data-testid="titoli-azzera-accessori-diritti"
+                                title="Azzera accessori sui titoli da incassare (non in prima nota) e i diritti sulle polizze">
+                                <Wrench size={14} className="mr-1" /> Azzera accessori/diritti
                             </Button>
                         )}
                         <Button variant="outline" onClick={stampaPdf} data-testid="titoli-print">

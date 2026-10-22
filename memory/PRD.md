@@ -2077,3 +2077,11 @@ artefatto del mio test (poi eliminato), NON un doppione reale.
 - `genera_documento`: se il modello ha `logo_url` usa quello, altrimenti fallback al logo agenzia (`azienda_config`).
 - UI form modello (solo PDF): box "Logo del modello" con upload immagine (data URL base64, max 1 MB), anteprima e "Usa logo agenzia" per resettare al default.
 - Testato: salvataggio logo_url ✓, generazione PDF con logo del modello ✓, UI dialog ✓.
+
+
+## 2026-10-22 — Regola ANIA accessori/diritti + bonifica dati
+- Import ANIA: ora accessori=0 SEMPRE (titoli e garanzie) e diritti=0 SEMPRE (polizze e garanzie). File: backend/ania_importer.py (titolo righe ~1431/1519/1545; garanzia rec42 riga 1201; garanzia rec30 fallback riga 1167; polizza diritti righe 1308/1326).
+- Formule rec42 invariate (netto=ΣY-CIA, imposte=ΣAA-ΣAC+CIA, ssn=ΣAC, lordo=ΣAB, provv=ΣAF).
+- Bonifica dati storici: endpoint admin POST /api/admin/azzera-accessori-diritti (tenant-scoped, param dry_run). Azzera accessori SOLO su titoli stato=da_incassare e NON in prima nota; azzera diritti su TUTTE le polizze (livello polizza + garanzie[]). I titoli in prima nota non vengono toccati. In server.py dopo ricalcola_titoli_netto.
+- UI: pulsante "Azzera accessori/diritti" in Titoli.jsx (data-testid=titoli-azzera-accessori-diritti, solo admin) con dry-run+conferma. Da usare in produzione (tenant jacopo@schiantarelli.it) dopo deploy.
+- Verificato: endpoint funziona, path array garanzie (arrayFilters+$elemMatch) ok su raw_db, import code coerente, pulsante visibile.

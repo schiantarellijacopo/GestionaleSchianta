@@ -17580,6 +17580,64 @@ async def ricalcola_titoli_netto(user=Depends(require_user("admin"))):
     return {"checked": checked, "fixed": fixed}
 
 
+@api.post("/admin/azzera-accessori-diritti")
+async def azzera_accessori_diritti(dry_run: bool = False,
+                                   user=Depends(require_user("admin"))):
+    """Bonifica una tantum (richiesta utente): gli ACCESSORI e i DIRITTI non
+    vengono più importati, quindi azzera i dati già presenti.
+      - Titoli: accessori = 0 SOLO per quelli in stato 'da_incassare' e MAI
+        registrati in prima nota (nessun incasso/copertura/pagamento/chiusura).
+      - Polizze: diritti = 0 su TUTTE le polizze (anche nelle singole garanzie).
+    Scoped al tenant dell'utente loggato. Con dry_run=true mostra solo l'anteprima.
+    """
+    # ── Titoli 'da_incassare' NON in prima nota, con accessori != 0 ──
+    titoli_flt = {
+        "stato": "da_incassare",
+        "accessori": {"$ne": 0},
+        "$and": [
+            {"$or": [{"data_incasso": None}, {"data_incasso": {"$exists": False}}]},
+            {"$or": [{"data_copertura": None}, {"data_copertura": {"$exists": False}}]},
+            {"titolo_coperto": {"$ne": True}},
+            {"$or": [{"importo_pagato": {"$in": [None, 0, 0.0]}},
+                     {"importo_pagato": {"$exists": False}}]},
+            {"$or": [{"chiusura_id": None}, {"chiusura_id": {"$exists": False}}]},
+        ],
+    }
+    # ── Polizze con diritti (livello polizza o garanzia) != 0 ──
+    polizze_flt = {"$or": [{"diritti": {"$ne": 0}},
+                           {"garanzie": {"$elemMatch": {"diritti": {"$ne": 0}}}}]}
+
+    titoli_match = await db.titoli.count_documents(titoli_flt)
+    polizze_match = await db.polizze.count_documents(polizze_flt)
+
+    report = {"dry_run": dry_run,
+              "titoli_da_azzerare": titoli_match,
+              "polizze_da_azzerare": polizze_match,
+              "titoli_azzerati": 0, "polizze_azzerate": 0}
+    if dry_run:
+        return report
+
+    if titoli_match:
+        r_t = await db.titoli.update_many(
+            titoli_flt, {"$set": {"accessori": 0, "updated_at": _now_iso()}})
+        report["titoli_azzerati"] = r_t.modified_count
+    if polizze_match:
+        r_p1 = await db.polizze.update_many(
+            {"diritti": {"$ne": 0}},
+            {"$set": {"diritti": 0, "updated_at": _now_iso()}})
+        r_p2 = await db.polizze.update_many(
+            {"garanzie": {"$elemMatch": {"diritti": {"$ne": 0}}}},
+            {"$set": {"garanzie.$[el].diritti": 0, "updated_at": _now_iso()}},
+            array_filters=[{"el.diritti": {"$ne": 0}}])
+        report["polizze_azzerate"] = polizze_match - await db.polizze.count_documents(polizze_flt)
+        report["polizze_diritti_azzerati"] = r_p1.modified_count
+        report["polizze_garanzie_azzerate"] = r_p2.modified_count
+
+    await log_attivita(user, "manutenzione", "titoli_polizze", "batch",
+                       f"azzera accessori/diritti: titoli={report['titoli_azzerati']} polizze={report['polizze_azzerate']}")
+    return report
+
+
 # ----- Mount -----
 
 

@@ -1164,11 +1164,11 @@ def _row_a_garanzia(row: dict, codice: str, descr: str, nome_finale: Optional[st
         "garanzia_originale": descr,
         "codice_ania": codice,
         "netto": _parse_float(row.get("netto_garanzia") or row.get("netto", "")),
-        "accessori": _parse_float(row.get("accessori", "")),
+        "accessori": 0.0,  # richiesta utente: gli accessori non vengono più importati
         "imposte": round(_imp_raw - _ssn, 2),
         "ssn": _ssn,
         "lordo": _parse_float(row.get("lordo_garanzia") or row.get("lordo", "")),
-        "diritti": _parse_float(row.get("diritti", "")),
+        "diritti": 0.0,  # richiesta utente: i diritti non vengono più importati
         "provvigione": _parse_float(row.get("provvigione_garanzia")
                                     or row.get("provvigioni_totali")
                                     or row.get("provvigione", "")),
@@ -1305,7 +1305,7 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
         ssn = round(sum(x["ssn"] for x in garanzie), 2)
         lordo = round(sum(x["lordo"] for x in garanzie), 2)
         provv = round(sum(x["provvigione"] for x in garanzie), 2)
-        diritti_tot = rec30_diritti.get(pol_id, 0.0)
+        diritti_tot = 0.0  # richiesta utente: i diritti non vengono più importati
         capitale_pol = max((x.get("capitale_assicurato", 0.0) for x in garanzie), default=0.0)
         upd = {
             "garanzie": garanzie,
@@ -1323,7 +1323,7 @@ async def _processa_garanzie(db, files_data: Dict[str, str],
     for pol_id, garanzie in rec30_garanzie.items():
         if pol_id in pols_con_rec42:
             continue
-        diritti_tot = rec30_diritti.get(pol_id, 0.0)
+        diritti_tot = 0.0  # richiesta utente: i diritti non vengono più importati
         capitale_pol = max((g.get("capitale_assicurato", 0.0) for g in garanzie), default=0.0)
         upd = {"garanzie": garanzie, "diritti": diritti_tot,
                "garanzie_imposte_scorporate": True, "updated_at": _now_iso()}
@@ -1427,8 +1427,8 @@ async def _processa_titoli(db, files_data: Dict[str, str], log: ImportLog,
                 continue
             id_t = row.get("id_titolo_exp") or _uid()
             # ═══ Importi SOLO dal rec42 (vedi regola in testa alla funzione) ═══
-            # Accessori: campo separato, non tra i 5 parametri → resta dal rec40.
-            accessori_titolo = _parse_float(_col_at(row, 46))
+            # Accessori: su richiesta utente NON vengono più importati (sempre 0).
+            accessori_titolo = 0.0
             _r42 = rec42_by_titolo.get((id_t or "").strip())
             if _r42:
                 netto_calc = round(_r42["netto"] - _r42["cia"], 2)
