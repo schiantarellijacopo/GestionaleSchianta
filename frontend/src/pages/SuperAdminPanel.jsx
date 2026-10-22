@@ -1737,6 +1737,7 @@ function ChiaviApiTab() {
     const [f, setF] = useState(null);
     const [saving, setSaving] = useState(false);
     const [testingWa, setTestingWa] = useState(false);
+    const [testingAi, setTestingAi] = useState("");
 
     useEffect(() => {
         api.get("/super-admin/chiavi-api")
@@ -1753,6 +1754,17 @@ function ChiaviApiTab() {
             toast.success("Chiavi API salvate");
         } catch (e) { toast.error(e?.response?.data?.detail || "Errore salvataggio"); }
         finally { setSaving(false); }
+    };
+
+    const testAi = async (tipo) => {
+        const field = tipo === "aistudio" ? "ai_studio_api_key" : "openai_api_key";
+        setTestingAi(tipo);
+        try {
+            const r = await api.post(`/super-admin/chiavi-api/test-${tipo}`, { [field]: f[field] || "" });
+            if (r.data.ok) toast.success(r.data.info || "Chiave valida");
+            else toast.error("Test fallito: " + (r.data.error || "errore sconosciuto"));
+        } catch (e) { toast.error(e?.response?.data?.detail || "Errore test"); }
+        finally { setTestingAi(""); }
     };
 
     const testWa = async () => {
@@ -1797,11 +1809,35 @@ function ChiaviApiTab() {
             {/* AI STUDIO — Google Gemini */}
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-aistudio">
                 <div className="font-semibold text-slate-800 text-sm">🤖 AI Studio — Google Gemini</div>
-                <div className="text-[11px] text-slate-500">Chiave usata dalle funzioni AI (OCR polizze, assistente, insight, generazione contenuti). Fallback a <code>GEMINI_API_KEY</code> quando non è presente la chiave gestita Emergent.</div>
+                <div className="text-[11px] text-slate-500">Usata dalle funzioni AI (OCR polizze, assistente, insight, generazione contenuti). <b>La chiave inserita qui ha priorità</b> sulla chiave gestita Emergent, che resta solo come fallback quando questo campo è vuoto.</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <FormField label="API Key (Google AI Studio)" type="password" value={f.ai_studio_api_key || ""} onChange={(v) => set("ai_studio_api_key", v)} testid="sa-aistudio-key" />
                 </div>
-                <div className="text-[11px] text-slate-400 mt-2">Ottieni la chiave su <span className="font-mono">aistudio.google.com/apikey</span>.</div>
+                <div className="flex items-center gap-3 mt-2">
+                    <button onClick={() => testAi("aistudio")} disabled={testingAi === "aistudio"}
+                        className="px-3 py-1.5 text-xs border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700 disabled:opacity-50"
+                        data-testid="sa-aistudio-test">
+                        {testingAi === "aistudio" ? "Verifica…" : "Test AI Studio"}
+                    </button>
+                    <span className="text-[11px] text-slate-400">Ottieni la chiave su <span className="font-mono">aistudio.google.com/apikey</span>.</span>
+                </div>
+            </div>
+
+            {/* OPENAI */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-openai">
+                <div className="font-semibold text-slate-800 text-sm">🧠 OpenAI — GPT / Voce / Immagini</div>
+                <div className="text-[11px] text-slate-500">Usata dalle funzioni vocali (podcast NotebookLM, video marketing) e immagini. <b>La chiave inserita qui ha priorità</b> sulla chiave gestita Emergent, che resta solo come fallback quando questo campo è vuoto.</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <FormField label="API Key (OpenAI, sk-…)" type="password" value={f.openai_api_key || ""} onChange={(v) => set("openai_api_key", v)} testid="sa-openai-key" />
+                </div>
+                <div className="flex items-center gap-3 mt-2">
+                    <button onClick={() => testAi("openai")} disabled={testingAi === "openai"}
+                        className="px-3 py-1.5 text-xs border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700 disabled:opacity-50"
+                        data-testid="sa-openai-test">
+                        {testingAi === "openai" ? "Verifica…" : "Test OpenAI"}
+                    </button>
+                    <span className="text-[11px] text-slate-400">Ottieni la chiave su <span className="font-mono">platform.openai.com/api-keys</span>.</span>
+                </div>
             </div>
 
             {/* TWILIO SMS */}

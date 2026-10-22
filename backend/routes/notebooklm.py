@@ -417,7 +417,8 @@ async def _run_audio(oid: str, nid: str):
             "progress": f"Sintesi vocale 0/{len(dialogo)}"}})
 
         from emergentintegrations.llm.openai import OpenAITextToSpeech
-        tts = OpenAITextToSpeech(api_key=os.environ.get("EMERGENT_LLM_KEY"))
+        from ai_keys import openai_key
+        tts = OpenAITextToSpeech(api_key=openai_key())
         segments = []
         for i, turn in enumerate(dialogo):
             testo = (turn.get("testo") or "").strip()[:4000]

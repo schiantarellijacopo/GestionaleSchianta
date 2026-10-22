@@ -64,8 +64,15 @@ _CHIAVI_AZIENDA = [
     "firma_api_token", "firma_webhook_secret",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
-    "ai_studio_api_key",
+    "ai_studio_api_key", "openai_api_key",
 ]
+
+# Chiavi AI del vault → variabile d'ambiente sincronizzata nel processo.
+# La chiave del pannello ha SEMPRE priorità sulla chiave gestita Emergent.
+_CHIAVI_AI_ENV = {
+    "ai_studio_api_key": "GEMINI_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+}
 
 
 @router.get("/chiavi-api")
@@ -94,12 +101,13 @@ async def sa_put_chiavi_api(body: dict, user=Depends(require_user("admin")),
         if az:
             await raw_db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
     # AI Studio (Gemini): rendi subito effettiva la chiave nel processo come fallback GEMINI_API_KEY
-    if "ai_studio_api_key" in body:
-        _k = (body.get("ai_studio_api_key") or "").strip()
-        if _k:
-            os.environ["GEMINI_API_KEY"] = _k
-        else:
-            os.environ.pop("GEMINI_API_KEY", None)
+    for _field, _env in _CHIAVI_AI_ENV.items():
+        if _field in body:
+            _k = (body.get(_field) or "").strip()
+            if _k:
+                os.environ[_env] = _k
+            else:
+                os.environ.pop(_env, None)
     if "evolution_server_url" in body or "evolution_api_key" in body:
         url = (body.get("evolution_server_url") or "").strip().rstrip("/")
         key = (body.get("evolution_api_key") or "").strip()
@@ -116,6 +124,52 @@ async def sa_put_chiavi_api(body: dict, user=Depends(require_user("admin")),
     await log_action(user=user, action_type="chiavi_api_update",
                      details="Aggiornate chiavi API piattaforma", request=request)
     return {"ok": True}
+
+
+@router.post("/chiavi-api/test-aistudio")
+async def sa_test_aistudio(body: dict | None = None,
+                           user=Depends(require_user("admin"))) -> dict:
+    """Valida la chiave Google AI Studio (Gemini) senza esporne il valore."""
+    _ensure_super_admin(user)
+    key = ((body or {}).get("ai_studio_api_key") or "").strip()
+    if not key:
+        az = await raw_db.azienda_config.find_one({}, {"_id": 0, "ai_studio_api_key": 1}) or {}
+        key = (az.get("ai_studio_api_key") or "").strip()
+    if not key:
+        raise HTTPException(400, "Nessuna chiave AI Studio configurata")
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r = await c.get("https://generativelanguage.googleapis.com/v1beta/models",
+                            params={"key": key, "pageSize": 1})
+        if r.status_code >= 400:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        return {"ok": True, "info": "Chiave AI Studio valida"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
+
+
+@router.post("/chiavi-api/test-openai")
+async def sa_test_openai(body: dict | None = None,
+                         user=Depends(require_user("admin"))) -> dict:
+    """Valida la chiave OpenAI senza esporne il valore."""
+    _ensure_super_admin(user)
+    key = ((body or {}).get("openai_api_key") or "").strip()
+    if not key:
+        az = await raw_db.azienda_config.find_one({}, {"_id": 0, "openai_api_key": 1}) or {}
+        key = (az.get("openai_api_key") or "").strip()
+    if not key:
+        raise HTTPException(400, "Nessuna chiave OpenAI configurata")
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r = await c.get("https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {key}"})
+        if r.status_code >= 400:
+            return {"ok": False, "error": f"HTTP {r.status_code}"}
+        return {"ok": True, "info": "Chiave OpenAI valida"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
 
 
 @router.post("/chiavi-api/test-whatsapp")

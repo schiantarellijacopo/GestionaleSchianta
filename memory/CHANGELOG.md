@@ -123,3 +123,18 @@
 - `/utility/ocr-polizza`: corretto Allegato (campi errati) → categoria="polizza".
 
 > NB: da pubblicare su Railway via **Save to GitHub**.
+
+## 2026-06 — Vault chiavi AI Super Admin (priorità al pannello)
+- Pannello Chiavi API: aggiunta chiave **OpenAI** (`openai_api_key`) oltre ad AI Studio/Gemini.
+- Priorità invertita: la chiave inserita nel pannello ha SEMPRE priorità;
+  `EMERGENT_LLM_KEY` resta solo fallback quando il campo è vuoto.
+  - Gemini: già gestito dal shim `llm_compat` (GEMINI_API_KEY → Gemini diretto).
+  - OpenAI: nuovo helper `backend/ai_keys.py` (`openai_key()`/`gemini_key()`);
+    usato nei siti TTS OpenAI (`marketing_studio.py`, `notebooklm.py`).
+- Sync env dal vault: `PUT /super-admin/chiavi-api` e startup `server.py`
+  caricano `ai_studio_api_key→GEMINI_API_KEY` e `openai_api_key→OPENAI_API_KEY`.
+- Nuovi endpoint test (non espongono la chiave): `POST /super-admin/chiavi-api/test-aistudio`,
+  `POST /super-admin/chiavi-api/test-openai`. UI: pulsanti "Test AI Studio" / "Test OpenAI".
+- Verificato: GET espone entrambi i campi, roundtrip salva/pulisce, test-openai con chiave
+  invalida → HTTP 401, UI renderizza sezioni e pulsanti.
+> NB: da pubblicare su Railway via **Save to GitHub**.

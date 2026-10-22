@@ -330,7 +330,8 @@ async def _run_video(vid: str, argomento: str, n: int,
         tts = None
         if con_audio:
             from emergentintegrations.llm.openai import OpenAITextToSpeech
-            tts = OpenAITextToSpeech(api_key=os.environ.get("EMERGENT_LLM_KEY"))
+            from ai_keys import openai_key
+            tts = OpenAITextToSpeech(api_key=openai_key())
 
         with tempfile.TemporaryDirectory() as tmp:
             clip_paths = []
