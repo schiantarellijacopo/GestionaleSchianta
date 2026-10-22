@@ -1,5 +1,24 @@
 # Changelog — Axicura CRM
 
+## 2026-10-22 — Modelli Firma: modalità {placeholder} + Word + Librerie
+- Aggiunto segnaposto `{x}` per **sbarrare una casella** (scrive una X nel punto). Verificato.
+- **Pivot a segnaposto `{...}`** (niente più riquadri da trascinare): nel Word/PDF si scrivono
+  `{nome_cliente}`, `{agenzia_rui}`, `{collab_rui_sezione}`, `{firma}` ecc.; in compilazione
+  l'app sostituisce i segnaposto coi valori reali (pymupdf redaction) e rileva `{firma}` per
+  posizionare il campo firma Yousign. Verificato con unit test (sostituzione + rilevamento firma).
+- **Nuovi gruppi dati**: Cliente, Polizza, **Collaboratore** (nome, CF, email, RUI, sezione RUI),
+  **Agenzia** (ragione sociale, P.IVA, RUI, sezione RUI), data odierna. Collaboratore risolto da
+  polizza o utente corrente; agenzia da `azienda_config`.
+- **Supporto Word**: .docx/.doc convertiti in PDF via LibreOffice headless (installato; va
+  aggiunto anche al Dockerfile Railway). Upload anche via **drag & drop**.
+- **Spostato in Librerie → "Modelli Firma (PDF/Word)"** (rimossa voce di menu dedicata).
+  UI: spiegazione, segnaposto cliccabili (copia), "Compila per un cliente", anteprima PDF.
+- Backend: `/api/firma/modelli` (upload/list/detail/delete/compila); compila salva il PDF come
+  allegato del cliente/polizza e, se c'è `{firma}`, crea la richiesta Yousign (sandbox).
+
+## 2026-10-22 — Firma Yousign/YouTrust sandbox — TESTATA OK
+- Flusso e2e verificato (crea→carica→firmatario→attiva `ongoing`). Key: `YOUSIGN_SANDBOX_API_KEY`.
+
 ## 2026-10-22 — Firma digitale Yousign/YouTrust + Designer modelli (MVP)
 - **Integrazione Yousign v3 (brand YouTrust)** testata e FUNZIONANTE in sandbox
   (`https://api-sandbox.yousign.app/v3`, Bearer): crea richiesta → carica PDF → aggiunge

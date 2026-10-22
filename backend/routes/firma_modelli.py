@@ -18,6 +18,9 @@ import base64
 import io
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -33,18 +36,35 @@ router = APIRouter(prefix="/api/firma/modelli", tags=["firma-modelli"])
 
 # chiavi dato disponibili da posizionare sul documento
 CAMPI_DATO = {
-    "nome_cliente": "Nome / Ragione sociale",
-    "codice_fiscale": "Codice fiscale",
-    "partita_iva": "Partita IVA",
-    "indirizzo": "Indirizzo",
-    "cap": "CAP",
-    "comune": "Comune",
-    "provincia": "Provincia",
-    "email": "Email",
-    "telefono": "Telefono/Cellulare",
+    # --- Cliente / contraente ---
+    "nome_cliente": "Cliente - Nome / Ragione sociale",
+    "codice_fiscale": "Cliente - Codice fiscale",
+    "partita_iva": "Cliente - Partita IVA",
+    "indirizzo": "Cliente - Indirizzo",
+    "cap": "Cliente - CAP",
+    "comune": "Cliente - Comune",
+    "provincia": "Cliente - Provincia",
+    "email": "Cliente - Email",
+    "telefono": "Cliente - Telefono/Cellulare",
+    "data_nascita": "Cliente - Data di nascita",
+    "luogo_nascita": "Cliente - Luogo di nascita",
+    # --- Polizza ---
+    "numero_polizza": "Polizza - Numero",
+    "compagnia": "Polizza - Compagnia",
+    # --- Collaboratore (intermediario) ---
+    "collab_nome": "Collaboratore - Nome",
+    "collab_codice_fiscale": "Collaboratore - Codice fiscale",
+    "collab_email": "Collaboratore - Email",
+    "collab_rui": "Collaboratore - Numero RUI",
+    "collab_rui_sezione": "Collaboratore - Sezione RUI",
+    # --- Agenzia ---
+    "agenzia_nome": "Agenzia - Ragione sociale",
+    "agenzia_piva": "Agenzia - Partita IVA",
+    "agenzia_rui": "Agenzia - Numero RUI",
+    "agenzia_rui_sezione": "Agenzia - Sezione RUI",
+    # --- Varie ---
     "data_oggi": "Data odierna",
-    "numero_polizza": "Numero polizza",
-    "compagnia": "Compagnia",
+    "x": "Sbarra casella (scrive una X)",
 }
 
 
@@ -54,6 +74,32 @@ def _now() -> str:
 
 def _tenant(user: dict) -> str | None:
     return user.get("agenzia_tenant_id")
+
+
+def _word_to_pdf(raw: bytes, filename: str) -> bytes | None:
+    """Converte .docx/.doc in PDF usando LibreOffice headless. None se non disponibile."""
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        return None
+    ext = ".docx" if filename.endswith(".docx") else ".doc"
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, f"in{ext}")
+        with open(src, "wb") as f:
+            f.write(raw)
+        try:
+            subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, src],
+                check=True, capture_output=True, timeout=90,
+                env={**os.environ, "HOME": tmp},
+            )
+        except Exception as e:
+            logger.warning("Conversione Word fallita: %s", e)
+            return None
+        out = os.path.join(tmp, "in.pdf")
+        if not os.path.exists(out):
+            return None
+        with open(out, "rb") as f:
+            return f.read()
 
 
 def _render_pages(pdf_bytes: bytes, dpi: int = 110) -> tuple[list[dict], list[str]]:
@@ -91,11 +137,13 @@ async def carica_modello(
     if fn.endswith(".pdf"):
         pdf_bytes = raw
     elif fn.endswith(".docx") or fn.endswith(".doc"):
-        raise HTTPException(
-            400, "Per ora carica il modello in PDF. Il supporto Word sarà aggiunto a breve "
-                 "(da Word: 'Salva come' → PDF).")
+        pdf_bytes = _word_to_pdf(raw, fn)
+        if pdf_bytes is None:
+            raise HTTPException(
+                400, "Conversione Word non disponibile su questo server. "
+                     "Da Word usa 'Salva come' → PDF e ricarica.")
     else:
-        raise HTTPException(400, "Formato non supportato: carica un PDF.")
+        raise HTTPException(400, "Formato non supportato: carica un PDF o un Word (.docx).")
 
     try:
         pages_meta, _ = _render_pages(pdf_bytes)
@@ -144,14 +192,17 @@ async def salva_campi(mid: str, body: dict, user=Depends(require_user("admin", "
     norm = []
     for c in campi:
         tipo = c.get("tipo")
-        if tipo not in ("dato", "firma"):
+        if tipo not in ("dato", "firma", "libero"):
             continue
         if tipo == "dato" and c.get("chiave") not in CAMPI_DATO:
+            continue
+        if tipo == "libero" and not (c.get("valore") or "").strip():
             continue
         norm.append({
             "id": c.get("id") or str(uuid.uuid4()),
             "tipo": tipo,
             "chiave": c.get("chiave") if tipo == "dato" else None,
+            "valore": (c.get("valore") or "").strip() if tipo == "libero" else None,
             "page": int(c.get("page") or 0),
             "x": float(c.get("x") or 0), "y": float(c.get("y") or 0),
             "w": float(c.get("w") or 0.2), "h": float(c.get("h") or 0.04),
@@ -179,7 +230,7 @@ async def elimina_modello(mid: str, user=Depends(require_user("admin", "collabor
     return {"ok": True}
 
 
-async def _valori_dato(db, anagrafica_id: str | None, polizza_id: str | None) -> dict:
+async def _valori_dato(db, anagrafica_id, polizza_id, collaboratore_id=None, user=None):
     ana = await db.anagrafiche.find_one({"id": anagrafica_id}, {"_id": 0}) if anagrafica_id else {}
     pol = await db.polizze.find_one({"id": polizza_id}, {"_id": 0}) if polizza_id else {}
     ana = ana or {}
@@ -188,6 +239,14 @@ async def _valori_dato(db, anagrafica_id: str | None, polizza_id: str | None) ->
     if pol.get("compagnia_id"):
         c = await db.compagnie.find_one({"id": pol["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
         comp_nome = (c or {}).get("ragione_sociale") or ""
+    # collaboratore: body → polizza → utente corrente (se collaboratore)
+    cid = collaboratore_id or pol.get("collaboratore_id")
+    if not cid and user and user.get("role") == "collaboratore":
+        cid = user.get("id")
+    collab = await db.users.find_one({"id": cid}, {"_id": 0}) if cid else {}
+    collab = collab or {}
+    # agenzia (singleton config)
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     from datetime import date
     return {
         "nome_cliente": ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
@@ -199,34 +258,51 @@ async def _valori_dato(db, anagrafica_id: str | None, polizza_id: str | None) ->
         "provincia": ana.get("provincia") or "",
         "email": ana.get("email") or "",
         "telefono": ana.get("cellulare") or ana.get("telefono") or "",
-        "data_oggi": date.today().strftime("%d/%m/%Y"),
+        "data_nascita": ana.get("data_nascita") or "",
+        "luogo_nascita": ana.get("comune_nascita") or ana.get("luogo_nascita") or "",
         "numero_polizza": pol.get("numero_polizza") or "",
         "compagnia": comp_nome,
+        "collab_nome": collab.get("nome") or collab.get("collaboratore_nome") or "",
+        "collab_codice_fiscale": collab.get("codice_fiscale") or "",
+        "collab_email": collab.get("email") or "",
+        "collab_rui": collab.get("rui") or "",
+        "collab_rui_sezione": collab.get("rui_sezione") or "",
+        "agenzia_nome": az.get("ragione_sociale") or "",
+        "agenzia_piva": az.get("partita_iva") or "",
+        "agenzia_rui": az.get("rui") or "",
+        "agenzia_rui_sezione": az.get("rui_sezione") or "",
+        "data_oggi": date.today().strftime("%d/%m/%Y"),
+        "x": "X",
     }
 
 
-def _compila_pdf(pdf_bytes: bytes, campi: list[dict], valori: dict) -> bytes:
-    """Scrive i campi 'dato' dentro il PDF alle coordinate salvate (frazioni)."""
+def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict]]:
+    """Sostituisce i segnaposto {chiave} nel PDF con i valori reali (ricerca testo).
+    Ritorna (pdf_compilato, firma_fields) dove firma_fields sono i rettangoli (in punti,
+    page 0-based) dove compare {firma}, da usare per il campo firma Yousign."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    for c in campi:
-        if c["tipo"] != "dato":
-            continue
-        pno = c["page"]
-        if pno < 0 or pno >= doc.page_count:
-            continue
-        page = doc[pno]
-        W, H = page.rect.width, page.rect.height
-        val = str(valori.get(c["chiave"], "") or "")
-        if not val:
-            continue
-        # baseline: y della frazione + fontsize (origine in alto a sx)
-        x = c["x"] * W
-        y = c["y"] * H + (c.get("font_size", 11))
-        page.insert_text((x, y), val, fontsize=c.get("font_size", 11),
-                         fontname="helv", color=(0, 0, 0))
+    firma_fields = []
+    for page in doc:
+        # campi dato: sostituzione testo in-place (redaction)
+        for chiave, val in valori.items():
+            token = "{" + chiave + "}"
+            rects = page.search_for(token)
+            for r in rects:
+                fs = max(7, min(12, r.height * 0.9))
+                page.add_redact_annot(r, text=str(val or ""), fontsize=fs,
+                                      fontname="helv", align=0, fill=(1, 1, 1))
+        # segnaposto firma: lo rimuoviamo e salviamo la posizione
+        for r in page.search_for("{firma}"):
+            page.add_redact_annot(r, text="", fill=(1, 1, 1))
+            firma_fields.append({
+                "page": page.number,
+                "x": round(r.x0), "y": round(r.y0),
+                "width": max(120, round(r.width)), "height": max(40, round(r.height * 2.2)),
+            })
+        page.apply_redactions()
     out = doc.tobytes()
     doc.close()
-    return out
+    return out, firma_fields
 
 
 @router.post("/{mid}/compila")
@@ -245,9 +321,9 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
         raise HTTPException(400, "anagrafica_id richiesto")
 
     pdf_bytes, _ = obj_storage.get_object(doc["storage_path"])
-    valori = await _valori_dato(db, anagrafica_id, polizza_id)
-    campi = doc.get("campi") or []
-    filled = _compila_pdf(pdf_bytes, campi, valori)
+    valori = await _valori_dato(db, anagrafica_id, polizza_id,
+                                collaboratore_id=body.get("collaboratore_id"), user=user)
+    filled, firma_fields = _compila_pdf(pdf_bytes, valori)
 
     # salva come allegato
     aid_alleg = str(uuid.uuid4())
@@ -264,17 +340,19 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
     }
     await db.allegati.insert_one(dict(alleg))
 
-    out = {"ok": True, "allegato_id": aid_alleg, "nome_file": nome_file}
+    out = {"ok": True, "allegato_id": aid_alleg, "nome_file": nome_file,
+           "firma_presente": bool(firma_fields)}
 
-    firma_campi = [c for c in campi if c["tipo"] == "firma"]
-    if firma_campi and body.get("invia_firma"):
-        signing = await _invia_yousign(db, doc, filled, firma_campi, valori, body)
+    if firma_fields and body.get("invia_firma"):
+        signing = await _invia_yousign(db, doc, filled, firma_fields, valori, body)
         out.update(signing)
+    elif body.get("invia_firma") and not firma_fields:
+        out["firma"] = {"ok": False, "error": "Nessun segnaposto {firma} trovato nel documento"}
     return out
 
 
-async def _invia_yousign(db, modello, pdf_bytes, firma_campi, valori, body) -> dict:
-    """Crea richiesta firma Yousign (sandbox) con i campi firma alle coordinate del modello."""
+async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body) -> dict:
+    """Crea richiesta firma Yousign (sandbox) con i campi firma alle posizioni dei {firma}."""
     api_key = (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip()
     if not api_key:
         return {"firma": {"ok": False, "error": "Firma Yousign non configurata"}}
@@ -307,18 +385,10 @@ async def _invia_yousign(db, modello, pdf_bytes, firma_campi, valori, body) -> d
             if up.is_error:
                 return {"firma": {"ok": False, "error": up.text[:200]}}
             did = up.json()["id"]
-            # usa le dimensioni reali della pagina per convertire le frazioni in punti
-            pdoc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            fields = []
-            for c in firma_campi:
-                pg = pdoc[c["page"]] if c["page"] < pdoc.page_count else pdoc[0]
-                W, H = pg.rect.width, pg.rect.height
-                fields.append({
-                    "type": "signature", "document_id": did, "page": c["page"] + 1,
-                    "x": round(c["x"] * W), "y": round(c["y"] * H),
-                    "width": max(85, round(c["w"] * W)), "height": max(37, round(c["h"] * H)),
-                })
-            pdoc.close()
+            fields = [{
+                "type": "signature", "document_id": did, "page": f["page"] + 1,
+                "x": f["x"], "y": f["y"], "width": f["width"], "height": f["height"],
+            } for f in firma_fields]
             signer_body = {
                 "info": {"first_name": first, "last_name": last, "email": email, "locale": "it"},
                 "signature_level": "electronic_signature",

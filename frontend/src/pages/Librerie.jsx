@@ -4,6 +4,7 @@ import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ModelliFirma from "@/pages/ModelliFirma";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,6 +62,7 @@ const SECTIONS = [
     { key: "voci-bilancio", label: "Voci di bilancio", icon: <Wallet size={14} />, endpoint: "/librerie/voci-bilancio" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
+    { key: "modelli-firma", label: "Modelli Firma (PDF/Word)", icon: <FileText size={14} />, custom: true },
     { key: "mup-modelli", label: "Modelli MUP (precontrattuale)", icon: <ClipboardList size={14} />, endpoint: "/librerie/mup-modelli", custom: true },
     { key: "questionari", label: "Questionari", icon: <ClipboardList size={14} />, custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
@@ -274,6 +276,7 @@ export default function Librerie() {
                             : s.key === "voci-ricorsive" ? <VociRicorsiveSezione />
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
+                            : s.key === "modelli-firma" ? <ModelliFirma />
                             : s.key === "mup-modelli" ? <ModelliMupSezione />
                             : s.key === "questionari" ? <QuestionariManager />
                             : s.key === "permessi" ? <PermessiSezione />
