@@ -158,3 +158,14 @@
   se è attiva la chiave `pannello`, `emergent` (fallback) o `nessuna`. Non espone valori.
 - UI pannello Chiavi API: badge colorato accanto a ogni sezione AI (verde=pannello,
   ambra=Emergent fallback, rosso=nessuna). Si aggiorna dopo ogni salvataggio.
+
+## 2026-10-22 — Documenti personali collaboratore a card multi-documento
+- Librerie → Utenti/Collaboratori → tab Certificati → "Documenti personali" ristrutturata:
+  - Firma digitale resta slot dedicato (alimenta la firma dei moduli, campo `firma_digitale_url`).
+  - Gli altri documenti ora sono multipli, raggruppati in card per tipologia
+    (Carta d'identità, Codice fiscale, Casellario giudiziale, Carichi pendenti, Documento IBAN, Altro).
+- Backend: aggiunta categoria `documenti` a `_ALLEGATO_CATEGORIE`; nuovo array `documenti_collab`
+  in UserPublic (db_models). Riusa gli endpoint `/auth/users/{uid}/allegati/{categoria}` (POST/DELETE).
+- Frontend (Librerie.jsx): riscritto `DocumentiCollaboratore` + nuovo `DocFolderCard`;
+  rimosso `DOC_TIPI` (slot fissi); `documenti_collab` aggiunto a `omitOnSave` di UtenteForm.
+- Verificato: upload con tipologia → raggruppamento in card → eliminazione (curl admin) + smoke UI.

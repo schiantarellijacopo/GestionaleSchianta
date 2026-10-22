@@ -15026,7 +15026,7 @@ async def elimina_corso_utente(uid: str, corso_id: str,
 # ============================================================
 # ALLEGATI collaboratore: contratti | dichiarazioni | certificati
 # ============================================================
-_ALLEGATO_CATEGORIE = {"contratti", "dichiarazioni", "certificati"}
+_ALLEGATO_CATEGORIE = {"contratti", "dichiarazioni", "certificati", "documenti"}
 
 
 @api.post("/auth/users/{uid}/allegati/{categoria}")

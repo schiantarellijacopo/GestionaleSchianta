@@ -163,6 +163,7 @@ class UserPublic(BaseDoc):
     contratti_collab: List[dict] = Field(default_factory=list)
     dichiarazioni_collab: List[dict] = Field(default_factory=list)
     certificati_collab: List[dict] = Field(default_factory=list)
+    documenti_collab: List[dict] = Field(default_factory=list)
     # --- Dati "Gestione utente" (gestionale) ---
     # Generale
     tipologia_utente: Optional[str] = None

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -2180,7 +2180,7 @@ function UtenteForm({ section, editing, onClose }) {
         api.get("/auth/users").then((r) => setStaff(r.data.filter((u) => u.role !== "cliente"))).catch(() => {});
     }, []);
     return <GenericForm section={section} editing={editing} onClose={onClose} dialogClass="max-w-3xl"
-        omitOnSave={["contratti_collab", "dichiarazioni_collab", "certificati_collab", "corsi",
+        omitOnSave={["contratti_collab", "dichiarazioni_collab", "certificati_collab", "documenti_collab", "corsi",
             "avatar_url", "firma_digitale_url", "carta_identita_url", "casellario_url",
             "carichi_pendenti_url", "documento_iban_url"]}
         defaults={{
@@ -2460,7 +2460,8 @@ function UtenteForm({ section, editing, onClose }) {
                             ]} />
                         <div className="border-t border-slate-200 pt-3">
                             <div className="text-xs font-semibold text-slate-600 mb-2">Documenti personali</div>
-                            <DocumentiCollaboratore userId={editing.id} user={f} onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
+                            <DocumentiCollaboratore userId={editing.id} user={f} items={f.documenti_collab || []}
+                                onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
                         </div>
                     </TabsContent>
                 )}
@@ -2947,14 +2948,6 @@ function SchemaProvvForm({ section, editing, onClose }) {
 }
 
 // =================== DOCUMENTI COLLABORATORE ===================
-const DOC_TIPI = [
-    { key: "firma_digitale", label: "Firma digitale", urlField: "firma_digitale_url" },
-    { key: "carta_identita", label: "Carta d'identità", urlField: "carta_identita_url" },
-    { key: "casellario", label: "Casellario giudiziale", urlField: "casellario_url" },
-    { key: "carichi_pendenti", label: "Carichi pendenti", urlField: "carichi_pendenti_url" },
-    { key: "documento_iban", label: "Documento IBAN", urlField: "documento_iban_url" },
-];
-
 // =================== SI/NO SELECT ===================
 function SiNoSelect({ value, onChange, testid }) {
     return (
@@ -3045,62 +3038,169 @@ function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, cam
     );
 }
 
-function DocumentiCollaboratore({ userId, user, onChange }) {
-    const upload = async (tipo, file) => {
-        if (!file) return;
-        const fd = new FormData();
-        fd.append("file", file);
+// Tipologie disponibili per i documenti personali (card raggruppate per tipo)
+const DOC_PERSONALI_TIPI = [
+    "Carta d'identità", "Codice fiscale", "Casellario giudiziale",
+    "Carichi pendenti", "Documento IBAN", "Altro",
+];
+
+function DocumentiCollaboratore({ userId, user, items, onChange }) {
+    const list = items || [];
+    const [tipologia, setTipologia] = useState("");
+    const [descrizione, setDescrizione] = useState("");
+    const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
+
+    // --- Firma digitale (slot dedicato, usata per la firma dei moduli) ---
+    const firmaUpload = async (f) => {
+        if (!f) return;
+        const fd = new FormData(); fd.append("file", f);
         try {
-            const r = await api.post(`/auth/users/${userId}/documenti/${tipo}`, fd,
+            const r = await api.post(`/auth/users/${userId}/documenti/firma_digitale`, fd,
                 { headers: { "Content-Type": "multipart/form-data" } });
             onChange(r.data);
-            toast.success("Documento caricato");
+            toast.success("Firma caricata");
         } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
-    const del = async (tipo) => {
-        if (!window.confirm("Eliminare il documento?")) return;
-        const f = DOC_TIPI.find((d) => d.key === tipo);
+    const firmaDel = async () => {
+        if (!window.confirm("Eliminare la firma digitale?")) return;
         try {
-            await api.delete(`/auth/users/${userId}/documenti/${tipo}`);
-            onChange({ [f.urlField]: null });
-            toast.success("Eliminato");
-        } catch (e) { toast.error("Errore"); }
+            await api.delete(`/auth/users/${userId}/documenti/firma_digitale`);
+            onChange({ firma_digitale_url: null });
+            toast.success("Eliminata");
+        } catch { toast.error("Errore"); }
     };
+
+    // --- Documenti (multi, raggruppati in card per tipologia) ---
+    const aggiungi = async () => {
+        if (!file) { toast.error("Seleziona un file"); return; }
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("tipologia", tipologia || "Altro");
+            fd.append("descrizione", descrizione || "");
+            const r = await api.post(`/auth/users/${userId}/allegati/documenti`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            onChange({ documenti_collab: [...list, r.data] });
+            setTipologia(""); setDescrizione(""); setFile(null); setFileKey((k) => k + 1);
+            toast.success("Documento aggiunto");
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/auth/users/${userId}/allegati/documenti/${id}`);
+            onChange({ documenti_collab: list.filter((x) => x.id !== id) });
+            toast.success("Eliminato");
+        } catch { toast.error("Errore"); }
+    };
+
+    // Raggruppa per tipologia mantenendo l'ordine di DOC_PERSONALI_TIPI, poi eventuali tipologie extra
+    const gruppi = {};
+    list.forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
+    const ordine = [...DOC_PERSONALI_TIPI, ...Object.keys(gruppi).filter((k) => !DOC_PERSONALI_TIPI.includes(k))];
+
+    const firmaUrl = user.firma_digitale_url;
+
     return (
-        <div className="space-y-2">
-            {DOC_TIPI.map((d) => {
-                const url = user[d.urlField];
-                return (
-                    <div key={d.key} className="flex items-center justify-between border border-slate-200 rounded-md p-3 bg-slate-50">
-                        <div className="flex items-center gap-2">
-                            <FileText size={14} className="text-slate-500" />
-                            <div>
-                                <div className="text-sm font-medium">{d.label}</div>
-                                <div className="text-xs text-slate-500">
-                                    {url ? <a href={url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">Visualizza documento</a> : "Nessun file caricato"}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="file"
-                                id={`doc-${d.key}`}
-                                className="hidden"
-                                data-testid={`doc-input-${d.key}`}
-                                onChange={(e) => upload(d.key, e.target.files?.[0])}
-                            />
-                            <label htmlFor={`doc-${d.key}`} className="cursor-pointer text-xs px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-md inline-flex items-center gap-1">
-                                <Upload size={11} /> {url ? "Sostituisci" : "Carica"}
-                            </label>
-                            {url && (
-                                <button onClick={() => del(d.key)} className="text-red-600 hover:bg-red-50 p-1.5 rounded">
-                                    <Trash2 size={13} />
-                                </button>
-                            )}
+        <div className="space-y-3" data-testid="documenti-collaboratore">
+            {/* Firma digitale */}
+            <div className="flex items-center justify-between border border-slate-200 rounded-md p-3 bg-slate-50" data-testid="doc-firma-digitale">
+                <div className="flex items-center gap-2">
+                    <FileText size={14} className="text-slate-500" />
+                    <div>
+                        <div className="text-sm font-medium">Firma digitale</div>
+                        <div className="text-xs text-slate-500">
+                            {firmaUrl ? <a href={firmaUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">Visualizza firma</a> : "Usata per firmare i moduli — nessuna firma caricata"}
                         </div>
                     </div>
-                );
-            })}
+                </div>
+                <div className="flex items-center gap-2">
+                    <input type="file" id="doc-firma_digitale" className="hidden" accept="image/*" data-testid="doc-input-firma_digitale"
+                        onChange={(e) => firmaUpload(e.target.files?.[0])} />
+                    <label htmlFor="doc-firma_digitale" className="cursor-pointer text-xs px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-md inline-flex items-center gap-1">
+                        <Upload size={11} /> {firmaUrl ? "Sostituisci" : "Carica"}
+                    </label>
+                    {firmaUrl && (
+                        <button onClick={firmaDel} className="text-red-600 hover:bg-red-50 p-1.5 rounded" data-testid="doc-del-firma_digitale">
+                            <Trash2 size={13} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Aggiungi documento */}
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <Label className="text-xs">Tipologia</Label>
+                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
+                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="doc-add-tipologia">
+                            <option value="">— Seleziona —</option>
+                            {DOC_PERSONALI_TIPI.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <Label className="text-xs">Descrizione (facoltativa)</Label>
+                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="doc-add-descrizione" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">File (PDF/IMG)</Label>
+                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="doc-add-file" />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="doc-add-btn">
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+
+            {/* Card raggruppate per tipologia */}
+            {list.length === 0 ? (
+                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="doc-cards">
+                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
+                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function DocFolderCard({ tipologia, files, onDelete }) {
+    const [open, setOpen] = useState(true);
+    return (
+        <div className="border border-slate-200 rounded-lg overflow-hidden" data-testid={`doc-folder-${tipologia}`}>
+            <button onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                data-testid={`doc-folder-toggle-${tipologia}`}>
+                <FileText size={16} className="text-slate-500" />
+                <span className="font-medium text-sm text-slate-800 flex-1">{tipologia}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">{files.length}</span>
+                <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+            </button>
+            {open && (
+                <ul className="divide-y divide-slate-100 px-3">
+                    {files.map((a) => (
+                        <li key={a.id} className="py-2.5 flex items-center gap-3" data-testid={`doc-item-${a.id}`}>
+                            <Paperclip size={15} className="text-slate-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                                {a.url ? (
+                                    <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-sky-700 hover:underline truncate block">{a.nome_file || "Apri"}</a>
+                                ) : (
+                                    <span className="text-sm text-slate-700 truncate block">{a.nome_file || "—"}</span>
+                                )}
+                                {a.descrizione && <div className="text-[11px] text-slate-500 truncate">{a.descrizione}</div>}
+                            </div>
+                            <button onClick={() => onDelete(a.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded shrink-0" data-testid={`doc-del-${a.id}`}>
+                                <Trash2 size={13} />
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            )}
         </div>
     );
 }
