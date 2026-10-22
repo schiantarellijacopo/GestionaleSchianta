@@ -130,6 +130,101 @@ async def sa_test_evolution(user=Depends(require_user("admin"))) -> dict:
     return {"ok": True, "istanze_sul_server": n}
 
 
+@router.post("/chiavi-api/test-yousign")
+async def sa_test_yousign(body: dict = None, user=Depends(require_user("admin"))) -> dict:
+    """Esegue un test end-to-end della firma Yousign/YouTrust in SANDBOX:
+    crea richiesta → carica un PDF di prova → aggiunge firmatario → attiva →
+    restituisce il LINK DI FIRMA da aprire per provare davvero.
+    Usa la API key sandbox da env (YOUSIGN_SANDBOX_API_KEY)."""
+    _ensure_super_admin(user)
+    import io
+    import httpx
+    api_key = (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip()
+    if not api_key:
+        raise HTTPException(400, "API key Yousign sandbox non configurata")
+    base = "https://api-sandbox.yousign.app/v3"
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+
+    # PDF di prova (1 pagina) con reportlab
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica", 14)
+    c.drawString(100, 760, "Documento di TEST firma — Axicura / Yousign Sandbox")
+    c.drawString(100, 700, "Questo documento serve solo a verificare l'integrazione.")
+    c.drawString(100, 620, "Firma qui sotto:")
+    c.rect(100, 540, 180, 60)
+    c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+
+    email_override = ((body or {}).get("email") or "").strip()
+    try:
+        async with httpx.AsyncClient(base_url=base, headers=headers, timeout=40) as cli:
+            # email firmatario: in sandbox deve appartenere all'organizzazione
+            signer_email = email_override
+            if not signer_email:
+                r = await cli.get("/users", params={"limit": 5})
+                if r.status_code == 200:
+                    for u in r.json().get("data", []):
+                        em = u.get("email") or (u.get("info") or {}).get("email")
+                        if em:
+                            signer_email = em
+                            break
+            if not signer_email:
+                return {"ok": False, "error": "Nessuna email organizzazione trovata; indica un'email del tuo account Yousign."}
+
+            req = await cli.post("/signature_requests",
+                                 json={"name": "TEST firma Axicura (sandbox)", "delivery_mode": "email"})
+            if req.is_error:
+                return {"ok": False, "step": "crea richiesta", "error": req.text[:300]}
+            rid = req.json()["id"]
+
+            doc = await cli.post(f"/signature_requests/{rid}/documents",
+                                 files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
+                                 data={"nature": "signable_document"})
+            if doc.is_error:
+                return {"ok": False, "step": "carica PDF", "error": doc.text[:300]}
+            did = doc.json()["id"]
+
+            signer_body = {
+                "info": {"first_name": "Test", "last_name": "Firma",
+                         "email": signer_email, "locale": "it"},
+                "signature_level": "electronic_signature",
+                "signature_authentication_mode": "no_otp",
+                "fields": [{"type": "signature", "document_id": did,
+                            "page": 1, "x": 100, "y": 540, "width": 180, "height": 60}],
+            }
+            sg = await cli.post(f"/signature_requests/{rid}/signers", json=signer_body)
+            if sg.is_error:
+                return {"ok": False, "step": "aggiungi firmatario", "error": sg.text[:300]}
+            signer_id = sg.json()["id"]
+
+            act = await cli.post(f"/signature_requests/{rid}/activate", json={})
+            if act.is_error:
+                return {"ok": False, "step": "attiva", "error": act.text[:300]}
+            status = act.json().get("status")
+
+            # recupera il link di firma del firmatario
+            link = None
+            sdet = await cli.get(f"/signature_requests/{rid}/signers/{signer_id}")
+            if sdet.status_code == 200:
+                link = sdet.json().get("signature_link")
+
+        return {
+            "ok": True,
+            "request_id": rid,
+            "status": status,
+            "signer_email": signer_email,
+            "signing_url": link,
+            "message": "Firma sandbox attivata. Apri il link di firma per provare, oppure controlla l'email ricevuta.",
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
+
 # ---------------------------------------------------------------------------
 # MARKETPLACE MGMT (super_admin cross-tenant)
 # ---------------------------------------------------------------------------

@@ -48,6 +48,7 @@ import Attivita from "@/pages/Attivita";
 import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
+import ModelliFirma from "@/pages/ModelliFirma";
 import Incentivazioni from "@/pages/Incentivazioni";
 import MappaClienti from "@/pages/MappaClienti";
 import Chat from "@/pages/Chat";
@@ -295,6 +296,11 @@ function App() {
                             <Route path="/librerie" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}>
                                     <Librerie />
+                                </ProtectedRoute>
+                            } />
+                            <Route path="/modelli-firma" element={
+                                <ProtectedRoute roles={["admin", "collaboratore"]}>
+                                    <ModelliFirma />
                                 </ProtectedRoute>
                             } />
                             <Route path="/whatsapp" element={

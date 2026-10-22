@@ -1,5 +1,26 @@
 # Changelog — Axicura CRM
 
+## 2026-10-22 — Firma digitale Yousign/YouTrust + Designer modelli (MVP)
+- **Integrazione Yousign v3 (brand YouTrust)** testata e FUNZIONANTE in sandbox
+  (`https://api-sandbox.yousign.app/v3`, Bearer): crea richiesta → carica PDF → aggiunge
+  firmatario (firma elettronica) → attiva (status `ongoing`). Key in `YOUSIGN_SANDBOX_API_KEY`.
+  Note: livello "simple" richiede `signature_authentication_mode` ∈ otp_email/otp_sms/no_otp;
+  in sandbox l'email firmatario deve appartenere all'organizzazione Yousign.
+- **Designer modelli firma** (`routes/firma_modelli.py` + `pages/ModelliFirma.jsx`):
+  - L'agenzia carica un PDF; il backend renderizza le pagine come immagini (pymupdf).
+  - Editor visivo: trascini sulle pagine i campi **Dato** (nome cliente, CF, P.IVA, indirizzo,
+    comune, CAP, provincia, email, telefono, data, n° polizza, compagnia) e il campo **Firma**;
+    coordinate salvate come frazioni sul modello (riusate finché non le modifichi).
+  - "Compila per cliente": scrive i dati reali dentro il PDF, lo salva come allegato, e (se
+    presente campo firma) crea la richiesta Yousign con il campo firma nel punto salvato.
+  - Scoping per agenzia (tenant). Endpoint sotto `/api/firma/modelli`. Voce menu "Modelli Firma".
+  - Endpoint diagnostico Super Admin `POST /super-admin/chiavi-api/test-yousign`.
+- Test: flusso e2e via API OK (nome scritto nel PDF verificato con estrazione testo; firma
+  Yousign status `ongoing`); editor verificato nel browser sul PDF IVASS reale.
+- **Pendente**: supporto Word (.docx) richiede LibreOffice (da aggiungere anche al Dockerfile
+  Railway); per ora caricare PDF. Sostituzione provider Namirial/OpenAPI non ancora effettuata
+  (Yousign affiancato, da promuovere a default quando confermi).
+
 ## 2026-10-22 — Verifica completa anti-doppia-registrazione (centralizzata nel backend)
 - Verificati TUTTI i flussi di incasso del codice:
   - Frontend multiplo: `Titoli.jsx` e `TitoliSospesi.jsx` → `merge_copertura:true` ripristinato.

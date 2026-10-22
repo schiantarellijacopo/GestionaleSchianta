@@ -156,3 +156,6 @@ websockets==16.0
 xlsxwriter==3.2.9
 yarl==1.24.2
 zipp==4.1.0
+pymupdf==2.0
+pymupdf4llm==2.0
+pymupdf_layout==2.0

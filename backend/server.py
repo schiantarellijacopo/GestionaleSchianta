@@ -18321,6 +18321,8 @@ from firma_router import router as _firma_router  # noqa: E402
 app.include_router(_firma_router)
 from routes.esignature_it import router as _esignature_router  # noqa: E402
 app.include_router(_esignature_router)
+from routes.firma_modelli import router as _firma_modelli_router  # noqa: E402
+app.include_router(_firma_modelli_router)
 
 # GZip: comprime le risposte JSON grandi (liste 5-6MB → ~500KB) per ricerche veloci
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
