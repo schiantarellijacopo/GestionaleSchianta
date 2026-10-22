@@ -1215,6 +1215,7 @@ export default function PolizzaDetail() {
                             entita_id={pol.id}
                             canEdit={canEdit}
                             layout="quadrotti"
+                            anagrafica={pol.contraente ? { id: pol.contraente.id || pol.contraente_id, cellulare: pol.contraente.cellulare, telefono: pol.contraente.telefono } : null}
                             titolo="Documenti polizza"
                             sottotitolo="Documenti organizzati per categoria. Polizza, condizioni, quietanze, libretto e atto di vendita sono di default visibili al cliente; preventivi, appunti e regolazione restano interni."
                             categorie={[

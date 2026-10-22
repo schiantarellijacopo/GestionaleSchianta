@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import RichiediDocCard from "@/components/RichiediDocCard";
 
 export default function DocumentiSezioneSplit({
     entita_tipo,
@@ -24,6 +25,7 @@ export default function DocumentiSezioneSplit({
     sottotitolo = null,
     categorie = [],
     layout = "split",
+    anagrafica = null,
 }) {
     const [items, setItems] = useState(null);
     const [uploading, setUploading] = useState(null);
@@ -194,6 +196,9 @@ export default function DocumentiSezioneSplit({
                             categoria={c}
                             files={gruppi[c.key] || []}
                             canEdit={canEdit}
+                            entita_tipo={entita_tipo}
+                            entita_id={entita_id}
+                            anagrafica={anagrafica}
                             uploading={uploading === c.key || (uploading === "libretto" && c.key.includes("libretto"))}
                             onUpload={(files) => upload(files, { visibile: defVis(c), categoria: c.key })}
                             onOcrLibretto={entita_tipo === "polizza" && c.key.includes("libretto") ? ocrLibretto : null}
@@ -358,27 +363,34 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
     );
 }
 
-function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onOcrLibretto, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
+function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onOcrLibretto, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange, entita_tipo, entita_id, anagrafica = null }) {
     const [open, setOpen] = useState(true);
     const c = categoria;
     const manca = !!c.obbligatoria && files.length === 0;
     return (
         <Card className={`p-0 overflow-hidden ${manca ? "border-2 border-rose-400" : "border-slate-200"}`} data-testid={`quadrotto-${c.key}`}>
-            <button type="button" onClick={() => setOpen((o) => !o)}
-                className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left ${manca ? "bg-rose-50 hover:bg-rose-100" : "bg-slate-50 hover:bg-slate-100"}`}
-                data-testid={`quadrotto-toggle-${c.key}`}>
-                <span className="text-lg">{c.icon || "📄"}</span>
-                <span className={`font-medium text-sm flex-1 ${manca ? "text-rose-800" : "text-slate-800"}`}>{c.label}</span>
+            <div className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors ${manca ? "bg-rose-50" : "bg-slate-50"}`}>
+                <button type="button" onClick={() => setOpen((o) => !o)}
+                    className={`flex items-center gap-2 flex-1 min-w-0 text-left ${manca ? "hover:text-rose-900" : "hover:text-slate-900"}`}
+                    data-testid={`quadrotto-toggle-${c.key}`}>
+                    <span className="text-lg">{c.icon || "📄"}</span>
+                    <span className={`font-medium text-sm flex-1 truncate ${manca ? "text-rose-800" : "text-slate-800"}`}>{c.label}</span>
+                </button>
                 {c.obbligatoria && (
                     <span className="inline-flex items-center gap-0.5 text-rose-600 shrink-0" title="Documento obbligatorio">
                         <AlertTriangle size={12} />
                     </span>
                 )}
+                {canEdit && entita_id && (
+                    <RichiediDocCard entita_tipo={entita_tipo} entita_id={entita_id} categoria={c.key}
+                        label={c.label} anagrafica={anagrafica} variant="icon" />
+                )}
                 {c.default_visibile ? <Eye size={12} className="text-emerald-600" title="Di default visibile al cliente" />
                     : <Lock size={12} className="text-slate-400" title="Di default interno" />}
                 <span className={`text-[11px] px-2 py-0.5 rounded-full ${manca ? "bg-rose-200 text-rose-700" : "bg-slate-200 text-slate-600"}`}>{files.length}</span>
-                <span className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
-            </button>
+                <button type="button" onClick={() => setOpen((o) => !o)} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+                    data-testid={`quadrotto-chevron-${c.key}`}>▾</button>
+            </div>
             {manca && (
                 <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-200 text-[11px] text-rose-700 font-medium flex items-center gap-1" data-testid={`quadrotto-manca-${c.key}`}>
                     <AlertTriangle size={11} /> Documento obbligatorio mancante

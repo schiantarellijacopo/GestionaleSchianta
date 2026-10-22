@@ -1,6 +1,36 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Richiesta documento PER CARD + Notifica "Nuovo Accesso"
+### Caricamento documenti direttamente nella card corretta (ogni entità)
+- `backend/routes/upload_link.py` generalizzato: il link pubblico ora è legato a
+  `(entita_tipo, entita_id, categoria)` — anagrafica | polizza | sinistro | titolo.
+  Alla ricezione il file viene archiviato DIRETTAMENTE nella card giusta:
+  - card a storage fisso dell'anagrafica (ANAG_CARD_KEYS) → `anagrafiche.documenti[categoria]`;
+  - polizza/sinistro/titolo → `allegati` con `categoria`=card key e `visibile_cliente` da config.
+  Il cliente può caricare PIÙ file sullo stesso link. Retro-compat mantenuta per `anagrafica_id`.
+  `GET /upload-links` filtra per `entita_tipo/entita_id/categoria`.
+- Nuovo componente riutilizzabile `frontend/src/components/RichiediDocCard.jsx`
+  (pulsante "Richiedi al cliente" + dialog: genera link, copia, WhatsApp, elimina) montato
+  su OGNI card: in `DocumentiSezioneSplit` (polizza/sinistro/titolo/libro-matricola) e nelle
+  card documenti di `AnagraficaDetail` (DocumentiTab). `anagrafica` passata da Polizza/Sinistro.
+- Dashboard "documenti mancanti": si svuota automaticamente al caricamento (ricalcolo da
+  allegati + dict documenti). Aggiunto `libretto_veicolo` al check libretto (`extras_p1p2.py`).
+- Testato via API: upload su card anagrafica (dict) e su card polizza (allegato) OK; cleanup eseguito.
+
+### Notifica di sicurezza "Nuovo Accesso" (nuovo dispositivo)
+- `backend/auth_device_alert.py`: fingerprint a bassa invasività (HMAC-SHA256 di UA + rete
+  coarse /24-/64; nessun IP/UA grezzo salvato). Collection `known_login_devices` con indice
+  unique `(agenzia_tenant_id,user_id,device_hash)` + TTL 365gg. Segreto HMAC auto-generato e
+  persistito in `app_settings` (nessuna modifica .env).
+- `POST /api/auth/login` (server.py): `$inc login_count` atomico → `register_login_device`.
+  Email SOLO se dispositivo nuovo E non è il primo accesso (login_count_before>0). Invio in
+  background (asyncio), non blocca il login. Dedup/cooldown 24h via `last_alerted_at`.
+- `resend_service.send_new_login_alert` (usa fallback SMTP→Resend→MOCK esistente).
+- Testato: login A (no email, 1° accesso) → A ripetuto (no email) → B nuovo device (1 email MOCK)
+  → B ripetuto (nessuna 2ª email). Verificato in MOCK mode, nessuna email reale. Cleanup eseguito.
+
+
 ## 2026-10-22 — Auth batch (auto-logout 10 min, email credenziali agenzia/operatore, recupero password + invalidazione sessioni) + chiavi OpenAPI.it/Gemini AI Studio
 ### Chiavi API (Super Admin)
 - `backend/routes/super_admin.py`: aggiunto `openapi_it_bearer_token` a `_CHIAVI_AZIENDA` + sync env `OPENAPI_IT_BEARER_TOKEN` (`_CHIAVI_EXTRA_ENV`). `frontend/src/pages/SuperAdminPanel.jsx` (`ChiaviApiTab`): nuova sezione "OpenAPI.it". Chiave OpenAPI.it salvata nel vault e caricata allo startup (log `OPENAPI_IT_BEARER_TOKEN caricato dal vault`).

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import RowActions, { PrintButton } from "@/components/RowActions";
 import { FirmaButton } from "@/components/DocumentiSezioneSplit";
+import RichiediDocCard from "@/components/RichiediDocCard";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
 import { TaskCollegati } from "@/components/TaskCollegati";
 import AzioniCliente from "@/components/AzioniCliente";
@@ -2264,6 +2265,12 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                     <span className={`text-slate-400 transition-transform ${cOpen ? "rotate-180" : ""}`}>▾</span>
                                 </div>
                             </button>
+                            {canEdit && (
+                                <div className="flex justify-end -mt-1 mb-1">
+                                    <RichiediDocCard entita_tipo="anagrafica" entita_id={anagrafica_id}
+                                        categoria={dt.key} label={dt.label} anagrafica={ana} variant="icon" />
+                                </div>
+                            )}
                             {cOpen && (doc ? (
                                 <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
                                     <div>

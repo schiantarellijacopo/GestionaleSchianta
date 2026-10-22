@@ -86,6 +86,7 @@ async def documenti_mancanti(
             {"entita_tipo": "polizza", "entita_id": {"$in": v_ids},
              "is_deleted": {"$ne": True},
              "$or": [{"categoria": "libretto_circolazione"}, {"categoria": "libretto"},
+                     {"categoria": "libretto_veicolo"},
                      {"nome_file": {"$regex": "libretto", "$options": "i"}}]},
             {"_id": 0, "entita_id": 1},
         ):

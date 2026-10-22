@@ -202,3 +202,26 @@ async def send_policy_expiring(*, to: str, contraente: str, numero_polizza: str,
     <p>Contatti la sua agenzia per il rinnovo.</p>
     """
     return await _send(to, f"Polizza {numero_polizza} in scadenza il {scadenza}", _html_wrap("Promemoria scadenza polizza", body))
+
+
+async def send_new_login_alert(*, to: str, name: str, when: str,
+                               browser: str = "", citta: str = "") -> dict:
+    """Avviso di sicurezza: accesso da un nuovo dispositivo/browser."""
+    dettagli = []
+    if when:
+        dettagli.append(f"<li><b>Data e ora:</b> {when}</li>")
+    if browser:
+        dettagli.append(f"<li><b>Dispositivo/Browser:</b> {browser}</li>")
+    if citta:
+        dettagli.append(f"<li><b>Zona di rete:</b> {citta}</li>")
+    lista = f"<ul style='margin:8px 0;padding-left:18px;'>{''.join(dettagli)}</ul>" if dettagli else ""
+    body = f"""
+    <p>Ciao <b>{name or ''}</b>,<br>
+    abbiamo rilevato un <b>nuovo accesso</b> al tuo account da un dispositivo o browser non riconosciuto.</p>
+    {lista}
+    <p>Se sei stato tu, puoi ignorare questa email.</p>
+    <p style="font-size:13px;color:#b91c1c;"><b>Se non sei stato tu</b>, cambia subito la password
+    e contatta l'amministratore dell'agenzia.</p>
+    """
+    return await _send(to, "🔐 Nuovo accesso al tuo account",
+                       _html_wrap("Avviso di sicurezza — Nuovo accesso", body))

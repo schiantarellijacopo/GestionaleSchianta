@@ -143,6 +143,21 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     user.pop("password_hash", None)
     user.pop("_id", None)
     await log_attivita(user, "login", "auth", user["id"], f"Login utente {email}")
+    # Notifica di sicurezza "Nuovo Accesso": incremento atomico del contatore login
+    # (il valore precedente serve a non avvisare al primissimo accesso) e
+    # registrazione del dispositivo in background.
+    try:
+        from auth_device_alert import register_login_device
+        prev = await db.users.find_one_and_update(
+            {"id": user["id"]}, {"$inc": {"login_count": 1}},
+            projection={"login_count": 1}, return_document=False)
+        login_count_before = int((prev or {}).get("login_count", 0) or 0)
+        await register_login_device(
+            tenant_id=tid or "", user_id=user["id"], user_email=user.get("email", ""),
+            user_name=user.get("name") or "", login_count_before=login_count_before,
+            request=request)
+    except Exception as _e:
+        logger.warning("Notifica nuovo accesso non eseguita: %s", _e)
     # Super admin login audit
     if is_su:
         try:
@@ -18895,6 +18910,8 @@ async def startup():
     await db.attivita_log.create_index("created_at")
     from indexes import ensure_indexes
     await ensure_indexes()
+    from auth_device_alert import ensure_device_indexes
+    await ensure_device_indexes()
 
     # Chiavi AI dal vault super-admin: priorità al pannello Chiavi API.
     # ai_studio_api_key → GEMINI_API_KEY, openai_api_key → OPENAI_API_KEY.

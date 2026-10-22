@@ -265,6 +265,7 @@ export default function SinistroDetail() {
                             entita_id={id}
                             canEdit={true}
                             layout="quadrotti"
+                            anagrafica={s.contraente ? { id: s.contraente.id || s.contraente_id, cellulare: s.contraente.cellulare, telefono: s.contraente.telefono } : null}
                             titolo="Documenti sinistro"
                             sottotitolo="Documenti organizzati per categoria (CID, perizia, foto, fatture, denuncia). Ogni riquadro indica se il documento è visibile al cliente."
                             categorie={[
