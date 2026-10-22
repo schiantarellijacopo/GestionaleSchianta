@@ -18120,6 +18120,8 @@ from routes import import_sinistri as _import_sin_router  # noqa: E402
 from routes import cloud_storage as _cloud_router  # noqa: E402
 from routes import tasks as _tasks_router  # noqa: E402
 api.include_router(_tasks_router.router)
+from routes import audit_operatori as _audit_router  # noqa: E402
+api.include_router(_audit_router.router)
 from routes import upload_link as _upload_link_router  # noqa: E402
 api.include_router(_upload_link_router.router)
 from routes import carichi_mensili as _carichi_router  # noqa: E402
@@ -18862,6 +18864,15 @@ async def tenant_context_middleware(request, call_next):
             _current_user_ctx.reset(ctx_tok)
         except (ValueError, LookupError):
             pass
+    # Audit operatori: traccia mutazioni/stampe/esportazioni in background.
+    try:
+        if user and request.method in ("POST", "PUT", "PATCH", "DELETE", "GET"):
+            import asyncio as _aio_audit
+            from routes.audit_operatori import registra_audit as _reg_audit
+            _aio_audit.create_task(
+                _reg_audit(user, request.method, request.url.path, response.status_code))
+    except Exception:
+        pass
     return response
 
 
@@ -18908,6 +18919,10 @@ async def startup():
     await db.titoli.create_index("id_titolo_exp")
     await db.sinistri.create_index("id_sinistro_exp")
     await db.attivita_log.create_index("created_at")
+    await raw_db.attivita_log.create_index([("entita", 1), ("entita_id", 1)])
+    await raw_db.audit_operatori.create_index([("agenzia_tenant_id", 1), ("created_at", -1)])
+    await raw_db.audit_operatori.create_index([("agenzia_tenant_id", 1), ("utente_id", 1), ("created_at", -1)])
+    await raw_db.audit_operatori.create_index([("agenzia_tenant_id", 1), ("area", 1)])
     from indexes import ensure_indexes
     await ensure_indexes()
     from auth_device_alert import ensure_device_indexes

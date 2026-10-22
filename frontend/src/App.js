@@ -45,6 +45,7 @@ import CaricaDocumento from "@/pages/CaricaDocumento";
 import AppCliente from "@/pages/AppCliente";
 import Email from "@/pages/Email";
 import Attivita from "@/pages/Attivita";
+import AuditOperatori from "@/pages/AuditOperatori";
 import Provvigioni from "@/pages/Provvigioni";
 import Pipeline from "@/pages/Pipeline";
 import Librerie from "@/pages/Librerie";
@@ -325,6 +326,14 @@ function App() {
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore"]}>
                                         <Attivita />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
+                                path="/audit-operatori"
+                                element={
+                                    <ProtectedRoute roles={["admin"]}>
+                                        <AuditOperatori />
                                     </ProtectedRoute>
                                 }
                             />

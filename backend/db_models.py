@@ -801,6 +801,7 @@ class EmailMessaggio(BaseDoc):
 class AttivitaLog(BaseDoc):
     utente_id: Optional[str] = None
     utente_email: Optional[str] = None
+    utente_nome: Optional[str] = None
     azione: str  # e.g. "create", "update", "delete", "login", "import", "calc_pensione"
     entita: str  # e.g. "anagrafica", "polizza", "sinistro"
     entita_id: Optional[str] = None

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading } from "@/components/Shared";
+import RecordStoria from "@/components/RecordStoria";
 import CollaboratoreInlineSelect from "@/components/CollaboratoreInlineSelect";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -390,6 +391,8 @@ export default function PolizzaDetail() {
                     )}
                 </div>
             </div>
+
+            <RecordStoria entita="polizza" entitaId={id} className="mb-3" />
 
             {/* Header tipo Cattolica */}
             <Card className="border-slate-200 mb-4 overflow-hidden">

@@ -1,5 +1,13 @@
 # Programma Assicurativo — PRD (aggiornato 30/09/2026)
-# STATO 2026-10-22 — Documenti Compagnie + Avvisi scadenza documentali (app+email) + verifica Visibilità: COMPLETATI e testati (vedi CHANGELOG.md). Avviso opt-in per singolo documento (compagnia/agenzia_partner/azienda), giorni configurabili (default 15), regola alert `documento_aziendale_scaduto` auto-creata/riattivata.
+# STATO 2026-10-22 — Documenti Compagnie + Avvisi scadenza documentali (app+email) + verifica Visibilità: COMPLETATI e testati
+# STATO 2026-10-22 (sera) — AUDIT OPERATORI completo: COMPLETATO e testato
+#   • Badge "Creato/Ultima modifica da … con data" (stile banner emerald) su schede anagrafica/polizza/sinistro (componente RecordStoria, visibile solo admin, ricostruito da attivita_log retroattivamente).
+#   • Pagina admin-only "/audit-operatori" (menu "Monitoraggio operatori"): filtri operatore/area/azione/periodo/ricerca, grafico aree più usate per operatore (recharts stacked bar), lista eventi, percorso operatore.
+#   • Tracciamento automatico via middleware HTTP in audit_operatori (tenant-scoped): tutte le mutazioni POST/PUT/PATCH/DELETE + stampe/esportazioni (GET) con utente/area/azione/entità/path/status.
+#   • Navigazione: POST /api/audit/navigazione inviato dal frontend (hook useNavTracking in Layout) ad ogni cambio pagina per staff.
+#   • Endpoint backend: /api/audit/{record-storia,navigazione,eventi,stats,percorso,operatori}. record-storia visibile ad admin+collaboratore; eventi/stats/percorso SOLO admin (collaboratore→403, verificato).
+#   • Isolamento tenant via agenzia_tenant_id (TenantAwareDB). Modello AttivitaLog esteso con utente_nome.
+#   • File: backend/routes/audit_operatori.py, frontend/src/components/RecordStoria.jsx, frontend/src/pages/AuditOperatori.jsx, hook in Layout.jsx, route in App.js, voce menu in Sidebar.jsx. (vedi CHANGELOG.md). Avviso opt-in per singolo documento (compagnia/agenzia_partner/azienda), giorni configurabili (default 15), regola alert `documento_aziendale_scaduto` auto-creata/riattivata.
 
 # CHANGELOG 2026-10-14 — Sostituzione polizza automatica (flusso OCR email)
 - Quando l'OCR crea una NUOVA polizza con "Sostituisce polizza" = numero di una polizza

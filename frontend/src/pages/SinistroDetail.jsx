@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
+import RecordStoria from "@/components/RecordStoria";
 import { api, API_BASE, fmtEur } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,6 +118,7 @@ export default function SinistroDetail() {
 
     return (
         <div data-testid="sinistro-detail-page" className="space-y-3">
+            <RecordStoria entita="sinistro" entitaId={id} />
             {/* Toolbar superiore */}
             <div className="bg-white border border-slate-200 rounded-md px-4 py-2 flex items-center gap-3">
                 <button onClick={() => navigate("/sinistri")} className="text-slate-500 hover:text-slate-900" data-testid="back-button">

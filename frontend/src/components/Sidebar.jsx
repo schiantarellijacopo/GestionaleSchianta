@@ -73,13 +73,14 @@ const ALL_MENU_ITEMS = [
     { id: "whatsapp", path: "/whatsapp", icon: "MessageCircle", label: "WhatsApp Agenzie", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "importazioni", path: "/importazioni", icon: "Upload", label: "Importazioni Flussi", section: "amministrazione", roles: ["admin", "collaboratore"] },
     { id: "attivita", path: "/attivita", icon: "Activity", label: "Log attività", section: "amministrazione", roles: ["admin", "collaboratore"] },
+    { id: "audit_operatori", path: "/audit-operatori", icon: "Eye", label: "Monitoraggio operatori", section: "amministrazione", roles: ["admin"] },
 ];
 
 const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award, Eye,
 };
 
 const SECTION_LABELS = {

@@ -148,6 +148,7 @@ async def log_attivita(utente: dict, azione: str, entita: str,
     log = AttivitaLog(
         utente_id=utente.get("id") if utente else None,
         utente_email=utente.get("email") if utente else None,
+        utente_nome=(utente.get("name") or utente.get("email")) if utente else None,
         azione=azione, entita=entita, entita_id=entita_id,
         descrizione=descrizione, payload=payload,
     )

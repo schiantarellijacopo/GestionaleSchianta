@@ -118,6 +118,7 @@ TENANT_SCOPED_COLLECTIONS = [
     "avvisi_regole",
     "avvisi_schedule",
     "attivita_log",
+    "audit_operatori",
     "compagnie",
     "prodotti",
     "collaboratori_esterni",

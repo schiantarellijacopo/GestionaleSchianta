@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import RecordStoria from "@/components/RecordStoria";
 import { api, fmtDate, fmtEur, sendWhatsApp } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
@@ -150,6 +151,7 @@ export default function AnagraficaDetail() {
             <Link to="/anagrafiche" className="text-sm text-slate-500 hover:text-sky-700 inline-flex items-center gap-1 mb-3">
                 <ArrowLeft size={14} /> Torna alle anagrafiche
             </Link>
+            <RecordStoria entita="anagrafica" entitaId={id} className="mb-3" />
             <PageHeader
                 title={
                     <span className="flex items-center gap-3 flex-wrap">
