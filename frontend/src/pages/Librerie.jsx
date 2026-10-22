@@ -88,9 +88,9 @@ function errMsg(e, fallback = "Errore") {
 
 const ENTITA_LABEL = {
     anagrafica: "Anagrafiche (cliente)", polizza: "Polizze", sinistro: "Sinistri",
-    collaboratore: "Utenti / Collaboratori", agenzia_partner: "Agenzie partner",
+    collaboratore: "Utenti / Collaboratori", agenzia_partner: "Agenzie partner", azienda: "Azienda",
 };
-const ENTITA_ORDINE = ["anagrafica", "polizza", "sinistro", "collaboratore", "agenzia_partner"];
+const ENTITA_ORDINE = ["anagrafica", "polizza", "sinistro", "collaboratore", "agenzia_partner", "azienda"];
 
 function VisibilitaDocCard({ ent, c, onToggleVis, onToggleObbl, onIcon, onDel }) {
     const dragControls = useDragControls();
@@ -142,6 +142,7 @@ function VisibilitaDocSezione() {
         sinistro: { label: "", icon: "🗂️", obbligatoria: false },
         collaboratore: { label: "", icon: "🗂️", obbligatoria: false },
         agenzia_partner: { label: "", icon: "🗂️", obbligatoria: false },
+        azienda: { label: "", icon: "🗂️", obbligatoria: false },
     });
 
     const load = () => api.get("/config/card-visibilita").then((r) => setCfg(r.data)).catch(() => setCfg({}));
@@ -2609,6 +2610,7 @@ function AziendaSezione() {
     };
 
     return (
+        <div className="space-y-5">
         <Card className="border-slate-200 p-6">
             <div className="flex items-center justify-between mb-5">
                 <div>
@@ -2853,10 +2855,112 @@ function AziendaSezione() {
                 </div>
             </div>
         </Card>
+            <Card className="border-slate-200 p-6" data-testid="azienda-documenti-card">
+                <div className="text-base font-semibold text-slate-800 mb-1 flex items-center gap-1.5">
+                    <FileText size={16} className="text-slate-500" /> Documenti azienda
+                </div>
+                <div className="text-xs text-slate-500 mb-4">Visura, iscrizione RUI/IVASS, certificazioni e altri documenti dell'agenzia. Tipologie configurabili in «Visibilità documenti».</div>
+                <DocumentiAzienda documenti={f.documenti || []} onChange={(docs) => set("documenti", docs)} />
+            </Card>
+        </div>
     );
 }
 
-// =================== SCHEMA PROVVIGIONALE ===================
+// =================== DOCUMENTI AZIENDA (card) ===================
+function DocumentiAzienda({ documenti, onChange }) {
+    const list = documenti || [];
+    const [tipi, setTipi] = useState(["Visura camerale", "Iscrizione RUI/IVASS", "Certificazioni", "Polizza RC professionale", "Documento IBAN", "Altro"]);
+    const [tipologia, setTipologia] = useState("");
+    const [descrizione, setDescrizione] = useState("");
+    const [dataRilascio, setDataRilascio] = useState("");
+    const [dataScadenza, setDataScadenza] = useState("");
+    const [file, setFile] = useState(null);
+    const [fileKey, setFileKey] = useState(0);
+
+    useEffect(() => {
+        api.get("/config/card-visibilita")
+            .then((r) => {
+                const lst = (r.data?.azienda || []).map((c) => c.label).filter(Boolean);
+                if (lst.length) setTipi(lst);
+            }).catch(() => {});
+    }, []);
+
+    const aggiungi = async () => {
+        if (!file) { toast.error("Seleziona un file"); return; }
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("tipologia", tipologia || "Altro");
+            fd.append("descrizione", descrizione || "");
+            fd.append("data_rilascio", dataRilascio || "");
+            fd.append("data_scadenza", dataScadenza || "");
+            const r = await api.post("/librerie/azienda/documenti", fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            onChange([...list, r.data]);
+            setTipologia(""); setDescrizione(""); setDataRilascio(""); setDataScadenza(""); setFile(null); setFileKey((k) => k + 1);
+            toast.success("Documento aggiunto");
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/librerie/azienda/documenti/${id}`);
+            onChange(list.filter((x) => x.id !== id));
+            toast.success("Eliminato");
+        } catch { toast.error("Errore"); }
+    };
+
+    const gruppi = {};
+    list.forEach((it) => { const k = it.tipologia || "Altro"; (gruppi[k] = gruppi[k] || []).push(it); });
+    const ordine = [...tipi, ...Object.keys(gruppi).filter((k) => !tipi.includes(k))];
+
+    return (
+        <div className="space-y-3" data-testid="documenti-azienda">
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50">
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1"><Plus size={13} /> Aggiungi documento</div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <Label className="text-xs">Tipologia</Label>
+                        <select value={tipologia} onChange={(e) => setTipologia(e.target.value)}
+                            className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="azienda-doc-tipologia">
+                            <option value="">— Seleziona —</option>
+                            {tipi.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <Label className="text-xs">Descrizione (facoltativa)</Label>
+                        <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="azienda-doc-descrizione" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data rilascio</Label>
+                        <Input type="date" value={dataRilascio} onChange={(e) => setDataRilascio(e.target.value)} data-testid="azienda-doc-data-rilascio" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Data scadenza</Label>
+                        <Input type="date" value={dataScadenza} onChange={(e) => setDataScadenza(e.target.value)} data-testid="azienda-doc-data-scadenza" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">File (PDF/IMG)</Label>
+                        <Input type="file" accept=".pdf,image/*" key={fileKey} onChange={(e) => setFile(e.target.files?.[0] || null)} data-testid="azienda-doc-file" />
+                    </div>
+                </div>
+                <Button size="sm" className="mt-2 bg-sky-700 hover:bg-sky-800" onClick={aggiungi} data-testid="azienda-doc-add-btn">
+                    <Plus size={12} className="mr-1" /> Aggiungi
+                </Button>
+            </div>
+
+            {list.length === 0 ? (
+                <div className="text-center text-xs text-slate-400 py-3">Nessun documento caricato</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="azienda-doc-cards">
+                    {ordine.filter((t) => (gruppi[t] || []).length > 0).map((t) => (
+                        <DocFolderCard key={t} tipologia={t} files={gruppi[t]} onDelete={rimuovi} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
 function SchemaProvvForm({ section, editing, onClose }) {
     const [collab, setCollab] = useState([]);
     const [compagnie, setCompagnie] = useState([]);

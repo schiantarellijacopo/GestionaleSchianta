@@ -1,0 +1,42 @@
+{
+  "summary": "Tested the new Agenzie partner features end to end: mandate fields, document cards and the 'Visibilità documenti' panels for agenzia_partner and collaboratore. Backend: 9/9 pytest pass. GET card-visibilita returns 5 entities. Custom cards can be created and deleted for both new entities. PUT saves icon, obbligatoria and order, and they persist. Mandate fields persist. Several documents with the same tipologia coexist. A PUT on the agency does NOT wipe documenti. Delete works. Unknown agency returns 404 and non-admin users are blocked. Frontend: 'Dati del mandato' fields and the hint for new agencies are visible. Create, then reopen: values are retained, the Documenti section appears, upload works, cards are grouped by tipologia, badges are correct ('In scadenza' at +10 days, 'Scaduto il' for past dates), delete works, and Aggiorna keeps the documents. Librerie shows all 5 panels. A custom card added to Agenzie partner and saved appears in the agency tipologia dropdown, and the collaboratore custom card appears in doc-add-tipologia. Found 1 real UI bug: stale document list after closing the dialog without saving.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/agenzie/{aid}/documenti/{item_id}", "issue": "Always returns {ok:true}, even when the agency or item does not exist (no 404). It also does not delete the file from object storage, leaving orphan files. Deleting the agency also leaves its document files orphaned."},
+      {"endpoint": "POST /api/agenzie/{aid}/documenti", "issue": "The backend accepts an upload with no file and creates an empty card. The frontend requires a file, so the two are inconsistent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Agenzie.jsx Dialog onOpenChange", "issue": "Stale document state. Steps: open Modifica agenzia, upload documents, then close the dialog with X or Esc without pressing 'Aggiorna'. Reopening the same agency shows 'Nessun documento caricato' (0 docs, reproduced), and the card counter 'N documenti' is not updated. Data is only correct after a page reload. Cause: onOpenChange only calls setEditing(null)/setOpen(false) and never load(), so editing.documenti comes from the stale list. Fix: call load() in onOpenChange when the dialog closes, or have DocumentiAgenzia fetch GET /agenzie/{aid} on mount.", "selector": "[data-testid^='age-doc-item-']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Obbligatoria flag for collaboratore/agenzia_partner", "issue": "The Visibilità panel lets you mark collaboratore and agenzia_partner cards as 'obbligatoria' (the panel text says missing mandatory cards are highlighted in red). However, DocumentiAgenzia ignores the flag, and the collaborator missing-docs badge uses the hardcoded DOC_OBBLIGATORI = ['Carta d\\'identità','Casellario giudiziale'] (Librerie.jsx ~3068) instead of the config.", "affected_selectors": ["[data-testid^='utente-doc-mancanti-']", "[data-testid='documenti-agenzia']"]}
+    ],
+    "design_issues": [
+      {"screen": "Agenzie dialog - Documenti / Collaboratore Documenti", "issues": ["Data rilascio and Data scadenza use the browser's native date picker (mm/dd/yyyy, not the Italian format) instead of the shadcn Calendar.", "Tipologia uses a native <select> instead of the shadcn Select used by the other fields in the same dialog.", "Agency card counter shows '1 documenti' (should be '1 documento')."]},
+      {"screen": "Agenzie dialog", "issues": ["The 'Dati del mandato' section is also shown for the agenzia principale, where it may be irrelevant."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter111_agenzie_mandato_documenti.py", "/app/test_reports/pytest/pytest_iter111.xml"],
+  "action_items": [
+    "Fix the stale documenti list in Agenzie.jsx: call load() when the dialog closes (onOpenChange false), or fetch documents on mount in DocumentiAgenzia.",
+    "Use the 'obbligatoria' config flag for agenzia_partner (highlight missing mandatory cards) and for collaboratore (replace hardcoded DOC_OBBLIGATORI), or remove the toggle from those panels.",
+    "Optional: return 404 in DELETE /agenzie/{aid}/documenti/{item_id} when the agency or item does not exist, and remove the file from object storage.",
+    "Optional: replace the native date inputs with the shadcn Calendar date picker; fix the '1 documenti' plural."
+  ],
+  "critical_code_review_comments": [
+    "PUT /config/card-visibilita rebuilds card_visibilita/meta/ordine for ALL entities from the body. Any entity missing from the body is reset. The current frontend sends all entities so it works, but the endpoint is fragile.",
+    "Card tipologia is stored as the label string, not the card key. If custom card renaming is ever added, existing documents will be orphaned into extra groups.",
+    "server.py is ~18.9k lines and Librerie.jsx ~6.7k lines, far above the 700-line guideline; the new endpoints add to this."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter111_agenzie_mandato_documenti.py"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "90% (all requested flows pass; 1 stale-state bug)"},
+  "test_credentials": "admin@assicura.it / Admin123! (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None persisted. Test agencies, documents and custom cards were created and then deleted. The card config snapshot was restored by the pytest fixture.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Agenzie route is /agenzie (admin). Agency cards use testid age-partner-{id} and edit uses age-edit-{id}. DocumentiAgenzia loads the tipologie asynchronously from /config/card-visibilita, so wait 3-4s before reading the age-doc-tipologia options (they first show the fallback list). Collaborator documents: Librerie > lib-tab-utenti > row-actions > action-edit > tab-certificati > doc-add-tipologia. window.confirm is used for deletes, so register a dialog accept handler.",
+  "rca of the issue": "Stale documents: Agenzie() passes editing=a from the `list` state to AgenziaDialog. DocumentiAgenzia keeps uploads only in its local state. Closing via Dialog onOpenChange does not refresh `list`, so reopening remounts the dialog with the stale a.documenti. Repro: edit agency, upload, press Esc, reopen: 0 docs. Mitigation: refresh in onOpenChange, or fetch on mount."
+}

@@ -169,3 +169,23 @@
 - Frontend (Librerie.jsx): riscritto `DocumentiCollaboratore` + nuovo `DocFolderCard`;
   rimosso `DOC_TIPI` (slot fissi); `documenti_collab` aggiunto a `omitOnSave` di UtenteForm.
 - Verificato: upload con tipologia → raggruppamento in card → eliminazione (curl admin) + smoke UI.
+
+## 2026-10-22 — Documenti Azienda (sezione Librerie → Azienda) + pannello Visibilità documenti
+**Richiesta:** regola generale confermata dall'utente — ogni volta che si chiede una "sezione documenti", va creata come CARD con più allegati e va SEMPRE creato anche il relativo pannello in «Visibilità documenti».
+
+**Backend**
+- `server.py` CARD_DEFS: aggiunta entità `"azienda"` (Visura camerale, Iscrizione RUI/IVASS, Certificazioni, Polizza RC professionale, Documento IBAN, Altro). Appare automaticamente in GET/PUT `/config/card-visibilita` e in `/config/card-custom/{entita}`.
+- `routes/librerie.py`:
+  - `POST /librerie/azienda/documenti` (multipart: file, tipologia, descrizione, data_rilascio, data_scadenza) → upload su object storage, `$push` in `azienda_config.documenti`. Richiede file (400 se vuoto), max 10MB.
+  - `DELETE /librerie/azienda/documenti/{item_id}` → elimina oggetto storage + `$pull` (404 se non trovato).
+  - `PUT /librerie/azienda`: aggiunto `body.pop("documenti")` così il salvataggio generale NON sovrascrive i documenti (gestiti da endpoint dedicati).
+- `db_models.py` AziendaConfig: aggiunto campo `documenti: List[dict]`.
+
+**Frontend**
+- `pages/Librerie.jsx`: nuova card `DocumentiAzienda` (data-testid `azienda-documenti-card`/`documenti-azienda`) nel tab Azienda, sotto Dati Azienda. Form aggiungi (tipologia da card-visibilita, descrizione, date rilascio/scadenza, file) + card raggruppate per tipologia via `DocFolderCard` con badge scadenza. `ENTITA_ORDINE`/`ENTITA_LABEL` estesi con `azienda`.
+
+**Fix da test precedente (agenzie partner):**
+- `pages/Agenzie.jsx`: refresh lista alla chiusura del dialog (fix stato stale dei documenti); pluralizzazione "1 documento"; sezione "Dati del mandato" mostrata solo per agenzie `tipo === partner`.
+- `server.py` endpoint documenti agenzie: require file + eliminazione oggetto storage su delete.
+
+**Verifiche:** card-visibilita espone 6 entità incl. `azienda` ✓; upload/lista/delete documento azienda via curl ✓; UI card "Documenti azienda" renderizzata ✓; pannelli Collaboratori/Azienda presenti in Visibilità documenti ✓. Deploy via Save to GitHub → Railway.

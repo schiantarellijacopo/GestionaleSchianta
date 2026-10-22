@@ -15097,7 +15097,7 @@ async def elimina_allegato_utente(uid: str, categoria: str, item_id: str,
 @api.post("/agenzie/{aid}/documenti")
 async def upload_documento_agenzia(
     aid: str,
-    file: UploadFile = File(None),
+    file: UploadFile = File(...),
     tipologia: str = Form(""),
     descrizione: str = Form(""),
     data_rilascio: str = Form(""),
@@ -15108,26 +15108,23 @@ async def upload_documento_agenzia(
     target = await db.agenzie.find_one({"id": aid}, {"_id": 0, "id": 1})
     if not target:
         raise HTTPException(404, "Agenzia non trovata")
-    url = None
-    nome_file = None
-    if file is not None:
-        content = await file.read()
-        if content:
-            if len(content) > 10 * 1024 * 1024:
-                raise HTTPException(400, "File troppo grande (max 10 MB)")
-            ct = file.content_type or obj_storage.mime_for(file.filename or "")
-            ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
-            path = f"{os.environ.get('APP_NAME', 'assicura')}/agenzie/{aid}/doc_{_uid()}.{ext}"
-            try:
-                result = obj_storage.put_object(path, content, ct)
-            except Exception as e:
-                raise HTTPException(503, f"Errore upload: {e}")
-            url = f"/api/storage/{result['path']}"
-            nome_file = file.filename
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "File vuoto")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/agenzie/{aid}/doc_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, content, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
     item = {
         "id": _uid(),
-        "url": url,
-        "nome_file": nome_file,
+        "url": f"/api/storage/{result['path']}",
+        "storage_path": result["path"],
+        "nome_file": file.filename,
         "tipologia": tipologia or "Altro",
         "descrizione": descrizione or None,
         "data_rilascio": data_rilascio or None,
@@ -15141,6 +15138,17 @@ async def upload_documento_agenzia(
 @api.delete("/agenzie/{aid}/documenti/{item_id}")
 async def elimina_documento_agenzia(aid: str, item_id: str,
                                      user=Depends(require_user("admin"))):
+    ag = await db.agenzie.find_one({"id": aid}, {"_id": 0, "id": 1, "documenti": 1})
+    if not ag:
+        raise HTTPException(404, "Agenzia non trovata")
+    item = next((x for x in (ag.get("documenti") or []) if x.get("id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Documento non trovato")
+    if item.get("storage_path"):
+        try:
+            obj_storage.delete_object(item["storage_path"])
+        except Exception:
+            pass
     await db.agenzie.update_one({"id": aid}, {"$pull": {"documenti": {"id": item_id}}})
     return {"ok": True}
 
@@ -15367,6 +15375,15 @@ CARD_DEFS = {
         {"key": "Lettera di incarico", "label": "Lettera di incarico", "default": False, "icon": "✉️"},
         {"key": "Visura camerale", "label": "Visura camerale", "default": False, "icon": "🏢"},
         {"key": "Iscrizione RUI/IVASS", "label": "Iscrizione RUI/IVASS", "default": False, "icon": "🪪"},
+        {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
+        {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
+    ],
+    # Documenti dell'azienda / agenzia principale (sezione Librerie → Azienda).
+    "azienda": [
+        {"key": "Visura camerale", "label": "Visura camerale", "default": False, "icon": "🏢"},
+        {"key": "Iscrizione RUI/IVASS", "label": "Iscrizione RUI/IVASS", "default": False, "icon": "🪪"},
+        {"key": "Certificazioni", "label": "Certificazioni", "default": False, "icon": "📜"},
+        {"key": "Polizza RC professionale", "label": "Polizza RC professionale", "default": False, "icon": "🛡️"},
         {"key": "Documento IBAN", "label": "Documento IBAN", "default": False, "icon": "🏦"},
         {"key": "Altro", "label": "Altro", "default": False, "icon": "📎"},
     ],

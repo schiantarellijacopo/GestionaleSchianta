@@ -11,7 +11,7 @@ import re
 from typing import Literal, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
 from database import db
@@ -1322,6 +1322,7 @@ async def get_azienda(user: dict = Depends(current_user)) -> dict:
 @router.put("/librerie/azienda")
 async def update_azienda(body: dict, user: dict = Depends(require_user("admin"))) -> dict:
     body.pop("id", None)
+    body.pop("documenti", None)  # gestiti da endpoint dedicati, non sovrascrivere
     if not is_super_admin(user):
         for k in _SEGRETI_AZIENDA:
             body.pop(k, None)
@@ -1450,6 +1451,73 @@ async def delete_video_analisi(user: dict = Depends(require_user("admin"))) -> d
                       "video_analisi_url": None,
                       "updated_at": _now_iso()}},
         )
+    return {"ok": True}
+
+
+# ============================================================
+# LIBRERIE — AZIENDA: DOCUMENTI (card, più allegati per tipologia)
+# ============================================================
+@router.post("/librerie/azienda/documenti")
+async def upload_documento_azienda(
+    file: UploadFile = File(...),
+    tipologia: str = Form(""),
+    descrizione: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
+    user: dict = Depends(require_user("admin")),
+) -> dict:
+    """Aggiunge un documento (card) all'azienda. Più documenti per tipologia."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "File vuoto")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/azienda/doc_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, content, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    item = {
+        "id": _uid(),
+        "url": f"/api/storage/{result['path']}",
+        "storage_path": result["path"],
+        "nome_file": file.filename,
+        "tipologia": tipologia or "Altro",
+        "descrizione": descrizione or None,
+        "data_rilascio": data_rilascio or None,
+        "data_scadenza": data_scadenza or None,
+        "created_at": _now_iso(),
+    }
+    existing = await db.azienda_config.find_one({})
+    if not existing:
+        cfg = AziendaConfig()
+        d = cfg.model_dump(); d["documenti"] = [item]
+        await db.azienda_config.insert_one(d)
+    else:
+        await db.azienda_config.update_one(
+            {"id": existing["id"]},
+            {"$push": {"documenti": item}, "$set": {"updated_at": _now_iso()}})
+    return item
+
+
+@router.delete("/librerie/azienda/documenti/{item_id}")
+async def elimina_documento_azienda(item_id: str,
+                                    user: dict = Depends(require_user("admin"))) -> dict:
+    existing = await db.azienda_config.find_one({}, {"_id": 0, "id": 1, "documenti": 1})
+    if not existing:
+        raise HTTPException(404, "Documento non trovato")
+    item = next((x for x in (existing.get("documenti") or []) if x.get("id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Documento non trovato")
+    if item.get("storage_path"):
+        try:
+            obj_storage.delete_object(item["storage_path"])
+        except Exception:
+            pass
+    await db.azienda_config.update_one(
+        {"id": existing["id"]}, {"$pull": {"documenti": {"id": item_id}}})
     return {"ok": True}
 
 

@@ -1244,6 +1244,7 @@ class AziendaConfig(BaseDoc):
     logo_url: Optional[str] = None         # URL logo per stampe
     logo_storage_path: Optional[str] = None
     note_footer_stampe: Optional[str] = None
+    documenti: List[dict] = Field(default_factory=list)  # documenti azienda (card, multipli per tipologia)
     # Firma Elettronica (Namirial eSignAnyWhere v6)
     firma_provider: Optional[str] = "namirial"
     firma_base_url: Optional[str] = None       # https://demo.esignanywhere.net/Api/v6

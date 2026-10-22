@@ -49,7 +49,7 @@ export default function Agenzie() {
                 title="Agenzie"
                 subtitle="Agenzia principale e agenzie partner (collaborazioni con mandati indiretti)"
                 actions={
-                    <Dialog open={open} onOpenChange={(o) => { if (!o) setEditing(null); setOpen(o); }}>
+                    <Dialog open={open} onOpenChange={(o) => { if (!o) { setEditing(null); load(); } setOpen(o); }}>
                         <DialogTrigger asChild>
                             <Button onClick={() => setEditing(null)} className="bg-sky-700 hover:bg-sky-800" data-testid="age-new">
                                 <Plus size={14} className="mr-1" /> Nuova agenzia
@@ -136,7 +136,7 @@ function AgenziaCard({ a, onEdit, onDelete, testid }) {
                 {a.autorizzato_incasso && <div>Autorizzato incasso: <span className="font-medium">{a.autorizzato_incasso === "si" ? "Sì" : "No"}</span></div>}
                 {a.rui_ivass && <div>RUI/IVASS: <span className="font-mono">{a.rui_ivass}</span></div>}
                 {(a.documenti || []).length > 0 && (
-                    <div className="flex items-center gap-1 text-slate-500"><FileText size={12} /> {a.documenti.length} documenti</div>
+                    <div className="flex items-center gap-1 text-slate-500"><FileText size={12} /> {a.documenti.length} {a.documenti.length === 1 ? "documento" : "documenti"}</div>
                 )}
                 {a.perc_ritenuta_acconto > 0 && (
                     <div className="text-rose-700 font-medium">Ritenuta acconto: {a.perc_ritenuta_acconto}%</div>
@@ -347,6 +347,7 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     <Input value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
 
                 {/* Dati del mandato */}
+                {f.tipo === "partner" && (<>
                 <div className="col-span-2 pt-1 mt-1 border-t border-slate-100">
                     <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Dati del mandato</div>
                 </div>
@@ -376,6 +377,7 @@ function AgenziaDialog({ editing, principaleExists, onClose }) {
                     <Input value={f.denominazione_sociale || ""} onChange={(e) => set("denominazione_sociale", e.target.value)} data-testid="age-denominazione" /></div>
                 <div><Label>Numero iscrizione RUI / IVASS</Label>
                     <Input value={f.rui_ivass || ""} onChange={(e) => set("rui_ivass", e.target.value)} data-testid="age-rui-ivass" /></div>
+                </>)}
 
                 <div>
                     <Label className="text-rose-700">Ritenuta d'acconto % (auto su fatture)</Label>
