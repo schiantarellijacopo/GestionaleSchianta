@@ -18235,6 +18235,9 @@ api.include_router(_app_cliente_router.router)
 from routes import polizze_email as _polizze_email_router
 api.include_router(_polizze_email_router.router)
 
+from routes import comunicazioni_copertura as _com_cop_router
+api.include_router(_com_cop_router.router)
+
 app.include_router(api)
 
 # Router pubblico non autenticato per upload documenti veicolo via link cliente

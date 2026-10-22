@@ -60,6 +60,7 @@ import Calendario from "@/pages/Calendario";
 import EstrattoContoCompagnie from "@/pages/EstrattoContoCompagnie";
 import EstrattoContoContraente from "@/pages/EstrattoContoContraente";
 import Banche from "@/pages/Banche";
+import ComunicazioniCopertura from "@/pages/ComunicazioniCopertura";
 import TitoliSospesi from "@/pages/TitoliSospesi";
 import Marketing from "@/pages/Marketing";
 import Avvisi from "@/pages/Avvisi";
@@ -128,6 +129,7 @@ function App() {
                             <Route path="/richieste-cliente" element={<RichiesteCliente />} />
                             <Route path="/titoli" element={<Titoli />} />
                             <Route path="/titoli-storici" element={<TitoliStorici />} />
+                            <Route path="/comunicazioni-copertura" element={<ComunicazioniCopertura />} />
                             <Route path="/alert" element={<Alert />} />
                             <Route path="/sinistri" element={<Sinistri />} />
                             <Route path="/sinistri/:id" element={<SinistroDetail />} />

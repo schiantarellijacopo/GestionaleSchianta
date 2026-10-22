@@ -634,6 +634,48 @@ class Titolo(BaseDoc):
     motivo_mancanza: Optional[str] = None  # se annullato: "Disdettata", "Mezzo Venduto", "Voltura", "Sostituita", ecc.
     premio_precedente: Optional[float] = None  # snapshot del premio del titolo precedente stessa polizza (per confronto)
 
+    # === Comunicazioni di Copertura (invio alle agenzie partner) ===
+    # Distinto da titolo_coperto (anticipo copertura interno): indica che il titolo
+    # è stato incluso in una comunicazione di copertura INVIATA all'agenzia partner.
+    copertura_comunicata: bool = False
+    copertura_comunicata_data: Optional[str] = None  # YYYY-MM-DD data invio
+    comunicazione_copertura_id: Optional[str] = None  # id della ComunicazioneCopertura
+
+
+# =============== COMUNICAZIONI DI COPERTURA ===============
+ComunicazioneStato = Literal["bozza", "inviata", "errore"]
+
+
+class RigaComunicazione(BaseDoc):
+    titolo_id: str
+    numero_polizza: Optional[str] = None
+    rischio: Optional[str] = None          # ramo/prodotto
+    operatore: Optional[str] = None        # nome collaboratore
+    contraente: Optional[str] = None
+    rata_del: Optional[str] = None         # scadenza/effetto del titolo
+    importo: float = 0.0
+
+
+class ComunicazioneCopertura(BaseDoc):
+    numero: int = 0                        # progressivo per tenant
+    giorno: str                            # YYYY-MM-DD di riferimento
+    compagnia_id: str
+    compagnia_nome: Optional[str] = None
+    mandato_label: Optional[str] = None    # "Nostra Agenzia - COMPAGNIA"
+    agenzia_partner_id: Optional[str] = None
+    agenzia_partner_nome: Optional[str] = None
+    destinatario_email: Optional[str] = None
+    titoli: List[dict] = Field(default_factory=list)   # snapshot righe
+    totale: float = 0.0
+    stato: ComunicazioneStato = "bozza"
+    inviata_at: Optional[str] = None
+    inviata_a: Optional[str] = None
+    email_errore: Optional[str] = None
+    pdf_storage_path: Optional[str] = None
+    pdf_url: Optional[str] = None
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+
 
 # =============== SINISTRI ===============
 SinistroStato = Literal["aperto", "in_istruttoria", "liquidato", "chiuso_senza_seguito", "respinto"]
