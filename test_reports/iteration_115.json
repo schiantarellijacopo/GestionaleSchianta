@@ -1,0 +1,46 @@
+{
+  "summary": "Tested the new 'Comunicazioni di Copertura' feature end to end, backend and frontend. These work: genera (grouping by compagnia, resolving the partner agency, totals), excluding titoli that are copertura_comunicata or stornato, salva bozza (progressive numero, titoli snapshot), storico filters, anteprima HTML, PDF, invia returning 400 'Nessuna email agenzia partner' without marking titoli, and delete. Found and fixed one CRITICAL multi-tenant leak: the comunicazioni_copertura collection was missing from TENANT_SCOPED_COLLECTIONS. Before the fix, documents were saved with agenzia_tenant_id=None, and users of other tenants could list, view, download the PDF of, and DELETE them. After the fix all 9 pytest tests pass and the cross-tenant check returns 404 / an empty list. On the frontend, every requested flow works.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/comunicazioni-copertura (all)", "issue": "FIXED by testing agent: collection not tenant-scoped, so docs were stored with agenzia_tenant_id=None and were visible and deletable from other tenants. Added 'comunicazioni_copertura' to TENANT_SCOPED_COLLECTIONS in /app/backend/tenant.py.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/comunicazioni-copertura/salva", "issue": "Titoli come from the client body as-is. There is no Pydantic model and no server-side check that the titolo_ids belong to the giorno or are not already comunicati. Totale, importo, numero_polizza etc. can be altered by the client. Recommend re-reading the titoli from the DB (re-run _build_gruppi and intersect by titolo_id)."},
+      {"endpoint": "POST /salva (repeat)", "issue": "Titoli in a bozza or errore comunicazione still show up in genera. Clicking 'Salva bozze' twice creates duplicate bozze for the same titoli. Consider excluding titoli already in an open bozza, or warning the user."},
+      {"endpoint": "_next_numero", "issue": "Uses find max+1, which is not atomic: concurrent saves can produce duplicate numbers. Use a counters collection with find_one_and_update $inc per tenant."},
+      {"endpoint": "_build_gruppi", "issue": "A titolo with data_incasso=D1 and data_copertura=D2 appears on both days. Example: titolo 2325cfdc shows on both 2026-10-05 and 2026-10-15. This is fine until it is sent, but duplicate bozze are possible."},
+      {"endpoint": "_html_comunicazione", "issue": "Values (contraente, rischio, names) are put into the HTML without html.escape. This is an XSS risk in the anteprima served as text/html from the API origin."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Storico > Invia button", "issue": "When invia fails, the error toast shows but caricaStorico() is only called on success. The row keeps showing 'Bozza' until the user clicks Aggiorna, even though the backend has set stato='errore'. Call caricaStorico() in the catch block too.", "selector": "[data-testid^=btn-invia-]", "priority": "LOW"},
+      {"component": "Storico > Elimina button", "issue": "The button is shown to collaboratore and dipendente, but DELETE requires admin, so they get a 403 toast. Hide it for non-admin users.", "selector": "[data-testid^=btn-elimina-]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter115_comunicazioni_copertura.py", "/app/backend/tests/cc_tenant_check.py", "/app/backend/tests/cc_db_helper.py", "/app/test_reports/pytest/pytest_iter115.xml"],
+  "action_items": [
+    "Keep the tenant.py fix (comunicazioni_copertura in TENANT_SCOPED_COLLECTIONS). Check whether any other new collections are missing from the list.",
+    "Validate the /salva payload server-side: Pydantic model, and re-read titoli and importi from the DB",
+    "Prevent duplicate bozze for the same titoli",
+    "Make the numero progressivo atomic per tenant",
+    "html.escape the values in _html_comunicazione",
+    "Frontend: refresh storico after a failed invia; hide Elimina for non-admin"
+  ],
+  "critical_code_review_comments": [
+    "Not tenant-scoped collection (fixed)",
+    "/salva trusts the client payload (no Pydantic, no re-validation)",
+    "The except: pass around PDF storage in _invia_doc swallows errors. Log them at least.",
+    "azienda_config is a global collection, so the 'nostra' ragione_sociale and SMTP settings are shared across tenants (existing pattern, but wrong for multi-tenant email sending)"
+  ],
+  "updated_files": ["/app/backend/tenant.py", "/app/backend/tests/test_iter115_comunicazioni_copertura.py", "/app/backend/tests/cc_tenant_check.py", "/app/backend/tests/cc_db_helper.py"],
+  "success_rate": {"backend": "100% after tenant fix (9/9 pytest + exclusion + cross-tenant checks)", "frontend": "100% of requested flows"},
+  "test_credentials": "admin@assicura.it / Admin123!, collaboratore@assicura.it / Collab123!. cc_tenant_check.py creates and then deletes a temporary admin in tenant-clean-master.",
+  "seed_data_creation": "None left. The test bozze were deleted. Titoli flags were changed temporarily and reverted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Days with data: 2026-10-05 (4 titoli, 634.00, Generali → Agenzia Bottoni, no email), 2026-10-15 (3), 2026-06-22 (1). Run: pytest tests/test_iter115_comunicazioni_copertura.py and python tests/cc_tenant_check.py. SMTP is not configured, so a real send cannot be tested.",
+  "rca of the issue": "The DB wrapper only filters and assigns agenzia_tenant_id for collections listed in tenant.TENANT_SCOPED_COLLECTIONS. The new collection comunicazioni_copertura was not listed, so inserts kept agenzia_tenant_id=None and queries had no tenant filter. Reproduced: an admin in tenant-clean-master listed, opened, downloaded the PDF of, and deleted a principale comunicazione. Mitigation: added the collection to the list. Verified that docs are now stored with the tenant id and that other tenants get 404 / an empty list."
+}

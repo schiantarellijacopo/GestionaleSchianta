@@ -158,6 +158,8 @@ TENANT_SCOPED_COLLECTIONS = [
     "lead",
     "lead_liste",
     "lettere_abbuono",
+    "comunicazioni_copertura",
+    "counters",
     "movimenti",
     "pipeline_cards",
     "pipelines_custom",

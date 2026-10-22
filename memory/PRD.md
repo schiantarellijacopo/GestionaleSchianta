@@ -2139,3 +2139,29 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 - **Frontend:** checkbox "Può riaprire le giornate chiuse" in scheda Utente (`Librerie.jsx`, testid `utente-riapri-giornate`); badge "Annullata" + pulsante Ripristina (`anag-restore-{id}`) in `Anagrafiche.jsx`; dialog eliminazione aggiornato in `Anagrafiche.jsx`/`AnagraficaDetail.jsx`; pulsante "Riapri" in `BrogliaccioTab.jsx` disabilitato per utenti non autorizzati.
 
 **Backlog/minori (pre-esistenti, non in questa richiesta):** PUT /auth/users accetta dict arbitrario (whitelist consigliata); POST /sinistri senza numero_sinistro → 500 invece di 422.
+
+---
+
+## 2026-10-22 — Comunicazioni di Copertura (nuova sezione)
+
+**Richiesta utente:** sezione da usare ogni giorno per inviare alle agenzie partner, in base ai titoli incassati/coperti registrati in Prima Nota, le relative comunicazioni di copertura, salvando tutto con storico persistente (riferimento: comunicazioni.pdf — "COMUNICAZIONE DI INCASSO" con righe titoli + totali).
+
+**Scelte utente (ask_human):**
+1. Titoli del giorno = tutti i movimenti registrati in Prima Nota quel giorno = titoli incassati (data_incasso==giorno, stato incassato) + coperti (data_copertura==giorno, titolo_coperto), esclusi già comunicati e stornati.
+2. Destinatario = SEMPRE l'agenzia partner collegata alla compagnia (email in libreria `agenzie`).
+3. Dopo l'INVIO i titoli sono marcati `copertura_comunicata` + data e non ricompaiono.
+4. Email HTML con tabella titoli; dopo invio si archivia un PDF con la data di invio.
+
+**Implementato e testato (testing agent iter.115: backend 100% 9/9 pytest + frontend 100%; + verifiche curl):**
+- **Modello** (`db_models.py`): `class ComunicazioneCopertura` (numero, giorno, compagnia, mandato_label, agenzia_partner, destinatario_email, titoli[], totale, stato bozza/inviata/errore, inviata_at, pdf_storage_path/url, email_errore). Nuovi campi su `Titolo`: `copertura_comunicata`, `copertura_comunicata_data`, `comunicazione_copertura_id`.
+- **Route** (`routes/comunicazioni_copertura.py`, prefix `/api/comunicazioni-copertura`):
+  - GET `/genera?giorno=` → raggruppa per compagnia→agenzia partner, calcola totali, esclude titoli già comunicati/stornati/già in una comunicazione esistente.
+  - POST `/salva` {giorno, gruppi, invia} → ricostruisce i titoli AUTOREVOLI dal DB (anti-tampering), numero progressivo ATOMICO per tenant (`db.counters` $inc), crea bozze; se invia=true spedisce subito.
+  - GET `` (storico, filtri dal/al/stato/giorno), GET `/{id}`, GET `/{id}/anteprima` (HTML, valori `html.escape`), GET `/{id}/pdf` (`pdf_report.stampa_elenco`), POST `/{id}/invia`, DELETE `/{id}` (solo admin, non su inviate).
+  - Invio via `email_utils.smtp_send` all'email dell'agenzia partner; senza email → stato errore "Nessuna email agenzia partner"; SMTP assente → "SMTP non configurato". A invio riuscito marca i titoli + archivia PDF.
+- **Frontend** (`pages/ComunicazioniCopertura.jsx`): tab "Genera e invia" (data giorno, carica, gruppi con checkbox, toolbar totali, Salva bozze / Salva e Invia) + tab "Storico" (filtri, azioni Anteprima/PDF/Invia/Elimina — Elimina solo admin). Route in `App.js`, voce menu "Comunicazioni copertura" (icona ShieldCheck) sezione Contabilità in `Sidebar.jsx`.
+- **Multi-tenant FIX (CRITICO, testing agent):** aggiunte `comunicazioni_copertura` e `counters` a `tenant.TENANT_SCOPED_COLLECTIONS` (prima i doc avevano agenzia_tenant_id=None ed erano visibili/eliminabili da altri tenant).
+
+**Backlog/minori non ancora fatti:** `azienda_config` è collezione globale (ragione sociale + SMTP condivisi tra tenant — pattern pre-esistente, non ideale per invio email multi-tenant); un titolo con data_incasso e data_copertura in giorni diversi compare in entrambi i giorni finché non inviato.
+
+**Pendente da fork precedente (NON verificato):** whitelist campi su PUT /auth/users/{uid} — da leggere lo stato attuale del file e testare prima di dichiararlo fatto.

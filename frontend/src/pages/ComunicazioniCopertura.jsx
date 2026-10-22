@@ -10,6 +10,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import DateInputIt from "@/components/DateInputIt";
 import { ShieldCheck, Send, Save, FileText, Eye, Trash2, RefreshCw, Mail, MailX } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -24,6 +25,8 @@ const StatoBadge = ({ stato }) => {
 };
 
 export default function ComunicazioniCopertura() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
     const [tab, setTab] = useState("genera");
 
     // --- Genera ---
@@ -141,7 +144,7 @@ export default function ComunicazioniCopertura() {
             await api.post(`/comunicazioni-copertura/${c.id}/invia`);
             toast.success(`Comunicazione N.${c.numero} inviata`);
             caricaStorico();
-        } catch (e) { toast.error(formatError(e)); }
+        } catch (e) { toast.error(formatError(e)); caricaStorico(); }
     };
     const eliminaBozza = async (c) => {
         if (!window.confirm(`Eliminare la comunicazione N.${c.numero}?`)) return;
@@ -352,7 +355,7 @@ export default function ComunicazioniCopertura() {
                                                             <Send className="w-4 h-4" />
                                                         </Button>
                                                     )}
-                                                    {c.stato !== "inviata" && (
+                                                    {c.stato !== "inviata" && isAdmin && (
                                                         <Button size="sm" variant="ghost" title="Elimina" onClick={() => eliminaBozza(c)} data-testid={`btn-elimina-${c.id}`}>
                                                             <Trash2 className="w-4 h-4 text-red-500" />
                                                         </Button>

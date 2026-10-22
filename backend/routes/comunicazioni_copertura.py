@@ -17,16 +17,21 @@ comunicazioni successive. Multi-tenant via wrapper `db`.
 """
 from __future__ import annotations
 
+import html
+import logging
 import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pymongo import ReturnDocument
 
 import storage as obj_storage
 from auth import require_user
 from database import db
 from db_models import ComunicazioneCopertura, _now_iso
 from shared import log_attivita
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/comunicazioni-copertura", tags=["comunicazioni-copertura"])
 
@@ -89,6 +94,15 @@ async def _build_gruppi(giorno: str) -> list[dict]:
         ],
     }
     titoli = await db.titoli.find(flt, {"_id": 0}).to_list(5000)
+    if not titoli:
+        return []
+
+    # Escludi titoli già presenti in una comunicazione esistente (bozza/errore/inviata),
+    # per evitare doppioni: la gestione prosegue dallo Storico.
+    gia_comunicati = await db.comunicazioni_copertura.distinct("titoli.titolo_id")
+    if gia_comunicati:
+        gset = set(gia_comunicati)
+        titoli = [t for t in titoli if t["id"] not in gset]
     if not titoli:
         return []
 
@@ -161,25 +175,27 @@ async def _build_gruppi(giorno: str) -> list[dict]:
 
 
 def _html_comunicazione(com: dict, az: dict) -> str:
+    def esc(v):
+        return html.escape(str(v if v is not None else ""))
     righe = ""
     for r in com.get("titoli", []):
         righe += (
             f"<tr>"
-            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{r.get('numero_polizza') or '—'}</td>"
-            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{r.get('rischio') or ''}</td>"
-            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{r.get('operatore') or ''}</td>"
-            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{r.get('contraente') or ''}</td>"
-            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{_fmt_data_breve(r.get('rata_del'))}</td>"
+            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{esc(r.get('numero_polizza') or '—')}</td>"
+            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{esc(r.get('rischio'))}</td>"
+            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{esc(r.get('operatore'))}</td>"
+            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{esc(r.get('contraente'))}</td>"
+            f"<td style='padding:4px 8px;border:1px solid #e2e8f0'>{esc(_fmt_data_breve(r.get('rata_del')))}</td>"
             f"<td style='padding:4px 8px;border:1px solid #e2e8f0;text-align:right'>€ {_fmt_eur(r.get('importo'))}</td>"
             f"</tr>"
         )
-    nostra = az.get("ragione_sociale") or "Agenzia"
+    nostra = esc(az.get("ragione_sociale") or "Agenzia")
     return f"""<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;font-size:13px">
 <p><b>{nostra}</b></p>
-<p>Comunicazione N. {com.get('numero')} — <b>COMUNICAZIONE DI INCASSO</b></p>
-<p>Spett.le <b>{com.get('agenzia_partner_nome') or com.get('compagnia_nome')}</b><br/>
-Mandato: {com.get('mandato_label')}<br/>
-Data: {_fmt_data_lunga(com.get('giorno'))}</p>
+<p>Comunicazione N. {esc(com.get('numero'))} — <b>COMUNICAZIONE DI INCASSO</b></p>
+<p>Spett.le <b>{esc(com.get('agenzia_partner_nome') or com.get('compagnia_nome'))}</b><br/>
+Mandato: {esc(com.get('mandato_label'))}<br/>
+Data: {esc(_fmt_data_lunga(com.get('giorno')))}</p>
 <p>Con la presente si comunicano i seguenti titoli incassati, per i quali si richiede/conferma la copertura:</p>
 <table style="border-collapse:collapse;width:100%;font-size:12px">
 <thead><tr style="background:#0f172a;color:#fff">
@@ -232,8 +248,13 @@ async def _pdf_comunicazione(com: dict) -> bytes:
 
 
 async def _next_numero() -> int:
-    last = await db.comunicazioni_copertura.find_one({}, {"_id": 0, "numero": 1}, sort=[("numero", -1)])
-    return int((last or {}).get("numero") or 0) + 1
+    doc = await db.counters.find_one_and_update(
+        {"_key": "comunicazioni_copertura"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(doc["seq"])
 
 
 async def _invia_doc(doc: dict, user: dict) -> dict:
@@ -258,14 +279,14 @@ async def _invia_doc(doc: dict, user: dict) -> dict:
         doc.update(stato="errore", email_errore="SMTP non configurato")
         return doc
 
-    html = _html_comunicazione(doc, az)
+    body_html = _html_comunicazione(doc, az)
     text = f"Comunicazione di incasso N. {doc.get('numero')} - {doc.get('mandato_label')}. Totale € {_fmt_eur(doc.get('totale'))}."
     try:
         import email_utils
         email_utils.smtp_send(
             az, to_addrs=email,
             subject=f"Comunicazione di copertura N. {doc.get('numero')} - {doc.get('compagnia_nome')} - {_fmt_data_breve(doc.get('giorno'))}",
-            text=text, html=html,
+            text=text, html=body_html,
         )
     except Exception as e:
         await db.comunicazioni_copertura.update_one(
@@ -285,8 +306,8 @@ async def _invia_doc(doc: dict, user: dict) -> dict:
         res = obj_storage.put_object(pdf_path, pdf_bytes, "application/pdf")
         pdf_path = res["path"]
         pdf_url = f"/api/storage/{pdf_path}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Errore generazione/archiviazione PDF comunicazione %s: %s", doc.get("id"), e)
 
     # Marca i titoli come copertura comunicata
     titolo_ids = [r["titolo_id"] for r in doc.get("titoli", [])]
@@ -329,26 +350,35 @@ async def genera(giorno: str, user=Depends(require_user(*_ROLES))):
 @router.post("/salva")
 async def salva(body: dict, user=Depends(require_user(*_ROLES))):
     giorno = body.get("giorno")
-    gruppi = body.get("gruppi") or []
+    gruppi_req = body.get("gruppi") or []
     invia = bool(body.get("invia"))
-    if not giorno or not gruppi:
+    if not giorno or not gruppi_req:
         raise HTTPException(400, "giorno e gruppi richiesti")
 
+    # Ricostruisco i gruppi autorevoli dal DB (anti-tampering: importi, snapshot,
+    # destinatari sono ricalcolati lato server; dal client prendo solo le selezioni).
+    autorevoli = {g["compagnia_id"]: g for g in await _build_gruppi(giorno)}
+
     creati = []
-    for g in gruppi:
-        titoli = g.get("titoli") or []
+    for gr in gruppi_req:
+        cid = gr.get("compagnia_id")
+        src = autorevoli.get(cid)
+        if not src:
+            continue
+        sel_ids = {t.get("titolo_id") for t in (gr.get("titoli") or []) if t.get("titolo_id")}
+        titoli = [t for t in src["titoli"] if t["titolo_id"] in sel_ids]
         if not titoli:
             continue
         numero = await _next_numero()
         com = ComunicazioneCopertura(
             numero=numero,
             giorno=giorno,
-            compagnia_id=g.get("compagnia_id"),
-            compagnia_nome=g.get("compagnia_nome"),
-            mandato_label=g.get("mandato_label"),
-            agenzia_partner_id=g.get("agenzia_partner_id"),
-            agenzia_partner_nome=g.get("agenzia_partner_nome"),
-            destinatario_email=g.get("destinatario_email"),
+            compagnia_id=cid,
+            compagnia_nome=src.get("compagnia_nome"),
+            mandato_label=src.get("mandato_label"),
+            agenzia_partner_id=src.get("agenzia_partner_id"),
+            agenzia_partner_nome=src.get("agenzia_partner_nome"),
+            destinatario_email=src.get("destinatario_email"),
             titoli=titoli,
             totale=round(sum(float(r.get("importo") or 0) for r in titoli), 2),
             stato="bozza",
@@ -362,6 +392,9 @@ async def salva(body: dict, user=Depends(require_user(*_ROLES))):
             doc = await _invia_doc(doc, user)
         doc.pop("_id", None)
         creati.append(doc)
+
+    if not creati:
+        raise HTTPException(400, "Nessun titolo valido da comunicare per il giorno indicato")
 
     await log_attivita(user, "salva", "comunicazione_copertura", giorno,
                        f"{len(creati)} comunicazioni (invia={invia})")
