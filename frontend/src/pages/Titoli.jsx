@@ -44,6 +44,7 @@ const PRESETS_CORRENTI = [
 ];
 
 const PRESETS_STORICO = [
+    { key: "storico", label: "Tutto lo storico" },
     { key: "storico_anno", label: "Anno corrente" },
     { key: "storico_mese", label: "Mese corrente" },
 ];
@@ -90,7 +91,7 @@ export default function Titoli({ storicoMode = false } = {}) {
 
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
-        ? ["storico_anno", "storico_mese"]
+        ? ["storico", "storico_anno", "storico_mese"]
         : ["sospesi", "scaduti", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
 
     const defaultPreset = storicoMode ? "storico_anno" : "tutti_aperti";
@@ -554,7 +555,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="f-al" />
                         </div>
                         <button onClick={() => { setQInput(""); setFilters({
-                            preset: storicoMode ? defaultPreset : "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
+                            preset: storicoMode ? "storico" : "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
                             prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
                             conto_cassa_id: "all", dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "scadenza",
                         }); }} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
