@@ -183,7 +183,7 @@ function App() {
                                 path="/carichi-mensili"
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
-                                        <CarichiMensili />
+                                        <CarichiMensili key="carichi-mensili" />
                                     </ProtectedRoute>
                                 }
                             />
@@ -191,7 +191,7 @@ function App() {
                                 path="/carichi-storico"
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
-                                        <CarichiMensili storico />
+                                        <CarichiMensili key="carichi-storico" storico />
                                     </ProtectedRoute>
                                 }
                             />

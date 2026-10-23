@@ -41,3 +41,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 ## Backlog / Da verificare
 - E2E Storico: validare titolo → sparisce da Carichi Mensili → appare in Storico (sola lettura).
 - Verifica route/sidebar Storico dopo ultime modifiche.
+
+## [2026-10-23] FIX Storico Carichi mostrava "In Attesa" (causa reale individuata)
+- Sintomo: navigando dal pulsante "Storico Carichi" dentro Carichi Mensili comparivano righe stato "In Attesa".
+- Causa reale: /carichi-mensili e /carichi-storico rendono entrambe <CarichiMensili>. React Router riusava la stessa istanza senza rimontare → la prop `storico` passava a true (sottotitolo corretto) ma lo stato `statoCarico` restava "attivi" dalla vista precedente, quindi il backend riceveva `attivi` (include in_attesa). L'apertura diretta dell'URL invece montava da zero (validato) → da qui la discrepanza coi test precedenti.
+- Fix: aggiunte `key` distinte ("carichi-mensili" / "carichi-storico") alle due Route in App.js → forzano il rimontaggio e il reset di stato.
+- Verifica: flusso reale (click pulsante) sul tenant schianta91 (c5ae2d0e) → In Attesa: 0, Validato: 98.
