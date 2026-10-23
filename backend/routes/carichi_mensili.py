@@ -796,7 +796,27 @@ async def valida_carichi(
     validati = 0
     sovrascritti = 0
     protetti = 0
+    scartati_polizza = 0
+    # Stato polizze: non si promuovono carichi su polizze sostituite/annullate
+    POLIZZA_NON_VALIDABILE = {"sostituita", "annullata"}
+    _pol_ids_c = list({c.get("polizza_id") for c in carichi if c.get("polizza_id")})
+    pol_stati = {}
+    async for p in db.polizze.find({"id": {"$in": _pol_ids_c}}, {"_id": 0, "id": 1, "stato": 1}):
+        pol_stati[p["id"]] = (p.get("stato") or "attiva").lower()
     for c in carichi:
+        # Guardia polizza: se la polizza è sostituita/annullata non si crea alcun
+        # titolo ufficiale (il rinnovo va sulla polizza sostitutiva). Il carico viene
+        # scartato con motivo esplicito.
+        _pstato = pol_stati.get(c.get("polizza_id"), "attiva")
+        if _pstato in POLIZZA_NON_VALIDABILE:
+            await db.titoli.update_one({"id": c["id"]}, {"$set": {
+                "stato_carico": "annullato_carico",
+                "motivo_mancanza": f"Polizza {_pstato}",
+                "note_carico": f"Scartato in validazione: la polizza risulta {_pstato} e non genera nuovi titoli.",
+                "updated_at": now,
+            }})
+            scartati_polizza += 1
+            continue
         # Allineato alla dedup import: si confronta per DECORRENZA (effetto), con
         # fallback sulla scadenza per i titoli storici senza effetto. In passato il
         # confronto era solo su 'scadenza' → incoerente con l'import (che usa effetto)
@@ -851,9 +871,9 @@ async def valida_carichi(
             validati += 1
 
     await log_attivita(user, "valida_carichi", "titoli", None,
-                       f"validati={validati} sovrascritti={sovrascritti} protetti={protetti}")
+                       f"validati={validati} sovrascritti={sovrascritti} protetti={protetti} scartati_polizza={scartati_polizza}")
     return {"ok": True, "validati": validati, "sovrascritti": sovrascritti,
-            "protetti": protetti}
+            "protetti": protetti, "scartati_polizza": scartati_polizza}
 
 
 class AnnullaBody(BaseModel):

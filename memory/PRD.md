@@ -61,3 +61,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Fix (routes/carichi_mensili.py, valida_carichi): confronto allineato all'import → per `effetto` (fallback scadenza per titoli senza effetto). Ora se esiste già un titolo protetto per stessa polizza+decorrenza il carico viene scartato (annullato_carico) e NON duplicato.
 - Verificato in preview: carico con effetto uguale a un incassato (scadenza diversa) → `protetti=1`, stato_carico=annullato_carico, nessun doppione.
 - NOTA: i doppioni "da incassare" già presenti in produzione (polizze 731121243 e 184643498) vanno eliminati a mano col cestino. Fix attivo in produzione solo dopo nuovo deploy.
+
+## [2026-10-23] Validazione carichi: guardia polizza sostituita/annullata
+- `valida_carichi` ora controlla lo stato della polizza prima di promuovere il carico.
+- Se la polizza è `sostituita` o `annullata`, il carico NON diventa titolo ufficiale: viene marcato `annullato_carico` con motivo `Polizza <stato>`.
+- Restituisce anche `scartati_polizza`; toast frontend aggiornato.
+- Risolve: creazione di titoli "da incassare" su polizze sostituite (es. 183629512).
+- Verificato con test diretto su tenant produzione. Richiede deploy per attivazione in produzione.

@@ -197,6 +197,7 @@ export default function CarichiMensili({ storico = false }) {
             const parts = [`${d.validati || 0} nuovi`];
             if (d.sovrascritti) parts.push(`${d.sovrascritti} aggiornati`);
             if (d.protetti) parts.push(`${d.protetti} protetti (saltati)`);
+            if (d.scartati_polizza) parts.push(`${d.scartati_polizza} su polizza sostituita/annullata (scartati)`);
             toast.success(`Validazione: ${parts.join(" · ")}`);
             setSelected(new Set());
             load();
