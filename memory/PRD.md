@@ -54,3 +54,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Fix (backend routes/carichi_mensili.py): se esiste già un titolo `stato_carico=validato` per stessa polizza+effetto → `_insert_or_replace_carico` ritorna `skipped_duplicate` e NON inserisce. Contatore `duplicati` aggiunto a import/apply, import/match-manual, import. Frontend mostra "Duplicati saltati" nel toast e nel riepilogo step 3.
 - Verificato in preview su polizza 731121243: esistente validato → skipped_duplicate (nessun insert); esistente in_attesa → replaced (sovrascrive).
 - NOTA: il doppione già presente in PRODUZIONE va rimosso a mano (cestino sul titolo "da incassare" errato). Il fix va in produzione solo dopo un nuovo deploy.
+
+## [2026-10-23] FIX incoerenza import/validazione (doppioni + stato "annullato")
+- Segnalazione (produzione, polizza 184643498 DE MARCO LOREDANA): titolo "incassato" + "da incassare" stessa decorrenza 01/10/2026; in Carichi Mensili il carico risultava "ANNULLATO".
+- Causa radice: l'IMPORT deduplica per `effetto` (decorrenza), ma la VALIDAZIONE cercava i titoli esistenti per `scadenza`. Poiché i titoli storici/incassati hanno spesso scadenza vuota o diversa da quella calcolata, la validazione NON trovava il titolo già presente e promuoveva il carico a "da_incassare" → doppione. In altri casi (scadenza combaciante) lo marcava `annullato_carico` "Già presente (protetto)" → di qui lo stato ANNULLATO visto dall'utente (comportamento anti-doppione corretto, ma incoerente).
+- Fix (routes/carichi_mensili.py, valida_carichi): confronto allineato all'import → per `effetto` (fallback scadenza per titoli senza effetto). Ora se esiste già un titolo protetto per stessa polizza+decorrenza il carico viene scartato (annullato_carico) e NON duplicato.
+- Verificato in preview: carico con effetto uguale a un incassato (scadenza diversa) → `protetti=1`, stato_carico=annullato_carico, nessun doppione.
+- NOTA: i doppioni "da incassare" già presenti in produzione (polizze 731121243 e 184643498) vanno eliminati a mano col cestino. Fix attivo in produzione solo dopo nuovo deploy.

@@ -780,7 +780,7 @@ async def valida_carichi(
 ):
     """Valida i carichi selezionati ('in_attesa') facendoli entrare nei Titoli
     (e, essendo collegati, nei Titoli di polizza). Per ogni carico, confronto sulla
-    chiave polizza + scadenza con i titoli UFFICIALI già esistenti:
+    chiave polizza + decorrenza (effetto) con i titoli UFFICIALI già esistenti:
       - esiste un titolo PROTETTO (incassato/coperto/stornato/sospeso-insoluto o in
         Prima Nota) → NON lo tocca, il carico viene scartato (contatore 'protetti');
       - esiste un titolo 'da_incassare' libero → lo SOVRASCRIVE con i nuovi importi
@@ -797,9 +797,15 @@ async def valida_carichi(
     sovrascritti = 0
     protetti = 0
     for c in carichi:
+        # Allineato alla dedup import: si confronta per DECORRENZA (effetto), con
+        # fallback sulla scadenza per i titoli storici senza effetto. In passato il
+        # confronto era solo su 'scadenza' → incoerente con l'import (che usa effetto)
+        # e causava doppioni quando la scadenza del file differiva da quella calcolata.
+        _kf = "effetto" if c.get("effetto") else "scadenza"
+        _kv = c.get("effetto") if c.get("effetto") else c.get("scadenza")
         existing = await db.titoli.find({
             "polizza_id": c.get("polizza_id"),
-            "scadenza": c.get("scadenza"),
+            _kf: _kv,
             "id": {"$ne": c["id"]},
             "stato_carico": {"$nin": ["in_attesa", "annullato_carico"]},
         }, {"_id": 0}).to_list(50)
