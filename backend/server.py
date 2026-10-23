@@ -4129,9 +4129,12 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         visited.add(prev["id"])
         polizza_ids_catena.append(prev["id"])
         cursor_rif = prev.get("sostituisce_polizza")
-    # Carica titoli di tutta la catena (polizza corrente + sostituite)
+    # Carica titoli di tutta la catena (polizza corrente + sostituite).
+    # ESCLUDE i carichi ancora 'in_attesa' (importati ma non validati): quelli
+    # vivono solo in Carichi Mensili finché l'operatore non li valida.
     doc["titoli"] = await db.titoli.find(
-        {"polizza_id": {"$in": polizza_ids_catena}}, {"_id": 0},
+        {"polizza_id": {"$in": polizza_ids_catena},
+         "stato_carico": {"$ne": "in_attesa"}}, {"_id": 0},
     ).sort("effetto", -1).to_list(500)
     # Ordine: i titoli della polizza CORRENTE per primi (in cima), poi quelli delle
     # polizze sostituite; a parità, per effetto decrescente (stable sort preserva l'ordine).
