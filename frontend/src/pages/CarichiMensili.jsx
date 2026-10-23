@@ -237,15 +237,6 @@ export default function CarichiMensili() {
                         <Filter size={14} className="text-slate-500" />
                         <span className="text-xs text-slate-600 uppercase font-semibold tracking-wide">Filtri</span>
                     </div>
-                    {["mese_corrente", "mese_successivo", "tutti"].map((r) => (
-                        <Button
-                            key={r} size="sm" variant={range === r && !dal ? "default" : "outline"}
-                            onClick={() => { setRange(r); setDal(""); setAl(""); }} data-testid={`filter-range-${r}`}
-                            className={range === r && !dal ? "bg-violet-600 hover:bg-violet-700" : ""}
-                        >
-                            {r === "mese_corrente" ? "Mese corrente" : r === "mese_successivo" ? "Mese successivo" : "Tutti"}
-                        </Button>
-                    ))}
                     <div className="w-px h-6 bg-slate-200 mx-1" />
                     <Select value={collabId || "all"} onValueChange={(v) => setCollabId(v === "all" ? "" : v)}>
                         <SelectTrigger className="w-52 h-9" data-testid="filter-collaboratore">
