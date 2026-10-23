@@ -41,6 +41,7 @@ const PRESETS_CORRENTI = [
     { key: "scad15", label: "Scadute da 15gg" },
     { key: "scad_oltre15", label: "Oltre 15gg" },
     { key: "tutti_aperti", label: "Tutti (da incassare)" },
+    { key: "arretrati", label: "Arretrati (no coperti)" },
 ];
 
 const PRESETS_STORICO = [
@@ -61,6 +62,7 @@ const presetParams = (key) => {
         case "sospesi": return { stato: "da_incassare", titolo_coperto: true };
         case "scaduti": return { stato: "da_incassare", titolo_coperto: false, scaduta_effetto: true };
         case "tutti_aperti": return { stato_not: "incassato,stornato" };
+        case "arretrati": return { stato_not: "incassato,stornato", titolo_coperto: false };
         case "storico": return { stato: "incassato" };
         case "storico_anno": return { stato: "incassato", dal: firstOfYearISO(), al: todayISO() };
         case "storico_mese": return { stato: "incassato", dal: firstOfMonthISO(), al: todayISO() };
@@ -92,7 +94,7 @@ export default function Titoli({ storicoMode = false } = {}) {
     const PRESETS = storicoMode ? PRESETS_STORICO : PRESETS_CORRENTI;
     const ACCEPTED_PRESETS = storicoMode
         ? ["storico", "storico_anno", "storico_mese"]
-        : ["sospesi", "scaduti", "tutti_aperti", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
+        : ["sospesi", "scaduti", "tutti_aperti", "arretrati", "scad15", "scad_oltre15", "scadute_oggi", "scad_5g", "scad_10g"];
 
     const defaultPreset = storicoMode ? "storico_anno" : "tutti_aperti";
 
