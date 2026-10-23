@@ -197,18 +197,16 @@ async def lista_carichi_mensili(
         # tipo_rinnovo su Titolo è il campo "tipo" (rinnovo/nuova/appendice/…)
         match["tipo"] = tipo_rinnovo
 
-    # Filtro data scadenza — ignorato quando è attiva una ricerca libera (q),
-    # così la ricerca spazia su tutte le annualità/mesi.
-    if not (q and q.strip()):
-        if range_filter == "mese_corrente":
-            match["scadenza"] = {"$regex": f"^{_mese_corrente()}"}
-        elif range_filter == "mese_successivo":
-            match["scadenza"] = {"$regex": f"^{_mese_offset(1)}"}
-        elif mese:
-            match["scadenza"] = {"$regex": f"^{mese}"}
-        elif dal and al:
-            # Range custom per DATA DECORRENZA (effetto), non per scadenza
-            match["effetto"] = {"$gte": dal, "$lte": al}
+    # Filtro data scadenza / decorrenza (si combina con l'eventuale ricerca libera q)
+    if range_filter == "mese_corrente":
+        match["scadenza"] = {"$regex": f"^{_mese_corrente()}"}
+    elif range_filter == "mese_successivo":
+        match["scadenza"] = {"$regex": f"^{_mese_offset(1)}"}
+    elif mese:
+        match["scadenza"] = {"$regex": f"^{mese}"}
+    elif dal and al:
+        # Range custom per DATA DECORRENZA (effetto), non per scadenza
+        match["effetto"] = {"$gte": dal, "$lte": al}
 
     # Prefiltro polizze se compagnia/ramo → riduce il set titoli
     if compagnia_id or ramo:

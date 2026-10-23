@@ -109,13 +109,12 @@ export default function CarichiMensili() {
             const params = { stato_carico: statoCarico };
             if (collabId) params.collaboratore_id = collabId;
             const qq = q.trim();
-            if (qq) {
-                // Ricerca libera: il backend ignora i filtri data e cerca su tutte le annualità
-                params.q = qq;
-            } else if (dal && al) {
-                // Se ci sono date esplicite, hanno priorità sul range preset
+            if (qq) params.q = qq;
+            if (dal && al) {
+                // Date esplicite: filtro per decorrenza (si combina con q/collaboratore)
                 params.dal = dal; params.al = al;
-            } else if (range !== "tutti") {
+            } else if (!qq && range !== "tutti") {
+                // Senza date e senza ricerca: preset mese; con ricerca attiva si cerca su tutto
                 params.range_filter = range;
             }
             const r = await api.get("/carichi-mensili", { params });
