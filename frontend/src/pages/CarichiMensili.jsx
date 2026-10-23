@@ -270,7 +270,7 @@ export default function CarichiMensili() {
                 </div>
                 {/* Range date custom (override preset) */}
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Range date scadenza:</span>
+                    <span className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">Range data decorrenza:</span>
                     <Input type="date" value={dal} onChange={(e) => setDal(e.target.value)}
                            className="w-40 h-8 text-xs" data-testid="filter-date-dal" placeholder="Da" />
                     <span className="text-[11px] text-slate-500">→</span>

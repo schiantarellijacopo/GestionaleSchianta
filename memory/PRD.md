@@ -2263,3 +2263,9 @@ Riepilogo flusso completo Carichi mensili:
 - IMPORT → tutto `in_attesa`, senza doppioni (ri-import sovrascrive il carico in attesa).
 - Revisione + modifica manuale (matita).
 - VALIDAZIONE → vs titoli ufficiali su polizza+scadenza: PROTETTO=salta(annulla carico) · da_incassare=sovrascrive l'ufficiale · mancante=crea come da_incassare. Entrano in Titoli e Titoli di polizza.
+
+---
+
+## 2026-10-23 (6) — Fix "Errore caricamento" Carichi + filtro range per decorrenza
+- **BUGFIX**: `GET /carichi-mensili` crashava con `KeyError: 'ragione_sociale'` su anagrafiche persona fisica. Corretto in `lista_carichi_mensili` e nell'endpoint confronto: nome cliente = `ragione_sociale or (cognome+nome) or "-"`.
+- **Modifica UI richiesta**: il range date personalizzato (filtro Carichi) ora filtra per DATA DECORRENZA (`effetto`), non più per `scadenza`. Etichetta "Range data decorrenza". I preset Mese corrente/successivo restano su scadenza. Verificato (range 01-31/10/2026 → effetto in ott 2026).

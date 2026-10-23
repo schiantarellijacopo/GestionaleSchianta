@@ -204,7 +204,8 @@ async def lista_carichi_mensili(
     elif mese:
         match["scadenza"] = {"$regex": f"^{mese}"}
     elif dal and al:
-        match["scadenza"] = {"$gte": dal, "$lte": al}
+        # Range custom per DATA DECORRENZA (effetto), non per scadenza
+        match["effetto"] = {"$gte": dal, "$lte": al}
 
     # Prefiltro polizze se compagnia/ramo → riduce il set titoli
     if compagnia_id or ramo:
@@ -234,9 +235,15 @@ async def lista_carichi_mensili(
          "note_interne": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values()})
-    anas = {a["id"]: a["ragione_sociale"] async for a in db.anagrafiche.find(
-        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
-    )}
+    anas = {}
+    async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1},
+    ):
+        nome = a.get("ragione_sociale") or " ".join(
+            x for x in [a.get("cognome"), a.get("nome")] if x
+        ).strip() or "-"
+        anas[a["id"]] = nome
     cmp_ids = list({p.get("compagnia_id") for p in pols.values() if p.get("compagnia_id")})
     cmps = {c["id"]: c.get("ragione_sociale") or c.get("codice") or "-"
             async for c in db.compagnie.find(
@@ -485,8 +492,14 @@ async def confronto_annuale(
          "premio_lordo": 1, "effetto": 1, "scadenza": 1, "targa": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values()})
-    anas = {a["id"]: a.get("ragione_sociale") async for a in db.anagrafiche.find(
-        {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    anas = {}
+    async for a in db.anagrafiche.find(
+        {"id": {"$in": ana_ids}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1},
+    ):
+        anas[a["id"]] = a.get("ragione_sociale") or " ".join(
+            x for x in [a.get("cognome"), a.get("nome")] if x
+        ).strip() or "-"
     cmp_ids = list({p.get("compagnia_id") for p in pols.values() if p.get("compagnia_id")})
     cmps = {c["id"]: c.get("ragione_sociale") or c.get("codice") or "-"
             async for c in db.compagnie.find(
