@@ -6233,10 +6233,43 @@ async def notifica_copertura(body: dict, user=Depends(require_user("admin", "col
         return {"ok": False, "errore": str(e), "destinatari": destinatari}
 
 
+def titoli_filter_params(
+    stato: Optional[str] = None,
+    stato_not: Optional[str] = None,
+    compagnia_id: Optional[str] = None,
+    collaboratore_id: Optional[str] = None,
+    ramo: Optional[str] = None,
+    prodotto: Optional[str] = None,
+    mezzo_pagamento: Optional[str] = None,
+    conto_cassa_id: Optional[str] = None,
+    titolo_coperto: Optional[bool] = None,
+    scaduta_effetto: Optional[bool] = None,
+    scadute_oggi: Optional[bool] = None,
+    scaduta_giorni_esatti: Optional[int] = None,
+    scaduta_giorni_oltre: Optional[int] = None,
+    scadute_da_min: Optional[int] = None,
+    scadute_da_max: Optional[int] = None,
+    in_scadenza_giorni: Optional[int] = None,
+    scadenza_oltre_giorni: Optional[int] = None,
+    coperti_non_pagati: Optional[bool] = None,
+    dal: Optional[str] = None,
+    al: Optional[str] = None,
+    data_campo: Optional[str] = None,
+    q: Optional[str] = None,
+    tag: Optional[str] = None,
+    polizza_id: Optional[str] = None,
+    sort: Optional[str] = None,
+    dir: str = "asc",
+) -> dict:
+    """Raccoglie gli stessi filtri della lista Titoli così che export CSV/XLSX/PDF
+    rispettino i filtri attivi in UI."""
+    return {k: v for k, v in locals().items() if v is not None}
+
+
 @api.get("/export/titoli.csv")
-async def export_titoli_csv(stato: Optional[str] = None,
+async def export_titoli_csv(filters: dict = Depends(titoli_filter_params),
                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    items = await list_titoli(stato=stato, limit=10000, user=user)
+    items = await list_titoli(**filters, limit=10000, user=user)
     import csv as _csv
     out = _io.StringIO()
     w = _csv.writer(out, delimiter=";")
@@ -6259,9 +6292,9 @@ async def export_titoli_csv(stato: Optional[str] = None,
 
 
 @api.get("/export/titoli.xlsx")
-async def export_titoli_xlsx(stato: Optional[str] = None,
+async def export_titoli_xlsx(filters: dict = Depends(titoli_filter_params),
                              user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    items = await list_titoli(stato=stato, limit=10000, user=user)
+    items = await list_titoli(**filters, limit=10000, user=user)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     wb = Workbook(); ws = wb.active; ws.title = "Titoli"
@@ -6408,7 +6441,8 @@ async def export_polizze_csv(
     q: Optional[str] = None, stato: Optional[str] = None,
     compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
     prodotto: Optional[str] = None, collaboratore_id: Optional[str] = None,
-    contraente_id: Optional[str] = None,
+    contraente_id: Optional[str] = None, tag: Optional[str] = None,
+    escludi_annullate: bool = False,
     dal: Optional[str] = None, al: Optional[str] = None,
     in_scadenza_giorni: Optional[int] = None,
     scadenza_oltre_giorni: Optional[int] = None,
@@ -6420,7 +6454,8 @@ async def export_polizze_csv(
     items = await list_polizze(
         q=q, stato=stato, ramo=ramo, prodotto=prodotto,
         contraente_id=contraente_id, compagnia_id=compagnia_id,
-        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        collaboratore_id=collaboratore_id, tag=tag, escludi_annullate=escludi_annullate,
+        dal=dal, al=al,
         in_scadenza_giorni=in_scadenza_giorni,
         scadenza_oltre_giorni=scadenza_oltre_giorni,
         scadute_oggi=scadute_oggi,
@@ -6452,7 +6487,8 @@ async def export_polizze_xlsx(
     q: Optional[str] = None, stato: Optional[str] = None,
     compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
     prodotto: Optional[str] = None, collaboratore_id: Optional[str] = None,
-    contraente_id: Optional[str] = None,
+    contraente_id: Optional[str] = None, tag: Optional[str] = None,
+    escludi_annullate: bool = False,
     dal: Optional[str] = None, al: Optional[str] = None,
     in_scadenza_giorni: Optional[int] = None,
     scadenza_oltre_giorni: Optional[int] = None,
@@ -6464,7 +6500,8 @@ async def export_polizze_xlsx(
     items = await list_polizze(
         q=q, stato=stato, ramo=ramo, prodotto=prodotto,
         contraente_id=contraente_id, compagnia_id=compagnia_id,
-        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        collaboratore_id=collaboratore_id, tag=tag, escludi_annullate=escludi_annullate,
+        dal=dal, al=al,
         in_scadenza_giorni=in_scadenza_giorni,
         scadenza_oltre_giorni=scadenza_oltre_giorni,
         scadute_oggi=scadute_oggi,
@@ -17284,6 +17321,7 @@ async def stampa_polizze(
     stato: Optional[str] = None, compagnia_id: Optional[str] = None,
     ramo: Optional[str] = None, prodotto: Optional[str] = None,
     collaboratore_id: Optional[str] = None, contraente_id: Optional[str] = None,
+    tag: Optional[str] = None, escludi_annullate: bool = False,
     dal: Optional[str] = None, al: Optional[str] = None,
     in_scadenza_giorni: Optional[int] = None,
     scadenza_oltre_giorni: Optional[int] = None,
@@ -17295,7 +17333,8 @@ async def stampa_polizze(
     items = await list_polizze(
         q=q, stato=stato, ramo=ramo, prodotto=prodotto,
         contraente_id=contraente_id, compagnia_id=compagnia_id,
-        collaboratore_id=collaboratore_id, dal=dal, al=al,
+        collaboratore_id=collaboratore_id, tag=tag, escludi_annullate=escludi_annullate,
+        dal=dal, al=al,
         in_scadenza_giorni=in_scadenza_giorni,
         scadenza_oltre_giorni=scadenza_oltre_giorni,
         scadute_oggi=scadute_oggi,
@@ -17322,42 +17361,27 @@ async def stampa_polizze(
 
 @api.get("/stampa/titoli")
 async def stampa_titoli(
-    stato: Optional[str] = None, in_scadenza_giorni: Optional[int] = None,
-    coperti_non_pagati: Optional[bool] = None,
+    filters: dict = Depends(titoli_filter_params),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    # riusa la logica list_titoli replicando i filtri base
-    flt: dict = {}
-    if stato: flt["stato"] = stato
-    from datetime import date, timedelta
-    today = date.today().isoformat()
-    if in_scadenza_giorni is not None:
-        limite = (date.today() + timedelta(days=int(in_scadenza_giorni))).isoformat()
-        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
-        flt["scadenza"] = {"$gte": today, "$lte": limite}
-    if coperti_non_pagati:
-        flt["stato"] = {"$in": ["da_incassare", "insoluto"]}
-        flt["effetto"] = {"$lte": today}
-        flt["scadenza"] = {"$gte": today}
-    items = await db.titoli.find(flt, {"_id": 0}).sort("scadenza", 1).to_list(5000)
-    pol_ids = list({t["polizza_id"] for t in items})
-    pols = {p["id"]: p async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0})}
-    ana_ids = list({p.get("contraente_id") for p in pols.values() if p.get("contraente_id")})
-    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+    # Stessa logica/filtri della lista Titoli, così la stampa rispetta i filtri attivi.
+    items = await list_titoli(**filters, limit=10000, user=user)
     headers = ["Polizza", "Contraente", "Ramo", "Tipo", "Effetto", "Scadenza", "Stato", "Lordo €", "Provv. €"]
     rows = []
     for t in items:
-        p = pols.get(t["polizza_id"], {})
+        tipo = t.get("tipo", "")
+        if tipo == "rinnovo":
+            tipo = "quietanza"
         rows.append([
-            p.get("numero_polizza", ""),
-            anas.get(p.get("contraente_id",""), {}).get("ragione_sociale", ""),
-            p.get("ramo", ""), t.get("tipo", ""),
+            t.get("numero_polizza", ""),
+            t.get("contraente_nome", ""),
+            t.get("ramo", ""), tipo,
             t.get("effetto", ""), t.get("scadenza", ""), t.get("stato", ""),
             t.get("importo_lordo", 0), t.get("provvigioni", 0),
         ])
     pdf = pdf_report.stampa_elenco(
         "Elenco Titoli",
-        f"{len(items)} titoli" + (" - in scadenza" if in_scadenza_giorni else "") + (" - coperti non pagati" if coperti_non_pagati else ""),
+        f"{len(items)} titoli",
         headers, rows,
         col_widths_mm=[32, 55, 25, 22, 22, 22, 25, 25, 25],
         **(await _intestazione_pdf()),

@@ -273,3 +273,10 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - `server.py` endpoint documenti agenzie: require file + eliminazione oggetto storage su delete.
 
 **Verifiche:** card-visibilita espone 6 entità incl. `azienda` ✓; upload/lista/delete documento azienda via curl ✓; UI card "Documenti azienda" renderizzata ✓; pannelli Collaboratori/Azienda presenti in Visibilità documenti ✓. Deploy via Save to GitHub → Railway.
+
+## 2026-06 — Export/stampa rispettano i filtri attivi
+- Titoli: CSV, Excel e Stampa PDF ora inviano TUTTI i filtri attivi (ricerca, compagnia, ramo, tag, collaboratore, conto, prodotto, tipo pagamento, periodo su data_campo, preset arretrati/sospesi/scaduti, stato) + ordinamento colonna corrente. Backend `/export/titoli.csv|.xlsx` e `/stampa/titoli` ora passano per `list_titoli` tramite dependency `titoli_filter_params`.
+- Frontend Titoli: export CSV/XLSX passano da `window.open` senza parametri a `downloadFile(...)` autenticato con `exportParams()` (filtri + sort/dir).
+- Polizze: export CSV/XLSX e `/stampa/polizze` ora accettano anche `tag` ed `escludi_annullate` (prima ignorati).
+- Verificato via curl: Titoli 45→11 (incassato), 31 (arretrati), range data effetto ok; Polizze 31→26 (escludi_annullate), 22 (stato=attiva).
+- Nota: PDF Titoli mostra `rinnovo` come `quietanza` (coerente con unificazione terminologia).

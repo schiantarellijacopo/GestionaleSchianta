@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
-import { openPdf } from "@/lib/pdf";
+import { openPdf, downloadFile } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import CollaboratoreCell from "@/components/CollaboratoreCell";
 import KpiBarSection from "@/components/KpiBar";
@@ -232,9 +232,10 @@ export default function Titoli({ storicoMode = false } = {}) {
         }
     };
 
-    const exportCsv = () => window.open(`${API_BASE}/export/titoli.csv`, "_blank");
-    const exportXlsx = () => window.open(`${API_BASE}/export/titoli.xlsx`, "_blank");
-    const stampaPdf = () => openPdf("/stampa/titoli", buildParams());
+    const exportParams = () => ({ ...buildParams(), sort: sortBy, dir: sortDir });
+    const exportCsv = () => downloadFile("/export/titoli.csv", exportParams(), { filename: "titoli.csv" });
+    const exportXlsx = () => downloadFile("/export/titoli.xlsx", exportParams(), { filename: "titoli.xlsx" });
+    const stampaPdf = () => openPdf("/stampa/titoli", exportParams());
 
     const bonificaScadenze = async () => {
         const globale = !!user?.is_super_admin;
