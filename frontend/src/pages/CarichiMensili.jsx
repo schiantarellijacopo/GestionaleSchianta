@@ -49,7 +49,7 @@ const ALL_COLUMNS = [
     { k: "provvigioni_collab", label: "Provv. collaboratore", w: 110 },
     { k: "importo_netto", label: "Premio netto", w: 100 },
     { k: "imposte", label: "Tasse", w: 90 },
-    { k: "servizio_sanitario", label: "Servizio sanitario", w: 100 },
+    { k: "servizio_sanitario", label: "SSN", w: 90 },
     { k: "polizza_targa", label: "Targa", w: 100 },
     { k: "frazionamento", label: "Frazionam.", w: 100 },
     { k: "confronto_premio", label: "Premio prec./attuale", w: 170 },
@@ -57,9 +57,9 @@ const ALL_COLUMNS = [
 ];
 const DEFAULT_VISIBLE = ["stato_carico", "cliente_nome", "polizza_numero",
     "compagnia_nome", "operatore_nome", "polizza_ramo", "data_decorrenza", "scadenza",
-    "premio_precedente", "importo_lordo", "tipo_rinnovo", "mezzo_pagamento",
+    "premio_precedente", "importo_lordo", "servizio_sanitario", "tipo_rinnovo", "mezzo_pagamento",
     "variazione_badge", "note_carico", "polizza_targa", "azioni"];
-const LS_COLS = "carichi_mensili.visible_cols.v2";
+const LS_COLS = "carichi_mensili.visible_cols.v3";
 const LS_ORDER = "carichi_mensili.col_order.v1";
 
 const MOTIVI = ["Disdettata", "Mezzo Venduto", "Cliente Trasferito", "Voltura", "Sostituita"];
@@ -534,11 +534,14 @@ const CELL_RENDERERS = {
     imposte: (r) => (
         <span className="font-mono text-[11px]">{fmtEur(r.imposte)}</span>
     ),
-    servizio_sanitario: (r) => (
-        <span className="font-mono text-[11px]">
-            {r.servizio_sanitario != null ? fmtEur(r.servizio_sanitario) : "-"}
-        </span>
-    ),
+    servizio_sanitario: (r) => {
+        const val = (r.ssn != null && r.ssn !== 0) ? r.ssn : r.servizio_sanitario;
+        return (
+            <span className="font-mono text-[11px]" data-testid={`cm-ssn-${r.id}`}>
+                {val != null ? fmtEur(val) : "-"}
+            </span>
+        );
+    },
     polizza_targa: (r) => <span className="font-mono">{r.polizza_targa || "-"}</span>,
     frazionamento: (r) => <span className="uppercase text-[10px]">{r.frazionamento || "-"}</span>,
     confronto_premio: (r) => {
@@ -965,6 +968,18 @@ function ImportExcelDialog({ onClose }) {
                                 </div>
                             )}
                         </div>
+                        {result.totali && (
+                            <div className="bg-slate-50 border border-slate-200 rounded p-3" data-testid="import-riepilogo-premi">
+                                <div className="text-xs font-semibold text-slate-600 mb-2">Riepilogo premi importati</div>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                                    <div><span className="text-slate-500 text-xs block">Premio lordo</span><strong className="font-mono">{fmtEur(result.totali.lordo)}</strong></div>
+                                    <div><span className="text-slate-500 text-xs block">Premio netto</span><strong className="font-mono">{fmtEur(result.totali.netto)}</strong></div>
+                                    <div><span className="text-slate-500 text-xs block">Tasse</span><strong className="font-mono">{fmtEur(result.totali.imposte)}</strong></div>
+                                    <div><span className="text-slate-500 text-xs block">SSN</span><strong className="font-mono text-violet-700" data-testid="import-tot-ssn">{fmtEur(result.totali.ssn)}</strong></div>
+                                    <div><span className="text-slate-500 text-xs block">Provvigioni</span><strong className="font-mono">{fmtEur(result.totali.provvigioni)}</strong></div>
+                                </div>
+                            </div>
+                        )}
                         {(result.errori || []).length > 0 && (
                             <div className="bg-rose-50 border border-rose-200 rounded p-2 max-h-40 overflow-y-auto">
                                 <div className="text-xs font-semibold text-rose-900 mb-1">⚠ {result.errori.length} errori:</div>

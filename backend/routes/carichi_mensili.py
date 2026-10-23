@@ -973,6 +973,7 @@ async def import_apply(
     saltati = 0
     errori: list[dict] = []
     unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
+    totali = {"lordo": 0.0, "netto": 0.0, "imposte": 0.0, "ssn": 0.0, "provvigioni": 0.0}
     header_pol = mapping.get("polizza_numero", "")
     header_cliente = mapping.get("cliente_nome", "")
 
@@ -1071,6 +1072,11 @@ async def import_apply(
             )
             await db.titoli.insert_one(t.model_dump())
             creati += 1
+            totali["lordo"] += t.importo_lordo or 0
+            totali["netto"] += t.importo_netto or 0
+            totali["imposte"] += t.imposte or 0
+            totali["ssn"] += t.ssn or 0
+            totali["provvigioni"] += t.provvigioni or 0
         except Exception as e:
             errori.append({"riga": i, "errore": str(e)})
 
@@ -1078,6 +1084,7 @@ async def import_apply(
                        f"creati={creati} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
     return {"ok": True, "batch_id": batch_id, "creati": creati,
             "saltati": saltati, "unmatched": unmatched, "errori": errori,
+            "totali": {k: round(v, 2) for k, v in totali.items()},
             "totale_letti": len(rows)}
 
 
