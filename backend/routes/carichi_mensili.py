@@ -169,7 +169,7 @@ def _add_period(effetto_iso: str, freq: str) -> str:
 
 @router.get("/carichi-mensili")
 async def lista_carichi_mensili(
-    stato_carico: str = Query("in_attesa", regex="^(in_attesa|validato|annullato_carico|tutti)$"),
+    stato_carico: str = Query("in_attesa", regex="^(in_attesa|validato|annullato_carico|attivi|tutti)$"),
     mese: Optional[str] = Query(None, description="YYYY-MM per filtrare per scadenza"),
     range_filter: Optional[str] = Query(None, regex="^(mese_corrente|mese_successivo|tutti)$"),
     dal: Optional[str] = Query(None), al: Optional[str] = Query(None),
@@ -187,7 +187,10 @@ async def lista_carichi_mensili(
     premio precedente stessa polizza + badge sinistri (12 mesi) + operatore.
     """
     match: dict = {}
-    if stato_carico != "tutti":
+    if stato_carico == "attivi":
+        # Tutto tranne i validati (che vivono nello Storico)
+        match["stato_carico"] = {"$ne": "validato"}
+    elif stato_carico != "tutti":
         match["stato_carico"] = stato_carico
     if collaboratore_id:
         match["collaboratore_id"] = collaboratore_id
@@ -280,6 +283,7 @@ async def lista_carichi_mensili(
          "data_sospensione": 1, "riattivazione_prevista": 1,
          "sostituita_da_polizza_id": 1, "sostituisce_polizza": 1,
          "provvigioni_operatori": 1, "collaboratore_id": 1,
+         "mezzo_pagamento_preferito": 1, "ultimo_mezzo_pagamento": 1,
          "note_interne": 1},
     )}
     ana_ids = list({p.get("contraente_id") for p in pols.values()})
@@ -468,6 +472,11 @@ async def lista_carichi_mensili(
             "compagnia_nome": cmps.get(p.get("compagnia_id"), ""),
             "sinistri_ultimi_12m": sin_map.get(p.get("id"), 0),
             "operatore_nome": users.get(t.get("collaboratore_id"), ""),
+            # Metodo pagamento: se il titolo non lo ha, eredita dalla polizza
+            # (tipo pagamento preferito, poi ultimo mezzo usato)
+            "mezzo_pagamento": (t.get("mezzo_pagamento")
+                                or p.get("mezzo_pagamento_preferito")
+                                or p.get("ultimo_mezzo_pagamento")),
             "bloccato": bloccato,
             "motivo_blocco": motivo,
             "variazione_badge": variazione_badge,
@@ -481,7 +490,44 @@ async def lista_carichi_mensili(
             "provvigioni_collab": provv_collab,
             "motivo_mancanza": t.get("motivo_mancanza") or motivo_dedotto,
         })
-    return {"totale": len(rows), "righe": rows}
+    # Totali aggregati sull'INTERO set filtrato (indipendenti dal limite di 1000
+    # righe visualizzate). provvigioni_collab via join sulle polizze.
+    tot = {"lordo": 0.0, "netto": 0.0, "provvigioni": 0.0, "provvigioni_collab": 0.0}
+    try:
+        agg_pipeline = [
+            {"$match": match},
+            {"$lookup": {"from": "polizze", "localField": "polizza_id",
+                         "foreignField": "id", "as": "_pol"}},
+            {"$addFields": {"_po": {"$arrayElemAt": ["$_pol", 0]}}},
+            {"$addFields": {"_collab": {"$sum": {"$map": {
+                "input": {"$ifNull": ["$_po.provvigioni_operatori", []]},
+                "as": "op",
+                "in": {"$add": [
+                    {"$ifNull": ["$$op.provvigione", 0]},
+                    {"$ifNull": ["$$op.provvigione_addizionali", 0]},
+                ]},
+            }}}}},
+            {"$group": {
+                "_id": None,
+                "lordo": {"$sum": {"$ifNull": ["$importo_lordo", 0]}},
+                "netto": {"$sum": {"$ifNull": ["$importo_netto", 0]}},
+                "provvigioni": {"$sum": {"$ifNull": ["$provvigioni", 0]}},
+                "provvigioni_collab": {"$sum": "$_collab"},
+            }},
+        ]
+        agg = await db.titoli.aggregate(agg_pipeline).to_list(1)
+        if agg:
+            g = agg[0]
+            tot["lordo"] = float(g.get("lordo") or 0)
+            tot["netto"] = float(g.get("netto") or 0)
+            tot["provvigioni"] = float(g.get("provvigioni") or 0)
+            tot["provvigioni_collab"] = float(g.get("provvigioni_collab") or 0)
+    except Exception:
+        pass
+    tot["margine"] = round(tot["provvigioni"] - tot["provvigioni_collab"], 2)
+    for k in ("lordo", "netto", "provvigioni", "provvigioni_collab"):
+        tot[k] = round(tot[k], 2)
+    return {"totale": len(rows), "righe": rows, "totali": tot}
 
 
 @router.get("/carichi-mensili/confronto-annuale")
@@ -1079,19 +1125,32 @@ def _to_float(v) -> float:
 
 def _to_iso_date(v) -> Optional[str]:
     """Converte una data (str o datetime) in ISO YYYY-MM-DD.
-    Accetta formati IT ``DD/MM/YYYY`` e ISO."""
+    Accetta ISO, formati IT ``DD/MM/YYYY`` o ``DD-MM-YYYY`` e anni a 2 cifre."""
     if v is None or v == "":
         return None
     if hasattr(v, "strftime"):
         return v.strftime("%Y-%m-%d")
     s = str(v).strip()[:10]
-    if "/" in s:
-        parts = s.split("/")
-        if len(parts) == 3:
-            d, m, y = parts
-            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-    if "-" in s and len(s) == 10:
+
+    def _norm_year(y: str) -> str:
+        y = y.strip()
+        if len(y) == 2:  # anno a 2 cifre → 20xx
+            return f"20{y.zfill(2)}"
+        return y.zfill(4)
+
+    # ISO già valido: YYYY-MM-DD (anno a 4 cifre in testa)
+    if len(s) == 10 and s[4] == "-" and s[:4].isdigit():
         return s
+    # Separatore / oppure - : formato IT DD<sep>MM<sep>YYYY
+    sep = "/" if "/" in s else ("-" if "-" in s else None)
+    if sep:
+        parts = s.split(sep)
+        if len(parts) == 3 and all(p.strip() for p in parts):
+            d, m, y = parts
+            # Se il primo blocco ha 4 cifre è già ISO (YYYY-MM-DD)
+            if len(d.strip()) == 4:
+                return f"{d.strip()}-{m.zfill(2)}-{y.zfill(2)}"
+            return f"{_norm_year(y)}-{m.zfill(2)}-{d.zfill(2)}"
     return None
 
 

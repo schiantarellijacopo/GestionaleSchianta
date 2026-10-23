@@ -188,6 +188,14 @@ function App() {
                                 }
                             />
                             <Route
+                                path="/carichi-storico"
+                                element={
+                                    <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>
+                                        <CarichiMensili storico />
+                                    </ProtectedRoute>
+                                }
+                            />
+                            <Route
                                 path="/rubrica-compagnie"
                                 element={
                                     <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}>

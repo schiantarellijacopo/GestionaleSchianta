@@ -29,6 +29,7 @@ const ALL_MENU_ITEMS = [
     { id: "sinistri", path: "/sinistri", icon: "AlertTriangle", label: "Sinistri", section: "assicurazione", roles: null },
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "carichi-mensili", path: "/carichi-mensili", icon: "PackageCheck", label: "Carichi Mensili", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "carichi-storico", path: "/carichi-storico", icon: "Archive", label: "Storico Carichi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "trattative", path: "/trattative", icon: "Briefcase", label: "Trattative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "alert", path: "/alert", icon: "Zap", label: "Alert & Automazioni", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "libro_matricola", path: "/libro-matricola", icon: "ClipboardList", label: "Libro Matricola / Cumulative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },

@@ -64,13 +64,14 @@ const LS_ORDER = "carichi_mensili.col_order.v1";
 
 const MOTIVI = ["Disdettata", "Mezzo Venduto", "Cliente Trasferito", "Voltura", "Sostituita"];
 
-export default function CarichiMensili() {
+export default function CarichiMensili({ storico = false }) {
     const [rows, setRows] = useState(null);
+    const [totali, setTotali] = useState(null);
     const [q, setQ] = useState("");
     const [range, setRange] = useState("mese_corrente");
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
-    const [statoCarico, setStatoCarico] = useState("tutti");
+    const [statoCarico, setStatoCarico] = useState(storico ? "validato" : "attivi");
     // Filtri avanzati (collaboratore/compagnia/ramo/mezzo/tipo)
     const [collabId, setCollabId] = useState("");
     const [compagniaId, setCompagniaId] = useState("");
@@ -108,6 +109,7 @@ export default function CarichiMensili() {
         try {
             const params = { stato_carico: statoCarico };
             if (collabId) params.collaboratore_id = collabId;
+            if (compagniaId) params.compagnia_id = compagniaId;
             const qq = q.trim();
             if (qq) params.q = qq;
             if (dal && al) {
@@ -119,13 +121,14 @@ export default function CarichiMensili() {
             }
             const r = await api.get("/carichi-mensili", { params });
             setRows(r.data.righe || []);
+            setTotali(r.data.totali || null);
             setSelected(new Set());
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore caricamento");
             setRows([]);
         }
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al, collabId]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al, collabId, compagniaId]);
 
     // Ricerca libera server-side con debounce
     useEffect(() => {
@@ -136,6 +139,7 @@ export default function CarichiMensili() {
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollaboratori(r.data || [])).catch(() => {});
+        api.get("/compagnie").then((r) => setCompagnie(r.data?.items || r.data || [])).catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -219,27 +223,37 @@ export default function CarichiMensili() {
     };
 
     return (
-        <div className="p-4 md:p-6 max-w-[1600px] mx-auto" data-testid="page-carichi-mensili">
+        <div className="p-4 md:p-6 max-w-[1600px] mx-auto" data-testid={storico ? "page-carichi-storico" : "page-carichi-mensili"}>
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Carichi Mensili / Quietanzamento</h1>
-                    <p className="text-sm text-slate-500">Import selettivo dei titoli in scadenza + vaglio operatore</p>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        {storico ? "Storico Carichi" : "Carichi Mensili / Quietanzamento"}
+                    </h1>
+                    <p className="text-sm text-slate-500">
+                        {storico
+                            ? "Titoli validati — sola lettura (nessuna modifica, validazione o cancellazione)"
+                            : "Import selettivo dei titoli in scadenza + vaglio operatore"}
+                    </p>
                 </div>
                 <div className="flex items-center gap-2">
                     <Button variant="outline" onClick={() => setConfrontoOpen(true)} data-testid="btn-confronto-annuale"
                             className="border-amber-300 text-amber-700 hover:bg-amber-50">
                         <TrendingDown size={14} className="mr-1" /> Confronto anno prec.
                     </Button>
-                    <Button variant="outline" onClick={() => setImportOpen(true)} data-testid="btn-import-excel"
-                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-                        <Upload size={14} className="mr-1" /> Importa Excel/CSV
-                    </Button>
+                    {!storico && (
+                        <Button variant="outline" onClick={() => setImportOpen(true)} data-testid="btn-import-excel"
+                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+                            <Upload size={14} className="mr-1" /> Importa Excel/CSV
+                        </Button>
+                    )}
                     <Button variant="outline" onClick={() => setColToggleOpen(true)} data-testid="btn-columns">
                         <Columns size={14} className="mr-1" /> Personalizza colonne
                     </Button>
-                    <Button onClick={() => setReplicaOpen(true)} className="bg-sky-700 hover:bg-sky-800" data-testid="btn-replica">
-                        <Plus size={14} className="mr-1" /> Replica titolo manuale
-                    </Button>
+                    {!storico && (
+                        <Button onClick={() => setReplicaOpen(true)} className="bg-sky-700 hover:bg-sky-800" data-testid="btn-replica">
+                            <Plus size={14} className="mr-1" /> Replica titolo manuale
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -259,6 +273,17 @@ export default function CarichiMensili() {
                             <SelectItem value="all">Tutti i collaboratori</SelectItem>
                             {collaboratori.map((c) => (
                                 <SelectItem key={c.id} value={c.id}>{c.name || c.email}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Select value={compagniaId || "all"} onValueChange={(v) => setCompagniaId(v === "all" ? "" : v)}>
+                        <SelectTrigger className="w-52 h-9" data-testid="filter-compagnia">
+                            <SelectValue placeholder="Compagnia" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Tutte le compagnie</SelectItem>
+                            {compagnie.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.ragione_sociale || c.codice}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
@@ -293,7 +318,7 @@ export default function CarichiMensili() {
             </Card>
 
             {/* Barra azioni bulk */}
-            {selected.size > 0 && (
+            {!storico && selected.size > 0 && (
                 <Card className="p-2.5 mb-2 bg-violet-50 border-violet-300 flex items-center gap-2" data-testid="bulk-bar">
                     <span className="text-sm font-semibold text-violet-900">
                         {selected.size} titoli selezionati
@@ -327,14 +352,16 @@ export default function CarichiMensili() {
                         <table className="w-full text-xs">
                             <thead className="bg-slate-50 border-b border-slate-200">
                                 <tr>
-                                    <th className="w-10 p-2 text-left">
-                                        <Checkbox
-                                            checked={filtered.length > 0 && selected.size === filtered.length}
-                                            onCheckedChange={toggleAll}
-                                            data-testid="check-all"
-                                        />
-                                    </th>
-                                    {orderedColumns.filter((c) => isVisible(c.k)).map((c) => (
+                                    {!storico && (
+                                        <th className="w-10 p-2 text-left">
+                                            <Checkbox
+                                                checked={filtered.length > 0 && selected.size === filtered.length}
+                                                onCheckedChange={toggleAll}
+                                                data-testid="check-all"
+                                            />
+                                        </th>
+                                    )}
+                                    {orderedColumns.filter((c) => isVisible(c.k) && !(storico && c.k === "azioni")).map((c) => (
                                         <th key={c.k} className="p-2 text-left font-semibold text-slate-700 uppercase tracking-wide"
                                             style={{ minWidth: c.w }}>{c.label}</th>
                                     ))}
@@ -344,6 +371,7 @@ export default function CarichiMensili() {
                                 {filtered.map((r) => (
                                     <TitoloRow
                                         key={r.id} r={r}
+                                        storico={storico}
                                         checked={selected.has(r.id)}
                                         onCheck={() => toggleOne(r.id)}
                                         onDelete={() => eliminaOne(r.id)}
@@ -357,6 +385,24 @@ export default function CarichiMensili() {
                     </div>
                 )}
             </Card>
+            {totali && (
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2" data-testid="carichi-totali">
+                    {[
+                        { k: "lordo", label: "Premi lordi", color: "text-slate-900", testid: "tot-lordo" },
+                        { k: "netto", label: "Premi netti", color: "text-slate-900", testid: "tot-netto" },
+                        { k: "provvigioni", label: "Provvigioni", color: "text-sky-700", testid: "tot-provvigioni" },
+                        { k: "margine", label: "Margine", color: "text-emerald-700", testid: "tot-margine" },
+                        { k: "provvigioni_collab", label: "Provv. collaboratore", color: "text-violet-700", testid: "tot-provv-collab" },
+                    ].map((c) => (
+                        <div key={c.k} className="rounded-lg border border-slate-200 bg-white px-3 py-2" data-testid={c.testid}>
+                            <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{c.label}</div>
+                            <div className={`text-base font-bold ${c.color}`}>
+                                € {(totali[c.k] || 0).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
             <div className="mt-2 text-xs text-slate-500 text-center">
                 {filtered.length} titoli · {selected.size} selezionati
             </div>
@@ -602,17 +648,19 @@ const CELL_RENDERERS = {
     ),
 };
 
-function TitoloRow({ r, checked, onCheck, onDelete, onEdit, orderedColumns, isVisible }) {
+function TitoloRow({ r, storico, checked, onCheck, onDelete, onEdit, orderedColumns, isVisible }) {
     const stato = r.stato_carico || "validato";
     return (
         <tr className={`border-b border-slate-100 hover:bg-slate-50/70 ${r.bloccato ? "bg-amber-50/30" : ""}`}
             data-testid={`row-${r.id}`}>
-            <td className="p-2">
-                <Checkbox checked={checked} onCheckedChange={onCheck}
-                          disabled={stato !== "in_attesa"}
-                          data-testid={`check-${r.id}`} />
-            </td>
-            {orderedColumns.filter((c) => isVisible(c.k)).map((c) => {
+            {!storico && (
+                <td className="p-2">
+                    <Checkbox checked={checked} onCheckedChange={onCheck}
+                              disabled={stato !== "in_attesa"}
+                              data-testid={`check-${r.id}`} />
+                </td>
+            )}
+            {orderedColumns.filter((c) => isVisible(c.k) && !(storico && c.k === "azioni")).map((c) => {
                 const renderer = CELL_RENDERERS[c.k];
                 return (
                     <td key={c.k} className="p-2 align-middle" data-testid={`cell-${c.k}-${r.id}`}>
