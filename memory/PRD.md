@@ -2228,3 +2228,22 @@ Su richiesta utente, lo STORNO automatico del titolo della polizza VECCHIA quand
 - titoli stornati 6 → **56 (+50)** ✅ storno sostituzione funzionante;
 - polizze 26300 → 26329 (29 create, 245 aggiornate), anagrafiche +26/282 agg., sinistri 7 ✅.
 Esito: OMNIA importa polizze/anagrafiche/veicoli/garanzie/sinistri, NON crea titoli, ma storna il titolo della polizza sostituita.
+
+---
+
+## 2026-10-23 (4) — CORREZIONE: dedup Carichi spostata da IMPORT → VALIDAZIONE
+
+**Cambio richiesto dall'utente** (sovrascrive la scelta precedente "all'import"): l'import carica SEMPRE tutto come `in_attesa` (per revisione/modifica manuale); il controllo protetto/sovrascrivi/crea avviene alla **VALIDAZIONE**. Alla validazione i titoli entrano nella sezione Titoli e, essendo collegati per `polizza_id`, nei Titoli di polizza.
+
+**Backend `routes/carichi_mensili.py`:**
+- Import (`/import/apply`, `/import` generico, `/import/match-manual`): rimossa la dedup → semplice `insert_one` come `in_attesa`. Risposta `/apply` torna a creati/saltati/unmatched/errori/totali(+ssn)/totale_letti. `_dedup_insert` reso deprecato (semplice insert).
+- `POST /carichi-mensili/valida` riscritto con la dedup su chiave **polizza + scadenza** (confronto coi titoli UFFICIALI, cioè stato_carico ∉ {in_attesa, annullato_carico}):
+  - esiste titolo PROTETTO (`not _carico_overwritable`: incassato/stornato/insoluto/coperto/data_incasso) → carico marcato `annullato_carico` (motivo "Già presente (protetto)"), contatore `protetti`;
+  - esiste titolo `da_incassare` libero → SOVRASCRITTO in loco con importi/SSN/effetto/mezzo del carico (resta `da_incassare` + `validato`), carico in_attesa eliminato (no doppione), contatore `sovrascritti`;
+  - nessuno → carico promosso a `validato`/`da_incassare`, contatore `validati`.
+  Risposta: `{validati, sovrascritti, protetti}`.
+- `_carico_overwritable` resta la funzione di classificazione condivisa.
+
+**Frontend `CarichiMensili.jsx`:** risultato import mostra Letti/Caricati(in attesa)/Orfani (niente più sovrascritti/protetti all'import); il toast di `valida()` mostra "X nuovi · Y aggiornati · Z protetti (saltati)".
+
+**Test e2e (admin tenant, 3 scadenze):** `validati=1, sovrascritti=1, protetti=1` → incassato(999) intatto + carico scartato(annullato); da_incassare 100→250 sovrascritto senza doppione; scadenza mancante creata come da_incassare. ✅

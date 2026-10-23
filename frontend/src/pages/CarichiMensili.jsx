@@ -176,7 +176,12 @@ export default function CarichiMensili() {
         if (!window.confirm(`Validare e promuovere ${selected.size} titolo/i nello Scadenziario ufficiale?`)) return;
         try {
             const r = await api.post("/carichi-mensili/valida", { titoli_ids: [...selected] });
-            toast.success(`Validati ${r.data.validati} titoli`);
+            const d = r.data || {};
+            const parts = [`${d.validati || 0} nuovi`];
+            if (d.sovrascritti) parts.push(`${d.sovrascritti} aggiornati`);
+            if (d.protetti) parts.push(`${d.protetti} protetti (saltati)`);
+            toast.success(`Validazione: ${parts.join(" · ")}`);
+            setSelected(new Set());
             load();
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore validazione");
@@ -1064,11 +1069,9 @@ function ImportExcelDialog({ onClose }) {
                     <div className="space-y-3">
                         <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
                             <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
-                            <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mt-2 text-sm">
+                            <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
                                 <div><span className="text-slate-500">Letti:</span> <strong>{result.totale_letti}</strong></div>
-                                <div><span className="text-emerald-700">Creati:</span> <strong data-testid="import-creati">{result.creati}</strong></div>
-                                <div><span className="text-sky-700">Sovrascritti:</span> <strong data-testid="import-sovrascritti">{result.sovrascritti || 0}</strong></div>
-                                <div><span className="text-violet-700" title="Già presenti in stato protetto (incassato/coperto/stornato/sospeso): non sovrascritti">Protetti:</span> <strong data-testid="import-protetti">{result.saltati_protetti || 0}</strong></div>
+                                <div><span className="text-emerald-700">Caricati (in attesa):</span> <strong data-testid="import-creati">{result.creati}</strong></div>
                                 <div><span className="text-rose-700">Orfani:</span> <strong>{(result.unmatched || []).length}</strong></div>
                             </div>
                             {result.creati_manuale > 0 && (
