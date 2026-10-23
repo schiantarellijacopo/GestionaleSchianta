@@ -6594,6 +6594,10 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
     if body.get("data_incasso"):
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
     body["updated_at"] = _now_iso()
+    # Regola: se la NOTA del titolo contiene "storno"/"stornato" → lo stato diventa "stornato".
+    _nota_eff = body.get("nota", cur.get("nota")) or ""
+    if "storn" in str(_nota_eff).lower():
+        body["stato"] = "stornato"
     # Arrotonda gli importi a 2 decimali (evita artefatti float tipo 686,9999999)
     for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "diritti", "accessori", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:

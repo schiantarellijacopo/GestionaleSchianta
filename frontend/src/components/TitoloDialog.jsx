@@ -27,6 +27,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     const round2 = (x) => Math.round((parseFloat(x) || 0) * 100) / 100;
     const [f, setF] = useState(() => ({
         ...titolo,
+        tipo: titolo.tipo === "rinnovo" ? "quietanza" : titolo.tipo,
         importo_lordo: round2(titolo.importo_lordo),
         importo_netto: round2(titolo.importo_netto),
         imposte: round2(titolo.imposte),
@@ -338,9 +339,8 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                             <SelectTrigger data-testid="titolo-tipo-select"><SelectValue placeholder="Seleziona tipo" /></SelectTrigger>
                             <SelectContent>
                                 {[
-                                    ["quietanza", "Quietanza di rinnovo"],
+                                    ["quietanza", "Quietanza"],
                                     ["nuova", "Polizza nuova"],
-                                    ["rinnovo", "Rinnovo"],
                                     ["appendice", "Appendice"],
                                     ["inclusione", "Inclusione"],
                                     ["esclusione", "Esclusione"],

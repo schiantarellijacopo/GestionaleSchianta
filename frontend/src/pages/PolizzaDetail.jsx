@@ -2171,11 +2171,12 @@ const _TIPO_TITOLO_STYLE = {
 };
 function TipoTitoloBadge({ tipo }) {
     if (!tipo) return <span>—</span>;
-    const cls = _TIPO_TITOLO_STYLE[tipo] || "bg-slate-100 text-slate-600 border-slate-200";
+    const norm = tipo === "rinnovo" ? "quietanza" : tipo;
+    const cls = _TIPO_TITOLO_STYLE[norm] || "bg-slate-100 text-slate-600 border-slate-200";
     return (
         <span className={`inline-block text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${cls}`}
-            data-testid={`titolo-tipo-badge-${tipo}`}>
-            {tipo}
+            data-testid={`titolo-tipo-badge-${norm}`}>
+            {norm}
         </span>
     );
 }
