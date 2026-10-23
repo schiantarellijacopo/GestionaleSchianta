@@ -108,9 +108,16 @@ export default function CarichiMensili() {
         try {
             const params = { stato_carico: statoCarico };
             if (collabId) params.collaboratore_id = collabId;
-            // Se ci sono date esplicite, hanno priorità sul range preset
-            if (dal && al) { params.dal = dal; params.al = al; }
-            else if (range !== "tutti") params.range_filter = range;
+            const qq = q.trim();
+            if (qq) {
+                // Ricerca libera: il backend ignora i filtri data e cerca su tutte le annualità
+                params.q = qq;
+            } else if (dal && al) {
+                // Se ci sono date esplicite, hanno priorità sul range preset
+                params.dal = dal; params.al = al;
+            } else if (range !== "tutti") {
+                params.range_filter = range;
+            }
             const r = await api.get("/carichi-mensili", { params });
             setRows(r.data.righe || []);
             setSelected(new Set());
@@ -120,6 +127,13 @@ export default function CarichiMensili() {
         }
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [statoCarico, range, dal, al, collabId]);
+
+    // Ricerca libera server-side con debounce
+    useEffect(() => {
+        const t = setTimeout(() => { load(); }, 350);
+        return () => clearTimeout(t);
+        /* eslint-disable-next-line */
+    }, [q]);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollaboratori(r.data || [])).catch(() => {});

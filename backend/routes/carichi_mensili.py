@@ -173,6 +173,7 @@ async def lista_carichi_mensili(
     mese: Optional[str] = Query(None, description="YYYY-MM per filtrare per scadenza"),
     range_filter: Optional[str] = Query(None, regex="^(mese_corrente|mese_successivo|tutti)$"),
     dal: Optional[str] = Query(None), al: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="Ricerca libera: numero polizza, targa, cliente, compagnia"),
     collaboratore_id: Optional[str] = None,
     compagnia_id: Optional[str] = None,
     ramo: Optional[str] = None,
@@ -196,16 +197,18 @@ async def lista_carichi_mensili(
         # tipo_rinnovo su Titolo è il campo "tipo" (rinnovo/nuova/appendice/…)
         match["tipo"] = tipo_rinnovo
 
-    # Filtro data scadenza
-    if range_filter == "mese_corrente":
-        match["scadenza"] = {"$regex": f"^{_mese_corrente()}"}
-    elif range_filter == "mese_successivo":
-        match["scadenza"] = {"$regex": f"^{_mese_offset(1)}"}
-    elif mese:
-        match["scadenza"] = {"$regex": f"^{mese}"}
-    elif dal and al:
-        # Range custom per DATA DECORRENZA (effetto), non per scadenza
-        match["effetto"] = {"$gte": dal, "$lte": al}
+    # Filtro data scadenza — ignorato quando è attiva una ricerca libera (q),
+    # così la ricerca spazia su tutte le annualità/mesi.
+    if not (q and q.strip()):
+        if range_filter == "mese_corrente":
+            match["scadenza"] = {"$regex": f"^{_mese_corrente()}"}
+        elif range_filter == "mese_successivo":
+            match["scadenza"] = {"$regex": f"^{_mese_offset(1)}"}
+        elif mese:
+            match["scadenza"] = {"$regex": f"^{mese}"}
+        elif dal and al:
+            # Range custom per DATA DECORRENZA (effetto), non per scadenza
+            match["effetto"] = {"$gte": dal, "$lte": al}
 
     # Prefiltro polizze se compagnia/ramo → riduce il set titoli
     if compagnia_id or ramo:
@@ -218,6 +221,46 @@ async def lista_carichi_mensili(
         if not pol_ids_pre:
             return {"totale": 0, "righe": []}
         match["polizza_id"] = {"$in": pol_ids_pre}
+
+    # Ricerca libera (q): risolve le polizze per numero/targa, i clienti per nome,
+    # le compagnie per ragione sociale → filtra i titoli per polizza_id corrispondente.
+    if q and q.strip():
+        import re as _re
+        rx = _re.compile(_re.escape(q.strip()), _re.IGNORECASE)
+        pol_match_ids: set[str] = set()
+        async for p in db.polizze.find(
+            {"$or": [{"numero_polizza": rx}, {"targa": rx}]},
+            {"_id": 0, "id": 1},
+        ):
+            pol_match_ids.add(p["id"])
+        # Clienti per nome / cognome / ragione sociale
+        ana_match_ids = [a["id"] async for a in db.anagrafiche.find(
+            {"$or": [{"ragione_sociale": rx}, {"nome": rx}, {"cognome": rx}]},
+            {"_id": 0, "id": 1},
+        )]
+        if ana_match_ids:
+            async for p in db.polizze.find(
+                {"contraente_id": {"$in": ana_match_ids}}, {"_id": 0, "id": 1},
+            ):
+                pol_match_ids.add(p["id"])
+        # Compagnie per ragione sociale / codice
+        cmp_match_ids = [c["id"] async for c in db.compagnie.find(
+            {"$or": [{"ragione_sociale": rx}, {"codice": rx}]}, {"_id": 0, "id": 1},
+        )]
+        if cmp_match_ids:
+            async for p in db.polizze.find(
+                {"compagnia_id": {"$in": cmp_match_ids}}, {"_id": 0, "id": 1},
+            ):
+                pol_match_ids.add(p["id"])
+        if not pol_match_ids:
+            return {"totale": 0, "righe": []}
+        # Interseca con eventuale prefiltro compagnia/ramo già impostato
+        if "polizza_id" in match and isinstance(match["polizza_id"], dict):
+            prev = set(match["polizza_id"].get("$in", []))
+            pol_match_ids &= prev
+            if not pol_match_ids:
+                return {"totale": 0, "righe": []}
+        match["polizza_id"] = {"$in": list(pol_match_ids)}
 
     # Ordino per il campo filtrato: se è attivo il range per decorrenza uso 'effetto'
     # (con scadenza DESC come secondario, così i titoli senza scadenza finiscono in
