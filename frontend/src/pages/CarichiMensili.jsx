@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import {
     Filter, CheckCircle2, XCircle, RotateCw, Search,
-    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload, Pencil,
+    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload, Pencil, Archive, PackageCheck,
 } from "lucide-react";
 
 const ALL_COLUMNS = [
@@ -236,6 +236,12 @@ export default function CarichiMensili({ storico = false }) {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
+                    {storico && (
+                        <Button variant="outline" asChild data-testid="btn-torna-carichi"
+                                className="border-slate-300 text-slate-700 hover:bg-slate-50">
+                            <Link to="/carichi-mensili"><PackageCheck size={14} className="mr-1" /> Carichi Mensili</Link>
+                        </Button>
+                    )}
                     <Button variant="outline" onClick={() => setConfrontoOpen(true)} data-testid="btn-confronto-annuale"
                             className="border-amber-300 text-amber-700 hover:bg-amber-50">
                         <TrendingDown size={14} className="mr-1" /> Confronto anno prec.
@@ -249,6 +255,12 @@ export default function CarichiMensili({ storico = false }) {
                     <Button variant="outline" onClick={() => setColToggleOpen(true)} data-testid="btn-columns">
                         <Columns size={14} className="mr-1" /> Personalizza colonne
                     </Button>
+                    {!storico && (
+                        <Button variant="outline" asChild data-testid="btn-storico-carichi"
+                                className="border-slate-300 text-slate-700 hover:bg-slate-50">
+                            <Link to="/carichi-storico"><Archive size={14} className="mr-1" /> Storico Carichi</Link>
+                        </Button>
+                    )}
                     {!storico && (
                         <Button onClick={() => setReplicaOpen(true)} className="bg-sky-700 hover:bg-sky-800" data-testid="btn-replica">
                             <Plus size={14} className="mr-1" /> Replica titolo manuale
