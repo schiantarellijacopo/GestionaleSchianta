@@ -1002,6 +1002,37 @@ async def delete_carico(
     return {"ok": True}
 
 
+class EliminaMultipliBody(BaseModel):
+    titoli_ids: list[str]
+
+
+@router.post("/carichi-mensili/elimina-multipli")
+async def elimina_multipli_carichi(
+    body: EliminaMultipliBody,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Elimina più titoli selezionati. I titoli bloccati (prima nota chiusa /
+    consolidati) vengono saltati e riportati nella risposta."""
+    if not body.titoli_ids:
+        raise HTTPException(400, "Nessun titolo selezionato")
+    eliminati = 0
+    bloccati = []
+    for tid in body.titoli_ids:
+        t = await db.titoli.find_one({"id": tid}, {"_id": 0})
+        if not t:
+            continue
+        bloccato, motivo = await _is_titolo_bloccato(t)
+        if bloccato:
+            bloccati.append({"id": tid, "motivo": motivo})
+            continue
+        await db.titoli.delete_one({"id": tid})
+        eliminati += 1
+    await log_attivita(user, "elimina_multipli_carichi", "titoli", None,
+                       f"eliminati={eliminati} bloccati={len(bloccati)}")
+    return {"ok": True, "eliminati": eliminati, "bloccati": bloccati}
+
+
+
 class ImportManualeBody(BaseModel):
     """Import 'manuale' di una lista di titoli (utile per test o per operatore che
     incolla dati da un file). Ogni titolo entra in ``stato_carico=in_attesa``.

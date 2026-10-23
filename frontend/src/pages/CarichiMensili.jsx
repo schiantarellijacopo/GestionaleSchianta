@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import {
     Filter, CheckCircle2, XCircle, RotateCw, Search,
-    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload, Pencil, Archive, PackageCheck,
+    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload, Pencil, Archive, PackageCheck, Trash2,
 } from "lucide-react";
 
 const ALL_COLUMNS = [
@@ -217,6 +217,25 @@ export default function CarichiMensili({ storico = false }) {
         }
     };
 
+    const eliminaSelezionati = async () => {
+        if (selected.size === 0) return;
+        if (!window.confirm(`Eliminare definitivamente ${selected.size} titolo/i selezionati? L'azione è irreversibile e li rimuove anche dai Titoli di polizza e dagli Arretrati.`)) return;
+        try {
+            const r = await api.post("/carichi-mensili/elimina-multipli", { titoli_ids: [...selected] });
+            const d = r.data || {};
+            const bloccati = (d.bloccati || []).length;
+            if (bloccati) {
+                toast.warning(`Eliminati ${d.eliminati || 0} · ${bloccati} saltati (bloccati: prima nota chiusa)`);
+            } else {
+                toast.success(`Eliminati ${d.eliminati || 0} titolo/i`);
+            }
+            setSelected(new Set());
+            load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore eliminazione");
+        }
+    };
+
     const isVisible = (k) => visible.includes(k);
     const toggleCol = (k) => {
         if (visible.includes(k)) setVisible(visible.filter((v) => v !== k));
@@ -345,6 +364,11 @@ export default function CarichiMensili({ storico = false }) {
                             className="border-rose-300 text-rose-700 hover:bg-rose-50"
                             data-testid="btn-annulla">
                         <XCircle size={14} className="mr-1" /> Annulla (motivo)
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={eliminaSelezionati}
+                            className="border-red-400 text-red-700 hover:bg-red-50"
+                            data-testid="btn-elimina-selezionati">
+                        <Trash2 size={14} className="mr-1" /> Elimina selezionati
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
                         Deseleziona
