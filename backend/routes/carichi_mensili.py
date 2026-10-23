@@ -94,8 +94,9 @@ async def _insert_or_replace_carico(t: "Titolo") -> str:
     file importato, mentre la scadenza può differire (colonna 'Scad. copertura'
     vs scadenza calcolata) e causava falsi doppioni.
     I titoli PROTETTI (incassato/coperto/stornato/sospeso/in Prima Nota) non
-    vengono mai toccati: in quel caso si inserisce comunque il carico per la
-    revisione e sarà la validazione a gestirli.
+    vengono mai toccati; inoltre, se per la stessa polizza+decorrenza esiste già
+    un titolo VALIDATO, il nuovo carico NON viene creato (ritorna
+    ``skipped_duplicate``) per impedire doppioni ufficiali dopo la validazione.
     """
     # Match sulla decorrenza; fallback sulla scadenza per i titoli senza effetto.
     key_field = "effetto" if t.effetto else "scadenza"
@@ -115,6 +116,13 @@ async def _insert_or_replace_carico(t: "Titolo") -> str:
         if dup_ids:
             await db.titoli.delete_many({"id": {"$in": dup_ids}})
         return "replaced"
+    # 2) esiste già un titolo VALIDATO (coperto/da incassare/incassato) per la stessa
+    #    polizza+decorrenza → è un doppione di un'annualità già processata: NON creare
+    #    un secondo carico (altrimenti dopo la validazione comparirebbe un doppione
+    #    ufficiale). Si salta e si segnala all'operatore.
+    gia_validato = any(e.get("stato_carico") == "validato" for e in existing)
+    if gia_validato:
+        return "skipped_duplicate"
     await db.titoli.insert_one(t.model_dump())
     return "created"
 
@@ -1198,6 +1206,7 @@ async def import_apply(
     creati = 0
     saltati = 0
     sovrascritti = 0
+    duplicati = 0
     errori: list[dict] = []
     unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
     totali = {"lordo": 0.0, "netto": 0.0, "imposte": 0.0, "ssn": 0.0, "provvigioni": 0.0}
@@ -1299,6 +1308,9 @@ async def import_apply(
                 fonte="import_ania",
             )
             esito = await _insert_or_replace_carico(t)
+            if esito == "skipped_duplicate":
+                duplicati += 1
+                continue
             if esito == "replaced":
                 sovrascritti += 1
             else:
@@ -1312,9 +1324,10 @@ async def import_apply(
             errori.append({"riga": i, "errore": str(e)})
 
     await log_attivita(user, "import_excel_csv", "titoli", batch_id,
-                       f"creati={creati} sovrascritti={sovrascritti} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
+                       f"creati={creati} sovrascritti={sovrascritti} duplicati={duplicati} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
     return {"ok": True, "batch_id": batch_id, "creati": creati,
             "sovrascritti": sovrascritti,
+            "duplicati": duplicati,
             "saltati": saltati, "unmatched": unmatched, "errori": errori,
             "totali": {k: round(v, 2) for k, v in totali.items()},
             "totale_letti": len(rows)}
@@ -1342,6 +1355,7 @@ async def import_match_manual(
         return {"ok": True, "creati": 0}
     creati = 0
     saltati_protetti = 0
+    duplicati = 0
     errori = []
     for m in body.matches:
         try:
@@ -1379,13 +1393,16 @@ async def import_match_manual(
                 fonte="import_ania",
                 note_carico=f"Abbinamento manuale post-import (file: {m.get('polizza_numero_file') or 'n/d'})",
             )
-            await _insert_or_replace_carico(t)
-            creati += 1
+            esito = await _insert_or_replace_carico(t)
+            if esito == "skipped_duplicate":
+                duplicati += 1
+            else:
+                creati += 1
         except Exception as e:
             errori.append({"errore": str(e)})
     await log_attivita(user, "import_manual_match", "titoli", body.batch_id,
-                       f"creati={creati} errori={len(errori)}")
-    return {"ok": True, "creati": creati, "errori": errori}
+                       f"creati={creati} duplicati={duplicati} errori={len(errori)}")
+    return {"ok": True, "creati": creati, "duplicati": duplicati, "errori": errori}
 
 
 @router.post("/carichi-mensili/import")
@@ -1400,6 +1417,7 @@ async def import_carichi(
         raise HTTPException(400, "Nessun titolo fornito")
     batch_id = str(uuid.uuid4())
     creati = 0
+    duplicati = 0
     errori = []
     for row in body.titoli:
         try:
@@ -1426,10 +1444,13 @@ async def import_carichi(
                 premio_precedente=float(last["importo_lordo"]) if last else None,
                 fonte="import_ania" if body.import_source != "manuale" else "manuale",
             )
-            await _insert_or_replace_carico(t)
-            creati += 1
+            esito = await _insert_or_replace_carico(t)
+            if esito == "skipped_duplicate":
+                duplicati += 1
+            else:
+                creati += 1
         except Exception as e:
             errori.append({"row": row.get("polizza_id"), "errore": str(e)})
     await log_attivita(user, "import_carichi", "titoli", batch_id,
-                       f"creati={creati} errori={len(errori)}")
-    return {"ok": True, "batch_id": batch_id, "creati": creati, "errori": errori}
+                       f"creati={creati} duplicati={duplicati} errori={len(errori)}")
+    return {"ok": True, "batch_id": batch_id, "creati": creati, "duplicati": duplicati, "errori": errori}

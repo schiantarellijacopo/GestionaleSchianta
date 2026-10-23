@@ -47,3 +47,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Causa reale: /carichi-mensili e /carichi-storico rendono entrambe <CarichiMensili>. React Router riusava la stessa istanza senza rimontare → la prop `storico` passava a true (sottotitolo corretto) ma lo stato `statoCarico` restava "attivi" dalla vista precedente, quindi il backend riceveva `attivi` (include in_attesa). L'apertura diretta dell'URL invece montava da zero (validato) → da qui la discrepanza coi test precedenti.
 - Fix: aggiunte `key` distinte ("carichi-mensili" / "carichi-storico") alle due Route in App.js → forzano il rimontaggio e il reset di stato.
 - Verifica: flusso reale (click pulsante) sul tenant schianta91 (c5ae2d0e) → In Attesa: 0, Validato: 98.
+
+## [2026-10-23] FIX doppione import (titolo già validato)
+- Segnalazione (produzione, tenant jacopo@schiantarelli.it / c5ae2d0e): polizza 731121243 con doppione — titolo effetto 19/10/2026 presente due volte (uno "coperto" validato + uno "da incassare" validato).
+- Causa: `_insert_or_replace_carico` sovrascriveva SOLO i titoli esistenti `in_attesa`. Se per stessa polizza+decorrenza esisteva già un titolo VALIDATO (coperto/incassato), creava un NUOVO carico in_attesa → dopo validazione = doppione ufficiale.
+- Fix (backend routes/carichi_mensili.py): se esiste già un titolo `stato_carico=validato` per stessa polizza+effetto → `_insert_or_replace_carico` ritorna `skipped_duplicate` e NON inserisce. Contatore `duplicati` aggiunto a import/apply, import/match-manual, import. Frontend mostra "Duplicati saltati" nel toast e nel riepilogo step 3.
+- Verificato in preview su polizza 731121243: esistente validato → skipped_duplicate (nessun insert); esistente in_attesa → replaced (sovrascrive).
+- NOTA: il doppione già presente in PRODUZIONE va rimosso a mano (cestino sul titolo "da incassare" errato). Il fix va in produzione solo dopo un nuovo deploy.

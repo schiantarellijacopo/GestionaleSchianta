@@ -964,7 +964,9 @@ function ImportExcelDialog({ onClose }) {
                 })));
             } else {
                 setStep(3);
-                toast.success(`Import completato: ${r.data.creati} titoli creati`);
+                const dup = r.data.duplicati ? ` · ${r.data.duplicati} duplicati saltati (già presenti)` : "";
+                const sov = r.data.sovrascritti ? ` · ${r.data.sovrascritti} aggiornati` : "";
+                toast.success(`Import completato: ${r.data.creati} titoli creati${sov}${dup}`);
             }
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore import");
@@ -1133,10 +1135,11 @@ function ImportExcelDialog({ onClose }) {
                     <div className="space-y-3">
                         <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
                             <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-sm">
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2 text-sm">
                                 <div><span className="text-slate-500">Letti:</span> <strong>{result.totale_letti}</strong></div>
                                 <div><span className="text-emerald-700">Caricati (in attesa):</span> <strong data-testid="import-creati">{result.creati}</strong></div>
                                 <div><span className="text-sky-700" title="Doppioni già presenti in attesa, sovrascritti con i nuovi dati">Doppioni sovrascritti:</span> <strong data-testid="import-sovrascritti">{result.sovrascritti || 0}</strong></div>
+                                <div><span className="text-amber-700" title="Titoli già validati per la stessa polizza e decorrenza: saltati per evitare doppioni">Duplicati saltati:</span> <strong data-testid="import-duplicati">{result.duplicati || 0}</strong></div>
                                 <div><span className="text-rose-700">Orfani:</span> <strong>{(result.unmatched || []).length}</strong></div>
                             </div>
                             {result.creati_manuale > 0 && (
