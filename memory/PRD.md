@@ -24,11 +24,17 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Date a due cifre normalizzate in ISO (`_to_iso_date`).
 
 ## Implementato (changelog recente)
-- 2026-06: Colonna **Metodo Pagamento** eredita dalla polizza (`mezzo_pagamento_preferito` → `ultimo_mezzo_pagamento`) quando il titolo non ha valore proprio. Backend `carichi_mensili.py` (proiezione polizze + build riga).
+- 2026-06: **Isolamento tenant rafforzato (regola critica: i dati di ogni tenant restano separati)**. Rimossi 645 titoli corrotti che puntavano a polizze di un altro tenant. L'import ora lega esplicitamente il titolo al tenant della sua polizza (`agenzia_tenant_id` dalla polizza) in entrambi i percorsi (import automatico + abbinamento manuale). Verificato: import nel tenant c5ae2d0e crea il titolo nello stesso tenant.
+- 2026-06: Dedup carichi per `polizza_id + effetto` (decorrenza) invece di `scadenza` — la scadenza poteva divergere (colonna "Scad. copertura" vs calcolata) causando falsi doppioni. Il re-import ora sovrascrive i dati (provvigioni comprese) e collassa i duplicati residui. Puliti i doppioni storici.
+- 2026-06: Colonna **Metodo Pagamento** mostra SOLO il tipo pagamento preferito della polizza (`mezzo_pagamento_preferito`).
 - Ricerca combinata q + date + compagnia + operatore.
-- Dedup import + normalizzazione date.
 - Filtro compagnia + totali full-set.
 - Sezione Storico (sola lettura) per titoli validati.
+
+## Note tenant
+- Dati reali nel tenant `c5ae2d0e-...` (26k polizze, 57k titoli, 23 utenti).
+- Account test admin@assicura.it = tenant `tenant-principale-schiantarelli` (dati minimi, NON il tenant reale).
+- Un titolo deve SEMPRE avere lo stesso `agenzia_tenant_id` della sua polizza.
 
 ## Backlog / Da verificare
 - E2E Storico: validare titolo → sparisce da Carichi Mensili → appare in Storico (sola lettura).

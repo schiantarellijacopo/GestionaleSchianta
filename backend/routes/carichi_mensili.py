@@ -88,23 +88,32 @@ def _carico_overwritable(t: dict) -> bool:
 
 async def _insert_or_replace_carico(t: "Titolo") -> str:
     """Evita i DOPPIONI in Carichi mensili: se esiste già un carico per la stessa
-    polizza + scadenza (sia 'in_attesa' sia un titolo già validato ma ancora
-    'da_incassare' e non protetto), lo SOVRASCRIVE con i nuovi importi riportandolo
-    'in_attesa'; altrimenti inserisce un nuovo carico. I titoli PROTETTI
-    (incassato/coperto/stornato/sospeso/in Prima Nota) non vengono mai toccati:
-    in quel caso si inserisce comunque il carico per la revisione e sarà la
-    validazione a gestirli.
+    polizza + decorrenza (effetto), lo SOVRASCRIVE con i nuovi importi (provvigioni
+    comprese) riportandolo 'in_attesa'; altrimenti inserisce un nuovo carico.
+    La chiave è ``polizza_id + effetto`` perché la decorrenza arriva identica dal
+    file importato, mentre la scadenza può differire (colonna 'Scad. copertura'
+    vs scadenza calcolata) e causava falsi doppioni.
+    I titoli PROTETTI (incassato/coperto/stornato/sospeso/in Prima Nota) non
+    vengono mai toccati: in quel caso si inserisce comunque il carico per la
+    revisione e sarà la validazione a gestirli.
     """
+    # Match sulla decorrenza; fallback sulla scadenza per i titoli senza effetto.
+    key_field = "effetto" if t.effetto else "scadenza"
+    key_val = t.effetto if t.effetto else t.scadenza
     existing = await db.titoli.find(
-        {"polizza_id": t.polizza_id, "scadenza": t.scadenza}, {"_id": 0},
+        {"polizza_id": t.polizza_id, key_field: key_val}, {"_id": 0},
     ).to_list(50)
-    # 1) doppione in attesa → sovrascrivi quello
-    in_attesa = next((e for e in existing if e.get("stato_carico") == "in_attesa"), None)
+    # 1) doppione in attesa → sovrascrivi il primo e RIMUOVI eventuali duplicati
+    in_attesa = [e for e in existing if e.get("stato_carico") == "in_attesa"]
     if in_attesa:
         patch = t.model_dump()
         patch.pop("id", None)
         patch.pop("created_at", None)
-        await db.titoli.update_one({"id": in_attesa["id"]}, {"$set": patch})
+        await db.titoli.update_one({"id": in_attesa[0]["id"]}, {"$set": patch})
+        # collassa gli eventuali duplicati residui (stessa polizza+decorrenza)
+        dup_ids = [e["id"] for e in in_attesa[1:]]
+        if dup_ids:
+            await db.titoli.delete_many({"id": {"$in": dup_ids}})
         return "replaced"
     await db.titoli.insert_one(t.model_dump())
     return "created"
@@ -472,11 +481,8 @@ async def lista_carichi_mensili(
             "compagnia_nome": cmps.get(p.get("compagnia_id"), ""),
             "sinistri_ultimi_12m": sin_map.get(p.get("id"), 0),
             "operatore_nome": users.get(t.get("collaboratore_id"), ""),
-            # Metodo pagamento: se il titolo non lo ha, eredita dalla polizza
-            # (tipo pagamento preferito, poi ultimo mezzo usato)
-            "mezzo_pagamento": (t.get("mezzo_pagamento")
-                                or p.get("mezzo_pagamento_preferito")
-                                or p.get("ultimo_mezzo_pagamento")),
+            # Metodo pagamento: mostra SOLO il tipo pagamento preferito della polizza
+            "mezzo_pagamento": p.get("mezzo_pagamento_preferito"),
             "bloccato": bloccato,
             "motivo_blocco": motivo,
             "variazione_badge": variazione_badge,
@@ -1207,7 +1213,7 @@ async def import_apply(
             pol_num = str(pol_num_raw).strip()
             pol = await db.polizze.find_one(
                 {"numero_polizza": pol_num},
-                {"_id": 0, "id": 1, "collaboratore_id": 1},
+                {"_id": 0, "id": 1, "collaboratore_id": 1, "agenzia_tenant_id": 1},
             )
             if not pol:
                 # Polizza non trovata → cerca candidati per abbinamento manuale
@@ -1277,6 +1283,7 @@ async def import_apply(
             )
             t = Titolo(
                 polizza_id=pol["id"],
+                agenzia_tenant_id=pol.get("agenzia_tenant_id"),
                 effetto=eff or scad, scadenza=scad,
                 importo_lordo=imp_lordo, importo_netto=imp_netto,
                 imposte=_to_float(r.get(mapping.get("imposte", ""))),
@@ -1342,7 +1349,7 @@ async def import_match_manual(
             if not pol_id:
                 continue
             pol = await db.polizze.find_one(
-                {"id": pol_id}, {"_id": 0, "id": 1, "collaboratore_id": 1},
+                {"id": pol_id}, {"_id": 0, "id": 1, "collaboratore_id": 1, "agenzia_tenant_id": 1},
             )
             if not pol:
                 errori.append({"polizza_id": pol_id, "errore": "polizza scomparsa"})
@@ -1354,6 +1361,7 @@ async def import_match_manual(
             imp_lordo = float(m.get("importo_lordo") or 0)
             t = Titolo(
                 polizza_id=pol_id,
+                agenzia_tenant_id=pol.get("agenzia_tenant_id"),
                 effetto=m.get("effetto") or m.get("scadenza"),
                 scadenza=m.get("scadenza"),
                 importo_lordo=imp_lordo,
