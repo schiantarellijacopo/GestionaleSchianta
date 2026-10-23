@@ -1927,10 +1927,21 @@ async def _marca_polizze_sostituite(db) -> tuple[int, int]:
             {"$set": {"stato": "sostituita", "sostituita_da_polizza_id": p["id"],
                       "updated_at": _now_iso()}})
         n += res.modified_count
-        # NB: lo STORNO automatico dei titoli della polizza sostituita è stato
-        # DISATTIVATO: l'import OMNIA non crea/aggiorna/storna più alcun titolo
-        # (i titoli si gestiscono solo da Carichi mensili). Resta il solo legame
-        # di polizza (stato 'sostituita' + backlink).
+        nuovo_num = (p.get("numero_polizza") or "").strip()
+        # STORNO automatico del titolo della polizza VECCHIA quando viene sostituita.
+        # (Unica operazione sui titoli mantenuta nell'import OMNIA.)
+        # Protetti SEMPRE: titoli COPERTI/incassati/pagati/in Prima Nota. Un titolo
+        # coperto ha stato="da_incassare" ma titolo_coperto=True → ESCLUSO.
+        _vuoto = lambda f: {"$or": [{f: None}, {f: ""}, {f: {"$exists": False}}]}
+        res_t = await db.titoli.update_many(
+            {"polizza_id": old_id, "stato": "da_incassare",
+             "titolo_coperto": {"$ne": True},
+             "$and": [_vuoto("data_copertura"), _vuoto("data_incasso"),
+                      _vuoto("movimento_pagamento_id"), _vuoto("chiusura_id")]},
+            {"$set": {"stato": "stornato",
+                      "nota_storno": f"Stornato automaticamente: polizza sostituita da N. {nuovo_num}".strip(),
+                      "updated_at": _now_iso()}})
+        stornati += res_t.modified_count
     return n, stornati
 
 
@@ -2011,8 +2022,9 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
                              tracker=tracker, import_mappings=import_mappings)
     # ═══ TITOLI DISATTIVATI NELL'IMPORT OMNIA (dal 2026-10) ═══
-    # Su richiesta, l'import OMNIA NON crea/aggiorna/storna più alcun titolo:
-    # i titoli nascono esclusivamente dalla sezione Carichi mensili.
+    # L'import OMNIA NON crea/aggiorna i titoli dai premi (rec42): i titoli nascono
+    # solo dalla sezione Carichi mensili. UNICA eccezione: lo STORNO automatico del
+    # titolo della polizza VECCHIA quando viene sostituita (vedi _marca_polizze_sostituite).
     # Restano attivi: clienti, polizze, veicoli, garanzie, premi, provvigioni, sinistri.
     #   (disattivati: _riattiva_titoli_sostituenti, _processa_titoli)
     counts["titoli_riattivati_sostituzione"] = 0

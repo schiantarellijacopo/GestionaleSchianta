@@ -2219,3 +2219,12 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 - `_processa_titoli`/`_riattiva_titoli_sostituenti` restano nel file ma NON più invocate (codice morto documentato).
 
 **Conseguenza nota:** lo storno automatico del titolo della polizza sostituita non avviene più da OMNIA (va gestito da Carichi mensili/manualmente). Titoli storici già creati da OMNIA restano (nessuna pulizia retroattiva). Verifica solo a livello di codice (syntax+import OK, call-graph): non disponibile uno ZIP OMNIA reale per il test end-to-end.
+
+### Aggiornamento 2026-10-23 (3) — eccezione: storno sostituzione RIATTIVATO + test reale
+Su richiesta utente, lo STORNO automatico del titolo della polizza VECCHIA quando viene sostituita DEVE restare attivo (unica operazione sui titoli mantenuta da OMNIA). Riabilitato il blocco in `_marca_polizze_sostituite` (protegge sempre coperti/incassati/pagati/in Prima Nota; storna solo i `da_incassare` liberi).
+
+**Test end-to-end con ZIP OMNIA reale** (A_OW8_23774…zip, 17 CSV incl. rec42 436KB) sul tenant reale c5ae2d0e (jacopo@schiantarelli.it), via `/import/omnia-async`:
+- `titoli_creati = 0`; titoli totali 57741 → **57741 (invariati)** ✅ nessun titolo creato;
+- titoli stornati 6 → **56 (+50)** ✅ storno sostituzione funzionante;
+- polizze 26300 → 26329 (29 create, 245 aggiornate), anagrafiche +26/282 agg., sinistri 7 ✅.
+Esito: OMNIA importa polizze/anagrafiche/veicoli/garanzie/sinistri, NON crea titoli, ma storna il titolo della polizza sostituita.
