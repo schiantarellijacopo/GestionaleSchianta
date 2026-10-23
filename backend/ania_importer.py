@@ -792,18 +792,8 @@ async def _applica_sospensione_import(db, pid: str, data_sosp: str) -> None:
         {"id": pid},
         {"$set": {"stato": "sospesa", "data_sospensione": data_sosp, "updated_at": _now_iso()}},
     )
-    # Titolo di sospensione automatico (importo 0) — una sola volta per data
-    gia = await db.titoli.find_one(
-        {"polizza_id": pid, "tipo": "sospensione", "effetto": data_sosp}, {"_id": 0, "id": 1})
-    if not gia:
-        t = Titolo(
-            polizza_id=pid, tipo="sospensione", effetto=data_sosp, scadenza=data_sosp,
-            importo_lordo=0.0, importo_netto=0.0, stato="da_incassare",
-            collaboratore_id=pol.get("collaboratore_id"),
-        )
-        doc_t = t.model_dump()
-        doc_t["nota"] = f"Sospensione dal {data_sosp} (da import OMNIA)"
-        await db.titoli.insert_one(doc_t)
+    # NB: il titolo di sospensione NON viene più creato dall'import OMNIA.
+    # Dal 2026-10 i titoli nascono esclusivamente dalla sezione Carichi mensili.
 
 
 
@@ -1937,21 +1927,10 @@ async def _marca_polizze_sostituite(db) -> tuple[int, int]:
             {"$set": {"stato": "sostituita", "sostituita_da_polizza_id": p["id"],
                       "updated_at": _now_iso()}})
         n += res.modified_count
-        nuovo_num = (p.get("numero_polizza") or "").strip()
-        # STORNO SOLO dei titoli davvero liberi: MAI toccare i titoli COPERTI/in
-        # Prima Nota (coperti, incassati, pagati, in giornata chiusa). Un titolo
-        # coperto ha stato="da_incassare" ma titolo_coperto=True: va ESCLUSO,
-        # altrimenti l'import lo storna e sparisce dai Sospesi.
-        _vuoto = lambda f: {"$or": [{f: None}, {f: ""}, {f: {"$exists": False}}]}
-        res_t = await db.titoli.update_many(
-            {"polizza_id": old_id, "stato": "da_incassare",
-             "titolo_coperto": {"$ne": True},
-             "$and": [_vuoto("data_copertura"), _vuoto("data_incasso"),
-                      _vuoto("movimento_pagamento_id"), _vuoto("chiusura_id")]},
-            {"$set": {"stato": "stornato",
-                      "nota_storno": f"Stornato automaticamente: polizza sostituita da N. {nuovo_num}".strip(),
-                      "updated_at": _now_iso()}})
-        stornati += res_t.modified_count
+        # NB: lo STORNO automatico dei titoli della polizza sostituita è stato
+        # DISATTIVATO: l'import OMNIA non crea/aggiorna/storna più alcun titolo
+        # (i titoli si gestiscono solo da Carichi mensili). Resta il solo legame
+        # di polizza (stato 'sostituita' + backlink).
     return n, stornati
 
 
@@ -2031,17 +2010,12 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
     await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
                              tracker=tracker, import_mappings=import_mappings)
-    # Sostituzioni (PRIMA dei titoli): riattiva i titoli stornati delle polizze
-    # "testa" della catena di sostituzione, così il passo rec42 li rivalorizza.
-    counts["titoli_riattivati_sostituzione"] = await _riattiva_titoli_sostituenti(db)
-    await _processa_titoli(db, files_data, log, polizza_id_map, counts,
-                           mapping_operatori=mapping_operatori,
-                           tracker=tracker, import_mappings=import_mappings)
-    # Passo 1 (RIMOSSO): la regola che impostava lo stato polizza in base ai titoli
-    # (annullamento automatico CATTOLICA / riattivazione da incasso >= 2025) è stata
-    # disattivata su richiesta. Gli import non modificano più lo stato della polizza
-    # in base ai titoli; resta lo stato del tracciato / quello già presente.
-    # (funzione `_applica_regola_stato_da_titoli` mantenuta ma non più invocata)
+    # ═══ TITOLI DISATTIVATI NELL'IMPORT OMNIA (dal 2026-10) ═══
+    # Su richiesta, l'import OMNIA NON crea/aggiorna/storna più alcun titolo:
+    # i titoli nascono esclusivamente dalla sezione Carichi mensili.
+    # Restano attivi: clienti, polizze, veicoli, garanzie, premi, provvigioni, sinistri.
+    #   (disattivati: _riattiva_titoli_sostituenti, _processa_titoli)
+    counts["titoli_riattivati_sostituzione"] = 0
     _sost_n, _sost_st = await _marca_polizze_sostituite(db)
     counts["polizze_sostituite"] = _sost_n
     counts["titoli_stornati_sostituzione"] = _sost_st

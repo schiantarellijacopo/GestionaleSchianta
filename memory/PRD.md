@@ -2205,3 +2205,17 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 - **Riepilogo import** (step 3): mostra Letti / Creati / Sovrascritti / Protetti / Orfani.
 
 **Note:** "coperto/sospeso" = `titolo_coperto=true` o `insoluto`; "incassato"/"stornato" = `stato`. Nessuna pulizia retroattiva dei doppioni già presenti (scelta utente).
+
+---
+
+## 2026-10-23 (2) — Import OMNIA: titoli DISATTIVATI (titoli solo da Carichi mensili)
+
+**Richiesta utente:** l'import OMNIA non deve più creare/aggiornare/stornare TITOLI. Deve continuare a creare/aggiornare polizze (se mancanti), veicoli, garanzie, premi, provvigioni, sinistri. I titoli nascono SOLO dalla sezione Carichi mensili.
+
+**Implementato (`backend/ania_importer.py`):**
+- `importa_zip`: NON invoca più `_processa_titoli` (rec42) né `_riattiva_titoli_sostituenti`. `counts["titoli_riattivati_sostituzione"]=0`. Restano attivi prodotti/collaboratori/anagrafiche/polizze/veicoli/garanzie/sinistri/liquidazioni + `_marca_polizze_sostituite` (solo marcatura polizza) + `_aggiorna_scadenza_da_titoli` (aggiorna scadenza POLIZZA leggendo i titoli, non li modifica).
+- `_applica_sospensione_import`: rimosso l'insert del titolo di sospensione (importo 0); resta l'aggiornamento stato polizza → 'sospesa'.
+- `_marca_polizze_sostituite`: rimosso lo STORNO automatico dei titoli della polizza sostituita; resta solo il legame di polizza (stato 'sostituita' + `sostituita_da_polizza_id`). Ritorna titoli_stornati=0.
+- `_processa_titoli`/`_riattiva_titoli_sostituenti` restano nel file ma NON più invocate (codice morto documentato).
+
+**Conseguenza nota:** lo storno automatico del titolo della polizza sostituita non avviene più da OMNIA (va gestito da Carichi mensili/manualmente). Titoli storici già creati da OMNIA restano (nessuna pulizia retroattiva). Verifica solo a livello di codice (syntax+import OK, call-graph): non disponibile uno ZIP OMNIA reale per il test end-to-end.
