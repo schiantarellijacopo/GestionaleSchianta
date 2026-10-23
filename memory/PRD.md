@@ -2186,3 +2186,22 @@ Richiesta: in ogni anagrafica/titolo/polizza/sinistro, 3 pulsanti — Email e Wh
 - Brogliaccio giorni GIÀ CHIUSI usano lo snapshot salvato: le giornate chiuse prima del fix continueranno a mostrare REDION come "Diretto". Solo i giorni live/aperti usano la nuova logica.
 - `slugify` dei testid elimina caratteri non-ASCII (es. "Carta d'identità" → "carta-d-identit"): solo cosmetico sui data-testid.
 - Helper morti lasciati (warning eslint, non bloccanti): `compDocScadenza` (Compagnie), `ageDocScadenza` (Agenzie), `DocFolderCard`/`docScadenza` (Librerie).
+
+---
+
+## 2026-10-23 — Carichi mensili: anti-sovrascrittura all'import, Titoli solo validati, SSN, edit manuale
+
+**Richiesta utente:** import mette i titoli in `in_attesa`; dopo validazione devono comparire nei Titoli. All'import controllare per polizza+scadenza: se esiste già un titolo protetto (coperto/incassato/stornato/sospeso) NON sovrascrivere; gli altri sovrascrivere; crearli se mancano. Inoltre poter modificare manualmente il titolo dalla sezione Carichi. (Scelte: controllo all'IMPORT; chiave = polizza + scadenza; nessuna pulizia dei doppioni storici.)
+
+**Implementato e verificato (curl + DB, tutti i rami):**
+- **Dedup all'import** (`routes/carichi_mensili.py`): helper `_carico_overwritable(t)` (sovrascrivibile solo se `stato==da_incassare` AND non `titolo_coperto` AND senza `data_incasso`; tutto il resto = protetto) + `_dedup_insert(t)` su chiave `polizza_id + scadenza`:
+  - protetto esistente → `skipped` (contatore `saltati_protetti`), nessun duplicato;
+  - sovrascrivibile → `overwritten` in-place (aggiorna importi/SSN/ecc. e riporta `stato_carico=in_attesa`), nessun duplicato;
+  - nessuno → `created`.
+  Applicato a tutti e 3 i percorsi di creazione: `/import/apply`, `/import/match-manual`, `/import` (generico). La response di `/apply` ora ritorna anche `sovrascritti` e `saltati_protetti`.
+  Test: 3 righe stessa polizza → incassato(999€) intatto / da_incassare(100→250€) sovrascritto in loco / mancante(300€) creato → creati=1, sovrascritti=1, saltati_protetti=1, zero duplicati.
+- **Titoli solo validati**: `GET /api/titoli` e `routes/kpi.py _stats_titoli` ora escludono `stato_carico ∈ {in_attesa, annullato_carico}` (documenti legacy senza il campo restano visibili). Risolve i doppioni visti in Titoli (es. 182259960): i carichi non validati restano solo in Carichi mensili.
+- **Edit manuale carico**: `UpdateCaricoBody` esteso con `imposte` e `ssn`; frontend `CarichiMensili.jsx` nuovo `EditCaricoDialog` (matita in colonna Azioni, testid `btn-edit-<id>` / `dialog-edit-carico`) che modifica lordo/netto/tasse/SSN/provvigioni/mezzo/effetto/scadenza/note via `PUT /carichi-mensili/{id}`. Bloccato se titolo consolidato in Prima Nota chiusa. Verificato PUT persiste i campi.
+- **Riepilogo import** (step 3): mostra Letti / Creati / Sovrascritti / Protetti / Orfani.
+
+**Note:** "coperto/sospeso" = `titolo_coperto=true` o `insoluto`; "incassato"/"stornato" = `stato`. Nessuna pulizia retroattiva dei doppioni già presenti (scelta utente).

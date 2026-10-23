@@ -5107,6 +5107,9 @@ async def list_titoli(
     flt: dict = {}
     if polizza_id:
         flt["polizza_id"] = polizza_id
+    # I carichi non ancora validati (in_attesa) e gli annullati NON compaiono nei
+    # Titoli ufficiali: restano visibili solo nella sezione Carichi mensili.
+    flt["stato_carico"] = {"$nin": ["in_attesa", "annullato_carico"]}
     if tag:
         flt["tags"] = tag
     if stato:

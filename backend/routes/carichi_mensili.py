@@ -71,6 +71,47 @@ async def _is_titolo_bloccato(t: dict) -> tuple[bool, str]:
     return False, ""
 
 
+def _carico_overwritable(t: dict) -> bool:
+    """Un titolo esistente è SOVRASCRIVIBILE da un import solo se è un semplice
+    'da_incassare' non ancora toccato contabilmente.
+    PROTETTI (mai sovrascritti): incassato, stornato, insoluto/sospeso,
+    coperto (titolo_coperto) o con data_incasso valorizzata.
+    """
+    if (t.get("stato") or "da_incassare") != "da_incassare":
+        return False
+    if t.get("titolo_coperto"):
+        return False
+    if t.get("data_incasso"):
+        return False
+    return True
+
+
+async def _dedup_insert(t: "Titolo") -> str:
+    """Inserisce un titolo d'import applicando la regola anti-sovrascrittura
+    sulla chiave (polizza_id + scadenza):
+      - se esiste un titolo PROTETTO → 'skipped' (non tocca nulla);
+      - se esiste un titolo sovrascrivibile → 'overwritten' (aggiorna in loco,
+        riportandolo in stato_carico=in_attesa per il vaglio);
+      - altrimenti → 'created'.
+    """
+    existing = await db.titoli.find(
+        {"polizza_id": t.polizza_id, "scadenza": t.scadenza}, {"_id": 0},
+    ).to_list(50)
+    if any(not _carico_overwritable(e) for e in existing):
+        return "skipped"
+    sovr = [e for e in existing if _carico_overwritable(e)]
+    if sovr:
+        target = min(sovr, key=lambda x: 0 if x.get("stato_carico") == "in_attesa" else 1)
+        patch = t.model_dump()
+        patch.pop("id", None)
+        patch.pop("created_at", None)
+        await db.titoli.update_one({"id": target["id"]}, {"$set": patch})
+        return "overwritten"
+    await db.titoli.insert_one(t.model_dump())
+    return "created"
+
+
+
 def _mese_iso(dt_str: str) -> str:
     """Estrae YYYY-MM da una data YYYY-MM-DD."""
     return str(dt_str or "")[:7]
@@ -710,6 +751,8 @@ async def replica_manuale_titolo(
 class UpdateCaricoBody(BaseModel):
     importo_lordo: Optional[float] = None
     importo_netto: Optional[float] = None
+    imposte: Optional[float] = None
+    ssn: Optional[float] = None
     provvigioni: Optional[float] = None
     scadenza: Optional[str] = None
     effetto: Optional[str] = None
@@ -971,6 +1014,8 @@ async def import_apply(
     batch_id = str(uuid.uuid4())
     creati = 0
     saltati = 0
+    sovrascritti = 0
+    saltati_protetti = 0
     errori: list[dict] = []
     unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
     totali = {"lordo": 0.0, "netto": 0.0, "imposte": 0.0, "ssn": 0.0, "provvigioni": 0.0}
@@ -1070,8 +1115,14 @@ async def import_apply(
                 premio_precedente=float(last["importo_lordo"]) if last else None,
                 fonte="import_ania",
             )
-            await db.titoli.insert_one(t.model_dump())
-            creati += 1
+            esito = await _dedup_insert(t)
+            if esito == "skipped":
+                saltati_protetti += 1
+                continue
+            if esito == "overwritten":
+                sovrascritti += 1
+            else:
+                creati += 1
             totali["lordo"] += t.importo_lordo or 0
             totali["netto"] += t.importo_netto or 0
             totali["imposte"] += t.imposte or 0
@@ -1081,8 +1132,9 @@ async def import_apply(
             errori.append({"riga": i, "errore": str(e)})
 
     await log_attivita(user, "import_excel_csv", "titoli", batch_id,
-                       f"creati={creati} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
+                       f"creati={creati} sovrascritti={sovrascritti} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
     return {"ok": True, "batch_id": batch_id, "creati": creati,
+            "sovrascritti": sovrascritti, "saltati_protetti": saltati_protetti,
             "saltati": saltati, "unmatched": unmatched, "errori": errori,
             "totali": {k: round(v, 2) for k, v in totali.items()},
             "totale_letti": len(rows)}
@@ -1109,6 +1161,7 @@ async def import_match_manual(
     if not body.matches:
         return {"ok": True, "creati": 0}
     creati = 0
+    saltati_protetti = 0
     errori = []
     for m in body.matches:
         try:
@@ -1145,13 +1198,16 @@ async def import_match_manual(
                 fonte="import_ania",
                 note_carico=f"Abbinamento manuale post-import (file: {m.get('polizza_numero_file') or 'n/d'})",
             )
-            await db.titoli.insert_one(t.model_dump())
-            creati += 1
+            esito = await _dedup_insert(t)
+            if esito == "skipped":
+                saltati_protetti += 1
+            else:
+                creati += 1
         except Exception as e:
             errori.append({"errore": str(e)})
     await log_attivita(user, "import_manual_match", "titoli", body.batch_id,
-                       f"creati={creati} errori={len(errori)}")
-    return {"ok": True, "creati": creati, "errori": errori}
+                       f"creati={creati} saltati_protetti={saltati_protetti} errori={len(errori)}")
+    return {"ok": True, "creati": creati, "saltati_protetti": saltati_protetti, "errori": errori}
 
 
 @router.post("/carichi-mensili/import")
@@ -1166,6 +1222,7 @@ async def import_carichi(
         raise HTTPException(400, "Nessun titolo fornito")
     batch_id = str(uuid.uuid4())
     creati = 0
+    saltati_protetti = 0
     errori = []
     for row in body.titoli:
         try:
@@ -1192,10 +1249,14 @@ async def import_carichi(
                 premio_precedente=float(last["importo_lordo"]) if last else None,
                 fonte="import_ania" if body.import_source != "manuale" else "manuale",
             )
-            await db.titoli.insert_one(t.model_dump())
-            creati += 1
+            esito = await _dedup_insert(t)
+            if esito == "skipped":
+                saltati_protetti += 1
+            else:
+                creati += 1
         except Exception as e:
             errori.append({"row": row.get("polizza_id"), "errore": str(e)})
     await log_attivita(user, "import_carichi", "titoli", batch_id,
-                       f"creati={creati} errori={len(errori)}")
-    return {"ok": True, "batch_id": batch_id, "creati": creati, "errori": errori}
+                       f"creati={creati} saltati_protetti={saltati_protetti} errori={len(errori)}")
+    return {"ok": True, "batch_id": batch_id, "creati": creati,
+            "saltati_protetti": saltati_protetti, "errori": errori}

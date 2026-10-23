@@ -211,6 +211,8 @@ async def _stats_titoli(scope_filter: dict, storico: bool = False) -> list[dict]
     """
     now = datetime.now(timezone.utc)
     anno = now.year
+    # Escludi i carichi non validati (in_attesa) e gli annullati dai conteggi KPI
+    scope_filter = {**scope_filter, "stato_carico": {"$nin": ["in_attesa", "annullato_carico"]}}
     y_start, y_end = f"{anno}-01-01", f"{anno}-12-31"
     m_start = f"{anno}-{now.month:02d}-01"
     m_end = f"{anno}-{now.month:02d}-31"

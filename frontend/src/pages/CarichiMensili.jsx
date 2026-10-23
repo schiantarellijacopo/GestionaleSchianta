@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import {
     Filter, CheckCircle2, XCircle, RotateCw, Search,
-    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload,
+    Lock, AlertTriangle, TrendingUp, TrendingDown, Plus, Columns, Upload, Pencil,
 } from "lucide-react";
 
 const ALL_COLUMNS = [
@@ -85,6 +85,7 @@ export default function CarichiMensili() {
     const [annullaOpen, setAnnullaOpen] = useState(false);
     const [confrontoOpen, setConfrontoOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
+    const [editRow, setEditRow] = useState(null);
     const [visible, setVisible] = useState(() => {
         try { return JSON.parse(localStorage.getItem(LS_COLS)) || DEFAULT_VISIBLE; }
         catch { return DEFAULT_VISIBLE; }
@@ -337,6 +338,7 @@ export default function CarichiMensili() {
                                         checked={selected.has(r.id)}
                                         onCheck={() => toggleOne(r.id)}
                                         onDelete={() => eliminaOne(r.id)}
+                                        onEdit={() => setEditRow(r)}
                                         orderedColumns={orderedColumns}
                                         isVisible={isVisible}
                                     />
@@ -353,6 +355,12 @@ export default function CarichiMensili() {
             {/* Dialog: replica manuale */}
             {replicaOpen && (
                 <ReplicaDialog onClose={() => { setReplicaOpen(false); load(); }} />
+            )}
+            {/* Dialog: modifica manuale del titolo/carico */}
+            {editRow && (
+                <EditCaricoDialog row={editRow}
+                    onClose={() => setEditRow(null)}
+                    onSaved={() => { setEditRow(null); load(); }} />
             )}
             {/* Dialog: annulla con motivo */}
             {annullaOpen && (
@@ -565,8 +573,15 @@ const CELL_RENDERERS = {
             </div>
         );
     },
-    azioni: (r, { onDelete }) => (
+    azioni: (r, { onDelete, onEdit }) => (
         <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-sky-700 hover:bg-sky-50"
+                    onClick={onEdit}
+                    disabled={r.bloccato}
+                    title={r.bloccato ? r.motivo_blocco : "Modifica titolo"}
+                    data-testid={`btn-edit-${r.id}`}>
+                <Pencil size={13} />
+            </Button>
             <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px] text-rose-600 hover:bg-rose-50"
                     onClick={onDelete}
                     disabled={r.bloccato}
@@ -578,7 +593,7 @@ const CELL_RENDERERS = {
     ),
 };
 
-function TitoloRow({ r, checked, onCheck, onDelete, orderedColumns, isVisible }) {
+function TitoloRow({ r, checked, onCheck, onDelete, onEdit, orderedColumns, isVisible }) {
     const stato = r.stato_carico || "validato";
     return (
         <tr className={`border-b border-slate-100 hover:bg-slate-50/70 ${r.bloccato ? "bg-amber-50/30" : ""}`}
@@ -592,11 +607,104 @@ function TitoloRow({ r, checked, onCheck, onDelete, orderedColumns, isVisible })
                 const renderer = CELL_RENDERERS[c.k];
                 return (
                     <td key={c.k} className="p-2 align-middle" data-testid={`cell-${c.k}-${r.id}`}>
-                        {renderer ? renderer(r, { onDelete }) : (r[c.k] != null ? String(r[c.k]) : "-")}
+                        {renderer ? renderer(r, { onDelete, onEdit }) : (r[c.k] != null ? String(r[c.k]) : "-")}
                     </td>
                 );
             })}
         </tr>
+    );
+}
+
+function EditCaricoDialog({ row, onClose, onSaved }) {
+    const [f, setF] = useState({
+        importo_lordo: row.importo_lordo ?? "",
+        importo_netto: row.importo_netto ?? "",
+        imposte: row.imposte ?? "",
+        ssn: (row.ssn != null && row.ssn !== 0) ? row.ssn : (row.servizio_sanitario ?? ""),
+        provvigioni: row.provvigioni ?? "",
+        effetto: (row.effetto || "").slice(0, 10),
+        scadenza: (row.scadenza || "").slice(0, 10),
+        mezzo_pagamento: row.mezzo_pagamento || "",
+        note_carico: row.note_carico || "",
+    });
+    const [saving, setSaving] = useState(false);
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const salva = async () => {
+        setSaving(true);
+        try {
+            const payload = {};
+            ["importo_lordo", "importo_netto", "imposte", "ssn", "provvigioni"].forEach((k) => {
+                if (f[k] !== "" && f[k] != null) payload[k] = parseFloat(f[k]);
+            });
+            ["effetto", "scadenza", "mezzo_pagamento", "note_carico"].forEach((k) => {
+                if (f[k] !== "" && f[k] != null) payload[k] = f[k];
+            });
+            await api.put(`/carichi-mensili/${row.id}`, payload);
+            toast.success("Titolo aggiornato");
+            onSaved();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        } finally { setSaving(false); }
+    };
+
+    const numField = (k, label) => (
+        <div>
+            <Label className="text-xs">{label}</Label>
+            <Input type="number" step="0.01" value={f[k]} onChange={(e) => set(k, e.target.value)}
+                   data-testid={`edit-${k}`} />
+        </div>
+    );
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose()}>
+            <DialogContent className="max-w-lg" data-testid="dialog-edit-carico">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Pencil size={16} /> Modifica titolo · {row.polizza_numero || "—"}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-3">
+                    {numField("importo_lordo", "Premio lordo €")}
+                    {numField("importo_netto", "Premio netto €")}
+                    {numField("imposte", "Tasse €")}
+                    {numField("ssn", "SSN €")}
+                    {numField("provvigioni", "Provvigioni €")}
+                    <div>
+                        <Label className="text-xs">Mezzo pagamento</Label>
+                        <Input value={f.mezzo_pagamento} onChange={(e) => set("mezzo_pagamento", e.target.value)}
+                               data-testid="edit-mezzo_pagamento" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Effetto</Label>
+                        <Input type="date" value={f.effetto} onChange={(e) => set("effetto", e.target.value)}
+                               data-testid="edit-effetto" />
+                    </div>
+                    <div>
+                        <Label className="text-xs">Scadenza</Label>
+                        <Input type="date" value={f.scadenza} onChange={(e) => set("scadenza", e.target.value)}
+                               data-testid="edit-scadenza" />
+                    </div>
+                    <div className="col-span-2">
+                        <Label className="text-xs">Note</Label>
+                        <Input value={f.note_carico} onChange={(e) => set("note_carico", e.target.value)}
+                               data-testid="edit-note_carico" />
+                    </div>
+                </div>
+                {row.bloccato && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                        ⚠ {row.motivo_blocco || "Titolo consolidato in Prima Nota — la modifica potrebbe essere bloccata."}
+                    </div>
+                )}
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Annulla</Button>
+                    <Button onClick={salva} disabled={saving} className="bg-sky-700 hover:bg-sky-800"
+                            data-testid="btn-salva-edit-carico">
+                        {saving ? "Salvo…" : "Salva modifiche"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -956,10 +1064,11 @@ function ImportExcelDialog({ onClose }) {
                     <div className="space-y-3">
                         <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
                             <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
-                            <div className="grid grid-cols-4 gap-2 mt-2 text-sm">
+                            <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mt-2 text-sm">
                                 <div><span className="text-slate-500">Letti:</span> <strong>{result.totale_letti}</strong></div>
-                                <div><span className="text-emerald-700">Creati:</span> <strong>{result.creati}</strong></div>
-                                <div><span className="text-amber-700">Saltati:</span> <strong>{result.saltati}</strong></div>
+                                <div><span className="text-emerald-700">Creati:</span> <strong data-testid="import-creati">{result.creati}</strong></div>
+                                <div><span className="text-sky-700">Sovrascritti:</span> <strong data-testid="import-sovrascritti">{result.sovrascritti || 0}</strong></div>
+                                <div><span className="text-violet-700" title="Già presenti in stato protetto (incassato/coperto/stornato/sospeso): non sovrascritti">Protetti:</span> <strong data-testid="import-protetti">{result.saltati_protetti || 0}</strong></div>
                                 <div><span className="text-rose-700">Orfani:</span> <strong>{(result.unmatched || []).length}</strong></div>
                             </div>
                             {result.creati_manuale > 0 && (
