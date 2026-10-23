@@ -30,6 +30,7 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Ricerca combinata q + date + compagnia + operatore.
 - Filtro compagnia + totali full-set.
 - Sezione Storico (sola lettura) per titoli validati.
+- 2026-06: **Titoli storici (/titoli-storici) resi archivio sola lettura.** In `Titoli.jsx` con `storicoMode`: `buildParams` forza sempre `stato=incassato` (titoli passati in prima nota), rimosse colonne selezione+azione e barra bulk INCASSO, disabilitati edit/delete. Filtro periodo default su **Data incasso** (prima era "scadenza" → i filtri date non restituivano risultati). "Azzera filtri" ora ripristina il preset storico (storico_anno) invece di "sospesi" (che mostrava titoli da incassare col pulsante Incasso). Verificato UI + curl (data_incasso 2026→9, 2020→0).
 
 ## Note tenant
 - Dati reali nel tenant `c5ae2d0e-...` (26k polizze, 57k titoli, 23 utenti).

@@ -100,7 +100,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         q: "",
         stato: "all", compagnia_id: "all", ramo: "all", tag: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
-        dal: "", al: "", data_campo: "scadenza",
+        dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "scadenza",
     });
 
     // Allineamento preset dall'URL (es. /titoli?preset=sospesi)
@@ -119,8 +119,8 @@ export default function Titoli({ storicoMode = false } = {}) {
     const [bulkOpen, setBulkOpen] = useState(null); // "incassa" | "copertura"
     const [paying, setPaying] = useState(null);     // titolo singolo da incassare
 
-    const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);
-    const canDelete = ["admin", "collaboratore"].includes(user?.role);
+    const canEdit = !storicoMode && ["admin", "collaboratore", "dipendente"].includes(user?.role);
+    const canDelete = !storicoMode && ["admin", "collaboratore"].includes(user?.role);
 
     const buildParams = () => {
         const p = { ...presetParams(filters.preset) };
@@ -136,6 +136,13 @@ export default function Titoli({ storicoMode = false } = {}) {
         if (filters.dal) p.dal = filters.dal;
         if (filters.al) p.al = filters.al;
         if (filters.data_campo) p.data_campo = filters.data_campo;
+        // Titoli storici = archivio dei titoli passati in prima nota (incassati):
+        // sola lettura, sempre e solo stato "incassato" a prescindere dal preset/filtri.
+        if (storicoMode) {
+            p.stato = "incassato";
+            delete p.stato_not;
+            delete p.titolo_coperto;
+        }
         return p;
     };
 
@@ -378,7 +385,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         {
             key: "azione", label: "Azione", locked: true, thClass: "w-[110px] text-center", tdClass: "text-center",
             render: (t) => (
-                t.stato !== "incassato" && t.stato !== "stornato" ? (
+                !storicoMode && t.stato !== "incassato" && t.stato !== "stornato" ? (
                     <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
                             onClick={() => setPaying(t)} data-testid={`titolo-incassa-${t.id}`}>
                         Incasso/Copertura
@@ -399,7 +406,11 @@ export default function Titoli({ storicoMode = false } = {}) {
             ),
         },
     ];
-    const { cols: titoliCols, picker: colsPicker } = useTableColumns("titoli", titoliColsDefault);
+    // In modalità storico l'archivio è in sola lettura: niente selezione/incasso.
+    const effectiveCols = storicoMode
+        ? titoliColsDefault.filter((c) => c.key !== "sel" && c.key !== "azione")
+        : titoliColsDefault;
+    const { cols: titoliCols, picker: colsPicker } = useTableColumns("titoli", effectiveCols);
 
     return (
         <div data-testid={storicoMode ? "titoli-storici-page" : "titoli-page"}>
@@ -543,9 +554,9 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <DateInputIt value={filters.al} onChange={(v) => setF("al", v)} data-testid="f-al" />
                         </div>
                         <button onClick={() => { setQInput(""); setFilters({
-                            preset: "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
+                            preset: storicoMode ? defaultPreset : "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
                             prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
-                            conto_cassa_id: "all", dal: "", al: "", data_campo: "scadenza",
+                            conto_cassa_id: "all", dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "scadenza",
                         }); }} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
                             <X size={12} /> Azzera filtri
                         </button>
@@ -603,6 +614,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             {/* Footer azione bulk + totali */}
             <div className="mt-2 bg-white border-t-2 border-slate-900 shadow-lg rounded-t-md px-4 py-3 flex-none" data-testid="bulk-footer">
                 <div className="flex flex-wrap items-center gap-3">
+                    {!storicoMode && (<>
                     <button onClick={() => setSelected(new Set(displayed.map((t) => t.id)))} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded text-xs font-semibold" data-testid="select-all-btn">
                         SELEZIONA TUTTI
                     </button>
@@ -620,6 +632,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                     >
                         <Wallet size={14} /> INCASSO / COPERTURA
                     </button>
+                    </>)}
+                    {storicoMode && (
+                        <span className="text-xs text-slate-500" data-testid="storico-readonly-hint">
+                            Archivio in sola lettura · titoli passati in prima nota
+                        </span>
+                    )}
                 </div>
                 {/* KPI cards in stile pannello laterale Brogliaccio */}
                 <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2" data-testid="titoli-kpi-grid">
