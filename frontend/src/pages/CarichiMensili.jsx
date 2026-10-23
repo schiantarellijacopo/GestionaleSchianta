@@ -1069,9 +1069,10 @@ function ImportExcelDialog({ onClose }) {
                     <div className="space-y-3">
                         <div className="bg-emerald-50 border border-emerald-300 rounded p-3">
                             <div className="text-lg font-bold text-emerald-900">🎉 Import completato</div>
-                            <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-sm">
                                 <div><span className="text-slate-500">Letti:</span> <strong>{result.totale_letti}</strong></div>
                                 <div><span className="text-emerald-700">Caricati (in attesa):</span> <strong data-testid="import-creati">{result.creati}</strong></div>
+                                <div><span className="text-sky-700" title="Doppioni già presenti in attesa, sovrascritti con i nuovi dati">Doppioni sovrascritti:</span> <strong data-testid="import-sovrascritti">{result.sovrascritti || 0}</strong></div>
                                 <div><span className="text-rose-700">Orfani:</span> <strong>{(result.unmatched || []).length}</strong></div>
                             </div>
                             {result.creati_manuale > 0 && (

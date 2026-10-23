@@ -86,8 +86,26 @@ def _carico_overwritable(t: dict) -> bool:
     return True
 
 
-async def _dedup_insert(t: "Titolo") -> str:
-    """(Deprecato) non più usato: la dedup avviene in validazione, non all'import."""
+async def _insert_or_replace_carico(t: "Titolo") -> str:
+    """Evita i DOPPIONI in Carichi mensili: se esiste già un carico per la stessa
+    polizza + scadenza (sia 'in_attesa' sia un titolo già validato ma ancora
+    'da_incassare' e non protetto), lo SOVRASCRIVE con i nuovi importi riportandolo
+    'in_attesa'; altrimenti inserisce un nuovo carico. I titoli PROTETTI
+    (incassato/coperto/stornato/sospeso/in Prima Nota) non vengono mai toccati:
+    in quel caso si inserisce comunque il carico per la revisione e sarà la
+    validazione a gestirli.
+    """
+    existing = await db.titoli.find(
+        {"polizza_id": t.polizza_id, "scadenza": t.scadenza}, {"_id": 0},
+    ).to_list(50)
+    # 1) doppione in attesa → sovrascrivi quello
+    in_attesa = next((e for e in existing if e.get("stato_carico") == "in_attesa"), None)
+    if in_attesa:
+        patch = t.model_dump()
+        patch.pop("id", None)
+        patch.pop("created_at", None)
+        await db.titoli.update_one({"id": in_attesa["id"]}, {"$set": patch})
+        return "replaced"
     await db.titoli.insert_one(t.model_dump())
     return "created"
 
@@ -1053,6 +1071,7 @@ async def import_apply(
     batch_id = str(uuid.uuid4())
     creati = 0
     saltati = 0
+    sovrascritti = 0
     errori: list[dict] = []
     unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
     totali = {"lordo": 0.0, "netto": 0.0, "imposte": 0.0, "ssn": 0.0, "provvigioni": 0.0}
@@ -1152,8 +1171,11 @@ async def import_apply(
                 premio_precedente=float(last["importo_lordo"]) if last else None,
                 fonte="import_ania",
             )
-            await db.titoli.insert_one(t.model_dump())
-            creati += 1
+            esito = await _insert_or_replace_carico(t)
+            if esito == "replaced":
+                sovrascritti += 1
+            else:
+                creati += 1
             totali["lordo"] += t.importo_lordo or 0
             totali["netto"] += t.importo_netto or 0
             totali["imposte"] += t.imposte or 0
@@ -1163,8 +1185,9 @@ async def import_apply(
             errori.append({"riga": i, "errore": str(e)})
 
     await log_attivita(user, "import_excel_csv", "titoli", batch_id,
-                       f"creati={creati} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
+                       f"creati={creati} sovrascritti={sovrascritti} saltati={saltati} unmatched={len(unmatched)} errori={len(errori)}")
     return {"ok": True, "batch_id": batch_id, "creati": creati,
+            "sovrascritti": sovrascritti,
             "saltati": saltati, "unmatched": unmatched, "errori": errori,
             "totali": {k: round(v, 2) for k, v in totali.items()},
             "totale_letti": len(rows)}
@@ -1228,7 +1251,7 @@ async def import_match_manual(
                 fonte="import_ania",
                 note_carico=f"Abbinamento manuale post-import (file: {m.get('polizza_numero_file') or 'n/d'})",
             )
-            await db.titoli.insert_one(t.model_dump())
+            await _insert_or_replace_carico(t)
             creati += 1
         except Exception as e:
             errori.append({"errore": str(e)})
@@ -1275,7 +1298,7 @@ async def import_carichi(
                 premio_precedente=float(last["importo_lordo"]) if last else None,
                 fonte="import_ania" if body.import_source != "manuale" else "manuale",
             )
-            await db.titoli.insert_one(t.model_dump())
+            await _insert_or_replace_carico(t)
             creati += 1
         except Exception as e:
             errori.append({"row": row.get("polizza_id"), "errore": str(e)})

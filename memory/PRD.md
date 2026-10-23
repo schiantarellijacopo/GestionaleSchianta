@@ -2247,3 +2247,19 @@ Esito: OMNIA importa polizze/anagrafiche/veicoli/garanzie/sinistri, NON crea tit
 **Frontend `CarichiMensili.jsx`:** risultato import mostra Letti/Caricati(in attesa)/Orfani (niente più sovrascritti/protetti all'import); il toast di `valida()` mostra "X nuovi · Y aggiornati · Z protetti (saltati)".
 
 **Test e2e (admin tenant, 3 scadenze):** `validati=1, sovrascritti=1, protetti=1` → incassato(999) intatto + carico scartato(annullato); da_incassare 100→250 sovrascritto senza doppione; scadenza mancante creata come da_incassare. ✅
+
+---
+
+## 2026-10-23 (5) — Carichi: anti-DOPPIONE all'import (sovrascrive il carico in attesa)
+
+**Richiesta:** al caricamento del file Excel/CSV in Carichi mensili, verificare SEMPRE i doppioni: se esiste già un carico per la stessa polizza+scadenza, sovrascriverlo invece di crearne un altro (evita righe doppie ri-importando lo stesso mese/un file corretto).
+
+**Backend `routes/carichi_mensili.py`:** nuovo helper `_insert_or_replace_carico(t)` usato dai 3 percorsi di import (`/import/apply`, `/import`, `/import/match-manual`): se esiste un carico `in_attesa` con stessa `polizza_id + scadenza` → lo SOVRASCRIVE in loco (importi/SSN/effetto/mezzo), altrimenti inserisce. I titoli già validati/protetti NON vengono toccati all'import (restano gestiti dalla validazione). `/apply` ritorna ora anche `sovrascritti` (doppioni aggiornati in import).
+**Frontend:** risultato import mostra Letti / Caricati (in attesa) / Doppioni sovrascritti / Orfani.
+
+**Test e2e:** import ripetuto stessa polizza+scadenza → 1° creati=1; 2° creati=0, sovrascritti=1; in DB UN solo carico con gli importi aggiornati. ✅
+
+Riepilogo flusso completo Carichi mensili:
+- IMPORT → tutto `in_attesa`, senza doppioni (ri-import sovrascrive il carico in attesa).
+- Revisione + modifica manuale (matita).
+- VALIDAZIONE → vs titoli ufficiali su polizza+scadenza: PROTETTO=salta(annulla carico) · da_incassare=sovrascrive l'ufficiale · mancante=crea come da_incassare. Entrano in Titoli e Titoli di polizza.
