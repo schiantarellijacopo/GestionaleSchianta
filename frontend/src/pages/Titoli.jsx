@@ -103,7 +103,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         q: "",
         stato: "all", compagnia_id: "all", ramo: "all", tag: "all", prodotto: "",
         collaboratore_id: "all", mezzo_pagamento: "", conto_cassa_id: "all",
-        dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "scadenza",
+        dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "effetto",
     });
 
     // Allineamento preset dall'URL (es. /titoli?preset=sospesi)
@@ -542,8 +542,8 @@ export default function Titoli({ storicoMode = false } = {}) {
                             <Select value={filters.data_campo} onValueChange={(v) => setF("data_campo", v)}>
                                 <SelectTrigger data-testid="f-data-campo"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="scadenza">Data scadenza</SelectItem>
                                     <SelectItem value="effetto">Data effetto</SelectItem>
+                                    <SelectItem value="scadenza">Data scadenza</SelectItem>
                                     <SelectItem value="data_copertura">Data copertura</SelectItem>
                                     <SelectItem value="data_incasso">Data incasso</SelectItem>
                                 </SelectContent>
@@ -560,7 +560,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                         <button onClick={() => { setQInput(""); setFilters({
                             preset: storicoMode ? "storico" : "sospesi", q: "", stato: "all", compagnia_id: "all", ramo: "all",
                             prodotto: "", collaboratore_id: "all", mezzo_pagamento: "",
-                            conto_cassa_id: "all", dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "scadenza",
+                            conto_cassa_id: "all", dal: "", al: "", data_campo: storicoMode ? "data_incasso" : "effetto",
                         }); }} className="text-xs text-slate-500 hover:text-rose-600 inline-flex items-center gap-1 col-span-2">
                             <X size={12} /> Azzera filtri
                         </button>
