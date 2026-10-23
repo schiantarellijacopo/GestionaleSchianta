@@ -68,3 +68,8 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Restituisce anche `scartati_polizza`; toast frontend aggiornato.
 - Risolve: creazione di titoli "da incassare" su polizze sostituite (es. 183629512).
 - Verificato con test diretto su tenant produzione. Richiede deploy per attivazione in produzione.
+
+## [2026-10-23] Tabelle ad altezza-contenuto (no scroll interno)
+- Rimosso il limite di altezza (`max-height`) da `.tbl-scroll` e `.tbl-scroll.has-footer` in index.css.
+- `useFillHeight` non impone più un'altezza in pixel (hook semplificato).
+- Ora tutte le tabelle crescono per mostrare tutte le righe della pagina (50/100/200); a scorrere è la pagina. Scroll orizzontale mantenuto per tabelle larghe / colonne congelate.

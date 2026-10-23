@@ -173,14 +173,16 @@ h1, h2, h3, h4, h5 {
    rispettivamente la 1ª, le prime 2, le prime 3 colonne.
    ===================================================================== */
 .tbl-scroll {
-    @apply relative overflow-auto rounded-lg border border-slate-200 bg-white;
-    /* L'altezza è gestita dalla pagina; default: tutta la viewport meno l'header app */
-    max-height: calc(100vh - 220px);
+    @apply relative overflow-x-auto overflow-y-visible rounded-lg border border-slate-200 bg-white;
+    /* Nessun limite di altezza: la tabella cresce con il contenuto e a scorrere
+       è la pagina (mostra tutte le righe della pagina, 50/100/200). Lo scroll
+       orizzontale resta per le tabelle larghe / colonne congelate. */
+    max-height: none;
 }
-/* Variante per le pagine con footer totali "sticky": riserva spazio così il
-   footer nero non copre le ultime righe della tabella. */
+/* Variante per le pagine con footer totali "sticky": nessun limite d'altezza,
+   la tabella cresce e il footer scorre con la pagina. */
 .tbl-scroll.has-footer {
-    max-height: calc(100vh - 300px);
+    max-height: none;
 }
 /* Variante usata dentro un wrapper flex ad altezza calcolata (useFillHeight):
    la tabella riempie lo spazio e il footer totali resta sempre sotto, senza
