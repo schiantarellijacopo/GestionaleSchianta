@@ -219,7 +219,14 @@ async def lista_carichi_mensili(
             return {"totale": 0, "righe": []}
         match["polizza_id"] = {"$in": pol_ids_pre}
 
-    titoli = await db.titoli.find(match, {"_id": 0}).sort("scadenza", 1).limit(1000).to_list(1000)
+    # Ordino per il campo filtrato: se è attivo il range per decorrenza uso 'effetto'
+    # (con scadenza DESC come secondario, così i titoli senza scadenza finiscono in
+    # fondo e non nascondono quelli valorizzati); altrimenti ordino per 'scadenza'.
+    if dal and al:
+        _sort = [("effetto", 1), ("scadenza", -1)]
+    else:
+        _sort = [("scadenza", 1)]
+    titoli = await db.titoli.find(match, {"_id": 0}).sort(_sort).limit(1000).to_list(1000)
 
     # Batch lookup: polizze + clienti + compagnie
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})
