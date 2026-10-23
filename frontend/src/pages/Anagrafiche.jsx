@@ -282,6 +282,7 @@ export default function Anagrafiche() {
         if (collabFilter) u.append("collaboratore_id", collabFilter);
         if (profFilter) u.append("professione", profFilter);
         if (comuneFilter) u.append("comune", comuneFilter);
+        u.append("columns", anagCols.map((c) => c.key).join(","));
         return u.toString();
     };
     const exportAnagCsv = () => window.open(`${API_BASE}/export/anagrafiche.csv?${qsExportAnag()}`, "_blank");

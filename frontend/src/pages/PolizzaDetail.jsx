@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap, ClipboardList } from "lucide-react";
+import { ArrowLeft, Car, ShieldCheck, Banknote, FileText, Info, Pencil, Trash2, AlertTriangle, Zap, ClipboardList, History } from "lucide-react";
 import { toast } from "sonner";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { useAuth } from "@/contexts/AuthContext";
@@ -496,6 +496,40 @@ export default function PolizzaDetail() {
                     <F label="Oggetto assicurato" value={pol.oggetto_assicurato || pol.targa} />
                 </div>
             </Card>
+
+            {pol.catena_sostituzioni && pol.catena_sostituzioni.length > 1 && (
+                <Card className="p-4" data-testid="polizza-catena-sostituzioni">
+                    <div className="flex items-center gap-2 mb-3">
+                        <History size={16} className="text-slate-500" />
+                        <h3 className="text-sm font-semibold text-slate-800">Cronologia sostituzioni</h3>
+                        <span className="text-xs text-slate-400">dal più recente al meno recente</span>
+                    </div>
+                    <div className="space-y-1.5">
+                        {pol.catena_sostituzioni.map((c) => (
+                            <div key={c.id}
+                                className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-sm ${c.is_current ? "bg-sky-50 border-sky-200" : "bg-white border-slate-200"}`}
+                                data-testid={`catena-row-${c.id}`}>
+                                <div className="flex items-center gap-2 min-w-0">
+                                    {c.is_current ? (
+                                        <span className="text-[10px] font-bold text-sky-700 bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded shrink-0">ATTUALE</span>
+                                    ) : null}
+                                    {c.is_current ? (
+                                        <span className="font-semibold text-slate-800 shrink-0">N. {c.numero_polizza}</span>
+                                    ) : (
+                                        <Link to={`/polizze/${c.id}`} className="text-sky-700 hover:underline font-semibold shrink-0" data-testid={`catena-link-${c.id}`}>N. {c.numero_polizza}</Link>
+                                    )}
+                                    <span className="text-xs text-slate-500 truncate">{c.contraente_nome || "—"} · {c.ramo || c.prodotto || "—"}</span>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0 text-xs">
+                                    <span className="num text-slate-600 whitespace-nowrap">{fmtDate(c.effetto)} → {fmtDate(c.scadenza)}</span>
+                                    <span className="num font-medium text-slate-800 whitespace-nowrap">{fmtEur(c.premio_lordo)}</span>
+                                    <StatusBadge stato={c.stato} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
 
             <Card className="p-4" data-testid="polizza-tags-card">
                 <div className="flex items-center gap-2 mb-1">

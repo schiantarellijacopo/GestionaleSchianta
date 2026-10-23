@@ -79,7 +79,7 @@ export default function StatistichePremi() {
                     </div>
                 </div>
                 <FSel label="Filtra per data" value={dataField} onChange={setDataField} opts={[["incasso", "Data incasso"], ["rata", "Rata / decorrenza"], ["copertura", "Data copertura"]]} tid="stat-datafield" />
-                <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ["nuova", "Nuove"], ["sostituzione", "Sostituite"], ["regolazione", "Regolazioni"], ["rinnovo", "Rinnovi"], ["quietanza", "Quietanze"]]} tid="stat-tipo" />
+                <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ["nuova", "Nuove"], ["sostituzione", "Sostituite"], ["regolazione", "Regolazioni"], ["quietanza", "Quietanze"]]} tid="stat-tipo" />
                 <FSel label="Compagnia" value={compagniaId} onChange={setCompagniaId} opts={[["all", "Tutte"], ...compagnie.map((c) => [c.id, c.ragione_sociale])]} tid="stat-compagnia" />
                 <RamoMulti rami={rami} sel={ramoSel} setSel={setRamoSel} tid="stat-ramo" />
                 {isAdmin && (

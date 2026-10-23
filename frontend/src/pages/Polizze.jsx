@@ -217,19 +217,20 @@ export default function Polizze() {
         return u.toString();
     };
 
+    const exportParams = () => ({ ...buildParams(), columns: cols.map((c) => c.key).join(",") });
     const exportCsv = () => {
         const link = document.createElement("a");
-        link.href = `${API_BASE}/export/polizze.csv?${qs(buildParams())}`;
+        link.href = `${API_BASE}/export/polizze.csv?${qs(exportParams())}`;
         link.target = "_blank";
         document.body.appendChild(link); link.click(); link.remove();
     };
     const exportXlsx = () => {
         const link = document.createElement("a");
-        link.href = `${API_BASE}/export/polizze.xlsx?${qs(buildParams())}`;
+        link.href = `${API_BASE}/export/polizze.xlsx?${qs(exportParams())}`;
         link.target = "_blank";
         document.body.appendChild(link); link.click(); link.remove();
     };
-    const stampaPdf = () => openPdf("/stampa/polizze", buildParams());
+    const stampaPdf = () => openPdf("/stampa/polizze", exportParams());
 
     return (
         <div data-testid="polizze-page">

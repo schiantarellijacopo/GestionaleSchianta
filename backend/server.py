@@ -4176,6 +4176,53 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         for t in doc["titoli"]:
             t["allegati_count"] = ag_counts.get(t["id"], 0)
     doc["sinistri"] = await db.sinistri.find({"polizza_id": pid}, {"_id": 0}).sort("data_avvenimento", -1).to_list(100)
+    # 🔗 Catena sostituzioni (storia): polizze più recenti che sostituiscono questa
+    #    + polizze più vecchie sostituite da questa. Ordine: dal più recente al meno recente.
+    _newer_ids: list = []
+    _seen = set(polizza_ids_catena)
+    _cur_id, _cur_num = pid, doc.get("numero_polizza")
+    while True:
+        _refs = [x for x in [_cur_id, _cur_num] if x]
+        nxt = await db.polizze.find_one(
+            {"sostituisce_polizza": {"$in": _refs}},
+            {"_id": 0, "id": 1, "numero_polizza": 1},
+        )
+        if not nxt or nxt["id"] in _seen:
+            break
+        _seen.add(nxt["id"])
+        _newer_ids.append(nxt["id"])
+        _cur_id, _cur_num = nxt["id"], nxt.get("numero_polizza")
+    _all_chain = _newer_ids + list(polizza_ids_catena)
+    doc["catena_sostituzioni"] = []
+    if len(_all_chain) > 1:
+        cmap = {p["id"]: p async for p in db.polizze.find(
+            {"id": {"$in": _all_chain}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "effetto": 1, "scadenza": 1,
+             "stato": 1, "premio_lordo": 1, "contraente_id": 1, "ramo": 1, "prodotto": 1},
+        )}
+        _ana_ids = list({cmap[i].get("contraente_id") for i in _all_chain if cmap.get(i) and cmap[i].get("contraente_id")})
+        _anas = {a["id"]: a.get("ragione_sociale") async for a in db.anagrafiche.find(
+            {"id": {"$in": _ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1},
+        )}
+        catena = []
+        for i in _all_chain:
+            p = cmap.get(i)
+            if not p:
+                continue
+            catena.append({
+                "id": p["id"],
+                "numero_polizza": p.get("numero_polizza"),
+                "effetto": p.get("effetto"),
+                "scadenza": p.get("scadenza"),
+                "stato": p.get("stato"),
+                "premio_lordo": p.get("premio_lordo"),
+                "ramo": p.get("ramo"),
+                "prodotto": p.get("prodotto"),
+                "contraente_nome": _anas.get(p.get("contraente_id")),
+                "is_current": p["id"] == pid,
+            })
+        catena.sort(key=lambda x: (x.get("effetto") or ""), reverse=True)
+        doc["catena_sostituzioni"] = catena
     return doc
 
 
@@ -4558,6 +4605,9 @@ async def statistiche_premi_provvigioni(
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
     rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
+    # Unificazione terminologia: 'Quietanze' include anche i vecchi titoli 'rinnovo'.
+    if "quietanza" in tipi and "rinnovo" not in tipi:
+        tipi.append("rinnovo")
 
     # Un collaboratore vede SOLO i propri premi/provvigioni: forziamo l'operatore su di lui.
     scoped = user.get("role") != "admin"
@@ -4822,6 +4872,9 @@ async def statistiche_per_operatore(
     rami = [r.strip() for r in (ramo or "").split(",") if r.strip()]
     rami_norm = {r.lower() for r in rami}
     tipi = [t.strip() for t in (tipo or "").split(",") if t.strip()]
+    # Unificazione terminologia: 'Quietanze' include anche i vecchi titoli 'rinnovo'.
+    if "quietanza" in tipi and "rinnovo" not in tipi:
+        tipi.append("rinnovo")
 
     # Un collaboratore vede solo se stesso
     scoped = user.get("role") != "admin"
@@ -6266,24 +6319,82 @@ def titoli_filter_params(
     return {k: v for k, v in locals().items() if v is not None}
 
 
+def _exp_d10(v):
+    return v[:10] if isinstance(v, str) else v
+
+
+def _resolve_export_cols(schema: dict, columns: Optional[str]) -> list:
+    """Restituisce le chiavi colonna richieste (menu 'Colonne'), nell'ordine scelto.
+    Se non viene passato nulla, esporta tutte le colonne dello schema."""
+    keys = [k.strip() for k in (columns or "").split(",") if k.strip() in schema]
+    return keys or list(schema.keys())
+
+
+# Schema export Titoli: key frontend -> (intestazione, getter, larghezza_mm PDF)
+TITOLI_EXPORT_SCHEMA = {
+    "contratto": ("Numero polizza", lambda t: t.get("numero_polizza"), 32),
+    "targa": ("Targa", lambda t: t.get("targa"), 22),
+    "contraente": ("Contraente", lambda t: t.get("contraente_nome"), 50),
+    "compagnia": ("Compagnia", lambda t: t.get("compagnia_nome"), 30),
+    "collaboratore": ("Collaboratore", lambda t: t.get("collaboratore_nome"), 30),
+    "premio": ("Lordo €", lambda t: t.get("importo_lordo"), 22),
+    "provv_tot": ("Provv. tot. €", lambda t: t.get("provvigione_totale") if t.get("provvigione_totale") is not None else t.get("provvigioni"), 22),
+    "provv_collab": ("Provv. collab. €", lambda t: t.get("provvigione_collaboratore"), 22),
+    "margine": ("Margine €", lambda t: t.get("provvigione_margine"), 22),
+    "effetto": ("Effetto", lambda t: _exp_d10(t.get("effetto")), 22),
+    "scadenza": ("Scadenza", lambda t: _exp_d10(t.get("scadenza")), 22),
+    "copertura": ("Coperto fino a", lambda t: _exp_d10(t.get("data_copertura")), 24),
+    "incassato_il": ("Data incasso", lambda t: _exp_d10(t.get("data_incasso")), 24),
+    "mezzo_pag": ("Mezzo pagamento", lambda t: t.get("mezzo_pagamento"), 26),
+    "stato": ("Stato", lambda t: t.get("stato"), 24),
+    "da_pagare": ("Da pagare €", lambda t: 0 if t.get("stato") == "incassato" else t.get("importo_lordo"), 22),
+}
+
+# Schema export Polizze
+POLIZZE_EXPORT_SCHEMA = {
+    "numero_polizza": ("Numero polizza", lambda p: p.get("numero_polizza"), 28),
+    "targa": ("Targa", lambda p: p.get("targa"), 22),
+    "contraente": ("Contraente", lambda p: p.get("contraente_nome"), 48),
+    "compagnia": ("Compagnia", lambda p: p.get("compagnia_nome"), 36),
+    "collaboratore": ("Collaboratore", lambda p: p.get("collaboratore_nome"), 30),
+    "ramo": ("Ramo", lambda p: p.get("ramo"), 22),
+    "stato": ("Stato", lambda p: p.get("stato"), 22),
+    "effetto": ("Effetto", lambda p: _exp_d10(p.get("effetto")), 22),
+    "scadenza": ("Scadenza", lambda p: _exp_d10(p.get("scadenza")), 22),
+    "premio_lordo": ("Premio lordo €", lambda p: p.get("premio_lordo"), 24),
+    "provvigioni": ("Provvigioni €", lambda p: p.get("provvigioni"), 22),
+}
+
+# Schema export Sinistri
+SINISTRI_EXPORT_SCHEMA = {
+    "numero_interno": ("Num. interno", lambda s: s.get("numero_interno"), 24),
+    "numero_sinistro": ("N. sinistro", lambda s: s.get("numero_sinistro"), 28),
+    "contratto": ("N. polizza", lambda s: s.get("numero_polizza"), 26),
+    "data": ("Data avvenimento", lambda s: _exp_d10(s.get("data_avvenimento")), 24),
+    "contraente": ("Contraente", lambda s: s.get("contraente_nome"), 42),
+    "compagnia": ("Compagnia", lambda s: s.get("compagnia_nome"), 30),
+    "tipologia": ("Tipologia", lambda s: s.get("tipologia_sinistro"), 32),
+    "danneggiato": ("Danneggiato", lambda s: s.get("danneggiato_nome"), 32),
+    "targa": ("Targa", lambda s: s.get("targa"), 22),
+    "collaboratore": ("Collaboratore", lambda s: s.get("collaboratore_nome"), 28),
+    "riserva": ("Riserva €", lambda s: s.get("riserva"), 22),
+    "liquidato": ("Liquidato €", lambda s: s.get("liquidazione"), 22),
+    "stato": ("Stato", lambda s: s.get("stato"), 22),
+}
+
+
 @api.get("/export/titoli.csv")
 async def export_titoli_csv(filters: dict = Depends(titoli_filter_params),
+                            columns: Optional[str] = None,
                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     items = await list_titoli(**filters, limit=10000, user=user)
+    keys = _resolve_export_cols(TITOLI_EXPORT_SCHEMA, columns)
     import csv as _csv
     out = _io.StringIO()
     w = _csv.writer(out, delimiter=";")
-    w.writerow(["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
-                "Ramo", "Tipo", "Effetto", "Scadenza", "Stato",
-                "Lordo", "Netto", "Imposte", "Provvigioni",
-                "Mezzo pagamento", "Data incasso", "Coperto fino a"])
+    w.writerow([TITOLI_EXPORT_SCHEMA[k][0] for k in keys])
     for t in items:
-        w.writerow([t.get("numero_polizza"), t.get("targa"), t.get("contraente_nome"),
-                    t.get("compagnia_nome"), t.get("collaboratore_nome"),
-                    t.get("ramo"), t.get("tipo"), t.get("effetto"), t.get("scadenza"),
-                    t.get("stato"), t.get("importo_lordo"), t.get("importo_netto"),
-                    t.get("imposte"), t.get("provvigioni"),
-                    t.get("mezzo_pagamento"), t.get("data_incasso"), t.get("data_copertura")])
+        w.writerow([TITOLI_EXPORT_SCHEMA[k][1](t) for k in keys])
     csv_bytes = out.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         _io.BytesIO(csv_bytes), media_type="text/csv",
@@ -6293,37 +6404,13 @@ async def export_titoli_csv(filters: dict = Depends(titoli_filter_params),
 
 @api.get("/export/titoli.xlsx")
 async def export_titoli_xlsx(filters: dict = Depends(titoli_filter_params),
+                             columns: Optional[str] = None,
                              user=Depends(require_user("admin", "collaboratore", "dipendente"))):
     items = await list_titoli(**filters, limit=10000, user=user)
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    wb = Workbook(); ws = wb.active; ws.title = "Titoli"
-    headers = ["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
-               "Ramo", "Tipo", "Effetto", "Scadenza", "Stato",
-               "Lordo €", "Netto €", "Imposte €", "Provvigioni €",
-               "Mezzo pag.", "Data incasso", "Coperto fino"]
-    ws.append(headers)
-    head_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
-    head_font = Font(bold=True, color="FFFFFF")
-    for col in range(1, len(headers) + 1):
-        c = ws.cell(row=1, column=col)
-        c.fill = head_fill; c.font = head_font; c.alignment = Alignment(horizontal="center")
-    for t in items:
-        ws.append([t.get("numero_polizza"), t.get("targa"), t.get("contraente_nome"),
-                   t.get("compagnia_nome"), t.get("collaboratore_nome"),
-                   t.get("ramo"), t.get("tipo"), t.get("effetto"), t.get("scadenza"),
-                   t.get("stato"), t.get("importo_lordo"), t.get("importo_netto"),
-                   t.get("imposte"), t.get("provvigioni"),
-                   t.get("mezzo_pagamento"), t.get("data_incasso"), t.get("coperto_fino_a")])
-    # auto column widths
-    for col in ws.columns:
-        ml = max((len(str(c.value)) if c.value else 0) for c in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 30)
-    out = _io.BytesIO(); wb.save(out); out.seek(0)
-    return StreamingResponse(
-        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="titoli.xlsx"'},
-    )
+    keys = _resolve_export_cols(TITOLI_EXPORT_SCHEMA, columns)
+    headers = [TITOLI_EXPORT_SCHEMA[k][0] for k in keys]
+    rows = [[TITOLI_EXPORT_SCHEMA[k][1](t) for k in keys] for t in items]
+    return _xlsx_response(headers, rows, "Titoli", "titoli.xlsx")
 
 
 def _xlsx_response(headers: list, rows: list, title: str, filename: str):
@@ -6386,22 +6473,19 @@ async def export_sinistri_csv(
     stato: Optional[str] = None, compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
     collaboratore_id: Optional[str] = None, tipologia: Optional[str] = None, q: Optional[str] = None,
     dal: Optional[str] = None, al: Optional[str] = None, polizza_id: Optional[str] = None,
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_sinistri(
         stato=stato, polizza_id=polizza_id, compagnia_id=compagnia_id, collaboratore_id=collaboratore_id,
         ramo=ramo, tipologia=tipologia, q=q, dal=dal, al=al, limit=20000, user=user)
+    keys = _resolve_export_cols(SINISTRI_EXPORT_SCHEMA, columns)
     import csv as _csv
     out = _io.StringIO()
     w = _csv.writer(out, delimiter=";")
-    w.writerow(["Num. interno", "N. sinistro", "N. polizza", "Data avvenimento", "Contraente",
-                "Compagnia", "Tipologia", "Danneggiato", "Targa", "Collaboratore",
-                "Riserva", "Liquidato", "Stato"])
+    w.writerow([SINISTRI_EXPORT_SCHEMA[k][0] for k in keys])
     for s in items:
-        w.writerow([s.get("numero_interno"), s.get("numero_sinistro"), s.get("numero_polizza"),
-                    s.get("data_avvenimento"), s.get("contraente_nome"), s.get("compagnia_nome"),
-                    s.get("tipologia_sinistro"), s.get("danneggiato_nome"), s.get("targa"),
-                    s.get("collaboratore_nome"), s.get("riserva"), s.get("liquidazione"), s.get("stato")])
+        w.writerow([SINISTRI_EXPORT_SCHEMA[k][1](s) for k in keys])
     csv_bytes = out.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         _io.BytesIO(csv_bytes), media_type="text/csv",
@@ -6414,20 +6498,15 @@ async def export_sinistri_xlsx(
     stato: Optional[str] = None, compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
     collaboratore_id: Optional[str] = None, tipologia: Optional[str] = None, q: Optional[str] = None,
     dal: Optional[str] = None, al: Optional[str] = None, polizza_id: Optional[str] = None,
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_sinistri(
         stato=stato, polizza_id=polizza_id, compagnia_id=compagnia_id, collaboratore_id=collaboratore_id,
         ramo=ramo, tipologia=tipologia, q=q, dal=dal, al=al, limit=20000, user=user)
-    headers = ["Num. interno", "N. sinistro", "N. polizza", "Data avvenimento", "Contraente",
-               "Compagnia", "Tipologia", "Danneggiato", "Targa", "Collaboratore",
-               "Riserva €", "Liquidato €", "Stato"]
-    rows = [[
-        s.get("numero_interno"), s.get("numero_sinistro"), s.get("numero_polizza"),
-        s.get("data_avvenimento"), s.get("contraente_nome"), s.get("compagnia_nome"),
-        s.get("tipologia_sinistro"), s.get("danneggiato_nome"), s.get("targa"),
-        s.get("collaboratore_nome"), s.get("riserva"), s.get("liquidazione"), s.get("stato"),
-    ] for s in items]
+    keys = _resolve_export_cols(SINISTRI_EXPORT_SCHEMA, columns)
+    headers = [SINISTRI_EXPORT_SCHEMA[k][0] for k in keys]
+    rows = [[SINISTRI_EXPORT_SCHEMA[k][1](s) for k in keys] for s in items]
     return _xlsx_response(headers, rows, "Sinistri", "sinistri.xlsx")
 
 
@@ -6449,6 +6528,7 @@ async def export_polizze_csv(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_polizze(
@@ -6462,19 +6542,13 @@ async def export_polizze_csv(
         scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
         limit=10000, user=user,
     )
+    keys = _resolve_export_cols(POLIZZE_EXPORT_SCHEMA, columns)
     import csv as _csv
     out = _io.StringIO()
     w = _csv.writer(out, delimiter=";")
-    w.writerow(["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
-                "Ramo", "Prodotto", "Stato", "Effetto", "Scadenza",
-                "Premio lordo", "Premio netto", "Provvigioni", "Frazionamento"])
+    w.writerow([POLIZZE_EXPORT_SCHEMA[k][0] for k in keys])
     for p in items:
-        w.writerow([p.get("numero_polizza"), p.get("targa"), p.get("contraente_nome"),
-                    p.get("compagnia_nome"), p.get("collaboratore_nome"),
-                    p.get("ramo"), p.get("prodotto"), p.get("stato"),
-                    p.get("effetto"), p.get("scadenza"),
-                    p.get("premio_lordo"), p.get("premio_netto"),
-                    p.get("provvigioni"), p.get("frazionamento")])
+        w.writerow([POLIZZE_EXPORT_SCHEMA[k][1](p) for k in keys])
     csv_bytes = out.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         _io.BytesIO(csv_bytes), media_type="text/csv",
@@ -6495,6 +6569,7 @@ async def export_polizze_xlsx(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_polizze(
@@ -6508,33 +6583,10 @@ async def export_polizze_xlsx(
         scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
         limit=10000, user=user,
     )
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    wb = Workbook(); ws = wb.active; ws.title = "Polizze"
-    headers = ["Numero polizza", "Targa", "Contraente", "Compagnia", "Collaboratore",
-               "Ramo", "Prodotto", "Stato", "Effetto", "Scadenza",
-               "Premio lordo €", "Premio netto €", "Provvigioni €", "Frazionamento"]
-    ws.append(headers)
-    head_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
-    head_font = Font(bold=True, color="FFFFFF")
-    for col in range(1, len(headers) + 1):
-        c = ws.cell(row=1, column=col)
-        c.fill = head_fill; c.font = head_font; c.alignment = Alignment(horizontal="center")
-    for p in items:
-        ws.append([p.get("numero_polizza"), p.get("targa"), p.get("contraente_nome"),
-                   p.get("compagnia_nome"), p.get("collaboratore_nome"),
-                   p.get("ramo"), p.get("prodotto"), p.get("stato"),
-                   p.get("effetto"), p.get("scadenza"),
-                   p.get("premio_lordo"), p.get("premio_netto"),
-                   p.get("provvigioni"), p.get("frazionamento")])
-    for col in ws.columns:
-        ml = max((len(str(c.value)) if c.value else 0) for c in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 30)
-    out = _io.BytesIO(); wb.save(out); out.seek(0)
-    return StreamingResponse(
-        out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="polizze.xlsx"'},
-    )
+    keys = _resolve_export_cols(POLIZZE_EXPORT_SCHEMA, columns)
+    headers = [POLIZZE_EXPORT_SCHEMA[k][0] for k in keys]
+    rows = [[POLIZZE_EXPORT_SCHEMA[k][1](p) for k in keys] for p in items]
+    return _xlsx_response(headers, rows, "Polizze", "polizze.xlsx")
 
 
 @api.delete("/titoli/{tid}")
@@ -17328,6 +17380,7 @@ async def stampa_polizze(
     scadute_oggi: Optional[bool] = None,
     scadute_da_min: Optional[int] = None,
     scadute_da_max: Optional[int] = None,
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_polizze(
@@ -17341,17 +17394,13 @@ async def stampa_polizze(
         scadute_da_min=scadute_da_min, scadute_da_max=scadute_da_max,
         limit=10000, user=user,
     )
-    headers = ["N. polizza", "Contraente", "Compagnia", "Collaboratore", "Ramo", "Stato", "Effetto", "Scadenza", "Premio €", "Provv. €"]
-    rows = [[p.get("numero_polizza", ""),
-             p.get("contraente_nome", ""),
-             p.get("compagnia_nome", ""),
-             p.get("collaboratore_nome", ""),
-             p.get("ramo", ""), p.get("stato", ""),
-             p.get("effetto", ""), p.get("scadenza", ""),
-             p.get("premio_lordo", 0), p.get("provvigioni", 0)] for p in items]
+    keys = _resolve_export_cols(POLIZZE_EXPORT_SCHEMA, columns)
+    headers = [POLIZZE_EXPORT_SCHEMA[k][0] for k in keys]
+    widths = [POLIZZE_EXPORT_SCHEMA[k][2] for k in keys]
+    rows = [[POLIZZE_EXPORT_SCHEMA[k][1](p) for k in keys] for p in items]
     pdf = pdf_report.stampa_elenco(
         "Elenco Polizze", f"{len(items)} polizze", headers, rows,
-        col_widths_mm=[28, 45, 40, 30, 22, 22, 22, 22, 22, 22],
+        col_widths_mm=widths,
         filtri_attivi={"Stato": stato, "Ramo": ramo, "Compagnia": compagnia_id,
                        "Collaboratore": collaboratore_id, "Dal": dal, "Al": al},
         **(await _intestazione_pdf()),
@@ -17362,28 +17411,20 @@ async def stampa_polizze(
 @api.get("/stampa/titoli")
 async def stampa_titoli(
     filters: dict = Depends(titoli_filter_params),
+    columns: Optional[str] = None,
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     # Stessa logica/filtri della lista Titoli, così la stampa rispetta i filtri attivi.
     items = await list_titoli(**filters, limit=10000, user=user)
-    headers = ["Polizza", "Contraente", "Ramo", "Tipo", "Effetto", "Scadenza", "Stato", "Lordo €", "Provv. €"]
-    rows = []
-    for t in items:
-        tipo = t.get("tipo", "")
-        if tipo == "rinnovo":
-            tipo = "quietanza"
-        rows.append([
-            t.get("numero_polizza", ""),
-            t.get("contraente_nome", ""),
-            t.get("ramo", ""), tipo,
-            t.get("effetto", ""), t.get("scadenza", ""), t.get("stato", ""),
-            t.get("importo_lordo", 0), t.get("provvigioni", 0),
-        ])
+    keys = _resolve_export_cols(TITOLI_EXPORT_SCHEMA, columns)
+    headers = [TITOLI_EXPORT_SCHEMA[k][0] for k in keys]
+    widths = [TITOLI_EXPORT_SCHEMA[k][2] for k in keys]
+    rows = [[TITOLI_EXPORT_SCHEMA[k][1](t) for k in keys] for t in items]
     pdf = pdf_report.stampa_elenco(
         "Elenco Titoli",
         f"{len(items)} titoli",
         headers, rows,
-        col_widths_mm=[32, 55, 25, 22, 22, 22, 25, 25, 25],
+        col_widths_mm=widths,
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "titoli.pdf")
@@ -17483,26 +17524,24 @@ async def stampa_titoli_sospesi_storico(
 
 
 @api.get("/stampa/sinistri")
-async def stampa_sinistri(stato: Optional[str] = None,
-                          user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    flt = await visibility_filter(user)
-    if stato: flt["stato"] = stato
-    items = await db.sinistri.find(flt, {"_id": 0}).sort("data_avvenimento", -1).to_list(5000)
-    pol_ids = list({s["polizza_id"] for s in items if s.get("polizza_id")})
-    pols = {p["id"]: p async for p in db.polizze.find({"id": {"$in": pol_ids}}, {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1})}
-    ana_ids = list({p.get("contraente_id") for p in pols.values()})
-    anas = {a["id"]: a async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
-    headers = ["N. sinistro", "Polizza", "Contraente", "Avvenimento", "Denuncia", "Stato", "Riserva €", "Liquidato €"]
-    rows = []
-    for s in items:
-        p = pols.get(s.get("polizza_id", ""), {})
-        rows.append([s["numero_sinistro"], p.get("numero_polizza", ""),
-                     anas.get(p.get("contraente_id", ""), {}).get("ragione_sociale", ""),
-                     s.get("data_avvenimento", ""), s.get("data_denuncia", ""),
-                     s.get("stato", ""), s.get("riserva", 0), s.get("liquidazione", 0)])
+async def stampa_sinistri(
+    stato: Optional[str] = None, compagnia_id: Optional[str] = None, ramo: Optional[str] = None,
+    collaboratore_id: Optional[str] = None, tipologia: Optional[str] = None, q: Optional[str] = None,
+    dal: Optional[str] = None, al: Optional[str] = None, polizza_id: Optional[str] = None,
+    columns: Optional[str] = None,
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    items = await list_sinistri(
+        stato=(None if stato == "all" else stato), polizza_id=polizza_id,
+        compagnia_id=compagnia_id, collaboratore_id=collaboratore_id,
+        ramo=ramo, tipologia=tipologia, q=q, dal=dal, al=al, limit=20000, user=user)
+    keys = _resolve_export_cols(SINISTRI_EXPORT_SCHEMA, columns)
+    headers = [SINISTRI_EXPORT_SCHEMA[k][0] for k in keys]
+    widths = [SINISTRI_EXPORT_SCHEMA[k][2] for k in keys]
+    rows = [[SINISTRI_EXPORT_SCHEMA[k][1](s) for k in keys] for s in items]
     pdf = pdf_report.stampa_elenco(
         "Elenco Sinistri", f"{len(items)} sinistri", headers, rows,
-        col_widths_mm=[30, 32, 55, 25, 25, 25, 28, 28],
+        col_widths_mm=widths,
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, "sinistri.pdf")

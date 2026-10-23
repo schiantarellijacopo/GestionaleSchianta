@@ -367,30 +367,47 @@ async def list_anagrafiche(
     return items
 
 
+def _anag_nome(a):
+    return a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip()
+
+
+# Schema export Anagrafiche: key colonna frontend -> (intestazione, getter)
+ANAG_EXPORT_SCHEMA = {
+    "cliente": ("Cliente", _anag_nome),
+    "email": ("E-mail", lambda a: a.get("email")),
+    "telefono": ("Telefono", lambda a: a.get("telefono") or a.get("cellulare")),
+    "indirizzo": ("Indirizzo", lambda a: a.get("indirizzo")),
+    "comune": ("Comune", lambda a: a.get("comune")),
+    "polizze": ("Polizze", lambda a: a.get("polizze_attive_count")),
+    "collaboratore": ("Collaboratore", lambda a: a.get("collaboratore_nome")),
+    "premio_totale": ("Premio tot. €", lambda a: a.get("premio_totale")),
+    "provvigioni": ("Provvigioni €", lambda a: a.get("provvigioni")),
+    "tag": ("Tag", lambda a: ", ".join(a.get("tags") or [])),
+}
+
+
+def _anag_resolve_cols(columns: Optional[str]) -> list:
+    keys = [k.strip() for k in (columns or "").split(",") if k.strip() in ANAG_EXPORT_SCHEMA]
+    return keys or list(ANAG_EXPORT_SCHEMA.keys())
+
+
 @router.get("/export/anagrafiche.csv")
 async def export_anagrafiche_csv(
     q: Optional[str] = None, tag: Optional[str] = None, collaboratore_id: Optional[str] = None,
     professione: Optional[str] = None, comune: Optional[str] = None,
+    columns: Optional[str] = None,
     user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_anagrafiche(
         q=q, tag=tag, collaboratore_id=collaboratore_id, professione=professione,
         comune=comune, limit=20000, user=user)
+    keys = _anag_resolve_cols(columns)
     import csv as _csv
     out = _io.StringIO()
     w = _csv.writer(out, delimiter=";")
-    w.writerow(["Ragione sociale / Nome", "Tipo", "Codice fiscale", "Partita IVA",
-                "Email", "Telefono", "Cellulare", "Indirizzo", "CAP", "Comune", "Provincia",
-                "Collaboratore", "Polizze attive", "Tag"])
+    w.writerow([ANAG_EXPORT_SCHEMA[k][0] for k in keys])
     for a in items:
-        w.writerow([
-            a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip(),
-            a.get("tipo"), a.get("codice_fiscale"), a.get("partita_iva"),
-            a.get("email"), a.get("telefono"), a.get("cellulare"), a.get("indirizzo"),
-            a.get("cap"), a.get("comune"), a.get("provincia"),
-            a.get("collaboratore_nome"), a.get("polizze_attive_count"),
-            ", ".join(a.get("tags") or []),
-        ])
+        w.writerow([ANAG_EXPORT_SCHEMA[k][1](a) for k in keys])
     csv_bytes = out.getvalue().encode("utf-8-sig")
     return StreamingResponse(
         _io.BytesIO(csv_bytes), media_type="text/csv",
@@ -402,17 +419,17 @@ async def export_anagrafiche_csv(
 async def export_anagrafiche_xlsx(
     q: Optional[str] = None, tag: Optional[str] = None, collaboratore_id: Optional[str] = None,
     professione: Optional[str] = None, comune: Optional[str] = None,
+    columns: Optional[str] = None,
     user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     items = await list_anagrafiche(
         q=q, tag=tag, collaboratore_id=collaboratore_id, professione=professione,
         comune=comune, limit=20000, user=user)
+    keys = _anag_resolve_cols(columns)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     wb = Workbook(); ws = wb.active; ws.title = "Clienti"
-    headers = ["Ragione sociale / Nome", "Tipo", "Codice fiscale", "Partita IVA",
-               "Email", "Telefono", "Cellulare", "Indirizzo", "CAP", "Comune", "Provincia",
-               "Collaboratore", "Polizze attive", "Tag"]
+    headers = [ANAG_EXPORT_SCHEMA[k][0] for k in keys]
     ws.append(headers)
     hf = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
     hfont = Font(bold=True, color="FFFFFF")
@@ -420,14 +437,7 @@ async def export_anagrafiche_xlsx(
         c = ws.cell(row=1, column=col)
         c.fill = hf; c.font = hfont; c.alignment = Alignment(horizontal="center")
     for a in items:
-        ws.append([
-            a.get("ragione_sociale") or f"{a.get('cognome', '')} {a.get('nome', '')}".strip(),
-            a.get("tipo"), a.get("codice_fiscale"), a.get("partita_iva"),
-            a.get("email"), a.get("telefono"), a.get("cellulare"), a.get("indirizzo"),
-            a.get("cap"), a.get("comune"), a.get("provincia"),
-            a.get("collaboratore_nome"), a.get("polizze_attive_count"),
-            ", ".join(a.get("tags") or []),
-        ])
+        ws.append([ANAG_EXPORT_SCHEMA[k][1](a) for k in keys])
     for col in ws.columns:
         ml = max((len(str(c.value)) if c.value is not None else 0) for c in col)
         ws.column_dimensions[col[0].column_letter].width = min(max(ml + 2, 10), 34)

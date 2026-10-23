@@ -232,7 +232,7 @@ export default function Titoli({ storicoMode = false } = {}) {
         }
     };
 
-    const exportParams = () => ({ ...buildParams(), sort: sortBy, dir: sortDir });
+    const exportParams = () => ({ ...buildParams(), sort: sortBy, dir: sortDir, columns: titoliCols.map((c) => c.key).join(",") });
     const exportCsv = () => downloadFile("/export/titoli.csv", exportParams(), { filename: "titoli.csv" });
     const exportXlsx = () => downloadFile("/export/titoli.xlsx", exportParams(), { filename: "titoli.xlsx" });
     const stampaPdf = () => openPdf("/stampa/titoli", exportParams());

@@ -163,12 +163,13 @@ export default function Sinistri() {
         Object.entries(buildParams()).forEach(([k, v]) => {
             if (v !== undefined && v !== null && v !== "") u.append(k, String(v));
         });
+        u.append("columns", cols.map((c) => c.key).join(","));
         return u.toString();
     };
     const exportCsv = () => window.open(`${API_BASE}/export/sinistri.csv?${qsExport()}`, "_blank");
     const exportXlsx = () => window.open(`${API_BASE}/export/sinistri.xlsx?${qsExport()}`, "_blank");
     const stampaPdf = () => window.open(
-        `${API_BASE}/stampa/sinistri${filters.stato !== "all" ? `?stato=${filters.stato}` : ""}`,
+        `${API_BASE}/stampa/sinistri?${qsExport()}`,
         "_blank",
     );
 

@@ -73,3 +73,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Rimosso il limite di altezza (`max-height`) da `.tbl-scroll` e `.tbl-scroll.has-footer` in index.css.
 - `useFillHeight` non impone più un'altezza in pixel (hook semplificato).
 - Ora tutte le tabelle crescono per mostrare tutte le righe della pagina (50/100/200); a scorrere è la pagina. Scroll orizzontale mantenuto per tabelle larghe / colonne congelate.
+
+## [2026-10-23] Cronologia sostituzioni, unifica Quietanze, export per colonne
+- PolizzaDetail: nuova card "Cronologia sostituzioni" (catena_sostituzioni da GET /polizze/{id}), dal piu recente al meno recente, con polizza ATTUALE evidenziata e link alle altre.
+- Statistiche per operatore e premi: rimossa la voce "Rinnovi"; "Quietanze" ora include anche i vecchi tipo="rinnovo" (nessuna migrazione dati storici, solo query/filtri).
+- Export (CSV/XLSX/PDF) ora rispettano SIA i filtri attivi SIA le colonne scelte nel menu "Colonne", in ordine: Titoli, Polizze, Sinistri, Anagrafiche. Schemi colonne lato backend: *_EXPORT_SCHEMA + _resolve_export_cols.
+- Primo titolo: confermata regola esistente "nuova" (nuova polizza) / "sostituzione" (sostituzione); nessuna modifica necessaria.
