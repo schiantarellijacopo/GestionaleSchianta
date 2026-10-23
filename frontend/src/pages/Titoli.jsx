@@ -543,6 +543,7 @@ export default function Titoli({ storicoMode = false } = {}) {
                                 <SelectTrigger data-testid="f-data-campo"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="scadenza">Data scadenza</SelectItem>
+                                    <SelectItem value="effetto">Data effetto</SelectItem>
                                     <SelectItem value="data_copertura">Data copertura</SelectItem>
                                     <SelectItem value="data_incasso">Data incasso</SelectItem>
                                 </SelectContent>

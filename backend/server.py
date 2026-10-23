@@ -5230,7 +5230,7 @@ async def list_titoli(
 
     # filtro periodo — applicato al campo scelto (default: scadenza)
     if dal or al:
-        campo = data_campo if data_campo in ("scadenza", "data_copertura", "data_incasso") else "scadenza"
+        campo = data_campo if data_campo in ("scadenza", "data_copertura", "data_incasso", "effetto") else "scadenza"
         cond = {}
         if dal: cond["$gte"] = dal
         if al: cond["$lte"] = al
